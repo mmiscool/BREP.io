@@ -1,4 +1,6 @@
 import { Solid } from './BetterSolid.js';
+import { getEdgePolylineWorld } from './edgePolylineUtils.js';
+import { computeBoundsFromVertices } from './boundsUtils.js';
 import * as THREE from 'three';
 const DEBUG = false;
 
@@ -226,48 +228,6 @@ export class Sweep extends FacesSolid {
     this._manifold = null;
     this._faceIndex = null;
 
-    // Helper to extract world-space polyline from an edge-like object
-    const extractPathPolylineWorld = (edgeObj) => {
-      const pts = [];
-      const cached = edgeObj?.userData?.polylineLocal;
-      const isWorld = !!(edgeObj?.userData?.polylineWorld);
-      const v = new THREE.Vector3();
-      if (Array.isArray(cached) && cached.length >= 2) {
-        if (isWorld) {
-          for (const p of cached) pts.push([p[0], p[1], p[2]]);
-        } else {
-          for (const p of cached) {
-            v.set(p[0], p[1], p[2]).applyMatrix4(edgeObj.matrixWorld);
-            pts.push([v.x, v.y, v.z]);
-          }
-        }
-      } else {
-        const posAttr = edgeObj?.geometry?.getAttribute?.('position');
-        if (posAttr && posAttr.itemSize === 3 && posAttr.count >= 2) {
-          for (let i = 0; i < posAttr.count; i++) {
-            v.set(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)).applyMatrix4(edgeObj.matrixWorld);
-            pts.push([v.x, v.y, v.z]);
-          }
-        } else {
-          const aStart = edgeObj?.geometry?.attributes?.instanceStart;
-          const aEnd = edgeObj?.geometry?.attributes?.instanceEnd;
-          if (aStart && aEnd && aStart.itemSize === 3 && aEnd.itemSize === 3 && aStart.count === aEnd.count && aStart.count >= 1) {
-            v.set(aStart.getX(0), aStart.getY(0), aStart.getZ(0)).applyMatrix4(edgeObj.matrixWorld);
-            pts.push([v.x, v.y, v.z]);
-            for (let i = 0; i < aEnd.count; i++) {
-              v.set(aEnd.getX(i), aEnd.getY(i), aEnd.getZ(i)).applyMatrix4(edgeObj.matrixWorld);
-              pts.push([v.x, v.y, v.z]);
-            }
-          }
-        }
-      }
-      // remove consecutive duplicates
-      for (let i = pts.length - 2; i >= 0; i--) {
-        const a = pts[i], b = pts[i + 1];
-        if (a[0] === b[0] && a[1] === b[1] && a[2] === b[2]) pts.splice(i + 1, 1);
-      }
-      return pts;
-    };
 
     // Helper: robustly split a quad into two triangles choosing the better diagonal.
     // Keeps outward orientation for non-holes and reverses for holes.
@@ -305,7 +265,7 @@ export class Sweep extends FacesSolid {
       if (!Array.isArray(edges) || edges.length === 0) return [];
       const polys = [];
       for (const e of edges) {
-        const p = extractPathPolylineWorld(e);
+        const p = getEdgePolylineWorld(e);
         if (p.length >= 2) polys.push(p);
       }
       if (polys.length === 0) return [];
@@ -1557,18 +1517,8 @@ export class Sweep extends FacesSolid {
       // Use ~1e-6 of the overall diagonal, clamped to [1e-7, 1e-4].
       let eps = 1e-6;
       if (Array.isArray(this._vertProperties) && this._vertProperties.length >= 6) {
-        let minX = Infinity, minY = Infinity, minZ = Infinity;
-        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-        for (let i = 0; i < this._vertProperties.length; i += 3) {
-          const x = this._vertProperties[i + 0];
-          const y = this._vertProperties[i + 1];
-          const z = this._vertProperties[i + 2];
-          if (x < minX) minX = x; if (x > maxX) maxX = x;
-          if (y < minY) minY = y; if (y > maxY) maxY = y;
-          if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
-        }
-        const dx = maxX - minX, dy = maxY - minY, dz = maxZ - minZ;
-        const diag = Math.hypot(dx, dy, dz) || 1;
+        const bounds = computeBoundsFromVertices(this._vertProperties);
+        const diag = (bounds && bounds.diag) ? bounds.diag : 1;
         eps = Math.min(1e-4, Math.max(1e-7, diag * 1e-6));
       }
       this.setEpsilon(eps);

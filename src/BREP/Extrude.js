@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { Solid } from './BetterSolid.js';
+import { getEdgePolylineWorld } from './edgePolylineUtils.js';
+import { computeBoundsFromVertices } from './boundsUtils.js';
 
 // Build a closed extruded solid from a single face by translating
 // the face and sweeping exactly one side wall per original edge.
@@ -141,39 +143,6 @@ export class ExtrudeSolid extends Solid {
       __snapEnd = __makeSnapMap(__capWorld, dirF);
     }
 
-    // Helper: get world-space polyline for an edge. Never auto-close.
-    const extractPolylineWorld = (edge) => {
-      const out = [];
-      const cached = edge?.userData?.polylineLocal;
-      const isWorld = !!(edge?.userData?.polylineWorld);
-      const v = new THREE.Vector3();
-      if (Array.isArray(cached) && cached.length >= 2) {
-        if (isWorld) {
-          for (const p of cached) out.push([p[0], p[1], p[2]]);
-        } else {
-          for (const p of cached) { v.set(p[0], p[1], p[2]).applyMatrix4(edge.matrixWorld); out.push([v.x, v.y, v.z]); }
-        }
-      } else {
-        const pos = edge?.geometry?.getAttribute?.('position');
-        if (pos && pos.itemSize === 3 && pos.count >= 2) {
-          for (let i = 0; i < pos.count; i++) { v.set(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(edge.matrixWorld); out.push([v.x, v.y, v.z]); }
-        } else {
-          const aStart = edge?.geometry?.attributes?.instanceStart;
-          const aEnd = edge?.geometry?.attributes?.instanceEnd;
-          if (aStart && aEnd && aStart.itemSize === 3 && aEnd.itemSize === 3 && aStart.count === aEnd.count && aStart.count >= 1) {
-            v.set(aStart.getX(0), aStart.getY(0), aStart.getZ(0)).applyMatrix4(edge.matrixWorld); out.push([v.x, v.y, v.z]);
-            for (let i = 0; i < aEnd.count; i++) { v.set(aEnd.getX(i), aEnd.getY(i), aEnd.getZ(i)).applyMatrix4(edge.matrixWorld); out.push([v.x, v.y, v.z]); }
-          }
-        }
-      }
-      // Remove consecutive duplicates only
-      for (let i = out.length - 2; i >= 0; i--) {
-        const a = out[i], b = out[i + 1];
-        if (a[0] === b[0] && a[1] === b[1] && a[2] === b[2]) out.splice(i + 1, 1);
-      }
-      return out;
-    };
-
     // Prefer explicit boundary loops (outer + holes) to guarantee identical
     // vertices with caps, but emit one side face per original sketch edge.
     // Fallback to per-edge polylines if loops are unavailable.
@@ -196,16 +165,7 @@ export class ExtrudeSolid extends Solid {
     } else {
       // Precompute world polylines for edges to allow segment->edge matching
       const edges = Array.isArray(face?.edges) ? face.edges : [];
-      const edgePolys = edges.map((e) => {
-        const poly = e?.userData?.polylineLocal;
-        const isWorld = !!(e?.userData?.polylineWorld);
-        if (Array.isArray(poly) && poly.length >= 2) {
-          if (isWorld) return poly.map((p) => [p[0], p[1], p[2]]);
-          const v = new THREE.Vector3();
-          return poly.map((p) => { v.set(p[0], p[1], p[2]).applyMatrix4(e.matrixWorld); return [v.x, v.y, v.z]; });
-        }
-        return extractPolylineWorld(e);
-      });
+      const edgePolys = edges.map((e) => getEdgePolylineWorld(e));
 
       // Find edge index whose polyline contains consecutive points A->B (or B->A)
       const matchEdge = (A, B) => {
@@ -428,17 +388,8 @@ export class ExtrudeSolid extends Solid {
     // Adaptive weld epsilon so caps and sides share vertices exactly.
     let eps = 1e-5;
     if (this._vertProperties.length >= 6) {
-      let minX = Infinity, minY = Infinity, minZ = Infinity;
-      let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-      for (let i = 0; i < this._vertProperties.length; i += 3) {
-        const x = this._vertProperties[i + 0];
-        const y = this._vertProperties[i + 1];
-        const z = this._vertProperties[i + 2];
-        if (x < minX) minX = x; if (x > maxX) maxX = x;
-        if (y < minY) minY = y; if (y > maxY) maxY = y;
-        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
-      }
-      const diag = Math.hypot(maxX - minX, maxY - minY, maxZ - minZ) || 1;
+      const bounds = computeBoundsFromVertices(this._vertProperties);
+      const diag = (bounds && bounds.diag) ? bounds.diag : 1;
       eps = Math.min(1e-4, Math.max(1e-7, diag * 1e-6));
     }
     this.setEpsilon(eps);

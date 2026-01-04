@@ -1,6 +1,7 @@
 /**
  * Geometric measurements.
  */
+import { computeTriangleArea } from '../triangleUtils.js';
 
 export function volume() {
     const mesh = this.getMesh();
@@ -32,12 +33,7 @@ export function surfaceArea() {
             const ax = vp[i0], ay = vp[i0 + 1], az = vp[i0 + 2];
             const bx = vp[i1], by = vp[i1 + 1], bz = vp[i1 + 2];
             const cx = vp[i2], cy = vp[i2 + 1], cz = vp[i2 + 2];
-            const ux = bx - ax, uy = by - ay, uz = bz - az;
-            const vx = cx - ax, vy = cy - ay, vz = cz - az;
-            const nx = uy * vz - uz * vy;
-            const ny = uz * vx - ux * vz;
-            const nz = ux * vy - uy * vx;
-            area += 0.5 * Math.hypot(nx, ny, nz);
+            area += computeTriangleArea(ax, ay, az, bx, by, bz, cx, cy, cz);
         }
         return area;
     } finally { try { if (mesh && typeof mesh.delete === 'function') mesh.delete(); } catch { } }

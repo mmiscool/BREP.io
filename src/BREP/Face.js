@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { CADmaterials } from "../UI/CADmaterials.js";
+import { computeTriangleArea } from "./triangleUtils.js";
 
 export class Face extends THREE.Mesh {
     constructor(geometry) {
@@ -70,8 +71,6 @@ export class Face extends THREE.Mesh {
         const a = new THREE.Vector3();
         const b = new THREE.Vector3();
         const c = new THREE.Vector3();
-        const ab = new THREE.Vector3();
-        const ac = new THREE.Vector3();
         let area = 0;
 
         const toWorld = (out, i) => out.set(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(this.matrixWorld);
@@ -83,9 +82,7 @@ export class Face extends THREE.Mesh {
                 const i1 = idx.getX(3 * t + 1) >>> 0;
                 const i2 = idx.getX(3 * t + 2) >>> 0;
                 toWorld(a, i0); toWorld(b, i1); toWorld(c, i2);
-                ab.subVectors(b, a);
-                ac.subVectors(c, a);
-                area += 0.5 * ab.cross(ac).length();
+                area += computeTriangleArea(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
             }
         } else {
             const triCount = (pos.count / 3) | 0;
@@ -94,9 +91,7 @@ export class Face extends THREE.Mesh {
                 const i1 = 3 * t + 1;
                 const i2 = 3 * t + 2;
                 toWorld(a, i0); toWorld(b, i1); toWorld(c, i2);
-                ab.subVectors(b, a);
-                ac.subVectors(c, a);
-                area += 0.5 * ab.cross(ac).length();
+                area += computeTriangleArea(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
             }
         }
         return area;

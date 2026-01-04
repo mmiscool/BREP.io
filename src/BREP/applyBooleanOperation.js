@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { Manifold, ManifoldMesh } from "./SolidShared.js";
 import { Solid } from "./BetterSolid.js";
 import { MeshRepairer } from "./MeshRepairer.js";
+import { computeBoundsFromVertices } from "./boundsUtils.js";
 
 const __booleanDebugConfig = (() => {
   try {
@@ -140,20 +141,11 @@ function __booleanSolidToGeometry(solid) {
     geom.setAttribute('position', new THREE.BufferAttribute(vertArray, 3));
     geom.setIndex(new THREE.BufferAttribute(triArray, 1));
 
-    let minX = +Infinity, minY = +Infinity, minZ = +Infinity;
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-    for (let i = 0; i < vertArray.length; i += 3) {
-      const x = vertArray[i];
-      const y = vertArray[i + 1];
-      const z = vertArray[i + 2];
-      if (x < minX) minX = x; if (x > maxX) maxX = x;
-      if (y < minY) minY = y; if (y > maxY) maxY = y;
-      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
-    }
-    const dx = maxX - minX;
-    const dy = maxY - minY;
-    const dz = maxZ - minZ;
-    const scale = Math.max(Math.hypot(dx, dy, dz), Math.abs(dx), Math.abs(dy), Math.abs(dz), 1);
+    const bounds = computeBoundsFromVertices(vertArray);
+    const size = bounds ? bounds.size : [0, 0, 0];
+    const diag = bounds ? bounds.diag : 0;
+    const dx = size[0], dy = size[1], dz = size[2];
+    const scale = Math.max(diag || 0, Math.abs(dx), Math.abs(dy), Math.abs(dz), 1);
 
     const idToFaceName = solid._idToFaceName instanceof Map ? solid._idToFaceName : new Map();
     const solidLabel = solid.name || solid.owningFeatureID || 'SOLID';

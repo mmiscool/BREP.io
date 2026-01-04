@@ -1,5 +1,6 @@
 import { Solid } from "./BetterSolid.js";
 import * as THREE from 'three';
+import { averageFaceNormalObjectSpace, localFaceNormalAtPoint } from './fillets/inset.js';
 
 // Planar chamfer wedge builder along an input edge shared by two faces.
 // Builds a closed solid consisting of:
@@ -440,46 +441,6 @@ function pointAtArcLength(pts, dist) {
         acc += seg;
     }
     return pts[pts.length - 1].clone();
-}
-
-function averageFaceNormalObjectSpace(solid, faceName) {
-    const tris = solid.getFace(faceName);
-    if (!tris || !tris.length) return new THREE.Vector3(0, 1, 0);
-    const accum = new THREE.Vector3();
-    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
-    const ab = new THREE.Vector3(), ac = new THREE.Vector3();
-    for (const t of tris) {
-        a.set(t.p1[0], t.p1[1], t.p1[2]);
-        b.set(t.p2[0], t.p2[1], t.p2[2]);
-        c.set(t.p3[0], t.p3[1], t.p3[2]);
-        ab.subVectors(b, a);
-        ac.subVectors(c, a);
-        accum.add(ab.clone().cross(ac));
-    }
-    if (accum.lengthSq() === 0) return new THREE.Vector3(0, 1, 0);
-    return accum.normalize();
-}
-
-function localFaceNormalAtPoint(solid, faceName, p) {
-    const tris = solid.getFace(faceName);
-    if (!tris || !tris.length) return null;
-    let best = null;
-    const pa = new THREE.Vector3(), pb = new THREE.Vector3(), pc = new THREE.Vector3();
-    const centroid = new THREE.Vector3();
-    for (const t of tris) {
-        pa.set(t.p1[0], t.p1[1], t.p1[2]);
-        pb.set(t.p2[0], t.p2[1], t.p2[2]);
-        pc.set(t.p3[0], t.p3[1], t.p3[2]);
-        const ab = new THREE.Vector3().subVectors(pb, pa);
-        const ac = new THREE.Vector3().subVectors(pc, pa);
-        const n = new THREE.Vector3().crossVectors(ab, ac);
-        if (n.lengthSq() < 1e-14) continue;
-        n.normalize();
-        centroid.copy(pa).add(pb).add(pc).multiplyScalar(1 / 3);
-        const d = Math.abs(n.dot(new THREE.Vector3().subVectors(p, centroid)));
-        if (!best || d < best.d) best = { d, n: n.clone() };
-    }
-    return best ? best.n : null;
 }
 
 function inflateChamferRails({ railP, railA, railB, normalsA, normalsB, tangents, inflate }) {

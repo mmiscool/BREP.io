@@ -1,5 +1,6 @@
 import { Solid } from './BetterSolid.js';
 import * as THREE from 'three';
+import { getEdgeLineEndpointsWorld, getEdgePolylineWorld } from './edgePolylineUtils.js';
 
 export class Revolve extends Solid {
   /**
@@ -26,45 +27,10 @@ export class Revolve extends Solid {
     const A = new THREE.Vector3(0, 0, 0);
     const B = new THREE.Vector3(0, 1, 0);
     if (axisObj) {
-      const mat = axisObj.matrixWorld;
-      // 1) Prefer cached polyline from visualize() payload
-      const cached = axisObj?.userData?.polylineLocal;
-      const isWorld = !!(axisObj?.userData?.polylineWorld);
-      if (Array.isArray(cached) && cached.length >= 2) {
-        // Pick the first two distinct points
-        const pick = [];
-        for (let i = 0; i < cached.length && pick.length < 2; i++) {
-          const p = cached[i];
-          if (!pick.length) { pick.push(p); continue; }
-          const q = pick[0];
-          if (Math.abs(p[0] - q[0]) > 1e-12 || Math.abs(p[1] - q[1]) > 1e-12 || Math.abs(p[2] - q[2]) > 1e-12) pick.push(p);
-        }
-        if (pick.length >= 2) {
-          if (isWorld) {
-            A.set(pick[0][0], pick[0][1], pick[0][2]);
-            B.set(pick[1][0], pick[1][1], pick[1][2]);
-          } else {
-            A.set(pick[0][0], pick[0][1], pick[0][2]).applyMatrix4(mat);
-            B.set(pick[1][0], pick[1][1], pick[1][2]).applyMatrix4(mat);
-          }
-        }
-      } else {
-        // 2) Try fat-line instanceStart/instanceEnd (LineSegments2/Geometry)
-        const aStart = axisObj?.geometry?.attributes?.instanceStart;
-        const aEnd = axisObj?.geometry?.attributes?.instanceEnd;
-        if (aStart && aEnd && aStart.count >= 1) {
-          const s = new THREE.Vector3(aStart.getX(0), aStart.getY(0), aStart.getZ(0)).applyMatrix4(mat);
-          const e = new THREE.Vector3(aEnd.getX(0), aEnd.getY(0), aEnd.getZ(0)).applyMatrix4(mat);
-          A.copy(s); B.copy(e);
-        } else {
-          // 3) Fallback: BufferGeometry positions
-          const pos = axisObj?.geometry?.getAttribute?.('position');
-          if (pos && pos.count >= 2) {
-            const s = new THREE.Vector3(pos.getX(0), pos.getY(0), pos.getZ(0)).applyMatrix4(mat);
-            const e = new THREE.Vector3(pos.getX(pos.count - 1), pos.getY(pos.count - 1), pos.getZ(pos.count - 1)).applyMatrix4(mat);
-            A.copy(s); B.copy(e);
-          }
-        }
+      const endpoints = getEdgeLineEndpointsWorld(axisObj);
+      if (endpoints) {
+        A.copy(endpoints.start);
+        B.copy(endpoints.end);
       }
     }
     let axisDir = B.clone().sub(A); if (axisDir.lengthSq() < 1e-12) axisDir.set(0, 1, 0); axisDir.normalize();
@@ -191,18 +157,15 @@ export class Revolve extends Solid {
       for (const e of edges) {
         const name = `${e?.name || 'EDGE'}_RV`;
         registerEdgeSource(name, e);
-        const poly = e?.userData?.polylineLocal;
-        const isWorld = !!(e?.userData?.polylineWorld);
+        const poly = getEdgePolylineWorld(e, { dedupe: false });
         if (Array.isArray(poly) && poly.length >= 2) {
           for (const p of poly) {
-            const w = isWorld ? p : new THREE.Vector3(p[0], p[1], p[2]).applyMatrix4(e.matrixWorld);
-            const arr = Array.isArray(w) ? w : [w.x, w.y, w.z];
-            const k = key(arr);
+            const k = key(p);
             let set = pointToEdgeNames.get(k);
             if (!set) { set = new Set(); pointToEdgeNames.set(k, set); }
             set.add(name);
-    }
-  }
+          }
+        }
 }
 
       for (const loop of boundaryLoops) {

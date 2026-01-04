@@ -4,6 +4,7 @@ import { Manifold } from '../SolidShared.js';
 import { resolveEdgesFromInputs } from './edgeResolution.js';
 import { computeFaceAreaFromTriangles } from '../fillets/filletGeometry.js';
 import { createQuantizer, deriveTolerance } from '../../utils/geometryTolerance.js';
+import { computeBoundsFromVertices } from '../boundsUtils.js';
 
 const debugMode = false;
 
@@ -308,20 +309,8 @@ function averageFaceNormalSimple(solid, faceName) {
 function deriveSolidToleranceFromVerts(solid, baseTol = 1e-5) {
   const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : null;
   if (!vp || vp.length < 6) return baseTol;
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-  for (let i = 0; i < vp.length; i += 3) {
-    const x = vp[i + 0];
-    const y = vp[i + 1];
-    const z = vp[i + 2];
-    if (x < minX) minX = x; if (x > maxX) maxX = x;
-    if (y < minY) minY = y; if (y > maxY) maxY = y;
-    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
-  }
-  const dx = maxX - minX;
-  const dy = maxY - minY;
-  const dz = maxZ - minZ;
-  const diag = Math.hypot(dx, dy, dz) || 1;
+  const bounds = computeBoundsFromVertices(vp);
+  const diag = (bounds && bounds.diag) ? bounds.diag : 1;
   return Math.max(baseTol, diag * 1e-6);
 }
 
