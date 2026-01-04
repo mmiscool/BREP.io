@@ -216,7 +216,7 @@ export class AssemblyConstraintCollectionWidget extends HistoryCollectionWidget 
     const controls = [];
     controls.push({
       key: 'move-up',
-      label: '↑',
+      label: '△',
       title: 'Move up',
       disabled: index <= 0,
       onClick: async () => {
@@ -226,7 +226,7 @@ export class AssemblyConstraintCollectionWidget extends HistoryCollectionWidget 
     });
     controls.push({
       key: 'move-down',
-      label: '↓',
+      label: '▽',
       title: 'Move down',
       disabled: index >= total - 1,
       onClick: async () => {

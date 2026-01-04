@@ -570,7 +570,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
       const upBtn = document.createElement("button");
       upBtn.type = "button";
       upBtn.className = "spw-icon-btn";
-      upBtn.textContent = "↑";
+      upBtn.textContent = "△";
       upBtn.title = "Move up";
       if (index === 0) upBtn.disabled = true;
       upBtn.addEventListener("click", () => {
@@ -582,7 +582,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
       const downBtn = document.createElement("button");
       downBtn.type = "button";
       downBtn.className = "spw-icon-btn";
-      downBtn.textContent = "↓";
+      downBtn.textContent = "▽";
       downBtn.title = "Move down";
       if (index === points.length - 1) downBtn.disabled = true;
       downBtn.addEventListener("click", () => {

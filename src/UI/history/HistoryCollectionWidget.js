@@ -476,14 +476,14 @@ export class HistoryCollectionWidget {
     const descriptors = [];
     descriptors.push({
       key: 'move-up',
-      label: '↑',
+      label: '△',
       title: 'Move up',
       disabled: index <= 0,
       onClick: () => { this._moveEntry(id, -1); },
     });
     descriptors.push({
       key: 'move-down',
-      label: '↓',
+      label: '▽',
       title: 'Move down',
       disabled: index >= totalCount - 1,
       onClick: () => { this._moveEntry(id, 1); },
