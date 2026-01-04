@@ -1,4 +1,5 @@
 // Solid.chamfer implementation: wraps ChamferSolid builder and applies booleans.
+import { resolveEdgesFromInputs } from './edgeResolution.js';
 
 /**
  * Apply chamfers to this Solid and return a new Solid with the result.
@@ -43,24 +44,7 @@ export async function chamfer(opts = {}) {
   });
 
   // Resolve edges from names and/or provided objects
-  const edgeObjs = [];
-  const wantNames = Array.isArray(opts.edgeNames) ? Array.from(new Set(opts.edgeNames.map(String))) : [];
-  if (wantNames.length) {
-    for (const ch of this.children || []) {
-      if (ch && ch.type === 'EDGE' && wantNames.includes(ch.name)) {
-        if (ch.parentSolid === this || ch.parent === this) edgeObjs.push(ch);
-      }
-    }
-  }
-  if (Array.isArray(opts.edges)) {
-    for (const e of opts.edges) {
-      if (e && (e.parentSolid === this || e.parent === this)) edgeObjs.push(e);
-    }
-  }
-  // Dedup
-  const unique = [];
-  const seen = new Set();
-  for (const e of edgeObjs) { if (e && !seen.has(e)) { seen.add(e); unique.push(e); } }
+  const unique = resolveEdgesFromInputs(this, { edgeNames: opts.edgeNames, edges: opts.edges });
   if (unique.length === 0) {
     console.warn('[Solid.chamfer] No edges resolved on target solid; returning clone.', { featureID, solid: this?.name });
     const c = this.clone();

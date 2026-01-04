@@ -1,3 +1,9 @@
+import {
+    collectEdgesFromSelection,
+    getSolidGeometryCounts,
+    resolveSingleSolidFromEdges,
+} from "../edgeFeatureUtils.js";
+
 const inputParamsSchema = {
     id: {
         type: "string",
@@ -47,34 +53,22 @@ export class ChamferFeature {
     }
     async run(partHistory) {
         const inputObjects = Array.isArray(this.inputParams.edges) ? this.inputParams.edges.filter(Boolean) : [];
-
-        const edgeObjs = [];
-        inputObjects.forEach(obj => {
-            if (obj.type === "EDGE") {
-                if (!edgeObjs.includes(obj)) edgeObjs.push(obj);
-            }
-            if (obj.type === "FACE") {
-                for (const edge of obj.edges) {
-                    if (!edgeObjs.includes(edge)) edgeObjs.push(edge);
-                }
-            }
-        });
+        const edgeObjs = collectEdgesFromSelection(inputObjects);
 
         if (edgeObjs.length === 0) {
             console.warn("No edges selected for chamfer");
             return { added: [], removed: [] };
         }
-        const solids = new Set(edgeObjs.map(e => e.parentSolid || e.parent));
-        if (solids.size === 0) {
-            console.warn("Selected edges do not belong to any solid");
-            return { added: [], removed: [] };
-        }
-        if (solids.size > 1) {
-            console.warn("Selected edges belong to multiple solids");
-            return { added: [], removed: [] };
-        }
 
-        const targetSolid = solids.values().next().value;
+        const { solid: targetSolid, solids } = resolveSingleSolidFromEdges(edgeObjs);
+        if (!targetSolid) {
+            if (solids.size === 0) {
+                console.warn("Selected edges do not belong to any solid");
+            } else {
+                console.warn("Selected edges belong to multiple solids");
+            }
+            return { added: [], removed: [] };
+        }
         const direction = String(this.inputParams.direction || "INSET").toUpperCase();
         const distance = Number(this.inputParams.distance);
         if (!Number.isFinite(distance) || !(distance > 0)) {
@@ -92,8 +86,7 @@ export class ChamferFeature {
             featureID: fid,
         });
 
-        const triCount = Array.isArray(result?._triVerts) ? (result._triVerts.length / 3) : 0;
-        const vertCount = Array.isArray(result?._vertProperties) ? (result._vertProperties.length / 3) : 0;
+        const { triCount, vertCount } = getSolidGeometryCounts(result);
         if (!result || triCount === 0 || vertCount === 0) {
             console.error("[ChamferFeature] Chamfer produced an empty result; skipping scene replacement.", {
                 featureID: fid,

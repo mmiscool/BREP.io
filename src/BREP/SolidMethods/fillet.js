@@ -1,6 +1,9 @@
 // Solid.fillet implementation: consolidates fillet logic so features call this API.
 // Usage: solid.fillet({ radius, edgeNames, featureID, direction, inflate, resolution, debug, showTangentOverlays, combineEdges })
 import { Manifold } from '../SolidShared.js';
+import { resolveEdgesFromInputs } from './edgeResolution.js';
+import { computeFaceAreaFromTriangles } from '../fillets/filletGeometry.js';
+import { createQuantizer, deriveTolerance } from '../../utils/geometryTolerance.js';
 
 const debugMode = false;
 
@@ -11,24 +14,7 @@ function computeFaceAreaByName(solid, faceName) {
   if (!solid || typeof solid.getFace !== 'function' || !faceName) return 0;
   try {
     const tris = solid.getFace(faceName);
-    if (!Array.isArray(tris) || tris.length === 0) return 0;
-    let area = 0;
-    for (const tri of tris) {
-      const p1 = tri?.p1;
-      const p2 = tri?.p2;
-      const p3 = tri?.p3;
-      if (!Array.isArray(p1) || !Array.isArray(p2) || !Array.isArray(p3)) continue;
-      const ax = Number(p1[0]) || 0, ay = Number(p1[1]) || 0, az = Number(p1[2]) || 0;
-      const bx = Number(p2[0]) || 0, by = Number(p2[1]) || 0, bz = Number(p2[2]) || 0;
-      const cx = Number(p3[0]) || 0, cy = Number(p3[1]) || 0, cz = Number(p3[2]) || 0;
-      const ux = bx - ax, uy = by - ay, uz = bz - az;
-      const vx = cx - ax, vy = cy - ay, vz = cz - az;
-      const nx = uy * vz - uz * vy;
-      const ny = uz * vx - ux * vz;
-      const nz = ux * vy - uy * vx;
-      area += 0.5 * Math.hypot(nx, ny, nz);
-    }
-    return area;
+    return computeFaceAreaFromTriangles(tris);
   } catch {
     return 0;
   }
@@ -236,44 +222,6 @@ function getEdgePolylineLocal(edgeObj) {
     return out;
   }
   return [];
-}
-
-function deriveTolerance(polys, baseTol = 1e-5) {
-  if (!Array.isArray(polys) || polys.length === 0) return baseTol;
-  if (baseTol !== 1e-5) return baseTol;
-
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-  const segLens = [];
-  for (const p of polys) {
-    for (let i = 0; i < p.length; i++) {
-      const v = p[i];
-      if (v[0] < minX) minX = v[0]; if (v[0] > maxX) maxX = v[0];
-      if (v[1] < minY) minY = v[1]; if (v[1] > maxY) maxY = v[1];
-      if (v[2] < minZ) minZ = v[2]; if (v[2] > maxZ) maxZ = v[2];
-      if (i > 0) {
-        const a = p[i - 1];
-        const dx = a[0] - v[0], dy = a[1] - v[1], dz = a[2] - v[2];
-        segLens.push(Math.hypot(dx, dy, dz));
-      }
-    }
-  }
-  const dx = maxX - minX, dy = maxY - minY, dz = maxZ - minZ;
-  const diag = Math.hypot(dx, dy, dz) || 1;
-  segLens.sort((a, b) => a - b);
-  const med = segLens.length ? segLens[(segLens.length >> 1)] : diag;
-  return Math.min(Math.max(1e-5, diag * 1e-3), med * 0.1);
-}
-
-function createQuantizer(tol) {
-  const t = tol || 1e-5;
-  const q = (v) => [
-    Math.round(v[0] / t) * t,
-    Math.round(v[1] / t) * t,
-    Math.round(v[2] / t) * t,
-  ];
-  const k = (v) => `${v[0]},${v[1]},${v[2]}`;
-  return { q, k };
 }
 
 function dedupePoints(points, tol = 1e-5) {
@@ -579,24 +527,7 @@ export async function fillet(opts = {}) {
   });
 
   // Resolve edges from names and/or provided objects
-  const edgeObjs = [];
-  const wantNames = Array.isArray(opts.edgeNames) ? Array.from(new Set(opts.edgeNames.map(String))) : [];
-  if (wantNames.length) {
-    for (const ch of this.children || []) {
-      if (ch && ch.type === 'EDGE' && wantNames.includes(ch.name)) {
-        if (ch.parentSolid === this || ch.parent === this) edgeObjs.push(ch);
-      }
-    }
-  }
-  if (Array.isArray(opts.edges)) {
-    for (const e of opts.edges) {
-      if (e && (e.parentSolid === this || e.parent === this)) edgeObjs.push(e);
-    }
-  }
-  // Dedup
-  const unique = [];
-  const seen = new Set();
-  for (const e of edgeObjs) { if (e && !seen.has(e)) { seen.add(e); unique.push(e); } }
+  const unique = resolveEdgesFromInputs(this, { edgeNames: opts.edgeNames, edges: opts.edges });
   if (unique.length === 0) {
     console.warn('[Solid.fillet] No edges resolved on target solid; returning clone.', { featureID, solid: this?.name });
     // Nothing to do - return an unchanged clone so caller can replace scene node safely

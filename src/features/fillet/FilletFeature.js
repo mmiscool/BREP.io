@@ -1,4 +1,9 @@
 import { clearFilletCaches } from "../../BREP/fillets/fillet.js";
+import {
+    collectEdgesFromSelection,
+    getSolidGeometryCounts,
+    resolveSingleSolidFromEdges,
+} from "../edgeFeatureUtils.js";
 
 const inputParamsSchema = {
     id: {
@@ -89,27 +94,21 @@ export class FilletFeature {
 
         // Resolve inputs from sanitizeInputParams()
         const inputObjects = Array.isArray(this.inputParams.edges) ? this.inputParams.edges.filter(Boolean) : [];
-        let edgeObjs = [];
-        for (const obj of inputObjects) {
-            if (!obj) continue;
-            if (obj.type === 'EDGE') {
-                if (!edgeObjs.includes(obj)) edgeObjs.push(obj);
-            } else if (obj.type === 'FACE' && Array.isArray(obj.edges)) {
-                for (const e of obj.edges) { if (e) edgeObjs.push(e); }
-            }
-        }
-        edgeObjs = Array.from(new Set(edgeObjs)).filter(e => (e && (e.parentSolid || e.parent)));
+        const edgeObjs = collectEdgesFromSelection(inputObjects);
         if (edgeObjs.length === 0) {
             console.warn('[FilletFeature] No edges resolved for fillet feature; aborting.');
             return { added: [], removed: [] };
         }
 
-        const solids = new Set(edgeObjs.map(e => e.parentSolid || e.parent));
-        if (solids.size !== 1) {
-            console.warn('[FilletFeature] Edges reference multiple solids; aborting fillet.', { solids: Array.from(solids).map(s => s?.name) });
+        const { solid: targetSolid, solids } = resolveSingleSolidFromEdges(edgeObjs);
+        if (!targetSolid) {
+            if (solids.size > 1) {
+                console.warn('[FilletFeature] Edges reference multiple solids; aborting fillet.', { solids: Array.from(solids).map(s => s?.name) });
+            } else {
+                console.warn('[FilletFeature] Edges do not reference a target solid; aborting fillet.');
+            }
             return { added: [], removed: [] };
         }
-        const targetSolid = solids.values().next().value;
         console.log('[FilletFeature] Target solid resolved', {
             name: targetSolid?.name,
             edgeCount: edgeObjs.length,
@@ -124,12 +123,11 @@ export class FilletFeature {
         }
 
         const fid = this.inputParams.featureID;
-        const combineEdges = dir === 'INSET' ? false : !!this.inputParams.combineEdges;
         let result = null;
         try {
             result = await targetSolid.fillet({
                 radius: r,
-                combineEdges,
+                combineEdges: this.inputParams?.combineEdges,
                 resolution: this.inputParams?.resolution,
                 edges: edgeObjs,
                 featureID: fid,
@@ -156,8 +154,7 @@ export class FilletFeature {
             return out;
         };
         const debugSolids = collectDebugSolids(result);
-        const triCount = Array.isArray(result?._triVerts) ? (result._triVerts.length / 3) : 0;
-        const vertCount = Array.isArray(result?._vertProperties) ? (result._vertProperties.length / 3) : 0;
+        const { triCount, vertCount } = getSolidGeometryCounts(result);
         if (!result) {
             console.error('[FilletFeature] Fillet returned no result; skipping scene replacement.', { featureID: fid });
             if (debugSolids.length) {
