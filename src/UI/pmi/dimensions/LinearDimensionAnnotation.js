@@ -81,13 +81,12 @@ export class LinearDimensionAnnotation extends BaseAnnotation {
     super(opts);
   }
 
-  uiFieldsTest() {
+  uiFieldsTest(context) {
     const planeRefName = this.inputParams?.planeRefName;
     const hasPlane = Array.isArray(planeRefName)
       ? planeRefName.length > 0
       : Boolean(String(planeRefName || '').trim());
-    if (hasPlane) return { exclude: ['alignment'] };
-    return null;
+    return hasPlane ? ['alignment'] : [];
   }
 
   async run(renderingContext) {

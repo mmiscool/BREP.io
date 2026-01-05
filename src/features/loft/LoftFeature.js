@@ -1,4 +1,5 @@
 import { BREP } from "../../BREP/BREP.js";
+import { selectionHasSketch } from "../selectionUtils.js";
 const THREE = BREP.THREE;
 
 const inputParamsSchema = {
@@ -13,6 +14,11 @@ const inputParamsSchema = {
     multiple: true,
     default_value: [],
     hint: "Select 2+ profiles (faces) to loft",
+  },
+  consumeProfileSketch: {
+    type: "boolean",
+    default_value: true,
+    hint: "Remove referenced sketches after creating the loft. Turn off to keep them in the scene.",
   },
   referencePoints: {
     type: "reference_selection",
@@ -58,6 +64,12 @@ export class LoftFeature {
     this.persistentData = {};
   }
 
+  uiFieldsTest(context) {
+    const params = this.inputParams || context?.params || {};
+    const partHistory = context?.history || null;
+    return selectionHasSketch(params.profiles, partHistory) ? [] : ["consumeProfileSketch"];
+  }
+
   async run(partHistory) {
     const { profiles } = this.inputParams;
     if (!Array.isArray(profiles) || profiles.length < 2) {
@@ -68,6 +80,7 @@ export class LoftFeature {
     // Resolve input names to FACE objects; allow SKETCH that contains a FACE
     const faces = [];
     const removed = [];
+    const consumeSketch = this.inputParams?.consumeProfileSketch !== false;
     for (const obj of profiles) {
       if (!obj) continue;
       let faceObj = obj;
@@ -76,7 +89,9 @@ export class LoftFeature {
       }
       if (faceObj && faceObj.type === 'FACE') {
         // If face came from a sketch, mark sketch for removal (structured)
-        if (faceObj.parent && faceObj.parent.type === 'SKETCH') removed.push(faceObj.parent);
+        if (consumeSketch && faceObj.parent && faceObj.parent.type === 'SKETCH') {
+          removed.push(faceObj.parent);
+        }
         faces.push(faceObj);
       }
     }

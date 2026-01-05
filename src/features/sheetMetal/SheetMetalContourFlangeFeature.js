@@ -1,4 +1,5 @@
 import { BREP } from "../../BREP/BREP.js";
+import { selectionHasSketch } from "../selectionUtils.js";
 import {
   normalizeThickness,
   normalizeBendRadius,
@@ -59,6 +60,13 @@ export class SheetMetalContourFlangeFeature {
   constructor() {
     this.inputParams = {};
     this.persistentData = {};
+  }
+
+  uiFieldsTest(context) {
+    const params = this.inputParams || context?.params || {};
+    const partHistory = context?.history || null;
+    const pathRef = params.path ?? params.profile;
+    return selectionHasSketch(pathRef, partHistory) ? [] : ["consumePathSketch"];
   }
 
   async run(partHistory) {

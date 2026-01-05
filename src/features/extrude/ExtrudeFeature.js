@@ -1,4 +1,6 @@
+import { increment } from "three/tsl";
 import { BREP } from "../../BREP/BREP.js";
+import { selectionHasSketch } from "../selectionUtils.js";
 
 const inputParamsSchema = {
   id: {
@@ -12,6 +14,11 @@ const inputParamsSchema = {
     multiple: false,
     default_value: null,
     hint: "Select the profile to extrude",
+  },
+  consumeProfileSketch: {
+    type: "boolean",
+    default_value: true,
+    hint: "Remove the referenced sketch after creating the extrusion. Turn off to keep it in the scene.",
   },
   distance: {
     type: "number",
@@ -40,6 +47,12 @@ export class ExtrudeFeature {
     this.persistentData = {};
   }
 
+  uiFieldsTest(context) {
+    const params = this.inputParams || context?.params || {};
+    const partHistory = context?.history || null;
+    return selectionHasSketch(params.profile, partHistory) ? [] : ["consumeProfileSketch"];
+  }
+
   async run(partHistory) {
     // actual code to create the extrude feature.
     const { profile, distance, distanceBack } = this.inputParams;
@@ -53,8 +66,11 @@ export class ExtrudeFeature {
     }
 
     const removed = [];
+    const consumeSketch = this.inputParams?.consumeProfileSketch !== false;
     // if the face is a child of a sketch we need to remove the sketch from the scene
-    if (faceObj && faceObj.type === 'FACE' && faceObj.parent && faceObj.parent.type === 'SKETCH') removed.push(faceObj.parent);
+    if (consumeSketch && faceObj && faceObj.type === 'FACE' && faceObj.parent && faceObj.parent.type === 'SKETCH') {
+      removed.push(faceObj.parent);
+    }
 
 
 

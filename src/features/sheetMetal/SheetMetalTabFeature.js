@@ -1,4 +1,5 @@
 import { BREP } from "../../BREP/BREP.js";
+import { selectionHasSketch } from "../selectionUtils.js";
 import { normalizeThickness, normalizeBendRadius, applySheetMetalMetadata } from "./sheetMetalMetadata.js";
 import { setSheetMetalFaceTypeMetadata, SHEET_METAL_FACE_TYPES, propagateSheetMetalFaceTypesToEdges } from "./sheetMetalFaceTypes.js";
 import { resolveProfileFace, collectSketchParents } from "./profileUtils.js";
@@ -54,6 +55,12 @@ export class SheetMetalTabFeature {
   constructor() {
     this.inputParams = {};
     this.persistentData = {};
+  }
+
+  uiFieldsTest(context) {
+    const params = this.inputParams || context?.params || {};
+    const partHistory = context?.history || null;
+    return selectionHasSketch(params.profile, partHistory) ? [] : ["consumeProfileSketch"];
   }
 
   async run(partHistory) {

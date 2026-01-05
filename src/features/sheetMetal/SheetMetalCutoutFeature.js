@@ -62,20 +62,14 @@ export class SheetMetalCutoutFeature {
     this.debugTool = null;
   }
 
-  uiFieldsTest(partHistory) {
-    const include = ["sheet", "profile", "keepTool", "debugCutter"];
-    const exclude = [];
-    const profileRef = firstSelection(this.inputParams?.profile);
+  uiFieldsTest(context) {
+    const params = this.inputParams || context?.params || {};
+    const partHistory = context?.history || null;
+    const profileRef = firstSelection(params?.profile);
     const resolvedProfile = resolveProfileFace(profileRef, partHistory) || profileRef;
     const profileType = resolvedProfile?.type;
     const allowDistances = (profileType === "FACE" || profileType === "SKETCH");
-    if (allowDistances) {
-      include.push("forwardDistance", "backDistance");
-    } else {
-      exclude.push("forwardDistance", "backDistance");
-    }
-
-    return { include, exclude };
+    return allowDistances ? [] : ["forwardDistance", "backDistance"];
   }
 
   async run(partHistory) {

@@ -16,10 +16,18 @@ const htmlEntries = {
 
 export default defineConfig({
   // Explicitly set the public directory to ensure generated docs are included
+  //
   publicDir: 'public',
   esbuild: {
     keepNames: true,
   },
+  // allow the tunneled host to access the dev server
+  server: {
+    allowedHosts: true,
+    cors: true,
+  },
+
+
   build: {
     minify: 'esbuild',
     terserOptions: {

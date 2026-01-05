@@ -1178,26 +1178,22 @@ export class HistoryCollectionWidget {
     const runTest = (owner, fn) => {
       if (typeof fn !== 'function') return null;
       try {
-        // For backward compatibility, pass partHistory as first arg when available.
-        return fn.call(owner || entry || null, context?.history || null, context);
+        return fn.call(owner || entry || null, context);
       } catch (error) {
         console.warn('[HistoryCollectionWidget] uiFieldsTest failed; falling back to full schema.', error);
         return null;
       }
     };
-    let result = runTest(entry, entry?.uiFieldsTest);
-    if (result == null && entityClass) {
+    let excluded = runTest(entry, entry?.uiFieldsTest);
+    if (excluded == null && entityClass) {
       if (typeof entityClass.uiFieldsTest === 'function') {
-        result = runTest(entityClass, entityClass.uiFieldsTest);
+        excluded = runTest(entityClass, entityClass.uiFieldsTest);
       } else if (entityClass.prototype && entityClass.prototype.uiFieldsTest && entityClass.prototype.uiFieldsTest !== entry?.uiFieldsTest) {
-        result = runTest(entry, entityClass.prototype.uiFieldsTest);
+        excluded = runTest(entry, entityClass.prototype.uiFieldsTest);
       }
     }
-    const { include, exclude } = this._normalizeUiFieldsResult(result);
-    const allowedSet = this._normalizeKeySet(include, fallbackKeys);
-    const blockedSet = this._normalizeKeySet(exclude, fallbackKeys);
+    const blockedSet = this._normalizeExcludeKeySet(excluded, fallbackKeys);
     let keys = [...fallbackKeys];
-    if (allowedSet.size > 0) keys = keys.filter((key) => allowedSet.has(key));
     if (blockedSet.size > 0) keys = keys.filter((key) => !blockedSet.has(key));
     if (keys.length === 0) return { schema: {}, visibleKeys: [] };
     const filtered = {};
@@ -1207,27 +1203,12 @@ export class HistoryCollectionWidget {
     return { schema: filtered, visibleKeys: keys };
   }
 
-  _normalizeUiFieldsResult(result) {
-    if (result == null) return { include: null, exclude: null };
-    if (Array.isArray(result)) return { include: result, exclude: null };
-    if (typeof result === 'object') {
-      const include = Array.isArray(result.include) ? result.include : null;
-      const exclude = Array.isArray(result.exclude) ? result.exclude : null;
-      if (include || exclude) return { include, exclude };
-      const keys = Object.keys(result);
-      if (!keys.length) return { include: null, exclude: null };
-      const includeFromBools = keys.filter((k) => result[k] === true);
-      const excludeFromBools = keys.filter((k) => result[k] === false);
-      return {
-        include: includeFromBools.length ? includeFromBools : null,
-        exclude: excludeFromBools.length ? excludeFromBools : null,
-      };
-    }
-    return { include: null, exclude: null };
-  }
-
-  _normalizeKeySet(list, fallbackKeys = []) {
+  _normalizeExcludeKeySet(result, fallbackKeys = []) {
     const set = new Set();
+    let list = null;
+    if (Array.isArray(result)) list = result;
+    else if (typeof result === 'string') list = [result];
+    else if (result && typeof result === 'object' && Array.isArray(result.exclude)) list = result.exclude;
     if (!Array.isArray(list)) return set;
     const allowed = new Set(fallbackKeys);
     for (const raw of list) {

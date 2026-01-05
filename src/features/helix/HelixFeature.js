@@ -202,29 +202,30 @@ export class HelixFeature {
     this.persistentData = this.persistentData || {};
   }
 
-  uiFieldsTest() {
-    const placementMode = String(this.inputParams?.placementMode || "transform").toLowerCase();
-    const modeRaw = this.inputParams?.mode ?? this.inputParams?.lengthMode;
+  uiFieldsTest(context) {
+    const params = this.inputParams || context?.params || {};
+    const placementMode = String(params?.placementMode || "transform").toLowerCase();
+    const modeRaw = params?.mode ?? params?.lengthMode;
     const modeNormalized = String(modeRaw || "turns").toLowerCase();
     const mode = modeNormalized === "pitch" || modeNormalized === "height" ? "pitch" : "turns";
-    if (!this.inputParams?.mode && this.inputParams?.lengthMode) {
+    if (!params?.mode && params?.lengthMode && this.inputParams) {
       this.inputParams.mode = mode;
     }
 
-    const include = ["placementMode","radius", "endRadius", "mode","height","startAngle", "handedness", "resolution"];
+    const exclude = new Set();
     if (placementMode.startsWith("axis")) {
-      include.push("axis", "startPoint");
+      exclude.add("transform");
+    } else {
+      exclude.add("axis");
+      exclude.add("startPoint");
     }
     if (mode === "pitch") {
-      include.push("pitch");
+      exclude.add("turns");
     } else {
-      include.push("turns");
-    }
-    if (!placementMode.startsWith("axis")) {
-      include.push("transform");
+      exclude.add("pitch");
     }
 
-    return { include };
+    return Array.from(exclude);
   }
 
   async run(partHistory) { // partHistory reserved for future downstream needs

@@ -575,41 +575,39 @@ export class HoleFeature {
     this.persistentData = {};
   }
 
-  uiFieldsTest() {
-    const t = String(this.inputParams?.holeType || 'SIMPLE').toUpperCase();
-    const clearanceFit = String(this.inputParams?.clearanceFit || 'NONE').toUpperCase();
-    const exclude = [];
-    const include = ['holeType', 'face', 'boolean', 'debugShowSolid'];
-    const addCommon = () => {
-      include.push('depth', 'throughAll', 'clearanceFit');
-      if (clearanceFit === 'NONE') {
-        include.push('diameter');
+  uiFieldsTest(context) {
+    const params = this.inputParams || context?.params || {};
+    const t = String(params?.holeType || 'SIMPLE').toUpperCase();
+    const clearanceFit = String(params?.clearanceFit || 'NONE').toUpperCase();
+    const exclude = new Set();
+
+    const hide = (...keys) => { for (const key of keys) exclude.add(key); };
+    const hideCountersink = () => hide('countersinkDiameter', 'countersinkAngle');
+    const hideCounterbore = () => hide('counterboreDiameter', 'counterboreDepth');
+    const hideThread = () => hide('threadStandard', 'threadDesignation', 'threadMode', 'threadRadialOffset', 'threadSegmentsPerTurn');
+
+    if (t === 'THREADED') {
+      hideCountersink();
+      hideCounterbore();
+      hide('clearanceFit', 'clearanceStandard', 'clearanceDesignation', 'diameter');
+    } else {
+      hideThread();
+      if (t === 'COUNTERSINK') {
+        hideCounterbore();
+      } else if (t === 'COUNTERBORE') {
+        hideCountersink();
       } else {
-        include.push('clearanceStandard', 'clearanceDesignation');
-        exclude.push('diameter');
+        hideCountersink();
+        hideCounterbore();
       }
-    };
-    const addCommonThreaded = () => {
-      include.push('depth', 'throughAll');
-      exclude.push('diameter');
-    };
-    if (t === 'SIMPLE') {
-      addCommon();
-      exclude.push('countersinkDiameter', 'countersinkAngle', 'counterboreDiameter', 'counterboreDepth');
-    } else if (t === 'COUNTERSINK') {
-      addCommon();
-      include.push('countersinkDiameter', 'countersinkAngle');
-      exclude.push('counterboreDiameter', 'counterboreDepth');
-    } else if (t === 'COUNTERBORE') {
-      addCommon();
-      include.push('counterboreDiameter', 'counterboreDepth');
-      exclude.push('countersinkDiameter', 'countersinkAngle');
-    } else if (t === 'THREADED') {
-      addCommonThreaded();
-      include.push('threadStandard', 'threadDesignation', 'threadMode', 'threadRadialOffset', 'threadSegmentsPerTurn');
-      exclude.push('countersinkDiameter', 'countersinkAngle', 'counterboreDiameter', 'counterboreDepth', 'clearanceFit', 'clearanceStandard', 'clearanceDesignation');
+      if (clearanceFit === 'NONE') {
+        hide('clearanceStandard', 'clearanceDesignation');
+      } else {
+        hide('diameter');
+      }
     }
-    return { include, exclude };
+
+    return Array.from(exclude);
   }
 
   async run(partHistory) {

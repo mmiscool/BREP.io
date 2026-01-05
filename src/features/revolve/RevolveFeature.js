@@ -1,4 +1,5 @@
 import { BREP } from "../../BREP/BREP.js";
+import { selectionHasSketch } from "../selectionUtils.js";
 
 const inputParamsSchema = {
     id: {
@@ -12,6 +13,11 @@ const inputParamsSchema = {
         multiple: false,
         default_value: null,
         hint: "Select the profile (face) to revolve",
+    },
+    consumeProfileSketch: {
+        type: "boolean",
+        default_value: true,
+        hint: "Remove the referenced sketch after creating the revolve. Turn off to keep it in the scene.",
     },
     axis: {
         type: "reference_selection",
@@ -47,6 +53,12 @@ export class RevolveFeature {
         this.persistentData = {};
     }
 
+    uiFieldsTest(context) {
+        const params = this.inputParams || context?.params || {};
+        const partHistory = context?.history || null;
+        return selectionHasSketch(params.profile, partHistory) ? [] : ["consumeProfileSketch"];
+    }
+
     async run(partHistory) {
         const { profile, axis, angle, resolution } = this.inputParams;
 
@@ -70,7 +82,10 @@ export class RevolveFeature {
         }
 
         const removed = [];
-        if (faceObj && faceObj.type === 'FACE' && faceObj.parent && faceObj.parent.type === 'SKETCH') removed.push(faceObj.parent);
+        const consumeSketch = this.inputParams?.consumeProfileSketch !== false;
+        if (consumeSketch && faceObj && faceObj.type === 'FACE' && faceObj.parent && faceObj.parent.type === 'SKETCH') {
+            removed.push(faceObj.parent);
+        }
 
         const revolve = new BREP.Revolve({
             face: faceObj,

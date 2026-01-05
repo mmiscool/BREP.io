@@ -69,12 +69,10 @@ export class FilletFeature {
         this.persistentData = {};
     }
 
-    uiFieldsTest() {
-        const dir = String(this.inputParams?.direction || 'INSET').toUpperCase();
-        if (dir === 'INSET') {
-            return { exclude: ['combineEdges'] };
-        }
-        return { exclude: [] };
+    uiFieldsTest(context) {
+        const params = this.inputParams || context?.params || {};
+        const dir = String(params?.direction || 'INSET').toUpperCase();
+        return dir === 'INSET' ? ['combineEdges'] : [];
     }
 
     async run(partHistory) {
