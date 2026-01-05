@@ -109,6 +109,8 @@ export class SceneListing {
     #isLoop(obj) { return obj && obj.type === "LOOP"; }
     #isVertex(obj) { return obj && obj.type === "VERTEX"; }
     #isPlane(obj) { return obj && obj.type === "PLANE"; }
+    #isDatum(obj) { return obj && obj.type === "DATUM"; }
+    #isSketch(obj) { return obj && obj.type === "SKETCH"; }
 
     #syncMembership() {
         const present = new Set();
@@ -324,10 +326,14 @@ export class SceneListing {
         const isFace = (obj) => this.#isFace(obj);
         const isEdge = (obj) => this.#isEdge(obj);
         const isVertex = (obj) => this.#isVertex(obj);
+        const isDatumOrPlane = (obj) => this.#isDatum(obj) || this.#isPlane(obj);
+        const isSketchOrChild = (obj) => this.#isSketch(obj) || (obj && obj.parent && this.#isSketch(obj.parent));
 
         this.toolbar.appendChild(makeTypeButton("Face", "Toggle visibility of all Faces", isFace));
         this.toolbar.appendChild(makeTypeButton("Edge", "Toggle visibility of all Edges", isEdge));
         this.toolbar.appendChild(makeTypeButton("Point", "Toggle visibility of all Points", isVertex));
+        this.toolbar.appendChild(makeTypeButton("Datium", "Toggle visibility of all Datiums (including planes)", isDatumOrPlane));
+        this.toolbar.appendChild(makeTypeButton("Sketch", "Toggle visibility of all Sketches", isSketchOrChild));
     }
 
     #toggleVisibility(predicate) {
