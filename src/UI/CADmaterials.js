@@ -229,9 +229,6 @@ export class CADmaterialWidget {
         widthInput.max = 600;
         widthInput.step = 1;
         widthInput.value = String(initialWidth);
-        const widthVal = document.createElement('span');
-        widthVal.className = 'cmw-val';
-        widthVal.textContent = `${initialWidth}px`;
         const applySidebarWidth = (px) => {
             try {
                 const sb = document.getElementById('sidebar');
@@ -247,17 +244,14 @@ export class CADmaterialWidget {
             const max = Number(widthInput.max) || 600;
             if (v < min) v = min; else if (v > max) v = max;
             widthInput.value = String(v);
-            widthVal.textContent = `${v}px`;
             this._applySidebarWidth(v);
             this._settings['__SIDEBAR_WIDTH__'] = v;
             this._saveAllSettings();
         };
         widthInput.addEventListener('change', (event) => commitWidth(event.target.value));
         widthRow.appendChild(widthInput);
-        widthRow.appendChild(widthVal);
         this.uiElement.appendChild(widthRow);
         this._widthInput = widthInput;
-        this._widthVal = widthVal;
 
         const resetRow = makeRightSpan();
         const resetLabel = document.createElement('label');
@@ -408,7 +402,7 @@ export class CADmaterialWidget {
         return v;
     }
     _setSidebarWidthUi(px) {
-        if (!this._widthInput || !this._widthVal) {
+        if (!this._widthInput) {
             this._applySidebarWidth(px);
             return;
         }
@@ -418,7 +412,6 @@ export class CADmaterialWidget {
         const max = Number(this._widthInput.max) || 600;
         if (v < min) v = min; else if (v > max) v = max;
         this._widthInput.value = String(v);
-        this._widthVal.textContent = `${v}px`;
         this._applySidebarWidth(v);
     }
     _normalizeHexColor(value) {
@@ -442,6 +435,83 @@ export class CADmaterialWidget {
         } catch { /* keep fallback */ }
         return fallback;
     }
+    _formatRangeValue(value, step) {
+        const v = Number(value);
+        if (!Number.isFinite(v)) return '';
+        const stepStr = step != null ? String(step) : '';
+        let decimals = 0;
+        if (stepStr.includes('.')) decimals = stepStr.split('.')[1].length;
+        if (decimals > 0) {
+            const fixed = v.toFixed(decimals);
+            return fixed.replace(/\.?0+$/, '');
+        }
+        return String(Math.round(v));
+    }
+    _getRangeThumbSize(input) {
+        if (!input) return 16;
+        const cached = Number(input.dataset.cmwThumb);
+        if (Number.isFinite(cached) && cached > 0) return cached;
+        let measured = input.offsetHeight || 0;
+        if (!measured) {
+            try {
+                measured = parseFloat(getComputedStyle(input).height) || 0;
+            } catch { /* ignore */ }
+        }
+        const size = measured > 0 ? measured : 16;
+        if (measured > 0) input.dataset.cmwThumb = String(size);
+        return size;
+    }
+    _updateRangeBubble(input, bubble) {
+        if (!input || !bubble) return;
+        const min = Number(input.min || 0);
+        const max = Number(input.max || 100);
+        const value = Number(input.value);
+        if (!Number.isFinite(value) || !Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
+            bubble.textContent = '';
+            bubble.style.left = '0%';
+            bubble.style.transform = 'translateX(-50%)';
+            return;
+        }
+        const pct = Math.min(1, Math.max(0, (value - min) / (max - min)));
+        const thumbSize = this._getRangeThumbSize(input);
+        const offset = (thumbSize / 2) - (pct * thumbSize);
+        bubble.textContent = this._formatRangeValue(value, input.step);
+        bubble.style.left = `${pct * 100}%`;
+        bubble.style.transform = `translateX(-50%) translateX(${offset}px)`;
+    }
+    _createRangeField(input) {
+        const wrap = document.createElement('div');
+        wrap.className = 'cmw-range-wrap';
+        wrap.appendChild(input);
+        const bubble = document.createElement('span');
+        bubble.className = 'cmw-range-bubble';
+        wrap.appendChild(bubble);
+        this._updateRangeBubble(input, bubble);
+        return { wrap, bubble };
+    }
+    _createRangeRow({ label, min, max, step, value, onInput }) {
+        const row = makeRightSpan();
+        row.classList.add('cmw-row-range');
+        const labelEl = document.createElement('label');
+        labelEl.className = 'cmw-label';
+        labelEl.textContent = label;
+        row.appendChild(labelEl);
+        const input = document.createElement('input');
+        input.type = 'range';
+        input.className = 'cmw-range';
+        input.min = min;
+        input.max = max;
+        input.step = step;
+        input.value = Number.isFinite(value) ? value : min;
+        const { wrap, bubble } = this._createRangeField(input);
+        input.addEventListener('input', (event) => {
+            const v = parseFloat(event.target.value);
+            if (Number.isFinite(v)) onInput(v);
+            this._updateRangeBubble(input, bubble);
+        });
+        row.appendChild(wrap);
+        return { row, input, bubble };
+    }
     _syncMaterialControls(labelText, material) {
         const controls = this._controlRefs.get(labelText);
         if (!controls || !material) return;
@@ -449,17 +519,16 @@ export class CADmaterialWidget {
             controls.colorInput.value = `#${material.color.getHexString()}`;
         }
         if (controls.lineWidthInput) {
-            const v = material.linewidth ?? '';
-            controls.lineWidthInput.value = v;
-            if (controls.lineWidthVal) controls.lineWidthVal.textContent = String(v);
+            if (material.linewidth != null) controls.lineWidthInput.value = material.linewidth;
+            if (controls.lineWidthBubble) this._updateRangeBubble(controls.lineWidthInput, controls.lineWidthBubble);
         }
         if (controls.pointSizeInput) {
-            const v = material.size ?? '';
-            controls.pointSizeInput.value = v;
-            if (controls.pointSizeVal) controls.pointSizeVal.textContent = String(v);
+            if (material.size != null) controls.pointSizeInput.value = material.size;
+            if (controls.pointSizeBubble) this._updateRangeBubble(controls.pointSizeInput, controls.pointSizeBubble);
         }
         if (controls.opacityInput) {
             controls.opacityInput.value = material.opacity ?? 1;
+            if (controls.opacityBubble) this._updateRangeBubble(controls.opacityInput, controls.opacityBubble);
         }
         if (controls.wireframeInput) {
             controls.wireframeInput.checked = !!material.wireframe;
@@ -563,62 +632,38 @@ export class CADmaterialWidget {
 
         // Line-specific controls
         if (material instanceof THREE.LineBasicMaterial || material instanceof LineMaterial) {
-            const lineWidthRow = makeRightSpan();
-            const lwLabel = document.createElement("label");
-            lwLabel.className = 'cmw-label';
-            lwLabel.textContent = "Linewidth";
-            lineWidthRow.appendChild(lwLabel);
-            const lwVal = document.createElement("span");
-            lwVal.className = 'cmw-val';
-            lwVal.textContent = String(material.linewidth ?? '');
-            const lwInput = document.createElement("input");
-            lwInput.type = "range";
-            lwInput.className = 'cmw-range';
-            lwInput.min = 1;
-            lwInput.max = 10;
-            lwInput.step = 0.1;
-            lwInput.value = material.linewidth ?? 1;
-            lwInput.addEventListener("input", (event) => {
-                const v = parseFloat(event.target.value);
-                material.linewidth = v;
-                lwVal.textContent = String(v);
-                this._setSettingsFor(labelText, { linewidth: v });
+            const { row, input, bubble } = this._createRangeRow({
+                label: 'Linewidth',
+                min: 1,
+                max: 10,
+                step: 0.1,
+                value: material.linewidth ?? 1,
+                onInput: (v) => {
+                    material.linewidth = v;
+                    this._setSettingsFor(labelText, { linewidth: v });
+                },
             });
-            lineWidthRow.appendChild(lwInput);
-            lineWidthRow.appendChild(lwVal);
-            container.appendChild(lineWidthRow);
-            controls.lineWidthInput = lwInput;
-            controls.lineWidthVal = lwVal;
+            container.appendChild(row);
+            controls.lineWidthInput = input;
+            controls.lineWidthBubble = bubble;
         }
 
         // Points-specific controls
         if (material instanceof THREE.PointsMaterial) {
-            const pointSizeRow = makeRightSpan();
-            const psLabel = document.createElement('label');
-            psLabel.className = 'cmw-label';
-            psLabel.textContent = 'Point Size';
-            pointSizeRow.appendChild(psLabel);
-            const psVal = document.createElement('span');
-            psVal.className = 'cmw-val';
-            psVal.textContent = String(material.size ?? '');
-            const psInput = document.createElement('input');
-            psInput.type = 'range';
-            psInput.className = 'cmw-range';
-            psInput.min = 1;
-            psInput.max = 30;
-            psInput.step = 0.5;
-            psInput.value = material.size ?? 6;
-            psInput.addEventListener('input', (event) => {
-                const v = parseFloat(event.target.value);
-                material.size = v;
-                psVal.textContent = String(v);
-                this._setSettingsFor(labelText, { pointSize: v });
+            const { row, input, bubble } = this._createRangeRow({
+                label: 'Point Size',
+                min: 1,
+                max: 30,
+                step: 0.5,
+                value: material.size ?? 6,
+                onInput: (v) => {
+                    material.size = v;
+                    this._setSettingsFor(labelText, { pointSize: v });
+                },
             });
-            pointSizeRow.appendChild(psInput);
-            pointSizeRow.appendChild(psVal);
-            container.appendChild(pointSizeRow);
-            controls.pointSizeInput = psInput;
-            controls.pointSizeVal = psVal;
+            container.appendChild(row);
+            controls.pointSizeInput = input;
+            controls.pointSizeBubble = bubble;
         }
 
         // Mesh material common controls
@@ -629,26 +674,21 @@ export class CADmaterialWidget {
             material instanceof THREE.MeshStandardMaterial
         ) {
             // Opacity
-            const opacityRow = makeRightSpan();
-            const opLabel = document.createElement("label");
-            opLabel.className = 'cmw-label';
-            opLabel.textContent = "Opacity";
-            opacityRow.appendChild(opLabel);
-            const opInput = document.createElement("input");
-            opInput.type = "range";
-            opInput.className = 'cmw-range';
-            opInput.min = 0;
-            opInput.max = 1;
-            opInput.step = 0.01;
-            opInput.value = material.opacity ?? 1;
-            opInput.addEventListener("input", (event) => {
-                material.opacity = parseFloat(event.target.value);
-                material.transparent = material.opacity < 1;
-                this._setSettingsFor(labelText, { opacity: material.opacity });
+            const { row, input, bubble } = this._createRangeRow({
+                label: 'Opacity',
+                min: 0,
+                max: 1,
+                step: 0.01,
+                value: material.opacity ?? 1,
+                onInput: (v) => {
+                    material.opacity = v;
+                    material.transparent = material.opacity < 1;
+                    this._setSettingsFor(labelText, { opacity: material.opacity });
+                },
             });
-            opacityRow.appendChild(opInput);
-            container.appendChild(opacityRow);
-            controls.opacityInput = opInput;
+            container.appendChild(row);
+            controls.opacityInput = input;
+            controls.opacityBubble = bubble;
 
             // Wireframe
             const wfRow = makeRightSpan();
@@ -713,11 +753,28 @@ export class CADmaterialWidget {
             }
             .cmw-mat { display: flex; flex-direction: column; }
             .cmw-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
+            .cmw-row-range { align-items: flex-start; }
+            .cmw-row-range .cmw-label { margin-top: 20px; }
             .cmw-label { width: 160px; color: var(--cmw-text); }
             .cmw-input { background: #0b0e14; color: var(--cmw-text); border: 1px solid #374151; border-radius: 8px; padding: 4px 6px; height: 28px; }
-            .cmw-range { width: 200px; accent-color: #60a5fa; }
+            .cmw-range-wrap { position: relative; width: 200px; padding-top: 20px; }
+            .cmw-range { width: 100%; accent-color: #60a5fa; }
+            .cmw-range-bubble {
+                position: absolute;
+                top: 0;
+                left: 0;
+                transform: translateX(-50%);
+                background: #0b0e14;
+                border: 1px solid #374151;
+                border-radius: 6px;
+                padding: 2px 6px;
+                font-size: 12px;
+                line-height: 1.2;
+                color: #d1d5db;
+                pointer-events: none;
+                white-space: nowrap;
+            }
             .cmw-check { accent-color: #60a5fa; }
-            .cmw-val { width: 48px; text-align: right; color: #9aa4b2; }
             .cmw-button {
                 background: #111827;
                 color: var(--cmw-text);

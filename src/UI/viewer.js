@@ -288,6 +288,8 @@ export class Viewer {
             near,
             far
         );
+        this._defaultNear = near;
+        this._defaultFar = far;
 
 
 
@@ -358,9 +360,8 @@ export class Viewer {
                 if (this.sidebar) {
                     this.sidebar.style.opacity = .9;
                 }
-                if (this._updateDepthRange({ reuseBounds: true })) {
-                    this._depthRangeInitialized = true;
-                }
+                this._cameraMoving = true;
+                this._updateDepthRange();
                 // (quiet) camera moving
             },
             onIdle: () => {
@@ -368,6 +369,7 @@ export class Viewer {
                 if (this.sidebar) {
                     this.sidebar.style.opacity = .9;
                 }
+                this._cameraMoving = false;
 
                 // recompute bounding spheres for all geometries (Mesh, Line/Line2, Points)
                 this.scene.traverse((object) => {
@@ -376,7 +378,7 @@ export class Viewer {
                         try { g.computeBoundingSphere(); } catch (_) { /* noop */ }
                     }
                 });
-                if (this._updateDepthRange()) this._depthRangeInitialized = true;
+                this._updateDepthRange();
             }
         })
 
@@ -392,7 +394,7 @@ export class Viewer {
         this._disposed = false;
         this._sketchMode = null;
         this._splineMode = null;
-        this._depthRangeInitialized = false;
+        this._cameraMoving = false;
         this._sceneBoundsCache = null;
         this._lastPointerEvent = null;
         this._lastDashWpp = null;
@@ -992,9 +994,7 @@ export class Viewer {
             try { this.scene.add(this.camera); } catch { /* ignore add errors */ }
         }
         this._updateCameraLightRig();
-        if (!this._depthRangeInitialized) {
-            if (this._updateDepthRange()) this._depthRangeInitialized = true;
-        }
+        this._updateDepthRange();
         this.renderer.render(this.scene, this.camera);
         try { this.viewCube && this.viewCube.render(); } catch { }
     }
@@ -1022,62 +1022,11 @@ export class Viewer {
     _computeSceneBounds({ reuse = false } = {}) {
         if (reuse && this._sceneBoundsCache) return this._sceneBoundsCache;
         const box = new THREE.Box3();
-        box.makeEmpty();
-        this.scene.traverse((obj) => {
-            if (!obj || !obj.visible) return;
-            // Only include leaf geometry objects to avoid pulling in excluded children via parents
-            const isGeom = !!(obj.isMesh || obj.isLine || obj.isLineSegments || obj.isLineLoop || obj.isLine2 || obj.isPoints);
-            if (!isGeom) return;
-            // Exclude Arcball gizmos/grid from fitting
-            if (this.controls) {
-                const giz = this.controls._gizmos;
-                const grid = this.controls._grid;
-                let p = obj;
-                while (p) {
-                    if (p === giz || p === grid) return;
-                    p = p.parent;
-                }
-            }
-            // Exclude active TransformControls gizmo/helper from fitting
-            try {
-                const ax = (typeof window !== 'undefined') ? (window.__BREP_activeXform || null) : null;
-                if (ax) {
-                    const tc = ax.controls || null;
-                    const group = ax.group || null;
-                    const parts = new Set();
-                    const addIfObj = (o) => { try { if (o && o.isObject3D) parts.add(o); } catch (_) { } };
-                    addIfObj(group);
-                    addIfObj(tc);
-                    addIfObj(tc && tc.getHelper ? tc.getHelper() : null);
-                    addIfObj(tc && tc.__helper);
-                    addIfObj(tc && tc.__fallbackGroup);
-                    addIfObj(tc && tc.gizmo);
-                    addIfObj(tc && tc._gizmo);
-                    addIfObj(tc && tc.picker);
-                    addIfObj(tc && tc._picker);
-                    addIfObj(tc && tc.helper);
-                    addIfObj(tc && tc._helper);
-                    let p = obj;
-                    while (p) {
-                        if (parts.has(p)) return;
-                        if (p.name === 'TransformControlsGroup') return;
-                        p = p.parent;
-                    }
-                }
-            } catch { /* ignore */ }
-            // Heuristic: skip any objects named like TransformControls (defensive against unknown builds)
-            try {
-                let p = obj;
-                while (p) {
-                    const n = (p.name || '');
-                    if (typeof n === 'string' && /TransformControls/i.test(n)) return;
-                    p = p.parent;
-                }
-            } catch { }
-            // Custom opt-out
-            try { if (obj.userData && obj.userData.excludeFromFit) return; } catch { }
-            try { box.expandByObject(obj); } catch { /* ignore */ }
-        });
+        try {
+            box.setFromObject(this.scene);
+        } catch {
+            return null;
+        }
         if (box.isEmpty()) return null;
         this._sceneBoundsCache = box;
         return box;
@@ -1110,9 +1059,25 @@ export class Viewer {
         if (!Number.isFinite(minZ) || !Number.isFinite(maxZ)) return false;
 
         const range = Math.max(1e-6, maxZ - minZ);
-        const pad = Math.max(range * 0.05, 0.1);
-        const near = Math.max(0.001, -(maxZ + pad));
-        const far = Math.max(near + 0.001, -(minZ - pad));
+        const diag = box.min.distanceTo(box.max);
+        const pad = Math.max(range * 0.1, diag * 0.1, 0.5);
+        if (maxZ > (-pad + 1e-6)) {
+            const dir = new THREE.Vector3();
+            try { this.camera.getWorldDirection(dir); } catch { dir.set(0, 0, -1); }
+            if (dir.lengthSq() > 0) {
+                const shift = maxZ + pad;
+                dir.normalize();
+                this.camera.position.addScaledVector(dir, -shift);
+                minZ -= shift;
+                maxZ -= shift;
+                try { this.camera.updateMatrixWorld(true); } catch { /* ignore */ }
+                try { this.controls?.updateMatrixState?.(); } catch { /* ignore */ }
+            }
+        }
+
+        const near = 0;
+        let far = Math.max(1, -minZ + pad);
+        if (!Number.isFinite(far)) return false;
 
         const nearChanged = Math.abs((this.camera.near || 0) - near) > 1e-6;
         const farChanged = Math.abs((this.camera.far || 0) - far) > 1e-6;
