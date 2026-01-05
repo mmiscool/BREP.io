@@ -84,12 +84,17 @@ export function addAuxEdge(name, points, options = {}) {
             ? points.map(toArr).filter(Boolean)
             : [];
         if (pts.length < 2) return this;
+        const label = name || 'EDGE';
+        const hasCenterlineOption = Object.prototype.hasOwnProperty.call(options || {}, 'centerline');
+        const inferredCenterline = typeof label === 'string' && /centerline/i.test(label);
+        const centerline = hasCenterlineOption ? !!options.centerline : inferredCenterline;
         const entry = {
-            name: name || 'EDGE',
+            name: label,
             points: pts,
             closedLoop: !!options.closedLoop,
             polylineWorld: !!options.polylineWorld,
             materialKey: options.materialKey || 'OVERLAY',
+            centerline,
         };
         if (!Array.isArray(this._auxEdges)) this._auxEdges = [];
         this._auxEdges.push(entry);
@@ -101,5 +106,7 @@ export function addAuxEdge(name, points, options = {}) {
 export function addCenterline(a, b, name = 'CENTERLINE', options = {}) {
     const A = Array.isArray(a) ? a : [a?.x || 0, a?.y || 0, a?.z || 0];
     const B = Array.isArray(b) ? b : [b?.x || 0, b?.y || 0, b?.z || 0];
-    return this.addAuxEdge(name, [A, B], options);
+    const opts = { ...(options || {}) };
+    if (!Object.prototype.hasOwnProperty.call(opts, 'centerline')) opts.centerline = true;
+    return this.addAuxEdge(name, [A, B], opts);
 }

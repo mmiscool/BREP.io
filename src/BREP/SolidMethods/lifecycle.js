@@ -29,7 +29,7 @@ export function constructorImpl() {
     this.type = 'SOLID';
     this.renderOrder = 1;
     // Custom auxiliary edges (e.g., centerlines) to visualize with this solid
-    // Each item: { name?:string, points:[[x,y,z],...], closedLoop?:boolean, polylineWorld?:boolean, materialKey?:'OVERLAY'|'BASE' }
+    // Each item: { name?:string, points:[[x,y,z],...], closedLoop?:boolean, polylineWorld?:boolean, materialKey?:'OVERLAY'|'BASE', centerline?:boolean }
     this._auxEdges = [];
 }
 
@@ -66,6 +66,7 @@ export function clone() {
                 closedLoop: !!e?.closedLoop,
                 polylineWorld: !!e?.polylineWorld,
                 materialKey: e?.materialKey,
+                centerline: !!e?.centerline,
                 points: Array.isArray(e?.points) ? e.points.map(p => Array.isArray(p) ? [p[0], p[1], p[2]] : p) : [],
             }))
             : [];

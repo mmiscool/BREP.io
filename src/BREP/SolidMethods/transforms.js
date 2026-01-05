@@ -223,6 +223,7 @@ export function mirrorAcrossPlane(point, normal) {
                     closedLoop: !!edge?.closedLoop,
                     polylineWorld: !!edge?.polylineWorld,
                     materialKey: edge?.materialKey,
+                    centerline: !!edge?.centerline,
                     points: pts,
                 };
             }).filter(e => Array.isArray(e.points) && e.points.length);

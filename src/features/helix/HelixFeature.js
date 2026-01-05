@@ -363,6 +363,7 @@ export class HelixFeature {
           polylineLocal: helixData.axisLine.map((p) => [p[0], p[1], p[2]]),
           polylineWorld: true,
           helixAxis: true,
+          centerline: true,
           sourceAxisName: (Array.isArray(this.inputParams.axis) ? this.inputParams.axis.find(Boolean)?.name : this.inputParams.axis?.name) || null,
         };
         sceneGroup.add(axisEdge);

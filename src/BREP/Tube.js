@@ -729,7 +729,7 @@ export class Tube extends Solid {
           auxPath.push([first[0], first[1], first[2]]);
         }
       }
-      this.addAuxEdge(`${faceTag}_PATH`, auxPath, { polylineWorld: true, materialKey: 'OVERLAY', closedLoop: !!isClosed });
+      this.addAuxEdge(`${faceTag}_PATH`, auxPath, { polylineWorld: true, materialKey: 'OVERLAY', closedLoop: !!isClosed, centerline: true });
     } catch (_) { /* ignore auxiliary path errors */ }
 
     const preTriCount = (this._triVerts?.length || 0) / 3 | 0;
@@ -741,6 +741,7 @@ export class Tube extends Solid {
           closedLoop: !!e?.closedLoop,
           polylineWorld: !!e?.polylineWorld,
           materialKey: e?.materialKey,
+          centerline: !!e?.centerline,
           points: Array.isArray(e?.points)
             ? e.points.map(p => (Array.isArray(p) ? [p[0], p[1], p[2]] : p))
             : [],
@@ -846,7 +847,7 @@ export class Tube extends Solid {
 
     try {
       const auxPath = cleanPoints.map(p => [p.x, p.y, p.z]);
-      this.addAuxEdge(`${faceTag}_PATH`, auxPath, { polylineWorld: true, materialKey: 'OVERLAY', closedLoop: !!isClosed });
+      this.addAuxEdge(`${faceTag}_PATH`, auxPath, { polylineWorld: true, materialKey: 'OVERLAY', closedLoop: !!isClosed, centerline: true });
     } catch (_) {
       // ignore auxiliary path errors
     }

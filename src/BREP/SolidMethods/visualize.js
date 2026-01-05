@@ -336,7 +336,13 @@ export function visualize(options = {}) {
                     const edgeObj = new Edge(g);
                     edgeObj.name = aux?.name || 'CENTERLINE';
                     edgeObj.closedLoop = !!aux?.closedLoop;
-                    edgeObj.userData = { ...(edgeObj.userData || {}), polylineLocal: pts, polylineWorld: !!aux?.polylineWorld };
+                    edgeObj.userData = {
+                        ...(edgeObj.userData || {}),
+                        polylineLocal: pts,
+                        polylineWorld: !!aux?.polylineWorld,
+                        centerline: !!aux?.centerline,
+                        auxEdge: true,
+                    };
                     edgeObj.parentSolid = this;
                     try {
                         const key = (aux?.materialKey || 'OVERLAY').toUpperCase();

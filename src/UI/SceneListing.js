@@ -111,6 +111,14 @@ export class SceneListing {
     #isPlane(obj) { return obj && obj.type === "PLANE"; }
     #isDatum(obj) { return obj && obj.type === "DATUM"; }
     #isSketch(obj) { return obj && obj.type === "SKETCH"; }
+    #isCenterlineEdge(obj) {
+        if (!obj || obj.type !== "EDGE") return false;
+        const ud = obj.userData || {};
+        if (ud.centerline) return true;
+        const name = obj.name || "";
+        return /centerline/i.test(name);
+    }
+    #isRegularEdge(obj) { return this.#isEdge(obj) && !this.#isCenterlineEdge(obj); }
 
     #syncMembership() {
         const present = new Set();
@@ -324,13 +332,15 @@ export class SceneListing {
         };
 
         const isFace = (obj) => this.#isFace(obj);
-        const isEdge = (obj) => this.#isEdge(obj);
+        const isEdge = (obj) => this.#isRegularEdge(obj);
         const isVertex = (obj) => this.#isVertex(obj);
+        const isCenterline = (obj) => this.#isCenterlineEdge(obj);
         const isDatumOrPlane = (obj) => this.#isDatum(obj) || this.#isPlane(obj);
         const isSketchOrChild = (obj) => this.#isSketch(obj) || (obj && obj.parent && this.#isSketch(obj.parent));
 
         this.toolbar.appendChild(makeTypeButton("Face", "Toggle visibility of all Faces", isFace));
-        this.toolbar.appendChild(makeTypeButton("Edge", "Toggle visibility of all Edges", isEdge));
+        this.toolbar.appendChild(makeTypeButton("Edge", "Toggle visibility of all Edges (excluding centerlines)", isEdge));
+        this.toolbar.appendChild(makeTypeButton("Centerline", "Toggle visibility of all Centerlines", isCenterline));
         this.toolbar.appendChild(makeTypeButton("Point", "Toggle visibility of all Points", isVertex));
         this.toolbar.appendChild(makeTypeButton("Datium", "Toggle visibility of all Datiums (including planes)", isDatumOrPlane));
         this.toolbar.appendChild(makeTypeButton("Sketch", "Toggle visibility of all Sketches", isSketchOrChild));
