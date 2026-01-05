@@ -20,9 +20,17 @@ import { test_fillets_more_dificult } from './test_filletsMoreDifficult.js';
 import { test_tube } from './test_tube.js';
 import { test_tube_closedLoop } from './test_tube_closedLoop.js';
 import { test_offsetShellGrouping } from './test_offsetShellGrouping.js';
+import { test_sheetMetal_tab, test_sheetMetal_flange, test_sheetMetal_cutout } from './test_sheetMetal_features.js';
+import {
+    test_SheetMetalContourFlange_Basic,
+    test_SheetMetalContourFlange_StraightLine,
+    afterRun_SheetMetalContourFlange_Basic,
+    afterRun_SheetMetalContourFlange_StraightLine,
+} from './test_sheetMetalContourFlange.js';
 import { test_pushFace, afterRun_pushFace } from './test_pushFace.js';
 import { test_sketch_openLoop, afterRun_sketch_openLoop } from './test_sketch_openLoop.js';
 import { test_Fillet_NonClosed, afterRun_Fillet_NonClosed } from './test_fillet_nonClosed.js';
+import { test_history_features_basic, afterRun_history_features_basic } from './test_history_features_basic.js';
 import { generate3MF } from '../exporters/threeMF.js';
 import {
     test_hole_through,
@@ -56,6 +64,11 @@ export const testFunctions = [
     { test: test_tube_closedLoop, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_sketch_openLoop, afterRun: afterRun_sketch_openLoop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_offsetShellGrouping, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sheetMetal_tab, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_sheetMetal_flange, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_sheetMetal_cutout, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_SheetMetalContourFlange_Basic, afterRun: afterRun_SheetMetalContourFlange_Basic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_SheetMetalContourFlange_StraightLine, afterRun: afterRun_SheetMetalContourFlange_StraightLine, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_ExtrudeFace, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_Fillet, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_Fillet_NonClosed, afterRun: afterRun_Fillet_NonClosed, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
@@ -68,6 +81,7 @@ export const testFunctions = [
     { test: test_hole_thread_modeled, afterRun: afterRun_hole_thread_modeled, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_pushFace, afterRun: afterRun_pushFace, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_mirror, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_history_features_basic, afterRun: afterRun_history_features_basic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_solidMetrics, afterRun: afterRun_solidMetrics, printArtifacts: true, exportFaces: true, exportSolids: true, resetHistory: true },
 
 ];
