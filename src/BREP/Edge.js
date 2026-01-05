@@ -8,6 +8,7 @@ export class Edge extends Line2 {
         this.faces = [];
         this.name = null;
         this.type = 'EDGE';
+        this.renderOrder = 2;
         this.closedLoop = false;
     }
 

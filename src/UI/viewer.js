@@ -358,6 +358,9 @@ export class Viewer {
                 if (this.sidebar) {
                     this.sidebar.style.opacity = .9;
                 }
+                if (this._updateDepthRange({ reuseBounds: true })) {
+                    this._depthRangeInitialized = true;
+                }
                 // (quiet) camera moving
             },
             onIdle: () => {
@@ -373,6 +376,7 @@ export class Viewer {
                         try { g.computeBoundingSphere(); } catch (_) { /* noop */ }
                     }
                 });
+                if (this._updateDepthRange()) this._depthRangeInitialized = true;
             }
         })
 
@@ -388,6 +392,8 @@ export class Viewer {
         this._disposed = false;
         this._sketchMode = null;
         this._splineMode = null;
+        this._depthRangeInitialized = false;
+        this._sceneBoundsCache = null;
         this._lastPointerEvent = null;
         this._lastDashWpp = null;
         this._selectionOverlay = null;
@@ -986,6 +992,9 @@ export class Viewer {
             try { this.scene.add(this.camera); } catch { /* ignore add errors */ }
         }
         this._updateCameraLightRig();
+        if (!this._depthRangeInitialized) {
+            if (this._updateDepthRange()) this._depthRangeInitialized = true;
+        }
         this.renderer.render(this.scene, this.camera);
         try { this.viewCube && this.viewCube.render(); } catch { }
     }
@@ -1010,6 +1019,111 @@ export class Viewer {
         });
     }
 
+    _computeSceneBounds({ reuse = false } = {}) {
+        if (reuse && this._sceneBoundsCache) return this._sceneBoundsCache;
+        const box = new THREE.Box3();
+        box.makeEmpty();
+        this.scene.traverse((obj) => {
+            if (!obj || !obj.visible) return;
+            // Only include leaf geometry objects to avoid pulling in excluded children via parents
+            const isGeom = !!(obj.isMesh || obj.isLine || obj.isLineSegments || obj.isLineLoop || obj.isLine2 || obj.isPoints);
+            if (!isGeom) return;
+            // Exclude Arcball gizmos/grid from fitting
+            if (this.controls) {
+                const giz = this.controls._gizmos;
+                const grid = this.controls._grid;
+                let p = obj;
+                while (p) {
+                    if (p === giz || p === grid) return;
+                    p = p.parent;
+                }
+            }
+            // Exclude active TransformControls gizmo/helper from fitting
+            try {
+                const ax = (typeof window !== 'undefined') ? (window.__BREP_activeXform || null) : null;
+                if (ax) {
+                    const tc = ax.controls || null;
+                    const group = ax.group || null;
+                    const parts = new Set();
+                    const addIfObj = (o) => { try { if (o && o.isObject3D) parts.add(o); } catch (_) { } };
+                    addIfObj(group);
+                    addIfObj(tc);
+                    addIfObj(tc && tc.getHelper ? tc.getHelper() : null);
+                    addIfObj(tc && tc.__helper);
+                    addIfObj(tc && tc.__fallbackGroup);
+                    addIfObj(tc && tc.gizmo);
+                    addIfObj(tc && tc._gizmo);
+                    addIfObj(tc && tc.picker);
+                    addIfObj(tc && tc._picker);
+                    addIfObj(tc && tc.helper);
+                    addIfObj(tc && tc._helper);
+                    let p = obj;
+                    while (p) {
+                        if (parts.has(p)) return;
+                        if (p.name === 'TransformControlsGroup') return;
+                        p = p.parent;
+                    }
+                }
+            } catch { /* ignore */ }
+            // Heuristic: skip any objects named like TransformControls (defensive against unknown builds)
+            try {
+                let p = obj;
+                while (p) {
+                    const n = (p.name || '');
+                    if (typeof n === 'string' && /TransformControls/i.test(n)) return;
+                    p = p.parent;
+                }
+            } catch { }
+            // Custom opt-out
+            try { if (obj.userData && obj.userData.excludeFromFit) return; } catch { }
+            try { box.expandByObject(obj); } catch { /* ignore */ }
+        });
+        if (box.isEmpty()) return null;
+        this._sceneBoundsCache = box;
+        return box;
+    }
+
+    _updateDepthRange({ reuseBounds = false } = {}) {
+        if (!this.camera) return false;
+        const box = this._computeSceneBounds({ reuse: reuseBounds });
+        if (!box) return false;
+        try { this.camera.updateMatrixWorld(true); } catch { /* ignore */ }
+
+        const corners = [
+            new THREE.Vector3(box.min.x, box.min.y, box.min.z),
+            new THREE.Vector3(box.min.x, box.min.y, box.max.z),
+            new THREE.Vector3(box.min.x, box.max.y, box.min.z),
+            new THREE.Vector3(box.min.x, box.max.y, box.max.z),
+            new THREE.Vector3(box.max.x, box.min.y, box.min.z),
+            new THREE.Vector3(box.max.x, box.min.y, box.max.z),
+            new THREE.Vector3(box.max.x, box.max.y, box.min.z),
+            new THREE.Vector3(box.max.x, box.max.y, box.max.z),
+        ];
+        const inv = new THREE.Matrix4().copy(this.camera.matrixWorld).invert();
+        let minZ = Infinity;
+        let maxZ = -Infinity;
+        for (const p of corners) {
+            p.applyMatrix4(inv);
+            if (p.z < minZ) minZ = p.z;
+            if (p.z > maxZ) maxZ = p.z;
+        }
+        if (!Number.isFinite(minZ) || !Number.isFinite(maxZ)) return false;
+
+        const range = Math.max(1e-6, maxZ - minZ);
+        const pad = Math.max(range * 0.05, 0.1);
+        const near = Math.max(0.001, -(maxZ + pad));
+        const far = Math.max(near + 0.001, -(minZ - pad));
+
+        const nearChanged = Math.abs((this.camera.near || 0) - near) > 1e-6;
+        const farChanged = Math.abs((this.camera.far || 0) - far) > 1e-6;
+        if (nearChanged || farChanged) {
+            this.camera.near = near;
+            this.camera.far = far;
+            try { this.camera.updateProjectionMatrix(); } catch { /* ignore */ }
+        }
+        return true;
+    }
+
     // Zoom-to-fit using only ArcballControls operations (pan + zoom).
     // Does not alter camera orientation or frustum parameters (left/right/top/bottom).
     zoomToFit(margin = 1.1) {
@@ -1017,67 +1131,8 @@ export class Viewer {
             const c = this.controls;
             if (!c) return;
 
-            // Build world-space bounds of all visible geometry (exclude UI + groups)
-            const box = new THREE.Box3();
-            box.makeEmpty();
-            this.scene.traverse((obj) => {
-                if (!obj || !obj.visible) return;
-                // Only include leaf geometry objects to avoid pulling in excluded children via parents
-                const isGeom = !!(obj.isMesh || obj.isLine || obj.isLineSegments || obj.isLineLoop || obj.isLine2 || obj.isPoints);
-                if (!isGeom) return;
-                // Exclude Arcball gizmos/grid from fitting
-                if (this.controls) {
-                    const giz = this.controls._gizmos;
-                    const grid = this.controls._grid;
-                    let p = obj;
-                    while (p) {
-                        if (p === giz || p === grid) return;
-                        p = p.parent;
-                    }
-                }
-                // Exclude active TransformControls gizmo/helper from fitting
-                try {
-                    const ax = (typeof window !== 'undefined') ? (window.__BREP_activeXform || null) : null;
-                    if (ax) {
-                        const tc = ax.controls || null;
-                        const group = ax.group || null;
-                        // Collect likely Object3D parts across three versions
-                        const parts = new Set();
-                        const addIfObj = (o) => { try { if (o && o.isObject3D) parts.add(o); } catch (_) { } };
-                        addIfObj(group);
-                        addIfObj(tc);
-                        addIfObj(tc && tc.getHelper ? tc.getHelper() : null);
-                        addIfObj(tc && tc.__helper);
-                        addIfObj(tc && tc.__fallbackGroup);
-                        addIfObj(tc && tc.gizmo);
-                        addIfObj(tc && tc._gizmo);
-                        addIfObj(tc && tc.picker);
-                        addIfObj(tc && tc._picker);
-                        addIfObj(tc && tc.helper);
-                        addIfObj(tc && tc._helper);
-                        let p = obj;
-                        while (p) {
-                            if (parts.has(p)) return;
-                            // Also skip well-known fallback group name
-                            if (p.name === 'TransformControlsGroup') return;
-                            p = p.parent;
-                        }
-                    }
-                } catch { /* ignore */ }
-                // Heuristic: skip any objects named like TransformControls (defensive against unknown builds)
-                try {
-                    let p = obj;
-                    while (p) {
-                        const n = (p.name || '');
-                        if (typeof n === 'string' && /TransformControls/i.test(n)) return;
-                        p = p.parent;
-                    }
-                } catch { }
-                // Custom opt-out
-                try { if (obj.userData && obj.userData.excludeFromFit) return; } catch { }
-                try { box.expandByObject(obj); } catch { /* ignore */ }
-            });
-            if (box.isEmpty()) return;
+            const box = this._computeSceneBounds();
+            if (!box) return;
 
             // Ensure matrices are current
             this.camera.updateMatrixWorld(true);

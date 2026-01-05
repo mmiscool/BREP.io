@@ -39,25 +39,21 @@ export const CADmaterials = {
         BASE: new LineMaterial({
             color: "#009dff",
             linewidth: 3,
-            transparent: true,
+            transparent: false,
             dashed: true,
             dashSize: 0.5,
             gapSize: 0.5,
             worldUnits: false, // keep dash/line size constant in screen space
-            // Pull slightly toward the camera so edges aren't buried by coplanar faces.
-            polygonOffset: true,
-            polygonOffsetFactor: 1,
-            polygonOffsetUnits: -.1,
+            // Depth-test against faces but don't write depth (avoid occluding faces).
+            depthWrite: false,
         }),
         SELECTED: new LineMaterial({
             color: "#ff00ff",
             linewidth: 3,
-            transparent: true,
+            transparent: false,
             worldUnits: false,
-            // Pull slightly toward the camera so edges aren't buried by coplanar faces.
-            polygonOffset: true,
-            polygonOffsetFactor: -1,
-            polygonOffsetUnits: -1,
+            // Depth-test against faces but don't write depth (avoid occluding faces).
+            depthWrite: false,
         }),
         // Overlay variant for helper/centerline edges. Uses depthTest=false so
         // it remains visible through faces. Viewer will keep its resolution
@@ -105,34 +101,40 @@ export const CADmaterials = {
         BASE: new THREE.MeshStandardMaterial({
             color: "#00009e",
             side: THREE.FrontSide,
-            transparent: true,
+            transparent: false,
             opacity: 1,
             flatShading: true,
             metalness: 0.05,
             roughness: 0.85,
             depthTest: true,
             depthWrite: true,
-            polygonOffset: false,
+            // Push faces slightly back so coplanar edges can sit on top.
+            polygonOffset: true,
+            polygonOffsetFactor: 2,
+            polygonOffsetUnits: 1,
             emissiveIntensity: 0,
         }),
         SELECTED: new THREE.MeshStandardMaterial({
-            color: "#00ffff",
+            color: "#ffc400",
             side: THREE.FrontSide,
             transparent: false,
             opacity: 1,
-            wireframe: true,
+            wireframe: false,
             flatShading: false,
             metalness: 0,
             roughness: 0.5,
             depthTest: true,
             depthWrite: true,
-            polygonOffset: false,
+            // Keep selected faces slightly behind edges as well.
+            polygonOffset: true,
+            polygonOffsetFactor: 2,
+            polygonOffsetUnits: 1,
             emissiveIntensity: 0,
         })
     },
     VERTEX: {
         BASE: new THREE.PointsMaterial({
-            color: '#ffb703',
+            color: '#4aff03',
             size: 6,
             sizeAttenuation: false, // keep a consistent pixel size
             transparent: true
@@ -524,7 +526,7 @@ export class CADmaterialWidget {
         ) {
             if (s.opacity != null) {
                 material.opacity = Number(s.opacity);
-                material.transparent = material.opacity < 1 ? true : material.transparent;
+                material.transparent = material.opacity < 1;
             }
             if (s.wireframe != null) material.wireframe = !!s.wireframe;
             if (s.doubleSided != null) material.side = s.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
@@ -641,7 +643,7 @@ export class CADmaterialWidget {
             opInput.value = material.opacity ?? 1;
             opInput.addEventListener("input", (event) => {
                 material.opacity = parseFloat(event.target.value);
-                material.transparent = material.opacity < 1 ? true : material.transparent;
+                material.transparent = material.opacity < 1;
                 this._setSettingsFor(labelText, { opacity: material.opacity });
             });
             opacityRow.appendChild(opInput);

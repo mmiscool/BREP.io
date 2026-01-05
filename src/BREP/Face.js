@@ -8,6 +8,7 @@ export class Face extends THREE.Mesh {
         this.edges = [];
         this.name = null;
         this.type = 'FACE';
+        this.renderOrder = 1;
         this.parentSolid = null;
     }
 
