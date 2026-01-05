@@ -292,11 +292,13 @@ function buildToolFromProfile(face, params, name) {
   const minTravel = 1e-4;
   const travelF = fd > 0 ? fd : minTravel;
   const travelB = bd > 0 ? bd : 0;
-  return new BREP.ExtrudeSolid({
+  return new BREP.Sweep({
     face,
     distance: travelF,
     distanceBack: travelB,
+    mode: "translate",
     name: name || "SM_CUTOUT_PROFILE",
+    omitBaseCap: false,
   });
 }
 
