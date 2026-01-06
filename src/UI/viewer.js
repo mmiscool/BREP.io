@@ -5,6 +5,7 @@
 
 import * as THREE from 'three';
 import { ArcballControls } from 'three/examples/jsm/controls/ArcballControls.js';
+import { SVGRenderer } from 'three/examples/jsm/renderers/SVGRenderer.js';
 // Use custom combined translate+rotate gizmo (drop-in for three/examples TransformControls)
 import { CombinedTransformControls } from './controls/CombinedTransformControls.js';
 import { SceneListing } from './SceneListing.js';
@@ -202,6 +203,64 @@ function ensureSidebarResizerStyles() {
     document.head.appendChild(style);
 }
 
+function ensureSidebarDockStyles() {
+    if (typeof document === 'undefined') return;
+    if (document.getElementById('sidebar-dock-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'sidebar-dock-styles';
+    style.textContent = `
+        #sidebar-hover-strip {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 10px;
+            height: 100%;
+            z-index: 8;
+            opacity: 0;
+            pointer-events: none;
+            background: linear-gradient(90deg, rgba(122,162,247,0.16), rgba(122,162,247,0.00));
+            transition: opacity .12s ease;
+        }
+        #sidebar-hover-strip.is-active {
+            opacity: 0.5;
+            pointer-events: auto;
+        }
+        #sidebar-pin-tab {
+            position: fixed;
+            top: 72px;
+            left: 0;
+            width: 45px;
+            height: 45px;
+            border: 1px solid #364053;
+            border-left: none;
+            border-radius: 0 8px 8px 0;
+            background: rgba(20,24,30,.92);
+            color: #d6dde6;
+            font: 22px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer;
+            z-index: 9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            user-select: none;
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+        }
+        #sidebar-pin-tab.is-pinned {
+            border-color: #6ea8fe;
+            color: #e9f0ff;
+            box-shadow: 0 0 0 1px rgba(110,168,254,.18) inset;
+        }
+        #sidebar-pin-tab:active {
+            transform: translateY(1px);
+        }
+    `;
+    document.head.appendChild(style);
+}
+
 export class Viewer {
     /**
      * @param {Object} opts
@@ -241,6 +300,16 @@ export class Viewer {
         this.sidebar = sidebar;
         this._sidebarResizer = null;
         this._sidebarResizerCleanup = null;
+        this._sidebarPinned = true;
+        this._sidebarHoverVisible = false;
+        this._sidebarAutoHideSuspended = false;
+        this._sidebarPinTab = null;
+        this._sidebarHoverStrip = null;
+        this._sidebarDockCleanup = null;
+        this._sidebarHoverTargets = null;
+        this._sidebarStoredDisplay = null;
+        this._sidebarStoredVisibility = null;
+        this._sidebarLastPointer = null;
         this.scene = partHistory instanceof PartHistory ? partHistory.scene : new THREE.Scene();
         ensureSelectionPickerStyles();
 
@@ -259,17 +328,17 @@ export class Viewer {
         } catch { /* ignore */ }
 
         this._setupSidebarResizer();
+        this._setupSidebarDock();
 
         // Renderer
-        this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true, });
-        const clear = new THREE.Color(clearColor);
-        this.renderer.setClearColor(clear, clearAlpha);
         this.pixelRatio = pixelRatio; // persist for future resizes
-        this.renderer.setPixelRatio(pixelRatio);
-        this.renderer.domElement.style.display = 'block';
-        this.renderer.domElement.style.outline = 'none';
-        this.renderer.domElement.style.userSelect = 'none';
-        this.renderer.domElement.style.background = clearAlpha === 0 ? 'transparent' : clear.getStyle();
+        this._clearColor = new THREE.Color(clearColor);
+        this._clearAlpha = clearAlpha;
+        this._rendererMode = 'webgl';
+        this._svgRenderer = null;
+        this._webglRenderer = null;
+        this.renderer = this._createWebGLRenderer();
+        this._webglRenderer = this.renderer;
         this.container.appendChild(this.renderer.domElement);
 
 
@@ -434,24 +503,20 @@ export class Viewer {
         this._selectAt = this._selectAt.bind(this);
         this._onDoubleClick = this._onDoubleClick.bind(this);
         this._onGlobalDoubleClick = this._onGlobalDoubleClick.bind(this);
+        this._onPointerLeave = () => {
+            try { SelectionFilter.clearHover(); } catch (_) { }
+            this._lastPointerEvent = null;
+        };
+        this._onPointerEnter = (ev) => { this._lastPointerEvent = ev; };
 
         // Events
         const el = this.renderer.domElement;
-        el.addEventListener('pointermove', this._onPointerMove, { passive: true });
-        el.addEventListener('pointerleave', () => {
-            try { SelectionFilter.clearHover(); } catch (_) { }
-            // When pointer leaves the canvas, forget the last pointer event
-            this._lastPointerEvent = null;
-        }, { passive: true });
+        this._attachRendererEvents(el);
 
         SelectionFilter.viewer = this;
-        el.addEventListener('pointerenter', (ev) => { this._lastPointerEvent = ev; }, { passive: true });
-        el.addEventListener('pointerdown', this._onPointerDown, { passive: false });
         // Use capture on pointerup to ensure we end interactions even if pointerup fires off-element
         window.addEventListener('pointerup', this._onPointerUp, { passive: false, capture: true });
-        el.addEventListener('dblclick', this._onDoubleClick, { passive: false });
         document.addEventListener('dblclick', this._onGlobalDoubleClick, { passive: false, capture: true });
-        el.addEventListener('contextmenu', this._onContextMenu);
         window.addEventListener('resize', this._onResize);
         this._onKeyDown = this._onKeyDown.bind(this);
         window.addEventListener('keydown', this._onKeyDown, { passive: true });
@@ -464,6 +529,85 @@ export class Viewer {
         this.annotationRegistry = annotationRegistry;
 
         // View cube overlay
+        this._ensureViewCube();
+
+        // Initial sizing + start
+        this._resizeRendererToDisplaySize();
+        this._loop();
+        this.setupAccordion();
+    }
+
+    _createWebGLRenderer() {
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+        renderer.setClearColor(this._clearColor, this._clearAlpha);
+        renderer.setPixelRatio(this.pixelRatio || 1);
+        this._applyRendererElementStyles(renderer);
+        return renderer;
+    }
+
+    _createSvgRenderer() {
+        const renderer = new SVGRenderer();
+        renderer.setQuality('high');
+        renderer.setClearColor(this._clearColor);
+        this._applyRendererElementStyles(renderer);
+        return renderer;
+    }
+
+    _applyRendererElementStyles(renderer) {
+        const el = renderer?.domElement;
+        if (!el) return;
+        el.style.display = 'block';
+        el.style.outline = 'none';
+        el.style.userSelect = 'none';
+        el.style.width = '100%';
+        el.style.height = '100%';
+        el.style.background = this._clearAlpha === 0 ? 'transparent' : this._clearColor.getStyle();
+    }
+
+    _attachRendererEvents(el) {
+        if (!el) return;
+        el.addEventListener('pointermove', this._onPointerMove, { passive: true });
+        el.addEventListener('pointerleave', this._onPointerLeave, { passive: true });
+        el.addEventListener('pointerenter', this._onPointerEnter, { passive: true });
+        el.addEventListener('pointerdown', this._onPointerDown, { passive: false });
+        el.addEventListener('dblclick', this._onDoubleClick, { passive: false });
+        el.addEventListener('contextmenu', this._onContextMenu);
+    }
+
+    _detachRendererEvents(el) {
+        if (!el) return;
+        el.removeEventListener('pointermove', this._onPointerMove);
+        el.removeEventListener('pointerleave', this._onPointerLeave);
+        el.removeEventListener('pointerenter', this._onPointerEnter);
+        el.removeEventListener('pointerdown', this._onPointerDown);
+        el.removeEventListener('dblclick', this._onDoubleClick);
+        el.removeEventListener('contextmenu', this._onContextMenu);
+    }
+
+    _rebuildControls(domElement) {
+        const prev = this.controls;
+        const prevState = prev ? {
+            target: prev.target ? prev.target.clone() : null,
+            enabled: prev.enabled,
+            minDistance: prev.minDistance,
+            maxDistance: prev.maxDistance,
+            enableAnimations: prev.enableAnimations
+        } : null;
+        try { prev?.removeEventListener?.('change', this._onControlsChange); } catch { }
+        try { prev?.dispose?.(); } catch { }
+
+        const controls = new ArcballControls(this.camera, domElement, this.scene);
+        controls.enableAnimations = prevState ? !!prevState.enableAnimations : false;
+        controls.setGizmosVisible(false);
+        controls.minDistance = prevState && Number.isFinite(prevState.minDistance) ? prevState.minDistance : 0.01;
+        if (prevState && Number.isFinite(prevState.maxDistance)) controls.maxDistance = prevState.maxDistance;
+        if (prevState?.target) controls.target.copy(prevState.target);
+        if (typeof prevState?.enabled === 'boolean') controls.enabled = prevState.enabled;
+        this.controls = controls;
+    }
+
+    _ensureViewCube() {
+        if (this.viewCube && this.viewCube.renderer === this.renderer) return;
         this.viewCube = new ViewCube({
             renderer: this.renderer,
             targetCamera: this.camera,
@@ -471,11 +615,45 @@ export class Viewer {
             size: 120,
             margin: 12,
         });
+    }
 
-        // Initial sizing + start
+    setRendererMode(mode) {
+        const nextMode = mode === 'svg' ? 'svg' : 'webgl';
+        if (nextMode === this._rendererMode && this.renderer) return;
+        this._rendererMode = nextMode;
+
+        try { this._stopComponentTransformSession?.(); } catch { }
+
+        const prevEl = this.renderer?.domElement;
+        this._detachRendererEvents(prevEl);
+        if (prevEl && prevEl.parentNode) prevEl.parentNode.removeChild(prevEl);
+
+        let nextRenderer = null;
+        if (nextMode === 'svg') {
+            if (!this._svgRenderer) this._svgRenderer = this._createSvgRenderer();
+            nextRenderer = this._svgRenderer;
+        } else {
+            if (!this._webglRenderer) this._webglRenderer = this._createWebGLRenderer();
+            nextRenderer = this._webglRenderer;
+        }
+
+        this.renderer = nextRenderer;
+        this._applyRendererElementStyles(this.renderer);
+        this.container.appendChild(this.renderer.domElement);
+        this._attachRendererEvents(this.renderer.domElement);
+        this._rebuildControls(this.renderer.domElement);
+        try { this.controls?.addEventListener?.('change', this._onControlsChange); } catch { }
+        try { this.camera?.attachControls?.(this.controls); } catch { }
+
+        if (nextMode === 'webgl') {
+            this._ensureViewCube();
+        } else {
+            this.viewCube = null;
+        }
+
+        try { this.renderer.domElement.style.marginTop = '0px'; } catch { }
         this._resizeRendererToDisplaySize();
-        this._loop();
-        this.setupAccordion();
+        this.render();
     }
 
     _setupSidebarResizer() {
@@ -511,6 +689,7 @@ export class Viewer {
             resizer.style.left = `${Math.round(rect.right - handleWidth / 2)}px`;
             resizer.style.top = `${Math.round(rect.top)}px`;
             resizer.style.height = `${Math.round(rect.height)}px`;
+            try { this._positionSidebarPinTab?.(); } catch { /* ignore */ }
         };
 
         const clampWidth = (value) => {
@@ -635,6 +814,289 @@ export class Viewer {
         };
     }
 
+    _setupSidebarDock() {
+        if (!this.sidebar || this._sidebarPinTab) return;
+        if (typeof document === 'undefined' || !document.body) return;
+        ensureSidebarDockStyles();
+        try {
+            const existingTab = document.getElementById('sidebar-pin-tab');
+            if (existingTab && existingTab.parentNode) existingTab.parentNode.removeChild(existingTab);
+        } catch { /* ignore */ }
+        try {
+            const existingStrip = document.getElementById('sidebar-hover-strip');
+            if (existingStrip && existingStrip.parentNode) existingStrip.parentNode.removeChild(existingStrip);
+        } catch { /* ignore */ }
+
+        const hoverStrip = document.createElement('div');
+        hoverStrip.id = 'sidebar-hover-strip';
+        hoverStrip.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(hoverStrip);
+        this._sidebarHoverStrip = hoverStrip;
+
+        const pinTab = document.createElement('button');
+        pinTab.id = 'sidebar-pin-tab';
+        pinTab.type = 'button';
+        pinTab.textContent = '🖈';
+        pinTab.setAttribute('aria-pressed', 'true');
+        pinTab.title = 'Collapse sidebar';
+        document.body.appendChild(pinTab);
+        this._sidebarPinTab = pinTab;
+
+        const hoverTargets = new Set();
+        this._sidebarHoverTargets = hoverTargets;
+        let hoverUpdateRaf = null;
+        const scheduleHoverUpdate = () => {
+            if (this._sidebarPinned || this._sidebarAutoHideSuspended) return;
+            if (hoverUpdateRaf != null) cancelAnimationFrame(hoverUpdateRaf);
+            hoverUpdateRaf = requestAnimationFrame(() => {
+                hoverUpdateRaf = null;
+                if (this._sidebarPinned || this._sidebarAutoHideSuspended) return;
+                this._setSidebarHoverVisible(hoverTargets.size > 0);
+            });
+        };
+        const bindHover = (el, { captureSidebarOnLeave = false, capturePinOnLeave = false, requireSidebarVisible = false } = {}) => {
+            const onEnter = () => {
+                if (requireSidebarVisible && !this._isSidebarVisible()) return;
+                hoverTargets.add(el);
+                scheduleHoverUpdate();
+            };
+            const onLeave = (ev) => {
+                hoverTargets.delete(el);
+                const pinTabEl = this._sidebarPinTab;
+                if (capturePinOnLeave && pinTabEl) {
+                    const related = ev?.relatedTarget;
+                    if (related === pinTabEl || (pinTabEl.contains && pinTabEl.contains(related))) {
+                        hoverTargets.add(pinTabEl);
+                        scheduleHoverUpdate();
+                        return;
+                    }
+                }
+                if (capturePinOnLeave && pinTabEl && this._isSidebarVisible()) {
+                    const rect = pinTabEl.getBoundingClientRect();
+                    if (rect
+                        && ev
+                        && ev.clientX >= rect.left
+                        && ev.clientX <= rect.right
+                        && ev.clientY >= rect.top
+                        && ev.clientY <= rect.bottom) {
+                        hoverTargets.add(pinTabEl);
+                        scheduleHoverUpdate();
+                        return;
+                    }
+                }
+                if (captureSidebarOnLeave && this.sidebar && this._isSidebarVisible()) {
+                    const rect = this.sidebar.getBoundingClientRect();
+                    if (rect
+                        && ev
+                        && ev.clientX >= rect.left
+                        && ev.clientX <= rect.right
+                        && ev.clientY >= rect.top
+                        && ev.clientY <= rect.bottom) {
+                        hoverTargets.add(this.sidebar);
+                    }
+                }
+                scheduleHoverUpdate();
+            };
+            el.addEventListener('pointerenter', onEnter);
+            el.addEventListener('pointerleave', onLeave);
+            return () => {
+                el.removeEventListener('pointerenter', onEnter);
+                el.removeEventListener('pointerleave', onLeave);
+            };
+        };
+
+        const cleanup = [];
+        cleanup.push(bindHover(hoverStrip, { captureSidebarOnLeave: true }));
+        cleanup.push(bindHover(pinTab, { captureSidebarOnLeave: true, requireSidebarVisible: true }));
+        cleanup.push(bindHover(this.sidebar, { capturePinOnLeave: true }));
+        if (this._sidebarResizer) {
+            cleanup.push(bindHover(this._sidebarResizer, { captureSidebarOnLeave: true, capturePinOnLeave: true }));
+        }
+        cleanup.push(() => {
+            if (hoverUpdateRaf != null) cancelAnimationFrame(hoverUpdateRaf);
+            hoverUpdateRaf = null;
+        });
+
+        const onPointerMove = (ev) => {
+            this._sidebarLastPointer = { x: ev.clientX, y: ev.clientY };
+        };
+        window.addEventListener('pointermove', onPointerMove, { passive: true });
+        cleanup.push(() => window.removeEventListener('pointermove', onPointerMove));
+
+        const onTabClick = (ev) => {
+            try { ev.preventDefault(); ev.stopPropagation(); } catch { }
+            this._setSidebarPinned(!this._sidebarPinned);
+        };
+        pinTab.addEventListener('click', onTabClick);
+        cleanup.push(() => pinTab.removeEventListener('click', onTabClick));
+
+        const positionTab = () => this._positionSidebarPinTab();
+        window.addEventListener('resize', positionTab);
+        cleanup.push(() => window.removeEventListener('resize', positionTab));
+
+        let ro = null;
+        try {
+            if (window.ResizeObserver) {
+                ro = new ResizeObserver(() => positionTab());
+                ro.observe(this.sidebar);
+            }
+        } catch { /* ignore */ }
+        let mo = null;
+        try {
+            if (window.MutationObserver) {
+                mo = new MutationObserver(() => positionTab());
+                mo.observe(this.sidebar, { attributes: true, attributeFilter: ['style', 'hidden', 'class'] });
+            }
+        } catch { /* ignore */ }
+        cleanup.push(() => { try { ro && ro.disconnect(); } catch { } });
+        cleanup.push(() => { try { mo && mo.disconnect(); } catch { } });
+
+        this._sidebarDockCleanup = () => {
+            cleanup.forEach((fn) => { try { fn(); } catch { } });
+            cleanup.length = 0;
+            try { if (hoverStrip.parentNode) hoverStrip.parentNode.removeChild(hoverStrip); } catch { }
+            try { if (pinTab.parentNode) pinTab.parentNode.removeChild(pinTab); } catch { }
+            if (this._sidebarHoverStrip === hoverStrip) this._sidebarHoverStrip = null;
+            if (this._sidebarPinTab === pinTab) this._sidebarPinTab = null;
+            this._sidebarHoverTargets = null;
+        };
+
+        this._syncSidebarVisibility();
+    }
+
+    _setSidebarAutoHideSuspended(suspended) {
+        const next = !!suspended;
+        if (this._sidebarAutoHideSuspended === next) return;
+        this._sidebarAutoHideSuspended = next;
+        this._syncSidebarVisibility();
+    }
+
+    _setSidebarPinned(pinned) {
+        const next = !!pinned;
+        if (this._sidebarPinned === next) return;
+        this._sidebarPinned = next;
+        if (!next && this._sidebarAutoHideSuspended) {
+            // Allow explicit user collapse even when auto-hide is suspended (e.g. sketch mode).
+            this._sidebarAutoHideSuspended = false;
+        }
+        if (next) {
+            this._sidebarHoverVisible = false;
+        } else {
+            if (this._sidebarHoverTargets) this._sidebarHoverTargets.clear();
+            this._sidebarHoverVisible = false;
+        }
+        this._syncSidebarVisibility();
+    }
+
+    _setSidebarHoverVisible(visible) {
+        const next = !!visible;
+        if (this._sidebarHoverVisible === next) return;
+        this._sidebarHoverVisible = next;
+        this._syncSidebarVisibility();
+    }
+
+    _refreshSidebarHoverTargetsFromPointer() {
+        const targets = this._sidebarHoverTargets;
+        const pos = this._sidebarLastPointer;
+        if (!targets || !pos) return;
+        targets.clear();
+        const { x, y } = pos;
+        const addIfHit = (el, requireVisible = false) => {
+            if (!el) return;
+            if (requireVisible && !this._isSidebarVisible()) return;
+            const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+            if (!rect || rect.width <= 0 || rect.height <= 0) return;
+            if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                targets.add(el);
+            }
+        };
+        addIfHit(this._sidebarHoverStrip);
+        addIfHit(this._sidebarPinTab, true);
+        addIfHit(this.sidebar, true);
+        addIfHit(this._sidebarResizer, true);
+    }
+
+    _getSidebarShouldShow() {
+        if (!this.sidebar) return false;
+        if (this._sidebarAutoHideSuspended) return true;
+        if (this._sidebarPinned) return true;
+        return !!this._sidebarHoverVisible;
+    }
+
+    _isSidebarVisible() {
+        if (!this.sidebar) return false;
+        return !this.sidebar.hidden
+            && this.sidebar.style.display !== 'none'
+            && this.sidebar.style.visibility !== 'hidden';
+    }
+
+    _setSidebarElementVisible(visible) {
+        if (!this.sidebar) return;
+        const isVisible = this._isSidebarVisible();
+        if (visible) {
+            if (!isVisible) {
+                this.sidebar.hidden = false;
+                if (this._sidebarStoredDisplay != null) {
+                    this.sidebar.style.display = this._sidebarStoredDisplay;
+                } else {
+                    try { this.sidebar.style.removeProperty('display'); } catch { }
+                    this.sidebar.style.display = this.sidebar.style.display || '';
+                }
+                const visibility = this._sidebarStoredVisibility;
+                this.sidebar.style.visibility = visibility && visibility !== 'hidden' ? visibility : 'visible';
+            }
+            this.sidebar.style.opacity = .9;
+            this.sidebar.style.zIndex = String(7);
+        } else {
+            if (isVisible) {
+                this._sidebarStoredDisplay = this.sidebar.style.display || '';
+                this._sidebarStoredVisibility = this.sidebar.style.visibility || '';
+            }
+            this.sidebar.hidden = true;
+            this.sidebar.style.display = 'none';
+            this.sidebar.style.visibility = 'hidden';
+        }
+        try { this.mainToolbar?._positionWithSidebar?.(); } catch { }
+    }
+
+    _updateSidebarDockUI() {
+        const tab = this._sidebarPinTab;
+        const strip = this._sidebarHoverStrip;
+        const pinned = !!this._sidebarPinned;
+        const hoverActive = !pinned && !this._sidebarAutoHideSuspended;
+        if (tab) {
+            tab.classList.toggle('is-pinned', pinned);
+            tab.setAttribute('aria-pressed', pinned ? 'true' : 'false');
+            tab.textContent = '🖈';
+            tab.title = pinned ? 'Collapse sidebar' : 'Pin sidebar';
+        }
+        if (strip) {
+            strip.classList.toggle('is-active', hoverActive);
+            strip.style.pointerEvents = hoverActive ? 'auto' : 'none';
+        }
+        this._positionSidebarPinTab();
+    }
+
+    _positionSidebarPinTab() {
+        const tab = this._sidebarPinTab;
+        if (!tab) return;
+        let left = 0;
+        const shouldDock = this._getSidebarShouldShow();
+        if (shouldDock && this.sidebar) {
+            const rect = this.sidebar.getBoundingClientRect();
+            if (rect && rect.width > 0) {
+                left = Math.max(0, Math.round(rect.right - 1));
+            }
+        }
+        tab.style.left = `${left}px`;
+    }
+
+    _syncSidebarVisibility() {
+        const shouldShow = this._getSidebarShouldShow();
+        this._setSidebarElementVisible(shouldShow);
+        this._updateSidebarDockUI();
+    }
+
 
     async setupAccordion() {
         // Setup accordion
@@ -695,7 +1157,7 @@ export class Viewer {
         pmiViewsSection.uiElement.appendChild(this.pmiViewsWidget.uiElement);
 
         // CADmaterials (Settings panel)
-        this.cadMaterialsUi = await new CADmaterialWidget();
+        this.cadMaterialsUi = await new CADmaterialWidget(this);
         const displaySection = await this.accordion.addSection("Display Settings");
         await displaySection.uiElement.appendChild(this.cadMaterialsUi.uiElement);
 
@@ -837,20 +1299,21 @@ export class Viewer {
         cancelAnimationFrame(this._raf);
         try { this._stopComponentTransformSession(); } catch { }
         try { this._sidebarResizerCleanup?.(); } catch { }
-        const el = this.renderer.domElement;
-        el.removeEventListener('pointermove', this._onPointerMove);
-        el.removeEventListener('pointerdown', this._onPointerDown);
+        try { this._sidebarDockCleanup?.(); } catch { }
+        const el = this.renderer?.domElement;
+        this._detachRendererEvents(el);
         window.removeEventListener('pointerup', this._onPointerUp, { capture: true });
-        el.removeEventListener('dblclick', this._onDoubleClick);
         document.removeEventListener('dblclick', this._onGlobalDoubleClick, { capture: true });
-        el.removeEventListener('contextmenu', this._onContextMenu);
         window.removeEventListener('resize', this._onResize);
         window.removeEventListener('keydown', this._onKeyDown, { passive: true });
-        this.controls.dispose();
-        this.renderer.dispose();
+        this.controls?.dispose?.();
+        this.renderer?.dispose?.();
+        if (this._webglRenderer && this._webglRenderer !== this.renderer) {
+            try { this._webglRenderer.dispose(); } catch { }
+        }
         try { if (this._sketchMode) this._sketchMode.dispose(); } catch { }
         try { if (this._splineMode) this._splineMode.dispose(); } catch { }
-        if (el.parentNode) el.parentNode.removeChild(el);
+        if (el && el.parentNode) el.parentNode.removeChild(el);
     }
 
     // ----------------------------------------
@@ -872,6 +1335,7 @@ export class Viewer {
         debugLog(this);
 
         try { if (this._sketchMode) this._sketchMode.dispose(); } catch { }
+        this._setSidebarAutoHideSuspended(true);
         this._sketchMode = new SketchMode3D(this, featureID);
         this._sketchMode.open();
 
@@ -902,17 +1366,7 @@ export class Viewer {
         try { if (this._sketchMode) this._sketchMode.close(); } catch { }
         this._sketchMode = null;
         // Ensure core UI is visible and controls enabled
-        try {
-            if (this.sidebar) {
-                this.sidebar.hidden = false;
-                try { this.sidebar.style.removeProperty('display'); } catch { }
-                this.sidebar.style.display = this.sidebar.style.display || '';
-                this.sidebar.style.visibility = 'visible';
-                this.sidebar.style.opacity = .9;
-                // Ensure sidebar is drawn above everything else again
-                this.sidebar.style.zIndex = String(7);
-            }
-        } catch { }
+        try { this._setSidebarAutoHideSuspended(false); } catch { }
         try { if (this.controls) this.controls.enabled = true; } catch { }
 
         // Clean up any legacy overlays that might still be mounted (from old 2D mode)
@@ -948,12 +1402,14 @@ export class Viewer {
         }
         try { if (this._pmiMode) this._pmiMode.dispose(); } catch { }
         try {
+            if (!alreadyActive) this._setSidebarAutoHideSuspended(true);
             this._pmiMode = new PMIMode(this, viewEntry, viewIndex, widget);
             this._pmiMode.open();
         } catch (error) {
             this._pmiMode = null;
             if (!alreadyActive) {
                 try { this.assemblyConstraintsWidget?.onPMIModeExit?.(); } catch { }
+                try { this._setSidebarAutoHideSuspended(false); } catch { }
             }
             throw error;
         }
@@ -975,16 +1431,7 @@ export class Viewer {
             try { this.assemblyConstraintsWidget?.onPMIModeExit?.(); } catch { }
         }
         // Robustly restore core UI similar to endSketchMode
-        try {
-            if (this.sidebar) {
-                this.sidebar.hidden = false;
-                try { this.sidebar.style.removeProperty('display'); } catch { }
-                this.sidebar.style.display = this.sidebar.style.display || '';
-                this.sidebar.style.visibility = 'visible';
-                this.sidebar.style.opacity = .9;
-                this.sidebar.style.zIndex = String(7);
-            }
-        } catch { }
+        try { this._setSidebarAutoHideSuspended(false); } catch { }
         try { if (this.controls) this.controls.enabled = true; } catch { }
     }
 
@@ -995,8 +1442,288 @@ export class Viewer {
         }
         this._updateCameraLightRig();
         this._updateDepthRange();
-        this.renderer.render(this.scene, this.camera);
-        try { this.viewCube && this.viewCube.render(); } catch { }
+        if (this._rendererMode === 'svg') {
+            this._renderSvgScene();
+        } else {
+            this.renderer.render(this.scene, this.camera);
+            try { this.viewCube && this.viewCube.render(); } catch { }
+        }
+    }
+
+    _renderSvgScene() {
+        if (!this.renderer || !this.scene || !this.camera) return;
+        const el = this.renderer.domElement;
+        if (!el) return;
+        try { this.scene.updateMatrixWorld(true); } catch { }
+        try { this.camera.updateMatrixWorld?.(); } catch { }
+        this._resizeRendererToDisplaySize();
+
+        const rect = el.getBoundingClientRect();
+        const width = Math.max(1, Math.floor(rect.width || this.container?.clientWidth || 0));
+        const height = Math.max(1, Math.floor(rect.height || this.container?.clientHeight || 0));
+        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 1 || height <= 1) return;
+
+        try {
+            if (typeof this.renderer.setClearColor === 'function') {
+                this.renderer.setClearColor(this._clearColor);
+            }
+        } catch { }
+
+        const pointAdjustments = [];
+        const sideAdjustments = [];
+        const tempLines = [];
+        const tempGroup = new THREE.Group();
+        const hiddenLines = [];
+        try {
+            if (this.camera?.isOrthographicCamera) {
+                const span = (Number(this.camera.right) - Number(this.camera.left)) || 0;
+                if (Number.isFinite(span) && span > 0) {
+                    const scaleFactor = span / width;
+                    this.scene.traverse((obj) => {
+                        if (!obj?.isPoints) return;
+                        const mat = obj.material;
+                        if (Array.isArray(mat)) {
+                            for (const m of mat) {
+                                if (!m?.isPointsMaterial || !Number.isFinite(m.size)) continue;
+                                pointAdjustments.push([m, m.size]);
+                                m.size = m.size * scaleFactor;
+                            }
+                        } else if (mat?.isPointsMaterial && Number.isFinite(mat.size)) {
+                            pointAdjustments.push([mat, mat.size]);
+                            mat.size = mat.size * scaleFactor;
+                        }
+                    });
+                }
+            }
+
+            const occluders = this._collectSvgOccluders(sideAdjustments);
+            const raycaster = this._svgRaycaster || new THREE.Raycaster();
+            this._svgRaycaster = raycaster;
+            const occlusionEps = this._computeSvgOcclusionEps();
+
+            this.scene.traverse((obj) => {
+                if (!obj?.visible) return;
+                if (!obj.isLine2 && !obj.isLineSegments2) return;
+                const line = this._buildSvgLineFromLine2(obj, {
+                    camera: this.camera,
+                    occluders,
+                    raycaster,
+                    occlusionEps,
+                });
+                if (!line) return;
+                tempLines.push(line);
+                tempGroup.add(line);
+                hiddenLines.push([obj, obj.visible]);
+                obj.visible = false;
+            });
+            if (tempLines.length) {
+                this.scene.add(tempGroup);
+            }
+
+            this._restoreSvgMaterialSides(sideAdjustments);
+
+            this.renderer.render(this.scene, this.camera);
+            try { el.style.background = this._clearAlpha === 0 ? 'transparent' : this._clearColor.getStyle(); } catch { }
+        } catch { } finally {
+            try {
+                if (tempLines.length) {
+                    this.scene.remove(tempGroup);
+                    for (const line of tempLines) {
+                        try { line.geometry?.dispose?.(); } catch { }
+                        try { line.material?.dispose?.(); } catch { }
+                    }
+                }
+            } catch { }
+            for (const [obj, wasVisible] of hiddenLines) {
+                try { obj.visible = wasVisible; } catch { }
+            }
+            this._restoreSvgMaterialSides(sideAdjustments);
+            for (const [mat, size] of pointAdjustments) {
+                try { mat.size = size; } catch { }
+            }
+        }
+    }
+
+    _buildSvgLineFromLine2(obj, { camera, occluders, raycaster, occlusionEps } = {}) {
+        const geom = obj.geometry;
+        const start = geom?.attributes?.instanceStart;
+        const end = geom?.attributes?.instanceEnd;
+        let positions = null;
+        if (start && end && Number.isFinite(start.count) && start.count > 0) {
+            const count = Math.min(start.count, end.count);
+            positions = new Float32Array(count * 6);
+            for (let i = 0; i < count; i += 1) {
+                positions[i * 6] = start.getX(i);
+                positions[i * 6 + 1] = start.getY(i);
+                positions[i * 6 + 2] = start.getZ(i);
+                positions[i * 6 + 3] = end.getX(i);
+                positions[i * 6 + 4] = end.getY(i);
+                positions[i * 6 + 5] = end.getZ(i);
+            }
+        } else if (geom?.attributes?.position?.count >= 2) {
+            const pos = geom.attributes.position;
+            const segCount = pos.count - 1;
+            positions = new Float32Array(segCount * 6);
+            for (let i = 0; i < segCount; i += 1) {
+                positions[i * 6] = pos.getX(i);
+                positions[i * 6 + 1] = pos.getY(i);
+                positions[i * 6 + 2] = pos.getZ(i);
+                positions[i * 6 + 3] = pos.getX(i + 1);
+                positions[i * 6 + 4] = pos.getY(i + 1);
+                positions[i * 6 + 5] = pos.getZ(i + 1);
+            }
+        }
+
+        if (!positions || positions.length < 6) return null;
+
+        const material = Array.isArray(obj.material) ? obj.material[0] : obj.material;
+        const wantsOcclusion = material?.depthTest !== false
+            && obj?.type === 'EDGE'
+            && Array.isArray(occluders)
+            && occluders.length
+            && camera
+            && raycaster;
+
+        if (wantsOcclusion) {
+            const edgeFaces = Array.isArray(obj.faces) ? new Set(obj.faces) : null;
+            const w1 = this._svgTmpVecA || (this._svgTmpVecA = new THREE.Vector3());
+            const w2 = this._svgTmpVecB || (this._svgTmpVecB = new THREE.Vector3());
+            const visible = [];
+            for (let i = 0; i < positions.length; i += 6) {
+                w1.set(positions[i], positions[i + 1], positions[i + 2]).applyMatrix4(obj.matrixWorld);
+                w2.set(positions[i + 3], positions[i + 4], positions[i + 5]).applyMatrix4(obj.matrixWorld);
+                if (this._isSvgSegmentVisible(w1, w2, camera, raycaster, occluders, edgeFaces, occlusionEps)) {
+                    visible.push(
+                        positions[i], positions[i + 1], positions[i + 2],
+                        positions[i + 3], positions[i + 4], positions[i + 5]
+                    );
+                }
+            }
+            if (!visible.length) return null;
+            positions = new Float32Array(visible);
+        }
+
+        const geomOut = new THREE.BufferGeometry();
+        geomOut.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+
+        const color = material?.color ? material.color : new THREE.Color('#ffffff');
+        const opacity = Number.isFinite(material?.opacity) ? material.opacity : 1;
+        const transparent = Boolean(material?.transparent) || opacity < 1;
+        const linewidth = Number.isFinite(material?.linewidth) ? material.linewidth : 1;
+        let matOut = null;
+
+        if (material?.dashed || material?.isLineDashedMaterial) {
+            matOut = new THREE.LineDashedMaterial({
+                color,
+                linewidth,
+                transparent,
+                opacity,
+                dashSize: Number.isFinite(material?.dashSize) ? material.dashSize : 0.5,
+                gapSize: Number.isFinite(material?.gapSize) ? material.gapSize : 0.5,
+            });
+        } else {
+            matOut = new THREE.LineBasicMaterial({
+                color,
+                linewidth,
+                transparent,
+                opacity,
+            });
+        }
+
+        const line = new THREE.LineSegments(geomOut, matOut);
+        line.matrixAutoUpdate = false;
+        try { line.matrix.copy(obj.matrixWorld); } catch { }
+        try { line.matrixWorld.copy(obj.matrixWorld); } catch { }
+        line.renderOrder = 2;
+        line.visible = true;
+        if (matOut.isLineDashedMaterial) {
+            try { line.computeLineDistances(); } catch { }
+        }
+        return line;
+    }
+
+    _collectSvgOccluders(sideAdjustments) {
+        const occluders = [];
+        try {
+            this.scene.traverse((obj) => {
+                if (!obj?.visible || !obj.isMesh) return;
+                if (obj.type && obj.type !== 'FACE') return;
+                const mat = obj.material;
+                const mats = Array.isArray(mat) ? mat : [mat];
+                if (!mats.some((m) => m && m.opacity !== 0)) return;
+                if (Array.isArray(sideAdjustments)) {
+                    for (const m of mats) {
+                        if (!m || m.side === THREE.DoubleSide) continue;
+                        sideAdjustments.push([m, m.side]);
+                        m.side = THREE.DoubleSide;
+                    }
+                }
+                occluders.push(obj);
+            });
+        } catch { }
+        return occluders;
+    }
+
+    _restoreSvgMaterialSides(sideAdjustments) {
+        if (!Array.isArray(sideAdjustments) || !sideAdjustments.length) return;
+        for (const [mat, side] of sideAdjustments) {
+            if (!mat) continue;
+            try { mat.side = side; } catch { }
+        }
+        sideAdjustments.length = 0;
+    }
+
+    _computeSvgOcclusionEps() {
+        const cam = this.camera;
+        if (!cam) return 1e-4;
+        if (cam.isOrthographicCamera) {
+            const span = Math.abs(Number(cam.right) - Number(cam.left)) || 0;
+            return Math.max(1e-4, span * 1e-4);
+        }
+        const target = this.controls?.target;
+        const dist = (target && cam.position?.distanceTo?.(target)) || cam.position?.length?.() || 1;
+        return Math.max(1e-4, dist * 1e-4);
+    }
+
+    _isSvgSegmentVisible(a, b, camera, raycaster, occluders, edgeFaces, eps) {
+        if (!camera || !raycaster || !Array.isArray(occluders) || !occluders.length) return true;
+        const samples = this._svgEdgeSamples || (this._svgEdgeSamples = [0.2, 0.5, 0.8]);
+        const p = this._svgTmpVecC || (this._svgTmpVecC = new THREE.Vector3());
+        for (const t of samples) {
+            p.lerpVectors(a, b, t);
+            if (!this._isSvgPointOccluded(p, camera, raycaster, occluders, edgeFaces, eps)) return true;
+        }
+        return false;
+    }
+
+    _isSvgPointOccluded(point, camera, raycaster, occluders, edgeFaces, eps) {
+        const ndc = this._svgTmpVecD || (this._svgTmpVecD = new THREE.Vector3());
+        ndc.copy(point).project(camera);
+        if (!Number.isFinite(ndc.x) || !Number.isFinite(ndc.y) || !Number.isFinite(ndc.z)) return false;
+        if (ndc.z < -1 || ndc.z > 1) return true;
+        raycaster.setFromCamera({ x: ndc.x, y: ndc.y }, camera);
+        const dist = raycaster.ray.origin.distanceTo(point);
+        const pad = Number.isFinite(eps) ? eps : 1e-4;
+        raycaster.near = 0;
+        raycaster.far = Math.max(0, dist - pad);
+        const hits = raycaster.intersectObjects(occluders, true);
+        if (!hits.length) return false;
+        if (edgeFaces && edgeFaces.size) {
+            for (const hit of hits) {
+                if (!this._isSvgHitFromEdgeFace(hit, edgeFaces)) return true;
+            }
+            return false;
+        }
+        return true;
+    }
+
+    _isSvgHitFromEdgeFace(hit, edgeFaces) {
+        let obj = hit?.object || null;
+        for (let i = 0; i < 3 && obj; i += 1) {
+            if (edgeFaces.has(obj)) return true;
+            obj = obj.parent || null;
+        }
+        return false;
     }
 
     _updateCameraLightRig() {
@@ -3109,21 +3836,36 @@ export class Viewer {
     _resizeRendererToDisplaySize() {
         const { width, height } = this._getContainerSize();
 
-        // Keep DPR current (handles moving across monitors)
-        const dpr = window.devicePixelRatio || 1;
-        const targetPR = Math.max(1, Math.min(this.pixelRatio || dpr, dpr));
-        if (this.renderer.getPixelRatio() !== targetPR) {
-            this.renderer.setPixelRatio(targetPR);
+        const isWebGL = !!this.renderer?.isWebGLRenderer;
+        let targetPR = 1;
+        if (isWebGL && typeof this.renderer.getPixelRatio === 'function' && typeof this.renderer.setPixelRatio === 'function') {
+            // Keep DPR current (handles moving across monitors)
+            const dpr = window.devicePixelRatio || 1;
+            targetPR = Math.max(1, Math.min(this.pixelRatio || dpr, dpr));
+            if (this.renderer.getPixelRatio() !== targetPR) {
+                this.renderer.setPixelRatio(targetPR);
+            }
         }
 
-        // Ensure canvas CSS size matches container (use updateStyle=true)
-        const canvas = this.renderer.domElement;
-        const needResize =
-            canvas.width !== Math.floor(width * targetPR) ||
-            canvas.height !== Math.floor(height * targetPR);
+        if (isWebGL) {
+            // Ensure canvas CSS size matches container (use updateStyle=true)
+            const canvas = this.renderer.domElement;
+            const needResize =
+                canvas.width !== Math.floor(width * targetPR) ||
+                canvas.height !== Math.floor(height * targetPR);
 
-        if (needResize) {
-            this.renderer.setSize(width, height, true);
+            if (needResize) {
+                this.renderer.setSize(width, height, true);
+            }
+        } else if (this.renderer && typeof this.renderer.setSize === 'function') {
+            this.renderer.setSize(width, height);
+            try {
+                const el = this.renderer.domElement;
+                if (el) {
+                    el.style.width = '100%';
+                    el.style.height = '100%';
+                }
+            } catch { }
         }
 
         // Keep fat-line materials in sync with canvas resolution

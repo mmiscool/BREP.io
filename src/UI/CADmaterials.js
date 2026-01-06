@@ -158,7 +158,8 @@ export const CADmaterials = {
 //
 // We will make the UI controls for each material in the global CADmaterials object
 export class CADmaterialWidget {
-    constructor() {
+    constructor(viewer = null) {
+        this.viewer = viewer || null;
         this.uiElement = document.createElement("div");
         this.uiElement.classList.add('cmw');
         this._storageKey = '__CAD_MATERIAL_SETTINGS__';
@@ -252,6 +253,36 @@ export class CADmaterialWidget {
         widthRow.appendChild(widthInput);
         this.uiElement.appendChild(widthRow);
         this._widthInput = widthInput;
+
+        // Renderer mode control (global persistent setting)
+        const rendererRow = makeRightSpan();
+        const rendererLabel = document.createElement('label');
+        rendererLabel.className = 'cmw-label';
+        rendererLabel.textContent = 'Renderer';
+        rendererRow.appendChild(rendererLabel);
+        const rendererSelect = document.createElement('select');
+        rendererSelect.className = 'cmw-input';
+        const optWebgl = document.createElement('option');
+        optWebgl.value = 'webgl';
+        optWebgl.textContent = 'WebGL (Canvas)';
+        const optSvg = document.createElement('option');
+        optSvg.value = 'svg';
+        optSvg.textContent = 'SVG';
+        rendererSelect.appendChild(optWebgl);
+        rendererSelect.appendChild(optSvg);
+        const storedMode = String(this._settings['__RENDERER_MODE__'] || '').toLowerCase();
+        const initialMode = storedMode === 'svg' ? 'svg' : 'webgl';
+        rendererSelect.value = initialMode;
+        rendererSelect.addEventListener('change', (event) => {
+            const mode = event?.target?.value === 'svg' ? 'svg' : 'webgl';
+            this._settings['__RENDERER_MODE__'] = mode;
+            this._saveAllSettings();
+            try { this.viewer?.setRendererMode?.(mode); } catch { }
+        });
+        rendererRow.appendChild(rendererSelect);
+        this.uiElement.appendChild(rendererRow);
+        this._rendererSelect = rendererSelect;
+        try { this.viewer?.setRendererMode?.(initialMode); } catch { }
 
         const resetRow = makeRightSpan();
         const resetLabel = document.createElement('label');
