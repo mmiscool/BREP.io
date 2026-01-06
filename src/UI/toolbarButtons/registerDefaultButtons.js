@@ -11,7 +11,6 @@ import { createExportButton } from './exportButton.js';
 import { createAboutButton } from './aboutButton.js';
 import { createTestsButton } from './testsButton.js';
 import { createScriptRunnerButton } from './scriptRunnerButton.js';
-import { createSpaceMouseButton } from './spaceMouseButton.js';
 
 export function registerDefaultToolbarButtons(viewer) {
   if (!viewer || typeof viewer.addToolbarButton !== 'function') return;
@@ -27,7 +26,6 @@ export function registerDefaultToolbarButtons(viewer) {
     createAboutButton,
     createTestsButton,
     createScriptRunnerButton,
-    createSpaceMouseButton,
   ];
 
   for (const make of creators) {
