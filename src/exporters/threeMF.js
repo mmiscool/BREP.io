@@ -487,7 +487,8 @@ function contentTypesXML() {
     '  <Default Extension="png" ContentType="image/png"/>',
     '  <Default Extension="jpg" ContentType="image/jpeg"/>',
     '  <Default Extension="jpeg" ContentType="image/jpeg"/>',
-    '</Types>'
+    '  <Default Extension="svg" ContentType="image/svg+xml"/>',
+  '</Types>'
   ].join('\n');
 }
 

@@ -309,7 +309,10 @@ export class Viewer {
         this._sidebarHoverTargets = null;
         this._sidebarStoredDisplay = null;
         this._sidebarStoredVisibility = null;
+        this._sidebarStoredTransform = null;
+        this._sidebarStoredPointerEvents = null;
         this._sidebarLastPointer = null;
+        this._sidebarOffscreen = false;
         this.scene = partHistory instanceof PartHistory ? partHistory.scene : new THREE.Scene();
         ensureSelectionPickerStyles();
 
@@ -678,9 +681,7 @@ export class Viewer {
         const updatePosition = () => {
             if (!this.sidebar) return;
             const rect = this.sidebar.getBoundingClientRect();
-            const hidden = this.sidebar.hidden
-                || this.sidebar.style.display === 'none'
-                || this.sidebar.style.visibility === 'hidden';
+            const hidden = !this._isSidebarVisible();
             if (hidden || rect.width <= 0 || rect.height <= 0) {
                 resizer.style.display = 'none';
                 return;
@@ -836,7 +837,7 @@ export class Viewer {
         const pinTab = document.createElement('button');
         pinTab.id = 'sidebar-pin-tab';
         pinTab.type = 'button';
-        pinTab.textContent = '🖈';
+        pinTab.textContent = '📌';
         pinTab.setAttribute('aria-pressed', 'true');
         pinTab.title = 'Collapse sidebar';
         document.body.appendChild(pinTab);
@@ -1025,7 +1026,8 @@ export class Viewer {
 
     _isSidebarVisible() {
         if (!this.sidebar) return false;
-        return !this.sidebar.hidden
+        return !this._sidebarOffscreen
+            && !this.sidebar.hidden
             && this.sidebar.style.display !== 'none'
             && this.sidebar.style.visibility !== 'hidden';
     }
@@ -1033,28 +1035,48 @@ export class Viewer {
     _setSidebarElementVisible(visible) {
         if (!this.sidebar) return;
         const isVisible = this._isSidebarVisible();
+        // Ensure the sidebar stays in the render tree even when collapsed.
+        try { if (this.sidebar.hidden) this.sidebar.hidden = false; } catch { }
+        if (this.sidebar.style.display === 'none') {
+            if (this._sidebarStoredDisplay != null) {
+                this.sidebar.style.display = this._sidebarStoredDisplay;
+            } else {
+                try { this.sidebar.style.removeProperty('display'); } catch { }
+                this.sidebar.style.display = this.sidebar.style.display || '';
+            }
+        }
+        if (this.sidebar.style.visibility === 'hidden') {
+            const visibility = this._sidebarStoredVisibility;
+            this.sidebar.style.visibility = visibility && visibility !== 'hidden' ? visibility : 'visible';
+        }
         if (visible) {
             if (!isVisible) {
-                this.sidebar.hidden = false;
-                if (this._sidebarStoredDisplay != null) {
-                    this.sidebar.style.display = this._sidebarStoredDisplay;
+                if (this._sidebarStoredTransform != null) {
+                    this.sidebar.style.transform = this._sidebarStoredTransform;
                 } else {
-                    try { this.sidebar.style.removeProperty('display'); } catch { }
-                    this.sidebar.style.display = this.sidebar.style.display || '';
+                    try { this.sidebar.style.removeProperty('transform'); } catch { }
+                    this.sidebar.style.transform = this.sidebar.style.transform || '';
                 }
-                const visibility = this._sidebarStoredVisibility;
-                this.sidebar.style.visibility = visibility && visibility !== 'hidden' ? visibility : 'visible';
+                if (this._sidebarStoredPointerEvents != null) {
+                    this.sidebar.style.pointerEvents = this._sidebarStoredPointerEvents;
+                } else {
+                    try { this.sidebar.style.removeProperty('pointer-events'); } catch { }
+                    this.sidebar.style.pointerEvents = this.sidebar.style.pointerEvents || '';
+                }
             }
             this.sidebar.style.opacity = .9;
             this.sidebar.style.zIndex = String(7);
+            this._sidebarOffscreen = false;
         } else {
-            if (isVisible) {
+            if (!this._sidebarOffscreen) {
                 this._sidebarStoredDisplay = this.sidebar.style.display || '';
                 this._sidebarStoredVisibility = this.sidebar.style.visibility || '';
+                this._sidebarStoredTransform = this.sidebar.style.transform || '';
+                this._sidebarStoredPointerEvents = this.sidebar.style.pointerEvents || '';
             }
-            this.sidebar.hidden = true;
-            this.sidebar.style.display = 'none';
-            this.sidebar.style.visibility = 'hidden';
+            this.sidebar.style.transform = 'translateX(calc(-100% - 12px))';
+            this.sidebar.style.pointerEvents = 'none';
+            this._sidebarOffscreen = true;
         }
         try { this.mainToolbar?._positionWithSidebar?.(); } catch { }
     }
@@ -1067,7 +1089,7 @@ export class Viewer {
         if (tab) {
             tab.classList.toggle('is-pinned', pinned);
             tab.setAttribute('aria-pressed', pinned ? 'true' : 'false');
-            tab.textContent = '🖈';
+            tab.textContent = '📌';
             tab.title = pinned ? 'Collapse sidebar' : 'Pin sidebar';
         }
         if (strip) {
@@ -1081,14 +1103,18 @@ export class Viewer {
         const tab = this._sidebarPinTab;
         if (!tab) return;
         let left = 0;
-        const shouldDock = this._getSidebarShouldShow();
-        if (shouldDock && this.sidebar) {
-            const rect = this.sidebar.getBoundingClientRect();
-            if (rect && rect.width > 0) {
-                left = Math.max(0, Math.round(rect.right - 1));
-            }
+        let top = 72;
+        const rect = this.sidebar?.getBoundingClientRect?.();
+        if (rect && rect.width > 0) {
+            left = Math.max(0, Math.round(rect.right - 1));
+        }
+        if (rect && rect.height > 0) {
+            const tabHeight = tab.getBoundingClientRect ? tab.getBoundingClientRect().height : tab.offsetHeight;
+            const nextTop = rect.top + (rect.height - (tabHeight || 0)) / 2;
+            if (Number.isFinite(nextTop)) top = Math.max(0, Math.round(nextTop));
         }
         tab.style.left = `${left}px`;
+        tab.style.top = `${top}px`;
     }
 
     _syncSidebarVisibility() {

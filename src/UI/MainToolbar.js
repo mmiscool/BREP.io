@@ -35,8 +35,10 @@ export class MainToolbar {
         position: fixed;
         top: 0; left: 0; right: 0;
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
-        justify-content: space-between;
+        justify-content: flex-start;
+        gap: 6px;
         padding: 6px;
         background: rgba(20,24,30,.85);
         border: 1px solid #262b36;
@@ -45,7 +47,15 @@ export class MainToolbar {
         pointer-events: auto;
         user-select: none;
       }
-      .mtb-left, .mtb-right { display: flex; align-items: center; gap: 6px; }
+      .mtb-left, .mtb-right {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+      .mtb-left { flex: 1 1 auto; }
+      .mtb-right { margin-left: auto; justify-content: flex-end; }
       .mtb-spacer { flex: 1; }
 
       .mtb-btn {
@@ -109,7 +119,12 @@ export class MainToolbar {
   _positionWithSidebar() {
     try {
       const sb = this.viewer?.sidebar;
-      const w = Math.ceil(sb?.getBoundingClientRect?.().width || sb?.offsetWidth || 0);
+      const shouldOffset = (typeof this.viewer?._getSidebarShouldShow === 'function')
+        ? this.viewer._getSidebarShouldShow()
+        : true;
+      const w = shouldOffset
+        ? Math.ceil(sb?.getBoundingClientRect?.().width || sb?.offsetWidth || 0)
+        : 0;
       this.root.style.left = `${w}px`;
     } catch { this.root.style.left = '0px'; }
   }
