@@ -1,6 +1,6 @@
 import { BREP } from "../../BREP/BREP.js";
 import { selectionHasSketch } from "../selectionUtils.js";
-import { normalizeThickness, normalizeBendRadius, applySheetMetalMetadata } from "./sheetMetalMetadata.js";
+import { normalizeThickness, normalizeBendRadius, normalizeNeutralFactor, applySheetMetalMetadata } from "./sheetMetalMetadata.js";
 import { setSheetMetalFaceTypeMetadata, SHEET_METAL_FACE_TYPES, propagateSheetMetalFaceTypesToEdges } from "./sheetMetalFaceTypes.js";
 import { resolveProfileFace, collectSketchParents } from "./profileUtils.js";
 
@@ -34,6 +34,14 @@ const inputParamsSchema = {
     default_value: 0.125,
     min: 0,
     hint: "Default bend radius captured with the sheet-metal base feature.",
+  },
+  neutralFactor: {
+    type: "number",
+    default_value: 0.5,
+    min: 0,
+    max: 1,
+    step: 0.01,
+    hint: "Neutral factor used for flat pattern bend allowance (0-1).",
   },
   consumeProfileSketch: {
     type: "boolean",
@@ -74,6 +82,7 @@ export class SheetMetalTabFeature {
       this.inputParams?.thickness ?? 1
     );
     const bendRadius = normalizeBendRadius(this.inputParams?.bendRadius ?? 0.125);
+    const neutralFactor = normalizeNeutralFactor(this.inputParams?.neutralFactor ?? 0.5);
     const placement = resolvePlacementMode(this.inputParams?.placementMode, signedThickness);
     const extrudeDistances = toExtrudeDistances(thicknessAbs, placement);
 
@@ -110,6 +119,7 @@ export class SheetMetalTabFeature {
       bendRadius,
       baseType: "TAB",
       extra: { placementMode: placement, signedThickness, consumeProfileSketch: consumeSketch },
+      neutralFactor,
       forceBaseOverwrite: true,
     });
 
@@ -118,6 +128,7 @@ export class SheetMetalTabFeature {
       baseType: "TAB",
       thickness: thicknessAbs,
       bendRadius,
+      neutralFactor,
       placementMode: placement,
       signedThickness,
       consumeProfileSketch: consumeSketch,

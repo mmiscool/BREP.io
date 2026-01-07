@@ -3,6 +3,7 @@ import { selectionHasSketch } from "../selectionUtils.js";
 import {
   normalizeThickness,
   normalizeBendRadius,
+  normalizeNeutralFactor,
   applySheetMetalMetadata,
 } from "./sheetMetalMetadata.js";
 import { setSheetMetalFaceTypeMetadata, SHEET_METAL_FACE_TYPES, propagateSheetMetalFaceTypesToEdges } from "./sheetMetalFaceTypes.js";
@@ -45,6 +46,14 @@ const inputParamsSchema = {
     min: 0,
     hint: "Default inside bend radius inserted wherever two lines meet.",
   },
+  neutralFactor: {
+    type: "number",
+    default_value: 0.5,
+    min: 0,
+    max: 1,
+    step: 0.01,
+    hint: "Neutral factor used for flat pattern bend allowance (0-1).",
+  },
   consumePathSketch: {
     type: "boolean",
     default_value: true,
@@ -82,6 +91,7 @@ export class SheetMetalContourFlangeFeature {
       this.inputParams?.thickness ?? 1,
     );
     const bendRadius = normalizeBendRadius(this.inputParams?.bendRadius ?? 0);
+    const neutralFactor = normalizeNeutralFactor(this.inputParams?.neutralFactor ?? 0.5);
     const rawDistance = Number(this.inputParams?.distance ?? 0);
     if (!Number.isFinite(rawDistance) || rawDistance === 0) {
       throw new Error("Contour Flange distance must be a non-zero number.");
@@ -193,6 +203,7 @@ export class SheetMetalContourFlangeFeature {
       featureID: this.inputParams?.featureID || null,
       thickness: thicknessAbs,
       bendRadius,
+      neutralFactor,
       baseType: "CONTOUR_FLANGE",
       extra: {
         signedThickness,
@@ -224,6 +235,7 @@ export class SheetMetalContourFlangeFeature {
       baseType: "CONTOUR_FLANGE",
       thickness: thicknessAbs,
       bendRadius,
+      neutralFactor,
       signedThickness,
       sheetSide,
       reverseSheetSide,

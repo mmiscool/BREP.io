@@ -33,6 +33,7 @@ import { SplineFeature } from './features/spline/SplineFeature.js';
 import { SheetMetalTabFeature } from './features/sheetMetal/SheetMetalTabFeature.js';
 import { SheetMetalContourFlangeFeature } from './features/sheetMetal/SheetMetalContourFlangeFeature.js';
 import { SheetMetalFlangeFeature } from './features/sheetMetal/SheetMetalFlangeFeature.js';
+import { SheetMetalHemFeature } from './features/sheetMetal/SheetMetalHemFeature.js';
 import { SheetMetalCutoutFeature } from './features/sheetMetal/SheetMetalCutoutFeature.js';
 
 /* ========================================================================
@@ -88,6 +89,7 @@ export class FeatureRegistry {
     this.register(SheetMetalTabFeature);
     this.register(SheetMetalContourFlangeFeature);
     this.register(SheetMetalFlangeFeature);
+    this.register(SheetMetalHemFeature);
     this.register(SheetMetalCutoutFeature);
     this.register(LoftFeature);
     this.register(MirrorFeature);

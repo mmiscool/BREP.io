@@ -46,6 +46,15 @@ export async function test_sheetMetal_flange(partHistory) {
   return partHistory;
 }
 
+export async function test_sheetMetal_hem(partHistory) {
+  const { edgeFaceName } = await buildBaseTab(partHistory, { size: 14, thickness: 1, geomBase: 110 });
+
+  const hem = await partHistory.newFeature("SM.HEM");
+  hem.inputParams.faces = [edgeFaceName];
+
+  return partHistory;
+}
+
 export async function test_sheetMetal_cutout(partHistory) {
   const sheetSize = 20;
   const { tab } = await buildBaseTab(partHistory, { size: sheetSize, thickness: 1, geomBase: 100 });

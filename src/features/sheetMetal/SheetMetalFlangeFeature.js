@@ -79,6 +79,11 @@ export class SheetMetalFlangeFeature {
   static shortName = "SM.F";
   static longName = "Sheet Metal Flange";
   static inputParamsSchema = inputParamsSchema;
+  static baseType = "FLANGE";
+  static logTag = "SheetMetalFlange";
+  static defaultAngle = 90;
+  static angleOverride = null;
+  static defaultBendRadius = null;
 
   constructor() {
     this.inputParams = {};
@@ -86,9 +91,23 @@ export class SheetMetalFlangeFeature {
   }
 
   async run(partHistory) {
+    const FeatureClass = this?.constructor || {};
+    const featureLabel = FeatureClass.longName || "Sheet Metal Flange";
+    const logTag = FeatureClass.logTag || "SheetMetalFlange";
+    const baseType = FeatureClass.baseType || "FLANGE";
+    const defaultAngle = Number.isFinite(FeatureClass.defaultAngle)
+      ? FeatureClass.defaultAngle
+      : 90;
+    const angleOverride = Number.isFinite(FeatureClass.angleOverride)
+      ? FeatureClass.angleOverride
+      : null;
+    const defaultBendRadius = Number.isFinite(FeatureClass.defaultBendRadius)
+      ? FeatureClass.defaultBendRadius
+      : null;
+
     const faces = resolveSelectedFaces(this.inputParams?.faces, partHistory?.scene);
     if (!faces.length) {
-      throw new Error("Sheet Metal Flange requires selecting at least one FACE.");
+      throw new Error(`${featureLabel} requires selecting at least one FACE.`);
     }
 
     // Assume all selected faces share the same sheet thickness; resolve it once up front.
@@ -99,16 +118,18 @@ export class SheetMetalFlangeFeature {
     const thickness = thicknessInfo?.thickness ?? 1;
     const baseBendRadius = thicknessInfo?.defaultBendRadius ?? thickness;
 
-    const angleDeg = this.inputParams.angle;
-    let angle = Number.isFinite(angleDeg) ? Math.max(0, Math.min(180, angleDeg)) : 90;
-    const bendRadiusInput = Math.max(0, Number(this.inputParams?.bendRadius ?? 0));
+    const angleDeg = angleOverride != null ? angleOverride : this.inputParams.angle;
+    const angleFallback = Math.max(0, Math.min(180, defaultAngle));
+    let angle = Number.isFinite(angleDeg) ? Math.max(0, Math.min(180, angleDeg)) : angleFallback;
+    const bendRadiusFallback = defaultBendRadius != null ? defaultBendRadius : 0;
+    const bendRadiusInput = Math.max(0, Number(this.inputParams?.bendRadius ?? bendRadiusFallback));
     const bendRadiusOverride = bendRadiusInput > 0 ? bendRadiusInput : null;
     const bendRadiusUsed = bendRadiusOverride ?? baseBendRadius;
     const useOppositeCenterline = this.inputParams?.useOppositeCenterline === true;
 
     try {
       const radiusSource = bendRadiusOverride != null ? "feature_override" : "parent_solid";
-      console.log("[SheetMetalFlange] Bend radius resolved", {
+      console.log(`[${logTag}] Bend radius resolved`, {
         featureId: this.inputParams?.featureID || this.inputParams?.id || null,
         parentSolid: parentSolidName,
         bendRadiusInput,
@@ -135,7 +156,7 @@ export class SheetMetalFlangeFeature {
       featureID: this.inputParams?.featureID || null,
       thickness,
       bendRadius: baseBendRadius,
-      baseType: "FLANGE",
+      baseType,
       extra: {
         angleDegrees: appliedAngle,
         insetMode: this.inputParams?.inset || null,
@@ -148,7 +169,7 @@ export class SheetMetalFlangeFeature {
     };
     this.persistentData = this.persistentData || {};
     this.persistentData.sheetMetal = {
-      baseType: "FLANGE",
+      baseType,
       thickness,
       bendRadius: bendRadiusUsed,
       defaultBendRadius: baseBendRadius,
@@ -331,7 +352,7 @@ export class SheetMetalFlangeFeature {
     }
 
     if (!generatedSolids.length) {
-      throw new Error("Unable to build any flange geometry for the selected faces.");
+      throw new Error(`${featureLabel} failed to generate any geometry for the selected faces.`);
     }
 
     if (skipUnion || parentSolidStates.size === 0) {
@@ -412,7 +433,7 @@ export class SheetMetalFlangeFeature {
 
     applySheetMetalMetadata(finalAdded, partHistory?.metadataManager, sheetMetalMetadata);
 
-    // Ensure final solids keep the original parent solid name (never the flange feature ID).
+    // Ensure final solids keep the original parent solid name (never the feature ID).
     for (const solid of finalAdded) {
       if (parentSolidName) setSolidNameSafe(solid, parentSolidName);
     }
@@ -978,10 +999,10 @@ function createOffsetExtrudeSolid(params = {}) {
 
   applyFaceSheetMetalData(face, sweep);
 
-  const reliefWidth = 0.001 + reliefWidthValue;
+  const reliefWidth = Number.isFinite(reliefWidthValue) ? Math.max(0, reliefWidthValue) : 0;
 
   // use the solid.pushFace() method to nudge the faces with sheetMetalFaceType of "A" or "B" outward by a tiny amount to avoid z-fighting
-  if (0 > lengthValue) {
+  if (0 > lengthValue && reliefWidth > 0) {
     for (const solidFace of sweep.faces) {
       const faceMetadata = solidFace.getMetadata();
       let pushFace = true;

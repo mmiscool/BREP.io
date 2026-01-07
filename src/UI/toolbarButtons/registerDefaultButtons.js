@@ -8,6 +8,7 @@ import { createInspectorToggleButton } from './inspectorToggleButton.js';
 import { createMetadataButton } from './metadataButton.js';
 import { createImportButton } from './importButton.js';
 import { createExportButton } from './exportButton.js';
+import { createFlatPatternButton } from './flatPatternButton.js';
 import { createAboutButton } from './aboutButton.js';
 import { createTestsButton } from './testsButton.js';
 import { createScriptRunnerButton } from './scriptRunnerButton.js';
@@ -23,6 +24,7 @@ export function registerDefaultToolbarButtons(viewer) {
     createMetadataButton,
     createImportButton,
     createExportButton,
+    createFlatPatternButton,
     createAboutButton,
     createTestsButton,
     createScriptRunnerButton,
