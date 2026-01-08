@@ -141,6 +141,46 @@ function findInsideFaceType(faceMetaByName) {
   return null;
 }
 
+function buildCylRadiusGroups(faceMetaById) {
+  const groups = new Map();
+  if (!faceMetaById || typeof faceMetaById.values !== 'function') return groups;
+  for (const meta of faceMetaById.values()) {
+    if (meta?.type !== 'cylindrical') continue;
+    const radius = Number(meta?.radius ?? meta?.pmiRadiusOverride ?? meta?.pmiRadius);
+    if (!Number.isFinite(radius) || radius <= 0) continue;
+    const key = lineKey(meta?.axis, meta?.center);
+    if (!key) continue;
+    let group = groups.get(key);
+    if (!group) {
+      group = { min: radius, max: radius };
+      groups.set(key, group);
+    } else {
+      if (radius < group.min) group.min = radius;
+      if (radius > group.max) group.max = radius;
+    }
+  }
+  return groups;
+}
+
+function inferCylFaceIsInside(meta, faceRadius, cylGroups, thickness) {
+  if (!Number.isFinite(faceRadius) || !cylGroups) return null;
+  const key = lineKey(meta?.axis, meta?.center);
+  if (!key) return null;
+  const group = cylGroups.get(key);
+  if (!group || !Number.isFinite(group.min) || !Number.isFinite(group.max)) return null;
+  if (group.max - group.min <= EPS) return null;
+  const dMin = Math.abs(faceRadius - group.min);
+  const dMax = Math.abs(faceRadius - group.max);
+  const tol = Number.isFinite(thickness) && thickness > 0
+    ? Math.max(1e-4, thickness * 0.1)
+    : 0;
+  if (tol > 0) {
+    if (dMin <= tol && dMin <= dMax) return true;
+    if (dMax <= tol && dMax < dMin) return false;
+  }
+  return dMin <= dMax;
+}
+
 function getVertex3(vertProps, idx) {
   const base = idx * 3;
   return [vertProps[base + 0], vertProps[base + 1], vertProps[base + 2]];
@@ -1724,6 +1764,7 @@ function buildFlatPatternMeshByFaces(solid, opts = {}) {
       surfaceIsInside,
     } = selection;
 
+    const cylGroups = buildCylRadiusGroups(faceMetaById);
     const faceTriangles = collectFaceTriangles(triVerts, faceIDs, includeSet, vertProps);
     if (!faceTriangles.size) return null;
     const faceNameById = solid._idToFaceName instanceof Map ? solid._idToFaceName : null;
@@ -1783,9 +1824,11 @@ function buildFlatPatternMeshByFaces(solid, opts = {}) {
       let coordsInfo = null;
       if (meta?.type === 'cylindrical') {
         const sharedVerts = sharedVertsByFace.get(faceId) || null;
-        let faceIsInside = surfaceIsInside;
-        if (insideType && faceType) faceIsInside = faceType === insideType;
         const faceRadius = Number(meta?.radius ?? meta?.pmiRadiusOverride ?? meta?.pmiRadius);
+        const inferredInside = inferCylFaceIsInside(meta, faceRadius, cylGroups, thickness);
+        let faceIsInside = inferredInside != null
+          ? inferredInside
+          : (insideType && faceType ? faceType === insideType : surfaceIsInside);
         let neutralRadius = null;
         if (Number.isFinite(faceRadius)) {
           neutralRadius = faceIsInside
@@ -2560,6 +2603,17 @@ function buildBendAnnotations2D(flatMesh) {
     return { centerlines: [], bendEdges: [] };
   }
 
+  const thickness = Number(flatMesh.thickness);
+  const faceNameById = flatMesh.faceNameById instanceof Map ? flatMesh.faceNameById : null;
+  const faceMetaByName = new Map();
+  if (faceNameById) {
+    for (const [id, name] of faceNameById.entries()) {
+      faceMetaByName.set(name, faceMetaById.get(id) || {});
+    }
+  }
+  const insideType = faceMetaByName.size ? findInsideFaceType(faceMetaByName) : null;
+  const cylGroups = buildCylRadiusGroups(faceMetaById);
+
   const positions = flatMesh.vertProperties;
   const triVerts = flatMesh.triVerts;
   const faceToTris = new Map();
@@ -2576,6 +2630,30 @@ function buildBendAnnotations2D(flatMesh) {
   const edgeKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
   const centerlines = [];
   const bendEdges = [];
+  const faceTowardA = new Map();
+  const getTowardA = (faceId) => {
+    if (faceTowardA.has(faceId)) return faceTowardA.get(faceId);
+    const meta = faceMetaById.get(faceId);
+    if (!meta || meta.type !== 'cylindrical') {
+      faceTowardA.set(faceId, null);
+      return null;
+    }
+    const faceRadius = Number(meta?.radius ?? meta?.pmiRadiusOverride ?? meta?.pmiRadius);
+    const inferredInside = inferCylFaceIsInside(meta, faceRadius, cylGroups, thickness);
+    let faceIsInside = inferredInside;
+    if (faceIsInside == null && insideType) {
+      const faceType = resolveFaceType(meta);
+      if (faceType) faceIsInside = faceType === insideType;
+    }
+    if (faceIsInside == null) {
+      faceTowardA.set(faceId, null);
+      return null;
+    }
+    const faceType = resolveFaceType(meta);
+    const towardA = faceType === 'B' ? !faceIsInside : faceIsInside;
+    faceTowardA.set(faceId, towardA);
+    return towardA;
+  };
 
   for (const [faceId, triIdxs] of faceToTris.entries()) {
     const edgeCounts = new Map();
@@ -2674,13 +2752,13 @@ function buildBendAnnotations2D(flatMesh) {
       x: axisDir.x * maxS + nDir.x * centerOff,
       y: axisDir.y * maxS + nDir.y * centerOff,
     };
-    centerlines.push({ p0, p1, faceId });
+    centerlines.push({ p0, p1, faceId, towardA: getTowardA(faceId) });
   }
 
   return { centerlines, bendEdges };
 }
 
-function buildSvgForFlatMesh(flatMesh, name = 'FLAT') {
+function buildSvgForFlatMesh(flatMesh, name = 'FLAT', opts = {}) {
   if (!flatMesh || !flatMesh.vertProperties || !flatMesh.triVerts) return null;
   const positions = flatMesh.vertProperties;
   const triVerts = flatMesh.triVerts;
@@ -2782,7 +2860,9 @@ function buildSvgForFlatMesh(flatMesh, name = 'FLAT') {
   }
   if (!pathParts.length) return null;
 
-  const lineParts = [];
+  const linePartsTowardA = [];
+  const linePartsAwayFromA = [];
+  const linePartsUnknown = [];
   if (centerlines.length) {
     for (const line of centerlines) {
       const p0 = rotatePoint(line.p0.x, line.p0.y);
@@ -2791,7 +2871,10 @@ function buildSvgForFlatMesh(flatMesh, name = 'FLAT') {
       const y1 = height - (p0.y - minY) + pad;
       const x2 = p1.x - minX + pad;
       const y2 = height - (p1.y - minY) + pad;
-      lineParts.push(`M ${fmt(x1)} ${fmt(y1)} L ${fmt(x2)} ${fmt(y2)}`);
+      const d = `M ${fmt(x1)} ${fmt(y1)} L ${fmt(x2)} ${fmt(y2)}`;
+      if (line.towardA === true) linePartsTowardA.push(d);
+      else if (line.towardA === false) linePartsAwayFromA.push(d);
+      else linePartsUnknown.push(d);
     }
   }
 
@@ -2808,27 +2891,41 @@ function buildSvgForFlatMesh(flatMesh, name = 'FLAT') {
     }
   }
 
+  const cutStroke = '#000';
+  const bendEdgeStroke = '#0070cc';
+  const centerTowardAStroke = '#00b000';
+  const centerAwayAStroke = '#b00000';
+  const centerUnknownStroke = centerTowardAStroke;
+
   const lines = [];
   lines.push('<?xml version="1.0" encoding="UTF-8"?>');
   lines.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${fmt(viewWidth)}mm" height="${fmt(viewHeight)}mm" viewBox="0 0 ${fmt(viewWidth)} ${fmt(viewHeight)}">`);
   lines.push(`  <title>${xmlEsc(name || 'Flat Pattern')}</title>`);
-  lines.push('  <g fill="none" stroke="#000" stroke-width="0.1" stroke-linejoin="round" stroke-linecap="round">');
+  lines.push(`  <g fill="none" stroke="${cutStroke}" stroke-width="0.1" stroke-linejoin="round" stroke-linecap="round">`);
   for (const d of pathParts) {
     lines.push(`    <path d="${d}"/>`);
   }
   lines.push('  </g>');
   if (bendEdgeParts.length) {
-    lines.push('  <g fill="none" stroke="#000" stroke-width="0.1" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="3,2">');
+    lines.push(`  <g fill="none" stroke="${bendEdgeStroke}" stroke-width="0.1" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="3,2">`);
     for (const d of bendEdgeParts) {
       lines.push(`    <path d="${d}"/>`);
     }
     lines.push('  </g>');
   }
-  if (lineParts.length) {
-    lines.push('  <g fill="none" stroke="#00b000" stroke-width="0.15" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2,1">');
-    for (const d of lineParts) {
-      lines.push(`    <path d="${d}"/>`);
-    }
+  if (linePartsTowardA.length) {
+    lines.push(`  <g fill="none" stroke="${centerTowardAStroke}" stroke-width="0.15" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2,1">`);
+    for (const d of linePartsTowardA) lines.push(`    <path d="${d}"/>`);
+    lines.push('  </g>');
+  }
+  if (linePartsAwayFromA.length) {
+    lines.push(`  <g fill="none" stroke="${centerAwayAStroke}" stroke-width="0.15" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2,1">`);
+    for (const d of linePartsAwayFromA) lines.push(`    <path d="${d}"/>`);
+    lines.push('  </g>');
+  }
+  if (linePartsUnknown.length) {
+    lines.push(`  <g fill="none" stroke="${centerUnknownStroke}" stroke-width="0.15" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2,1">`);
+    for (const d of linePartsUnknown) lines.push(`    <path d="${d}"/>`);
     lines.push('  </g>');
   }
   lines.push('</svg>');
