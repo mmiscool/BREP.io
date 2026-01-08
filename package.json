@@ -30,6 +30,7 @@
   "author": "",
   "license": "See licence.md",
   "dependencies": {
+    "@tarikjabiri/dxf": "^2.8.9",
     "jszip": "^3.10.1",
     "manifold-3d": "^3.3.2",
     "monaco-editor": "^0.55.1",

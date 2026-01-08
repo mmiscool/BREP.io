@@ -4,6 +4,7 @@ import { Line2, LineGeometry, LineMaterial } from 'three/examples/jsm/Addons.js'
 import { FloatingWindow } from '../FloatingWindow.js';
 import {
   buildSheetMetalFlatPatternDebugSteps,
+  buildSheetMetalFlatPatternDxfs,
   buildSheetMetalFlatPatternSvgs,
 } from '../../exporters/sheetMetalFlatPattern.js';
 import { resolveSheetMetalFaceType } from '../../features/sheetMetal/sheetMetalFaceTypes.js';
@@ -178,8 +179,14 @@ class FlatPatternUnfoldPanel {
     btnExport.textContent = 'Export SVG';
     btnExport.addEventListener('click', () => this._exportSvg());
 
+    const btnExportDxf = document.createElement('button');
+    btnExportDxf.className = 'flat-unfold-btn';
+    btnExportDxf.textContent = 'Export DXF';
+    btnExportDxf.addEventListener('click', () => this._exportDxf());
+
     fw.addHeaderAction(btnFit);
     fw.addHeaderAction(btnExport);
+    fw.addHeaderAction(btnExportDxf);
 
     const content = document.createElement('div');
     content.className = 'flat-unfold-content';
@@ -1127,6 +1134,34 @@ class FlatPatternUnfoldPanel {
     const blob = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE', compressionOptions: { level: 6 } });
     const base = _safeName(this.viewer?.fileManagerWidget?.currentName || 'flatpattern');
     _download(`${base}_flatpattern.zip`, blob, 'application/zip');
+  }
+
+  async _exportDxf() {
+    const solids = this._solids?.length ? this._solids : _collectSolids(this.viewer);
+    if (!solids.length) {
+      this._setEmpty('No solids to export.');
+      return;
+    }
+    const metadataManager = this.viewer?.partHistory?.metadataManager || null;
+    const dxfEntries = buildSheetMetalFlatPatternDxfs(solids, { metadataManager });
+    if (!dxfEntries.length) {
+      this._setEmpty('No flat pattern DXFs available.');
+      return;
+    }
+    if (dxfEntries.length === 1) {
+      const entry = dxfEntries[0];
+      const safe = _safeName(entry.name || 'flat');
+      _download(`${safe}_flat.dxf`, entry.dxf, 'application/dxf');
+      return;
+    }
+    const zip = new JSZip();
+    for (const entry of dxfEntries) {
+      const safe = _safeName(entry.name || 'flat');
+      zip.file(`${safe}_flat.dxf`, entry.dxf);
+    }
+    const blob = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    const base = _safeName(this.viewer?.fileManagerWidget?.currentName || 'flatpattern');
+    _download(`${base}_flatpattern_dxf.zip`, blob, 'application/zip');
   }
 
   _setEmpty(text) {

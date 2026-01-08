@@ -1,3 +1,5 @@
+import { Colors, DxfWriter, LineTypes, Units, point3d } from '@tarikjabiri/dxf';
+
 const DEFAULT_NEUTRAL_FACTOR = 0.5;
 const EPS = 1e-9;
 
@@ -2932,6 +2934,162 @@ function buildSvgForFlatMesh(flatMesh, name = 'FLAT', opts = {}) {
   return { svg: lines.join('\n'), width: viewWidth, height: viewHeight };
 }
 
+function buildDxfForFlatMesh(flatMesh, name = 'FLAT') {
+  if (!flatMesh || !flatMesh.vertProperties || !flatMesh.triVerts) return null;
+  const positions = flatMesh.vertProperties;
+  const triVerts = flatMesh.triVerts;
+  const loops = buildBoundaryLoops2D(positions, triVerts);
+  if (!loops.length) return null;
+  const bendAnnotations = buildBendAnnotations2D(flatMesh) || { centerlines: [], bendEdges: [] };
+  const centerlines = Array.isArray(bendAnnotations.centerlines) ? bendAnnotations.centerlines : [];
+  const bendEdges = Array.isArray(bendAnnotations.bendEdges) ? bendAnnotations.bendEdges : [];
+
+  let longestLen = 0;
+  let longestDx = 1;
+  let longestDy = 0;
+  for (const loop of loops) {
+    if (!loop || loop.length < 2) continue;
+    const pts = loop[0] === loop[loop.length - 1] ? loop.slice(0, -1) : loop;
+    const count = pts.length;
+    if (count < 2) continue;
+    for (let i = 0; i < count; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % count];
+      const ax = positions[a * 3 + 0];
+      const ay = positions[a * 3 + 1];
+      const bx = positions[b * 3 + 0];
+      const by = positions[b * 3 + 1];
+      const dx = bx - ax;
+      const dy = by - ay;
+      const len = Math.hypot(dx, dy);
+      if (len > longestLen) {
+        longestLen = len;
+        longestDx = dx;
+        longestDy = dy;
+      }
+    }
+  }
+
+  let rotCos = 1;
+  let rotSin = 0;
+  if (longestLen > EPS) {
+    const angle = Math.atan2(longestDy, longestDx);
+    const rot = -angle;
+    rotCos = Math.cos(rot);
+    rotSin = Math.sin(rot);
+  }
+
+  const rotatePoint = (x, y) => ({
+    x: rotCos * x - rotSin * y,
+    y: rotSin * x + rotCos * y,
+  });
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const loop of loops) {
+    for (const idx of loop) {
+      const rawX = positions[idx * 3 + 0];
+      const rawY = positions[idx * 3 + 1];
+      const p = rotatePoint(rawX, rawY);
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
+  const width = Math.max(maxX - minX, 1);
+  const height = Math.max(maxY - minY, 1);
+  const pad = Math.max(1, Math.min(width, height) * 0.05);
+  const viewWidth = width + pad * 2;
+  const viewHeight = height + pad * 2;
+
+  const toPoint = (x, y) => {
+    const p = rotatePoint(x, y);
+    return { x: p.x - minX + pad, y: p.y - minY + pad };
+  };
+
+  const dxf = new DxfWriter();
+  dxf.setUnits(Units.Millimeters);
+
+  const dashedType = 'DASHED';
+  const centerType = 'CENTER';
+  dxf.addLType(dashedType, 'Dashed', [3, -1.5]);
+  dxf.addLType(centerType, 'Center', [2, -0.5, 0.5, -0.5]);
+
+  const cutLayer = 'CUT';
+  const bendLayer = 'BEND_EDGE';
+  const centerTowardLayer = 'BEND_CTR_TOWARD_A';
+  const centerAwayLayer = 'BEND_CTR_AWAY_A';
+  const centerUnknownLayer = 'BEND_CTR';
+
+  dxf.addLayer(cutLayer, Colors.Black, LineTypes.Continuous);
+  dxf.addLayer(bendLayer, Colors.Blue, dashedType);
+  dxf.addLayer(centerTowardLayer, Colors.Green, centerType);
+  dxf.addLayer(centerAwayLayer, Colors.Red, centerType);
+  dxf.addLayer(centerUnknownLayer, Colors.Green, centerType);
+
+  const addLine = (p0, p1) => {
+    dxf.addLine(point3d(p0.x, p0.y, 0), point3d(p1.x, p1.y, 0));
+  };
+
+  dxf.setCurrentLayerName(cutLayer);
+  for (const loop of loops) {
+    if (!loop || loop.length < 2) continue;
+    const pts = loop[0] === loop[loop.length - 1] ? loop.slice(0, -1) : loop;
+    if (pts.length < 2) continue;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
+      const ax = positions[a * 3 + 0];
+      const ay = positions[a * 3 + 1];
+      const bx = positions[b * 3 + 0];
+      const by = positions[b * 3 + 1];
+      addLine(toPoint(ax, ay), toPoint(bx, by));
+    }
+  }
+
+  if (bendEdges.length) {
+    dxf.setCurrentLayerName(bendLayer);
+    for (const edge of bendEdges) {
+      addLine(toPoint(edge.p0.x, edge.p0.y), toPoint(edge.p1.x, edge.p1.y));
+    }
+  }
+
+  if (centerlines.length) {
+    const towardLines = [];
+    const awayLines = [];
+    const unknownLines = [];
+    for (const line of centerlines) {
+      if (line.towardA === true) towardLines.push(line);
+      else if (line.towardA === false) awayLines.push(line);
+      else unknownLines.push(line);
+    }
+    if (towardLines.length) {
+      dxf.setCurrentLayerName(centerTowardLayer);
+      for (const line of towardLines) {
+        addLine(toPoint(line.p0.x, line.p0.y), toPoint(line.p1.x, line.p1.y));
+      }
+    }
+    if (awayLines.length) {
+      dxf.setCurrentLayerName(centerAwayLayer);
+      for (const line of awayLines) {
+        addLine(toPoint(line.p0.x, line.p0.y), toPoint(line.p1.x, line.p1.y));
+      }
+    }
+    if (unknownLines.length) {
+      dxf.setCurrentLayerName(centerUnknownLayer);
+      for (const line of unknownLines) {
+        addLine(toPoint(line.p0.x, line.p0.y), toPoint(line.p1.x, line.p1.y));
+      }
+    }
+  }
+
+  return { dxf: dxf.stringify(), width: viewWidth, height: viewHeight, name };
+}
+
 export function buildSheetMetalFlatPatternSolids(solids, opts = {}) {
   const out = [];
   const list = Array.isArray(solids) ? solids : [];
@@ -2946,6 +3104,21 @@ export function buildSheetMetalFlatPatternSolids(solids, opts = {}) {
     });
   }
   return out;
+}
+
+export function buildSheetMetalFlatPatternDxfs(solids, opts = {}) {
+  const entries = [];
+  const list = Array.isArray(solids) ? solids : [];
+  for (const solid of list) {
+    if (!solid || typeof solid.getMesh !== 'function') continue;
+    const flatMesh = buildFlatPatternMesh(solid, opts);
+    if (!flatMesh) continue;
+    const baseName = String(solid.name || 'SHEET').trim() || 'SHEET';
+    const dxfInfo = buildDxfForFlatMesh(flatMesh, `${baseName} Flat Pattern`);
+    if (!dxfInfo || !dxfInfo.dxf) continue;
+    entries.push({ name: baseName, dxf: dxfInfo.dxf, width: dxfInfo.width, height: dxfInfo.height });
+  }
+  return entries;
 }
 
 export function buildSheetMetalFlatPatternDebugSteps(solids, opts = {}) {

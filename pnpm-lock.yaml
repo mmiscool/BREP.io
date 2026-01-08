@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@tarikjabiri/dxf':
+        specifier: ^2.8.9
+        version: 2.8.9
       jszip:
         specifier: ^3.10.1
         version: 3.10.1
@@ -469,6 +472,10 @@ packages:
     resolution: {integrity: sha512-UhTd8u31dXadv0MopwGgNOBpUVROFKWVQgAg5N1ESyCz8AuBcMqm4AuTjrwgQKGDfoFuz02EuMRHQIw/frmYKQ==}
     cpu: [x64]
     os: [win32]
+
+  '@tarikjabiri/dxf@2.8.9':
+    resolution: {integrity: sha512-ckBkEsWdlFTvqm2ARm23xX3EVouYsnNuZWS7P/oec1WCGTjzdd9jhmtQqyhh7TQSvQo4HunbDv4Vxiv07/8zsQ==}
+    engines: {node: '>=16', pnpm: '>=8'}
 
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
@@ -1108,6 +1115,8 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.53.3':
     optional: true
+
+  '@tarikjabiri/dxf@2.8.9': {}
 
   '@types/estree@1.0.8': {}
 
