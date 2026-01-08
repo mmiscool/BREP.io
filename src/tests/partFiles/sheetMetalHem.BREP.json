@@ -1,0 +1,734 @@
+{
+  "features": [
+    {
+      "type": "P",
+      "inputParams": {
+        "id": "P1",
+        "datum": null,
+        "orientation": "XY",
+        "offset_distance": 0,
+        "__open": false
+      },
+      "persistentData": {},
+      "timestamp": 1767840486366
+    },
+    {
+      "type": "S",
+      "inputParams": {
+        "id": "S2",
+        "sketchPlane": "P1",
+        "editSketch": null,
+        "dumpSketchDiagnostics": null,
+        "curveResolution": 32,
+        "__open": false
+      },
+      "persistentData": {
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0,
+              "y": 0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 20,
+              "y": 0,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": 20,
+              "y": 20,
+              "fixed": false
+            },
+            {
+              "id": 3,
+              "x": 0,
+              "y": 20,
+              "fixed": false
+            }
+          ],
+          "geometries": [
+            {
+              "id": 100,
+              "type": "line",
+              "points": [
+                0,
+                1
+              ],
+              "construction": false
+            },
+            {
+              "id": 101,
+              "type": "line",
+              "points": [
+                1,
+                2
+              ],
+              "construction": false
+            },
+            {
+              "id": 102,
+              "type": "line",
+              "points": [
+                2,
+                3
+              ],
+              "construction": false
+            },
+            {
+              "id": 103,
+              "type": "line",
+              "points": [
+                3,
+                0
+              ],
+              "construction": false
+            }
+          ],
+          "constraints": [
+            {
+              "id": 0,
+              "type": "⏚",
+              "points": [
+                0
+              ],
+              "status": "solved",
+              "previousPointValues": "[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true}]"
+            },
+            {
+              "id": 1,
+              "type": "⟺",
+              "points": [
+                3,
+                0
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 20,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":3,\"x\":0,\"y\":20,\"fixed\":false},{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true}]"
+            },
+            {
+              "id": 2,
+              "type": "⟺",
+              "points": [
+                0,
+                1
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 20,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":1,\"x\":20,\"y\":0,\"fixed\":false}]"
+            },
+            {
+              "id": 3,
+              "type": "⟂",
+              "points": [
+                0,
+                1,
+                3,
+                0
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 90,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":1,\"x\":20,\"y\":0,\"fixed\":false},{\"id\":3,\"x\":0,\"y\":20,\"fixed\":false},{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true}]"
+            },
+            {
+              "id": 4,
+              "type": "━",
+              "points": [
+                0,
+                1
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":1,\"x\":20,\"y\":0,\"fixed\":false}]"
+            },
+            {
+              "id": 5,
+              "type": "⟂",
+              "points": [
+                3,
+                2,
+                3,
+                0
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 90,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":3,\"x\":0,\"y\":20,\"fixed\":false},{\"id\":2,\"x\":20,\"y\":20,\"fixed\":false},{\"id\":3,\"x\":0,\"y\":20,\"fixed\":false},{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true}]"
+            },
+            {
+              "id": 6,
+              "type": "⟂",
+              "points": [
+                2,
+                1,
+                2,
+                3
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 90,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":2,\"x\":20,\"y\":20,\"fixed\":false},{\"id\":1,\"x\":20,\"y\":0,\"fixed\":false},{\"id\":2,\"x\":20,\"y\":20,\"fixed\":false},{\"id\":3,\"x\":0,\"y\":20,\"fixed\":false}]"
+            }
+          ]
+        },
+        "basis": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            1,
+            0
+          ],
+          "z": [
+            0,
+            0,
+            1
+          ],
+          "refName": "P1"
+        },
+        "lastSketchSignature": "{\"points\":[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":1,\"x\":20,\"y\":0,\"fixed\":false},{\"id\":2,\"x\":20,\"y\":20,\"fixed\":false},{\"id\":3,\"x\":0,\"y\":20,\"fixed\":false}],\"geometries\":[{\"id\":100,\"type\":\"line\",\"points\":[0,1],\"construction\":false},{\"id\":101,\"type\":\"line\",\"points\":[1,2],\"construction\":false},{\"id\":102,\"type\":\"line\",\"points\":[2,3],\"construction\":false},{\"id\":103,\"type\":\"line\",\"points\":[3,0],\"construction\":false}],\"constraints\":[{\"id\":0,\"type\":\"⏚\",\"points\":[0],\"status\":\"solved\",\"previousPointValues\":\"[{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true}]\"},{\"id\":1,\"type\":\"⟺\",\"points\":[3,0],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":20,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":3,\\\"x\\\":0,\\\"y\\\":20,\\\"fixed\\\":false},{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true}]\"},{\"id\":2,\"type\":\"⟺\",\"points\":[0,1],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":20,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true},{\\\"id\\\":1,\\\"x\\\":20,\\\"y\\\":0,\\\"fixed\\\":false}]\"},{\"id\":3,\"type\":\"⟂\",\"points\":[0,1,3,0],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":90,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true},{\\\"id\\\":1,\\\"x\\\":20,\\\"y\\\":0,\\\"fixed\\\":false},{\\\"id\\\":3,\\\"x\\\":0,\\\"y\\\":20,\\\"fixed\\\":false},{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true}]\"},{\"id\":4,\"type\":\"━\",\"points\":[0,1],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true},{\\\"id\\\":1,\\\"x\\\":20,\\\"y\\\":0,\\\"fixed\\\":false}]\"},{\"id\":5,\"type\":\"⟂\",\"points\":[3,2,3,0],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":90,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":3,\\\"x\\\":0,\\\"y\\\":20,\\\"fixed\\\":false},{\\\"id\\\":2,\\\"x\\\":20,\\\"y\\\":20,\\\"fixed\\\":false},{\\\"id\\\":3,\\\"x\\\":0,\\\"y\\\":20,\\\"fixed\\\":false},{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true}]\"},{\"id\":6,\"type\":\"⟂\",\"points\":[2,1,2,3],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":90,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":2,\\\"x\\\":20,\\\"y\\\":20,\\\"fixed\\\":false},{\\\"id\\\":1,\\\"x\\\":20,\\\"y\\\":0,\\\"fixed\\\":false},{\\\"id\\\":2,\\\"x\\\":20,\\\"y\\\":20,\\\"fixed\\\":false},{\\\"id\\\":3,\\\"x\\\":0,\\\"y\\\":20,\\\"fixed\\\":false}]\"}]}",
+        "lastSketchChanged": false,
+        "sketchDimOffsets": {
+          "1": {
+            "d": -5.086584559957327
+          },
+          "2": {
+            "d": -7.655568628843383
+          }
+        }
+      },
+      "timestamp": 1767840486371
+    },
+    {
+      "type": "SM.TAB",
+      "inputParams": {
+        "id": "SM.TAB3",
+        "profile": "S2",
+        "thickness": 1,
+        "placementMode": "forward",
+        "bendRadius": "2",
+        "consumeProfileSketch": true,
+        "boolean": {
+          "targets": [],
+          "operation": "NONE"
+        },
+        "__open": false,
+        "neutralFactor": 0.5
+      },
+      "persistentData": {
+        "sheetMetal": {
+          "baseType": "TAB",
+          "thickness": 1,
+          "bendRadius": 2,
+          "neutralFactor": 0.5,
+          "placementMode": "forward",
+          "signedThickness": 1,
+          "consumeProfileSketch": true,
+          "profileName": "S2:PROFILE"
+        }
+      },
+      "timestamp": 1767840486377
+    },
+    {
+      "type": "SM.F",
+      "inputParams": {
+        "id": "SM.F10",
+        "faces": [
+          "SM.TAB3:S2:G101_SW"
+        ],
+        "useOppositeCenterline": false,
+        "flangeLength": 10,
+        "flangeLengthReference": "outside",
+        "angle": 90,
+        "inset": "material_inside",
+        "reliefWidth": 0,
+        "bendRadius": 0,
+        "offset": 0,
+        "debugSkipUnion": false,
+        "__open": false
+      },
+      "persistentData": {
+        "sheetMetal": {
+          "baseType": "FLANGE",
+          "thickness": 1,
+          "bendRadius": 2,
+          "defaultBendRadius": 2,
+          "bendRadiusOverride": null,
+          "angleDegrees": 90,
+          "insetMode": "material_inside",
+          "useOppositeCenterline": false,
+          "offsetValue": -3
+        }
+      },
+      "timestamp": 1767840486453
+    },
+    {
+      "type": "SM.F",
+      "inputParams": {
+        "id": "SM.F11",
+        "faces": [
+          "SM.TAB3:S2:G102_SW"
+        ],
+        "useOppositeCenterline": true,
+        "flangeLength": 10,
+        "flangeLengthReference": "outside",
+        "angle": 90,
+        "inset": "bend_outside",
+        "reliefWidth": 0,
+        "bendRadius": 0,
+        "offset": 0,
+        "debugSkipUnion": false,
+        "__open": false
+      },
+      "persistentData": {
+        "sheetMetal": {
+          "baseType": "FLANGE",
+          "thickness": 1,
+          "bendRadius": 2,
+          "defaultBendRadius": 2,
+          "bendRadiusOverride": null,
+          "angleDegrees": 90,
+          "insetMode": "bend_outside",
+          "useOppositeCenterline": true,
+          "offsetValue": 0
+        }
+      },
+      "timestamp": 1767840486517
+    },
+    {
+      "type": "SM.F",
+      "inputParams": {
+        "id": "SM.F14",
+        "faces": [
+          "SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW"
+        ],
+        "useOppositeCenterline": false,
+        "flangeLength": 10,
+        "flangeLengthReference": "outside",
+        "angle": 90,
+        "inset": "material_inside",
+        "reliefWidth": 0,
+        "bendRadius": 0,
+        "offset": 0,
+        "debugSkipUnion": false,
+        "__open": true
+      },
+      "persistentData": {
+        "sheetMetal": {
+          "baseType": "FLANGE",
+          "thickness": 1,
+          "bendRadius": 2,
+          "defaultBendRadius": 2,
+          "bendRadiusOverride": null,
+          "angleDegrees": 90,
+          "insetMode": "material_inside",
+          "useOppositeCenterline": false,
+          "offsetValue": -3
+        }
+      },
+      "timestamp": 1767840486577
+    },
+    {
+      "type": "SM.HEM",
+      "inputParams": {
+        "id": "SM.HEM15",
+        "faces": [
+          "SM.F14:OFFSET:0:SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW_END_END"
+        ],
+        "useOppositeCenterline": false,
+        "flangeLength": "5",
+        "flangeLengthReference": "outside",
+        "angle": "180",
+        "inset": "material_inside",
+        "reliefWidth": 0,
+        "bendRadius": "0.001",
+        "offset": 0,
+        "debugSkipUnion": false,
+        "__open": true
+      },
+      "persistentData": {
+        "sheetMetal": {
+          "baseType": "HEM",
+          "thickness": 1,
+          "bendRadius": 0.001,
+          "defaultBendRadius": 2,
+          "bendRadiusOverride": 0.001,
+          "angleDegrees": 180,
+          "insetMode": "material_inside",
+          "useOppositeCenterline": false,
+          "offsetValue": -1.001
+        }
+      },
+      "timestamp": 1767840486684
+    }
+  ],
+  "idCounter": 15,
+  "expressions": "//Examples:\nx = 10 + 6; \ny = x * 2;",
+  "pmiViews": [
+    {
+      "viewName": "View 1",
+      "name": "View 1",
+      "camera": {
+        "version": 2,
+        "type": "OrthographicCamera",
+        "worldMatrix": [
+          -0.7071067811865478,
+          0.7071067811865478,
+          0,
+          0,
+          -0.40824829046386296,
+          -0.408248290463863,
+          0.816496580927726,
+          0,
+          0.5773502691896257,
+          0.5773502691896255,
+          0.5773502691896254,
+          0,
+          50.49792175352891,
+          43.2878074790918,
+          36.902730483518,
+          1
+        ],
+        "projection": {
+          "kind": "orthographic",
+          "left": -13.540144980018415,
+          "right": 13.540144980018415,
+          "top": 10,
+          "bottom": -10,
+          "near": 0,
+          "far": 89.05237095291655,
+          "zoom": 0.4135117070459204,
+          "view": {
+            "enabled": false
+          }
+        },
+        "position": {
+          "x": 50.49792175352891,
+          "y": 43.2878074790918,
+          "z": 36.902730483518
+        },
+        "quaternion": {
+          "x": 0.17591989660616122,
+          "y": 0.42470820027786693,
+          "z": 0.8204732385702833,
+          "w": 0.3398511429799874
+        },
+        "up": {
+          "x": 0,
+          "y": 0,
+          "z": 1
+        },
+        "zoom": 0.4135117070459204,
+        "near": 0,
+        "far": 89.05237095291655,
+        "layers": 1,
+        "target": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "controlsState": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "cameraMatrix": [
+            -0.7071067811865478,
+            0.7071067811865478,
+            0,
+            0,
+            -0.40824829046386296,
+            -0.408248290463863,
+            0.816496580927726,
+            0,
+            0.5773502691896257,
+            0.5773502691896255,
+            0.5773502691896254,
+            0,
+            50.49792175352891,
+            43.2878074790918,
+            36.902730483518,
+            1
+          ],
+          "cameraUp": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "cameraNear": 0,
+          "cameraFar": 89.05237095291655,
+          "cameraZoom": 0.4135117070459204,
+          "gizmoMatrix": [
+            2.4183112181850546,
+            0,
+            0,
+            0,
+            0,
+            2.4183112181850546,
+            0,
+            0,
+            0,
+            0,
+            2.4183112181850546,
+            0,
+            13.400017635649473,
+            6.189903361212377,
+            -0.19517363436142796,
+            1
+          ]
+        },
+        "userData": {
+          "preventRemove": true
+        }
+      },
+      "viewSettings": {
+        "wireframe": false
+      },
+      "annotations": [
+        {
+          "type": "linear",
+          "inputParams": {
+            "id": "DIM1",
+            "decimals": 3,
+            "targets": [
+              "SM.TAB3:S2:G103_SW|SM.TAB3:S2:PROFILE_START[0]"
+            ],
+            "planeRefName": "SM.TAB3:S2:PROFILE_START",
+            "alignment": "view",
+            "offset": -7.932889825156913,
+            "showExt": true,
+            "isReference": false,
+            "value": "20.000",
+            "labelWorld": [
+              -7.932889825156913,
+              7.958264544075703,
+              3.552713678800501e-15
+            ],
+            "type": "linear"
+          },
+          "persistentData": {
+            "labelWorld": [
+              -7.932889825156913,
+              7.958264544075703,
+              3.552713678800501e-15
+            ]
+          },
+          "enabled": true
+        },
+        {
+          "type": "linear",
+          "inputParams": {
+            "id": "DIM2",
+            "decimals": 3,
+            "targets": [
+              "SM.TAB3:S2:G102_SW|SM.TAB3:S2:PROFILE_START[0]"
+            ],
+            "planeRefName": "SM.TAB3:S2:PROFILE_START",
+            "alignment": "view",
+            "offset": -5.395351034868035,
+            "showExt": true,
+            "isReference": false,
+            "value": "0.000",
+            "labelWorld": [
+              8.358949790663528,
+              25.395351034868035,
+              0
+            ],
+            "type": "linear"
+          },
+          "persistentData": {
+            "labelWorld": [
+              8.358949790663528,
+              25.395351034868035,
+              0
+            ]
+          },
+          "enabled": true
+        },
+        {
+          "type": "linear",
+          "inputParams": {
+            "id": "DIM3",
+            "decimals": 3,
+            "targets": [
+              "SM.F10:OFFSET:0:SM.TAB3:S2:G101_SW_END|SM.TAB3:S2:G101_SW|SM.TAB3:S2:G102_SW[0]_RV[0]_SW|SM.F10:OFFSET:0:SM.TAB3:S2:G101_SW_END|SM.TAB3:S2:G101_SW|SM.TAB3:S2:PROFILE_END[0]_RV[0]_SW[0]"
+            ],
+            "planeRefName": "SM.F10:OFFSET:0:SM.TAB3:S2:G101_SW_END|SM.TAB3:S2:G101_SW|SM.TAB3:S2:PROFILE_START[0]_RV[0]_SW",
+            "alignment": "view",
+            "offset": 24.137432582873657,
+            "showExt": true,
+            "isReference": false,
+            "value": "7.000",
+            "labelWorld": [
+              20,
+              -4.137432582873657,
+              5.445658605495694
+            ],
+            "type": "linear"
+          },
+          "persistentData": {},
+          "enabled": true
+        },
+        {
+          "type": "linear",
+          "inputParams": {
+            "id": "DIM4",
+            "decimals": 3,
+            "targets": [
+              "SM.F14:OFFSET:0:SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW_END|SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW|SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:PROFILE_END[0]_RV[0]_SW[0]_RV[0]_SW|SM.F14:OFFSET:0:SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW_END|SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_RV[0]_SW[0]"
+            ],
+            "planeRefName": "SM.F14:OFFSET:0:SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW_END|SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_RV[0]_SW",
+            "alignment": "view",
+            "offset": -3.837187355076928,
+            "showExt": true,
+            "isReference": false,
+            "type": "linear",
+            "value": "5.999",
+            "labelWorld": [
+              -3.837187355076928,
+              27.34054293842167,
+              -3
+            ]
+          },
+          "persistentData": {},
+          "enabled": true
+        },
+        {
+          "type": "linear",
+          "inputParams": {
+            "id": "DIM5",
+            "decimals": 3,
+            "targets": [
+              "SM.HEM15:OFFSET:0:SM.F14:OFFSET:0:SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW_END_END_END|SM.F14:OFFSET:0:SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW_END_END|SM.F14:OFFSET:0:SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW_END|SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW|SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:PROFILE_END[0]_RV[0]_SW[0]_RV[0]_SW[0]_RV[0]_SW|SM.HEM15:OFFSET:0:SM.F14:OFFSET:0:SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW_END_END_END|SM.F14:OFFSET:0:SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW_END_END|SM.F14:OFFSET:0:SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW_END|SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_RV[0]_SW[0]_RV[0]_SW[0]"
+            ],
+            "planeRefName": "SM.HEM15:OFFSET:0:SM.F14:OFFSET:0:SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW_END_END_END|SM.F14:OFFSET:0:SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW_END_END|SM.F14:OFFSET:0:SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW_END|SM.F11:OFFSET:0:SM.TAB3:S2:G102_SW_END|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_SW|SM.TAB3:S2:G102_SW|SM.TAB3:S2:G103_SW[0]_RV[0]_RV[0]_SW[0]_RV[0]_SW",
+            "alignment": "view",
+            "offset": 2.415646110122193,
+            "showExt": true,
+            "isReference": false,
+            "type": "linear",
+            "value": "3.999",
+            "labelWorld": [
+              4.102457223845327,
+              28.21482550471635,
+              -4.315782360443372
+            ]
+          },
+          "persistentData": {},
+          "__open": true,
+          "enabled": true
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "SM.TAB3": {
+      "sheetMetalThickness": 1,
+      "sheetMetalBendRadius": 2,
+      "sheetMetalBaseType": "TAB",
+      "sheetMetalFeatureId": "SM.HEM15",
+      "sheetMetalExtra": {
+        "angleDegrees": 180,
+        "insetMode": "material_inside",
+        "useOppositeCenterline": false,
+        "offsetValue": -1.001,
+        "bendRadiusOverride": 0.001,
+        "bendRadiusUsed": 0.001,
+        "baseBendRadius": 2
+      },
+      "sheetMetalNeutralFactor": 0.5
+    },
+    "SM.CUTOUT6": {
+      "sheetMetalThickness": 1,
+      "sheetMetalBendRadius": 0.125,
+      "sheetMetalBaseType": "TAB",
+      "sheetMetalFeatureId": "SM.CUTOUT9",
+      "sheetMetalExtra": {
+        "sourceFeature": "CUTOUT"
+      }
+    },
+    "SM.CUTOUT9_CUTOUT_CUTTER": {
+      "sheetMetalThickness": 1,
+      "sheetMetalBendRadius": 0.125,
+      "sheetMetalBaseType": "TAB",
+      "sheetMetalFeatureId": "SM.CUTOUT9",
+      "sheetMetalExtra": {
+        "sourceFeature": "CUTOUT"
+      }
+    },
+    "SM.HEM13:BEND": {
+      "sheetMetalThickness": 1,
+      "sheetMetalBendRadius": 2,
+      "sheetMetalNeutralFactor": 0,
+      "sheetMetalBaseType": "HEM",
+      "sheetMetalFeatureId": "SM.HEM13",
+      "sheetMetalExtra": {
+        "angleDegrees": 180,
+        "insetMode": "material_inside",
+        "useOppositeCenterline": true,
+        "offsetValue": -1.0001,
+        "bendRadiusOverride": 0.0001,
+        "bendRadiusUsed": 0.0001,
+        "baseBendRadius": 2
+      }
+    },
+    "SM.HEM13:OFFSET:0": {
+      "sheetMetalThickness": 1,
+      "sheetMetalBendRadius": 2,
+      "sheetMetalNeutralFactor": 0,
+      "sheetMetalBaseType": "HEM",
+      "sheetMetalFeatureId": "SM.HEM13",
+      "sheetMetalExtra": {
+        "angleDegrees": 180,
+        "insetMode": "material_inside",
+        "useOppositeCenterline": true,
+        "offsetValue": -1.0001,
+        "bendRadiusOverride": 0.0001,
+        "bendRadiusUsed": 0.0001,
+        "baseBendRadius": 2
+      }
+    }
+  },
+  "assemblyConstraints": [],
+  "assemblyConstraintIdCounter": 0
+}

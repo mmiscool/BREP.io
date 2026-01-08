@@ -91,7 +91,7 @@ function _ensureFlatPatternUnfoldStyles() {
   const style = document.createElement('style');
   style.id = 'flat-unfold-styles';
   style.textContent = `
-      .flat-unfold-content { display:flex; flex-direction:column; gap:10px; padding:10px; width:100%; height:100%; box-sizing:border-box; color:#e5e7eb; }
+      .flat-unfold-content { display:flex; flex-direction:column; gap:10px; padding:10px; width:100%; height:100%; min-height:0; box-sizing:border-box; color:#e5e7eb; }
       .flat-unfold-row { display:flex; align-items:center; gap:8px; }
       .flat-unfold-label { min-width:70px; font-size:12px; color:#9aa0aa; }
       .flat-unfold-select, .flat-unfold-input { flex:1 1 auto; padding:6px 8px; border-radius:8px; background:#0b0e14; color:#e5e7eb; border:1px solid #374151; outline:none; font-size:12px; }
@@ -102,7 +102,7 @@ function _ensureFlatPatternUnfoldStyles() {
       .flat-unfold-slider { width: 100%; }
       .flat-unfold-step { font-size:12px; color:#cbd5f5; }
       .flat-unfold-hint { font-size:12px; color:#9aa0aa; }
-      .flat-unfold-detail { font-size:12px; color:#cfd6e4; background:rgba(8,10,14,.55); border:1px solid #1f2937; border-radius:8px; padding:8px; max-height:120px; overflow:auto; white-space:pre-wrap; line-height:1.35; }
+      .flat-unfold-detail { flex:1 1 auto; min-height:0; font-size:12px; color:#cfd6e4; background:rgba(8,10,14,.55); border:1px solid #1f2937; border-radius:8px; padding:8px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; line-height:1.35; }
       .flat-unfold-empty { font-size:12px; color:#9aa0aa; }
     `;
   document.head.appendChild(style);
@@ -184,9 +184,15 @@ class FlatPatternUnfoldPanel {
     btnExportDxf.textContent = 'Export DXF';
     btnExportDxf.addEventListener('click', () => this._exportDxf());
 
+    const btnDebugJson = document.createElement('button');
+    btnDebugJson.className = 'flat-unfold-btn';
+    btnDebugJson.textContent = 'Copy Debug JSON';
+    btnDebugJson.addEventListener('click', () => this._copyDebugJson());
+
     fw.addHeaderAction(btnFit);
     fw.addHeaderAction(btnExport);
     fw.addHeaderAction(btnExportDxf);
+    fw.addHeaderAction(btnDebugJson);
 
     const content = document.createElement('div');
     content.className = 'flat-unfold-content';
@@ -269,6 +275,7 @@ class FlatPatternUnfoldPanel {
       slider,
       detail,
       empty,
+      btnDebugJson,
     };
   }
 
@@ -282,6 +289,7 @@ class FlatPatternUnfoldPanel {
     this._stopPlayback();
     this._clearEdgeGroup();
     this._clearHighlightedFace();
+    this._clearVisualizationMeshes();
     this.aFaces = [];
     this.aEdgeNames = new Set();
     this.aEdgeLabels = new Set();
@@ -305,6 +313,9 @@ class FlatPatternUnfoldPanel {
       this._setEmpty('No sheet metal flat pattern steps available.');
       return;
     }
+
+    // Display visualization meshes for A faces
+    this._renderVisualizationMeshes(entries);
 
     for (const entry of entries) {
       const opt = document.createElement('option');
@@ -548,6 +559,22 @@ class FlatPatternUnfoldPanel {
       return;
     }
     const step = this.steps[this.stepIndex];
+    
+    // If this is the first step (offset calculation), don't render paths
+    // Just show the visualization meshes and offset info
+    if (step?.offsetInfo) {
+      this._updateStepLabel(step?.label || 'A-Face Offset', this.stepIndex + 1, this.steps.length);
+      if (this.ui.slider) {
+        this.ui.slider.max = String(Math.max(0, this.steps.length - 1));
+        this.ui.slider.value = String(this.stepIndex);
+      }
+      this._clearEdgeGroup();
+      this._clearHighlightedFace();
+      this._updateStepDetail(step, null, null);
+      if (shouldFit) this._fitToCurrent();
+      return;
+    }
+    
     this._updateStepLabel(step?.label || 'Step', this.stepIndex + 1, this.steps.length);
     if (this.ui.slider) {
       this.ui.slider.max = String(Math.max(0, this.steps.length - 1));
@@ -558,7 +585,7 @@ class FlatPatternUnfoldPanel {
     const prevPaths = prevStep ? this._filterPathsToAEdges(prevStep?.paths || []) : [];
     const highlightLabels = this._collectNewEdgeLabelsFromPaths(stepPaths, prevPaths);
     const highlightFaceId = this._resolveHighlightFaceId(step);
-    this._renderStepPaths(stepPaths, { highlightLabels, highlightFaceId });
+    this._renderStepPaths(stepPaths, { highlightLabels, highlightFaceId, showEmptyMessage: true });
     this._highlightStepFace(step);
     this._updateStepDetail(step, prevStep, highlightLabels, stepPaths);
     if (shouldFit) this._fitToCurrent();
@@ -604,6 +631,37 @@ class FlatPatternUnfoldPanel {
       this.ui.detail.textContent = '';
       return;
     }
+    
+    const lines = [];
+    
+    // Check if this is the offset calculation step
+    if (step.offsetInfo) {
+      const info = step.offsetInfo;
+      lines.push(`=== A-FACE OFFSET CALCULATION ===`);
+      lines.push('');
+      lines.push(`Neutral Factor (k-factor): ${info.neutralFactor.toFixed(4)}`);
+      lines.push(`Sheet Thickness: ${info.thickness.toFixed(3)} mm`);
+      lines.push('');
+      lines.push(`📐 OFFSET DISTANCE: ${info.offsetDistance.toFixed(4)} mm`);
+      lines.push('');
+      lines.push(`Formula: Offset = neutralFactor × thickness`);
+      lines.push(`         ${info.offsetDistance.toFixed(4)} = ${info.neutralFactor.toFixed(4)} × ${info.thickness.toFixed(3)}`);
+      lines.push('');
+      lines.push(`A-Faces to Offset: ${info.aFaceCount}`);
+      lines.push('');
+      lines.push(`This offset accounts for bend allowance in the flat pattern.`);
+      lines.push(`Each triangle is offset along its normal by this distance.`);
+      lines.push('');
+      lines.push(`VISUALIZATION MESHES:`);
+      lines.push(`🔴 Red = Original A-faces (planar)`);
+      lines.push(`🔵 Blue = Offset A-faces (planar)`);
+      lines.push(`🟢 Green = Original Bend-faces (cylindrical)`);
+      lines.push(`🟡 Yellow = Offset Bend-faces (cylindrical)`);
+      
+      this.ui.detail.textContent = lines.join('\n');
+      return;
+    }
+    
     const solid = this.activeSolid;
     const faceId = this._resolveHighlightFaceId(step);
     const faceName = solid ? this._resolveFaceNameFromStep(step, solid, faceId) : null;
@@ -622,9 +680,16 @@ class FlatPatternUnfoldPanel {
     );
     const paths = Array.isArray(pathsOverride) ? pathsOverride : (Array.isArray(step.paths) ? step.paths : []);
     const newPaths = paths.filter((path) => highlightSet.has(path?.edgeLabel || path?.name));
-    const lines = [];
+    
     lines.push(`Purpose: ${purpose}`);
-    if (newPaths.length) {
+    
+    // Check if no paths at all were generated
+    if (!paths || paths.length === 0) {
+      lines.push('⚠️ WARNING: No flat pattern geometry generated for this step.');
+      lines.push('This indicates a problem with the unfolding algorithm.');
+      lines.push('The face could not be unfolded to 2D coordinates.');
+      lines.push('Check the Copy Debug JSON for detailed information.');
+    } else if (newPaths.length) {
       lines.push(`Curves created (${newPaths.length}):`);
       for (const path of newPaths) {
         const label = path?.edgeLabel || path?.name || 'edge';
@@ -636,8 +701,202 @@ class FlatPatternUnfoldPanel {
       }
     } else {
       lines.push('Curves created: none (no new edges).');
+      lines.push(`Total paths in step: ${paths.length}`);
+      if (this.stepIndex > 0) {
+        lines.push('(All edges were already present in previous steps)');
+      }
+      // Get face metadata to provide more context
+      if (faceName && solid) {
+        const face = this._findFaceByName(solid, faceName);
+        if (face) {
+          try {
+            const faceMeta = typeof face.getMetadata === 'function' ? face.getMetadata() : null;
+            if (faceMeta?.type === 'cylindrical') {
+              const radius = faceMeta.radius || faceMeta.pmiRadiusOverride || faceMeta.pmiRadius;
+              if (Number.isFinite(radius)) {
+                lines.push(`Note: Cylindrical face (R=${this._formatNumber(radius)})`);
+                lines.push('Bend edges may be shared with adjacent planar faces.');
+              }
+            }
+          } catch {}
+        }
+      }
     }
     this.ui.detail.textContent = lines.join('\n');
+  }
+
+  _basisToPlain(basis) {
+    if (!basis) return null;
+    const toArray = (value) => {
+      if (!value) return null;
+      if (Array.isArray(value)) return value.slice(0, 3);
+      if (typeof value.x === 'number' && typeof value.y === 'number' && typeof value.z === 'number') {
+        return [value.x, value.y, value.z];
+      }
+      return null;
+    };
+    return {
+      origin: toArray(basis.origin),
+      uAxis: toArray(basis.uAxis),
+      vAxis: toArray(basis.vAxis),
+      normal: toArray(basis.normal),
+    };
+  }
+
+  _summarizePath(path) {
+    if (!path) return null;
+    const pts = Array.isArray(path.points) ? path.points : [];
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const pt of pts) {
+      if (!pt) continue;
+      if (pt.x < minX) minX = pt.x;
+      if (pt.y < minY) minY = pt.y;
+      if (pt.x > maxX) maxX = pt.x;
+      if (pt.y > maxY) maxY = pt.y;
+    }
+    const bbox = Number.isFinite(minX)
+      ? { minX, minY, maxX, maxY }
+      : null;
+    return {
+      edgeLabel: path.edgeLabel || path.name || null,
+      name: path.name || null,
+      faceId: Number.isFinite(path.faceId) ? path.faceId : null,
+      faceName: path.faceName || null,
+      faceLabel: path.faceLabel || null,
+      closed: !!path.closed,
+      shared: !!path.shared,
+      otherFaceId: Number.isFinite(path.otherFaceId) ? path.otherFaceId : null,
+      color: path.color || null,
+      strokeWidth: Number.isFinite(path.strokeWidth) ? path.strokeWidth : null,
+      pointCount: pts.length,
+      length: this._pathLength(pts, !!path.closed),
+      bbox,
+      points: pts.map((pt) => ({ x: pt.x, y: pt.y })),
+      indices: Array.isArray(path.indices) ? path.indices.slice() : null,
+    };
+  }
+
+  _buildDebugInfo() {
+    const entry = this.entries?.[this.activeIndex];
+    const step = this.steps?.[this.stepIndex];
+    if (!entry || !step) return null;
+    const prevStep = this.stepIndex > 0 ? this.steps[this.stepIndex - 1] : null;
+    const rawPaths = Array.isArray(step.paths) ? step.paths : [];
+    const filteredPaths = this._filterPathsToAEdges(rawPaths);
+    const prevPaths = prevStep ? this._filterPathsToAEdges(prevStep.paths || []) : [];
+    const highlightLabels = this._collectNewEdgeLabelsFromPaths(filteredPaths, prevPaths);
+    const newPaths = filteredPaths.filter((path) => highlightLabels.has(path?.edgeLabel || path?.name));
+    const highlightFaceId = this._resolveHighlightFaceId(step);
+    const solid = this.activeSolid;
+    const faceName = solid ? this._resolveFaceNameFromStep(step, solid, highlightFaceId) : null;
+    const face = faceName ? this._findFaceByName(solid, faceName) : null;
+    const faceType = face ? resolveSheetMetalFaceType(face) : null;
+    let faceMeta = null;
+    try { faceMeta = typeof face?.getMetadata === 'function' ? face.getMetadata() : null; } catch { }
+    let solidFaceMeta = null;
+    if (solid && faceName && typeof solid.getFaceMetadata === 'function') {
+      try { solidFaceMeta = solid.getFaceMetadata(faceName); } catch { }
+    }
+    const newEdgeLabels = Array.from(highlightLabels);
+    const filteredEdgeLabels = filteredPaths.map((path) => path?.edgeLabel || path?.name).filter(Boolean);
+    const rawEdgeLabels = rawPaths.map((path) => path?.edgeLabel || path?.name).filter(Boolean);
+
+    return {
+      version: 1,
+      timestamp: new Date().toISOString(),
+      solid: {
+        name: this.activeSolid?.name || entry?.name || null,
+        index: this.activeIndex,
+        sourceIndex: Number.isFinite(entry?.sourceIndex) ? entry.sourceIndex : null,
+        thickness: Number.isFinite(entry?.thickness) ? entry.thickness : null,
+      },
+      step: {
+        index: this.stepIndex,
+        total: this.steps.length,
+        label: step.label || null,
+        faceId: Number.isFinite(highlightFaceId) ? highlightFaceId : null,
+        faceName,
+        addedFaceId: Number.isFinite(step.addedFaceId) ? step.addedFaceId : null,
+        addedFaceName: step.addedFaceName || null,
+        baseFaceId: Number.isFinite(step.baseFaceId) ? step.baseFaceId : null,
+        baseBasis: this._basisToPlain(step.baseBasis),
+        basis: this._basisToPlain(step.basis),
+      },
+      face: {
+        name: faceName,
+        id: Number.isFinite(highlightFaceId) ? highlightFaceId : null,
+        sheetMetalFaceType: faceType || null,
+        metadata: faceMeta,
+        solidMetadata: solidFaceMeta,
+      },
+      flat: {
+        basis: this._basisToPlain(this.flatBasis),
+        offset: { ...this.flatOffset },
+      },
+      filters: {
+        aFaceLabels: Array.from(this.aFaceLabels || []),
+        aEdgeLabels: Array.from(this.aEdgeLabels || []),
+        aEdgeNames: Array.from(this.aEdgeNames || []),
+      },
+      paths: {
+        rawCount: rawPaths.length,
+        filteredCount: filteredPaths.length,
+        newCount: newPaths.length,
+        rawEdgeLabels,
+        filteredEdgeLabels,
+        newEdgeLabels,
+        raw: rawPaths.map((path) => this._summarizePath(path)).filter(Boolean),
+        filtered: filteredPaths.map((path) => this._summarizePath(path)).filter(Boolean),
+        newlyAdded: newPaths.map((path) => this._summarizePath(path)).filter(Boolean),
+      },
+    };
+  }
+
+  async _copyDebugJson() {
+    const debugInfo = this._buildDebugInfo();
+    if (!debugInfo) {
+      this._setEmpty('No debug data available.');
+      return;
+    }
+    const json = JSON.stringify(debugInfo, null, 2);
+    const copied = await this._copyText(json);
+    const btn = this.ui.btnDebugJson;
+    if (copied) {
+      if (btn) {
+        const prev = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = prev; }, 900);
+      } else {
+        try { this.viewer?._toast?.('Debug JSON copied'); } catch { }
+      }
+    } else {
+      this._setEmpty('Failed to copy debug JSON.');
+    }
+  }
+
+  async _copyText(text) {
+    if (typeof text !== 'string' || !text.length) return false;
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch { }
+    try {
+      const area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', 'true');
+      area.style.position = 'fixed';
+      area.style.left = '-9999px';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(area);
+      return ok;
+    } catch { }
+    return false;
   }
 
   _collectEdgeLabels(paths) {
@@ -853,11 +1112,18 @@ class FlatPatternUnfoldPanel {
   _renderStepPaths(paths, opts = {}) {
     this._ensureEdgeGroup();
     this._clearEdgeGroup();
-    if (!Array.isArray(paths) || !paths.length) return;
+    if (!Array.isArray(paths) || !paths.length) {
+      // Show message if no paths were generated for this step
+      if (opts.showEmptyMessage) {
+        this._setEmpty('No flat pattern geometry generated for this step.');
+      }
+      return;
+    }
     const basis = this.flatBasis;
     const useBasis = !!(basis && basis.origin && basis.uAxis && basis.vAxis);
     const highlightLabels = opts.highlightLabels instanceof Set ? opts.highlightLabels : new Set();
     const highlightFaceId = Number.isFinite(opts.highlightFaceId) ? opts.highlightFaceId : null;
+    let renderedCount = 0;
     for (const path of paths) {
       const pts = Array.isArray(path?.points) ? path.points : [];
       if (pts.length < 2) continue;
@@ -910,6 +1176,11 @@ class FlatPatternUnfoldPanel {
       const line = new Line2(geom, mat);
       line.renderOrder = isHighlight ? 3 : 2;
       this.edgeGroup.add(line);
+      renderedCount++;
+    }
+    // Show message if no valid paths were rendered
+    if (renderedCount === 0 && opts.showEmptyMessage) {
+      this._setEmpty('No valid flat pattern geometry generated for this step.');
     }
     try { this.edgeGroup.updateMatrixWorld(true); } catch { }
     try { this.viewer?.render?.(); } catch { }
@@ -932,6 +1203,179 @@ class FlatPatternUnfoldPanel {
       try { child.geometry?.dispose?.(); } catch { }
       try { child.material?.dispose?.(); } catch { }
     }
+  }
+
+  _renderVisualizationMeshes(entries) {
+    // Clear any existing visualization meshes
+    this._clearVisualizationMeshes();
+    
+    if (!entries || !entries.length) {
+      console.log('[FlatPattern] No entries for visualization');
+      return;
+    }
+    
+    const scene = this._getScene();
+    if (!scene) {
+      console.log('[FlatPattern] No scene available for visualization');
+      return;
+    }
+    
+    this.visualizationMeshes = [];
+    let meshCount = 0;
+    
+    for (const entry of entries) {
+      if (!entry.visualizationMeshes || !entry.visualizationMeshes.length) {
+        console.log(`[FlatPattern] Entry "${entry.name}" has no visualization meshes`);
+        continue;
+      }
+      
+      console.log(`[FlatPattern] Rendering ${entry.visualizationMeshes.length} visualization meshes for "${entry.name}"`);
+      
+      for (const meshData of entry.visualizationMeshes) {
+        console.log(`[FlatPattern]   - ${meshData.name}: ${meshData.triangles.length} triangles, ${meshData.positions.length / 3} vertices`);
+        
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(meshData.positions, 3));
+        
+        // Convert triangles to indices
+        const indices = [];
+        for (const tri of meshData.triangles) {
+          indices.push(tri[0], tri[1], tri[2]);
+        }
+        geometry.setIndex(indices);
+        geometry.computeVertexNormals();
+        geometry.computeBoundingBox();
+        geometry.computeBoundingSphere();
+        
+        const material = new THREE.MeshStandardMaterial({
+          color: new THREE.Color(meshData.color[0], meshData.color[1], meshData.color[2]),
+          transparent: true,
+          opacity: meshData.name.includes('Offset A Faces') ? 0.8 : 0.3, // Higher opacity for offset A faces
+          side: THREE.DoubleSide,
+          depthTest: true,
+          depthWrite: false,
+          polygonOffset: true,
+          polygonOffsetFactor: -2,
+          polygonOffsetUnits: -2,
+          emissive: new THREE.Color(meshData.color[0], meshData.color[1], meshData.color[2]),
+          emissiveIntensity: 0.2,
+        });
+        
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.name = `VisualizationMesh_${meshData.name.replace(/\s/g, '_')}`;
+        mesh.renderOrder = 1; // Low order so diagnostic tools render after
+        mesh.userData = {
+          tool: 'flat-pattern-unfold',
+          kind: 'visualization',
+          vizName: meshData.name,
+        };
+        
+        scene.add(mesh);
+        this.visualizationMeshes.push(mesh);
+        meshCount++;
+      }
+      
+      // Render diagnostic rays if present
+      if (entry.visualizationMeshes?.[0]?.diagnosticRays) {
+        const rayData = entry.visualizationMeshes[0].diagnosticRays;
+        console.log(`[FlatPattern] Rendering ${rayData.length} diagnostic rays`);
+        
+        for (const ray of rayData) {
+          // Create ray line
+          const rayEnd = [
+            ray.origin[0] + ray.direction[0] * ray.length,
+            ray.origin[1] + ray.direction[1] * ray.length,
+            ray.origin[2] + ray.direction[2] * ray.length,
+          ];
+          
+          const rayGeometry = new THREE.BufferGeometry();
+          rayGeometry.setAttribute('position', new THREE.BufferAttribute(
+            new Float32Array([...ray.origin, ...rayEnd]), 3
+          ));
+          
+          const rayColor = ray.hitsOriginal && ray.hitsOffsetPositive ? 0x00ff00 : 0xff0000;
+          const rayMaterial = new THREE.LineBasicMaterial({ 
+            color: rayColor,
+            linewidth: 3,
+            depthTest: false,
+            depthWrite: false,
+          });
+          
+          const rayLine = new THREE.Line(rayGeometry, rayMaterial);
+          rayLine.name = `DiagnosticRay_${ray.faceId}`;
+          rayLine.renderOrder = 9999;
+          scene.add(rayLine);
+          this.visualizationMeshes.push(rayLine);
+          
+          // Create sphere at ray origin (blue)
+          const originGeometry = new THREE.SphereGeometry(0.02);
+          const originMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0x0000ff,
+            depthTest: false,
+            depthWrite: false,
+          });
+          const originSphere = new THREE.Mesh(originGeometry, originMaterial);
+          originSphere.position.set(ray.origin[0], ray.origin[1], ray.origin[2]);
+          originSphere.renderOrder = 10000;
+          scene.add(originSphere);
+          this.visualizationMeshes.push(originSphere);
+          
+          // Create sphere at original hit point (green)
+          if (ray.originalHitPoint) {
+            const hitGeometry = new THREE.SphereGeometry(0.015);
+            const hitMaterial = new THREE.MeshBasicMaterial({ 
+              color: 0x00ff00,
+              depthTest: false,
+              depthWrite: false,
+            });
+            const hitSphere = new THREE.Mesh(hitGeometry, hitMaterial);
+            hitSphere.position.set(
+              ray.originalHitPoint[0], 
+              ray.originalHitPoint[1], 
+              ray.originalHitPoint[2]
+            );
+            hitSphere.renderOrder = 10000;
+            scene.add(hitSphere);
+            this.visualizationMeshes.push(hitSphere);
+          }
+          
+          // Create sphere at offset hit point (yellow)
+          if (ray.offsetHitPoint) {
+            const offsetGeometry = new THREE.SphereGeometry(0.015);
+            const offsetMaterial = new THREE.MeshBasicMaterial({ 
+              color: 0xffff00,
+              depthTest: false,
+              depthWrite: false,
+            });
+            const offsetSphere = new THREE.Mesh(offsetGeometry, offsetMaterial);
+            offsetSphere.position.set(
+              ray.offsetHitPoint[0], 
+              ray.offsetHitPoint[1], 
+              ray.offsetHitPoint[2]
+            );
+            offsetSphere.renderOrder = 10000;
+            scene.add(offsetSphere);
+            this.visualizationMeshes.push(offsetSphere);
+          }
+        }
+      }
+    }
+    
+    console.log(`[FlatPattern] Added ${meshCount} visualization meshes to scene`);
+    try { this.viewer?.render?.(); } catch { }
+  }
+
+  _clearVisualizationMeshes() {
+    if (!this.visualizationMeshes || !this.visualizationMeshes.length) return;
+    
+    console.log(`[FlatPattern] Clearing ${this.visualizationMeshes.length} visualization meshes`);
+    const scene = this._getScene();
+    for (const mesh of this.visualizationMeshes) {
+      try { scene?.remove(mesh); } catch { }
+      try { mesh.geometry?.dispose?.(); } catch { }
+      try { mesh.material?.dispose?.(); } catch { }
+    }
+    this.visualizationMeshes = [];
   }
 
   _ensureSolidFaces(solid) {

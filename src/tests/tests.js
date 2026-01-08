@@ -32,6 +32,7 @@ import { test_sketch_openLoop, afterRun_sketch_openLoop } from './test_sketch_op
 import { test_Fillet_NonClosed, afterRun_Fillet_NonClosed } from './test_fillet_nonClosed.js';
 import { test_history_features_basic, afterRun_history_features_basic } from './test_history_features_basic.js';
 import { generate3MF } from '../exporters/threeMF.js';
+import { buildSheetMetalFlatPatternSvgs } from '../exporters/sheetMetalFlatPattern.js';
 import {
     test_hole_through,
     afterRun_hole_through,
@@ -101,6 +102,7 @@ async function registerPartFileTests() {
                 const baseName = String(file).replace(/\.[^.]+$/, '');
                 const safeName = baseName.replace(/[^a-zA-Z0-9._-]+/g, '_').substring(0, 100);
                 const testName = `import_part_${safeName}`;
+                const isSheetMetalHem = file.toLowerCase() === 'sheetmetalhem.brep.json';
 
                 const importTest = async function (partHistory) {
                     // Read file and load into PartHistory
@@ -123,8 +125,27 @@ async function registerPartFileTests() {
                     // runHistory will be called by runSingleTest()
                 };
                 try { Object.defineProperty(importTest, 'name', { value: testName, configurable: true }); } catch {}
+
+                const afterRun = isSheetMetalHem ? async function (partHistory) {
+                    const solids = (partHistory.scene?.children || []).filter(o => o && o.type === 'SOLID' && typeof o.getMesh === 'function');
+                    const svgEntries = buildSheetMetalFlatPatternSvgs(solids, {
+                        metadataManager: partHistory?.metadataManager || null,
+                    });
+                    if (!svgEntries.length) {
+                        console.warn(`[runTests] No flat pattern SVG produced for ${testName}`);
+                        return;
+                    }
+                    const exportPath = `./tests/results/${testName}/`;
+                    for (const entry of svgEntries) {
+                        const safeEntryName = sanitizeFileName(entry.name || 'SHEET');
+                        const outPath = path.join(exportPath, `${safeEntryName}_flat-pattern.svg`);
+                        writeFile(outPath, entry.svg);
+                    }
+                } : null;
+
                 testFunctions.push({
                     test: importTest,
+                    afterRun,
                     printArtifacts: false,
                     exportFaces: true,
                     exportSolids: true,
