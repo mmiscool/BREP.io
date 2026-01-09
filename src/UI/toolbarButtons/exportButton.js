@@ -1,7 +1,5 @@
 import JSZip from 'jszip';
 import { generate3MF } from '../../exporters/threeMF.js';
-import { buildSheetMetalFlatPatternSvgs } from '../../exporters/sheetMetalFlatPattern.js';
-import { FloatingWindow } from '../FloatingWindow.js';
 
 async function _captureThumbnail(viewer, size = 256) {
   try {
@@ -163,101 +161,6 @@ function _safeName(raw, fallback = 'solid') {
   return (s.length ? s : fallback).replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80);
 }
 
-function _ensureFlatPatternDebugStyles() {
-  if (document.getElementById('flat-pattern-debug-window-styles')) return;
-  const style = document.createElement('style');
-  style.id = 'flat-pattern-debug-window-styles';
-  style.textContent = `
-      .flat-debug-content { display:flex; flex-direction:column; gap:12px; padding:8px; width:100%; height:100%; box-sizing:border-box; overflow:auto; }
-      .flat-debug-title { font-size:13px; font-weight:700; color:#e5e7eb; }
-      .flat-debug-section { display:flex; flex-direction:column; gap:8px; }
-      .flat-debug-section-title { font-size:12px; color:#9aa0aa; text-transform:none; letter-spacing:.2px; }
-      .flat-debug-step { padding:10px; border:1px solid #1f2937; border-radius:8px; background:#111827; display:flex; flex-direction:column; gap:6px; }
-      .flat-debug-step-label { font-size:12px; color:#cbd5f5; }
-      .flat-debug-svg { background:#fff; border-radius:6px; padding:6px; display:block; max-width:100%; overflow:auto; height:300px; }
-      .flat-debug-svg svg { display:block; max-width:100%; width:100%; height:100%; }
-      .flat-debug-empty { font-size:12px; color:#9aa0aa; }
-    `;
-  document.head.appendChild(style);
-}
-
-function _ensureFlatPatternDebugPanel(viewer, title) {
-  if (!viewer) return null;
-  _ensureFlatPatternDebugStyles();
-  if (viewer.__flatPatternDebugPanel && viewer.__flatPatternDebugPanel.window) {
-    const panel = viewer.__flatPatternDebugPanel;
-    try { panel.window.setTitle(title || 'Flat Pattern Debug'); } catch {}
-    try { panel.root.style.display = 'flex'; } catch {}
-    try { panel.window.bringToFront(); } catch {}
-    return panel;
-  }
-  let panel = null;
-  const height = Math.max(260, Math.floor((window?.innerHeight || 800) * 0.7));
-  const fw = new FloatingWindow({
-    title: title || 'Flat Pattern Debug',
-    width: 760,
-    height,
-    right: 12,
-    top: 80,
-    shaded: false,
-    onClose: () => {
-      if (panel && panel.root) {
-        try { panel.root.style.display = 'none'; } catch {}
-      }
-      if (panel) panel.open = false;
-    },
-  });
-  const content = document.createElement('div');
-  content.className = 'flat-debug-content';
-  fw.content.appendChild(content);
-  panel = { window: fw, root: fw.root, content, open: true };
-  viewer.__flatPatternDebugPanel = panel;
-  return panel;
-}
-
-function _renderFlatPatternDebugPanel(panel, entries, baseName) {
-  if (!panel || !panel.content) return;
-  panel.content.innerHTML = '';
-  const title = document.createElement('div');
-  title.className = 'flat-debug-title';
-  title.textContent = baseName ? `${baseName} Flat Pattern Debug` : 'Flat Pattern Debug';
-  panel.content.appendChild(title);
-
-  let hasSteps = false;
-  if (Array.isArray(entries)) {
-    for (const entry of entries) {
-      if (!entry || !Array.isArray(entry.debug) || !entry.debug.length) continue;
-      hasSteps = true;
-      const section = document.createElement('div');
-      section.className = 'flat-debug-section';
-      const sectionTitle = document.createElement('div');
-      sectionTitle.className = 'flat-debug-section-title';
-      sectionTitle.textContent = entry.name || 'Flat Pattern';
-      section.appendChild(sectionTitle);
-      for (const step of entry.debug) {
-        const stepWrap = document.createElement('div');
-        stepWrap.className = 'flat-debug-step';
-        const label = document.createElement('div');
-        label.className = 'flat-debug-step-label';
-        label.textContent = step.label || 'Step';
-        const svgWrap = document.createElement('div');
-        svgWrap.className = 'flat-debug-svg';
-        const cleaned = String(step.svg || '').replace(/^<\\?xml[^>]*>\\s*/i, '');
-        svgWrap.innerHTML = cleaned;
-        stepWrap.appendChild(label);
-        stepWrap.appendChild(svgWrap);
-        section.appendChild(stepWrap);
-      }
-      panel.content.appendChild(section);
-    }
-  }
-  if (!hasSteps) {
-    const empty = document.createElement('div');
-    empty.className = 'flat-debug-empty';
-    empty.textContent = 'No flat pattern debug steps available.';
-    panel.content.appendChild(empty);
-  }
-}
 
 function _openExportDialog(viewer) {
   _ensureExportDialogStyles();
@@ -307,47 +210,12 @@ function _openExportDialog(viewer) {
   try { selUnit.value = 'millimeter'; } catch {}
   rowUnit.appendChild(labUnit); rowUnit.appendChild(selUnit);
 
-  // Flat pattern options (3MF only)
-  const rowFlat = document.createElement('div'); rowFlat.className = 'exp-row';
-  const labFlat = document.createElement('div'); labFlat.className = 'exp-label'; labFlat.textContent = 'Flat';
-  const chkFlat = document.createElement('input'); chkFlat.type = 'checkbox'; chkFlat.checked = true;
-  const flatWrap = document.createElement('label');
-  flatWrap.style.display = 'flex';
-  flatWrap.style.alignItems = 'center';
-  flatWrap.style.gap = '6px';
-  flatWrap.appendChild(chkFlat);
-  flatWrap.appendChild(document.createTextNode('Include flat pattern'));
-  rowFlat.appendChild(labFlat); rowFlat.appendChild(flatWrap);
-
-  const rowNeutral = document.createElement('div'); rowNeutral.className = 'exp-row';
-  const labNeutral = document.createElement('div'); labNeutral.className = 'exp-label'; labNeutral.textContent = 'Neutral';
-  const inpNeutral = document.createElement('input'); inpNeutral.className = 'exp-input';
-  inpNeutral.type = 'number'; inpNeutral.min = '0'; inpNeutral.max = '1'; inpNeutral.step = '0.01';
-  inpNeutral.placeholder = 'auto';
-  inpNeutral.value = '';
-  rowNeutral.appendChild(labNeutral); rowNeutral.appendChild(inpNeutral);
-
-  const rowDebug = document.createElement('div'); rowDebug.className = 'exp-row';
-  const labDebug = document.createElement('div'); labDebug.className = 'exp-label'; labDebug.textContent = 'Debug';
-  const chkDebug = document.createElement('input'); chkDebug.type = 'checkbox'; chkDebug.checked = false;
-  const debugWrap = document.createElement('label');
-  debugWrap.style.display = 'flex';
-  debugWrap.style.alignItems = 'center';
-  debugWrap.style.gap = '6px';
-  debugWrap.appendChild(chkDebug);
-  debugWrap.appendChild(document.createTextNode('Show flat pattern steps'));
-  rowDebug.appendChild(labDebug); rowDebug.appendChild(debugWrap);
-
   // Toggle unit row visibility based on format
   const updateUnitVisibility = () => {
     const fmt = selFmt.value;
     rowUnit.style.display = (fmt === 'stl' || fmt === '3mf' || fmt === 'obj') ? 'flex' : 'none';
-    rowFlat.style.display = (fmt === '3mf') ? 'flex' : 'none';
-    rowNeutral.style.display = (fmt === '3mf' && chkFlat.checked) ? 'flex' : 'none';
-    rowDebug.style.display = (fmt === '3mf' && chkFlat.checked) ? 'flex' : 'none';
   };
   selFmt.addEventListener('change', updateUnitVisibility);
-  chkFlat.addEventListener('change', updateUnitVisibility);
   updateUnitVisibility();
 
   const hint = document.createElement('div'); hint.className = 'exp-hint'; hint.textContent = '3MF includes feature history when available. STL/OBJ export triangulated meshes. BREP JSON saves editable feature history only.';
@@ -366,8 +234,8 @@ function _openExportDialog(viewer) {
       const fmt = selFmt.value;
       const unit = selUnit.value;
       const scale = _unitScale(unit);
-      const showDebug = fmt === '3mf' && chkFlat.checked && chkDebug.checked;
-      const debugPanel = showDebug ? _ensureFlatPatternDebugPanel(viewer, `${base} Flat Pattern Debug`) : null;
+      const showDebug = false;
+      const debugPanel = null;
 
       if (fmt === 'json') {
         try {
@@ -419,32 +287,6 @@ function _openExportDialog(viewer) {
         let data;
         try {
           const metadataManager = viewer?.partHistory?.metadataManager || null;
-          const includeFlat = chkFlat.checked;
-          const neutralRaw = String(inpNeutral.value || '').trim();
-          const neutralFactor = neutralRaw ? Number(neutralRaw) : null;
-          if (includeFlat) {
-            const svgEntries = buildSheetMetalFlatPatternSvgs(solidsForExport, {
-              neutralFactor,
-              metadataManager,
-              debug: !!debugPanel,
-            });
-            if (svgEntries.length) {
-              const svgPaths = [];
-              const svgFiles = {};
-              for (const entry of svgEntries) {
-                const safe = _safeName(entry.name || 'flat');
-                const path = `Metadata/flatpattern_${safe}.svg`;
-                svgFiles[path] = entry.svg;
-                svgPaths.push(`/${path}`);
-              }
-              additionalFiles = { ...(additionalFiles || {}), ...svgFiles };
-              if (!modelMetadata) modelMetadata = {};
-              modelMetadata.sheetMetalFlatPatternPaths = JSON.stringify(svgPaths);
-            }
-            if (debugPanel) {
-              _renderFlatPatternDebugPanel(debugPanel, svgEntries, base);
-            }
-          }
           data = await generate3MF(solidsForExport, { unit, precision: 6, scale, additionalFiles, modelMetadata, thumbnail, metadataManager });
         } catch (e) {
           // As a last resort, attempt exporting only the feature history (no solids)
@@ -533,8 +375,6 @@ function _openExportDialog(viewer) {
   modal.appendChild(rowFmt);
   modal.appendChild(rowUnit);
   modal.appendChild(rowFlat);
-  modal.appendChild(rowNeutral);
-  modal.appendChild(rowDebug);
   modal.appendChild(hint);
   modal.appendChild(buttons);
   overlay.appendChild(modal);
