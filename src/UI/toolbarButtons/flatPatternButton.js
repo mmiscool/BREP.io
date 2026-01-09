@@ -1222,6 +1222,13 @@ class FlatPatternUnfoldPanel {
     
     this.visualizationMeshes = [];
     let meshCount = 0;
+    const faceColor = (faceId) => {
+      const seed = (Number(faceId) + 1) * 2654435761;
+      const hue = (seed % 360) / 360;
+      const color = new THREE.Color();
+      color.setHSL(hue, 0.6, 0.55);
+      return color;
+    };
     
     for (const entry of entries) {
       if (!entry.visualizationMeshes || !entry.visualizationMeshes.length) {
@@ -1232,17 +1239,45 @@ class FlatPatternUnfoldPanel {
       console.log(`[FlatPattern] Rendering ${entry.visualizationMeshes.length} visualization meshes for "${entry.name}"`);
       
       for (const meshData of entry.visualizationMeshes) {
+        if (meshData.name === 'Offset A Faces (Unified)') {
+          continue;
+        }
         console.log(`[FlatPattern]   - ${meshData.name}: ${meshData.triangles.length} triangles, ${meshData.positions.length / 3} vertices`);
         
         const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.BufferAttribute(meshData.positions, 3));
-        
-        // Convert triangles to indices
-        const indices = [];
-        for (const tri of meshData.triangles) {
-          indices.push(tri[0], tri[1], tri[2]);
+        const isFlatUnfold = meshData.name && meshData.name.includes('Flat A Faces');
+        const hasFaceIds = Array.isArray(meshData.triangleFaceIds);
+        if (isFlatUnfold && hasFaceIds) {
+          const triCount = meshData.triangles.length;
+          const flatPositions = new Float32Array(triCount * 9);
+          const flatColors = new Float32Array(triCount * 9);
+          let writeIdx = 0;
+          let colorIdx = 0;
+          for (let i = 0; i < triCount; i++) {
+            const tri = meshData.triangles[i];
+            const color = faceColor(meshData.triangleFaceIds[i]);
+            for (let k = 0; k < 3; k++) {
+              const vIdx = tri[k];
+              flatPositions[writeIdx++] = meshData.positions[vIdx * 3 + 0];
+              flatPositions[writeIdx++] = meshData.positions[vIdx * 3 + 1];
+              flatPositions[writeIdx++] = meshData.positions[vIdx * 3 + 2];
+              flatColors[colorIdx++] = color.r;
+              flatColors[colorIdx++] = color.g;
+              flatColors[colorIdx++] = color.b;
+            }
+          }
+          geometry.setAttribute('position', new THREE.BufferAttribute(flatPositions, 3));
+          geometry.setAttribute('color', new THREE.BufferAttribute(flatColors, 3));
+        } else {
+          geometry.setAttribute('position', new THREE.BufferAttribute(meshData.positions, 3));
+          
+          // Convert triangles to indices
+          const indices = [];
+          for (const tri of meshData.triangles) {
+            indices.push(tri[0], tri[1], tri[2]);
+          }
+          geometry.setIndex(indices);
         }
-        geometry.setIndex(indices);
         geometry.computeVertexNormals();
         geometry.computeBoundingBox();
         geometry.computeBoundingSphere();
@@ -1259,6 +1294,7 @@ class FlatPatternUnfoldPanel {
           polygonOffsetUnits: -2,
           emissive: new THREE.Color(meshData.color[0], meshData.color[1], meshData.color[2]),
           emissiveIntensity: 0.2,
+          vertexColors: isFlatUnfold && hasFaceIds,
         });
         
         const mesh = new THREE.Mesh(geometry, material);
@@ -1269,6 +1305,278 @@ class FlatPatternUnfoldPanel {
           kind: 'visualization',
           vizName: meshData.name,
         };
+
+        if (isFlatUnfold && hasFaceIds) {
+          const pos2d = (idx) => ({
+            x: meshData.positions[idx * 3 + 0],
+            y: meshData.positions[idx * 3 + 1],
+          });
+          const isColinear = (a, b, c) => {
+            const pa = pos2d(a);
+            const pb = pos2d(b);
+            const pc = pos2d(c);
+            const v1x = pa.x - pb.x;
+            const v1y = pa.y - pb.y;
+            const v2x = pc.x - pb.x;
+            const v2y = pc.y - pb.y;
+            const len1 = Math.hypot(v1x, v1y);
+            const len2 = Math.hypot(v2x, v2y);
+            if (len1 < 1e-9 || len2 < 1e-9) return false;
+            const cross = v1x * v2y - v1y * v2x;
+            return Math.abs(cross) <= 1e-6 * len1 * len2;
+          };
+          const mergeColinearEdges = (segments) => {
+            const edgeKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+            const adj = new Map();
+            const unvisited = new Set();
+            for (const [a, b] of segments) {
+              const key = edgeKey(a, b);
+              unvisited.add(key);
+              if (!adj.has(a)) adj.set(a, []);
+              if (!adj.has(b)) adj.set(b, []);
+              adj.get(a).push(b);
+              adj.get(b).push(a);
+            }
+            const hasEdge = (a, b) => unvisited.has(edgeKey(a, b));
+            const takeEdge = (a, b) => unvisited.delete(edgeKey(a, b));
+            const merged = [];
+            while (unvisited.size) {
+              const key = unvisited.values().next().value;
+              const [aStr, bStr] = key.split('|');
+              const a = Number(aStr);
+              const b = Number(bStr);
+              takeEdge(a, b);
+              let start = a;
+              let end = b;
+              const startNeighbor = b;
+              let prev = start;
+              let curr = end;
+              while (true) {
+                const nbrs = (adj.get(curr) || []).filter((n) => n !== prev);
+                if (nbrs.length !== 1) break;
+                const next = nbrs[0];
+                if (!hasEdge(curr, next)) break;
+                if (!isColinear(prev, curr, next)) break;
+                takeEdge(curr, next);
+                prev = curr;
+                curr = next;
+                end = curr;
+              }
+              prev = startNeighbor;
+              curr = start;
+              while (true) {
+                const nbrs = (adj.get(curr) || []).filter((n) => n !== prev);
+                if (nbrs.length !== 1) break;
+                const next = nbrs[0];
+                if (!hasEdge(curr, next)) break;
+                if (!isColinear(prev, curr, next)) break;
+                takeEdge(curr, next);
+                prev = curr;
+                curr = next;
+                start = curr;
+              }
+              merged.push([start, end]);
+            }
+            return merged;
+          };
+
+          const faceMetaById = meshData.faceMetaById || null;
+          const isCylFace = (faceId) => {
+            if (!faceMetaById) return false;
+            if (faceMetaById instanceof Map) {
+              return faceMetaById.get(faceId)?.type === 'cylindrical';
+            }
+            return faceMetaById[faceId]?.type === 'cylindrical';
+          };
+          const faceCentroids = new Map();
+          const faceVertexCounts = new Map();
+          for (let i = 0; i < meshData.triangles.length; i++) {
+            const tri = meshData.triangles[i];
+            const faceId = meshData.triangleFaceIds[i];
+            for (let k = 0; k < 3; k++) {
+              const vIdx = tri[k];
+              const p = pos2d(vIdx);
+              const acc = faceCentroids.get(faceId) || { x: 0, y: 0 };
+              acc.x += p.x;
+              acc.y += p.y;
+              faceCentroids.set(faceId, acc);
+              faceVertexCounts.set(faceId, (faceVertexCounts.get(faceId) || 0) + 1);
+            }
+          }
+          for (const [faceId, acc] of faceCentroids.entries()) {
+            const count = faceVertexCounts.get(faceId) || 1;
+            acc.x /= count;
+            acc.y /= count;
+          }
+
+          const edgeMap = new Map();
+          const pushEdge = (a, b, faceId) => {
+            const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+            if (!edgeMap.has(key)) edgeMap.set(key, []);
+            edgeMap.get(key).push(faceId);
+          };
+          for (let i = 0; i < meshData.triangles.length; i++) {
+            const tri = meshData.triangles[i];
+            const faceId = meshData.triangleFaceIds[i];
+            pushEdge(tri[0], tri[1], faceId);
+            pushEdge(tri[1], tri[2], faceId);
+            pushEdge(tri[2], tri[0], faceId);
+          }
+
+          const pinkSegments = [];
+          const whiteSegments = [];
+          for (const [key, faces] of edgeMap.entries()) {
+            const [aStr, bStr] = key.split('|');
+            const a = Number(aStr);
+            const b = Number(bStr);
+            const faceSet = new Set(faces);
+            if (faces.length === 1) {
+              pinkSegments.push([a, b]);
+            } else if (faceSet.size > 1) {
+              whiteSegments.push([a, b]);
+            }
+          }
+
+          const bendEdgeMap = new Map();
+          for (const [key, faces] of edgeMap.entries()) {
+            const [aStr, bStr] = key.split('|');
+            const a = Number(aStr);
+            const b = Number(bStr);
+            const faceSet = new Set(faces);
+            if (faceSet.size > 1) {
+              for (const faceId of faceSet) {
+                if (!isCylFace(faceId)) continue;
+                if (!bendEdgeMap.has(faceId)) bendEdgeMap.set(faceId, []);
+                bendEdgeMap.get(faceId).push([a, b]);
+              }
+            }
+          }
+
+          const addEdgeLines = (segments, color) => {
+            if (!segments.length) return;
+            const mergedEdges = mergeColinearEdges(segments);
+            if (!mergedEdges.length) return;
+            const lineMaterial = new THREE.LineBasicMaterial({
+              color,
+              linewidth: 2,
+              depthTest: true,
+              depthWrite: false,
+            });
+            let edgeIndex = 0;
+            for (const [a, b] of mergedEdges) {
+              const linePositions = new Float32Array(6);
+              linePositions[0] = meshData.positions[a * 3 + 0];
+              linePositions[1] = meshData.positions[a * 3 + 1];
+              linePositions[2] = meshData.positions[a * 3 + 2];
+              linePositions[3] = meshData.positions[b * 3 + 0];
+              linePositions[4] = meshData.positions[b * 3 + 1];
+              linePositions[5] = meshData.positions[b * 3 + 2];
+              const lineGeometry = new THREE.BufferGeometry();
+              lineGeometry.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
+              const line = new THREE.LineSegments(lineGeometry, lineMaterial);
+              line.name = `VisualizationEdge_${edgeIndex++}`;
+              line.renderOrder = 2;
+              mesh.add(line);
+              this.visualizationMeshes.push(line);
+            }
+          };
+
+          addEdgeLines(pinkSegments, 0xff5fa2);
+          addEdgeLines(whiteSegments, 0xffffff);
+
+          const buildCenterline = (edges, faceId) => {
+            if (!edges || edges.length < 2) return null;
+            const merged = mergeColinearEdges(edges);
+            if (merged.length < 2) return null;
+            const centroid = faceCentroids.get(faceId);
+            if (!centroid) return null;
+            const edgeDir = (a, b) => {
+              const pa = pos2d(a);
+              const pb = pos2d(b);
+              const dx = pb.x - pa.x;
+              const dy = pb.y - pa.y;
+              const len = Math.hypot(dx, dy);
+              if (len < 1e-9) return null;
+              return { x: dx / len, y: dy / len };
+            };
+            const baseDir = edgeDir(merged[0][0], merged[0][1]);
+            if (!baseDir) return null;
+            const perp = { x: -baseDir.y, y: baseDir.x };
+            const groupA = [];
+            const groupB = [];
+            for (const [a, b] of merged) {
+              const dir = edgeDir(a, b);
+              if (!dir) continue;
+              const dot = dir.x * baseDir.x + dir.y * baseDir.y;
+              if (Math.abs(dot) < 0.98) continue;
+              const pa = pos2d(a);
+              const cross = (baseDir.x * (centroid.y - pa.y)) - (baseDir.y * (centroid.x - pa.x));
+              if (cross >= 0) groupA.push([a, b]);
+              else groupB.push([a, b]);
+            }
+            if (!groupA.length || !groupB.length) return null;
+            const buildLine = (group) => {
+              let minT = Infinity;
+              let maxT = -Infinity;
+              let offSum = 0;
+              let offCount = 0;
+              for (const [a, b] of group) {
+                const pa = pos2d(a);
+                const pb = pos2d(b);
+                const ta = pa.x * baseDir.x + pa.y * baseDir.y;
+                const tb = pb.x * baseDir.x + pb.y * baseDir.y;
+                minT = Math.min(minT, ta, tb);
+                maxT = Math.max(maxT, ta, tb);
+                offSum += pa.x * perp.x + pa.y * perp.y;
+                offSum += pb.x * perp.x + pb.y * perp.y;
+                offCount += 2;
+              }
+              return {
+                minT,
+                maxT,
+                off: offSum / offCount,
+              };
+            };
+            const lineA = buildLine(groupA);
+            const lineB = buildLine(groupB);
+            if (!lineA || !lineB) return null;
+            const minT = Math.min(lineA.minT, lineB.minT);
+            const maxT = Math.max(lineA.maxT, lineB.maxT);
+            const midOff = (lineA.off + lineB.off) * 0.5;
+            const start = {
+              x: baseDir.x * minT + perp.x * midOff,
+              y: baseDir.y * minT + perp.y * midOff,
+            };
+            const end = {
+              x: baseDir.x * maxT + perp.x * midOff,
+              y: baseDir.y * maxT + perp.y * midOff,
+            };
+            return { start, end };
+          };
+
+          const centerlineMaterial = new THREE.LineBasicMaterial({
+            color: 0x00ffff,
+            linewidth: 2,
+            depthTest: true,
+            depthWrite: false,
+          });
+          let centerlineIndex = 0;
+          for (const [faceId, edges] of bendEdgeMap.entries()) {
+            const lineInfo = buildCenterline(edges, faceId);
+            if (!lineInfo) continue;
+            const linePositions = new Float32Array([
+              lineInfo.start.x, lineInfo.start.y, 0,
+              lineInfo.end.x, lineInfo.end.y, 0,
+            ]);
+            const lineGeometry = new THREE.BufferGeometry();
+            lineGeometry.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
+            const line = new THREE.LineSegments(lineGeometry, centerlineMaterial);
+            line.name = `VisualizationCenterline_${centerlineIndex++}`;
+            line.renderOrder = 2;
+            mesh.add(line);
+            this.visualizationMeshes.push(line);
+          }
+        }
         
         scene.add(mesh);
         this.visualizationMeshes.push(mesh);

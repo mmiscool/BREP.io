@@ -2051,8 +2051,6 @@ function createVisualizationMeshes(visualizationData, vertProps, neutralFactor, 
   console.log('[FlatPattern]   thickness:', thickness);
   console.log('[FlatPattern]   offsetDistance (neutralFactor * thickness):', offsetDist);
   console.log('[FlatPattern]   allAFaceTrianglesCount:', visualizationData.allAFaceTriangles.length);
-  console.log('[FlatPattern]   originalBendFacesCount:', visualizationData.originalBendFaces.length);
-  console.log('[FlatPattern]   offsetBendFacesCount:', visualizationData.offsetBendFaces.length);
   console.log('[FlatPattern] ========================================');
   
   if (offsetDist === 0 || !Number.isFinite(offsetDist)) {
@@ -2060,39 +2058,12 @@ function createVisualizationMeshes(visualizationData, vertProps, neutralFactor, 
     console.error('[FlatPattern]   This will result in no visible offset.');
   }
   
-  // Create mesh for unified original A faces (semi-transparent red)
-  if (visualizationData.allAFaceTriangles.length > 0) {
-    const positions = [];
-    const triangles = [];
-    
-    for (const entry of visualizationData.allAFaceTriangles) {
-      const tri = entry.tri; // Extract triangle from object
-      const baseIdx = positions.length / 3;
-      // Add each vertex of the triangle (no sharing for original visualization)
-      for (const vertIdx of tri) {
-        const v = getVertex3(vertProps, vertIdx);
-        positions.push(v[0], v[1], v[2]);
-      }
-      triangles.push([baseIdx, baseIdx + 1, baseIdx + 2]);
-    }
-    
-    if (positions.length > 0) {
-      console.log(`[FlatPattern]   Created Unified Original A Faces mesh: ${positions.length / 3} vertices, ${triangles.length} triangles`);
-      meshes.push({
-        name: 'Original A Faces (Unified)',
-        positions: new Float32Array(positions),
-        triangles,
-        color: [1, 0, 0], // Red
-        opacity: 0.5,
-      });
-    }
-  }
-  
   // Create mesh for unified offset A faces (semi-transparent blue)
   // Build a unified mesh from all A faces, calculate vertex normals, then offset
   if (visualizationData.allAFaceTriangles.length > 0) {
     const positions = [];
     const triangles = [];
+    const triangleFaceIds = [];
     
     // First, build vertex -> triangles map for the unified mesh
     const vertexTriangles = new Map();
@@ -2152,6 +2123,7 @@ function createVisualizationMeshes(visualizationData, vertProps, neutralFactor, 
         triIndices.push(newIdx);
       }
       triangles.push(triIndices);
+      triangleFaceIds.push(entry.faceId);
     }
     
     if (positions.length > 0) {
@@ -2160,118 +2132,258 @@ function createVisualizationMeshes(visualizationData, vertProps, neutralFactor, 
         name: 'Offset A Faces (Unified)',
         positions: new Float32Array(positions),
         triangles,
+        triangleFaceIds,
+        faceMetaById: visualizationData.faceMetaById || null,
         color: [0, 0.5, 1], // Light Blue
         opacity: 0.5,
       });
     }
   }
-  
-  // Create mesh for original bend faces (semi-transparent green)
-  if (visualizationData.originalBendFaces.length > 0) {
-    const positions = [];
-    const triangles = [];
-    
-    for (const faceData of visualizationData.originalBendFaces) {
-      for (const tri of faceData.triangles) {
-        const baseIdx = positions.length / 3;
-        // Add each vertex of the triangle (no sharing between triangles)
-        for (const vertIdx of tri) {
-          const v = getVertex3(vertProps, vertIdx);
-          positions.push(v[0], v[1], v[2]);
-        }
-        triangles.push([baseIdx, baseIdx + 1, baseIdx + 2]);
-      }
-    }
-    
-    if (positions.length > 0) {
-      console.log(`[FlatPattern]   Created Original Bend Faces mesh: ${positions.length / 3} vertices, ${triangles.length} triangles`);
-      meshes.push({
-        name: 'Original Bend Faces',
-        positions: new Float32Array(positions),
-        triangles,
-        color: [0, 1, 0], // Green
-        opacity: 0.5,
-      });
-    }
-  }
-  
-  // Create mesh for offset bend faces (semi-transparent yellow)
-  // Use averaged vertex normals to maintain mesh continuity
-  if (visualizationData.offsetBendFaces.length > 0) {
-    const positions = [];
-    const triangles = [];
-    const vertexMap = new Map();
-    
-    // Build vertex -> triangles map to calculate averaged normals
-    const vertexTriangles = new Map();
-    for (const faceData of visualizationData.offsetBendFaces) {
-      for (const tri of faceData.triangles) {
-        for (const vertIdx of tri) {
-          if (!vertexTriangles.has(vertIdx)) {
-            vertexTriangles.set(vertIdx, []);
-          }
-          vertexTriangles.get(vertIdx).push(tri);
-        }
-      }
-    }
-    
-    // Calculate averaged normal for each vertex
-    const vertexNormals = new Map();
-    for (const [vertIdx, tris] of vertexTriangles.entries()) {
-      let avgNormal = [0, 0, 0];
-      for (const tri of tris) {
-        const v0 = getVertex3(vertProps, tri[0]);
-        const v1 = getVertex3(vertProps, tri[1]);
-        const v2 = getVertex3(vertProps, tri[2]);
-        const triNormal = computeTriangleNormal(v0, v1, v2);
-        avgNormal = add3(avgNormal, triNormal);
-      }
-      vertexNormals.set(vertIdx, normalizeVec3(avgNormal));
-    }
-    
-    // Create mesh with shared vertices, each offset by its averaged normal
-    for (const faceData of visualizationData.offsetBendFaces) {
-      const faceOffsetDist = faceData.offsetDistance; // Use face's actual offset distance (can be negative)
-      
-      for (const tri of faceData.triangles) {
-        const triIndices = [];
-        for (const vertIdx of tri) {
-          let newIdx = vertexMap.get(vertIdx);
-          if (newIdx === undefined) {
-            newIdx = positions.length / 3;
-            const v = getVertex3(vertProps, vertIdx);
-            const normal = vertexNormals.get(vertIdx);
-            // Offset vertex along its averaged normal using the face's offset distance
-            const offsetV = add3(v, scale3(normal, faceOffsetDist));
-            positions.push(offsetV[0], offsetV[1], offsetV[2]);
-            vertexMap.set(vertIdx, newIdx);
-          }
-          triIndices.push(newIdx);
-        }
-        triangles.push(triIndices);
-      }
-    }
-    
-    if (positions.length > 0) {
-      console.log(`[FlatPattern]   Created Offset Bend Faces mesh: ${positions.length / 3} vertices, ${triangles.length} triangles (using averaged vertex normals)`);
-      meshes.push({
-        name: 'Offset Bend Faces',
-        positions: new Float32Array(positions),
-        triangles,
-        color: [1, 1, 0], // Yellow
-        opacity: 0.5,
-      });
-    }
-  }
-  
-  // Add diagnostic rays data to first mesh (if any meshes exist)
-  if (meshes.length > 0 && visualizationData.diagnosticRays.length > 0) {
-    meshes[0].diagnosticRays = visualizationData.diagnosticRays;
-    console.log(`[FlatPattern] Added ${visualizationData.diagnosticRays.length} diagnostic rays to visualization`);
+
+  if (meshes.length) {
+    const flatMesh = unfoldTriangleMesh(meshes[meshes.length - 1]);
+    if (flatMesh) meshes.push(flatMesh);
   }
   
   console.log(`[FlatPattern] Total visualization meshes created: ${meshes.length}`);
   return meshes;
+}
+
+function unfoldTriangleMesh(meshData) {
+  if (!meshData || !meshData.positions || !meshData.triangles) return null;
+  const positions = meshData.positions;
+  const triangles = meshData.triangles;
+  const triangleFaceIds = Array.isArray(meshData.triangleFaceIds)
+    ? meshData.triangleFaceIds
+    : null;
+  const faceMetaById = meshData.faceMetaById || null;
+  const triCount = triangles.length;
+  if (!triCount) return null;
+
+  const vertexCount = (positions.length / 3) | 0;
+  const getV3 = (idx) => [
+    positions[idx * 3 + 0],
+    positions[idx * 3 + 1],
+    positions[idx * 3 + 2],
+  ];
+  const dist3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  const cross2d = (a, b, c) => {
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const acx = c.x - a.x;
+    const acy = c.y - a.y;
+    return abx * acy - aby * acx;
+  };
+
+  const triInfo = new Array(triCount);
+  const edgeMap = new Map();
+  for (let i = 0; i < triCount; i++) {
+    const tri = triangles[i];
+    const v0 = getV3(tri[0]);
+    const v1 = getV3(tri[1]);
+    const v2 = getV3(tri[2]);
+    const n = computeTriangleNormal(v0, v1, v2);
+    const e1 = sub3(v1, v0);
+    const e2 = sub3(v2, v0);
+    const area = 0.5 * Math.hypot(...cross3(e1, e2));
+    triInfo[i] = {
+      tri,
+      normal: n,
+      area,
+    };
+    const edges = [
+      [tri[0], tri[1]],
+      [tri[1], tri[2]],
+      [tri[2], tri[0]],
+    ];
+    for (const [a, b] of edges) {
+      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+      if (!edgeMap.has(key)) edgeMap.set(key, []);
+      edgeMap.get(key).push(i);
+    }
+  }
+
+  const neighbors = new Array(triCount);
+  for (let i = 0; i < triCount; i++) neighbors[i] = [];
+  for (const [key, tris] of edgeMap.entries()) {
+    if (tris.length !== 2) continue;
+    const [t0, t1] = tris;
+    const [aStr, bStr] = key.split('|');
+    const a = Number(aStr);
+    const b = Number(bStr);
+    neighbors[t0].push({ tri: t1, edge: [a, b] });
+    neighbors[t1].push({ tri: t0, edge: [a, b] });
+  }
+
+  const placedVerts = new Map();
+  const placedTris = new Array(triCount).fill(false);
+  let globalMaxX = 0;
+  let globalMinX = 0;
+  const padding = 5;
+
+  const placeSeedTriangle = (triIndex, offsetX) => {
+    const tri = triInfo[triIndex].tri;
+    const a = tri[0];
+    const b = tri[1];
+    const c = tri[2];
+    const va = getV3(a);
+    const vb = getV3(b);
+    const vc = getV3(c);
+    const dAB = dist3(va, vb);
+    const dAC = dist3(va, vc);
+    const dBC = dist3(vb, vc);
+    if (dAB < EPS || !Number.isFinite(dAB)) return false;
+    const x = (dAC * dAC - dBC * dBC + dAB * dAB) / (2 * dAB);
+    const y2 = Math.max(0, dAC * dAC - x * x);
+    const y = Math.sqrt(y2);
+    placedVerts.set(a, { x: offsetX, y: 0 });
+    placedVerts.set(b, { x: offsetX + dAB, y: 0 });
+    placedVerts.set(c, { x: offsetX + x, y });
+    return true;
+  };
+
+  const placeNeighbor = (currentTri, neighborInfo) => {
+    const nb = neighborInfo.tri;
+    const [ea, eb] = neighborInfo.edge;
+    const a2d = placedVerts.get(ea);
+    const b2d = placedVerts.get(eb);
+    if (!a2d || !b2d) return false;
+    const tri = triInfo[nb].tri;
+    const third = tri[0] !== ea && tri[0] !== eb ? tri[0]
+      : tri[1] !== ea && tri[1] !== eb ? tri[1]
+        : tri[2];
+    if (placedVerts.has(third)) return true;
+
+    const va = getV3(ea);
+    const vb = getV3(eb);
+    const vc = getV3(third);
+    const dAB = dist3(va, vb);
+    if (dAB < EPS || !Number.isFinite(dAB)) return false;
+    const dAC = dist3(va, vc);
+    const dBC = dist3(vb, vc);
+    const x = (dAC * dAC - dBC * dBC + dAB * dAB) / (2 * dAB);
+    const y2 = Math.max(0, dAC * dAC - x * x);
+    const y = Math.sqrt(y2);
+
+    const edge2d = { x: b2d.x - a2d.x, y: b2d.y - a2d.y };
+    const edgeLen2d = Math.hypot(edge2d.x, edge2d.y);
+    if (edgeLen2d < EPS) return false;
+    const ex = edge2d.x / edgeLen2d;
+    const ey = edge2d.y / edgeLen2d;
+    const px = -ey;
+    const py = ex;
+    const cand1 = { x: a2d.x + ex * x + px * y, y: a2d.y + ey * x + py * y };
+    const cand2 = { x: a2d.x + ex * x - px * y, y: a2d.y + ey * x - py * y };
+
+    const currentInfo = triInfo[currentTri];
+    const currentTriVerts = currentInfo.tri;
+    const currentThird = currentTriVerts[0] !== ea && currentTriVerts[0] !== eb ? currentTriVerts[0]
+      : currentTriVerts[1] !== ea && currentTriVerts[1] !== eb ? currentTriVerts[1]
+        : currentTriVerts[2];
+    const currentThird2d = placedVerts.get(currentThird);
+    if (!currentThird2d) return false;
+    const sideCurrent2d = cross2d(a2d, b2d, currentThird2d);
+
+    const n1 = currentInfo.normal;
+    const n2 = triInfo[nb].normal;
+    const e3 = normalizeVec3(sub3(vb, va));
+    let v1 = cross3(e3, n1);
+    let v2 = cross3(e3, n2);
+    v1 = normalizeVec3(v1);
+    v2 = normalizeVec3(v2);
+    if (dot3(v1, sub3(getV3(currentThird), va)) < 0) v1 = scale3(v1, -1);
+    if (dot3(v2, sub3(vc, va)) < 0) v2 = scale3(v2, -1);
+    const sameSide = dot3(v1, v2) >= 0;
+    const wantPositive = sideCurrent2d >= 0 ? sameSide : !sameSide;
+    const sideCand1 = cross2d(a2d, b2d, cand1);
+    const pickCand1 = wantPositive ? sideCand1 >= 0 : sideCand1 < 0;
+    placedVerts.set(third, pickCand1 ? cand1 : cand2);
+    return true;
+  };
+
+  const triIndices = triInfo
+    .map((info, idx) => ({ idx, area: info.area }))
+    .sort((a, b) => b.area - a.area);
+
+  for (const { idx } of triIndices) {
+    if (placedTris[idx]) continue;
+    const offsetX = placedVerts.size ? globalMaxX + padding : 0;
+    if (!placeSeedTriangle(idx, offsetX)) {
+      placedTris[idx] = true;
+      continue;
+    }
+    placedTris[idx] = true;
+    const queue = [idx];
+    while (queue.length) {
+      const current = queue.shift();
+      for (const nb of neighbors[current]) {
+        if (placedTris[nb.tri]) continue;
+        if (placeNeighbor(current, nb)) {
+          placedTris[nb.tri] = true;
+          queue.push(nb.tri);
+        }
+      }
+    }
+
+    for (const { x } of placedVerts.values()) {
+      globalMinX = Math.min(globalMinX, x);
+      globalMaxX = Math.max(globalMaxX, x);
+    }
+  }
+
+  const flatPositions = new Float32Array(vertexCount * 3);
+  for (let i = 0; i < vertexCount; i++) {
+    const p2d = placedVerts.get(i);
+    if (!p2d) continue;
+    flatPositions[i * 3 + 0] = p2d.x;
+    flatPositions[i * 3 + 1] = p2d.y;
+    flatPositions[i * 3 + 2] = 0;
+  }
+
+  const edgeSegments = triangleFaceIds
+    ? buildUnfoldedEdgeSegments(triangles, triangleFaceIds)
+    : null;
+
+  return {
+    name: 'Flat A Faces (Triangle Unfold)',
+    positions: flatPositions,
+    triangles,
+    triangleFaceIds: triangleFaceIds ? triangleFaceIds.slice() : undefined,
+    faceMetaById,
+    edgeSegments,
+    color: [1, 0.6, 0.1],
+    opacity: 0.7,
+  };
+}
+
+function buildUnfoldedEdgeSegments(triangles, triangleFaceIds) {
+  if (!Array.isArray(triangles) || !Array.isArray(triangleFaceIds)) return null;
+  if (triangles.length !== triangleFaceIds.length) return null;
+  const edgeMap = new Map();
+  const addEdge = (a, b, faceId) => {
+    const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+    let entry = edgeMap.get(key);
+    if (!entry) {
+      entry = { a, b, faces: [] };
+      edgeMap.set(key, entry);
+    }
+    entry.faces.push(faceId);
+  };
+  for (let i = 0; i < triangles.length; i++) {
+    const tri = triangles[i];
+    const faceId = triangleFaceIds[i];
+    addEdge(tri[0], tri[1], faceId);
+    addEdge(tri[1], tri[2], faceId);
+    addEdge(tri[2], tri[0], faceId);
+  }
+
+  const outerEdges = [];
+  const innerEdges = [];
+  for (const entry of edgeMap.values()) {
+    if (entry.faces.size === 1) outerEdges.push([entry.a, entry.b]);
+    else if (entry.faces.size > 1) innerEdges.push([entry.a, entry.b]);
+  }
+  return { outerEdges, innerEdges };
 }
 
 function buildFlatPatternMeshByFaces(solid, opts = {}) {
@@ -2289,1142 +2401,48 @@ function buildFlatPatternMeshByFaces(solid, opts = {}) {
     if (!selection || !selection.includeSet || !selection.includeSet.size) return null;
     const {
       includeSet,
-      faceMetaById,
       faceTypeById,
+      faceMetaById,
       thickness,
       neutralFactor,
-      insideRadius,
-      insideType,
-      surfaceIsInside,
     } = selection;
 
-    const cylGroups = buildCylRadiusGroups(faceMetaById);
     const faceTriangles = collectFaceTriangles(triVerts, faceIDs, includeSet, vertProps);
     if (!faceTriangles.size) return null;
-    const faceNameById = solid._idToFaceName instanceof Map ? solid._idToFaceName : null;
-    const tolFromOpts = Number.isFinite(opts?.edgeTolerance) ? opts.edgeTolerance
-      : Number.isFinite(opts?.mergeTolerance) ? opts.mergeTolerance
-        : null;
-    const edgeTol = Number.isFinite(tolFromOpts)
-      ? tolFromOpts
-      : Math.max(0, thickness * 1e-2);
-    const topoEdges = buildFaceEdgeChainsFromMesh(
-      triVerts,
-      faceIDs,
-      faceNameById,
-      includeSet,
-      vertProps,
-      { tolerance: edgeTol },
-    );
-    let sharedPairs = topoEdges.byPair;
-    let neighbors = topoEdges.neighbors;
-    let sharedVertsByFace = topoEdges.sharedVertsByFace;
-    let fallbackEdgesByPair = null;
-    let fallback = null;
-    const ensureFallback = () => {
-      if (!fallback) {
-        fallback = buildSharedEdgesMap(faceTriangles, vertProps, { tolerance: edgeTol });
-      }
-      return fallback;
-    };
-    if (!neighbors || !neighbors.size) {
-      const fb = ensureFallback();
-      sharedPairs = null;
-      neighbors = fb.neighbors;
-      sharedVertsByFace = fb.sharedVertsByFace;
-      fallbackEdgesByPair = fb.sharedEdgesByPair;
-    } else {
-      const fb = ensureFallback();
-      fallbackEdgesByPair = fb.sharedEdgesByPair;
-      for (const [faceId, set] of fb.neighbors.entries()) {
-        let target = neighbors.get(faceId);
-        if (!target) { target = new Set(); neighbors.set(faceId, target); }
-        for (const nb of set) target.add(nb);
-      }
-      for (const [faceId, set] of fb.sharedVertsByFace.entries()) {
-        let target = sharedVertsByFace.get(faceId);
-        if (!target) { target = new Set(); sharedVertsByFace.set(faceId, target); }
-        for (const idx of set) target.add(idx);
-      }
-    }
-    const faceData = new Map();
-    const debugSteps = opts?.debug ? [] : null;
-    const debugPlacementSteps = !!opts?.debugPlacementSteps;
-    const identity = { cos: 1, sin: 0, tx: 0, ty: 0 };
 
-    // Store visualization data for A faces and bend faces
     const visualizationData = {
-      originalBendFaces: [],
-      offsetBendFaces: [],
-      diagnosticRays: [], // For debugging offset direction detection
-      allAFaceTriangles: [], // Collect all A face triangles for unified mesh
-      allAFaceNormals: [], // Collect normals for each triangle
+      allAFaceTriangles: [],
+      faceMetaById,
     };
 
-    // Don't pre-calculate offset vertices - instead offset each triangle using its face normal
-    // This prevents issues at sharp bends where vertices need different offsets per face
-
-    // Now process faces for flat pattern generation and visualization
     for (const [faceId, face] of faceTriangles.entries()) {
-      const meta = faceMetaById.get(faceId) || {};
       const faceType = faceTypeById.get(faceId) || null;
-      
-      // Handle cylindrical (bend) faces
-      if (meta?.type === 'cylindrical') {
-        // Store for visualization
-        visualizationData.originalBendFaces.push({
-          faceId,
-          triangles: face.triangles.slice(),
-        });
-        
-        // If this is an A-type bend, add to unified A face mesh and DEFER processing
-        if (faceType === 'A') {
-          // For cylindrical faces, use individual triangle normals (not averaged face normal)
-          // This ensures proper offset for curved surfaces
-          for (const tri of face.triangles) {
-            const v0 = getVertex3(vertProps, tri[0]);
-            const v1 = getVertex3(vertProps, tri[1]);
-            const v2 = getVertex3(vertProps, tri[2]);
-            const triNormal = computeTriangleNormal(v0, v1, v2);
-            visualizationData.allAFaceTriangles.push({ tri, faceId, faceNormal: triNormal });
-          }
-          
-          console.log(`[FlatPattern] Added A-type cylindrical face ${faceId} to unified mesh (${face.triangles.length} triangles) - DEFERRED processing`);
-          // Skip processing this face now - will process after unified offset
-          continue;
-        }
-        
-        // Process NON-A cylindrical (bend) faces using original vertices
-        const bendRadius = Number(meta?.radius ?? meta?.pmiRadiusOverride ?? meta?.pmiRadius);
-        if (!Number.isFinite(bendRadius) || bendRadius <= 0) continue;
-        
-        // Determine correct offset direction by testing if ray from centerline hits both faces
-        let offsetSign = 1; // Default: offset outward (increasing radius)
-        
-        // Get bend axis and center
-        const axisDir = normalizeAxis(meta?.axis);
-        const axisOrigin = Array.isArray(meta?.center) && meta.center.length >= 3
-          ? [Number(meta.center[0]), Number(meta.center[1]), Number(meta.center[2])]
-          : getVertex3(vertProps, Array.from(face.vertices)[0]);
-        
-        if (axisDir && axisOrigin) {
-          // Use the first triangle's center as target point instead of averaging all vertices
-          // This ensures we're shooting toward an actual point on the surface
-          const firstTri = face.triangles[0];
-          const v0 = getVertex3(vertProps, firstTri[0]);
-          const v1 = getVertex3(vertProps, firstTri[1]);
-          const v2 = getVertex3(vertProps, firstTri[2]);
-          const triCenter = scale3(add3(add3(v0, v1), v2), 1/3);
-          
-          // Find axial extent along the bend axis to get midpoint
-          let minAxial = Infinity;
-          let maxAxial = -Infinity;
-          for (const vertIdx of face.vertices) {
-            const v = getVertex3(vertProps, vertIdx);
-            const toV = sub3(v, axisOrigin);
-            const axialDist = dot3(toV, axisDir);
-            minAxial = Math.min(minAxial, axialDist);
-            maxAxial = Math.max(maxAxial, axialDist);
-          }
-          const midAxial = (minAxial + maxAxial) / 2;
-          
-          // Ray origin is at the midpoint of the centerline
-          const rayOrigin = add3(axisOrigin, scale3(axisDir, midAxial));
-          
-          // Ray direction points from centerline toward triangle center
-          const toTriCenter = sub3(triCenter, rayOrigin);
-          const radialDir = sub3(toTriCenter, scale3(axisDir, dot3(toTriCenter, axisDir)));
-          const radialLen = Math.hypot(radialDir[0], radialDir[1], radialDir[2]);
-          
-          if (radialLen < 1e-6) {
-            console.warn(`[FlatPattern] Cylindrical face ${faceId}: Cannot determine radial direction`);
-            continue;
-          }
-          
-          const rayDir = normalizeVec3(radialDir);
-          const rayLength = radialLen * 3; // Extend beyond bend
-          
-          // Test intersection with original face
-          let hitsOriginal = false;
-          let originalHitPoint = null;
-          for (const tri of face.triangles) {
-            const v0 = getVertex3(vertProps, tri[0]);
-            const v1 = getVertex3(vertProps, tri[1]);
-            const v2 = getVertex3(vertProps, tri[2]);
-            const hit = rayIntersectsTriangleWithPoint(rayOrigin, rayDir, v0, v1, v2);
-            if (hit) {
-              hitsOriginal = true;
-              originalHitPoint = hit.point;
-              break;
-            }
-          }
-          
-          // Test intersection with offset face (positive offset)
-          let hitsOffsetPositive = false;
-          let offsetHitPoint = null;
-          const testOffsetDist = neutralFactor * thickness;
-          for (const tri of face.triangles) {
-            const v0 = getVertex3(vertProps, tri[0]);
-            const v1 = getVertex3(vertProps, tri[1]);
-            const v2 = getVertex3(vertProps, tri[2]);
-            const n = computeTriangleNormal(v0, v1, v2);
-            const v0off = add3(v0, scale3(n, testOffsetDist));
-            const v1off = add3(v1, scale3(n, testOffsetDist));
-            const v2off = add3(v2, scale3(n, testOffsetDist));
-            const hit = rayIntersectsTriangleWithPoint(rayOrigin, rayDir, v0off, v1off, v2off);
-            if (hit) {
-              hitsOffsetPositive = true;
-              offsetHitPoint = hit.point;
-              break;
-            }
-          }
-          
-          // Store diagnostic visualization data
-          visualizationData.diagnosticRays.push({
-            faceId,
-            origin: rayOrigin.slice(),
-            direction: rayDir.slice(),
-            length: rayLength,
-            hitsOriginal,
-            hitsOffsetPositive,
-            originalHitPoint: originalHitPoint ? originalHitPoint.slice() : null,
-            offsetHitPoint: offsetHitPoint ? offsetHitPoint.slice() : null,
-          });
-          
-          console.log(`[FlatPattern] Face ${faceId} ray test:`);
-          console.log(`  Ray origin: [${rayOrigin.map(v => v.toFixed(3)).join(', ')}]`);
-          console.log(`  Ray direction: [${rayDir.map(v => v.toFixed(3)).join(', ')}]`);
-          console.log(`  Hits original: ${hitsOriginal}${originalHitPoint ? ` at [${originalHitPoint.map(v => v.toFixed(3)).join(', ')}]` : ''}`);
-          console.log(`  Hits offset+: ${hitsOffsetPositive}${offsetHitPoint ? ` at [${offsetHitPoint.map(v => v.toFixed(3)).join(', ')}]` : ''}`);
-          
-          if (!hitsOriginal) {
-            console.warn(`[FlatPattern] Cylindrical face ${faceId}: Ray from centerline doesn't hit original face - check bend geometry`);
-          }
-        }
-        
-        // Always use standard neutral radius calculation for flat pattern
-        // Neutral axis is always inside the material (radius + offset)
-        const neutralRadius = bendRadius + (neutralFactor * thickness);
-        
-        visualizationData.offsetBendFaces.push({
-          faceId,
-          triangles: face.triangles.slice(),
-          offsetDistance: -(neutralFactor * thickness), // Negative for visualization (inward)
-        });
-        
-        // Use existing buildCylFaceCoords with offset positions
-        const coordsInfo = buildCylFaceCoords(face, vertProps, meta, neutralRadius, null);
-        if (!coordsInfo || !coordsInfo.coords) {
-          console.warn(`[FlatPattern] Failed to unwrap cylindrical face ${faceId} with radius ${bendRadius}`);
-          continue;
-        }
-        
-        const boundaryEdges = buildBoundaryEdgesFromTriangles(face.triangles);
-        const boundaryChains = topoEdges.byFace.get(faceId) || buildEdgeChainsFromEdges(boundaryEdges);
-        const basis = coordsInfo.origin && coordsInfo.uAxis && coordsInfo.vAxis
-          ? {
-            origin: Array.isArray(coordsInfo.origin) ? coordsInfo.origin.slice() : coordsInfo.origin,
-            uAxis: Array.isArray(coordsInfo.uAxis) ? coordsInfo.uAxis.slice() : coordsInfo.uAxis,
-            vAxis: Array.isArray(coordsInfo.vAxis) ? coordsInfo.vAxis.slice() : coordsInfo.vAxis,
-            normal: Array.isArray(coordsInfo.normal) ? coordsInfo.normal.slice() : coordsInfo.normal,
-          }
-          : null;
-        faceData.set(faceId, {
-          ...face,
-          coords: coordsInfo.coords,
-          meta,
-          area: face.area || 0,
-          boundaryEdges,
-          boundaryChains,
-          basis,
-          offsetDistance: neutralFactor * thickness,
-          faceType: 'cylindrical',
-          bendRadius,
-        });
-        continue;
-      }
-      
-      // Handle planar faces (A and B types)
-      let offsetDistance = 0;
-      let faceNormal = null;
-      
-      // Calculate face normal from triangles
-      let computedNormal = [0, 0, 0];
+      if (faceType !== 'A') continue;
       for (const tri of face.triangles) {
         const v0 = getVertex3(vertProps, tri[0]);
         const v1 = getVertex3(vertProps, tri[1]);
         const v2 = getVertex3(vertProps, tri[2]);
         const triNormal = computeTriangleNormal(v0, v1, v2);
-        computedNormal = add3(computedNormal, triNormal);
-      }
-      faceNormal = normalizeVec3(computedNormal);
-      
-      if (faceType === 'A' && Number.isFinite(thickness) && thickness > 0) {
-        // Collect all A face triangles for unified mesh processing
-        // Store face ID with triangles for later processing
-        for (const tri of face.triangles) {
-          visualizationData.allAFaceTriangles.push({ tri, faceId, faceNormal });
-        }
-        
-        // Don't skip - we'll process this after building the unified mesh offset
-        // For now, continue to next iteration
-        continue;
-      }
-      
-      // Build planar face coordinates WITHOUT 3D offset - use original positions
-      // The offset is only for visualization; the actual flat pattern uses original geometry
-      const coordsInfo = buildPlanarFaceCoords(face, vertProps, 0, null);
-      if (!coordsInfo || !coordsInfo.coords) return null;
-      
-      const boundaryEdges = buildBoundaryEdgesFromTriangles(face.triangles);
-      const boundaryChains = topoEdges.byFace.get(faceId) || buildEdgeChainsFromEdges(boundaryEdges);
-      const basis = coordsInfo.origin && coordsInfo.uAxis && coordsInfo.vAxis
-        ? {
-          origin: Array.isArray(coordsInfo.origin) ? coordsInfo.origin.slice() : coordsInfo.origin,
-          uAxis: Array.isArray(coordsInfo.uAxis) ? coordsInfo.uAxis.slice() : coordsInfo.uAxis,
-          vAxis: Array.isArray(coordsInfo.vAxis) ? coordsInfo.vAxis.slice() : coordsInfo.vAxis,
-          normal: Array.isArray(coordsInfo.normal) ? coordsInfo.normal.slice() : coordsInfo.normal,
-        }
-        : null;
-      faceData.set(faceId, {
-        ...face,
-        coords: coordsInfo.coords,
-        meta,
-        area: face.area || 0,
-        boundaryEdges,
-        boundaryChains,
-        basis,
-        offsetDistance, // Store offset for later use
-        faceType,
-      });
-    }
-    
-    // Process unified A face mesh if we collected any A faces
-    if (visualizationData.allAFaceTriangles.length > 0) {
-      console.log(`[FlatPattern] Processing unified A face mesh with ${visualizationData.allAFaceTriangles.length} triangle entries`);
-      
-      // Extract just the triangles and normals
-      const allTris = visualizationData.allAFaceTriangles.map(entry => entry.tri);
-      const allNormals = visualizationData.allAFaceTriangles.map(entry => entry.faceNormal);
-      
-      // Check connectivity - detect if we have multiple disconnected components
-      const vertexConnections = new Map(); // vertex -> set of connected vertices
-      for (const tri of allTris) {
-        for (let i = 0; i < 3; i++) {
-          const v1 = tri[i];
-          const v2 = tri[(i + 1) % 3];
-          if (!vertexConnections.has(v1)) vertexConnections.set(v1, new Set());
-          if (!vertexConnections.has(v2)) vertexConnections.set(v2, new Set());
-          vertexConnections.get(v1).add(v2);
-          vertexConnections.get(v2).add(v1);
-        }
-      }
-      
-      // Find connected components using flood fill
-      const allVertices = new Set(vertexConnections.keys());
-      const visited = new Set();
-      const components = [];
-      
-      for (const startVertex of allVertices) {
-        if (visited.has(startVertex)) continue;
-        
-        const component = new Set();
-        const queue = [startVertex];
-        
-        while (queue.length > 0) {
-          const v = queue.shift();
-          if (visited.has(v)) continue;
-          visited.add(v);
-          component.add(v);
-          
-          const neighbors = vertexConnections.get(v);
-          if (neighbors) {
-            for (const neighbor of neighbors) {
-              if (!visited.has(neighbor)) {
-                queue.push(neighbor);
-              }
-            }
-          }
-        }
-        
-        components.push(component);
-      }
-      
-      console.log(`[FlatPattern] Unified A face mesh connectivity:`);
-      console.log(`[FlatPattern]   Total vertices: ${allVertices.size}`);
-      console.log(`[FlatPattern]   Connected components: ${components.length}`);
-      for (let i = 0; i < components.length; i++) {
-        console.log(`[FlatPattern]     Component ${i + 1}: ${components[i].size} vertices`);
-      }
-      
-      if (components.length > 1) {
-        console.warn(`[FlatPattern] WARNING: Unified A face mesh has ${components.length} DISCONNECTED components!`);
-        console.warn(`[FlatPattern]   This will cause floating islands in the flat pattern.`);
-        console.warn(`[FlatPattern]   Possible causes:`);
-        console.warn(`[FlatPattern]     - Some A faces are not topologically connected`);
-        console.warn(`[FlatPattern]     - Missing faces between A-type regions`);
-        console.warn(`[FlatPattern]     - Incorrect face type assignments`);
-      }
-      
-      // Build vertex -> triangles map for the unified mesh
-      const vertexTriangles = new Map();
-      for (let i = 0; i < allTris.length; i++) {
-        const tri = allTris[i];
-        for (const vertIdx of tri) {
-          if (!vertexTriangles.has(vertIdx)) {
-            vertexTriangles.set(vertIdx, []);
-          }
-          vertexTriangles.get(vertIdx).push({ tri, triNormal: allNormals[i] });
-        }
-      }
-      
-      // Calculate averaged normal for each vertex in the unified mesh
-      const vertexNormals = new Map();
-      for (const [vertIdx, triData] of vertexTriangles.entries()) {
-        let avgNormal = [0, 0, 0];
-        for (const { triNormal } of triData) {
-          avgNormal = add3(avgNormal, triNormal);
-        }
-        vertexNormals.set(vertIdx, normalizeVec3(avgNormal));
-      }
-      
-      // Create modified vertex properties with offset applied
-      const offsetVertProps = new Float32Array(vertProps.length);
-      for (let i = 0; i < vertProps.length / 3; i++) {
-        const v = getVertex3(vertProps, i);
-        const normal = vertexNormals.get(i);
-        if (normal) {
-          // This vertex is part of A faces - offset it
-          const offsetDist = -(neutralFactor * thickness);
-          const offsetV = add3(v, scale3(normal, offsetDist));
-          offsetVertProps[i * 3 + 0] = offsetV[0];
-          offsetVertProps[i * 3 + 1] = offsetV[1];
-          offsetVertProps[i * 3 + 2] = offsetV[2];
-        } else {
-          // Not part of A faces - keep original position
-          offsetVertProps[i * 3 + 0] = v[0];
-          offsetVertProps[i * 3 + 1] = v[1];
-          offsetVertProps[i * 3 + 2] = v[2];
-        }
-      }
-      
-      // Now process each individual A face using the offset vertex positions
-      // Group triangles back by faceId
-      const faceTrianglesMap = new Map();
-      for (const entry of visualizationData.allAFaceTriangles) {
-        if (!faceTrianglesMap.has(entry.faceId)) {
-          faceTrianglesMap.set(entry.faceId, []);
-        }
-        faceTrianglesMap.get(entry.faceId).push(entry.tri);
-      }
-      
-      // Add each A face to faceData using offset coordinates
-      console.log(`[FlatPattern] Processing ${faceTrianglesMap.size} individual A faces from unified mesh`);
-      for (const [faceId, tris] of faceTrianglesMap.entries()) {
-        const faceEntry = faceTriangles.get(faceId);
-        if (!faceEntry) {
-          console.log(`[FlatPattern] WARNING: No faceEntry found for faceId ${faceId}`);
-          continue;
-        }
-        
-        const faceMeta = faceMetaById.get(faceId) || {};
-        const isCylindrical = faceMeta?.type === 'cylindrical';
-        
-        // For cylindrical A faces, use buildCylFaceCoords with offset vertices
-        if (isCylindrical) {
-          const bendRadius = Number(faceMeta?.radius ?? faceMeta?.pmiRadiusOverride ?? faceMeta?.pmiRadius);
-          if (!Number.isFinite(bendRadius) || bendRadius <= 0) {
-            console.log(`[FlatPattern] WARNING: Invalid bend radius for cylindrical face ${faceId}`);
-            continue;
-          }
-          
-          // Use offset vertices to calculate neutral radius
-          const neutralRadius = bendRadius + (neutralFactor * thickness);
-          const coordsInfo = buildCylFaceCoords(faceEntry, offsetVertProps, faceMeta, neutralRadius, null);
-          
-          if (!coordsInfo || !coordsInfo.coords) {
-            console.log(`[FlatPattern] WARNING: Failed to unwrap cylindrical A face ${faceId}`);
-            continue;
-          }
-          
-          const boundaryEdges = buildBoundaryEdgesFromTriangles(tris);
-          const boundaryChains = topoEdges.byFace.get(faceId) || buildEdgeChainsFromEdges(boundaryEdges);
-          const basis = coordsInfo.origin && coordsInfo.uAxis && coordsInfo.vAxis
-            ? {
-              origin: Array.isArray(coordsInfo.origin) ? coordsInfo.origin.slice() : coordsInfo.origin,
-              uAxis: Array.isArray(coordsInfo.uAxis) ? coordsInfo.uAxis.slice() : coordsInfo.uAxis,
-              vAxis: Array.isArray(coordsInfo.vAxis) ? coordsInfo.vAxis.slice() : coordsInfo.vAxis,
-              normal: Array.isArray(coordsInfo.normal) ? coordsInfo.normal.slice() : coordsInfo.normal,
-            }
-            : null;
-          
-          faceData.set(faceId, {
-            ...faceEntry,
-            coords: coordsInfo.coords,
-            meta: faceMeta,
-            area: faceEntry.area || 0,
-            boundaryEdges,
-            boundaryChains,
-            basis,
-            offsetDistance: -(neutralFactor * thickness),
-            faceType: 'A',
-            bendRadius,
-          });
-          
-          console.log(`[FlatPattern] Added cylindrical A face ${faceId} using unified offset coordinates`);
-        } else {
-          // For planar A faces, use buildPlanarFaceCoords with offset vertices
-          const coordsInfo = buildPlanarFaceCoords(faceEntry, offsetVertProps, 0, null);
-          if (!coordsInfo || !coordsInfo.coords) {
-            console.log(`[FlatPattern] WARNING: Failed to build coords for face ${faceId}`);
-            continue;
-          }
-          
-          const boundaryEdges = buildBoundaryEdgesFromTriangles(tris);
-          const boundaryChains = topoEdges.byFace.get(faceId) || buildEdgeChainsFromEdges(boundaryEdges);
-          const basis = coordsInfo.origin && coordsInfo.uAxis && coordsInfo.vAxis
-            ? {
-              origin: Array.isArray(coordsInfo.origin) ? coordsInfo.origin.slice() : coordsInfo.origin,
-              uAxis: Array.isArray(coordsInfo.uAxis) ? coordsInfo.uAxis.slice() : coordsInfo.uAxis,
-              vAxis: Array.isArray(coordsInfo.vAxis) ? coordsInfo.vAxis.slice() : coordsInfo.vAxis,
-              normal: Array.isArray(coordsInfo.normal) ? coordsInfo.normal.slice() : coordsInfo.normal,
-            }
-            : null;
-          
-          faceData.set(faceId, {
-            ...faceEntry,
-            coords: coordsInfo.coords,
-            meta: faceMetaById.get(faceId) || {},
-            area: faceEntry.area || 0,
-            boundaryEdges,
-            boundaryChains,
-            basis,
-            offsetDistance: -(neutralFactor * thickness),
-            faceType: 'A',
-          });
-          
-          console.log(`[FlatPattern] Added planar A face ${faceId} using unified offset coordinates`);
-        }
-      }
-      
-      // CRITICAL: Rebuild neighbor relationships for A faces using offset vertices
-      // The original neighbor detection used original vertices, but A faces now use offset vertices
-      // We need to find shared edges between A faces in the offset coordinate space
-      console.log('[FlatPattern] Rebuilding neighbor relationships AND boundary chains for offset A faces...');
-      const aFaceIds = Array.from(faceTrianglesMap.keys());
-      const aFaceNeighbors = new Map();
-      const aFaceBoundaryChains = new Map(); // Store updated boundary chains
-      
-      // Build edge map for A faces using offset vertices  
-      const offsetEdgeToFaces = new Map();
-      const offsetEdgeKey = (v1, v2) => {
-        const [a, b] = v1 < v2 ? [v1, v2] : [v2, v1];
-        return `${a}|${b}`;
-      };
-      
-      // Also track which edges are on boundaries (appear once) vs shared (appear twice)
-      for (const faceId of aFaceIds) {
-        const tris = faceTrianglesMap.get(faceId);
-        const edgeCounts = new Map();
-        
-        // Count edge occurrences within this face
-        for (const tri of tris) {
-          const edges = [
-            [tri[0], tri[1]],
-            [tri[1], tri[2]],
-            [tri[2], tri[0]]
-          ];
-          for (const [v1, v2] of edges) {
-            const key = offsetEdgeKey(v1, v2);
-            edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
-          }
-        }
-        
-        // Boundary edges appear once, internal edges appear twice
-        const boundaryEdges = [];
-        for (const [key, count] of edgeCounts.entries()) {
-          if (count === 1) {
-            const [a, b] = key.split('|').map(Number);
-            boundaryEdges.push([a, b]);
-            
-            // Also track globally for neighbor detection
-            if (!offsetEdgeToFaces.has(key)) {
-              offsetEdgeToFaces.set(key, []);
-            }
-            const faces = offsetEdgeToFaces.get(key);
-            if (!faces.includes(faceId)) {
-              faces.push(faceId);
-            }
-          }
-        }
-        
-        // Build boundary chains from boundary edges
-        const chains = buildEdgeChainsFromEdges(boundaryEdges);
-        aFaceBoundaryChains.set(faceId, chains);
-        console.log(`[FlatPattern]   A face ${faceId} has ${chains.length} boundary chains with ${boundaryEdges.length} edges`);
-      }
-      
-      // Build neighbor map from shared edges
-      for (const faces of offsetEdgeToFaces.values()) {
-        if (faces.length === 2) {
-          const [f1, f2] = faces;
-          if (!aFaceNeighbors.has(f1)) aFaceNeighbors.set(f1, new Set());
-          if (!aFaceNeighbors.has(f2)) aFaceNeighbors.set(f2, new Set());
-          aFaceNeighbors.get(f1).add(f2);
-          aFaceNeighbors.get(f2).add(f1);
-        }
-      }
-      
-      // Update faceData with corrected boundary chains
-      for (const faceId of aFaceIds) {
-        const face = faceData.get(faceId);
-        if (face && aFaceBoundaryChains.has(faceId)) {
-          face.boundaryChains = aFaceBoundaryChains.get(faceId);
-          console.log(`[FlatPattern]   Updated boundary chains for A face ${faceId}`);
-        }
-      }
-      
-      // CRITICAL: Rebuild sharedPairs for A face connections
-      // The original sharedPairs uses original vertex indices, but A faces use offset indices
-      console.log('[FlatPattern] Rebuilding sharedPairs for A face connections...');
-      for (const faces of offsetEdgeToFaces.values()) {
-        if (faces.length === 2) {
-          const [faceA, faceB] = faces;
-          const key = pairKey(faceA, faceB);
-          
-          if (!sharedPairs) {
-            sharedPairs = new Map();
-          }
-          
-          if (!sharedPairs.has(key)) {
-            // Create new shared pair entry for these A faces
-            sharedPairs.set(key, {
-              faceA,
-              faceB,
-              chains: []
-            });
-          }
-          
-          // Build chain from boundary edges between these two faces
-          // Find the shared edges (edges that appear in both faces' boundary)
-          const trisA = faceTrianglesMap.get(faceA);
-          const trisB = faceTrianglesMap.get(faceB);
-          const edgesA = new Set();
-          const edgesB = new Set();
-          
-          for (const tri of trisA) {
-            const edges = [[tri[0], tri[1]], [tri[1], tri[2]], [tri[2], tri[0]]];
-            for (const [v1, v2] of edges) {
-              edgesA.add(offsetEdgeKey(v1, v2));
-            }
-          }
-          
-          for (const tri of trisB) {
-            const edges = [[tri[0], tri[1]], [tri[1], tri[2]], [tri[2], tri[0]]];
-            for (const [v1, v2] of edges) {
-              edgesB.add(offsetEdgeKey(v1, v2));
-            }
-          }
-          
-          // Find shared edges
-          const sharedEdgeKeys = [];
-          for (const key of edgesA) {
-            if (edgesB.has(key)) {
-              sharedEdgeKeys.push(key);
-            }
-          }
-          
-          // Convert to vertex array
-          const sharedVerts = [];
-          for (const key of sharedEdgeKeys) {
-            const [a, b] = key.split('|').map(Number);
-            if (!sharedVerts.includes(a)) sharedVerts.push(a);
-            if (!sharedVerts.includes(b)) sharedVerts.push(b);
-          }
-          
-          if (sharedVerts.length >= 2) {
-            const entry = sharedPairs.get(pairKey(faceA, faceB));
-            entry.chains.push({
-              verts: sharedVerts,
-              vertsA: sharedVerts,
-              vertsB: sharedVerts,
-              closed: false
-            });
-            console.log(`[FlatPattern]   Created shared chain for A faces ${faceA}-${faceB} with ${sharedVerts.length} vertices`);
-          }
-        }
-      }
-      
-      // Update the global neighbors map with A face relationships
-      for (const [faceId, nbrs] of aFaceNeighbors.entries()) {
-        if (!neighbors.has(faceId)) {
-          neighbors.set(faceId, new Set());
-        }
-        const existing = neighbors.get(faceId);
-        // Clear old A-face neighbors and add new ones
-        for (const otherId of aFaceIds) {
-          if (otherId !== faceId) existing.delete(otherId);
-        }
-        for (const nbrId of nbrs) {
-          existing.add(nbrId);
-        }
-        console.log(`[FlatPattern]   A face ${faceId} has ${nbrs.size} A-face neighbors: [${Array.from(nbrs).join(', ')}]`);
+        visualizationData.allAFaceTriangles.push({ tri, faceId, faceNormal: triNormal });
       }
     }
 
-    console.log(`[FlatPattern] Total faces in faceData: ${faceData.size}`);
-    if (!faceData.size) {
-      console.log('[FlatPattern] ERROR: No faces in faceData - returning null');
-      return null;
-    }
+    if (!visualizationData.allAFaceTriangles.length) return null;
 
-    console.log('[FlatPattern] Setting up placement algorithm...');
-    // Skip shared edges only between faces of different types during placement
-    const skipSharedEdge = (faceIdA, faceIdB) => {
-      if (!faceIdA || !faceIdB) return false;
-      const faceA = faceData.get(faceIdA);
-      const faceB = faceData.get(faceIdB);
-      if (!faceA || !faceB) return false;
-      
-      // Don't skip edges between planar and cylindrical faces - these need to be unfolded
-      // Only skip if both are the same type to avoid double-processing
-      return false;
-    };
+    const visualizationMeshes = createVisualizationMeshes(
+      visualizationData,
+      vertProps,
+      neutralFactor,
+      thickness
+    );
+    if (!visualizationMeshes || !visualizationMeshes.length) return null;
 
-    console.log('[FlatPattern] Initializing transforms and components...');
-    const transforms = new Map();
-    const components = [];
-    const unvisited = new Set(faceData.keys());
-    console.log(`[FlatPattern] Unvisited faces: ${unvisited.size}`);
-    if (debugSteps) {
-      try {
-        // Add initial step showing offset calculation
-        const offsetDistanceUsed = neutralFactor * thickness;
-        const aFaceCount = new Set(visualizationData.allAFaceTriangles.map(e => e.faceId)).size;
-        debugSteps.push({
-          label: `A-Face Offset Calculation (${aFaceCount} A-faces)`,
-          paths: [],
-          offsetInfo: {
-            neutralFactor,
-            thickness,
-            offsetDistance: offsetDistanceUsed,
-            description: `Offset Distance = neutralFactor × thickness = ${neutralFactor.toFixed(4)} × ${thickness.toFixed(3)} = ${offsetDistanceUsed.toFixed(4)} mm`,
-            aFaceCount,
-          },
-        });
-        
-        console.log('[FlatPattern] Building debug paths for each face...');
-        for (const faceId of faceData.keys()) {
-          const faceName = (faceNameById && typeof faceNameById.get === 'function' && faceNameById.get(faceId))
-            || `face_${faceId}`;
-          const faceLabel = safeEdgeName(faceName);
-          const paths = collectPathsForFaces([faceId], faceData, null, faceNameById, { skipSharedEdge });
-          if (paths.length) {
-            debugSteps.push({
-              label: `Face ${faceLabel} (local)`,
-              paths,
-              faceId,
-              faceName,
-              basis: faceData.get(faceId)?.basis || null,
-              addedFaceId: faceId,
-              addedFaceName: faceName,
-            });
-          }
-        }
-        console.log(`[FlatPattern] Built ${debugSteps.length} debug steps`);
-      } catch (err) {
-        console.error('[FlatPattern] ERROR building debug steps:', err);
-      }
-    }
-
-    console.log('[FlatPattern] Starting component placement loop...');
-    let componentIndex = 0;
-    while (unvisited.size) {
-      console.log(`[FlatPattern] Component ${componentIndex + 1}: ${unvisited.size} unvisited faces remaining`);
-      let root = null;
-      let maxArea = -Infinity;
-      for (const id of unvisited) {
-        const area = faceData.get(id)?.area ?? 0;
-        if (area > maxArea) {
-          maxArea = area;
-          root = id;
-        }
-      }
-      if (root == null) break;
-
-      const compFaces = new Set();
-      const queue = [root];
-      transforms.set(root, identity);
-      compFaces.add(root);
-      unvisited.delete(root);
-      componentIndex += 1;
-      let stepIndex = 0;
-      let prevSig = null;
-      const baseBasis = faceData.get(root)?.basis || null;
-      if (debugSteps && debugPlacementSteps) {
-        const faceName = (faceNameById && typeof faceNameById.get === 'function' && faceNameById.get(root))
-          || `face_${root}`;
-        const faceLabel = safeEdgeName(faceName);
-        const paths = collectPathsForFaces([root], faceData, transforms, faceNameById, {
-          requireTransform: true,
-          dedupe: true,
-          skipSharedEdge,
-        });
-        const sig = paths.length ? paths.map((p) => p.edgeLabel || p.name || '').sort().join('|') : '';
-        if (paths.length && sig !== prevSig) {
-          debugSteps.push({
-            label: `Component ${componentIndex} step ${stepIndex} (root ${faceLabel})`,
-            paths,
-            baseFaceId: root,
-            baseBasis,
-            addedFaceId: root,
-            addedFaceName: faceName,
-          });
-          prevSig = sig;
-        }
-      }
-
-      while (queue.length) {
-        const current = queue.shift();
-        const baseTr = transforms.get(current);
-        const nbrs = neighbors.get(current);
-        if (!nbrs) continue;
-        for (const nb of nbrs) {
-          if (!faceData.has(nb)) continue;
-          if (transforms.has(nb)) continue;
-          const faceA = faceData.get(current);
-          const faceB = faceData.get(nb);
-          if (!faceA || !faceB) continue;
-          
-          console.log(`[FlatPattern]   Trying to connect face ${current} to neighbor ${nb}...`);
-          
-          let edgeInfo = null;
-          if (sharedPairs) {
-            const pairEntry = sharedPairs.get(pairKey(current, nb));
-            edgeInfo = pickBestSharedChain(faceA, faceB, current, nb, pairEntry);
-            if (edgeInfo) {
-              console.log(`[FlatPattern]     Found shared edge via sharedPairs`);
-            }
-          }
-          if (!edgeInfo && fallbackEdgesByPair) {
-            const fallbackEdges = fallbackEdgesByPair.get(pairKey(current, nb));
-            edgeInfo = pickBestSharedEdge(faceA, faceB, current, nb, fallbackEdges);
-            if (edgeInfo) {
-              console.log(`[FlatPattern]     Found shared edge via fallback`);
-            }
-          }
-          if (!edgeInfo) {
-            console.warn(`[FlatPattern]     FAILED to find shared edge between ${current} and ${nb}`);
-            continue;
-          }
-          const tr = computeTransformForEdge(faceA, faceB, baseTr, edgeInfo);
-          if (!tr) {
-            console.warn(`[FlatPattern]     FAILED to compute transform between ${current} and ${nb}`);
-            continue;
-          }
-          console.log(`[FlatPattern]     Successfully connected ${current} to ${nb}`);
-          transforms.set(nb, tr);
-          compFaces.add(nb);
-          unvisited.delete(nb);
-          queue.push(nb);
-          if (debugSteps && debugPlacementSteps) {
-            const faceName = (faceNameById && typeof faceNameById.get === 'function' && faceNameById.get(nb))
-              || `face_${nb}`;
-            const faceLabel = safeEdgeName(faceName);
-            stepIndex += 1;
-            const placed = Array.from(compFaces);
-            const paths = collectPathsForFaces(placed, faceData, transforms, faceNameById, {
-              requireTransform: true,
-              dedupe: true,
-              skipSharedEdge,
-            });
-            const sig = paths.length ? paths.map((p) => p.edgeLabel || p.name || '').sort().join('|') : '';
-            if (paths.length && sig !== prevSig) {
-              debugSteps.push({
-                label: `Component ${componentIndex} step ${stepIndex} (+${faceLabel})`,
-                paths,
-                baseFaceId: root,
-                baseBasis,
-                addedFaceId: nb,
-                addedFaceName: faceName,
-              });
-              prevSig = sig;
-            }
-          }
-        }
-      }
-
-      const bounds = computeComponentBounds(compFaces, faceData, transforms);
-      if (bounds) {
-        console.log(`[FlatPattern] Component ${componentIndex} has ${compFaces.size} faces`);
-        components.push({ faces: Array.from(compFaces), bounds });
-      } else {
-        console.log(`[FlatPattern] WARNING: Component ${componentIndex} has no bounds (${compFaces.size} faces)`);
-      }
-    }
-
-    console.log(`[FlatPattern] Total components built: ${components.length}`);
-    if (!components.length) {
-      console.log('[FlatPattern] ERROR: No components - returning null');
-      return null;
-    }
-    
-    // Alert if multiple disconnected components (islands) in flat pattern
-    if (components.length > 1) {
-      console.error('[FlatPattern] ========================================');
-      console.error('[FlatPattern] CRITICAL ERROR: MULTIPLE DISCONNECTED ISLANDS IN FLAT PATTERN');
-      console.error('[FlatPattern] ========================================');
-      console.error(`[FlatPattern] The flat pattern has ${components.length} separate disconnected components:`);
-      for (let i = 0; i < components.length; i++) {
-        const faceIds = components[i].faces;
-        console.error(`[FlatPattern]   Component ${i + 1}: ${faceIds.length} faces - ${faceIds.join(', ')}`);
-      }
-      console.error('[FlatPattern] Possible causes:');
-      console.error('[FlatPattern]   1. Face neighbor relationships are incorrect');
-      console.error('[FlatPattern]   2. Shared edges between faces are not being detected');
-      console.error('[FlatPattern]   3. Transform computation is failing for some face pairs');
-      console.error('[FlatPattern]   4. Some faces are truly disconnected in the 3D geometry');
-      console.error('[FlatPattern] ========================================');
-      
-      // Also show which faces are in the unified mesh but not connected
-      if (visualizationData?.allAFaceTriangles?.length > 0) {
-        const aFaceIds = new Set();
-        for (const entry of visualizationData.allAFaceTriangles) {
-          aFaceIds.add(entry.faceId);
-        }
-        console.error(`[FlatPattern] A faces in unified mesh: [${Array.from(aFaceIds).join(', ')}]`);
-      }
-      
-      // Show browser alert
-      const componentDetails = components.map((c, i) => 
-        `Component ${i + 1}: ${c.faces.length} face${c.faces.length !== 1 ? 's' : ''}`
-      ).join('\n');
-      alert(
-        `⚠️ FLAT PATTERN ERROR ⚠️\n\n` +
-        `The flat pattern has ${components.length} DISCONNECTED ISLANDS!\n\n` +
-        `${componentDetails}\n\n` +
-        `This means some faces could not be connected.\n` +
-        `Check the console for detailed error information.`
-      );
-    }
-
-    const positions = [];
-    const triOut = [];
-    const triFaceIds = [];
-    const uvs = [];
-    const centerlines = [];
-    const bendEdges = [];
-    const faceTowardA = new Map();
-    const getTowardA = (faceId) => {
-      if (faceTowardA.has(faceId)) return faceTowardA.get(faceId);
-      const meta = faceMetaById.get(faceId);
-      if (!meta || meta.type !== 'cylindrical') {
-        faceTowardA.set(faceId, null);
-        return null;
-      }
-      const faceRadius = Number(meta?.radius ?? meta?.pmiRadiusOverride ?? meta?.pmiRadius);
-      const inferredInside = inferCylFaceIsInside(meta, faceRadius, cylGroups, thickness);
-      let faceIsInside = inferredInside;
-      if (faceIsInside == null && insideType) {
-        const ft = faceTypeById.get(faceId) || resolveFaceType(meta);
-        if (ft) faceIsInside = ft === insideType;
-      }
-      if (faceIsInside == null) {
-        faceTowardA.set(faceId, null);
-        return null;
-      }
-      const faceType = faceTypeById.get(faceId) || resolveFaceType(meta);
-      const towardA = faceType === 'B' ? !faceIsInside : faceIsInside;
-      faceTowardA.set(faceId, towardA);
-      return towardA;
-    };
-    const margin = Math.max(1, thickness * 2);
-    const weldTol = Math.max(1e-5, thickness * 1e-6);
-    const coordKey = (x, y) => `${Math.round(x / weldTol)},${Math.round(y / weldTol)}`;
-    let offsetX = 0;
-
-    for (const component of components) {
-      const bounds = component.bounds;
-      if (!bounds) continue;
-      const dx = offsetX - bounds.minX;
-      const dy = -bounds.minY;
-      offsetX += (bounds.maxX - bounds.minX) + margin;
-
-      const coordToNew = new Map();
-      const getIndex = (pt) => {
-        const key = coordKey(pt.x, pt.y);
-        let idx = coordToNew.get(key);
-        if (idx != null) return idx;
-        idx = (positions.length / 3) | 0;
-        positions.push(pt.x, pt.y, 0);
-        uvs[idx] = { x: pt.x, y: pt.y };
-        coordToNew.set(key, idx);
-        return idx;
-      };
-
-      for (const faceId of component.faces) {
-        const face = faceData.get(faceId);
-        const tr = transforms.get(faceId);
-        if (!face || !tr) continue;
-        if (face.meta?.type === 'cylindrical' && face.coords && face.coords.size) {
-          const toGlobal = (pt) => {
-            const g = applyTransform2(pt, tr);
-            return { x: g.x + dx, y: g.y + dy };
-          };
-          let handled = false;
-          const g0 = toGlobal({ x: 0, y: 0 });
-          const gX = toGlobal({ x: 1, y: 0 });
-          const axisVec = { x: gX.x - g0.x, y: gX.y - g0.y };
-          const axisLen = Math.hypot(axisVec.x, axisVec.y);
-          const axisDir = axisLen > EPS ? { x: axisVec.x / axisLen, y: axisVec.y / axisLen } : null;
-          const nDir = axisDir ? { x: -axisDir.y, y: axisDir.x } : null;
-          if (axisDir && nDir) {
-            const chains = Array.isArray(face.boundaryChains) ? face.boundaryChains : [];
-            const sharedChains = chains.filter((chain) => {
-              if (!chain || !Number.isFinite(chain.otherFaceId)) return false;
-              if (skipSharedEdge && skipSharedEdge(faceId, chain.otherFaceId, chain)) return false;
-              return true;
-            });
-            if (sharedChains.length >= 2) {
-              const chainInfos = [];
-              for (const chain of sharedChains) {
-                const verts = Array.isArray(chain.verts) ? chain.verts : [];
-                if (verts.length < 2) continue;
-                let minS = Infinity;
-                let maxS = -Infinity;
-                let sumOff = 0;
-                let count = 0;
-                for (const idx of verts) {
-                  const local = face.coords.get(idx);
-                  if (!local) continue;
-                  const g = toGlobal(local);
-                  const vx = g.x - g0.x;
-                  const vy = g.y - g0.y;
-                  const s = vx * axisDir.x + vy * axisDir.y;
-                  const off = vx * nDir.x + vy * nDir.y;
-                  if (s < minS) minS = s;
-                  if (s > maxS) maxS = s;
-                  sumOff += off;
-                  count += 1;
-                }
-                if (count < 2 || !Number.isFinite(minS) || !Number.isFinite(maxS)) continue;
-                chainInfos.push({ minS, maxS, avgOff: sumOff / count });
-              }
-              if (chainInfos.length >= 2) {
-                chainInfos.sort((a, b) => a.avgOff - b.avgOff);
-                const low = chainInfos[0];
-                const high = chainInfos[chainInfos.length - 1];
-                const minS = Math.min(low.minS, high.minS);
-                const maxS = Math.max(low.maxS, high.maxS);
-                const p0a = {
-                  x: g0.x + axisDir.x * minS + nDir.x * low.avgOff,
-                  y: g0.y + axisDir.y * minS + nDir.y * low.avgOff,
-                };
-                const p1a = {
-                  x: g0.x + axisDir.x * maxS + nDir.x * low.avgOff,
-                  y: g0.y + axisDir.y * maxS + nDir.y * low.avgOff,
-                };
-                const p0b = {
-                  x: g0.x + axisDir.x * minS + nDir.x * high.avgOff,
-                  y: g0.y + axisDir.y * minS + nDir.y * high.avgOff,
-                };
-                const p1b = {
-                  x: g0.x + axisDir.x * maxS + nDir.x * high.avgOff,
-                  y: g0.y + axisDir.y * maxS + nDir.y * high.avgOff,
-                };
-                bendEdges.push({ p0: p0a, p1: p1a, faceId });
-                bendEdges.push({ p0: p0b, p1: p1b, faceId });
-                const centerOff = (low.avgOff + high.avgOff) * 0.5;
-                const cl0 = {
-                  x: g0.x + axisDir.x * minS + nDir.x * centerOff,
-                  y: g0.y + axisDir.y * minS + nDir.y * centerOff,
-                };
-                const cl1 = {
-                  x: g0.x + axisDir.x * maxS + nDir.x * centerOff,
-                  y: g0.y + axisDir.y * maxS + nDir.y * centerOff,
-                };
-                centerlines.push({ p0: cl0, p1: cl1, faceId, towardA: getTowardA(faceId) });
-                handled = true;
-              }
-            }
-          }
-          if (!handled) {
-            let minX = Infinity;
-            let maxX = -Infinity;
-            let minY = Infinity;
-            let maxY = -Infinity;
-            for (const pt of face.coords.values()) {
-              if (!pt) continue;
-              if (pt.x < minX) minX = pt.x;
-              if (pt.x > maxX) maxX = pt.x;
-              if (pt.y < minY) minY = pt.y;
-              if (pt.y > maxY) maxY = pt.y;
-            }
-            if (Number.isFinite(minX) && Number.isFinite(maxX) && Number.isFinite(minY) && Number.isFinite(maxY)) {
-              const centerY = (minY + maxY) * 0.5;
-              const cl0 = toGlobal({ x: minX, y: centerY });
-              const cl1 = toGlobal({ x: maxX, y: centerY });
-              centerlines.push({ p0: cl0, p1: cl1, faceId, towardA: getTowardA(faceId) });
-              const be0a = toGlobal({ x: minX, y: minY });
-              const be1a = toGlobal({ x: maxX, y: minY });
-              const be0b = toGlobal({ x: minX, y: maxY });
-              const be1b = toGlobal({ x: maxX, y: maxY });
-              bendEdges.push({ p0: be0a, p1: be1a, faceId });
-              bendEdges.push({ p0: be0b, p1: be1b, faceId });
-            }
-          }
-        }
-        const faceCoords = new Map();
-        for (const idx of face.vertices) {
-          const local = face.coords.get(idx);
-          if (!local) continue;
-          const g = applyTransform2(local, tr);
-          faceCoords.set(idx, { x: g.x + dx, y: g.y + dy });
-        }
-        for (const tri of face.triangles) {
-          const pa = faceCoords.get(tri[0]);
-          const pb = faceCoords.get(tri[1]);
-          const pc = faceCoords.get(tri[2]);
-          if (!pa || !pb || !pc) continue;
-          const ia = getIndex(pa);
-          const ib = getIndex(pb);
-          const ic = getIndex(pc);
-          triOut.push(ia, ib, ic);
-          triFaceIds.push(faceId);
-        }
-      }
-    }
-
-    if (!triOut.length || !positions.length) return null;
-    const result = {
-      vertProperties: new Float32Array(positions),
-      triVerts: new Uint32Array(triOut),
-      triFaces: triFaceIds,
-      uvs,
-      faceMetaById,
-      faceNameById: solid._idToFaceName,
+    return {
+      visualizationMeshes,
       thickness,
       delete() {},
+      isVisualizationOnly: true,
     };
-    if (centerlines.length || bendEdges.length) {
-      result.bendAnnotations = {
-        centerlines,
-        bendEdges,
-      };
-    }
-    if (debugSteps) result.debugSteps = debugSteps;
-    
-    // Add visualization meshes for A faces
-    if (visualizationData) {
-      result.visualizationMeshes = createVisualizationMeshes(
-        visualizationData,
-        vertProps,
-        neutralFactor,
-        thickness
-      );
-    }
-    
-    return result;
   } finally {
     try { if (mesh && typeof mesh.delete === 'function') mesh.delete(); } catch {}
   }
@@ -3849,9 +2867,13 @@ function buildFlatPatternMeshTriangulated(solid, opts = {}) {
 }
 
 function buildFlatPatternMesh(solid, opts = {}) {
-  const flatByFaces = buildFlatPatternMeshByFaces(solid, opts);
-  if (flatByFaces) return flatByFaces;
-  return buildFlatPatternMeshTriangulated(solid, opts);
+  const flat = buildFlatPatternMeshTriangulated(solid, opts);
+  const viz = buildFlatPatternMeshByFaces(solid, opts);
+  if (flat) {
+    if (viz?.visualizationMeshes) flat.visualizationMeshes = viz.visualizationMeshes;
+    return flat;
+  }
+  return viz;
 }
 
 function buildBoundaryLoops2D(positions, triVerts) {
@@ -4275,6 +3297,85 @@ function buildBendAnnotations2D(flatMesh) {
 
 function buildSvgForFlatMesh(flatMesh, name = 'FLAT', opts = {}) {
   if (!flatMesh || !flatMesh.vertProperties || !flatMesh.triVerts) return null;
+  const unfolded = extractUnfoldedEdges(flatMesh) || extractTriangulatedEdges(flatMesh);
+  if (unfolded) {
+    const { positions, outerEdges, innerEdges, centerlines } = unfolded;
+    const allEdges = outerEdges.concat(innerEdges);
+    if (!allEdges.length) return null;
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const [a, b] of allEdges) {
+      const ax = positions[a * 3 + 0];
+      const ay = positions[a * 3 + 1];
+      const bx = positions[b * 3 + 0];
+      const by = positions[b * 3 + 1];
+      minX = Math.min(minX, ax, bx);
+      maxX = Math.max(maxX, ax, bx);
+      minY = Math.min(minY, ay, by);
+      maxY = Math.max(maxY, ay, by);
+    }
+    for (const line of centerlines || []) {
+      minX = Math.min(minX, line.start.x, line.end.x);
+      maxX = Math.max(maxX, line.start.x, line.end.x);
+      minY = Math.min(minY, line.start.y, line.end.y);
+      maxY = Math.max(maxY, line.start.y, line.end.y);
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
+    const width = Math.max(maxX - minX, 1);
+    const height = Math.max(maxY - minY, 1);
+    const pad = Math.max(1, Math.min(width, height) * 0.05);
+    const viewWidth = width + pad * 2;
+    const viewHeight = height + pad * 2;
+
+    const fmt = (n) => {
+      if (!Number.isFinite(n)) return '0';
+      const s = n.toFixed(4);
+      return s.replace(/\.0+$/,'').replace(/(\.[0-9]*?)0+$/,'$1');
+    };
+
+    const buildLines = (edges) => edges.map(([a, b]) => {
+      const ax = positions[a * 3 + 0] - minX + pad;
+      const ay = height - (positions[a * 3 + 1] - minY) + pad;
+      const bx = positions[b * 3 + 0] - minX + pad;
+      const by = height - (positions[b * 3 + 1] - minY) + pad;
+      return `M ${fmt(ax)} ${fmt(ay)} L ${fmt(bx)} ${fmt(by)}`;
+    });
+
+    const outerParts = buildLines(outerEdges);
+    const innerParts = buildLines(innerEdges);
+    const centerParts = (centerlines || []).map((line) => {
+      const ax = line.start.x - minX + pad;
+      const ay = height - (line.start.y - minY) + pad;
+      const bx = line.end.x - minX + pad;
+      const by = height - (line.end.y - minY) + pad;
+      return `M ${fmt(ax)} ${fmt(ay)} L ${fmt(bx)} ${fmt(by)}`;
+    });
+
+    const lines = [];
+    lines.push('<?xml version="1.0" encoding="UTF-8"?>');
+    lines.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${fmt(viewWidth)}mm" height="${fmt(viewHeight)}mm" viewBox="0 0 ${fmt(viewWidth)} ${fmt(viewHeight)}">`);
+    lines.push(`  <title>${xmlEsc(name || 'Flat Pattern')}</title>`);
+    if (outerParts.length) {
+      lines.push(`  <g fill="none" stroke="#ff5fa2" stroke-width="0.1" stroke-linejoin="round" stroke-linecap="round">`);
+      for (const d of outerParts) lines.push(`    <path d="${d}"/>`);
+      lines.push('  </g>');
+    }
+    if (innerParts.length) {
+      lines.push(`  <g fill="none" stroke="#00ffff" stroke-width="0.1" stroke-linejoin="round" stroke-linecap="round">`);
+      for (const d of innerParts) lines.push(`    <path d="${d}"/>`);
+      lines.push('  </g>');
+    }
+    if (centerParts.length) {
+      lines.push(`  <g fill="none" stroke="#00ffff" stroke-width="0.1" stroke-linejoin="round" stroke-linecap="round">`);
+      for (const d of centerParts) lines.push(`    <path d="${d}"/>`);
+      lines.push('  </g>');
+    }
+    lines.push('</svg>');
+    return { svg: lines.join('\n'), width: viewWidth, height: viewHeight };
+  }
   const positions = flatMesh.vertProperties;
   const triVerts = flatMesh.triVerts;
   const loops = buildBoundaryLoops2D(positions, triVerts);
@@ -4449,6 +3550,78 @@ function buildSvgForFlatMesh(flatMesh, name = 'FLAT', opts = {}) {
 
 function buildDxfForFlatMesh(flatMesh, name = 'FLAT') {
   if (!flatMesh || !flatMesh.vertProperties || !flatMesh.triVerts) return null;
+  const unfolded = extractUnfoldedEdges(flatMesh) || extractTriangulatedEdges(flatMesh);
+  if (unfolded) {
+    const { positions, outerEdges, innerEdges, centerlines } = unfolded;
+    const allEdges = outerEdges.concat(innerEdges);
+    if (!allEdges.length) return null;
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const [a, b] of allEdges) {
+      const ax = positions[a * 3 + 0];
+      const ay = positions[a * 3 + 1];
+      const bx = positions[b * 3 + 0];
+      const by = positions[b * 3 + 1];
+      minX = Math.min(minX, ax, bx);
+      maxX = Math.max(maxX, ax, bx);
+      minY = Math.min(minY, ay, by);
+      maxY = Math.max(maxY, ay, by);
+    }
+    for (const line of centerlines || []) {
+      minX = Math.min(minX, line.start.x, line.end.x);
+      maxX = Math.max(maxX, line.start.x, line.end.x);
+      minY = Math.min(minY, line.start.y, line.end.y);
+      maxY = Math.max(maxY, line.start.y, line.end.y);
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
+    const width = Math.max(maxX - minX, 1);
+    const height = Math.max(maxY - minY, 1);
+    const pad = Math.max(1, Math.min(width, height) * 0.05);
+    const viewWidth = width + pad * 2;
+    const viewHeight = height + pad * 2;
+
+    const toPoint = (x, y) => ({ x: x - minX + pad, y: y - minY + pad });
+    const dxf = new DxfWriter();
+    dxf.setUnits(Units.Millimeters);
+    const cutLayer = 'CUT';
+    const innerLayer = 'FACE_EDGE';
+    const centerLayer = 'BEND_CENTER';
+    dxf.addLayer(cutLayer, Colors.Magenta, LineTypes.Continuous);
+    dxf.addLayer(innerLayer, Colors.White, LineTypes.Continuous);
+    dxf.addLayer(centerLayer, Colors.Cyan, LineTypes.Continuous);
+    const addLine = (p0, p1) => {
+      dxf.addLine(point3d(p0.x, p0.y, 0), point3d(p1.x, p1.y, 0));
+    };
+
+    dxf.setCurrentLayerName(cutLayer);
+    for (const [a, b] of outerEdges) {
+      const ax = positions[a * 3 + 0];
+      const ay = positions[a * 3 + 1];
+      const bx = positions[b * 3 + 0];
+      const by = positions[b * 3 + 1];
+      addLine(toPoint(ax, ay), toPoint(bx, by));
+    }
+    if (innerEdges.length) {
+      dxf.setCurrentLayerName(innerLayer);
+      for (const [a, b] of innerEdges) {
+        const ax = positions[a * 3 + 0];
+        const ay = positions[a * 3 + 1];
+        const bx = positions[b * 3 + 0];
+        const by = positions[b * 3 + 1];
+        addLine(toPoint(ax, ay), toPoint(bx, by));
+      }
+    }
+    if (centerlines && centerlines.length) {
+      dxf.setCurrentLayerName(centerLayer);
+      for (const line of centerlines) {
+        addLine(toPoint(line.start.x, line.start.y), toPoint(line.end.x, line.end.y));
+      }
+    }
+    return { dxf: dxf.stringify(), width: viewWidth, height: viewHeight, name };
+  }
   const positions = flatMesh.vertProperties;
   const triVerts = flatMesh.triVerts;
   const loops = buildBoundaryLoops2D(positions, triVerts);
@@ -4603,13 +3776,289 @@ function buildDxfForFlatMesh(flatMesh, name = 'FLAT') {
   return { dxf: dxf.stringify(), width: viewWidth, height: viewHeight, name };
 }
 
+function extractUnfoldedEdges(flatMesh) {
+  const meshes = Array.isArray(flatMesh?.visualizationMeshes) ? flatMesh.visualizationMeshes : [];
+  const unfolded = meshes.find((m) => m?.name === 'Flat A Faces (Triangle Unfold)') || null;
+  if (!unfolded || !unfolded.positions) return null;
+  const positions = unfolded.positions;
+  const lines = buildUnfoldedChildLines(unfolded);
+  if (!lines) return null;
+  const outerEdges = Array.isArray(lines.outerEdges) ? lines.outerEdges : [];
+  const innerEdges = Array.isArray(lines.innerEdges) ? lines.innerEdges : [];
+  const centerlines = Array.isArray(lines.centerlines) ? lines.centerlines : [];
+  if (!outerEdges.length && !innerEdges.length && !centerlines.length) return null;
+
+  return { positions, outerEdges, innerEdges, centerlines };
+}
+
+function extractTriangulatedEdges(flatMesh) {
+  if (!flatMesh?.vertProperties || !flatMesh?.triVerts) return null;
+  const faceIds = Array.isArray(flatMesh.triFaces) ? flatMesh.triFaces : null;
+  const triVerts = flatMesh.triVerts;
+  const triCount = (triVerts.length / 3) | 0;
+  if (!faceIds || faceIds.length !== triCount) return null;
+  const triangles = new Array(triCount);
+  for (let i = 0; i < triCount; i++) {
+    const base = i * 3;
+    triangles[i] = [triVerts[base + 0], triVerts[base + 1], triVerts[base + 2]];
+  }
+  const lines = buildUnfoldedChildLines({
+    positions: flatMesh.vertProperties,
+    triangles,
+    triangleFaceIds: faceIds,
+    faceMetaById: flatMesh.faceMetaById || null,
+  });
+  if (!lines) return null;
+  const outerEdges = Array.isArray(lines.outerEdges) ? lines.outerEdges : [];
+  const innerEdges = Array.isArray(lines.innerEdges) ? lines.innerEdges : [];
+  const centerlines = Array.isArray(lines.centerlines) ? lines.centerlines : [];
+  if (!outerEdges.length && !innerEdges.length && !centerlines.length) return null;
+  return {
+    positions: flatMesh.vertProperties,
+    outerEdges,
+    innerEdges,
+    centerlines,
+  };
+}
+
+function buildUnfoldedChildLines(unfolded) {
+  if (!unfolded || !unfolded.positions || !unfolded.triangles) return null;
+  const positions = unfolded.positions;
+  const triangles = unfolded.triangles;
+  const faceIds = Array.isArray(unfolded.triangleFaceIds) ? unfolded.triangleFaceIds : null;
+  if (!faceIds || faceIds.length !== triangles.length) return null;
+
+  const pos2d = (idx) => ({
+    x: positions[idx * 3 + 0],
+    y: positions[idx * 3 + 1],
+  });
+  const isColinear = (a, b, c) => {
+    const pa = pos2d(a);
+    const pb = pos2d(b);
+    const pc = pos2d(c);
+    const v1x = pa.x - pb.x;
+    const v1y = pa.y - pb.y;
+    const v2x = pc.x - pb.x;
+    const v2y = pc.y - pb.y;
+    const len1 = Math.hypot(v1x, v1y);
+    const len2 = Math.hypot(v2x, v2y);
+    if (len1 < 1e-9 || len2 < 1e-9) return false;
+    const cross = v1x * v2y - v1y * v2x;
+    return Math.abs(cross) <= 1e-6 * len1 * len2;
+  };
+  const mergeColinearEdges = (segments) => {
+    const edgeKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+    const adj = new Map();
+    const unvisited = new Set();
+    for (const [a, b] of segments) {
+      const key = edgeKey(a, b);
+      unvisited.add(key);
+      if (!adj.has(a)) adj.set(a, []);
+      if (!adj.has(b)) adj.set(b, []);
+      adj.get(a).push(b);
+      adj.get(b).push(a);
+    }
+    const hasEdge = (a, b) => unvisited.has(edgeKey(a, b));
+    const takeEdge = (a, b) => unvisited.delete(edgeKey(a, b));
+    const merged = [];
+    while (unvisited.size) {
+      const key = unvisited.values().next().value;
+      const [aStr, bStr] = key.split('|');
+      const a = Number(aStr);
+      const b = Number(bStr);
+      takeEdge(a, b);
+      let start = a;
+      let end = b;
+      const startNeighbor = b;
+      let prev = start;
+      let curr = end;
+      while (true) {
+        const nbrs = (adj.get(curr) || []).filter((n) => n !== prev);
+        if (nbrs.length !== 1) break;
+        const next = nbrs[0];
+        if (!hasEdge(curr, next)) break;
+        if (!isColinear(prev, curr, next)) break;
+        takeEdge(curr, next);
+        prev = curr;
+        curr = next;
+        end = curr;
+      }
+      prev = startNeighbor;
+      curr = start;
+      while (true) {
+        const nbrs = (adj.get(curr) || []).filter((n) => n !== prev);
+        if (nbrs.length !== 1) break;
+        const next = nbrs[0];
+        if (!hasEdge(curr, next)) break;
+        if (!isColinear(prev, curr, next)) break;
+        takeEdge(curr, next);
+        prev = curr;
+        curr = next;
+        start = curr;
+      }
+      merged.push([start, end]);
+    }
+    return merged;
+  };
+
+  const edgeMap = new Map();
+  const addEdge = (a, b, faceId) => {
+    const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+    let entry = edgeMap.get(key);
+    if (!entry) {
+      entry = { a, b, faces: [] };
+      edgeMap.set(key, entry);
+    }
+    entry.faces.push(faceId);
+  };
+  for (let i = 0; i < triangles.length; i++) {
+    const tri = triangles[i];
+    const faceId = faceIds[i];
+    addEdge(tri[0], tri[1], faceId);
+    addEdge(tri[1], tri[2], faceId);
+    addEdge(tri[2], tri[0], faceId);
+  }
+
+  const pinkSegments = [];
+  const whiteSegments = [];
+  const bendEdgeMap = new Map();
+  const faceMetaById = unfolded.faceMetaById || null;
+  const isCylFace = (faceId) => {
+    if (!faceMetaById) return false;
+    if (faceMetaById instanceof Map) {
+      return faceMetaById.get(faceId)?.type === 'cylindrical';
+    }
+    return faceMetaById[faceId]?.type === 'cylindrical';
+  };
+  for (const entry of edgeMap.values()) {
+    const faces = entry.faces;
+    const faceSet = new Set(faces);
+    // Match visualization edge logic: only keep edges used by a single triangle,
+    // or shared between different faces (ignore same-face triangulation edges).
+    if (faces.length === 1) {
+      pinkSegments.push([entry.a, entry.b]);
+    } else if (faceSet.size > 1) {
+      whiteSegments.push([entry.a, entry.b]);
+      for (const faceId of faceSet) {
+        if (!isCylFace(faceId)) continue;
+        if (!bendEdgeMap.has(faceId)) bendEdgeMap.set(faceId, []);
+        bendEdgeMap.get(faceId).push([entry.a, entry.b]);
+      }
+    }
+  }
+
+  const faceCentroids = new Map();
+  const faceVertexCounts = new Map();
+  for (let i = 0; i < triangles.length; i++) {
+    const tri = triangles[i];
+    const faceId = faceIds[i];
+    for (let k = 0; k < 3; k++) {
+      const vIdx = tri[k];
+      const p = pos2d(vIdx);
+      const acc = faceCentroids.get(faceId) || { x: 0, y: 0 };
+      acc.x += p.x;
+      acc.y += p.y;
+      faceCentroids.set(faceId, acc);
+      faceVertexCounts.set(faceId, (faceVertexCounts.get(faceId) || 0) + 1);
+    }
+  }
+  for (const [faceId, acc] of faceCentroids.entries()) {
+    const count = faceVertexCounts.get(faceId) || 1;
+    acc.x /= count;
+    acc.y /= count;
+  }
+
+  const buildCenterline = (edges, faceId) => {
+    if (!edges || edges.length < 2) return null;
+    const merged = mergeColinearEdges(edges);
+    if (merged.length < 2) return null;
+    const centroid = faceCentroids.get(faceId);
+    if (!centroid) return null;
+    const edgeDir = (a, b) => {
+      const pa = pos2d(a);
+      const pb = pos2d(b);
+      const dx = pb.x - pa.x;
+      const dy = pb.y - pa.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-9) return null;
+      return { x: dx / len, y: dy / len };
+    };
+    const baseDir = edgeDir(merged[0][0], merged[0][1]);
+    if (!baseDir) return null;
+    const perp = { x: -baseDir.y, y: baseDir.x };
+    const groupA = [];
+    const groupB = [];
+    for (const [a, b] of merged) {
+      const dir = edgeDir(a, b);
+      if (!dir) continue;
+      const dot = dir.x * baseDir.x + dir.y * baseDir.y;
+      if (Math.abs(dot) < 0.98) continue;
+      const pa = pos2d(a);
+      const cross = (baseDir.x * (centroid.y - pa.y)) - (baseDir.y * (centroid.x - pa.x));
+      if (cross >= 0) groupA.push([a, b]);
+      else groupB.push([a, b]);
+    }
+    if (!groupA.length || !groupB.length) return null;
+    const buildLine = (group) => {
+      let minT = Infinity;
+      let maxT = -Infinity;
+      let offSum = 0;
+      let offCount = 0;
+      for (const [a, b] of group) {
+        const pa = pos2d(a);
+        const pb = pos2d(b);
+        const ta = pa.x * baseDir.x + pa.y * baseDir.y;
+        const tb = pb.x * baseDir.x + pb.y * baseDir.y;
+        minT = Math.min(minT, ta, tb);
+        maxT = Math.max(maxT, ta, tb);
+        offSum += pa.x * perp.x + pa.y * perp.y;
+        offSum += pb.x * perp.x + pb.y * perp.y;
+        offCount += 2;
+      }
+      return {
+        minT,
+        maxT,
+        off: offSum / offCount,
+      };
+    };
+    const lineA = buildLine(groupA);
+    const lineB = buildLine(groupB);
+    if (!lineA || !lineB) return null;
+    const minT = Math.min(lineA.minT, lineB.minT);
+    const maxT = Math.max(lineA.maxT, lineB.maxT);
+    const midOff = (lineA.off + lineB.off) * 0.5;
+    const start = {
+      x: baseDir.x * minT + perp.x * midOff,
+      y: baseDir.y * minT + perp.y * midOff,
+    };
+    const end = {
+      x: baseDir.x * maxT + perp.x * midOff,
+      y: baseDir.y * maxT + perp.y * midOff,
+    };
+    return { start, end };
+  };
+
+  const centerlines = [];
+  for (const [faceId, edges] of bendEdgeMap.entries()) {
+    const lineInfo = buildCenterline(edges, faceId);
+    if (!lineInfo) continue;
+    centerlines.push(lineInfo);
+  }
+
+  return {
+    outerEdges: mergeColinearEdges(pinkSegments),
+    innerEdges: mergeColinearEdges(whiteSegments),
+    centerlines,
+  };
+}
+
 export function buildSheetMetalFlatPatternSolids(solids, opts = {}) {
   const out = [];
   const list = Array.isArray(solids) ? solids : [];
   for (const solid of list) {
     if (!solid || typeof solid.getMesh !== 'function') continue;
-    const flatMesh = buildFlatPatternMesh(solid, opts);
-    if (!flatMesh) continue;
+    const flatMesh = buildFlatPatternMeshTriangulated(solid, opts);
+    if (!flatMesh || flatMesh.isVisualizationOnly) continue;
     const baseName = String(solid.name || 'SHEET').trim() || 'SHEET';
     out.push({
       name: `${baseName}_FLAT`,
@@ -4625,7 +4074,7 @@ export function buildSheetMetalFlatPatternDxfs(solids, opts = {}) {
   for (const solid of list) {
     if (!solid || typeof solid.getMesh !== 'function') continue;
     const flatMesh = buildFlatPatternMesh(solid, opts);
-    if (!flatMesh) continue;
+    if (!flatMesh || flatMesh.isVisualizationOnly) continue;
     const baseName = String(solid.name || 'SHEET').trim() || 'SHEET';
     const dxfInfo = buildDxfForFlatMesh(flatMesh, `${baseName} Flat Pattern`);
     if (!dxfInfo || !dxfInfo.dxf) continue;
@@ -4646,12 +4095,13 @@ export function buildSheetMetalFlatPatternDebugSteps(solids, opts = {}) {
       debug: true,
       debugPlacementSteps,
     });
-    if (!flatMesh || !Array.isArray(flatMesh.debugSteps) || !flatMesh.debugSteps.length) continue;
-    assignDebugPathColors(flatMesh.debugSteps);
+    if (!flatMesh) continue;
+    const debugSteps = Array.isArray(flatMesh.debugSteps) ? flatMesh.debugSteps : [];
+    if (debugSteps.length) assignDebugPathColors(debugSteps);
     const baseName = String(solid.name || 'SHEET').trim() || 'SHEET';
     entries.push({
       name: baseName,
-      debugSteps: flatMesh.debugSteps,
+      debugSteps,
       visualizationMeshes: flatMesh.visualizationMeshes || [],
       thickness: flatMesh.thickness,
       sourceIndex: i,
@@ -4666,7 +4116,7 @@ export function buildSheetMetalFlatPatternSvgs(solids, opts = {}) {
   for (const solid of list) {
     if (!solid || typeof solid.getMesh !== 'function') continue;
     const flatMesh = buildFlatPatternMesh(solid, opts);
-    if (!flatMesh) continue;
+    if (!flatMesh || flatMesh.isVisualizationOnly) continue;
     const baseName = String(solid.name || 'SHEET').trim() || 'SHEET';
     const svgInfo = buildSvgForFlatMesh(flatMesh, `${baseName} Flat Pattern`);
     if (!svgInfo || !svgInfo.svg) continue;
