@@ -23,8 +23,6 @@ export class SceneListing {
         this.toolbar.className = "scene-tree__toolbar";
         this.uiElement.appendChild(this.toolbar);
 
-        this.#attachTypeVisibilityButtons();
-
         // Tree container
         this.treeRoot = document.createElement("ul");
         this.treeRoot.className = "scene-tree__list";
@@ -33,12 +31,18 @@ export class SceneListing {
         this.#ensureStyles();
 
         // --- State ------------------------------------------------------------------
-        /** @type {Map<string, {obj: any, li: HTMLLIElement, chk: HTMLInputElement, nameEl: HTMLButtonElement, childrenUL?: HTMLUListElement, lastSelected?: boolean}>} */
+        this._showAllObjects = false;
+        /** @type {Map<string, {obj: any, li: HTMLLIElement, chk: HTMLInputElement, nameEl: HTMLButtonElement, caret: HTMLButtonElement, childrenUL?: HTMLUListElement, lastSelected?: boolean}>} */
         this.nodes = new Map();
         // Remember per-solid expand/collapse state across scene rebuilds (keyed by solid name)
         this._expandedByName = new Map(); // name -> boolean
+        // Remember expand/collapse state for non-solid nodes when showing all objects
+        this._expandedByUuid = new Map(); // uuid -> boolean
         this._running = false;
         this._raf = 0;
+
+        this.#attachTypeVisibilityButtons();
+        this.#attachDisplayModeToggle();
 
         // Wire toolbar
         // this.toolbar.querySelector(".st-expand").addEventListener("click", () => this.#setAllOpen(true));
@@ -111,6 +115,11 @@ export class SceneListing {
     #isPlane(obj) { return obj && obj.type === "PLANE"; }
     #isDatum(obj) { return obj && obj.type === "DATUM"; }
     #isSketch(obj) { return obj && obj.type === "SKETCH"; }
+    #canExpand(obj) {
+        if (!obj || !obj.isObject3D) return false;
+        if (this._showAllObjects) return !!(obj.children && obj.children.length);
+        return this.#isSolid(obj);
+    }
     #isCenterlineEdge(obj) {
         if (!obj || obj.type !== "EDGE") return false;
         const ud = obj.userData || {};
@@ -123,29 +132,40 @@ export class SceneListing {
     #syncMembership() {
         const present = new Set();
 
-        // Find solids at any depth (simple stack)
-        const stack = [...this.scene.children];
-        while (stack.length) {
-            const o = stack.pop();
-            if (!o || !o.isObject3D) continue;
-            if (this.#isSolid(o)) {
-                const parentSolid = (o.parent && this.#isSolid(o.parent)) ? o.parent : null;
-                // Ensure node for Solid (or component) with awareness of parent containers
-                this.#ensureNodeFor(o, parentSolid);
-                // Ensure children nodes for faces/edges/loops/vertices/planes (direct children of Solid/Sketch/Datum)
-                for (const child of o.children) {
-                    if (this.#isFace(child) || this.#isEdge(child) || this.#isLoop(child) || this.#isVertex(child) || this.#isPlane(child)) {
-                        this.#ensureNodeFor(child, o);
+        if (this._showAllObjects) {
+            // Show every Object3D in the scene (recursive)
+            const stack = [...this.scene.children];
+            while (stack.length) {
+                const o = stack.pop();
+                if (!o || !o.isObject3D) continue;
+                present.add(o.uuid);
+                const parentObj = (o.parent && o.parent.isObject3D && o.parent !== this.scene) ? o.parent : null;
+                this.#ensureNodeFor(o, parentObj);
+                if (o.children && o.children.length) stack.push(...o.children);
+            }
+        } else {
+            // Find solids at any depth (simple stack)
+            const stack = [...this.scene.children];
+            while (stack.length) {
+                const o = stack.pop();
+                if (!o || !o.isObject3D) continue;
+                if (this.#isSolid(o)) {
+                    const parentSolid = (o.parent && this.#isSolid(o.parent)) ? o.parent : null;
+                    // Ensure node for Solid (or component) with awareness of parent containers
+                    present.add(o.uuid);
+                    this.#ensureNodeFor(o, parentSolid);
+                    // Ensure children nodes for faces/edges/loops/vertices/planes (direct children of Solid/Sketch/Datum)
+                    for (const child of o.children) {
+                        if (!child || !child.isObject3D) continue;
+                        if (this.#isFace(child) || this.#isEdge(child) || this.#isLoop(child) || this.#isVertex(child) || this.#isPlane(child)) {
+                            present.add(child.uuid);
+                            this.#ensureNodeFor(child, o);
+                        }
                     }
                 }
+                // continue traversal
+                if (o.children && o.children.length) stack.push(...o.children);
             }
-            // continue traversal
-            if (o.children && o.children.length) stack.push(...o.children);
-        }
-
-        // Track present uuids
-        for (const [uuid, info] of this.nodes) {
-            if (info.obj && info.obj.parent) present.add(uuid);
         }
 
         // Remove nodes whose objects are gone
@@ -181,21 +201,12 @@ export class SceneListing {
         const toggle = document.createElement("button");
         toggle.type = "button";
         toggle.className = "st-caret";
-        toggle.title = "Expand/Collapse";
-        toggle.textContent = "▸";
-        // Solids/components can expand; leaves don't show caret
-        if (this.#isSolid(obj)) {
-            toggle.addEventListener("click", (e) => {
-                e.stopPropagation();
-                const open = !li.classList.contains("open");
-                this.#setOpen(li, open);
-            });
-        } else {
-            toggle.classList.add("is-leaf");
-            toggle.disabled = true;
-            toggle.textContent = "•";
-            toggle.title = "";
-        }
+        toggle.addEventListener("click", (e) => {
+            e.stopPropagation();
+            if (!this.#canExpand(obj)) return;
+            const open = !li.classList.contains("open");
+            this.#setOpen(li, open);
+        });
 
         const chk = document.createElement("input");
         chk.type = "checkbox";
@@ -252,13 +263,15 @@ export class SceneListing {
             li,
             chk,
             nameEl: nameBtn,
+            caret: toggle,
             childrenUL: null,
             lastSelected: undefined
         };
         this.nodes.set(obj.uuid, info);
 
         // Initial state: solids collapsed by default; restore remembered open state by name
-        if (this.#isSolid(obj)) this.#setOpen(li, this.#wantOpen(obj));
+        if (this.#canExpand(obj)) this.#setOpen(li, this.#wantOpen(obj));
+        this.#syncCaret(info);
         this.#applyTypeClass(li, obj);
         return info;
     }
@@ -274,6 +287,7 @@ export class SceneListing {
         // Reflect plain per-object visibility & selection back into UI
         for (const info of this.nodes.values()) {
             const obj = info.obj;
+            this.#syncCaret(info);
 
             // Checkbox: reflect ONLY obj.visible
             const desiredChecked = !!obj.visible;
@@ -316,6 +330,32 @@ export class SceneListing {
     }
 
     // ---- UI helpers -----------------------------------------------------------
+
+    #attachDisplayModeToggle() {
+        const wrap = document.createElement("label");
+        wrap.className = "st-toggle";
+        wrap.title = "Show all scene objects (recursive)";
+
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.className = "st-toggle__input";
+        input.checked = !!this._showAllObjects;
+
+        const text = document.createElement("span");
+        text.className = "st-toggle__label";
+        text.textContent = "All Objects";
+
+        wrap.appendChild(input);
+        wrap.appendChild(text);
+
+        input.addEventListener("change", (e) => {
+            e.stopPropagation();
+            this._showAllObjects = input.checked;
+            this.refresh();
+        });
+
+        this.toolbar.appendChild(wrap);
+    }
 
     #attachTypeVisibilityButtons() {
         const makeTypeButton = (label, title, predicate) => {
@@ -401,15 +441,12 @@ export class SceneListing {
             li.classList.remove("open");
             if (caret) caret.textContent = "▸";
         }
-        // Persist state for solids by name
+        // Persist state for solids by name (and by uuid for other nodes when enabled)
         try {
             const uuid = li?.dataset?.uuid;
             const info = uuid ? this.nodes.get(uuid) : null;
             const obj = info ? info.obj : null;
-            if (obj && this.#isSolid(obj)) {
-                const key = (obj.name && String(obj.name).length) ? String(obj.name) : null;
-                if (key) this._expandedByName.set(key, !!open);
-            }
+            if (obj) this.#rememberOpenState(obj, open);
         } catch (_) { }
     }
 
@@ -419,13 +456,50 @@ export class SceneListing {
         }
     }
 
+    #rememberOpenState(obj, open) {
+        if (!obj) return;
+        const solidKey = this.#solidOpenKey(obj);
+        if (solidKey) {
+            this._expandedByName.set(solidKey, !!open);
+            return;
+        }
+        if (this._showAllObjects && obj.uuid) {
+            this._expandedByUuid.set(obj.uuid, !!open);
+        }
+    }
+
+    #solidOpenKey(obj) {
+        if (!obj || !this.#isSolid(obj)) return null;
+        const key = (obj.name && String(obj.name).length) ? String(obj.name) : null;
+        return key;
+    }
+
+    #syncCaret(info) {
+        if (!info || !info.caret) return;
+        const obj = info.obj;
+        const canExpand = this.#canExpand(obj);
+        if (canExpand) {
+            if (info.caret.classList.contains("is-leaf")) info.caret.classList.remove("is-leaf");
+            if (info.caret.disabled) info.caret.disabled = false;
+            if (info.caret.title !== "Expand/Collapse") info.caret.title = "Expand/Collapse";
+            const open = info.li.classList.contains("open");
+            const symbol = open ? "▾" : "▸";
+            if (info.caret.textContent !== symbol) info.caret.textContent = symbol;
+        } else {
+            if (!info.caret.classList.contains("is-leaf")) info.caret.classList.add("is-leaf");
+            if (!info.caret.disabled) info.caret.disabled = true;
+            if (info.caret.textContent !== "•") info.caret.textContent = "•";
+            if (info.caret.title) info.caret.title = "";
+        }
+    }
+
     // Remembered open state for solids (by name), default collapsed when unknown/unnamed
     #wantOpen(obj) {
         try {
-            if (!obj || !this.#isSolid(obj)) return false;
-            const key = (obj.name && String(obj.name).length) ? String(obj.name) : null;
-            if (!key) return false;
-            return !!this._expandedByName.get(key);
+            const solidKey = this.#solidOpenKey(obj);
+            if (solidKey) return !!this._expandedByName.get(solidKey);
+            if (this._showAllObjects && obj && obj.uuid) return !!this._expandedByUuid.get(obj.uuid);
+            return false;
         } catch (_) {
             return false;
         }
@@ -459,6 +533,18 @@ export class SceneListing {
 .scene-tree__toolbar{
   display:flex; gap:6px; margin-bottom:6px; flex-wrap:wrap;
 }
+.st-toggle{
+  display:flex; align-items:center; gap:6px;
+  background:#0f1722; color:var(--fg); border:1px solid var(--border);
+  padding:2px 8px; border-radius:8px; font-size:11px; cursor:pointer;
+}
+.st-toggle__input{
+  margin:0; accent-color: var(--accent); cursor:pointer;
+}
+.st-toggle__label{
+  cursor:pointer;
+}
+.st-toggle:hover{ background:var(--hover); }
 .st-btn{
   background:#0f1722; color:var(--fg); border:1px solid var(--border);
   padding:4px; border-radius:8px; cursor:pointer;
