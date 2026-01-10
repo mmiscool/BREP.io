@@ -5,7 +5,8 @@ import {
   propagateSheetMetalFaceTypesToEdges,
 } from "./sheetMetalFaceTypes.js";
 import { applySheetMetalMetadata } from "./sheetMetalMetadata.js";
-import { resolveProfileFace } from "./profileUtils.js";
+import { selectionHasSketch } from "../selectionUtils.js";
+import { resolveProfileFace, collectSketchParents } from "./profileUtils.js";
 
 const inputParamsSchema = {
   id: {
@@ -26,6 +27,11 @@ const inputParamsSchema = {
     multiple: false,
     default_value: null,
     hint: "Solid tool or sketch/face to extrude as a cutting tool.",
+  },
+  consumeProfileSketch: {
+    type: "boolean",
+    default_value: true,
+    hint: "Remove the referenced sketch after creating the cutout. Turn off to keep it in the scene.",
   },
   forwardDistance: {
     type: "number",
@@ -69,7 +75,9 @@ export class SheetMetalCutoutFeature {
     const resolvedProfile = resolveProfileFace(profileRef, partHistory) || profileRef;
     const profileType = resolvedProfile?.type;
     const allowDistances = (profileType === "FACE" || profileType === "SKETCH");
-    return allowDistances ? [] : ["forwardDistance", "backDistance"];
+    const hide = allowDistances ? [] : ["forwardDistance", "backDistance"];
+    if (!selectionHasSketch(params?.profile, partHistory)) hide.push("consumeProfileSketch");
+    return hide;
   }
 
   async run(partHistory) {
@@ -79,6 +87,7 @@ export class SheetMetalCutoutFeature {
     let sheetSolid = resolveSolidRef(sheetRef, scene);
 
     const tools = [];
+    const sketchParentsToRemove = [];
     this.debugTool = null;
 
     // Profile can be a solid (use directly) or a face/sketch (extrude).
@@ -90,6 +99,7 @@ export class SheetMetalCutoutFeature {
       tools.push(profileSolid);
     } else {
       const profileFace = resolveProfileFace(profileSelection, partHistory);
+      if (profileFace) sketchParentsToRemove.push(...collectSketchParents(profileFace));
       if (profileFace && profileFace.type === "FACE") {
         const profileTool = buildToolFromProfile(profileFace, this.inputParams, this.inputParams?.featureID || "SM_CUTOUT_PROFILE");
         if (profileTool) {
@@ -204,6 +214,11 @@ export class SheetMetalCutoutFeature {
       try { cutPrism.visualize?.(); } catch { /* ignore */ }
     }
 
+    const consumeSketch = this.inputParams?.consumeProfileSketch !== false;
+    if (consumeSketch && sketchParentsToRemove.length) {
+      removed.push(...sketchParentsToRemove);
+    }
+
     const keepTool = this.inputParams?.keepTool === true;
     if (keepTool && tools?.length) {
       removed = removed.filter((o) => !tools.includes(o) && o !== toolUnion);
@@ -216,7 +231,7 @@ export class SheetMetalCutoutFeature {
       thickness: sheetThickness,
       baseType: sheetSolid?.userData?.sheetMetal?.baseType || null,
       bendRadius: sheetSolid?.userData?.sheetMetal?.bendRadius ?? null,
-      extra: { sourceFeature: "CUTOUT" },
+      extra: { sourceFeature: "CUTOUT", consumeProfileSketch: consumeSketch },
       forceBaseOverwrite: false,
     });
 

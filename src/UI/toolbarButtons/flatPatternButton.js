@@ -2,6 +2,7 @@ import JSZip from 'jszip';
 import * as THREE from 'three';
 import { Line2, LineGeometry, LineMaterial } from 'three/examples/jsm/Addons.js';
 import { FloatingWindow } from '../FloatingWindow.js';
+import { CADmaterials } from '../CADmaterials.js';
 import {
   buildSheetMetalFlatPatternDebugSteps,
   buildSheetMetalFlatPatternDxfs,
@@ -169,11 +170,6 @@ class FlatPatternUnfoldPanel {
       onClose: () => this.close(),
     });
 
-    const btnFit = document.createElement('button');
-    btnFit.className = 'flat-unfold-btn';
-    btnFit.textContent = 'Fit';
-    btnFit.addEventListener('click', () => this._fitToCurrent());
-
     const btnExport = document.createElement('button');
     btnExport.className = 'flat-unfold-btn';
     btnExport.textContent = 'Export SVG';
@@ -183,16 +179,6 @@ class FlatPatternUnfoldPanel {
     btnExportDxf.className = 'flat-unfold-btn';
     btnExportDxf.textContent = 'Export DXF';
     btnExportDxf.addEventListener('click', () => this._exportDxf());
-
-    const btnDebugJson = document.createElement('button');
-    btnDebugJson.className = 'flat-unfold-btn';
-    btnDebugJson.textContent = 'Copy Debug JSON';
-    btnDebugJson.addEventListener('click', () => this._copyDebugJson());
-
-    fw.addHeaderAction(btnFit);
-    fw.addHeaderAction(btnExport);
-    fw.addHeaderAction(btnExportDxf);
-    fw.addHeaderAction(btnDebugJson);
 
     const content = document.createElement('div');
     content.className = 'flat-unfold-content';
@@ -212,70 +198,22 @@ class FlatPatternUnfoldPanel {
     rowSolid.appendChild(labSolid);
     rowSolid.appendChild(selSolid);
 
-    const rowControls = document.createElement('div');
-    rowControls.className = 'flat-unfold-row';
-    const btnPrev = document.createElement('button');
-    btnPrev.className = 'flat-unfold-btn';
-    btnPrev.textContent = 'Prev';
-    btnPrev.addEventListener('click', () => this._stepBy(-1));
-    const btnPlay = document.createElement('button');
-    btnPlay.className = 'flat-unfold-btn';
-    btnPlay.textContent = 'Play';
-    btnPlay.addEventListener('click', () => this._togglePlayback());
-    const btnNext = document.createElement('button');
-    btnNext.className = 'flat-unfold-btn';
-    btnNext.textContent = 'Next';
-    btnNext.addEventListener('click', () => this._stepBy(1));
-    const stepLabel = document.createElement('div');
-    stepLabel.className = 'flat-unfold-step';
-    rowControls.appendChild(btnPrev);
-    rowControls.appendChild(btnPlay);
-    rowControls.appendChild(btnNext);
-    rowControls.appendChild(stepLabel);
-
-    const rowSlider = document.createElement('div');
-    rowSlider.className = 'flat-unfold-row';
-    const labStep = document.createElement('div');
-    labStep.className = 'flat-unfold-label';
-    labStep.textContent = 'Step';
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.className = 'flat-unfold-slider';
-    slider.min = '0';
-    slider.max = '0';
-    slider.step = '1';
-    slider.value = '0';
-    slider.addEventListener('input', () => this._setStepIndex(Number(slider.value)));
-    rowSlider.appendChild(labStep);
-    rowSlider.appendChild(slider);
-
-    const hint = document.createElement('div');
-    hint.className = 'flat-unfold-hint';
-    hint.textContent = 'Unfolds the A-side sheet metal faces. Cylindrical bends are stretched/shrunk on the neutral surface.';
-
-    const detail = document.createElement('div');
-    detail.className = 'flat-unfold-detail';
-    detail.textContent = '';
+    const rowActions = document.createElement('div');
+    rowActions.className = 'flat-unfold-row';
+    rowActions.appendChild(btnExport);
+    rowActions.appendChild(btnExportDxf);
 
     const empty = document.createElement('div');
     empty.className = 'flat-unfold-empty';
     empty.textContent = '';
 
     content.appendChild(rowSolid);
-    content.appendChild(rowControls);
-    content.appendChild(rowSlider);
-    content.appendChild(hint);
-    content.appendChild(detail);
+    content.appendChild(rowActions);
     content.appendChild(empty);
 
     this.ui = {
       selSolid,
-      btnPlay,
-      stepLabel,
-      slider,
-      detail,
       empty,
-      btnDebugJson,
     };
   }
 
@@ -332,9 +270,7 @@ class FlatPatternUnfoldPanel {
     const next = Math.max(0, Math.min(idx, this.entries.length - 1));
     this.activeIndex = next;
     const entry = this.entries[next];
-    const allSteps = Array.isArray(entry?.debugSteps) ? entry.debugSteps : [];
-    const placementSteps = allSteps.filter((step) => /^Component\s/.test(String(step?.label || '')));
-    this.steps = placementSteps.length ? placementSteps : allSteps;
+    this.steps = [];
     this.stepIndex = 0;
     if (this.ui.selSolid) this.ui.selSolid.selectedIndex = next;
     const solid = (entry && Number.isFinite(entry.sourceIndex))
@@ -349,7 +285,8 @@ class FlatPatternUnfoldPanel {
     } else {
       this._setEmpty('');
     }
-    this._renderStep(true);
+    this._clearEdgeGroup();
+    this._clearHighlightedFace();
   }
 
   _setStepIndex(idx) {
@@ -371,7 +308,7 @@ class FlatPatternUnfoldPanel {
         }
       }
     }
-    const baseFace = this._pickBaseFace();
+    const baseFace = this._pickLargestFace(solid);
     if (baseFace) this.flatBasis = this._buildFaceBasis(baseFace);
   }
 
@@ -397,25 +334,674 @@ class FlatPatternUnfoldPanel {
     return { origin: originWorld, uAxis: uWorld, vAxis: vWorld, normal };
   }
 
-  _pickBaseFace() {
-    if (!this.aFaces || !this.aFaces.length) return null;
+  _pickLargestFace(solid) {
+    const faces = [];
+    try { solid?.updateMatrixWorld?.(true); } catch { }
+    if (solid && typeof solid.traverse === 'function') {
+      solid.traverse((obj) => {
+        if (obj && obj.type === 'FACE') faces.push(obj);
+      });
+    }
+    if (!faces.length) return null;
+    let bestPlanarA = null;
+    let bestPlanarAArea = -Infinity;
+    let bestA = null;
+    let bestAArea = -Infinity;
     let bestPlanar = null;
     let bestPlanarArea = -Infinity;
     let best = null;
     let bestArea = -Infinity;
-    for (const face of this.aFaces) {
+    for (const face of faces) {
       if (!face) continue;
       const area = this._faceArea(face);
+      const faceType = resolveSheetMetalFaceType(face);
       if (area > bestArea) { best = face; bestArea = area; }
       let meta = null;
       try { meta = typeof face.getMetadata === 'function' ? face.getMetadata() : null; } catch { meta = null; }
       const isCyl = meta?.type === 'cylindrical';
+      if (faceType === 'A') {
+        if (!isCyl && area > bestPlanarAArea) {
+          bestPlanarA = face;
+          bestPlanarAArea = area;
+        } else if (area > bestAArea) {
+          bestA = face;
+          bestAArea = area;
+        }
+      }
       if (!isCyl && area > bestPlanarArea) {
         bestPlanar = face;
         bestPlanarArea = area;
       }
     }
-    return bestPlanar || best;
+    return bestPlanarA || bestA || bestPlanar || best;
+  }
+
+  _applyBasisToMesh(mesh, basis) {
+    if (!mesh || !basis || !basis.origin || !basis.uAxis || !basis.vAxis) return;
+    const uAxis = basis.uAxis.clone().normalize();
+    const vAxis = basis.vAxis.clone().normalize();
+    const normal = basis.normal
+      ? basis.normal.clone().normalize()
+      : new THREE.Vector3().crossVectors(uAxis, vAxis).normalize();
+    const rot = new THREE.Matrix4().makeBasis(uAxis, vAxis, normal);
+    const quat = new THREE.Quaternion().setFromRotationMatrix(rot);
+    mesh.position.copy(basis.origin);
+    mesh.quaternion.copy(quat);
+    mesh.scale.set(1, 1, 1);
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
+  }
+
+  _computeFlatMeshEdgeAngle(meshData, opts = {}) {
+    const positions = meshData?.positions;
+    const triangles = meshData?.triangles;
+    if (!positions || !triangles || !triangles.length) return 0;
+    const targetFaceId = Number.isFinite(opts.faceId) ? opts.faceId : null;
+    const faceIds = Array.isArray(meshData?.triangleFaceIds) ? meshData.triangleFaceIds : null;
+    const edgeCounts = new Map();
+    const edgeKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+    if (targetFaceId != null && faceIds && faceIds.length === triangles.length) {
+      for (let i = 0; i < triangles.length; i++) {
+        const tri = triangles[i];
+        if (!tri || tri.length < 3) continue;
+        const faceId = faceIds[i];
+        const edges = [[tri[0], tri[1]], [tri[1], tri[2]], [tri[2], tri[0]]];
+        for (const [a, b] of edges) {
+          const key = edgeKey(a, b);
+          let entry = edgeCounts.get(key);
+          if (!entry) {
+            entry = { count: 0, faces: new Set(), a, b };
+            edgeCounts.set(key, entry);
+          }
+          entry.count += 1;
+          entry.faces.add(faceId);
+        }
+      }
+    } else {
+      for (const tri of triangles) {
+        if (!tri || tri.length < 3) continue;
+        const edges = [[tri[0], tri[1]], [tri[1], tri[2]], [tri[2], tri[0]]];
+        for (const [a, b] of edges) {
+          const key = edgeKey(a, b);
+          edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
+        }
+      }
+    }
+    let bestDx = 1;
+    let bestDy = 0;
+    let bestLen = -Infinity;
+    for (const [key, entry] of edgeCounts.entries()) {
+      let a = null;
+      let b = null;
+      let isBoundary = false;
+      if (entry && typeof entry === 'object' && entry.faces instanceof Set) {
+        if (!entry.faces.has(targetFaceId)) continue;
+        isBoundary = entry.count === 1 || entry.faces.size > 1;
+        if (!isBoundary) continue;
+        a = entry.a;
+        b = entry.b;
+      } else {
+        if (entry !== 1) continue;
+        const [aStr, bStr] = key.split('|');
+        a = Number(aStr);
+        b = Number(bStr);
+      }
+      const ax = positions[a * 3 + 0];
+      const ay = positions[a * 3 + 1];
+      const bx = positions[b * 3 + 0];
+      const by = positions[b * 3 + 1];
+      const dx = bx - ax;
+      const dy = by - ay;
+      const len = dx * dx + dy * dy;
+      if (len > bestLen) {
+        bestLen = len;
+        bestDx = dx;
+        bestDy = dy;
+      }
+    }
+    if (bestLen < 0 && targetFaceId != null) {
+      const fallbackCounts = new Map();
+      for (const tri of triangles) {
+        if (!tri || tri.length < 3) continue;
+        const edges = [[tri[0], tri[1]], [tri[1], tri[2]], [tri[2], tri[0]]];
+        for (const [a, b] of edges) {
+          const key = edgeKey(a, b);
+          fallbackCounts.set(key, (fallbackCounts.get(key) || 0) + 1);
+        }
+      }
+      for (const [key, count] of fallbackCounts.entries()) {
+        if (count !== 1) continue;
+        const [aStr, bStr] = key.split('|');
+        const a = Number(aStr);
+        const b = Number(bStr);
+        const ax = positions[a * 3 + 0];
+        const ay = positions[a * 3 + 1];
+        const bx = positions[b * 3 + 0];
+        const by = positions[b * 3 + 1];
+        const dx = bx - ax;
+        const dy = by - ay;
+        const len = dx * dx + dy * dy;
+        if (len > bestLen) {
+          bestLen = len;
+          bestDx = dx;
+          bestDy = dy;
+        }
+      }
+    }
+    return Math.atan2(bestDy, bestDx);
+  }
+
+  _resolveFaceIdFromFace(solid, face) {
+    if (!solid || !face) return null;
+    const faceName = face.userData?.faceName || face.name;
+    const idToName = solid._idToFaceName instanceof Map ? solid._idToFaceName : null;
+    if (!faceName || !idToName) return null;
+    for (const [id, name] of idToName.entries()) {
+      if (name === faceName) return id;
+    }
+    return null;
+  }
+
+  _projectPointToBasis(point, basis) {
+    if (!point || !basis?.origin || !basis?.uAxis || !basis?.vAxis) return null;
+    const rel = point.clone().sub(basis.origin);
+    return {
+      x: rel.dot(basis.uAxis),
+      y: rel.dot(basis.vAxis),
+    };
+  }
+
+  _computeFaceCentroid2D(face, basis) {
+    const geom = face?.geometry;
+    const pos = geom?.getAttribute?.('position');
+    if (!geom || !pos || pos.itemSize !== 3 || pos.count < 3) return null;
+    const idx = geom.getIndex?.();
+    const toWorld = (i, out) => out.set(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(face.matrixWorld);
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const c = new THREE.Vector3();
+    const ab = new THREE.Vector3();
+    const ac = new THREE.Vector3();
+    const centroid = new THREE.Vector3();
+    const triCentroid = new THREE.Vector3();
+    let areaSum = 0;
+
+    const addTri = (i0, i1, i2) => {
+      toWorld(i0, a);
+      toWorld(i1, b);
+      toWorld(i2, c);
+      ab.subVectors(b, a);
+      ac.subVectors(c, a);
+      const area = 0.5 * ab.cross(ac).length();
+      if (!(area > 0)) return;
+      triCentroid.copy(a).add(b).add(c).multiplyScalar(1 / 3);
+      centroid.add(triCentroid.multiplyScalar(area));
+      areaSum += area;
+    };
+
+    if (idx) {
+      const triCount = (idx.count / 3) | 0;
+      for (let t = 0; t < triCount; t++) {
+        addTri(idx.getX(3 * t + 0) >>> 0, idx.getX(3 * t + 1) >>> 0, idx.getX(3 * t + 2) >>> 0);
+      }
+    } else {
+      const triCount = (pos.count / 3) | 0;
+      for (let t = 0; t < triCount; t++) {
+        addTri(3 * t + 0, 3 * t + 1, 3 * t + 2);
+      }
+    }
+
+    if (!(areaSum > 0)) return null;
+    centroid.multiplyScalar(1 / areaSum);
+    return this._projectPointToBasis(centroid, basis);
+  }
+
+  _computeFlatFaceCentroid2D(meshData, faceId) {
+    const positions = meshData?.positions;
+    const triangles = meshData?.triangles;
+    const faceIds = meshData?.triangleFaceIds;
+    if (!positions || !triangles || !Array.isArray(faceIds) || faceIds.length !== triangles.length) return null;
+    let areaSum = 0;
+    let cx = 0;
+    let cy = 0;
+    for (let i = 0; i < triangles.length; i++) {
+      if (faceIds[i] !== faceId) continue;
+      const tri = triangles[i];
+      if (!tri || tri.length < 3) continue;
+      const a = tri[0];
+      const b = tri[1];
+      const c = tri[2];
+      const ax = positions[a * 3 + 0];
+      const ay = positions[a * 3 + 1];
+      const bx = positions[b * 3 + 0];
+      const by = positions[b * 3 + 1];
+      const cx0 = positions[c * 3 + 0];
+      const cy0 = positions[c * 3 + 1];
+      const area = 0.5 * Math.abs((bx - ax) * (cy0 - ay) - (by - ay) * (cx0 - ax));
+      if (!(area > 0)) continue;
+      const mx = (ax + bx + cx0) / 3;
+      const my = (ay + by + cy0) / 3;
+      cx += mx * area;
+      cy += my * area;
+      areaSum += area;
+    }
+    if (!(areaSum > 0)) return null;
+    return { x: cx / areaSum, y: cy / areaSum };
+  }
+
+  _getFaceBoundaryEdges2D(face, basis) {
+    const geom = face?.geometry;
+    const pos = geom?.getAttribute?.('position');
+    if (!geom || !pos || pos.itemSize !== 3 || pos.count < 3) return [];
+    const idx = geom.getIndex?.();
+    const toWorld = (i, out) => out.set(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(face.matrixWorld);
+    let minX = Infinity;
+    let minY = Infinity;
+    let minZ = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let maxZ = -Infinity;
+    const tmp = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) {
+      toWorld(i, tmp);
+      if (tmp.x < minX) minX = tmp.x;
+      if (tmp.y < minY) minY = tmp.y;
+      if (tmp.z < minZ) minZ = tmp.z;
+      if (tmp.x > maxX) maxX = tmp.x;
+      if (tmp.y > maxY) maxY = tmp.y;
+      if (tmp.z > maxZ) maxZ = tmp.z;
+    }
+    const diag = Math.hypot(maxX - minX, maxY - minY, maxZ - minZ) || 1;
+    const tol = Math.max(1e-6, diag * 1e-6);
+    const keyFor = (v) => (
+      `${Math.round(v.x / tol)},${Math.round(v.y / tol)},${Math.round(v.z / tol)}`
+    );
+
+    const pointByKey = new Map();
+    const edgeCounts = new Map();
+    const addEdge = (ka, kb) => {
+      if (ka === kb) return;
+      const key = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+      let entry = edgeCounts.get(key);
+      if (!entry) {
+        entry = { count: 0, a: ka, b: kb };
+        edgeCounts.set(key, entry);
+      }
+      entry.count += 1;
+    };
+    const pushVertex = (idxValue) => {
+      const v = new THREE.Vector3();
+      toWorld(idxValue, v);
+      const key = keyFor(v);
+      if (!pointByKey.has(key)) pointByKey.set(key, v);
+      return key;
+    };
+
+    if (idx) {
+      const triCount = (idx.count / 3) | 0;
+      for (let t = 0; t < triCount; t++) {
+        const aIdx = idx.getX(3 * t + 0) >>> 0;
+        const bIdx = idx.getX(3 * t + 1) >>> 0;
+        const cIdx = idx.getX(3 * t + 2) >>> 0;
+        const ka = pushVertex(aIdx);
+        const kb = pushVertex(bIdx);
+        const kc = pushVertex(cIdx);
+        addEdge(ka, kb);
+        addEdge(kb, kc);
+        addEdge(kc, ka);
+      }
+    } else {
+      const triCount = (pos.count / 3) | 0;
+      for (let t = 0; t < triCount; t++) {
+        const aIdx = 3 * t + 0;
+        const bIdx = 3 * t + 1;
+        const cIdx = 3 * t + 2;
+        const ka = pushVertex(aIdx);
+        const kb = pushVertex(bIdx);
+        const kc = pushVertex(cIdx);
+        addEdge(ka, kb);
+        addEdge(kb, kc);
+        addEdge(kc, ka);
+      }
+    }
+
+    const edges = [];
+    for (const entry of edgeCounts.values()) {
+      if (entry.count !== 1) continue;
+      const pa = pointByKey.get(entry.a);
+      const pb = pointByKey.get(entry.b);
+      if (!pa || !pb) continue;
+      const a2d = this._projectPointToBasis(pa, basis);
+      const b2d = this._projectPointToBasis(pb, basis);
+      if (!a2d || !b2d) continue;
+      const dx = b2d.x - a2d.x;
+      const dy = b2d.y - a2d.y;
+      const len = Math.hypot(dx, dy);
+      if (!(len > 0)) continue;
+      edges.push({
+        a: a2d,
+        b: b2d,
+        aKey: entry.a,
+        bKey: entry.b,
+        mid: { x: (a2d.x + b2d.x) / 2, y: (a2d.y + b2d.y) / 2 },
+        len,
+      });
+    }
+    return edges;
+  }
+
+  _getFlatFaceBoundaryEdges2D(meshData, faceId) {
+    const positions = meshData?.positions;
+    const triangles = meshData?.triangles;
+    const faceIds = meshData?.triangleFaceIds;
+    if (!positions || !triangles || !Array.isArray(faceIds) || faceIds.length !== triangles.length) return [];
+    const edgeCounts = new Map();
+    const addEdge = (a, b) => {
+      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+      edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
+    };
+    for (let i = 0; i < triangles.length; i++) {
+      if (faceIds[i] !== faceId) continue;
+      const tri = triangles[i];
+      if (!tri || tri.length < 3) continue;
+      addEdge(tri[0], tri[1]);
+      addEdge(tri[1], tri[2]);
+      addEdge(tri[2], tri[0]);
+    }
+    const edges = [];
+    for (const [key, count] of edgeCounts.entries()) {
+      if (count !== 1) continue;
+      const [aStr, bStr] = key.split('|');
+      const a = Number(aStr);
+      const b = Number(bStr);
+      const ax = positions[a * 3 + 0];
+      const ay = positions[a * 3 + 1];
+      const bx = positions[b * 3 + 0];
+      const by = positions[b * 3 + 1];
+      const dx = bx - ax;
+      const dy = by - ay;
+      const len = Math.hypot(dx, dy);
+      if (!(len > 0)) continue;
+      edges.push({
+        a: { x: ax, y: ay },
+        b: { x: bx, y: by },
+        aKey: a,
+        bKey: b,
+        mid: { x: (ax + bx) / 2, y: (ay + by) / 2 },
+        len,
+      });
+    }
+    return edges;
+  }
+
+  _computeFlatMeshPlacement(meshData, baseFace, baseFaceId, basis) {
+    if (!meshData || !baseFace || !basis || !Number.isFinite(baseFaceId)) return null;
+    const baseEdges = this._getFaceBoundaryEdges2D(baseFace, basis);
+    if (!baseEdges.length) return null;
+    const baseCentroid = this._computeFaceCentroid2D(baseFace, basis);
+
+    const flatEdges = this._getFlatFaceBoundaryEdges2D(meshData, baseFaceId);
+    if (!flatEdges.length) return null;
+    const flatCentroid = this._computeFlatFaceCentroid2D(meshData, baseFaceId);
+
+    const buildPointMap = (edges) => {
+      const map = new Map();
+      for (const edge of edges) {
+        if (edge && edge.aKey != null) map.set(edge.aKey, edge.a);
+        if (edge && edge.bKey != null) map.set(edge.bKey, edge.b);
+      }
+      return map;
+    };
+    const mergeColinearEdges2D = (edges, points) => {
+      if (!edges.length) return [];
+      const edgeKey = (a, b) => {
+        const sa = String(a);
+        const sb = String(b);
+        return sa < sb ? `${sa}|${sb}` : `${sb}|${sa}`;
+      };
+      const edgeByKey = new Map();
+      const unvisited = new Set();
+      const adj = new Map();
+      const addAdj = (a, b) => {
+        let list = adj.get(a);
+        if (!list) { list = []; adj.set(a, list); }
+        list.push(b);
+      };
+      for (const edge of edges) {
+        if (!edge || edge.aKey == null || edge.bKey == null) continue;
+        const a = edge.aKey;
+        const b = edge.bKey;
+        const key = edgeKey(a, b);
+        if (!edgeByKey.has(key)) edgeByKey.set(key, { a, b });
+        unvisited.add(key);
+        addAdj(a, b);
+        addAdj(b, a);
+      }
+      const hasEdge = (a, b) => unvisited.has(edgeKey(a, b));
+      const takeEdge = (a, b) => unvisited.delete(edgeKey(a, b));
+      const isColinear = (a, b, c) => {
+        const pa = points.get(a);
+        const pb = points.get(b);
+        const pc = points.get(c);
+        if (!pa || !pb || !pc) return false;
+        const v1x = pa.x - pb.x;
+        const v1y = pa.y - pb.y;
+        const v2x = pc.x - pb.x;
+        const v2y = pc.y - pb.y;
+        const len1 = Math.hypot(v1x, v1y);
+        const len2 = Math.hypot(v2x, v2y);
+        if (len1 < 1e-9 || len2 < 1e-9) return false;
+        const cross = v1x * v2y - v1y * v2x;
+        return Math.abs(cross) <= 1e-6 * len1 * len2;
+      };
+
+      const mergedKeys = [];
+      while (unvisited.size) {
+        const key = unvisited.values().next().value;
+        const entry = edgeByKey.get(key);
+        if (!entry) { unvisited.delete(key); continue; }
+        const a = entry.a;
+        const b = entry.b;
+        takeEdge(a, b);
+        let start = a;
+        let end = b;
+        let prev = start;
+        let curr = end;
+        while (true) {
+          const neighbors = (adj.get(curr) || []).filter((n) => n !== prev);
+          if (neighbors.length !== 1) break;
+          const next = neighbors[0];
+          if (!hasEdge(curr, next)) break;
+          if (!isColinear(prev, curr, next)) break;
+          takeEdge(curr, next);
+          prev = curr;
+          curr = next;
+          end = curr;
+        }
+        prev = end;
+        curr = start;
+        while (true) {
+          const neighbors = (adj.get(curr) || []).filter((n) => n !== prev);
+          if (neighbors.length !== 1) break;
+          const next = neighbors[0];
+          if (!hasEdge(curr, next)) break;
+          if (!isColinear(prev, curr, next)) break;
+          takeEdge(curr, next);
+          prev = curr;
+          curr = next;
+          start = curr;
+        }
+        mergedKeys.push([start, end]);
+      }
+
+      const merged = [];
+      for (const [a, b] of mergedKeys) {
+        const pa = points.get(a);
+        const pb = points.get(b);
+        if (!pa || !pb) continue;
+        const dx = pb.x - pa.x;
+        const dy = pb.y - pa.y;
+        const len = Math.hypot(dx, dy);
+        if (!(len > 0)) continue;
+        merged.push({
+          a: pa,
+          b: pb,
+          aKey: a,
+          bKey: b,
+          mid: { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 },
+          len,
+        });
+      }
+      return merged;
+    };
+    const buildAdjacency = (edges) => {
+      const adj = new Map();
+      const add = (key, edge, otherKey) => {
+        if (key == null || otherKey == null) return;
+        let list = adj.get(key);
+        if (!list) { list = []; adj.set(key, list); }
+        list.push({ edge, otherKey });
+      };
+      for (const edge of edges) {
+        if (!edge) continue;
+        add(edge.aKey, edge, edge.bKey);
+        add(edge.bKey, edge, edge.aKey);
+      }
+      return adj;
+    };
+    const basePoints = buildPointMap(baseEdges);
+    const flatPoints = buildPointMap(flatEdges);
+    const baseMergedEdges = mergeColinearEdges2D(baseEdges, basePoints);
+    const flatMergedEdges = mergeColinearEdges2D(flatEdges, flatPoints);
+    const baseEdgesForAlign = baseMergedEdges.length ? baseMergedEdges : baseEdges;
+    const flatEdgesForAlign = flatMergedEdges.length ? flatMergedEdges : flatEdges;
+    baseEdgesForAlign.sort((a, b) => b.len - a.len);
+    const baseEdge = baseEdgesForAlign[0];
+    if (!baseEdge) return null;
+
+    const baseLen = baseEdge.len;
+    const lenTol = Math.max(1e-6, baseLen * 0.01);
+    let candidates = flatEdgesForAlign.filter((edge) => Math.abs(edge.len - baseLen) <= lenTol);
+    if (!candidates.length) candidates = flatEdgesForAlign.slice();
+
+    const baseAdj = buildAdjacency(baseEdgesForAlign);
+    const flatAdj = buildAdjacency(flatEdgesForAlign);
+    const endpointSignature = (edge, key, points, adj) => {
+      if (!edge || key == null) return null;
+      const endPt = points.get(key);
+      if (!endPt) return null;
+      const otherKey = key === edge.aKey ? edge.bKey : edge.aKey;
+      const otherPt = points.get(otherKey);
+      if (!otherPt) return null;
+      const neighbors = adj.get(key) || [];
+      let best = null;
+      for (const entry of neighbors) {
+        if (!entry || entry.edge === edge) continue;
+        if (!best || entry.edge.len > best.edge.len) best = entry;
+      }
+      if (!best) return null;
+      const adjPt = points.get(best.otherKey);
+      if (!adjPt) return null;
+      const mainDx = otherPt.x - endPt.x;
+      const mainDy = otherPt.y - endPt.y;
+      const adjDx = adjPt.x - endPt.x;
+      const adjDy = adjPt.y - endPt.y;
+      const mainLen = Math.hypot(mainDx, mainDy);
+      const adjLen = Math.hypot(adjDx, adjDy);
+      if (!(mainLen > 0) || !(adjLen > 0)) return null;
+      const dot = (mainDx * adjDx + mainDy * adjDy) / (mainLen * adjLen);
+      const cross = (mainDx * adjDy - mainDy * adjDx) / (mainLen * adjLen);
+      const angle = Math.atan2(cross, dot);
+      return { angle, len: best.edge.len };
+    };
+    const wrapAngleDiff = (a, b) => {
+      const d = a - b;
+      return Math.abs(Math.atan2(Math.sin(d), Math.cos(d)));
+    };
+    const sigDist = (s1, s2) => {
+      if (!s1 || !s2) return Infinity;
+      const angleDiff = wrapAngleDiff(s1.angle, s2.angle);
+      const lenDiff = (s1.len - s2.len) / (baseLen || 1);
+      return angleDiff * angleDiff + lenDiff * lenDiff;
+    };
+    const orderByXY = (p0, p1, tol = 1e-6) => {
+      if (p0.x < p1.x - tol) return { start: p0, end: p1 };
+      if (p0.x > p1.x + tol) return { start: p1, end: p0 };
+      if (p0.y <= p1.y) return { start: p0, end: p1 };
+      return { start: p1, end: p0 };
+    };
+    const baseSigA = endpointSignature(baseEdge, baseEdge.aKey, basePoints, baseAdj);
+    const baseSigB = endpointSignature(baseEdge, baseEdge.bKey, basePoints, baseAdj);
+    const baseOrderFallback = orderByXY(baseEdge.a, baseEdge.b, baseEdge.len * 1e-6);
+    const baseStartFallback = baseOrderFallback.end;
+    const baseEndFallback = baseOrderFallback.start;
+
+    const evalTransform = (baseStart, baseEnd, flatStart, flatEnd) => {
+      const baseDx = baseEnd.x - baseStart.x;
+      const baseDy = baseEnd.y - baseStart.y;
+      const baseAngle = Math.atan2(baseDy, baseDx);
+      const flatAngle = Math.atan2(flatEnd.y - flatStart.y, flatEnd.x - flatStart.x);
+      const angle = baseAngle - flatAngle;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const rot = (pt) => ({
+        x: cos * pt.x - sin * pt.y,
+        y: sin * pt.x + cos * pt.y,
+      });
+      const ra = rot(flatStart);
+      const rb = rot(flatEnd);
+      const tx = ((baseStart.x - ra.x) + (baseEnd.x - rb.x)) / 2;
+      const ty = ((baseStart.y - ra.y) + (baseEnd.y - rb.y)) / 2;
+      const ax = ra.x + tx - baseStart.x;
+      const ay = ra.y + ty - baseStart.y;
+      const bx = rb.x + tx - baseEnd.x;
+      const by = rb.y + ty - baseEnd.y;
+      let score = (ax * ax + ay * ay) + (bx * bx + by * by);
+      if (flatCentroid && baseCentroid) {
+        const rc = rot(flatCentroid);
+        const dx = (rc.x + tx) - baseCentroid.x;
+        const dy = (rc.y + ty) - baseCentroid.y;
+        score += dx * dx + dy * dy;
+      }
+      return { angle, tx, ty, score };
+    };
+
+    let best = null;
+    for (const edge of candidates) {
+      const flatSigA = endpointSignature(edge, edge.aKey, flatPoints, flatAdj);
+      const flatSigB = endpointSignature(edge, edge.bKey, flatPoints, flatAdj);
+      const useSig = baseSigA && baseSigB && flatSigA && flatSigB;
+      const baseStart = basePoints.get(baseEdge.bKey) || baseStartFallback;
+      const baseEnd = basePoints.get(baseEdge.aKey) || baseEndFallback;
+      let mappingScoreA = 0;
+      let mappingScoreB = 0;
+      if (useSig) {
+        mappingScoreA = sigDist(baseSigB, flatSigA) + sigDist(baseSigA, flatSigB);
+        mappingScoreB = sigDist(baseSigB, flatSigB) + sigDist(baseSigA, flatSigA);
+      }
+      const candA = evalTransform(baseStart, baseEnd, edge.a, edge.b);
+      const candB = evalTransform(baseStart, baseEnd, edge.b, edge.a);
+      const lenDiff = edge.len - baseLen;
+      candA.score += mappingScoreA + (lenDiff * lenDiff) * 1e-6;
+      candB.score += mappingScoreB + (lenDiff * lenDiff) * 1e-6;
+      const winner = candA.score <= candB.score ? candA : candB;
+      if (!best || winner.score < best.score) best = winner;
+    }
+
+    if (!best) return null;
+    const uAxis = basis.uAxis.clone().normalize();
+    const vAxis = basis.vAxis.clone().normalize();
+    const normal = basis.normal
+      ? basis.normal.clone().normalize()
+      : new THREE.Vector3().crossVectors(uAxis, vAxis).normalize();
+    const rot = new THREE.Matrix4().makeBasis(uAxis, vAxis, normal);
+    const basisQuat = new THREE.Quaternion().setFromRotationMatrix(rot);
+    const localQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), best.angle);
+    const finalQuat = basisQuat.clone().multiply(localQuat);
+    const worldPos = basis.origin.clone()
+      .add(uAxis.multiplyScalar(best.tx))
+      .add(vAxis.multiplyScalar(best.ty));
+    return { position: worldPos, quaternion: finalQuat };
   }
 
   _faceArea(face) {
@@ -499,25 +1085,107 @@ class FlatPatternUnfoldPanel {
     if (normal.lengthSq() > 1e-12) normal.normalize();
     else normal.set(0, 0, 1);
 
-    let far = null;
-    let maxDist = -Infinity;
-    const tmp = new THREE.Vector3();
-    for (let i = 0; i < pos.count; i++) {
-      toWorld(i, tmp);
-      const d = tmp.distanceToSquared(origin);
-      if (d > maxDist) {
-        maxDist = d;
-        far = tmp.clone();
+    let uAxis = null;
+    let maxEdgeLen = -Infinity;
+    const p0 = new THREE.Vector3();
+    const p1 = new THREE.Vector3();
+    const edge = new THREE.Vector3();
+    const proj = new THREE.Vector3();
+    const considerEdge = (i0, i1) => {
+      toWorld(i0, p0);
+      toWorld(i1, p1);
+      edge.subVectors(p1, p0);
+      const dot = edge.dot(normal);
+      proj.copy(edge).addScaledVector(normal, -dot);
+      const len = proj.lengthSq();
+      if (len > maxEdgeLen) {
+        maxEdgeLen = len;
+        uAxis = proj.clone().normalize();
+      }
+    };
+    const edgeCounts = new Map();
+    const addEdge = (i0, i1) => {
+      if (i0 === i1) return;
+      const a = i0 < i1 ? i0 : i1;
+      const b = i0 < i1 ? i1 : i0;
+      const key = `${a}|${b}`;
+      edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
+    };
+
+    if (idx) {
+      const triCount = (idx.count / 3) | 0;
+      for (let t = 0; t < triCount; t++) {
+        const aIdx = idx.getX(3 * t + 0) >>> 0;
+        const bIdx = idx.getX(3 * t + 1) >>> 0;
+        const cIdx = idx.getX(3 * t + 2) >>> 0;
+        addEdge(aIdx, bIdx);
+        addEdge(bIdx, cIdx);
+        addEdge(cIdx, aIdx);
+      }
+    } else {
+      const triCount = (pos.count / 3) | 0;
+      for (let t = 0; t < triCount; t++) {
+        const aIdx = 3 * t + 0;
+        const bIdx = 3 * t + 1;
+        const cIdx = 3 * t + 2;
+        addEdge(aIdx, bIdx);
+        addEdge(bIdx, cIdx);
+        addEdge(cIdx, aIdx);
       }
     }
-    if (!far) return null;
-    const uAxis = far.clone().sub(origin).normalize();
-    if (Math.abs(uAxis.dot(normal)) > 0.99) {
-      const ref = new THREE.Vector3(1, 0, 0);
-      const alt = new THREE.Vector3(0, 1, 0);
-      const fallback = new THREE.Vector3().crossVectors(normal, ref);
-      if (fallback.lengthSq() < 1e-12) fallback.crossVectors(normal, alt);
-      uAxis.copy(fallback.normalize());
+
+    let hasBoundary = false;
+    for (const [key, count] of edgeCounts.entries()) {
+      if (count !== 1) continue;
+      hasBoundary = true;
+      const [aStr, bStr] = key.split('|');
+      considerEdge(Number(aStr), Number(bStr));
+    }
+
+    if (!hasBoundary) {
+      if (idx) {
+        const triCount = (idx.count / 3) | 0;
+        for (let t = 0; t < triCount; t++) {
+          const aIdx = idx.getX(3 * t + 0) >>> 0;
+          const bIdx = idx.getX(3 * t + 1) >>> 0;
+          const cIdx = idx.getX(3 * t + 2) >>> 0;
+          considerEdge(aIdx, bIdx);
+          considerEdge(bIdx, cIdx);
+          considerEdge(cIdx, aIdx);
+        }
+      } else {
+        const triCount = (pos.count / 3) | 0;
+        for (let t = 0; t < triCount; t++) {
+          const aIdx = 3 * t + 0;
+          const bIdx = 3 * t + 1;
+          const cIdx = 3 * t + 2;
+          considerEdge(aIdx, bIdx);
+          considerEdge(bIdx, cIdx);
+          considerEdge(cIdx, aIdx);
+        }
+      }
+    }
+    if (!uAxis || uAxis.lengthSq() < 1e-12) {
+      let far = null;
+      let maxDist = -Infinity;
+      const tmp = new THREE.Vector3();
+      for (let i = 0; i < pos.count; i++) {
+        toWorld(i, tmp);
+        const d = tmp.distanceToSquared(origin);
+        if (d > maxDist) {
+          maxDist = d;
+          far = tmp.clone();
+        }
+      }
+      if (!far) return null;
+      uAxis = far.clone().sub(origin).normalize();
+      if (Math.abs(uAxis.dot(normal)) > 0.99) {
+        const ref = new THREE.Vector3(1, 0, 0);
+        const alt = new THREE.Vector3(0, 1, 0);
+        const fallback = new THREE.Vector3().crossVectors(normal, ref);
+        if (fallback.lengthSq() < 1e-12) fallback.crossVectors(normal, alt);
+        uAxis.copy(fallback.normalize());
+      }
     }
     const vAxis = new THREE.Vector3().crossVectors(normal, uAxis).normalize();
     return { origin, uAxis, vAxis, normal };
@@ -1119,8 +1787,8 @@ class FlatPatternUnfoldPanel {
       }
       return;
     }
-    const basis = this.flatBasis;
-    const useBasis = !!(basis && basis.origin && basis.uAxis && basis.vAxis);
+    const basis = null;
+    const useBasis = false;
     const highlightLabels = opts.highlightLabels instanceof Set ? opts.highlightLabels : new Set();
     const highlightFaceId = Number.isFinite(opts.highlightFaceId) ? opts.highlightFaceId : null;
     let renderedCount = 0;
@@ -1229,13 +1897,16 @@ class FlatPatternUnfoldPanel {
       color.setHSL(hue, 0.6, 0.55);
       return color;
     };
+    const planarColor = new THREE.Color('#1f7a3a');
+    const bendColor = new THREE.Color('#8b2f1f');
     
-    for (const entry of entries) {
+    for (let entryIndex = 0; entryIndex < entries.length; entryIndex++) {
+      const entry = entries[entryIndex];
       if (!entry.visualizationMeshes || !entry.visualizationMeshes.length) {
         console.log(`[FlatPattern] Entry "${entry.name}" has no visualization meshes`);
         continue;
       }
-      
+
       console.log(`[FlatPattern] Rendering ${entry.visualizationMeshes.length} visualization meshes for "${entry.name}"`);
       
       for (const meshData of entry.visualizationMeshes) {
@@ -1248,6 +1919,20 @@ class FlatPatternUnfoldPanel {
         const isFlatUnfold = meshData.name && meshData.name.includes('Flat A Faces');
         const hasFaceIds = Array.isArray(meshData.triangleFaceIds);
         if (isFlatUnfold && hasFaceIds) {
+          const faceMetaById = meshData.faceMetaById || null;
+          const isBendFace = (faceId) => {
+            if (!faceMetaById) return null;
+            const meta = faceMetaById instanceof Map ? faceMetaById.get(faceId) : faceMetaById[faceId];
+            if (meta?.type !== 'cylindrical') return false;
+            const radius = Number(meta?.radius ?? meta?.pmiRadiusOverride ?? meta?.pmiRadius);
+            return Number.isFinite(radius) && radius > 0;
+          };
+          const colorForFace = (faceId) => {
+            const bend = isBendFace(faceId);
+            if (bend === true) return bendColor;
+            if (bend === false) return planarColor;
+            return faceColor(faceId);
+          };
           const triCount = meshData.triangles.length;
           const flatPositions = new Float32Array(triCount * 9);
           const flatColors = new Float32Array(triCount * 9);
@@ -1255,7 +1940,7 @@ class FlatPatternUnfoldPanel {
           let colorIdx = 0;
           for (let i = 0; i < triCount; i++) {
             const tri = meshData.triangles[i];
-            const color = faceColor(meshData.triangleFaceIds[i]);
+            const color = colorForFace(meshData.triangleFaceIds[i]);
             for (let k = 0; k < 3; k++) {
               const vIdx = tri[k];
               flatPositions[writeIdx++] = meshData.positions[vIdx * 3 + 0];
@@ -1304,7 +1989,11 @@ class FlatPatternUnfoldPanel {
           tool: 'flat-pattern-unfold',
           kind: 'visualization',
           vizName: meshData.name,
+          flatPatternEntry: entry.name || null,
         };
+        if (isFlatUnfold) {
+          mesh.scale.set(1, 1, 1);
+        }
 
         if (isFlatUnfold && hasFaceIds) {
           const pos2d = (idx) => ({
@@ -1383,10 +2072,10 @@ class FlatPatternUnfoldPanel {
           const faceMetaById = meshData.faceMetaById || null;
           const isCylFace = (faceId) => {
             if (!faceMetaById) return false;
-            if (faceMetaById instanceof Map) {
-              return faceMetaById.get(faceId)?.type === 'cylindrical';
-            }
-            return faceMetaById[faceId]?.type === 'cylindrical';
+            const meta = faceMetaById instanceof Map ? faceMetaById.get(faceId) : faceMetaById[faceId];
+            if (meta?.type !== 'cylindrical') return false;
+            const radius = Number(meta?.radius ?? meta?.pmiRadiusOverride ?? meta?.pmiRadius);
+            return Number.isFinite(radius) && radius > 0;
           };
           const faceCentroids = new Map();
           const faceVertexCounts = new Map();
@@ -1452,16 +2141,48 @@ class FlatPatternUnfoldPanel {
             }
           }
 
-          const addEdgeLines = (segments, color) => {
+          const addEdgeLines = (segments, material, fallbackColor, style = null) => {
             if (!segments.length) return;
             const mergedEdges = mergeColinearEdges(segments);
             if (!mergedEdges.length) return;
-            const lineMaterial = new THREE.LineBasicMaterial({
-              color,
-              linewidth: 2,
-              depthTest: true,
-              depthWrite: false,
-            });
+            let dashSize = style?.dashSize;
+            let gapSize = style?.gapSize;
+            if (style?.count) {
+              let minLen = Infinity;
+              for (const [a, b] of mergedEdges) {
+                const ax = meshData.positions[a * 3 + 0];
+                const ay = meshData.positions[a * 3 + 1];
+                const az = meshData.positions[a * 3 + 2];
+                const bx = meshData.positions[b * 3 + 0];
+                const by = meshData.positions[b * 3 + 1];
+                const bz = meshData.positions[b * 3 + 2];
+                const len = Math.hypot(bx - ax, by - ay, bz - az);
+                if (len > 1e-9 && len < minLen) minLen = len;
+              }
+              if (!Number.isFinite(minLen) || minLen <= 0) minLen = 1;
+              const seg = minLen / style.count;
+              const ratio = Number.isFinite(style.dashRatio) ? style.dashRatio : 0.2;
+              dashSize = Math.max(1e-4, seg * ratio);
+              gapSize = Math.max(1e-4, seg - dashSize);
+            }
+            const matColor = material?.color && typeof material.color.getHex === 'function'
+              ? material.color.getHex()
+              : fallbackColor;
+            const lineMaterial = style?.dashed
+              ? new THREE.LineDashedMaterial({
+                color: matColor,
+                linewidth: 2,
+                dashSize: dashSize ?? 0.2,
+                gapSize: gapSize ?? 9.8,
+                depthTest: true,
+                depthWrite: false,
+              })
+              : new THREE.LineBasicMaterial({
+                color: matColor,
+                linewidth: 2,
+                depthTest: true,
+                depthWrite: false,
+              });
             let edgeIndex = 0;
             for (const [a, b] of mergedEdges) {
               const linePositions = new Float32Array(6);
@@ -1474,6 +2195,9 @@ class FlatPatternUnfoldPanel {
               const lineGeometry = new THREE.BufferGeometry();
               lineGeometry.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
               const line = new THREE.LineSegments(lineGeometry, lineMaterial);
+              if (style?.dashed && typeof line.computeLineDistances === 'function') {
+                line.computeLineDistances();
+              }
               line.name = `VisualizationEdge_${edgeIndex++}`;
               line.renderOrder = 2;
               mesh.add(line);
@@ -1481,8 +2205,17 @@ class FlatPatternUnfoldPanel {
             }
           };
 
-          addEdgeLines(pinkSegments, 0xff5fa2);
-          addEdgeLines(whiteSegments, 0xffffff);
+          addEdgeLines(
+            pinkSegments,
+            CADmaterials?.FLAT_PATTERN?.OUTER_EDGE,
+            0xff5fa2
+          );
+          addEdgeLines(
+            whiteSegments,
+            CADmaterials?.FLAT_PATTERN?.INNER_EDGE,
+            0x00ffff,
+            { dashed: true, count: 10, dashRatio: 0.2 }
+          );
 
           const buildCenterline = (edges, faceId) => {
             if (!edges || edges.length < 2) return null;
@@ -1554,16 +2287,36 @@ class FlatPatternUnfoldPanel {
             return { start, end };
           };
 
-          const centerlineMaterial = new THREE.LineBasicMaterial({
-            color: 0x00ffff,
+          const centerMat = CADmaterials?.FLAT_PATTERN?.CENTERLINE;
+          const centerColor = centerMat?.color && typeof centerMat.color.getHex === 'function'
+            ? centerMat.color.getHex()
+            : 0x00ffff;
+          const centerlinesInfo = [];
+          let minCenterLen = Infinity;
+          for (const [faceId, edges] of bendEdgeMap.entries()) {
+            const lineInfo = buildCenterline(edges, faceId);
+            if (!lineInfo) continue;
+            centerlinesInfo.push(lineInfo);
+            const len = Math.hypot(
+              lineInfo.end.x - lineInfo.start.x,
+              lineInfo.end.y - lineInfo.start.y,
+            );
+            if (len > 1e-9 && len < minCenterLen) minCenterLen = len;
+          }
+          if (!Number.isFinite(minCenterLen) || minCenterLen <= 0) minCenterLen = 1;
+          const centerSeg = minCenterLen / 10;
+          const centerDash = Math.max(1e-4, centerSeg * 0.5);
+          const centerGap = Math.max(1e-4, centerSeg - centerDash);
+          const centerlineMaterial = new THREE.LineDashedMaterial({
+            color: centerColor,
             linewidth: 2,
+            dashSize: centerDash,
+            gapSize: centerGap,
             depthTest: true,
             depthWrite: false,
           });
           let centerlineIndex = 0;
-          for (const [faceId, edges] of bendEdgeMap.entries()) {
-            const lineInfo = buildCenterline(edges, faceId);
-            if (!lineInfo) continue;
+          for (const lineInfo of centerlinesInfo) {
             const linePositions = new Float32Array([
               lineInfo.start.x, lineInfo.start.y, 0,
               lineInfo.end.x, lineInfo.end.y, 0,
@@ -1571,6 +2324,9 @@ class FlatPatternUnfoldPanel {
             const lineGeometry = new THREE.BufferGeometry();
             lineGeometry.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
             const line = new THREE.LineSegments(lineGeometry, centerlineMaterial);
+            if (typeof line.computeLineDistances === 'function') {
+              line.computeLineDistances();
+            }
             line.name = `VisualizationCenterline_${centerlineIndex++}`;
             line.renderOrder = 2;
             mesh.add(line);
@@ -1860,6 +2616,21 @@ class FlatPatternUnfoldPanel {
     _fitBoxToView(this.viewer, box, 1.15);
   }
 
+  _getFlatPatternColors() {
+    const flat = CADmaterials?.FLAT_PATTERN || {};
+    const asHex = (mat, fallback) => {
+      if (mat?.color && typeof mat.color.getHexString === 'function') {
+        return `#${mat.color.getHexString()}`;
+      }
+      return fallback;
+    };
+    return {
+      outer: asHex(flat.OUTER_EDGE, '#ff5fa2'),
+      inner: asHex(flat.INNER_EDGE, '#00ffff'),
+      center: asHex(flat.CENTERLINE, '#00ffff'),
+    };
+  }
+
   async _exportSvg() {
     const solids = this._solids?.length ? this._solids : _collectSolids(this.viewer);
     if (!solids.length) {
@@ -1867,7 +2638,10 @@ class FlatPatternUnfoldPanel {
       return;
     }
     const metadataManager = this.viewer?.partHistory?.metadataManager || null;
-    const svgEntries = buildSheetMetalFlatPatternSvgs(solids, { metadataManager });
+    const svgEntries = buildSheetMetalFlatPatternSvgs(solids, {
+      metadataManager,
+      flatPatternColors: this._getFlatPatternColors(),
+    });
     if (!svgEntries.length) {
       this._setEmpty('No flat pattern SVGs available.');
       return;
@@ -1895,7 +2669,10 @@ class FlatPatternUnfoldPanel {
       return;
     }
     const metadataManager = this.viewer?.partHistory?.metadataManager || null;
-    const dxfEntries = buildSheetMetalFlatPatternDxfs(solids, { metadataManager });
+    const dxfEntries = buildSheetMetalFlatPatternDxfs(solids, {
+      metadataManager,
+      flatPatternColors: this._getFlatPatternColors(),
+    });
     if (!dxfEntries.length) {
       this._setEmpty('No flat pattern DXFs available.');
       return;

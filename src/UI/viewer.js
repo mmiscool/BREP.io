@@ -36,6 +36,7 @@ import { annotationRegistry } from './pmi/AnnotationRegistry.js';
 import { SchemaForm } from './featureDialogs.js';
 import './dialogs.js';
 import { BREP } from '../BREP/BREP.js';
+import { createAxisHelperGroup, DEFAULT_AXIS_HELPER_PX } from '../utils/axisHelpers.js';
 
 const ASSEMBLY_CONSTRAINTS_TITLE = 'Assembly Constraints';
 
@@ -314,6 +315,19 @@ export class Viewer {
         this._sidebarLastPointer = null;
         this._sidebarOffscreen = false;
         this.scene = partHistory instanceof PartHistory ? partHistory.scene : new THREE.Scene();
+        this._axisHelpers = new Set();
+        this._axisHelpersDirty = true;
+        this._axisHelperPx = DEFAULT_AXIS_HELPER_PX;
+        try {
+            this._worldAxisHelper = createAxisHelperGroup({
+                name: "__WORLD_AXES__",
+                selectable: false,
+                axisHelperPx: this._axisHelperPx,
+            });
+            this._worldAxisHelper.userData = this._worldAxisHelper.userData || {};
+            this._worldAxisHelper.userData.preventRemove = true;
+            this.scene.add(this._worldAxisHelper);
+        } catch { /* ignore axis helper failures */ }
         ensureSelectionPickerStyles();
 
         // Apply persisted sidebar width early (before building UI)
@@ -1153,10 +1167,12 @@ export class Viewer {
         this.partHistory.callbacks.afterRunHistory = () => {
             this._refreshAssemblyConstraintsPanelVisibility();
             this.applyMetadataColors();
+            this._axisHelpersDirty = true;
         };
         this.partHistory.callbacks.afterReset = () => {
             this._refreshAssemblyConstraintsPanelVisibility();
             this.applyMetadataColors();
+            this._axisHelpersDirty = true;
         };
         const historySection = await this.accordion.addSection("History");
         await historySection.uiElement.appendChild(await this.historyWidget.uiElement);
@@ -1466,6 +1482,7 @@ export class Viewer {
         if (this.camera && this.camera.parent !== this.scene) {
             try { this.scene.add(this.camera); } catch { /* ignore add errors */ }
         }
+        this._updateAxisHelpers();
         this._updateCameraLightRig();
         this._updateDepthRange();
         if (this._rendererMode === 'svg') {
@@ -1772,15 +1789,116 @@ export class Viewer {
         });
     }
 
+    _collectAxisHelpers() {
+        this._axisHelpers = new Set();
+        if (!this.scene || typeof this.scene.traverse !== 'function') {
+            this._axisHelpersDirty = false;
+            return;
+        }
+        this.scene.traverse((obj) => {
+            if (obj?.userData?.axisHelper) this._axisHelpers.add(obj);
+        });
+        this._axisHelpersDirty = false;
+    }
+
+    _updateAxisHelpers() {
+        if (!this.camera || !this.scene) return;
+        if (this._axisHelpersDirty) this._collectAxisHelpers();
+        if (!this._axisHelpers || this._axisHelpers.size === 0) return;
+
+        const { width, height } = this._getContainerSize();
+        const wpp = this._worldPerPixel(this.camera, width, height);
+        if (!Number.isFinite(wpp) || wpp <= 0) return;
+
+        const parentScale = new THREE.Vector3(1, 1, 1);
+        const eps = 1e-9;
+        const setRes = (mat) => {
+            if (mat?.resolution && typeof mat.resolution.set === 'function') {
+                mat.resolution.set(width, height);
+            }
+        };
+
+        for (const helper of this._axisHelpers) {
+            if (!helper || !helper.isObject3D) continue;
+            const px = Number(helper.userData?.axisHelperPx);
+            const axisPx = Number.isFinite(px) ? px : (this._axisHelperPx || DEFAULT_AXIS_HELPER_PX);
+            const axisLen = wpp * axisPx;
+
+            let sx = axisLen;
+            let sy = axisLen;
+            let sz = axisLen;
+            const compensate = helper.userData?.axisHelperCompensateScale !== false;
+            if (compensate && helper.parent && typeof helper.parent.getWorldScale === 'function') {
+                try { helper.parent.updateMatrixWorld?.(true); } catch { }
+                helper.parent.getWorldScale(parentScale);
+                const safe = (v) => (Math.abs(v) < eps ? 1 : Math.abs(v));
+                sx /= safe(parentScale.x);
+                sy /= safe(parentScale.y);
+                sz /= safe(parentScale.z);
+            }
+
+            const last = helper.userData._axisHelperScale;
+            if (!last
+                || Math.abs(last.x - sx) > 1e-6
+                || Math.abs(last.y - sy) > 1e-6
+                || Math.abs(last.z - sz) > 1e-6) {
+                helper.scale.set(sx, sy, sz);
+                helper.userData._axisHelperScale = { x: sx, y: sy, z: sz };
+            }
+
+            helper.traverse?.((node) => {
+                const mat = node?.material;
+                if (!mat) return;
+                if (Array.isArray(mat)) mat.forEach(setRes);
+                else setRes(mat);
+            });
+        }
+    }
+
     _computeSceneBounds({ reuse = false } = {}) {
         if (reuse && this._sceneBoundsCache) return this._sceneBoundsCache;
         const box = new THREE.Box3();
-        try {
-            box.setFromObject(this.scene);
-        } catch {
-            return null;
-        }
-        if (box.isEmpty()) return null;
+        const tmp = new THREE.Box3();
+        let hasBounds = false;
+        if (!this.scene) return null;
+        try { this.scene.updateMatrixWorld(true); } catch { }
+
+        const shouldSkip = (obj) => {
+            const ud = obj?.userData;
+            return !!(ud?.excludeFromFit || ud?.axisHelper);
+        };
+        const visit = (obj, skipParent) => {
+            if (!obj) return;
+            const skip = skipParent || shouldSkip(obj);
+            if (!skip) {
+                const geom = obj.geometry;
+                if (geom) {
+                    let bbox = null;
+                    if (obj.boundingBox !== undefined) {
+                        if (obj.boundingBox == null && typeof obj.computeBoundingBox === 'function') {
+                            try { obj.computeBoundingBox(); } catch { }
+                        }
+                        bbox = obj.boundingBox;
+                    } else {
+                        if (geom.boundingBox == null && typeof geom.computeBoundingBox === 'function') {
+                            try { geom.computeBoundingBox(); } catch { }
+                        }
+                        bbox = geom.boundingBox;
+                    }
+                    if (bbox) {
+                        tmp.copy(bbox);
+                        tmp.applyMatrix4(obj.matrixWorld);
+                        box.union(tmp);
+                        hasBounds = true;
+                    }
+                }
+            }
+            const children = obj.children || [];
+            for (const child of children) visit(child, skip);
+        };
+        visit(this.scene, false);
+
+        if (!hasBounds || box.isEmpty()) return null;
         this._sceneBoundsCache = box;
         return box;
     }

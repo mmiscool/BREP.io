@@ -146,6 +146,26 @@ export const CADmaterials = {
             transparent: true
         })
     },
+    FLAT_PATTERN: {
+        OUTER_EDGE: new THREE.LineBasicMaterial({
+            color: '#ff5fa2',
+            linewidth: 2,
+            depthTest: true,
+            depthWrite: false,
+        }),
+        INNER_EDGE: new THREE.LineBasicMaterial({
+            color: '#00ffff',
+            linewidth: 2,
+            depthTest: true,
+            depthWrite: false,
+        }),
+        CENTERLINE: new THREE.LineBasicMaterial({
+            color: '#00ffff',
+            linewidth: 2,
+            depthTest: true,
+            depthWrite: false,
+        }),
+    },
 
 };
 

@@ -2,6 +2,7 @@
 import { BREP } from "../../BREP/BREP.js";
 const THREE = BREP.THREE;
 import { createPlaneBaseMesh } from '../plane/PlaneFeature.js';
+import { createAxisHelperGroup } from "../../utils/axisHelpers.js";
 
 const inputParamsSchema = {
     id: {
@@ -52,6 +53,12 @@ export class DatiumFeature {
         const pYZ = mkPlane('YZ', 'YZ');
         group.add(pXY, pXZ, pYZ);
         group.renderOrder = 1; // Render on top of most things
+
+        const axisHelper = createAxisHelperGroup({
+            name: `${baseName}:Axes`,
+            selectable: true,
+        });
+        group.add(axisHelper);
 
         // Apply TRS to the whole datum group (position/orient in 3D space)
         try {

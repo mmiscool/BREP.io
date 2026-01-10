@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import { generate3MF } from '../../exporters/threeMF.js';
+import { CADmaterials } from '../CADmaterials.js';
 import { buildSheetMetalFlatPatternSvgs } from '../../exporters/sheetMetalFlatPattern.js';
 import { FloatingWindow } from '../FloatingWindow.js';
 
@@ -23,6 +24,21 @@ async function _captureThumbnail(viewer, size = 256) {
     ctx.drawImage(canvas, 0, 0, srcW, srcH, dx, dy, dw, dh);
     return dst.toDataURL('image/png');
   } catch { return null; }
+}
+
+function _getFlatPatternColors() {
+  const flat = CADmaterials?.FLAT_PATTERN || {};
+  const asHex = (mat, fallback) => {
+    if (mat?.color && typeof mat.color.getHexString === 'function') {
+      return `#${mat.color.getHexString()}`;
+    }
+    return fallback;
+  };
+  return {
+    outer: asHex(flat.OUTER_EDGE, '#ff5fa2'),
+    inner: asHex(flat.INNER_EDGE, '#00ffff'),
+    center: asHex(flat.CENTERLINE, '#00ffff'),
+  };
 }
 
 export function createExportButton(viewer) {
@@ -427,6 +443,7 @@ function _openExportDialog(viewer) {
               neutralFactor,
               metadataManager,
               debug: !!debugPanel,
+              flatPatternColors: _getFlatPatternColors(),
             });
             if (svgEntries.length) {
               const svgPaths = [];
