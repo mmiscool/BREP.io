@@ -310,7 +310,11 @@ window.prompt = async (message, defaultValue = '') => {
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
 
-        inputField.focus();
+        // Focus and select the existing text so typing replaces it by default.
+        requestAnimationFrame(() => {
+            inputField.focus();
+            inputField.select();
+        });
 
         const cleanup = () => {
             okButton.removeEventListener('click', onOk);
