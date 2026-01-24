@@ -33,6 +33,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
     this.render();
     this.#startAutoSyncLoop();
     this.#patchRunHistory();
+    this.partHistory?.queueHistorySnapshot?.({ debounceMs: 0, reason: 'init' });
   }
 
   dispose() {
@@ -61,7 +62,8 @@ export class HistoryWidget extends HistoryCollectionWidget {
       const featureId = this.#entryId(feature);
       if (featureId) this.#setCurrentHistoryStep(featureId);
     }
-    this.#safeRunHistory();
+    await this.#safeRunHistory();
+    this.partHistory?.queueHistorySnapshot?.({ debounceMs: 0, reason: 'move' });
   }
 
   _deleteEntry(id) {
@@ -72,7 +74,14 @@ export class HistoryWidget extends HistoryCollectionWidget {
       this.partHistory.currentHistoryStepId = null;
     }
     this._idsSignature = this.#computeIdsSignature();
-    this.#safeRunHistory();
+    const runPromise = this.#safeRunHistory();
+    if (runPromise && typeof runPromise.then === 'function') {
+      runPromise.then(() => {
+        this.partHistory?.queueHistorySnapshot?.({ debounceMs: 0, reason: 'delete' });
+      });
+    } else {
+      this.partHistory?.queueHistorySnapshot?.({ debounceMs: 0, reason: 'delete' });
+    }
   }
 
   _refreshAddMenu() {
@@ -201,6 +210,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
       const newId = this.#entryId(feature);
       if (newId) this.#setCurrentHistoryStep(newId);
       await this.#safeRunHistory();
+      this.partHistory?.queueHistorySnapshot?.({ debounceMs: 0, reason: 'add' });
       this._idsSignature = this.#computeIdsSignature();
       return feature;
     } catch (error) {
@@ -237,7 +247,14 @@ export class HistoryWidget extends HistoryCollectionWidget {
   #handleEntryChange({ entry }) {
     const id = this.#entryId(entry);
     if (id) this.#setCurrentHistoryStep(id);
-    this.#safeRunHistory();
+    const runPromise = this.#safeRunHistory();
+    if (runPromise && typeof runPromise.then === 'function') {
+      runPromise.then(() => {
+        this.partHistory?.queueHistorySnapshot?.({ reason: 'edit' });
+      });
+    } else {
+      this.partHistory?.queueHistorySnapshot?.({ reason: 'edit' });
+    }
   }
 
   #handleFormReady({ id, entry }) {

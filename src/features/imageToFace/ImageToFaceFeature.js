@@ -51,7 +51,14 @@ const inputParamsSchema = {
           try {
             if (ctx.partHistory) {
               ctx.partHistory.currentHistoryStepId = ctx.feature.inputParams.featureID;
-              if (typeof ctx.partHistory.runHistory === 'function') ctx.partHistory.runHistory();
+              if (typeof ctx.partHistory.runHistory === 'function') {
+                const runPromise = ctx.partHistory.runHistory();
+                if (runPromise && typeof runPromise.then === 'function') {
+                  runPromise.then(() => ctx.partHistory?.queueHistorySnapshot?.({ debounceMs: 0, reason: 'image-edit' }));
+                } else {
+                  ctx.partHistory?.queueHistorySnapshot?.({ debounceMs: 0, reason: 'image-edit' });
+                }
+              }
             }
           } catch (_) {}
         },
@@ -65,7 +72,14 @@ const inputParamsSchema = {
           try {
             if (ctx && ctx.partHistory) {
               ctx.partHistory.currentHistoryStepId = ctx.feature?.inputParams?.featureID;
-              if (typeof ctx.partHistory.runHistory === 'function') ctx.partHistory.runHistory();
+              if (typeof ctx.partHistory.runHistory === 'function') {
+                const runPromise = ctx.partHistory.runHistory();
+                if (runPromise && typeof runPromise.then === 'function') {
+                  runPromise.then(() => ctx.partHistory?.queueHistorySnapshot?.({ debounceMs: 0, reason: 'image-edit' }));
+                } else {
+                  ctx.partHistory?.queueHistorySnapshot?.({ debounceMs: 0, reason: 'image-edit' });
+                }
+              }
             }
           } catch (_) { /* ignore */ }
         }

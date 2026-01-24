@@ -480,6 +480,7 @@ export class Viewer {
         this._disposed = false;
         this._sketchMode = null;
         this._splineMode = null;
+        this._imageEditorActive = false;
         this._cameraMoving = false;
         this._sceneBoundsCache = null;
         this._lastPointerEvent = null;
@@ -536,7 +537,7 @@ export class Viewer {
         document.addEventListener('dblclick', this._onGlobalDoubleClick, { passive: false, capture: true });
         window.addEventListener('resize', this._onResize);
         this._onKeyDown = this._onKeyDown.bind(this);
-        window.addEventListener('keydown', this._onKeyDown, { passive: true });
+        window.addEventListener('keydown', this._onKeyDown, { passive: false });
         // Keep camera updates; no picking to sync
         this.controls.addEventListener('change', this._onControlsChange);
 
@@ -1262,6 +1263,33 @@ export class Viewer {
         return null;
     }
 
+    _syncHistoryUiAfterUndoRedo() {
+        try {
+            if (this.expressionsManager?.textArea) {
+                this.expressionsManager.textArea.value = this.partHistory?.expressions || '';
+            }
+        } catch { }
+        try {
+            if (this.pmiViewsWidget) {
+                this.pmiViewsWidget.refreshFromHistory?.();
+                this.pmiViewsWidget._renderList?.();
+            }
+        } catch { }
+        try { this.historyWidget?.render?.(); } catch { }
+    }
+
+    async _runFeatureHistoryUndoRedo(direction) {
+        const ph = this.partHistory;
+        if (!ph) return false;
+        let changed = false;
+        try {
+            if (direction === 'redo') changed = await ph.redoFeatureHistory();
+            else changed = await ph.undoFeatureHistory();
+        } catch { }
+        try { this._syncHistoryUiAfterUndoRedo(); } catch { }
+        return changed;
+    }
+
     // Apply a single queued plugin side panel entry
     async _applyPluginSidePanel({ title, content }) {
         if (!this.accordion || typeof this.accordion.addSection !== 'function') return null;
@@ -1347,7 +1375,7 @@ export class Viewer {
         window.removeEventListener('pointerup', this._onPointerUp, { capture: true });
         document.removeEventListener('dblclick', this._onGlobalDoubleClick, { capture: true });
         window.removeEventListener('resize', this._onResize);
-        window.removeEventListener('keydown', this._onKeyDown, { passive: true });
+        window.removeEventListener('keydown', this._onKeyDown, { passive: false });
         this.controls?.dispose?.();
         this.renderer?.dispose?.();
         if (this._webglRenderer && this._webglRenderer !== this.renderer) {
@@ -1397,7 +1425,14 @@ export class Viewer {
         f.persistentData = f.persistentData || {};
         f.persistentData.sketch = sketchObject || {};
         // re-run to keep downstream in sync (even if SketchFeature.run has no output yet)
-        try { ph.runHistory(); } catch { }
+        try {
+            const runPromise = ph.runHistory();
+            if (runPromise && typeof runPromise.then === 'function') {
+                runPromise.then(() => ph.queueHistorySnapshot?.({ debounceMs: 0, reason: 'sketch' }));
+            } else {
+                ph.queueHistorySnapshot?.({ debounceMs: 0, reason: 'sketch' });
+            }
+        } catch { }
     }
 
     onSketchCancelled(_featureID) {
@@ -3077,6 +3112,33 @@ export class Viewer {
 
     _onKeyDown(event) {
         if (this._disposed) return;
+        const target = event?.target || null;
+        const tag = target?.tagName ? String(target.tagName).toLowerCase() : '';
+        const isEditable = !!(
+            target
+            && (target.isContentEditable
+                || tag === 'input'
+                || tag === 'textarea'
+                || tag === 'select')
+        );
+        const key = (event?.key || '').toLowerCase();
+        const isMod = !!(event?.ctrlKey || event?.metaKey);
+        const isUndo = isMod && !event?.altKey && key === 'z' && !event?.shiftKey;
+        const isRedo = isMod && !event?.altKey && (key === 'y' || (event?.shiftKey && key === 'z'));
+        if ((isUndo || isRedo) && !isEditable) {
+            if (this._imageEditorActive) return;
+            try {
+                if (this._sketchMode && typeof this._sketchMode.undo === 'function' && typeof this._sketchMode.redo === 'function') {
+                    if (isUndo) this._sketchMode.undo();
+                    else this._sketchMode.redo();
+                } else if (this.partHistory) {
+                    void this._runFeatureHistoryUndoRedo(isRedo ? 'redo' : 'undo');
+                }
+                try { event.preventDefault(); } catch { }
+                try { event.stopImmediatePropagation(); } catch { }
+            } catch { }
+            return;
+        }
         const k = event?.key || event?.code || '';
         if (k === 'Escape' || k === 'Esc') {
             try { this._hideSelectionOverlay(); } catch { }

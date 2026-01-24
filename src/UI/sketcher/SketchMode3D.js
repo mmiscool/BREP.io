@@ -5,6 +5,7 @@ import { ConstraintSolver } from "../../features/sketch/sketchSolver2D/Constrain
 import { updateListHighlights, applyHoverAndSelectionColors } from "./highlights.js";
 import { renderDimensions as dimsRender } from "./dimensions.js";
 import { AccordionWidget } from "../AccordionWidget.js";
+import { deepClone } from "../../utils/deepClone.js";
 
 export class SketchMode3D {
   constructor(viewer, featureID) {
@@ -48,6 +49,15 @@ export class SketchMode3D {
     // No clipping plane; orientation must do the work
     // Reference object used for plane basis/orientation
     this._refObj = null;
+    // Sketch undo/redo state
+    this._undoStack = [];
+    this._redoStack = [];
+    this._undoMax = 50;
+    this._undoTimer = null;
+    this._undoSignature = null;
+    this._undoReady = false;
+    this._undoApplying = false;
+    this._undoButtons = { undo: null, redo: null };
   }
 
   open() {
@@ -204,6 +214,9 @@ export class SketchMode3D {
       }
     } catch { }
 
+    // Initialize undo stack after solver + dimension offsets are ready
+    this.#initSketchUndo();
+
     // Build editing group
     this._sketchGroup = new THREE.Group();
     this._sketchGroup.renderOrder = 9999; // render last
@@ -263,6 +276,28 @@ export class SketchMode3D {
       const dialogOpen = (typeof window !== 'undefined') &&
         (((typeof window.isDialogOpen === 'function') && window.isDialogOpen()) || window.__BREPDialogOpen);
       if (dialogOpen) return; // Ignore shortcuts when a modal dialog is shown
+      const target = ev?.target || null;
+      const tag = target?.tagName ? String(target.tagName).toLowerCase() : '';
+      const isEditable = !!(
+        target
+        && (target.isContentEditable
+          || tag === 'input'
+          || tag === 'textarea'
+          || tag === 'select')
+      );
+      const key = (ev?.key || '').toLowerCase();
+      const isMod = !!(ev?.ctrlKey || ev?.metaKey);
+      const isUndo = isMod && !ev?.altKey && key === 'z' && !ev?.shiftKey;
+      const isRedo = isMod && !ev?.altKey && (key === 'y' || (ev?.shiftKey && key === 'z'));
+      if ((isUndo || isRedo) && !isEditable) {
+        try {
+          if (isUndo) this.undo();
+          else this.redo();
+          ev.preventDefault();
+          ev.stopImmediatePropagation();
+        } catch { }
+        return;
+      }
       const k = ev.key || ev.code || '';
       if (k === 'Escape' || k === 'Esc') {
         if (this._selection.size) {
@@ -327,7 +362,7 @@ export class SketchMode3D {
         }
       }
     };
-    window.addEventListener('keydown', this._onKeyDown, { passive: true });
+    window.addEventListener('keydown', this._onKeyDown, { passive: false });
   }
 
   close() {
@@ -399,6 +434,11 @@ export class SketchMode3D {
       window.removeEventListener("pointerup", this._onUp, true);
     } catch { }
     try { window.removeEventListener('keydown', this._onKeyDown); } catch { }
+    if (this._undoTimer) {
+      try { clearTimeout(this._undoTimer); } catch { }
+      this._undoTimer = null;
+    }
+    this._undoReady = false;
     this._lock = null;
     try {
       cancelAnimationFrame(this._sizeRAF);
@@ -440,10 +480,19 @@ export class SketchMode3D {
     this._toolbarButtons = null;
     this._toolbarPrevButtons = null;
     this._toolButtons = null;
+    this._undoButtons = { undo: null, redo: null };
   }
 
   dispose() {
     this.close();
+  }
+
+  undo() {
+    this.#undoSketch();
+  }
+
+  redo() {
+    this.#redoSketch();
   }
 
   finish() {
@@ -1349,6 +1398,114 @@ export class SketchMode3D {
     }
   }
 
+  #initSketchUndo() {
+    this._undoStack = [];
+    this._redoStack = [];
+    this._undoSignature = null;
+    this._undoApplying = false;
+    this._undoReady = true;
+    this.#pushSketchSnapshot({ force: true });
+    this.#updateSketchUndoButtons();
+  }
+
+  #computeSketchSignature(snapshot = null) {
+    try {
+      const sketch = snapshot?.sketch || this._solver?.sketchObject || null;
+      const dimOffsets = snapshot?.dimOffsets || this._dimOffsets || null;
+      const feature = this.#getSketchFeature();
+      const externalRefs = snapshot?.externalRefs
+        || feature?.persistentData?.externalRefs
+        || [];
+      const dimEntries = dimOffsets instanceof Map ? Array.from(dimOffsets.entries()) : dimOffsets;
+      return JSON.stringify({ sketch, dimEntries, externalRefs });
+    } catch {
+      return null;
+    }
+  }
+
+  #captureSketchSnapshot() {
+    if (!this._solver?.sketchObject) return null;
+    const feature = this.#getSketchFeature();
+    const dimOffsets = this._dimOffsets instanceof Map ? deepClone(this._dimOffsets) : new Map(this._dimOffsets || []);
+    return {
+      sketch: deepClone(this._solver.sketchObject),
+      dimOffsets,
+      externalRefs: deepClone(feature?.persistentData?.externalRefs || []),
+    };
+  }
+
+  #pushSketchSnapshot({ force = false } = {}) {
+    if (!this._undoReady || this._undoApplying) return;
+    const snap = this.#captureSketchSnapshot();
+    if (!snap) return;
+    const signature = this.#computeSketchSignature(snap);
+    if (!force && signature && signature === this._undoSignature) return;
+    this._undoStack.push(snap);
+    if (this._undoStack.length > this._undoMax) this._undoStack.shift();
+    this._redoStack.length = 0;
+    this._undoSignature = signature || this._undoSignature;
+    this.#updateSketchUndoButtons();
+  }
+
+  #scheduleSketchSnapshot() {
+    if (!this._undoReady || this._undoApplying) return;
+    if (this._undoTimer) {
+      try { clearTimeout(this._undoTimer); } catch { }
+    }
+    this._undoTimer = setTimeout(() => {
+      this._undoTimer = null;
+      this.#pushSketchSnapshot();
+    }, 300);
+  }
+
+  #applySketchSnapshot(snapshot) {
+    if (!snapshot || !this._solver) return;
+    this._undoApplying = true;
+    try {
+      this._solver.sketchObject = deepClone(snapshot.sketch || {});
+      this._dimOffsets = snapshot.dimOffsets instanceof Map
+        ? deepClone(snapshot.dimOffsets)
+        : new Map(snapshot.dimOffsets || []);
+      const feature = this.#getSketchFeature();
+      if (feature) {
+        feature.persistentData = feature.persistentData || {};
+        feature.persistentData.externalRefs = deepClone(snapshot.externalRefs || []);
+      }
+      this._selection.clear();
+      this.#rebuildSketchGraphics();
+      this.#renderDimensions();
+      try { this.#renderExternalRefsList(); } catch { }
+      try { this.#refreshExternalPointsPositions(true); } catch { }
+      this._undoSignature = this.#computeSketchSignature(snapshot);
+    } catch { }
+    this._undoApplying = false;
+    this.#updateSketchUndoButtons();
+  }
+
+  #undoSketch() {
+    if (this._undoStack.length <= 1) return;
+    const current = this._undoStack.pop();
+    if (current) this._redoStack.push(current);
+    const prev = this._undoStack[this._undoStack.length - 1];
+    if (prev) this.#applySketchSnapshot(prev);
+  }
+
+  #redoSketch() {
+    if (!this._redoStack.length) return;
+    const next = this._redoStack.pop();
+    if (next) {
+      this._undoStack.push(next);
+      this.#applySketchSnapshot(next);
+    }
+  }
+
+  #updateSketchUndoButtons() {
+    const undoBtn = this._undoButtons?.undo || null;
+    const redoBtn = this._undoButtons?.redo || null;
+    if (undoBtn) undoBtn.disabled = this._undoStack.length <= 1;
+    if (redoBtn) redoBtn.disabled = this._redoStack.length === 0;
+  }
+
   // Helper: compute world endpoints for a BREP Edge object
   #edgeEndpointsWorld(edge) {
     if (!edge) return null;
@@ -1646,6 +1803,30 @@ export class SketchMode3D {
       try { child.style.display = "none"; } catch { }
     }
 
+    const mkAction = ({ label, tooltip, onClick }) => {
+      const btn = toolbar.addCustomButton({
+        label,
+        title: tooltip,
+        onClick,
+      });
+      if (!btn) return null;
+      if (tooltip) btn.setAttribute("aria-label", tooltip);
+      if (label && label.length <= 2) btn.classList.add("mtb-icon");
+      this._toolbarButtons.push(btn);
+      return btn;
+    };
+
+    this._undoButtons.undo = mkAction({
+      label: "↶",
+      tooltip: "Undo (Ctrl+Z)",
+      onClick: () => this.undo(),
+    });
+    this._undoButtons.redo = mkAction({
+      label: "↷",
+      tooltip: "Redo (Ctrl+Y)",
+      onClick: () => this.redo(),
+    });
+
     const mk = ({ label, tool, tooltip }) => {
       const btn = toolbar.addCustomButton({
         label,
@@ -1673,6 +1854,7 @@ export class SketchMode3D {
     ];
     buttons.forEach((btn) => mk(btn));
     this.#refreshTopToolbarActive();
+    this.#updateSketchUndoButtons();
   }
 
   #setTool(tool) {
@@ -2586,6 +2768,7 @@ export class SketchMode3D {
     this.#refreshLists();
     this.#renderDimensions();
     this.#applyHoverAndSelectionColors();
+    this.#scheduleSketchSnapshot();
   }
 
   #updateHandleSizes() {
@@ -2748,6 +2931,7 @@ export class SketchMode3D {
     e.stopPropagation();
     // Notify controls that interaction ended (no lock/unlock)
     try { if (this.viewer?.controls) this.viewer.controls.enabled = true; } catch { }
+    this.#scheduleSketchSnapshot();
     setTimeout(() => { this.#notifyControlsEnd(e); }, 30);
   }
 

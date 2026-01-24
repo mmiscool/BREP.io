@@ -2,6 +2,7 @@
 // Each button's logic is implemented in its own module.
 
 import { createSaveButton } from './saveButton.js';
+import { createUndoButton, createRedoButton } from './undoRedoButtons.js';
 import { createZoomToFitButton } from './zoomToFitButton.js';
 import { createOrientToFaceButton } from './orientToFaceButton.js';
 import { createWireframeToggleButton } from './wireframeToggleButton.js';
@@ -18,6 +19,8 @@ export function registerDefaultToolbarButtons(viewer) {
   if (!viewer || typeof viewer.addToolbarButton !== 'function') return;
 
   const creators = [
+    createUndoButton,
+    createRedoButton,
     createSaveButton,
     createZoomToFitButton,
     createOrientToFaceButton,

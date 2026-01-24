@@ -38,6 +38,17 @@ export class PartHistory {
     this.expressions = "//Examples:\nx = 10 + 6; \ny = x * 2;";
     this.pmiViewsManager = new PMIViewsManager(this);
     this.metadataManager = new MetadataManager
+    this._historyUndo = {
+      undoStack: [],
+      redoStack: [],
+      max: 50,
+      debounceMs: 350,
+      pendingTimer: null,
+      lastSignature: null,
+      captureInFlight: false,
+      pendingRequest: false,
+      isApplying: false,
+    };
     if (this.assemblyConstraintHistory) {
       this.assemblyConstraintHistory.clear();
       this.assemblyConstraintHistory.setPartHistory(this);
@@ -257,6 +268,9 @@ export class PartHistory {
     if (this.callbacks.afterReset) {
       try { await this.callbacks.afterReset(); } catch { /* ignore */ }
     }
+
+    this.resetHistoryUndo();
+    await this._commitHistorySnapshot({ force: true });
 
     // sleep for a short duration to allow scene updates to complete
     //await new Promise(resolve => setTimeout(resolve, 1000));
@@ -606,7 +620,7 @@ export class PartHistory {
     return clone;
   }
 
-  async fromJSON(jsonString) {
+  async fromJSON(jsonString, options = {}) {
     const importData = JSON.parse(jsonString);
     const rawFeatures = Array.isArray(importData.features) ? importData.features : [];
     this.features = this.#prepareFeatureList(rawFeatures);
@@ -629,11 +643,146 @@ export class PartHistory {
         this.assemblyConstraintHistory.idCounter = constraintCounter;
       }
     }
+
+    const skipUndoReset = !!(options && options.skipUndoReset);
+    if (!skipUndoReset) {
+      this.resetHistoryUndo();
+      await this._commitHistorySnapshot({ force: true });
+    }
   }
 
   async generateId(prefix) {
     this.idCounter += 1;
     return `${prefix}${this.idCounter}`;
+  }
+
+  resetHistoryUndo() {
+    const state = this._historyUndo;
+    if (!state) return;
+    if (state.pendingTimer) {
+      try { clearTimeout(state.pendingTimer); } catch { }
+    }
+    state.pendingTimer = null;
+    state.undoStack = [];
+    state.redoStack = [];
+    state.lastSignature = null;
+    state.captureInFlight = false;
+    state.pendingRequest = false;
+    state.isApplying = false;
+  }
+
+  queueHistorySnapshot(options = {}) {
+    const state = this._historyUndo;
+    if (!state || state.isApplying) return;
+    const debounceMs = (typeof options.debounceMs === 'number')
+      ? options.debounceMs
+      : state.debounceMs;
+    if (state.pendingTimer) {
+      try { clearTimeout(state.pendingTimer); } catch { }
+      state.pendingTimer = null;
+    }
+    if (debounceMs <= 0) {
+      void this._commitHistorySnapshot({ force: !!options.force });
+      return;
+    }
+    state.pendingTimer = setTimeout(() => {
+      state.pendingTimer = null;
+      void this._commitHistorySnapshot({ force: !!options.force });
+    }, debounceMs);
+  }
+
+  async flushHistorySnapshot(options = {}) {
+    const state = this._historyUndo;
+    if (!state) return;
+    if (state.pendingTimer) {
+      try { clearTimeout(state.pendingTimer); } catch { }
+      state.pendingTimer = null;
+    }
+    await this._commitHistorySnapshot({ force: !!options.force });
+  }
+
+  canUndoFeatureHistory() {
+    const state = this._historyUndo;
+    return !!(state && Array.isArray(state.undoStack) && state.undoStack.length > 1);
+  }
+
+  canRedoFeatureHistory() {
+    const state = this._historyUndo;
+    return !!(state && Array.isArray(state.redoStack) && state.redoStack.length > 0);
+  }
+
+  async undoFeatureHistory() {
+    const state = this._historyUndo;
+    if (!state || state.undoStack.length <= 1) return false;
+    await this.flushHistorySnapshot();
+    if (state.undoStack.length <= 1) return false;
+    const current = state.undoStack.pop();
+    if (current) state.redoStack.push(current);
+    const prev = state.undoStack[state.undoStack.length - 1];
+    if (!prev) return false;
+    await this._applyHistorySnapshot(prev);
+    return true;
+  }
+
+  async redoFeatureHistory() {
+    const state = this._historyUndo;
+    if (!state || state.redoStack.length === 0) return false;
+    const next = state.redoStack.pop();
+    if (!next) return false;
+    state.undoStack.push(next);
+    await this._applyHistorySnapshot(next);
+    return true;
+  }
+
+  async _commitHistorySnapshot({ force = false } = {}) {
+    const state = this._historyUndo;
+    if (!state || state.isApplying) return;
+    if (state.captureInFlight) {
+      state.pendingRequest = true;
+      return;
+    }
+    state.captureInFlight = true;
+    try {
+      const json = await this.toJSON();
+      if (!json) return;
+      if (!force && state.lastSignature === json) return;
+      const snapshot = {
+        json,
+        currentHistoryStepId: this.currentHistoryStepId != null ? String(this.currentHistoryStepId) : null,
+      };
+      state.undoStack.push(snapshot);
+      if (state.undoStack.length > state.max) state.undoStack.shift();
+      state.redoStack.length = 0;
+      state.lastSignature = json;
+    } catch (error) {
+      console.warn('[PartHistory] Failed to capture history snapshot:', error);
+    } finally {
+      state.captureInFlight = false;
+      if (state.pendingRequest) {
+        state.pendingRequest = false;
+        await this._commitHistorySnapshot({ force: false });
+      }
+    }
+  }
+
+  async _applyHistorySnapshot(snapshot) {
+    const state = this._historyUndo;
+    if (!state || !snapshot || !snapshot.json) return;
+    if (state.pendingTimer) {
+      try { clearTimeout(state.pendingTimer); } catch { }
+      state.pendingTimer = null;
+    }
+    state.isApplying = true;
+    try {
+      await this.fromJSON(snapshot.json, { skipUndoReset: true });
+      this.currentHistoryStepId = snapshot.currentHistoryStepId != null ? String(snapshot.currentHistoryStepId) : null;
+      await this.runHistory();
+      state.lastSignature = snapshot.json;
+    } catch (error) {
+      console.warn('[PartHistory] Failed to apply history snapshot:', error);
+    } finally {
+      state.isApplying = false;
+    }
   }
 
   async runAssemblyConstraints() {

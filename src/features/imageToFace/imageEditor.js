@@ -104,6 +104,7 @@ export class ImageEditorUI {
         if (!this.overlay) return;
         if (!document.body.contains(this.overlay)) document.body.appendChild(this.overlay);
         this._attachEvents();
+        try { if (this.featureViewer) this.featureViewer._imageEditorActive = true; } catch { }
         // Ensure initial 1:1 view once canvas has real size
         this._maybeResetInitialView(true);
         this._render();
@@ -112,6 +113,7 @@ export class ImageEditorUI {
     close() {
         this._detachEvents();
         if (this.overlay && this.overlay.parentNode) this.overlay.parentNode.removeChild(this.overlay);
+        try { if (this.featureViewer) this.featureViewer._imageEditorActive = false; } catch { }
     }
 
     // ---------------------------- Initialization ---------------------------

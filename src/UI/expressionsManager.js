@@ -87,7 +87,14 @@ export class expressionsManager {
         if (succeeded) {
             this.resultDiv.textContent = "Expressions evaluated successfully.";
             this.resultDiv.style.color = 'green';
-            this.viewer.partHistory.runHistory();
+            const runPromise = this.viewer.partHistory.runHistory();
+            if (runPromise && typeof runPromise.then === 'function') {
+                runPromise.then(() => {
+                    this.viewer.partHistory?.queueHistorySnapshot?.({ reason: 'expressions' });
+                });
+            } else {
+                this.viewer.partHistory?.queueHistorySnapshot?.({ reason: 'expressions' });
+            }
         }
     }
 }
