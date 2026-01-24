@@ -29,6 +29,7 @@ import { PatternRadialFeature } from './features/patternRadial/PatternRadialFeat
 import { TubeFeature } from './features/tube/TubeFeature.js';
 import { AssemblyComponentFeature } from './features/assemblyComponent/AssemblyComponentFeature.js';
 import { OffsetShellFeature } from './features/offsetShell/OffsetShellFeature.js';
+import { OffsetFaceFeature } from './features/offsetFace/OffsetFaceFeature.js';
 import { SplineFeature } from './features/spline/SplineFeature.js';
 import { SheetMetalTabFeature } from './features/sheetMetal/SheetMetalTabFeature.js';
 import { SheetMetalContourFlangeFeature } from './features/sheetMetal/SheetMetalContourFlangeFeature.js';
@@ -86,6 +87,7 @@ export class FeatureRegistry {
     this.register(FilletFeature);
     this.register(ChamferFeature);
     this.register(OffsetShellFeature);
+    this.register(OffsetFaceFeature);
     this.register(SheetMetalTabFeature);
     this.register(SheetMetalContourFlangeFeature);
     this.register(SheetMetalFlangeFeature);

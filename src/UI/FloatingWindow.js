@@ -82,11 +82,11 @@ export class FloatingWindow {
     const content = document.createElement('div');
     content.className = 'floating-window__content';
 
-    // Resizers (corners)
+    // Resizers (corners + edges)
     root.appendChild(header);
     root.appendChild(content);
     const resizers = [];
-    const resizerDirs = ['nw', 'ne', 'sw', 'se'];
+    const resizerDirs = ['nw', 'ne', 'sw', 'se', 'n', 'e', 's', 'w'];
     for (const dir of resizerDirs) {
       const handle = document.createElement('div');
       handle.className = `floating-window__resizer floating-window__resizer--${dir}`;
@@ -368,12 +368,20 @@ export class FloatingWindow {
       .floating-window__resizer--sw { left:2px; bottom:2px; cursor:sw-resize; }
       .floating-window__resizer--ne { right:2px; top:2px; cursor:ne-resize; }
       .floating-window__resizer--nw { left:2px; top:2px; cursor:nw-resize; }
+      .floating-window__resizer--n { left:16px; right:16px; top:-4px; height:8px; width:auto; cursor:n-resize; }
+      .floating-window__resizer--s { left:16px; right:16px; bottom:-4px; height:8px; width:auto; cursor:s-resize; }
+      .floating-window__resizer--e { top:16px; bottom:16px; right:-4px; width:8px; height:auto; cursor:e-resize; }
+      .floating-window__resizer--w { top:16px; bottom:16px; left:-4px; width:8px; height:auto; cursor:w-resize; }
       .floating-window.is-shaded .floating-window__resizer { display:none; }
       .floating-window__resizer::after { content:""; position:absolute; width:10px; height:10px; opacity:.8; }
       .floating-window__resizer--se::after { right:3px; bottom:3px; border-right:2px solid #4b5563; border-bottom:2px solid #4b5563; }
       .floating-window__resizer--sw::after { left:3px; bottom:3px; border-left:2px solid #4b5563; border-bottom:2px solid #4b5563; }
       .floating-window__resizer--ne::after { right:3px; top:3px; border-right:2px solid #4b5563; border-top:2px solid #4b5563; }
       .floating-window__resizer--nw::after { left:3px; top:3px; border-left:2px solid #4b5563; border-top:2px solid #4b5563; }
+      .floating-window__resizer--n::after,
+      .floating-window__resizer--s::after,
+      .floating-window__resizer--e::after,
+      .floating-window__resizer--w::after { display:none; }
       .floating-window.is-resizing, .floating-window__header:active { cursor:grabbing; }
     `;
     document.head.appendChild(style);

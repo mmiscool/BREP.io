@@ -7,6 +7,10 @@ import {
 import { applySheetMetalMetadata } from "./sheetMetalMetadata.js";
 import { selectionHasSketch } from "../selectionUtils.js";
 import { resolveProfileFace, collectSketchParents } from "./profileUtils.js";
+import { cleanupSheetMetalOppositeEdgeFaces } from "./sheetMetalCleanup.js";
+import { SheetMetalObject } from "./SheetMetalObject.js";
+import { cloneSheetMetalTree, createSheetMetalCutoutNode } from "./sheetMetalTree.js";
+import { cloneProfileGroups, collectProfileEdges, buildFaceFromProfileGroups } from "./sheetMetalProfileUtils.js";
 
 const inputParamsSchema = {
   id: {
@@ -83,149 +87,88 @@ export class SheetMetalCutoutFeature {
   async run(partHistory) {
     const scene = partHistory?.scene;
     const metadataManager = partHistory?.metadataManager;
+    this.debugTool = null;
     const sheetRef = firstSelection(this.inputParams?.sheet);
     let sheetSolid = resolveSolidRef(sheetRef, scene);
 
-    const tools = [];
-    const sketchParentsToRemove = [];
-    this.debugTool = null;
-
-    // Profile can be a solid (use directly) or a face/sketch (extrude).
-    const profileSelection = firstSelection(this.inputParams?.profile);
-    const profileSolid = (profileSelection && profileSelection.type === "SOLID")
-      ? profileSelection
-      : (typeof profileSelection === "string" ? partHistory?.getObjectByName?.(profileSelection) : null);
-    if (profileSolid && profileSolid.type === "SOLID") {
-      tools.push(profileSolid);
-    } else {
-      const profileFace = resolveProfileFace(profileSelection, partHistory);
-      if (profileFace) sketchParentsToRemove.push(...collectSketchParents(profileFace));
-      if (profileFace && profileFace.type === "FACE") {
-        const profileTool = buildToolFromProfile(profileFace, this.inputParams, this.inputParams?.featureID || "SM_CUTOUT_PROFILE");
-        if (profileTool) {
-          tools.push(profileTool);
-          this.debugTool = profileTool;
-        }
-      }
-    }
-
-    // Require explicit sheet; if missing, try to infer from sheet metadata in scene as a last resort.
     if (!sheetSolid) {
       sheetSolid = findFirstSheetMetalSolid(scene, metadataManager);
     }
 
     if (!sheetSolid) throw new Error("Sheet Metal Cutout requires a valid sheet metal solid selection.");
-    if (!tools.length) {
-      throw new Error("Sheet Metal Cutout needs a Profile selection (solid or face) to build the cutting tool.");
-    }
 
-    const toolUnion = unionSolids(tools);
-    if (!toolUnion) throw new Error("Failed to combine cutting tools for Sheet Metal Cutout.");
+    const tree = sheetSolid?.userData?.sheetMetalTree
+      || sheetSolid?.userData?.sheetMetal?.tree
+      || null;
 
-    const sheetThickness = resolveSheetThickness(sheetSolid, partHistory?.metadataManager);
-    if (!(sheetThickness > 0)) throw new Error("Sheet Metal Cutout could not resolve sheet metal thickness.");
-
-    let added = [];
-    let removed = [];
-    const keepCutter = this.inputParams?.debugCutter === true;
-    let working = sheetSolid;
-
-    // Step 1: remove the original tool volume to honor its shape.
-    if (toolUnion) {
+    if (!tree) {
+      const result = await buildSheetMetalCutoutSolids({
+        params: this.inputParams,
+        partHistory,
+        sheetSolid,
+        applyMetadata: true,
+      });
       try {
-        working = sheetSolid.subtract(toolUnion);
-        working.visualize?.();
-        removed.push(sheetSolid, toolUnion);
-      } catch (toolErr) {
-        console.warn("[SheetMetalCutout] Subtracting cutting tool failed, falling back to boolean", toolErr);
-        const effects = await BREP.applyBooleanOperation(
-          partHistory || {},
-          toolUnion,
-          { operation: "SUBTRACT", targets: [sheetSolid] },
-          this.inputParams?.featureID,
-        );
-        const candidate = Array.isArray(effects?.added) ? effects.added[0] : null;
-        if (!candidate) throw new Error("Sheet Metal Cutout could not subtract the cutting tool.");
-        candidate.visualize?.();
-        working = candidate;
-        removed.push(...(effects?.removed || []), sheetSolid, toolUnion);
-      }
+        for (const obj of result.removed || []) {
+          if (obj) obj.__removeFlag = true;
+        }
+      } catch { /* ignore */ }
+      this.debugTool = result?.debugTool || null;
+      this.persistentData = result?.persistentData || {};
+      return { added: result.added || [], removed: result.removed || [] };
     }
 
-    const sheetFaces = collectSheetFaces(working);
-    if (!sheetFaces.A.length && !sheetFaces.B.length) {
-      throw new Error("Sheet Metal Cutout could not find sheet metal A/B faces on the target. Ensure the target solid has sheet-metal metadata.");
-    }
+    const profileSelection = firstSelection(this.inputParams?.profile);
+    const profileFace = resolveProfileFaceFromSolid(profileSelection, partHistory, sheetSolid);
+    const sketchParentsToRemove = profileFace ? collectSketchParents(profileFace) : [];
+    const profileGroups = cloneProfileGroups(profileFace);
+    const profileEdges = collectProfileEdges(profileFace);
+    const profileFaceName = profileFace?.name || null;
 
-    const faceInfoMap = buildSheetFaceInfoMap(sheetFaces);
-    const faceTypeMap = buildFaceTypeMap(working);
-    let prisms = buildPrismsFromBoundaryLoops(working, faceInfoMap, faceTypeMap, sheetThickness, this.inputParams?.featureID);
+    const baseMeta = sheetSolid?.userData?.sheetMetal || {};
+    const sheetMetal = new SheetMetalObject({
+      tree,
+      kFactor: baseMeta.neutralFactor ?? sheetSolid?.userData?.sheetMetalNeutralFactor ?? null,
+      thickness: baseMeta.thickness ?? sheetSolid?.userData?.sheetThickness ?? null,
+      bendRadius: baseMeta.bendRadius ?? sheetSolid?.userData?.sheetBendRadius ?? null,
+    });
+    const cutoutNode = createSheetMetalCutoutNode({
+      featureID: this.inputParams?.featureID || null,
+      sheetRef: this.inputParams?.sheet ?? null,
+      profileRef: this.inputParams?.profile ?? null,
+      profileFaceName,
+      profileGroups,
+      profileEdges,
+      consumeProfileSketch: this.inputParams?.consumeProfileSketch !== false,
+      forwardDistance: this.inputParams?.forwardDistance,
+      backDistance: this.inputParams?.backDistance,
+      keepTool: this.inputParams?.keepTool,
+      debugCutter: this.inputParams?.debugCutter,
+    });
+    sheetMetal.appendNode(cutoutNode);
+    await sheetMetal.generate({
+      partHistory,
+      metadataManager: partHistory?.metadataManager,
+      mode: "solid",
+    });
+    try { sheetMetal.name = sheetSolid?.name || sheetMetal.name; } catch { /* ignore */ }
 
-    if (!prisms.length) {
-      const intersection = safeIntersect(sheetSolid, toolUnion) || await safeIntersectFallbackBoolean(partHistory, sheetSolid, toolUnion, this.inputParams?.featureID);
-      if (intersection) {
-        prisms = buildPrismsFromIntersection(intersection, sheetSolid, sheetThickness, this.inputParams?.featureID);
-      }
-    }
-
-    let cutPrism = null;
-    if (!prisms.length) {
-      console.warn("[SheetMetalCutout] Cleanup footprint not found; keeping direct subtract result.");
-      if (working) {
-        try { working.name = this.inputParams?.featureID || working.name || sheetSolid.name; } catch { /* ignore */ }
-        added = [working];
-      }
-      removed.push(...tools);
-    } else {
-      cutPrism = prisms[0];
-      for (let i = 1; i < prisms.length; i++) {
-        try { cutPrism = cutPrism.union(prisms[i]); } catch { cutPrism = prisms[i]; }
-      }
-      if (this.inputParams?.featureID && cutPrism) {
-        try { cutPrism.name = `${this.inputParams.featureID}_CUTOUT_CUTTER`; } catch { /* best effort */ }
-      }
-
-      // Step 2: cut perpendicular walls using the planar footprint prisms on the original sheet.
-      try {
-        const finalCut = sheetSolid.subtract(cutPrism);
-        finalCut.visualize?.();
-        try { finalCut.name = sheetSolid?.name || finalCut.name; } catch { /* ignore */ }
-        added = [finalCut];
-        removed.push(sheetSolid, working, cutPrism, ...tools);
-      } catch (directErr) {
-        console.warn("[SheetMetalCutout] Subtracting cleanup prisms failed, falling back to boolean", directErr);
-        const effects = await BREP.applyBooleanOperation(
-          partHistory || {},
-          cutPrism,
-          { operation: "SUBTRACT", targets: [sheetSolid] },
-          this.inputParams?.featureID,
-        );
-        const candidate = Array.isArray(effects?.added) ? effects.added[0] : null;
-        if (!candidate) throw new Error("Sheet Metal Cutout could not complete the cleanup cut.");
-        try { candidate.name = sheetSolid?.name || candidate.name; } catch { /* ignore */ }
-        removed.push(...(effects?.removed || []), sheetSolid, working, cutPrism, ...tools);
-        added = effects?.added || [];
-      }
-    }
-
-    if (keepCutter && cutPrism) {
-      added.push(cutPrism);
-      removed = removed.filter((o) => o !== cutPrism);
-      try { cutPrism.visualize?.(); } catch { /* ignore */ }
-    }
-
+    const added = [sheetMetal];
     const consumeSketch = this.inputParams?.consumeProfileSketch !== false;
+    let removed = [sheetSolid];
     if (consumeSketch && sketchParentsToRemove.length) {
-      removed.push(...sketchParentsToRemove);
+      removed = removed.concat(sketchParentsToRemove);
     }
 
-    const keepTool = this.inputParams?.keepTool === true;
-    if (keepTool && tools?.length) {
-      removed = removed.filter((o) => !tools.includes(o) && o !== toolUnion);
-    }
-    try { for (const obj of removed) { if (obj) obj.__removeFlag = true; } } catch { /* ignore */ }
+    try {
+      for (const obj of removed) {
+        if (obj) obj.__removeFlag = true;
+      }
+    } catch { /* ignore */ }
 
+    cleanupSheetMetalOppositeEdgeFaces(added);
     propagateSheetMetalFaceTypesToEdges(added);
+    const sheetThickness = resolveSheetThickness(sheetSolid, metadataManager);
     applySheetMetalMetadata(added, partHistory?.metadataManager, {
       featureID: this.inputParams?.featureID || null,
       thickness: sheetThickness,
@@ -235,29 +178,247 @@ export class SheetMetalCutoutFeature {
       forceBaseOverwrite: false,
     });
 
-    // Optionally keep the generated tool for debugging
-    if (this.inputParams?.keepTool && this.debugTool) {
-      added.push(this.debugTool);
-      try { this.debugTool.visualize?.(); } catch { /* ignore */ }
+    for (const solid of added) {
+      if (!solid) continue;
+      solid.userData = solid.userData || {};
+      solid.userData.sheetMetalTree = cloneSheetMetalTree(sheetMetal.tree);
+      solid.userData.sheetMetalKFactor = sheetMetal.kFactor ?? null;
     }
 
     this.persistentData = {
       sheetName: sheetSolid?.name || null,
-      toolCount: tools.length,
+      toolCount: 1,
       sheetThickness,
-      footprintFaceTypes: {
-        A: sheetFaces.A.length,
-        B: sheetFaces.B.length,
-      },
+      footprintFaceTypes: null,
+      tree: sheetMetal.tree,
     };
 
     return { added, removed };
   }
 }
 
+export async function buildSheetMetalCutoutSolids({
+  params,
+  partHistory,
+  sheetSolid = null,
+  applyMetadata = true,
+} = {}) {
+  const scene = partHistory?.scene;
+  const metadataManager = partHistory?.metadataManager;
+  const sheetRef = firstSelection(params?.sheet);
+  let targetSheet = sheetSolid || resolveSolidRef(sheetRef, scene);
+
+  const tools = [];
+  const sketchParentsToRemove = [];
+  let debugTool = null;
+
+  const profileSelection = firstSelection(params?.profile);
+  const profileSolid = resolveProfileSolid(profileSelection, partHistory);
+  if (profileSolid && profileSolid.type === "SOLID") {
+    tools.push(profileSolid);
+  } else {
+    let profileFace = resolveProfileFaceFromSolid(profileSelection, partHistory, targetSheet);
+    if (!profileFace && params?.profileGroups) {
+      profileFace = buildFaceFromProfileGroups(
+        params.profileGroups,
+        params.profileName || params.profileRef || params.profile,
+        params.profileEdges,
+      );
+    }
+    if (profileFace) sketchParentsToRemove.push(...collectSketchParents(profileFace));
+    if (profileFace && profileFace.type === "FACE") {
+      const toolName = params?.featureID || "SM_CUTOUT_PROFILE";
+      const profileTool = buildToolFromProfile(profileFace, params, toolName);
+      if (profileTool) {
+        tools.push(profileTool);
+        debugTool = profileTool;
+      }
+    }
+  }
+
+  if (!targetSheet) {
+    targetSheet = findFirstSheetMetalSolid(scene, metadataManager);
+  }
+
+  if (!targetSheet) throw new Error("Sheet Metal Cutout requires a valid sheet metal solid selection.");
+  if (!tools.length) {
+    throw new Error("Sheet Metal Cutout needs a Profile selection (solid or face) to build the cutting tool.");
+  }
+
+  const toolUnion = unionSolids(tools);
+  if (!toolUnion) throw new Error("Failed to combine cutting tools for Sheet Metal Cutout.");
+
+  const sheetThickness = resolveSheetThickness(targetSheet, partHistory?.metadataManager);
+  if (!(sheetThickness > 0)) throw new Error("Sheet Metal Cutout could not resolve sheet metal thickness.");
+
+  let added = [];
+  let removed = [];
+  const keepCutter = params?.debugCutter === true;
+  let working = targetSheet;
+
+  if (toolUnion) {
+    try {
+      working = targetSheet.subtract(toolUnion);
+      working.visualize?.();
+      removed.push(targetSheet, toolUnion);
+    } catch (toolErr) {
+      console.warn("[SheetMetalCutout] Subtracting cutting tool failed, falling back to boolean", toolErr);
+      const effects = await BREP.applyBooleanOperation(
+        partHistory || {},
+        toolUnion,
+        { operation: "SUBTRACT", targets: [targetSheet] },
+        params?.featureID,
+      );
+      const candidate = Array.isArray(effects?.added) ? effects.added[0] : null;
+      if (!candidate) throw new Error("Sheet Metal Cutout could not subtract the cutting tool.");
+      candidate.visualize?.();
+      working = candidate;
+      removed.push(...(effects?.removed || []), targetSheet, toolUnion);
+    }
+  }
+
+  const sheetFaces = collectSheetFaces(working);
+  if (!sheetFaces.A.length && !sheetFaces.B.length) {
+    throw new Error("Sheet Metal Cutout could not find sheet metal A/B faces on the target. Ensure the target solid has sheet-metal metadata.");
+  }
+
+  const faceInfoMap = buildSheetFaceInfoMap(sheetFaces);
+  const faceTypeMap = buildFaceTypeMap(working);
+  let prisms = buildPrismsFromBoundaryLoops(working, faceInfoMap, faceTypeMap, sheetThickness, params?.featureID);
+
+  if (!prisms.length) {
+    const intersection = safeIntersect(targetSheet, toolUnion)
+      || await safeIntersectFallbackBoolean(partHistory, targetSheet, toolUnion, params?.featureID);
+    if (intersection) {
+      prisms = buildPrismsFromIntersection(intersection, targetSheet, sheetThickness, params?.featureID);
+    }
+  }
+
+  let cutPrism = null;
+  if (!prisms.length) {
+    console.warn("[SheetMetalCutout] Cleanup footprint not found; keeping direct subtract result.");
+    if (working) {
+      try { working.name = params?.featureID || working.name || targetSheet.name; } catch { /* ignore */ }
+      added = [working];
+    }
+    removed.push(...tools);
+  } else {
+    cutPrism = prisms[0];
+    for (let i = 1; i < prisms.length; i++) {
+      try { cutPrism = cutPrism.union(prisms[i]); } catch { cutPrism = prisms[i]; }
+    }
+    if (params?.featureID && cutPrism) {
+      try { cutPrism.name = `${params.featureID}_CUTOUT_CUTTER`; } catch { /* best effort */ }
+    }
+
+    try {
+      const finalCut = targetSheet.subtract(cutPrism);
+      finalCut.visualize?.();
+      try { finalCut.name = targetSheet?.name || finalCut.name; } catch { /* ignore */ }
+      added = [finalCut];
+      removed.push(targetSheet, working, cutPrism, ...tools);
+    } catch (directErr) {
+      console.warn("[SheetMetalCutout] Subtracting cleanup prisms failed, falling back to boolean", directErr);
+      const effects = await BREP.applyBooleanOperation(
+        partHistory || {},
+        cutPrism,
+        { operation: "SUBTRACT", targets: [targetSheet] },
+        params?.featureID,
+      );
+      const candidate = Array.isArray(effects?.added) ? effects.added[0] : null;
+      if (!candidate) throw new Error("Sheet Metal Cutout could not complete the cleanup cut.");
+      try { candidate.name = targetSheet?.name || candidate.name; } catch { /* ignore */ }
+      removed.push(...(effects?.removed || []), targetSheet, working, cutPrism, ...tools);
+      added = effects?.added || [];
+    }
+  }
+
+  if (keepCutter && cutPrism) {
+    added.push(cutPrism);
+    removed = removed.filter((o) => o !== cutPrism);
+    try { cutPrism.visualize?.(); } catch { /* ignore */ }
+  }
+
+  const consumeSketch = params?.consumeProfileSketch !== false;
+  if (consumeSketch && sketchParentsToRemove.length) {
+    removed.push(...sketchParentsToRemove);
+  }
+
+  const keepTool = params?.keepTool === true;
+  if (keepTool && tools?.length) {
+    removed = removed.filter((o) => !tools.includes(o) && o !== toolUnion);
+  }
+
+  cleanupSheetMetalOppositeEdgeFaces(added);
+  propagateSheetMetalFaceTypesToEdges(added);
+  if (applyMetadata) {
+    applySheetMetalMetadata(added, partHistory?.metadataManager, {
+      featureID: params?.featureID || null,
+      thickness: sheetThickness,
+      baseType: targetSheet?.userData?.sheetMetal?.baseType || null,
+      bendRadius: targetSheet?.userData?.sheetMetal?.bendRadius ?? null,
+      extra: { sourceFeature: "CUTOUT", consumeProfileSketch: consumeSketch },
+      forceBaseOverwrite: false,
+    });
+  }
+
+  if (params?.keepTool && debugTool) {
+    added.push(debugTool);
+    try { debugTool.visualize?.(); } catch { /* ignore */ }
+  }
+
+  const persistentData = {
+    sheetName: targetSheet?.name || null,
+    toolCount: tools.length,
+    sheetThickness,
+    footprintFaceTypes: {
+      A: sheetFaces.A.length,
+      B: sheetFaces.B.length,
+    },
+  };
+
+  return { added, removed, persistentData, debugTool };
+}
+
 function firstSelection(sel) {
   if (Array.isArray(sel)) return sel[0] || null;
   return sel || null;
+}
+
+function findFaceInSolidByName(solid, name) {
+  if (!solid || !name) return null;
+  try {
+    if (typeof solid.getObjectByName === "function") {
+      const found = solid.getObjectByName(name);
+      if (found?.type === "FACE") return found;
+    }
+  } catch { /* ignore */ }
+  const children = Array.isArray(solid.children) ? solid.children : [];
+  for (const child of children) {
+    if (child?.type === "FACE" && child?.name === name) return child;
+  }
+  return null;
+}
+
+function resolveProfileSolid(selection, partHistory) {
+  if (!selection) return null;
+  if (selection?.type === "SOLID") return selection;
+  if (typeof selection === "string" && partHistory?.getObjectByName) {
+    const obj = partHistory.getObjectByName(selection);
+    if (obj?.type === "SOLID") return obj;
+  }
+  return null;
+}
+
+function resolveProfileFaceFromSolid(selection, partHistory, sheetSolid) {
+  if (!selection) return null;
+  if (selection?.type === "FACE") return selection;
+  const name = typeof selection === "string" ? selection : selection?.name;
+  if (name && sheetSolid) {
+    const face = findFaceInSolidByName(sheetSolid, name);
+    if (face) return face;
+  }
+  return resolveProfileFace(selection, partHistory);
 }
 
 function resolveSolidRef(ref, scene) {

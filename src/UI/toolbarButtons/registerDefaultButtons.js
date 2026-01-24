@@ -3,6 +3,7 @@
 
 import { createSaveButton } from './saveButton.js';
 import { createZoomToFitButton } from './zoomToFitButton.js';
+import { createOrientToFaceButton } from './orientToFaceButton.js';
 import { createWireframeToggleButton } from './wireframeToggleButton.js';
 import { createInspectorToggleButton } from './inspectorToggleButton.js';
 import { createMetadataButton } from './metadataButton.js';
@@ -19,6 +20,7 @@ export function registerDefaultToolbarButtons(viewer) {
   const creators = [
     createSaveButton,
     createZoomToFitButton,
+    createOrientToFaceButton,
     createWireframeToggleButton,
     createInspectorToggleButton,
     createMetadataButton,

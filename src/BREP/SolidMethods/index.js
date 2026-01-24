@@ -35,6 +35,7 @@ export {
 export {
     removeSmallIslands,
     removeSmallInternalIslands,
+    removeOppositeSingleEdgeFaces,
     removeTinyBoundaryTriangles,
     collapseTinyTriangles,
     remesh,

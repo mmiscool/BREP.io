@@ -2,8 +2,14 @@ import { BREP } from "../../BREP/BREP.js";
 import {
   SHEET_METAL_FACE_TYPES,
   resolveSheetMetalFaceType as resolveSMFaceType,
+  propagateSheetMetalFaceTypesToEdges,
 } from "./sheetMetalFaceTypes.js";
 import { applySheetMetalMetadata } from "./sheetMetalMetadata.js";
+import { normalizeSelectionList } from "../selectionUtils.js";
+import { cleanupSheetMetalOppositeEdgeFaces } from "./sheetMetalCleanup.js";
+import { computeBoundsFromVertices } from "../../BREP/boundsUtils.js";
+import { SheetMetalObject } from "./SheetMetalObject.js";
+import { cloneSheetMetalTree, createSheetMetalFlangeNode } from "./sheetMetalTree.js";
 
 const inputParamsSchema = {
   id: {
@@ -110,17 +116,42 @@ export class SheetMetalFlangeFeature {
       throw new Error(`${featureLabel} requires selecting at least one FACE.`);
     }
 
-    // Assume all selected faces share the same sheet thickness; resolve it once up front.
-    const baseFace = faces[0];
-    const baseParentSolid = findAncestorSolid(baseFace);
-    const parentSolidName = baseParentSolid?.name || null;
-    const thicknessInfo = resolveThickness(baseFace, baseParentSolid, partHistory?.metadataManager);
+    const parentSolid = findAncestorSolid(faces[0]);
+    const sameParentFaces = faces.filter((face) => findAncestorSolid(face) === parentSolid);
+    if (!parentSolid || sameParentFaces.length !== faces.length) {
+      throw new Error(`${featureLabel} selections must belong to a single sheet metal solid.`);
+    }
+
+    const tree = parentSolid?.userData?.sheetMetalTree
+      || parentSolid?.userData?.sheetMetal?.tree
+      || null;
+
+    if (!tree) {
+      const result = await buildSheetMetalFlangeSolids({
+        params: this.inputParams,
+        partHistory,
+        faces,
+        featureClass: this?.constructor,
+        applyMetadata: true,
+      });
+      this.persistentData = this.persistentData || {};
+      if (result?.persistentData) {
+        this.persistentData.sheetMetal = result.persistentData;
+      }
+      return { added: result.added || [], removed: result.removed || [] };
+    }
+
+    const baseFace = sameParentFaces[0];
+    const parentSolidName = parentSolid?.name || null;
+    const thicknessInfo = resolveThickness(baseFace, parentSolid, partHistory?.metadataManager);
     const thickness = thicknessInfo?.thickness ?? 1;
     const baseBendRadius = thicknessInfo?.defaultBendRadius ?? thickness;
 
     const angleDeg = angleOverride != null ? angleOverride : this.inputParams.angle;
     const angleFallback = Math.max(0, Math.min(180, defaultAngle));
-    let angle = Number.isFinite(angleDeg) ? Math.max(0, Math.min(180, angleDeg)) : angleFallback;
+    const appliedAngle = Number.isFinite(angleDeg)
+      ? Math.max(0, Math.min(180, angleDeg))
+      : angleFallback;
     const bendRadiusFallback = defaultBendRadius != null ? defaultBendRadius : 0;
     const bendRadiusInput = Math.max(0, Number(this.inputParams?.bendRadius ?? bendRadiusFallback));
     const bendRadiusOverride = bendRadiusInput > 0 ? bendRadiusInput : null;
@@ -139,19 +170,12 @@ export class SheetMetalFlangeFeature {
       });
     } catch { /* logging best-effort */ }
 
-    const skipUnion = this.inputParams?.debugSkipUnion === true;
-
     let insetOffsetValue = 0;
     if (this.inputParams?.inset === "material_inside") insetOffsetValue = -bendRadiusUsed - thickness;
     if (this.inputParams?.inset === "material_outside") insetOffsetValue = -bendRadiusUsed;
     if (this.inputParams?.inset === "bend_outside") insetOffsetValue = 0;
-
-
-
     const offsetValue = Number(this.inputParams?.offset ?? 0) + insetOffsetValue;
-    const shouldExtrudeOffset = Number.isFinite(offsetValue) && offsetValue !== 0;
 
-    const appliedAngle = angle;
     const sheetMetalMetadata = {
       featureID: this.inputParams?.featureID || null,
       thickness,
@@ -167,8 +191,7 @@ export class SheetMetalFlangeFeature {
         baseBendRadius,
       },
     };
-    this.persistentData = this.persistentData || {};
-    this.persistentData.sheetMetal = {
+    const persistentData = {
       baseType,
       thickness,
       bendRadius: bendRadiusUsed,
@@ -180,58 +203,235 @@ export class SheetMetalFlangeFeature {
       offsetValue,
     };
 
+    const baseMeta = parentSolid?.userData?.sheetMetal || {};
+    const sheetMetal = new SheetMetalObject({
+      tree,
+      kFactor: baseMeta.neutralFactor ?? parentSolid?.userData?.sheetMetalNeutralFactor ?? null,
+      thickness: baseMeta.thickness ?? parentSolid?.userData?.sheetThickness ?? null,
+      bendRadius: baseMeta.bendRadius ?? parentSolid?.userData?.sheetBendRadius ?? null,
+    });
+    const flangeNode = createSheetMetalFlangeNode({
+      featureID: this.inputParams?.featureID || null,
+      faceRefs: normalizeSelectionList(this.inputParams?.faces),
+      useOppositeCenterline: this.inputParams?.useOppositeCenterline === true,
+      flangeLength: this.inputParams?.flangeLength,
+      flangeLengthReference: this.inputParams?.flangeLengthReference,
+      angle: this.inputParams?.angle,
+      inset: this.inputParams?.inset,
+      reliefWidth: this.inputParams?.reliefWidth,
+      bendRadius: this.inputParams?.bendRadius,
+      offset: this.inputParams?.offset,
+      debugSkipUnion: this.inputParams?.debugSkipUnion === true,
+      baseType,
+      defaultAngle,
+      angleOverride,
+      defaultBendRadius,
+    });
+    sheetMetal.appendNode(flangeNode);
+    await sheetMetal.generate({
+      partHistory,
+      metadataManager: partHistory?.metadataManager,
+      mode: "solid",
+    });
+    if (parentSolidName) {
+      try { sheetMetal.name = parentSolidName; } catch { /* ignore */ }
+    }
 
+    const added = [sheetMetal];
+    let removed = [parentSolid];
+    if (this.inputParams?.debug) removed = [];
 
+    cleanupSheetMetalOppositeEdgeFaces(added);
+    propagateSheetMetalFaceTypesToEdges(added);
+    applySheetMetalMetadata(added, partHistory?.metadataManager, {
+      ...sheetMetalMetadata,
+      forceBaseOverwrite: false,
+    });
 
+    for (const solid of added) {
+      if (!solid) continue;
+      solid.userData = solid.userData || {};
+      solid.userData.sheetMetalTree = cloneSheetMetalTree(sheetMetal.tree);
+      solid.userData.sheetMetalKFactor = sheetMetal.kFactor ?? null;
+    }
 
-    const generatedSolids = [];
-    const parentSolidStates = new Map();
-    const orphanSolids = [];
-    const solidParentNames = new WeakMap();
-    const recordParentName = (solid, parentSolid) => {
-      try {
-        if (solid && parentSolid?.name) solidParentNames.set(solid, parentSolid.name);
-      } catch { /* ignore */ }
+    this.persistentData = this.persistentData || {};
+    this.persistentData.sheetMetal = {
+      ...persistentData,
+      tree: sheetMetal.tree,
     };
-    const registerSolid = (solid, parentSolid) => {
-      if (!solid) return;
-      generatedSolids.push(solid);
-      if (parentSolid) {
-        const state = getParentState(parentSolidStates, parentSolid);
-        if (state) state.solids.push(solid);
-        recordParentName(solid, parentSolid);
-      } else {
-        orphanSolids.push(solid);
-      }
-    };
-    const subtractRemoved = [];
-    const debugSubtractionSolids = [];
 
-    let faceIndex = 0;
-    for (const face of faces) {
-      const context = analyzeFace(face);
-      if (!context) continue;
-      const orientationInfo = resolveABOrientation(face, context);
-      const desiredBendSide = useOppositeCenterline
-        ? SHEET_METAL_FACE_TYPES.B
-        : SHEET_METAL_FACE_TYPES.A;
+    return { added, removed };
+  }
+}
 
-      const offsetVector = shouldExtrudeOffset
-        ? buildOffsetTranslationVector(context.baseNormal, offsetValue)
-        : null;
+export async function buildSheetMetalFlangeSolids({
+  params,
+  partHistory,
+  faces = null,
+  featureClass = null,
+  applyMetadata = true,
+} = {}) {
+  const FeatureClass = featureClass || {};
+  const featureLabel = FeatureClass.longName || "Sheet Metal Flange";
+  const logTag = FeatureClass.logTag || "SheetMetalFlange";
+  const baseType = FeatureClass.baseType || "FLANGE";
+  const defaultAngle = Number.isFinite(FeatureClass.defaultAngle)
+    ? FeatureClass.defaultAngle
+    : 90;
+  const angleOverride = Number.isFinite(FeatureClass.angleOverride)
+    ? FeatureClass.angleOverride
+    : null;
+  const defaultBendRadius = Number.isFinite(FeatureClass.defaultBendRadius)
+    ? FeatureClass.defaultBendRadius
+    : null;
 
-      const targetRadius = bendRadiusUsed;
-      const tolerance = Math.max(1e-4, targetRadius * 0.01);
-      const hingeOptions = [];
-      const primaryHinge = pickCenterlineEdge(face, context, useOppositeCenterline);
-      if (primaryHinge) hingeOptions.push(primaryHinge);
-      const altHinge = pickCenterlineEdge(face, context, !useOppositeCenterline);
-      if (altHinge) hingeOptions.push(altHinge);
+  const resolvedFaces = Array.isArray(faces)
+    ? faces.filter(Boolean)
+    : resolveSelectedFaces(params?.faces, partHistory?.scene);
+  if (!resolvedFaces.length) {
+    throw new Error(`${featureLabel} requires selecting at least one FACE.`);
+  }
 
-      let chosen = null;
-      for (const hingeEdge of hingeOptions) {
-        const defaultOffset = bendRadiusUsed + thickness;
-        const primary = evaluateFlangeCandidate({
+  const featureID = params?.featureID || params?.id || null;
+
+  // Assume all selected faces share the same sheet thickness; resolve it once up front.
+  const baseFace = resolvedFaces[0];
+  const baseParentSolid = findAncestorSolid(baseFace);
+  const parentSolidName = baseParentSolid?.name || null;
+  const thicknessInfo = resolveThickness(baseFace, baseParentSolid, partHistory?.metadataManager);
+  const thickness = thicknessInfo?.thickness ?? 1;
+  const baseBendRadius = thicknessInfo?.defaultBendRadius ?? thickness;
+
+  const angleDeg = angleOverride != null ? angleOverride : params?.angle;
+  const angleFallback = Math.max(0, Math.min(180, defaultAngle));
+  let angle = Number.isFinite(angleDeg) ? Math.max(0, Math.min(180, angleDeg)) : angleFallback;
+  const bendRadiusFallback = defaultBendRadius != null ? defaultBendRadius : 0;
+  const bendRadiusInput = Math.max(0, Number(params?.bendRadius ?? bendRadiusFallback));
+  const bendRadiusOverride = bendRadiusInput > 0 ? bendRadiusInput : null;
+  const bendRadiusUsed = bendRadiusOverride ?? baseBendRadius;
+  const useOppositeCenterline = params?.useOppositeCenterline === true;
+
+  try {
+    const radiusSource = bendRadiusOverride != null ? "feature_override" : "parent_solid";
+    console.log(`[${logTag}] Bend radius resolved`, {
+      featureId: featureID,
+      parentSolid: parentSolidName,
+      bendRadiusInput,
+      baseBendRadius,
+      bendRadiusUsed,
+      radiusSource,
+    });
+  } catch { /* logging best-effort */ }
+
+  const skipUnion = params?.debugSkipUnion === true;
+
+  let insetOffsetValue = 0;
+  if (params?.inset === "material_inside") insetOffsetValue = -bendRadiusUsed - thickness;
+  if (params?.inset === "material_outside") insetOffsetValue = -bendRadiusUsed;
+  if (params?.inset === "bend_outside") insetOffsetValue = 0;
+
+  const offsetValue = Number(params?.offset ?? 0) + insetOffsetValue;
+  const shouldExtrudeOffset = Number.isFinite(offsetValue) && offsetValue !== 0;
+
+  const appliedAngle = angle;
+  const sheetMetalMetadata = {
+    featureID,
+    thickness,
+    bendRadius: baseBendRadius,
+    baseType,
+    extra: {
+      angleDegrees: appliedAngle,
+      insetMode: params?.inset || null,
+      useOppositeCenterline,
+      offsetValue,
+      bendRadiusOverride,
+      bendRadiusUsed,
+      baseBendRadius,
+    },
+  };
+  const persistentData = {
+    baseType,
+    thickness,
+    bendRadius: bendRadiusUsed,
+    defaultBendRadius: baseBendRadius,
+    bendRadiusOverride,
+    angleDegrees: appliedAngle,
+    insetMode: params?.inset || null,
+    useOppositeCenterline,
+    offsetValue,
+  };
+
+  const generatedSolids = [];
+  const parentSolidStates = new Map();
+  const orphanSolids = [];
+  const solidParentNames = new WeakMap();
+  const recordParentName = (solid, parentSolid) => {
+    try {
+      if (solid && parentSolid?.name) solidParentNames.set(solid, parentSolid.name);
+    } catch { /* ignore */ }
+  };
+  const registerSolid = (solid, parentSolid) => {
+    if (!solid) return;
+    generatedSolids.push(solid);
+    if (parentSolid) {
+      const state = getParentState(parentSolidStates, parentSolid);
+      if (state) state.solids.push(solid);
+      recordParentName(solid, parentSolid);
+    } else {
+      orphanSolids.push(solid);
+    }
+  };
+  const subtractRemoved = [];
+  const debugSubtractionSolids = [];
+
+  let faceIndex = 0;
+  for (const face of resolvedFaces) {
+    const context = analyzeFace(face);
+    if (!context) continue;
+    const orientationInfo = resolveABOrientation(face, context);
+    const desiredBendSide = useOppositeCenterline
+      ? SHEET_METAL_FACE_TYPES.B
+      : SHEET_METAL_FACE_TYPES.A;
+
+    const offsetNormal = shouldExtrudeOffset
+      ? resolveOffsetNormal(context, face)
+      : null;
+    const offsetVector = shouldExtrudeOffset
+      ? buildOffsetTranslationVector(offsetNormal || context.baseNormal, offsetValue)
+      : null;
+
+    const targetRadius = bendRadiusUsed;
+    const tolerance = Math.max(1e-4, targetRadius * 0.01);
+    const hingeOptions = [];
+    const primaryHinge = pickCenterlineEdge(face, context, useOppositeCenterline);
+    if (primaryHinge) hingeOptions.push(primaryHinge);
+    const altHinge = pickCenterlineEdge(face, context, !useOppositeCenterline);
+    if (altHinge) hingeOptions.push(altHinge);
+
+    let chosen = null;
+    for (const hingeEdge of hingeOptions) {
+      const defaultOffset = bendRadiusUsed + thickness;
+      const primary = evaluateFlangeCandidate({
+        raw: buildFlangeRevolve({
+          face,
+          context,
+          hingeEdge,
+          appliedAngle,
+          bendRadiusUsed,
+          thickness,
+          offsetVector,
+          featureID,
+          offsetMagnitudeOverride: defaultOffset,
+        }),
+        targetRadius,
+        desiredBendSide,
+        orientationInfo,
+      });
+      chosen = pickBetterFlangeCandidate(chosen, primary);
+
+      if ((primary?.radiusErr ?? Infinity) > tolerance) {
+        const tighter = evaluateFlangeCandidate({
           raw: buildFlangeRevolve({
             face,
             context,
@@ -240,213 +440,199 @@ export class SheetMetalFlangeFeature {
             bendRadiusUsed,
             thickness,
             offsetVector,
-            featureID: this.inputParams?.featureID,
-            offsetMagnitudeOverride: defaultOffset,
+            featureID,
+            offsetMagnitudeOverride: bendRadiusUsed,
           }),
           targetRadius,
           desiredBendSide,
           orientationInfo,
         });
-        chosen = pickBetterFlangeCandidate(chosen, primary);
-
-        if ((primary?.radiusErr ?? Infinity) > tolerance) {
-          const tighter = evaluateFlangeCandidate({
-            raw: buildFlangeRevolve({
-              face,
-              context,
-              hingeEdge,
-              appliedAngle,
-              bendRadiusUsed,
-              thickness,
-              offsetVector,
-              featureID: this.inputParams?.featureID,
-              offsetMagnitudeOverride: bendRadiusUsed,
-            }),
-            targetRadius,
-            desiredBendSide,
-            orientationInfo,
-          });
-          chosen = pickBetterFlangeCandidate(chosen, tighter);
-        }
-        if (chosen?.revolve
-          && (chosen.orientationPenalty ?? 0) === 0
-          && (chosen.radiusErr ?? Infinity) <= tolerance) {
-          break;
-        }
+        chosen = pickBetterFlangeCandidate(chosen, tighter);
       }
+      if (chosen?.revolve
+        && (chosen.orientationPenalty ?? 0) === 0
+        && (chosen.radiusErr ?? Infinity) <= tolerance) {
+        break;
+      }
+    }
 
-      if (!chosen?.revolve) continue;
+    if (!chosen?.revolve) continue;
 
-      const revolve = chosen.revolve;
-      const bendEndFace = chosen.bendEndFace;
-      registerSolid(revolve, context.parentSolid);
+    const revolve = chosen.revolve;
+    const bendEndFace = chosen.bendEndFace;
+    registerSolid(revolve, context.parentSolid);
 
-      if (offsetVector) {
-        const useForSubtraction = offsetValue < 0 && !!context.parentSolid;
-        const reliefWidth = (Number.isFinite(this.inputParams?.reliefWidth) && this.inputParams.reliefWidth > 0
-          ? this.inputParams.reliefWidth
-          : 0);
-        const offsetSolid = createOffsetExtrudeSolid({
-          face,
-          faceNormal: context.baseNormal,
-          lengthValue: offsetValue,
-          featureID: this.inputParams?.featureID,
-          faceIndex,
-          reliefWidthValue: reliefWidth,
-        });
-        if (offsetSolid) {
-          let usedForSubtraction = false;
-          if (useForSubtraction) {
-            const state = getParentState(parentSolidStates, context.parentSolid);
-            const subtractionTarget = state?.target || context.parentSolid;
-            if (subtractionTarget) {
-              try {
-                const subtraction = await BREP.applyBooleanOperation(
-                  partHistory || {},
-                  offsetSolid,
-                  { operation: "SUBTRACT", targets: [subtractionTarget] },
-                  this.inputParams?.featureID,
-                );
-                if (Array.isArray(subtraction?.removed)) subtractRemoved.push(...subtraction.removed);
-                const replacement = pickReplacementSolid(subtraction?.added);
-                if (replacement) {
-                  state.target = replacement;
-                  usedForSubtraction = true;
-                }
-              } catch {
-                usedForSubtraction = false;
+    const zFightNudge = Math.max(1e-6, Math.min(0.001, thickness * 0.0001));
+
+    if (offsetVector) {
+      const useForSubtraction = offsetValue < 0 && !!context.parentSolid;
+      // Avoid inflating the subtraction cutter; it creates visible clearance gaps.
+      const reliefPushDistance = useForSubtraction ? 0 : zFightNudge;
+      const offsetSolid = createOffsetExtrudeSolid({
+        face,
+        faceNormal: offsetNormal || context.baseNormal,
+        lengthValue: offsetValue,
+        featureID,
+        faceIndex,
+        applyReliefPush: !useForSubtraction,
+        reliefPushDistance,
+        reliefPushNormal: context.baseNormal,
+      });
+      if (offsetSolid) {
+        let usedForSubtraction = false;
+        if (useForSubtraction) {
+          const state = getParentState(parentSolidStates, context.parentSolid);
+          const subtractionTarget = state?.target || context.parentSolid;
+          if (subtractionTarget) {
+            try {
+              const subtraction = await BREP.applyBooleanOperation(
+                partHistory || {},
+                offsetSolid,
+                { operation: "SUBTRACT", targets: [subtractionTarget] },
+                featureID,
+              );
+              if (Array.isArray(subtraction?.removed)) subtractRemoved.push(...subtraction.removed);
+              const replacement = pickReplacementSolid(subtraction?.added);
+              if (replacement) {
+                state.target = replacement;
+                usedForSubtraction = true;
               }
+            } catch {
+              usedForSubtraction = false;
             }
           }
-          if (usedForSubtraction && skipUnion) {
-            debugSubtractionSolids.push(offsetSolid);
-          }
-          if (!usedForSubtraction) {
-            registerSolid(offsetSolid, context.parentSolid);
-          }
+        }
+        if (usedForSubtraction && skipUnion) {
+          debugSubtractionSolids.push(offsetSolid);
+        }
+        if (!usedForSubtraction) {
+          registerSolid(offsetSolid, context.parentSolid);
         }
       }
-      const flangeRef = String(this.inputParams?.flangeLengthReference || "web").toLowerCase();
-      let flangeLength = Number(this.inputParams?.flangeLength ?? 0);
-      if (!Number.isFinite(flangeLength)) flangeLength = 0;
-      if (flangeRef === "inside") flangeLength = flangeLength - bendRadiusUsed;
-      if (flangeRef === "outside") flangeLength = flangeLength - bendRadiusUsed - thickness;
-      if (flangeRef === "web") flangeLength = flangeLength;
-      if (bendEndFace && Number.isFinite(flangeLength) && flangeLength !== 0) {
-        const flatSolid = createOffsetExtrudeSolid({
-          face: bendEndFace,
-          faceNormal: bendEndFace?.getAverageNormal ? bendEndFace.getAverageNormal() : null,
-          lengthValue: flangeLength,
-          featureID: this.inputParams?.featureID,
-          faceIndex,
-          reliefWidthValue: 0,
-        });
-        if (flatSolid) {
-          if (offsetVector) {
-            applyTranslationToSolid(flatSolid, offsetVector);
-          }
-          registerSolid(flatSolid, context.parentSolid);
+    }
+    const flangeRef = String(params?.flangeLengthReference || "web").toLowerCase();
+    let flangeLength = Number(params?.flangeLength ?? 0);
+    if (!Number.isFinite(flangeLength)) flangeLength = 0;
+    if (flangeRef === "inside") flangeLength = flangeLength - bendRadiusUsed;
+    if (flangeRef === "outside") flangeLength = flangeLength - bendRadiusUsed - thickness;
+    if (flangeRef === "web") flangeLength = flangeLength;
+    if (bendEndFace && Number.isFinite(flangeLength) && flangeLength !== 0) {
+      const flatSolid = createOffsetExtrudeSolid({
+        face: bendEndFace,
+        faceNormal: bendEndFace?.getAverageNormal ? bendEndFace.getAverageNormal() : null,
+        lengthValue: flangeLength,
+        featureID,
+        faceIndex,
+        reliefPushDistance: zFightNudge,
+      });
+      if (flatSolid) {
+        if (offsetVector) {
+          applyTranslationToSolid(flatSolid, offsetVector);
         }
-      }
-      faceIndex++;
-    }
-
-    if (!generatedSolids.length) {
-      throw new Error(`${featureLabel} failed to generate any geometry for the selected faces.`);
-    }
-
-    if (skipUnion || parentSolidStates.size === 0) {
-      const added = skipUnion && debugSubtractionSolids.length
-        ? [...generatedSolids, ...debugSubtractionSolids]
-        : generatedSolids;
-      applySheetMetalMetadata(added, partHistory?.metadataManager, sheetMetalMetadata);
-      return { added, removed: subtractRemoved };
-    }
-
-    const unionResults = [];
-    const unionRemoved = [];
-    const fallbackSolids = [...orphanSolids];
-    let groupIndex = 0;
-
-    for (const state of parentSolidStates.values()) {
-      const parentSolid = state?.target || state?.original;
-      const solids = state?.solids || [];
-      if (!parentSolid || !Array.isArray(solids) || !solids.length) continue;
-      const baseSolid = solids.length === 1
-        ? solids[0]
-        : combineSolids({
-          solids,
-          featureID: this.inputParams?.featureID,
-          groupIndex: groupIndex++,
-        });
-      recordParentName(baseSolid, parentSolid);
-      if (!baseSolid) {
-        fallbackSolids.push(...solids);
-        continue;
-      }
-
-      let unionSucceeded = false;
-      try {
-        const effects = await BREP.applyBooleanOperation(
-          partHistory || {},
-          baseSolid,
-          { operation: "UNION", targets: [parentSolid] },
-          this.inputParams?.featureID,
-        );
-        if (Array.isArray(effects?.added)) {
-          for (const addedSolid of effects.added) {
-            if (parentSolid?.name) setSolidNameSafe(addedSolid, parentSolid.name);
-            recordParentName(addedSolid, parentSolid);
-          }
-          unionResults.push(...effects.added);
-        }
-        if (Array.isArray(effects?.removed)) unionRemoved.push(...effects.removed);
-        unionSucceeded = Array.isArray(effects?.removed)
-          && effects.removed.some((solid) => solidsMatch(solid, parentSolid));
-      } catch {
-        unionSucceeded = false;
-      }
-
-      if (!unionSucceeded) {
-        fallbackSolids.push(...solids);
+        registerSolid(flatSolid, context.parentSolid);
       }
     }
-
-    const finalAdded = [];
-    if (unionResults.length) finalAdded.push(...unionResults);
-    if (fallbackSolids.length) finalAdded.push(...fallbackSolids);
-    if (!finalAdded.length) finalAdded.push(...generatedSolids);
-
-    // Preserve parent solid names on outputs derived from that parent.
-    for (const state of parentSolidStates.values()) {
-      const parentName = state?.original?.name;
-      if (!parentName || !Array.isArray(state?.solids)) continue;
-      const known = new Set(state.solids);
-      for (const solid of finalAdded) {
-        if (known.has(solid)) setSolidNameSafe(solid, parentName);
-      }
-    }
-    for (const solid of finalAdded) {
-      const name = solidParentNames.get(solid);
-      if (name) setSolidNameSafe(solid, name);
-    }
-
-    applySheetMetalMetadata(finalAdded, partHistory?.metadataManager, sheetMetalMetadata);
-
-    // Ensure final solids keep the original parent solid name (never the feature ID).
-    for (const solid of finalAdded) {
-      if (parentSolidName) setSolidNameSafe(solid, parentSolidName);
-    }
-
-    // skip removal if debugging
-
-
-    let removed = [...subtractRemoved, ...unionRemoved];
-
-    if (this.inputParams?.debug) removed = [];
-
-    return { added: finalAdded, removed };
+    faceIndex++;
   }
+
+  if (!generatedSolids.length) {
+    throw new Error(`${featureLabel} failed to generate any geometry for the selected faces.`);
+  }
+
+  if (skipUnion || parentSolidStates.size === 0) {
+    const added = skipUnion && debugSubtractionSolids.length
+      ? [...generatedSolids, ...debugSubtractionSolids]
+      : generatedSolids;
+    cleanupSheetMetalOppositeEdgeFaces(added);
+    if (applyMetadata) {
+      applySheetMetalMetadata(added, partHistory?.metadataManager, sheetMetalMetadata);
+    }
+    return { added, removed: subtractRemoved, persistentData };
+  }
+
+  const unionResults = [];
+  const unionRemoved = [];
+  const fallbackSolids = [...orphanSolids];
+  let groupIndex = 0;
+
+  for (const state of parentSolidStates.values()) {
+    const parentSolid = state?.target || state?.original;
+    const solids = state?.solids || [];
+    if (!parentSolid || !Array.isArray(solids) || !solids.length) continue;
+    const baseSolid = solids.length === 1
+      ? solids[0]
+      : combineSolids({
+        solids,
+        featureID,
+        groupIndex: groupIndex++,
+      });
+    recordParentName(baseSolid, parentSolid);
+    if (!baseSolid) {
+      fallbackSolids.push(...solids);
+      continue;
+    }
+
+    let unionSucceeded = false;
+    try {
+      const effects = await BREP.applyBooleanOperation(
+        partHistory || {},
+        baseSolid,
+        { operation: "UNION", targets: [parentSolid] },
+        featureID,
+      );
+      if (Array.isArray(effects?.added)) {
+        for (const addedSolid of effects.added) {
+          if (parentSolid?.name) setSolidNameSafe(addedSolid, parentSolid.name);
+          recordParentName(addedSolid, parentSolid);
+        }
+        unionResults.push(...effects.added);
+      }
+      if (Array.isArray(effects?.removed)) unionRemoved.push(...effects.removed);
+      unionSucceeded = Array.isArray(effects?.removed)
+        && effects.removed.some((solid) => solidsMatch(solid, parentSolid));
+    } catch {
+      unionSucceeded = false;
+    }
+
+    if (!unionSucceeded) {
+      fallbackSolids.push(...solids);
+    }
+  }
+
+  const finalAdded = [];
+  if (unionResults.length) finalAdded.push(...unionResults);
+  if (fallbackSolids.length) finalAdded.push(...fallbackSolids);
+  if (!finalAdded.length) finalAdded.push(...generatedSolids);
+
+  // Preserve parent solid names on outputs derived from that parent.
+  for (const state of parentSolidStates.values()) {
+    const parentName = state?.original?.name;
+    if (!parentName || !Array.isArray(state?.solids)) continue;
+    const known = new Set(state.solids);
+    for (const solid of finalAdded) {
+      if (known.has(solid)) setSolidNameSafe(solid, parentName);
+    }
+  }
+  for (const solid of finalAdded) {
+    const name = solidParentNames.get(solid);
+    if (name) setSolidNameSafe(solid, name);
+  }
+
+  cleanupSheetMetalOppositeEdgeFaces(finalAdded);
+  if (applyMetadata) {
+    applySheetMetalMetadata(finalAdded, partHistory?.metadataManager, sheetMetalMetadata);
+  }
+
+  // Ensure final solids keep the original parent solid name (never the feature ID).
+  for (const solid of finalAdded) {
+    if (parentSolidName) setSolidNameSafe(solid, parentSolidName);
+  }
+
+  let removed = [...subtractRemoved, ...unionRemoved];
+
+  if (params?.debug) removed = [];
+
+  return { added: finalAdded, removed, persistentData };
 }
 
 function resolveSelectedFaces(selectionRefs, scene) {
@@ -543,6 +729,71 @@ function analyzeFace(face) {
   } catch {
     return null;
   }
+}
+
+function resolveOffsetNormal(context, face) {
+  const THREE = BREP.THREE;
+  const baseNormal = (context?.baseNormal && typeof context.baseNormal.clone === "function")
+    ? context.baseNormal.clone()
+    : (typeof face?.getAverageNormal === "function"
+      ? face.getAverageNormal().clone()
+      : new THREE.Vector3(0, 0, 1));
+  if (!baseNormal || baseNormal.lengthSq() < 1e-12) return null;
+  baseNormal.normalize();
+
+  const parentSolid = context?.parentSolid || findAncestorSolid(face);
+  const faceCenter = context?.origin?.clone?.() || computeFaceCenter(face);
+  const solidCenter = computeSolidCenter(parentSolid);
+  if (faceCenter && solidCenter) {
+    const toCenter = solidCenter.clone().sub(faceCenter);
+    if (toCenter.lengthSq() > 1e-12) {
+      const dot = baseNormal.dot(toCenter);
+      if (Math.abs(dot) > 1e-9 && dot < 0) {
+        baseNormal.multiplyScalar(-1);
+      }
+    }
+  }
+  return baseNormal;
+}
+
+function computeSolidCenter(solid) {
+  if (!solid) return null;
+  const THREE = BREP.THREE;
+  let center = null;
+  let fromLocal = false;
+  try {
+    const verts = solid._vertProperties || null;
+    const bounds = computeBoundsFromVertices(verts);
+    if (bounds) {
+      center = new THREE.Vector3(
+        (bounds.min[0] + bounds.max[0]) * 0.5,
+        (bounds.min[1] + bounds.max[1]) * 0.5,
+        (bounds.min[2] + bounds.max[2]) * 0.5,
+      );
+      fromLocal = true;
+    }
+  } catch { /* best effort */ }
+
+  if (!center) {
+    try {
+      const box = new THREE.Box3().setFromObject(solid);
+      if (box && box.min && box.max) {
+        center = new THREE.Vector3(
+          (box.min.x + box.max.x) * 0.5,
+          (box.min.y + box.max.y) * 0.5,
+          (box.min.z + box.max.z) * 0.5,
+        );
+      }
+    } catch { /* ignore */ }
+  }
+
+  if (center && fromLocal) {
+    try {
+      if (solid.matrixWorld) center.applyMatrix4(solid.matrixWorld);
+    } catch { /* ignore */ }
+  }
+
+  return center;
 }
 
 function extractFacePointsFromGeometry(face) {
@@ -972,7 +1223,9 @@ function createOffsetExtrudeSolid(params = {}) {
     lengthValue,
     featureID,
     faceIndex,
-    reliefWidthValue = 0,
+    applyReliefPush = true,
+    reliefPushDistance = null,
+    reliefPushNormal = null,
   } = params;
   if (!face || !Number.isFinite(lengthValue) || lengthValue === 0) return null;
   const THREE = BREP.THREE;
@@ -999,16 +1252,35 @@ function createOffsetExtrudeSolid(params = {}) {
 
   applyFaceSheetMetalData(face, sweep);
 
-  const reliefWidth = Number.isFinite(reliefWidthValue) ? Math.max(0, reliefWidthValue) : 0;
+  const tinyPush = Number.isFinite(reliefPushDistance)
+    ? Math.max(0, reliefPushDistance)
+    : 0;
+  let pushNormal = null;
+  if (reliefPushNormal && typeof reliefPushNormal.clone === "function") {
+    pushNormal = reliefPushNormal.clone();
+  } else if (reliefPushNormal && Number.isFinite(reliefPushNormal.x)) {
+    pushNormal = new THREE.Vector3(reliefPushNormal.x, reliefPushNormal.y, reliefPushNormal.z);
+  }
+  if (pushNormal && pushNormal.lengthSq() > 1e-12) pushNormal.normalize();
+  else pushNormal = null;
 
-  // use the solid.pushFace() method to nudge the faces with sheetMetalFaceType of "A" or "B" outward by a tiny amount to avoid z-fighting
-  if (0 > lengthValue && reliefWidth > 0) {
+  // use the solid.pushFace() method to nudge the A/B faces outward by a tiny amount to avoid z-fighting
+  if (applyReliefPush && 0 > lengthValue && tinyPush > 0) {
     for (const solidFace of sweep.faces) {
       const faceMetadata = solidFace.getMetadata();
-      let pushFace = true;
-      if (faceMetadata?.sheetMetalFaceType === "A" || faceMetadata?.sheetMetalFaceType === "B") pushFace = true;
-      if (faceMetadata?.faceType === "ENDCAP") pushFace = false;
-      if (pushFace == true) sweep.pushFace(solidFace.name, reliefWidth);
+      if (faceMetadata?.faceType === "STARTCAP" || faceMetadata?.faceType === "ENDCAP") continue;
+      const sheetType = faceMetadata?.sheetMetalFaceType;
+      let shouldPush = sheetType === SHEET_METAL_FACE_TYPES.A || sheetType === SHEET_METAL_FACE_TYPES.B;
+      if (!shouldPush && pushNormal && typeof solidFace.getAverageNormal === "function") {
+        const faceNormal = solidFace.getAverageNormal();
+        if (faceNormal && faceNormal.lengthSq() > 1e-12) {
+          faceNormal.normalize();
+          const align = Math.abs(faceNormal.dot(pushNormal));
+          if (align > 0.95) shouldPush = true;
+        }
+      }
+      if (!shouldPush) continue;
+      sweep.pushFace(solidFace.name, tinyPush);
     }
   }
   return sweep;

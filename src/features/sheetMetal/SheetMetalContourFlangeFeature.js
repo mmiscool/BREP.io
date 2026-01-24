@@ -7,6 +7,9 @@ import {
   applySheetMetalMetadata,
 } from "./sheetMetalMetadata.js";
 import { setSheetMetalFaceTypeMetadata, SHEET_METAL_FACE_TYPES, propagateSheetMetalFaceTypesToEdges } from "./sheetMetalFaceTypes.js";
+import { cleanupSheetMetalOppositeEdgeFaces } from "./sheetMetalCleanup.js";
+import { SheetMetalObject } from "./SheetMetalObject.js";
+import { cloneSheetMetalTree, createSheetMetalContourFlangeNode, createSheetMetalTree } from "./sheetMetalTree.js";
 
 const THREE = BREP.THREE;
 
@@ -79,10 +82,8 @@ export class SheetMetalContourFlangeFeature {
   }
 
   async run(partHistory) {
-    const { edges, sketches, basisHint, pathOverride } = resolvePathSelection(
-      this.inputParams?.path ?? this.inputParams?.profile,
-      partHistory,
-    );
+    const pathRef = this.inputParams?.path ?? this.inputParams?.profile;
+    const { edges, sketches } = resolvePathSelection(pathRef, partHistory);
     if (!edges.length) {
       throw new Error("Contour Flange requires selecting a SKETCH or one or more connected EDGEs.");
     }
@@ -97,109 +98,47 @@ export class SheetMetalContourFlangeFeature {
       throw new Error("Contour Flange distance must be a non-zero number.");
     }
     const distance = Math.abs(rawDistance);
-    const extrudeDirectionSign = rawDistance >= 0 ? 1 : -1;
 
     const { sheetSide, reverseSheetSide } = resolveSheetSideOption(this.inputParams);
 
-    const pathData = buildPathPoints(edges);
-    let rawPath = pathData.points;
-    let pathSegmentNames = pathData.segmentNames;
-    if ((!rawPath || rawPath.length < 2) && Array.isArray(pathOverride) && pathOverride.length >= 2) {
-      rawPath = pathOverride.map((pt) => (pt instanceof THREE.Vector3)
-        ? pt.clone()
-        : new THREE.Vector3(pt.x ?? pt[0] ?? 0, pt.y ?? pt[1] ?? 0, pt.z ?? pt[2] ?? 0));
-      pathSegmentNames = buildDefaultSegmentNames(rawPath.length - 1);
-    }
-    if (!rawPath || rawPath.length < 2) {
-      throw new Error("Contour Flange path must contain at least two points.");
-    }
-    pathSegmentNames = normalizeSegmentNameCount(pathSegmentNames, rawPath.length - 1);
-
-    const planeBasis = computePlaneBasis(rawPath, basisHint);
-    const filletResult = bendRadius > 0
-      ? filletPolyline(rawPath, bendRadius, planeBasis, pathSegmentNames, sheetSide, thicknessAbs)
-      : { points: rawPath.map((pt) => pt.clone()), points2D: null, tangents2D: null, segmentNames: pathSegmentNames.slice(), arcs: [] };
-    const filletedPath = filletResult.points;
-    const filletedPath2D = Array.isArray(filletResult.points2D) ? filletResult.points2D : null;
-    const filletedTangents2D = Array.isArray(filletResult.tangents2D) ? filletResult.tangents2D : null;
-    const filletedArcs = Array.isArray(filletResult.arcs) ? filletResult.arcs : [];
-    const filletedSegmentNames = normalizeSegmentNameCount(
-      filletResult.segmentNames,
-      filletedPath.length - 1,
-    );
-
-    if (filletedPath.length < 2) {
-      throw new Error("Contour Flange requires at least two path points after filleting.");
-    }
-
-    const flangeFaces = buildContourFlangeStripFaces({
-      featureID: this.inputParams?.featureID,
-      pathPoints: filletedPath,
-      pathSegmentNames: filletedSegmentNames,
-      planeBasis,
+    const sheetMetal = new SheetMetalObject({
+      tree: createSheetMetalTree(),
+      kFactor: neutralFactor,
       thickness: thicknessAbs,
+      bendRadius,
+    });
+    const contourNode = createSheetMetalContourFlangeNode({
+      featureID: this.inputParams?.featureID || null,
+      pathRefs: pathRef,
+      distance: rawDistance,
+      thickness: thicknessAbs,
+      signedThickness,
+      signedDistance: rawDistance,
+      reverseSheetSide,
       sheetSide,
-      path2DOverride: filletedPath2D,
-      pathTangents2D: filletedTangents2D,
+      bendRadius,
+      neutralFactor,
+      consumePathSketch: this.inputParams?.consumePathSketch !== false,
     });
-
-    const converters = createPlaneBasisConverters(planeBasis);
-    const extrudeVector = planeBasis.planeNormal.clone().normalize().multiplyScalar(distance * extrudeDirectionSign);
-    const sweeps = flangeFaces.map((face) => {
-      const sweep = new BREP.Sweep({
-        face,
-        distance: extrudeVector,
-        mode: "translate",
-        name:this.inputParams?.featureID,
-        omitBaseCap: false,
-      });
-      sweep.visualize();
-      tagContourFlangeFaceTypes(sweep);
-      // Add cylinder metadata and centerlines for bend arcs (if any).
-      const axisDir = extrudeVector.clone().normalize();
-      addCylMetadataToSideFaces(
-        sweep,
-        filletedArcs,
-        converters,
-        extrudeVector,
-        axisDir,
-        thicknessAbs,
-        bendRadius,
-        sheetSide,
-      );
-      return sweep;
+    sheetMetal.appendNode(contourNode);
+    await sheetMetal.generate({
+      partHistory,
+      metadataManager: partHistory?.metadataManager,
+      mode: "solid",
     });
-    if (!sweeps.length) {
-      throw new Error("Contour flange failed to generate any extrusions from the selected path.");
-    }
-    let combinedSweep = sweeps[0];
-    for (let i = 1; i < sweeps.length; i++) {
-      try {
-        combinedSweep = combinedSweep.union(sweeps[i]);
-      } catch {
-        combinedSweep = sweeps[i];
-      }
-    }
-
-    if (this.inputParams?.featureID && combinedSweep) {
-      try { combinedSweep.name = this.inputParams.featureID; } catch { /* best effort */ }
-    }
-
-    const effects = await BREP.applyBooleanOperation(
-      partHistory || {},
-      combinedSweep,
-      null,
-      this.inputParams?.id,
-    );
 
     const consumeSketch = this.inputParams?.consumePathSketch !== false;
-    const sketchesToRemove = consumeSketch ? sketches : [];
-    const removed = [
-      ...sketchesToRemove,
-      ...(effects?.removed || []),
-    ];
-    const added = effects?.added || [];
-    const sheetMetalMetadata = {
+    const removed = consumeSketch ? sketches : [];
+    try {
+      for (const obj of removed) {
+        if (obj) obj.__removeFlag = true;
+      }
+    } catch { /* best effort */ }
+
+    const added = [sheetMetal];
+    cleanupSheetMetalOppositeEdgeFaces(added);
+    propagateSheetMetalFaceTypesToEdges(added);
+    applySheetMetalMetadata(added, partHistory?.metadataManager, {
       featureID: this.inputParams?.featureID || null,
       thickness: thicknessAbs,
       bendRadius,
@@ -211,24 +150,19 @@ export class SheetMetalContourFlangeFeature {
         reverseSheetSide,
         signedDistance: rawDistance,
         distance,
-        pathPointCount: filletedPath.length,
+        pathRefCount: Array.isArray(contourNode?.params?.pathRefs)
+          ? contourNode.params.pathRefs.length
+          : null,
       },
-    };
-    try {
-      for (const obj of removed) {
-        if (obj) obj.__removeFlag = true;
-      }
-    } catch { /* best effort */ }
-
-    const sheetMetalTargets = Array.isArray(added) ? added.slice() : [];
-    if (combinedSweep && !sheetMetalTargets.includes(combinedSweep)) {
-      sheetMetalTargets.push(combinedSweep);
-    }
-
-    applySheetMetalMetadata(sheetMetalTargets, partHistory?.metadataManager, {
-      ...sheetMetalMetadata,
       forceBaseOverwrite: true,
     });
+
+    for (const solid of added) {
+      if (!solid) continue;
+      solid.userData = solid.userData || {};
+      solid.userData.sheetMetalTree = cloneSheetMetalTree(sheetMetal.tree);
+      solid.userData.sheetMetalKFactor = neutralFactor;
+    }
 
     this.persistentData = this.persistentData || {};
     this.persistentData.sheetMetal = {
@@ -241,13 +175,138 @@ export class SheetMetalContourFlangeFeature {
       reverseSheetSide,
       signedDistance: rawDistance,
       distance,
-      pathPointCount: filletedPath.length,
+      pathRefCount: Array.isArray(contourNode?.params?.pathRefs)
+        ? contourNode.params.pathRefs.length
+        : null,
+      tree: sheetMetal.tree,
     };
-
-    propagateSheetMetalFaceTypesToEdges(added);
 
     return { added, removed };
   }
+}
+
+export function buildContourFlangeSolidFromParams(params, partHistory) {
+  const { edges, sketches, basisHint, pathOverride } = resolvePathSelection(
+    params?.path ?? params?.profile,
+    partHistory,
+  );
+  if (!edges.length) {
+    throw new Error("Contour Flange requires selecting a SKETCH or one or more connected EDGEs.");
+  }
+
+  const { magnitude: thicknessAbs, signed: signedThickness } = normalizeThickness(
+    params?.thickness ?? 1,
+  );
+  const bendRadius = normalizeBendRadius(params?.bendRadius ?? 0);
+  const neutralFactor = normalizeNeutralFactor(params?.neutralFactor ?? 0.5);
+  const rawDistance = Number(params?.distance ?? 0);
+  if (!Number.isFinite(rawDistance) || rawDistance === 0) {
+    throw new Error("Contour Flange distance must be a non-zero number.");
+  }
+  const distance = Math.abs(rawDistance);
+  const extrudeDirectionSign = rawDistance >= 0 ? 1 : -1;
+
+  const { sheetSide, reverseSheetSide } = resolveSheetSideOption(params);
+
+  const pathData = buildPathPoints(edges);
+  let rawPath = pathData.points;
+  let pathSegmentNames = pathData.segmentNames;
+  if ((!rawPath || rawPath.length < 2) && Array.isArray(pathOverride) && pathOverride.length >= 2) {
+    rawPath = pathOverride.map((pt) => (pt instanceof THREE.Vector3)
+      ? pt.clone()
+      : new THREE.Vector3(pt.x ?? pt[0] ?? 0, pt.y ?? pt[1] ?? 0, pt.z ?? pt[2] ?? 0));
+    pathSegmentNames = buildDefaultSegmentNames(rawPath.length - 1);
+  }
+  if (!rawPath || rawPath.length < 2) {
+    throw new Error("Contour Flange path must contain at least two points.");
+  }
+  pathSegmentNames = normalizeSegmentNameCount(pathSegmentNames, rawPath.length - 1);
+
+  const planeBasis = computePlaneBasis(rawPath, basisHint);
+  const filletResult = bendRadius > 0
+    ? filletPolyline(rawPath, bendRadius, planeBasis, pathSegmentNames, sheetSide, thicknessAbs)
+    : { points: rawPath.map((pt) => pt.clone()), points2D: null, tangents2D: null, segmentNames: pathSegmentNames.slice(), arcs: [] };
+  const filletedPath = filletResult.points;
+  const filletedPath2D = Array.isArray(filletResult.points2D) ? filletResult.points2D : null;
+  const filletedTangents2D = Array.isArray(filletResult.tangents2D) ? filletResult.tangents2D : null;
+  const filletedArcs = Array.isArray(filletResult.arcs) ? filletResult.arcs : [];
+  const filletedSegmentNames = normalizeSegmentNameCount(
+    filletResult.segmentNames,
+    filletedPath.length - 1,
+  );
+
+  if (filletedPath.length < 2) {
+    throw new Error("Contour Flange requires at least two path points after filleting.");
+  }
+
+  const flangeFaces = buildContourFlangeStripFaces({
+    featureID: params?.featureID,
+    pathPoints: filletedPath,
+    pathSegmentNames: filletedSegmentNames,
+    planeBasis,
+    thickness: thicknessAbs,
+    sheetSide,
+    path2DOverride: filletedPath2D,
+    pathTangents2D: filletedTangents2D,
+  });
+
+  const converters = createPlaneBasisConverters(planeBasis);
+  const extrudeVector = planeBasis.planeNormal.clone().normalize().multiplyScalar(distance * extrudeDirectionSign);
+  const sweeps = flangeFaces.map((face) => {
+    const sweep = new BREP.Sweep({
+      face,
+      distance: extrudeVector,
+      mode: "translate",
+      name: params?.featureID,
+      omitBaseCap: false,
+    });
+    sweep.visualize();
+    tagContourFlangeFaceTypes(sweep);
+    // Add cylinder metadata and centerlines for bend arcs (if any).
+    const axisDir = extrudeVector.clone().normalize();
+    addCylMetadataToSideFaces(
+      sweep,
+      filletedArcs,
+      converters,
+      extrudeVector,
+      axisDir,
+      thicknessAbs,
+      bendRadius,
+      sheetSide,
+    );
+    return sweep;
+  });
+  if (!sweeps.length) {
+    throw new Error("Contour flange failed to generate any extrusions from the selected path.");
+  }
+  let combinedSweep = sweeps[0];
+  for (let i = 1; i < sweeps.length; i++) {
+    try {
+      combinedSweep = combinedSweep.union(sweeps[i]);
+    } catch {
+      combinedSweep = sweeps[i];
+    }
+  }
+
+  if (params?.featureID && combinedSweep) {
+    try { combinedSweep.name = params.featureID; } catch { /* best effort */ }
+  }
+
+  return {
+    solid: combinedSweep,
+    sketches,
+    meta: {
+      thicknessAbs,
+      signedThickness,
+      bendRadius,
+      neutralFactor,
+      sheetSide,
+      reverseSheetSide,
+      rawDistance,
+      distance,
+      pathPointCount: filletedPath.length,
+    },
+  };
 }
 
 function resolvePathSelection(pathRefs, partHistory) {
@@ -1398,6 +1457,9 @@ function addCylMetadataToSideFaces(
   const height = extrudeVector.length();
   const featureTag = sweep.params?.name ? `${sweep.params.name}:` : "";
   const v = new THREE.Vector3();
+  const eps = 1e-9;
+  const relStdTol = 0.02;
+  const absStdTol = Math.max(1e-5, Math.abs(thickness || 0) * 0.02, Math.abs(bendRadius || 0) * 0.02);
 
   const arc3D = arcList.map((arc) => {
     const startCenter = converters.to3D(arc.center);
@@ -1409,6 +1471,111 @@ function addCylMetadataToSideFaces(
       axisEnd: endCenter,
     };
   });
+
+  const arc3DByName = new Map();
+  for (const arc of arc3D) {
+    const name = typeof arc.name === "string" ? arc.name.trim() : "";
+    if (!name) continue;
+    let list = arc3DByName.get(name);
+    if (!list) { list = []; arc3DByName.set(name, list); }
+    list.push(arc);
+  }
+
+  const isFacePlanar = (face) => {
+    const geom = face?.geometry;
+    const pos = geom?.getAttribute?.("position");
+    if (!pos || pos.count < 3) return null;
+    const idx = geom.getIndex?.() || null;
+    const triCount = idx ? (idx.count / 3) | 0 : (pos.count / 3) | 0;
+    if (!triCount) return null;
+
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const c = new THREE.Vector3();
+    const m = face.matrixWorld || null;
+    const getPos = (out, i) => {
+      out.set(pos.getX(i), pos.getY(i), pos.getZ(i));
+      if (m) out.applyMatrix4(m);
+      return out;
+    };
+
+    let nx = 0;
+    let ny = 0;
+    let nz = 0;
+    let areaSum = 0;
+    for (let t = 0; t < triCount; t++) {
+      const base = t * 3;
+      const i0 = idx ? idx.getX(base) >>> 0 : base;
+      const i1 = idx ? idx.getX(base + 1) >>> 0 : base + 1;
+      const i2 = idx ? idx.getX(base + 2) >>> 0 : base + 2;
+      getPos(a, i0);
+      getPos(b, i1);
+      getPos(c, i2);
+      const abx = b.x - a.x;
+      const aby = b.y - a.y;
+      const abz = b.z - a.z;
+      const acx = c.x - a.x;
+      const acy = c.y - a.y;
+      const acz = c.z - a.z;
+      const tx = aby * acz - abz * acy;
+      const ty = abz * acx - abx * acz;
+      const tz = abx * acy - aby * acx;
+      const area = Math.hypot(tx, ty, tz);
+      if (area <= 1e-12) continue;
+      nx += tx;
+      ny += ty;
+      nz += tz;
+      areaSum += area;
+    }
+
+    const len = Math.hypot(nx, ny, nz);
+    if (!(len > 1e-12) || !(areaSum > 1e-12)) return null;
+    const ax = nx / len;
+    const ay = ny / len;
+    const az = nz / len;
+    let maxAngle = 0;
+    for (let t = 0; t < triCount; t++) {
+      const base = t * 3;
+      const i0 = idx ? idx.getX(base) >>> 0 : base;
+      const i1 = idx ? idx.getX(base + 1) >>> 0 : base + 1;
+      const i2 = idx ? idx.getX(base + 2) >>> 0 : base + 2;
+      getPos(a, i0);
+      getPos(b, i1);
+      getPos(c, i2);
+      const abx = b.x - a.x;
+      const aby = b.y - a.y;
+      const abz = b.z - a.z;
+      const acx = c.x - a.x;
+      const acy = c.y - a.y;
+      const acz = c.z - a.z;
+      const tx = aby * acz - abz * acy;
+      const ty = abz * acx - abx * acz;
+      const tz = abx * acy - aby * acx;
+      const nLen = Math.hypot(tx, ty, tz);
+      if (nLen <= 1e-12) continue;
+      const dot = Math.abs((tx / nLen) * ax + (ty / nLen) * ay + (tz / nLen) * az);
+      const clamped = Math.max(-1, Math.min(1, dot));
+      const angle = Math.acos(clamped);
+      if (angle > maxAngle) maxAngle = angle;
+    }
+
+    const planarRatio = len / areaSum;
+    return planarRatio >= 0.9995 && maxAngle <= (Math.PI / 180);
+  };
+
+  const findArcCandidates = (sourceName) => {
+    if (!sourceName) return arc3D;
+    const trimmed = String(sourceName).trim();
+    if (!trimmed) return arc3D;
+    const direct = arc3DByName.get(trimmed);
+    if (direct && direct.length) return direct;
+    const tail = trimmed.includes(":") ? trimmed.split(":").slice(-1)[0] : trimmed;
+    if (tail !== trimmed) {
+      const directTail = arc3DByName.get(tail);
+      if (directTail && directTail.length) return directTail;
+    }
+    return [];
+  };
 
   // Centerlines per arc
   for (const arc of arc3D) {
@@ -1422,6 +1589,7 @@ function addCylMetadataToSideFaces(
       const meta = face.getMetadata?.() || {};
       const faceType = meta?.faceType;
       if (faceType && faceType !== "SIDEWALL") continue;
+      if (isFacePlanar(face)) continue;
       const pos = face.geometry?.getAttribute?.("position");
       if (!pos || pos.itemSize !== 3 || pos.count < 3) continue;
       const verts = [];
@@ -1429,14 +1597,18 @@ function addCylMetadataToSideFaces(
         v.set(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(face.matrixWorld);
         verts.push(v.clone());
       }
+      const sourceEdgeName = meta?.sourceEdgeName || face?.name || null;
+      let candidates = findArcCandidates(sourceEdgeName);
+      if (!candidates.length) candidates = arc3D;
       let best = null;
-      for (const arc of arc3D) {
+      for (const arc of candidates) {
         const axisVec = arc.axisEnd.clone().sub(arc.axisStart);
         const axisLen = axisVec.length();
         if (axisLen < 1e-9) continue;
         const axisN = axisVec.clone().normalize();
         const origin = arc.axisStart;
         let sumDist = 0;
+        let sumSqDist = 0;
         let minT = Infinity;
         let maxT = -Infinity;
         for (const p of verts) {
@@ -1446,13 +1618,18 @@ function addCylMetadataToSideFaces(
           const proj = origin.clone().add(axisN.clone().multiplyScalar(t));
           const d = p.distanceTo(proj);
           sumDist += d;
+          sumSqDist += d * d;
         }
         const meanRadius = sumDist / verts.length;
-        const dev = Math.abs(meanRadius - arc.radius);
-        if (!best || dev < best.dev) {
+        if (!(meanRadius > eps)) continue;
+        const variance = Math.max(0, sumSqDist / verts.length - meanRadius * meanRadius);
+        const std = Math.sqrt(variance);
+        const relStd = std / meanRadius;
+        if (std > absStdTol && relStd > relStdTol) continue;
+        if (!best || relStd < best.relStd) {
           best = {
             arc,
-            dev,
+            relStd,
             radius: meanRadius,
             axisN,
             center: origin.clone().add(axisN.clone().multiplyScalar((minT + maxT) * 0.5)),

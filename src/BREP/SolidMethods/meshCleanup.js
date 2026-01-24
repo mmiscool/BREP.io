@@ -208,6 +208,204 @@ export function removeSmallInternalIslands(maxTriangles = 30) {
 }
 
 /**
+ * Remove faces that only connect via a single shared edge chain to an opposite-facing neighbor.
+ * @param {object} [options]
+ * @param {number} [options.normalDotThreshold=-0.95] dot-product threshold for opposite normals
+ * @returns {number} triangles removed
+ */
+export function removeOppositeSingleEdgeFaces({ normalDotThreshold = -0.95 } = {}) {
+    const tv = this._triVerts;
+    const vp = this._vertProperties;
+    const ids = this._triIDs;
+    if (!tv || !vp || !ids) return 0;
+    const triCount = (tv.length / 3) | 0;
+    if (triCount === 0 || ids.length !== triCount) return 0;
+    const nv = (vp.length / 3) | 0;
+    if (nv === 0) return 0;
+
+    const NV = BigInt(Math.max(1, nv));
+    const eKey = (a, b) => {
+        const A = BigInt(a), B = BigInt(b);
+        return A < B ? (A * NV + B) : (B * NV + A);
+    };
+
+    const faceNormals = new Map(); // id -> [nx, ny, nz]
+    const addNormal = (id, nx, ny, nz) => {
+        let entry = faceNormals.get(id);
+        if (!entry) { entry = [0, 0, 0]; faceNormals.set(id, entry); }
+        entry[0] += nx; entry[1] += ny; entry[2] += nz;
+    };
+
+    const edgeMap = new Map(); // key -> {faces:Set, a, b}
+
+    for (let t = 0; t < triCount; t++) {
+        const id = ids[t];
+        if (id === undefined || id === null) continue;
+        const base = t * 3;
+        const i0 = tv[base + 0] >>> 0;
+        const i1 = tv[base + 1] >>> 0;
+        const i2 = tv[base + 2] >>> 0;
+
+        const ax = vp[i0 * 3 + 0], ay = vp[i0 * 3 + 1], az = vp[i0 * 3 + 2];
+        const bx = vp[i1 * 3 + 0], by = vp[i1 * 3 + 1], bz = vp[i1 * 3 + 2];
+        const cx = vp[i2 * 3 + 0], cy = vp[i2 * 3 + 1], cz = vp[i2 * 3 + 2];
+        const ux = bx - ax, uy = by - ay, uz = bz - az;
+        const vx = cx - ax, vy = cy - ay, vz = cz - az;
+        const nx = uy * vz - uz * vy;
+        const ny = uz * vx - ux * vz;
+        const nz = ux * vy - uy * vx;
+        addNormal(id, nx, ny, nz);
+
+        const edges = [[i0, i1], [i1, i2], [i2, i0]];
+        for (let k = 0; k < 3; k++) {
+            let a = edges[k][0];
+            let b = edges[k][1];
+            if (a === b) continue;
+            const key = eKey(a, b);
+            let entry = edgeMap.get(key);
+            if (!entry) {
+                if (a > b) { const tmp = a; a = b; b = tmp; }
+                entry = { faces: new Set(), a, b };
+                edgeMap.set(key, entry);
+            }
+            entry.faces.add(id);
+        }
+    }
+
+    const pairEdges = new Map(); // key -> { ids: [idA, idB], edges: [[u, v], ...] }
+    const facePairs = new Map(); // faceId -> Set(pairKey)
+    const addPair = (faceId, pairKey) => {
+        let set = facePairs.get(faceId);
+        if (!set) { set = new Set(); facePairs.set(faceId, set); }
+        set.add(pairKey);
+    };
+
+    for (const entry of edgeMap.values()) {
+        if (entry.faces.size !== 2) continue;
+        const faces = Array.from(entry.faces);
+        const idA = faces[0];
+        const idB = faces[1];
+        if (idA === idB) continue;
+        const pairKey = idA < idB ? `${idA}|${idB}` : `${idB}|${idA}`;
+        let pair = pairEdges.get(pairKey);
+        if (!pair) {
+            pair = {
+                ids: idA < idB ? [idA, idB] : [idB, idA],
+                edges: [],
+            };
+            pairEdges.set(pairKey, pair);
+        }
+        pair.edges.push([entry.a, entry.b]);
+        addPair(idA, pairKey);
+        addPair(idB, pairKey);
+    }
+
+    const isSingleEdgeChain = (edges) => {
+        if (!edges || edges.length === 0) return false;
+        const adj = new Map();
+        const verts = new Set();
+        for (const [u, v] of edges) {
+            verts.add(u); verts.add(v);
+            if (!adj.has(u)) adj.set(u, new Set());
+            if (!adj.has(v)) adj.set(v, new Set());
+            adj.get(u).add(v);
+            adj.get(v).add(u);
+        }
+        let components = 0;
+        const visited = new Set();
+        for (const v of verts) {
+            if (visited.has(v)) continue;
+            components++;
+            if (components > 1) return false;
+            const stack = [v];
+            visited.add(v);
+            while (stack.length) {
+                const cur = stack.pop();
+                const nbrs = adj.get(cur);
+                if (!nbrs) continue;
+                for (const n of nbrs) {
+                    if (visited.has(n)) continue;
+                    visited.add(n);
+                    stack.push(n);
+                }
+            }
+        }
+        return components === 1;
+    };
+
+    const toRemove = new Set();
+    for (const [faceId, pairs] of facePairs.entries()) {
+        if (pairs.size !== 1) continue;
+        const pairKey = pairs.values().next().value;
+        const pair = pairEdges.get(pairKey);
+        if (!pair || !pair.edges.length) continue;
+        if (!isSingleEdgeChain(pair.edges)) continue;
+        const otherId = pair.ids[0] === faceId ? pair.ids[1] : pair.ids[0];
+        const n0 = faceNormals.get(faceId);
+        const n1 = faceNormals.get(otherId);
+        if (!n0 || !n1) continue;
+        const len0 = Math.hypot(n0[0], n0[1], n0[2]);
+        const len1 = Math.hypot(n1[0], n1[1], n1[2]);
+        if (!(len0 > 1e-12) || !(len1 > 1e-12)) continue;
+        const dot = (n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2]) / (len0 * len1);
+        if (dot <= normalDotThreshold) toRemove.add(faceId);
+    }
+
+    if (!toRemove.size) return 0;
+
+    const keepTri = new Uint8Array(triCount);
+    let removed = 0;
+    for (let t = 0; t < triCount; t++) {
+        if (toRemove.has(ids[t])) {
+            removed++;
+            continue;
+        }
+        keepTri[t] = 1;
+    }
+    if (removed === 0) return 0;
+
+    const usedVert = new Uint8Array(nv);
+    const newTriVerts = [];
+    const newTriIDs = [];
+    for (let t = 0; t < triCount; t++) {
+        if (!keepTri[t]) continue;
+        const b = t * 3;
+        const a = tv[b + 0] >>> 0;
+        const b1 = tv[b + 1] >>> 0;
+        const c = tv[b + 2] >>> 0;
+        newTriVerts.push(a, b1, c);
+        newTriIDs.push(ids[t]);
+        usedVert[a] = 1; usedVert[b1] = 1; usedVert[c] = 1;
+    }
+
+    const oldToNew = new Int32Array(nv);
+    for (let i = 0; i < nv; i++) oldToNew[i] = -1;
+    const newVP = [];
+    let write = 0;
+    for (let i = 0; i < nv; i++) {
+        if (!usedVert[i]) continue;
+        oldToNew[i] = write++;
+        newVP.push(vp[i * 3 + 0], vp[i * 3 + 1], vp[i * 3 + 2]);
+    }
+    for (let i = 0; i < newTriVerts.length; i++) {
+        newTriVerts[i] = oldToNew[newTriVerts[i]];
+    }
+
+    this._vertProperties = newVP;
+    this._triVerts = newTriVerts;
+    this._triIDs = newTriIDs;
+    this._vertKeyToIndex = new Map();
+    for (let i = 0; i < this._vertProperties.length; i += 3) {
+        const x = this._vertProperties[i], y = this._vertProperties[i + 1], z = this._vertProperties[i + 2];
+        this._vertKeyToIndex.set(`${x},${y},${z}`, (i / 3) | 0);
+    }
+    this._dirty = true;
+    this._faceIndex = null;
+    this._manifold = null;
+    return removed;
+}
+
+/**
  * Remove tiny triangles that lie along boundaries between faces by performing
  * local 2–2 edge flips across inter-face edges.
  */

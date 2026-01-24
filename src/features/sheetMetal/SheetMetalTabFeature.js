@@ -1,8 +1,13 @@
 import { BREP } from "../../BREP/BREP.js";
 import { selectionHasSketch } from "../selectionUtils.js";
 import { normalizeThickness, normalizeBendRadius, normalizeNeutralFactor, applySheetMetalMetadata } from "./sheetMetalMetadata.js";
-import { setSheetMetalFaceTypeMetadata, SHEET_METAL_FACE_TYPES, propagateSheetMetalFaceTypesToEdges } from "./sheetMetalFaceTypes.js";
+import { propagateSheetMetalFaceTypesToEdges } from "./sheetMetalFaceTypes.js";
 import { resolveProfileFace, collectSketchParents } from "./profileUtils.js";
+import { cleanupSheetMetalOppositeEdgeFaces } from "./sheetMetalCleanup.js";
+import { SheetMetalObject } from "./SheetMetalObject.js";
+import { cloneSheetMetalTree, createSheetMetalTree, createSheetMetalTabNode } from "./sheetMetalTree.js";
+import { resolvePlacementMode } from "./sheetMetalTabUtils.js";
+import { cloneProfileGroups, collectProfileEdges } from "./sheetMetalProfileUtils.js";
 
 const inputParamsSchema = {
   id: {
@@ -84,22 +89,37 @@ export class SheetMetalTabFeature {
     const bendRadius = normalizeBendRadius(this.inputParams?.bendRadius ?? 0.125);
     const neutralFactor = normalizeNeutralFactor(this.inputParams?.neutralFactor ?? 0.5);
     const placement = resolvePlacementMode(this.inputParams?.placementMode, signedThickness);
-    const extrudeDistances = toExtrudeDistances(thicknessAbs, placement);
-
-    const sweep = new BREP.Sweep({
-      face: faceObj,
-      distance: extrudeDistances.distance,
-      distanceBack: extrudeDistances.distanceBack,
-      mode: "translate",
-      name: this.inputParams?.featureID,
-      omitBaseCap: false,
+    const sheetMetal = new SheetMetalObject({
+      tree: createSheetMetalTree(),
+      kFactor: neutralFactor,
+      thickness: thicknessAbs,
+      bendRadius,
     });
-    sweep.visualize();
-    tagTabFaceTypes(sweep);
+    const profileGroups = cloneProfileGroups(faceObj);
+    const profileEdges = collectProfileEdges(faceObj);
+    const tabNode = createSheetMetalTabNode({
+      featureID: this.inputParams?.featureID || null,
+      profileRef: this.inputParams?.profile ?? null,
+      profileName: faceObj?.name || null,
+      profileGroups,
+      profileEdges,
+      thickness: thicknessAbs,
+      placementMode: placement,
+      bendRadius,
+      neutralFactor,
+      signedThickness,
+      consumeProfileSketch: this.inputParams?.consumeProfileSketch !== false,
+    });
+    sheetMetal.appendNode(tabNode);
+    await sheetMetal.generate({
+      partHistory,
+      metadataManager: partHistory?.metadataManager,
+      mode: "solid",
+    });
 
     const effects = await BREP.applyBooleanOperation(
       partHistory || {},
-      sweep,
+      sheetMetal,
       this.inputParams?.boolean,
       this.inputParams?.featureID
     );
@@ -111,6 +131,7 @@ export class SheetMetalTabFeature {
     ];
     const added = effects?.added || [];
 
+    cleanupSheetMetalOppositeEdgeFaces(added);
     propagateSheetMetalFaceTypesToEdges(added);
 
     applySheetMetalMetadata(added, partHistory?.metadataManager, {
@@ -123,6 +144,13 @@ export class SheetMetalTabFeature {
       forceBaseOverwrite: true,
     });
 
+    for (const solid of added) {
+      if (!solid) continue;
+      solid.userData = solid.userData || {};
+      solid.userData.sheetMetalTree = cloneSheetMetalTree(sheetMetal.tree);
+      solid.userData.sheetMetalKFactor = neutralFactor;
+    }
+
     this.persistentData = this.persistentData || {};
     this.persistentData.sheetMetal = {
       baseType: "TAB",
@@ -133,6 +161,7 @@ export class SheetMetalTabFeature {
       signedThickness,
       consumeProfileSketch: consumeSketch,
       profileName: faceObj?.name || null,
+      tree: sheetMetal.tree,
     };
 
     // Flag removed parents so history cleans them up
@@ -144,32 +173,4 @@ export class SheetMetalTabFeature {
 
     return { added, removed: removedArtifacts };
   }
-}
-
-function resolvePlacementMode(requested, signedThickness) {
-  const normalized = String(requested || "").toLowerCase();
-  if (normalized === "forward" || normalized === "reverse" || normalized === "midplane") {
-    return normalized;
-  }
-  return signedThickness < 0 ? "reverse" : "forward";
-}
-
-function toExtrudeDistances(thickness, placementMode) {
-  if (placementMode === "reverse") return { distance: 0, distanceBack: thickness };
-  if (placementMode === "midplane") {
-    const half = thickness / 2;
-    return { distance: half, distanceBack: half };
-  }
-  return { distance: thickness, distanceBack: 0 };
-}
-
-function tagTabFaceTypes(sweep) {
-  if (!sweep || typeof sweep.getFaceNames !== "function") return;
-  const faceNames = sweep.getFaceNames();
-  const startFaces = faceNames.filter((name) => name.endsWith("_START"));
-  const endFaces = faceNames.filter((name) => name.endsWith("_END"));
-  const thicknessFaces = faceNames.filter((name) => name.endsWith("_SW"));
-  setSheetMetalFaceTypeMetadata(sweep, startFaces, SHEET_METAL_FACE_TYPES.A);
-  setSheetMetalFaceTypeMetadata(sweep, endFaces, SHEET_METAL_FACE_TYPES.B);
-  setSheetMetalFaceTypeMetadata(sweep, thicknessFaces, SHEET_METAL_FACE_TYPES.THICKNESS);
 }

@@ -1,6 +1,5 @@
 import JSZip from 'jszip';
 import { generate3MF } from '../../exporters/threeMF.js';
-import { CADmaterials } from '../CADmaterials.js';
 import { buildSheetMetalFlatPatternSvgs } from '../../exporters/sheetMetalFlatPattern.js';
 import { FloatingWindow } from '../FloatingWindow.js';
 
@@ -24,21 +23,6 @@ async function _captureThumbnail(viewer, size = 256) {
     ctx.drawImage(canvas, 0, 0, srcW, srcH, dx, dy, dw, dh);
     return dst.toDataURL('image/png');
   } catch { return null; }
-}
-
-function _getFlatPatternColors() {
-  const flat = CADmaterials?.FLAT_PATTERN || {};
-  const asHex = (mat, fallback) => {
-    if (mat?.color && typeof mat.color.getHexString === 'function') {
-      return `#${mat.color.getHexString()}`;
-    }
-    return fallback;
-  };
-  return {
-    outer: asHex(flat.OUTER_EDGE, '#ff5fa2'),
-    inner: asHex(flat.INNER_EDGE, '#00ffff'),
-    center: asHex(flat.CENTERLINE, '#00ffff'),
-  };
 }
 
 export function createExportButton(viewer) {
@@ -189,7 +173,6 @@ function _ensureFlatPatternDebugStyles() {
       .flat-debug-section { display:flex; flex-direction:column; gap:8px; }
       .flat-debug-section-title { font-size:12px; color:#9aa0aa; text-transform:none; letter-spacing:.2px; }
       .flat-debug-step { padding:10px; border:1px solid #1f2937; border-radius:8px; background:#111827; display:flex; flex-direction:column; gap:6px; }
-      .flat-debug-step-label { font-size:12px; color:#cbd5f5; }
       .flat-debug-svg { background:#fff; border-radius:6px; padding:6px; display:block; max-width:100%; overflow:auto; height:300px; }
       .flat-debug-svg svg { display:block; max-width:100%; width:100%; height:100%; }
       .flat-debug-empty { font-size:12px; color:#9aa0aa; }
@@ -239,38 +222,32 @@ function _renderFlatPatternDebugPanel(panel, entries, baseName) {
   title.textContent = baseName ? `${baseName} Flat Pattern Debug` : 'Flat Pattern Debug';
   panel.content.appendChild(title);
 
-  let hasSteps = false;
+  let hasPreview = false;
   if (Array.isArray(entries)) {
     for (const entry of entries) {
-      if (!entry || !Array.isArray(entry.debug) || !entry.debug.length) continue;
-      hasSteps = true;
+      if (!entry || !entry.svg) continue;
+      hasPreview = true;
       const section = document.createElement('div');
       section.className = 'flat-debug-section';
       const sectionTitle = document.createElement('div');
       sectionTitle.className = 'flat-debug-section-title';
       sectionTitle.textContent = entry.name || 'Flat Pattern';
       section.appendChild(sectionTitle);
-      for (const step of entry.debug) {
-        const stepWrap = document.createElement('div');
-        stepWrap.className = 'flat-debug-step';
-        const label = document.createElement('div');
-        label.className = 'flat-debug-step-label';
-        label.textContent = step.label || 'Step';
-        const svgWrap = document.createElement('div');
-        svgWrap.className = 'flat-debug-svg';
-        const cleaned = String(step.svg || '').replace(/^<\\?xml[^>]*>\\s*/i, '');
-        svgWrap.innerHTML = cleaned;
-        stepWrap.appendChild(label);
-        stepWrap.appendChild(svgWrap);
-        section.appendChild(stepWrap);
-      }
+      const stepWrap = document.createElement('div');
+      stepWrap.className = 'flat-debug-step';
+      const svgWrap = document.createElement('div');
+      svgWrap.className = 'flat-debug-svg';
+      const cleaned = String(entry.svg || '').replace(/^<\\?xml[^>]*>\\s*/i, '');
+      svgWrap.innerHTML = cleaned;
+      stepWrap.appendChild(svgWrap);
+      section.appendChild(stepWrap);
       panel.content.appendChild(section);
     }
   }
-  if (!hasSteps) {
+  if (!hasPreview) {
     const empty = document.createElement('div');
     empty.className = 'flat-debug-empty';
-    empty.textContent = 'No flat pattern debug steps available.';
+    empty.textContent = 'No flat pattern previews available.';
     panel.content.appendChild(empty);
   }
 }
@@ -351,7 +328,7 @@ function _openExportDialog(viewer) {
   debugWrap.style.alignItems = 'center';
   debugWrap.style.gap = '6px';
   debugWrap.appendChild(chkDebug);
-  debugWrap.appendChild(document.createTextNode('Show flat pattern steps'));
+  debugWrap.appendChild(document.createTextNode('Show flat pattern preview'));
   rowDebug.appendChild(labDebug); rowDebug.appendChild(debugWrap);
 
   // Toggle unit row visibility based on format
@@ -443,7 +420,6 @@ function _openExportDialog(viewer) {
               neutralFactor,
               metadataManager,
               debug: !!debugPanel,
-              flatPatternColors: _getFlatPatternColors(),
             });
             if (svgEntries.length) {
               const svgPaths = [];

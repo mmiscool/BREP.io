@@ -247,6 +247,16 @@ export class Solid extends THREE.Group {
     }
 
     /**
+     * Remove faces that only connect via a single shared edge chain to an opposite-facing neighbor.
+     * @param {object} [options]
+     * @param {number} [options.normalDotThreshold=-0.95] dot-product threshold for opposite normals
+     * @returns {number} triangles removed
+     */
+    removeOppositeSingleEdgeFaces({ normalDotThreshold = -0.95 } = {}) {
+        return SolidMethods.removeOppositeSingleEdgeFaces.apply(this, arguments);
+    }
+
+    /**
      * Mirror the solid across a plane defined by a point and a normal, returning a new Solid.
      * @param {number[]|THREE.Vector3} point
      * @param {number[]|THREE.Vector3} normal
