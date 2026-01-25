@@ -482,7 +482,50 @@ export class Sweep extends FacesSolid {
       }
     }
 
-    // Orient path to start near face centroid (only for translate). PathAlign respects selection order.
+    // For pathAlign, ensure path direction starts from the end closest to the profile.
+    if (pathPts.length >= 2 && mode === 'pathAlign') {
+      const profilePts = [];
+      const loops = Array.isArray(face?.userData?.boundaryLoopsWorld) ? face.userData.boundaryLoopsWorld : null;
+      if (loops && loops.length) {
+        const outerLoops = loops.filter(l => !l?.isHole);
+        const useLoops = outerLoops.length ? outerLoops : loops;
+        for (const loop of useLoops) {
+          const arr = Array.isArray(loop?.pts) ? loop.pts : loop;
+          if (!Array.isArray(arr)) continue;
+          for (const p of arr) {
+            if (Array.isArray(p) && p.length >= 3) profilePts.push([p[0], p[1], p[2]]);
+          }
+        }
+      }
+      if (!profilePts.length) {
+        const posAttr = face?.geometry?.getAttribute?.('position');
+        if (posAttr) {
+          const v = new THREE.Vector3();
+          for (let i = 0; i < posAttr.count; i++) {
+            v.set(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)).applyMatrix4(face.matrixWorld);
+            profilePts.push([v.x, v.y, v.z]);
+          }
+        }
+      }
+      if (profilePts.length) {
+        const minD2 = (p) => {
+          let best = Infinity;
+          for (const q of profilePts) {
+            const dx = p[0] - q[0], dy = p[1] - q[1], dz = p[2] - q[2];
+            const d2 = dx * dx + dy * dy + dz * dz;
+            if (d2 < best) best = d2;
+          }
+          return best;
+        };
+        const start = pathPts[0];
+        const end = pathPts[pathPts.length - 1];
+        const startD = minD2(start);
+        const endD = minD2(end);
+        if (endD < startD) pathPts.reverse();
+      }
+    }
+
+    // Orient path to start near face centroid (translate mode only).
     if (pathPts.length >= 2 && mode !== 'pathAlign') {
       let centroid = null;
       const loops = Array.isArray(face?.userData?.boundaryLoopsWorld) ? face.userData.boundaryLoopsWorld : null;
@@ -521,19 +564,25 @@ export class Sweep extends FacesSolid {
     let offsets = [];
     if (pathPts.length >= 2) {
       const p0 = pathPts[0];
+      const rawOffsets = [];
       for (let i = 0; i < pathPts.length; i++) {
         const p = pathPts[i];
-        offsets.push(new THREE.Vector3(p[0] - p0[0], p[1] - p0[1], p[2] - p0[2]));
+        rawOffsets.push(new THREE.Vector3(p[0] - p0[0], p[1] - p0[1], p[2] - p0[2]));
       }
       // Collapse near-duplicate steps to avoid zero-area side faces
-      const filtered = [offsets[0]];
-      for (let i = 1; i < offsets.length; i++) {
-        const prev = filtered[filtered.length - 1];
-        const cur = offsets[i];
+      const filteredOffsets = [rawOffsets[0]];
+      const filteredPts = [pathPts[0]];
+      for (let i = 1; i < rawOffsets.length; i++) {
+        const prev = filteredOffsets[filteredOffsets.length - 1];
+        const cur = rawOffsets[i];
         const d2 = cur.clone().sub(prev).lengthSq();
-        if (d2 > 1e-14) filtered.push(cur);
+        if (d2 > 1e-14) {
+          filteredOffsets.push(cur);
+          filteredPts.push(pathPts[i]);
+        }
       }
-      offsets = filtered;
+      offsets = filteredOffsets;
+      pathPts = filteredPts;
     }
 
     // Determine sweep vectors for cap translation only (single-shot extrude or end cap of path)
@@ -590,7 +639,7 @@ export class Sweep extends FacesSolid {
     setFaceType(startName, 'STARTCAP');
     setFaceType(endName, 'ENDCAP');
 
-    // Note: pathAlign support removed. If reintroducing, add helpers here.
+    // PathAlign uses rotation-minimizing frames to align the profile to the path.
 
     // Prefer rebuilding caps using 2D profile groups from the sketch to ensure
     // identical boundary vertices with side walls.
@@ -874,6 +923,235 @@ export class Sweep extends FacesSolid {
     };
     if (!boundaryLoops || !boundaryLoops.length) boundaryLoops = computeBoundaryLoopsFromFace(face);
     const doPathSweep = offsets.length >= 2;
+
+    const getFaceWorldPoints = () => {
+      const posAttr = face?.geometry?.getAttribute?.('position');
+      if (!posAttr) return [];
+      const v = new THREE.Vector3();
+      const pts = new Array(posAttr.count);
+      for (let i = 0; i < posAttr.count; i++) {
+        v.set(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)).applyMatrix4(face.matrixWorld);
+        pts[i] = [v.x, v.y, v.z];
+      }
+      return pts;
+    };
+
+    const computeProfileBasis = (loops, fallbackPts) => {
+      let baseZ = (typeof face.getAverageNormal === 'function') ? face.getAverageNormal().clone() : new THREE.Vector3(0, 0, 1);
+      if (!baseZ || !isFinite(baseZ.x) || baseZ.lengthSq() < 1e-20) baseZ = new THREE.Vector3(0, 0, 1);
+      baseZ.normalize();
+
+      let outerPts = null;
+      if (loops && loops.length) {
+        const outerLoop = loops.find(l => !l.isHole) || loops[0];
+        const pts = Array.isArray(outerLoop?.pts) ? outerLoop.pts : outerLoop;
+        if (Array.isArray(pts) && pts.length) outerPts = pts;
+      }
+      const candidates = (outerPts && outerPts.length) ? outerPts : (fallbackPts || []);
+      const centroidOf = (arr) => {
+        const c = new THREE.Vector3();
+        for (const p of arr) c.add(new THREE.Vector3(p[0], p[1], p[2]));
+        return c.multiplyScalar(1 / arr.length);
+      };
+      let baseOriginW = null;
+      if (outerPts && outerPts.length) baseOriginW = centroidOf(outerPts);
+      else if (candidates.length) baseOriginW = centroidOf(candidates);
+      else baseOriginW = new THREE.Vector3(0, 0, 0);
+
+      let anchorWorld = null;
+      if (candidates.length) {
+        let bestD2 = -1; let best = candidates[0];
+        for (const p of candidates) {
+          const dx = p[0] - baseOriginW.x, dy = p[1] - baseOriginW.y, dz = p[2] - baseOriginW.z;
+          const d2 = dx*dx + dy*dy + dz*dz;
+          if (d2 > bestD2) { bestD2 = d2; best = p; }
+        }
+        anchorWorld = new THREE.Vector3(best[0], best[1], best[2]);
+      } else {
+        anchorWorld = baseOriginW.clone();
+      }
+
+      let baseX = anchorWorld.clone().sub(baseOriginW);
+      baseX.addScaledVector(baseZ, -baseX.dot(baseZ));
+      if (baseX.lengthSq() < 1e-12) {
+        baseX = new THREE.Vector3(1, 0, 0);
+        if (Math.abs(baseX.dot(baseZ)) > 0.9) baseX.set(0, 1, 0);
+        baseX.addScaledVector(baseZ, -baseX.dot(baseZ));
+      }
+      baseX.normalize();
+      let baseY = new THREE.Vector3().crossVectors(baseZ, baseX).normalize();
+      baseX = new THREE.Vector3().crossVectors(baseY, baseZ).normalize();
+
+      return { baseOriginW, baseX, baseY, baseZ, anchorWorld, outerPts };
+    };
+
+    const computePathTangents = (P) => {
+      const T = new Array(P.length);
+      const EPS = 1e-12;
+      for (let i = 0; i < P.length; i++) {
+        let t = null;
+        if (i === 0) {
+          t = P[1].clone().sub(P[0]);
+        } else if (i === P.length - 1) {
+          t = P[i].clone().sub(P[i - 1]);
+        } else {
+          const tPrev = P[i].clone().sub(P[i - 1]);
+          const tNext = P[i + 1].clone().sub(P[i]);
+          if (tPrev.lengthSq() < EPS) t = tNext;
+          else if (tNext.lengthSq() < EPS) t = tPrev;
+          else t = tPrev.normalize().add(tNext.normalize());
+        }
+        if (!t || t.lengthSq() < EPS) t = new THREE.Vector3(0, 0, 1);
+        else t.normalize();
+        T[i] = t;
+      }
+      return T;
+    };
+
+    const computeRMFFrames = (P, baseX, baseY, baseZ) => {
+      if (!P || P.length < 2) return null;
+      const T = computePathTangents(P);
+      const frames = new Array(P.length);
+      let X = baseX.clone();
+      let Y = baseY.clone();
+      let Z = baseZ.clone();
+      frames[0] = { origin: P[0].clone(), X: X.clone(), Y: Y.clone(), Z: Z.clone() };
+      const EPS = 1e-12;
+      for (let i = 1; i < P.length; i++) {
+        const tPrev = T[i - 1];
+        const t = T[i];
+        const axis = new THREE.Vector3().crossVectors(tPrev, t);
+        const sin = axis.length();
+        const cos = Math.max(-1, Math.min(1, tPrev.dot(t)));
+        if (sin < EPS) {
+          if (cos < 0) {
+            let rotAxis = X.clone();
+            rotAxis.addScaledVector(tPrev, -rotAxis.dot(tPrev));
+            if (rotAxis.lengthSq() < EPS) {
+              rotAxis = Y.clone();
+              rotAxis.addScaledVector(tPrev, -rotAxis.dot(tPrev));
+            }
+            if (rotAxis.lengthSq() < EPS) {
+              rotAxis = new THREE.Vector3(1, 0, 0).cross(tPrev);
+            }
+            if (rotAxis.lengthSq() >= EPS) {
+              rotAxis.normalize();
+              const q = new THREE.Quaternion().setFromAxisAngle(rotAxis, Math.PI);
+              X.applyQuaternion(q);
+              Y.applyQuaternion(q);
+              Z.applyQuaternion(q);
+            }
+          }
+        } else {
+          axis.normalize();
+          const angle = Math.atan2(sin, cos);
+          const q = new THREE.Quaternion().setFromAxisAngle(axis, angle);
+          X.applyQuaternion(q);
+          Y.applyQuaternion(q);
+          Z.applyQuaternion(q);
+        }
+        frames[i] = { origin: P[i].clone(), X: X.clone(), Y: Y.clone(), Z: Z.clone() };
+      }
+      return frames;
+    };
+
+    const buildPathAlignContext = () => {
+      const P = pathPts.map(p => new THREE.Vector3(p[0], p[1], p[2]));
+      if (P.length < 2) return null;
+      const basis = computeProfileBasis(boundaryLoops, getFaceWorldPoints());
+      if (!basis) return null;
+      let { baseOriginW, baseX, baseY, baseZ, anchorWorld, outerPts } = basis;
+      const T0 = computePathTangents(P)[0];
+      if (T0 && baseZ && baseZ.dot(T0) < 0) {
+        baseZ = baseZ.clone().multiplyScalar(-1);
+        baseY = baseY.clone().multiplyScalar(-1);
+      }
+      const frames = computeRMFFrames(P, baseX, baseY, baseZ);
+      if (!frames || frames.length < 2) return null;
+
+      const P0 = P[0].clone();
+      for (let i = 0; i < frames.length; i++) {
+        const off = P[i].clone().sub(P0);
+        frames[i].origin = baseOriginW.clone().add(off);
+      }
+
+      const uvCache = new Map();
+      const uvOf = (pArr) => {
+        const k = `${pArr[0].toFixed(6)},${pArr[1].toFixed(6)},${pArr[2].toFixed(6)}`;
+        const cached = uvCache.get(k);
+        if (cached) return cached;
+        const v = new THREE.Vector3(pArr[0] - baseOriginW.x, pArr[1] - baseOriginW.y, pArr[2] - baseOriginW.z);
+        const u = v.dot(baseX);
+        const w = v.dot(baseY);
+        const uv = [u, w];
+        uvCache.set(k, uv);
+        return uv;
+      };
+
+      let lockU = 0, lockV = 0;
+      const lockCandidates = (Array.isArray(outerPts) && outerPts.length) ? outerPts : getFaceWorldPoints();
+      if (Array.isArray(lockCandidates) && lockCandidates.length) {
+        let farD = -1; let far = lockCandidates[0];
+        for (const p of lockCandidates) {
+          const uv = uvOf(p);
+          const d = uv[0] * uv[0] + uv[1] * uv[1];
+          if (d > farD) { farD = d; far = p; }
+        }
+        const uvF = uvOf(far);
+        lockU = uvF[0];
+        lockV = uvF[1];
+      }
+
+      if ((lockU*lockU + lockV*lockV) > 1e-20) {
+        for (let i = 1; i < frames.length; i++) {
+          const prevVec = new THREE.Vector3().addScaledVector(frames[i - 1].X, lockU).addScaledVector(frames[i - 1].Y, lockV);
+          const currVec = new THREE.Vector3().addScaledVector(frames[i].X, lockU).addScaledVector(frames[i].Y, lockV);
+          if (prevVec.lengthSq() > 1e-24 && currVec.lengthSq() > 1e-24) {
+            if (currVec.normalize().dot(prevVec.normalize()) < 0) {
+              frames[i].X.multiplyScalar(-1);
+              frames[i].Y.multiplyScalar(-1);
+              frames[i].Z.multiplyScalar(-1);
+            }
+          }
+        }
+      }
+
+      const placeAt = (pArr, segIndex) => {
+        const uv = uvOf(pArr);
+        const idx = Math.max(0, Math.min(frames.length - 1, segIndex | 0));
+        const f = frames[idx];
+        const du = uv[0];
+        const dv = uv[1];
+        return [
+          f.origin.x + f.X.x * du + f.Y.x * dv,
+          f.origin.y + f.X.y * du + f.Y.y * dv,
+          f.origin.z + f.X.z * du + f.Y.z * dv,
+        ];
+      };
+
+      if (sweepDebugEnabled()) {
+        const pathDbg = frames.map((f, i) => ({
+          i,
+          p: [ +f.origin.x.toFixed(4), +f.origin.y.toFixed(4), +f.origin.z.toFixed(4) ],
+          X: [ +f.X.x.toFixed(4), +f.X.y.toFixed(4), +f.X.z.toFixed(4) ],
+          Y: [ +f.Y.x.toFixed(4), +f.Y.y.toFixed(4), +f.Y.z.toFixed(4) ],
+          Z: [ +f.Z.x.toFixed(4), +f.Z.y.toFixed(4), +f.Z.z.toFixed(4) ],
+        }));
+        const framesMeta = { baseOriginW: _v3(baseOriginW), baseX: _v3(baseX), baseY: _v3(baseY), anchorWorld: _v3(anchorWorld) };
+        dlog('Frames', 'RMF frames', framesMeta);
+        console.table(pathDbg);
+        djson('Frames', { meta: framesMeta, rows: pathDbg });
+        dlog('Anchor', 'uv and start frame', { lockU, lockV, frame0: frames[0] });
+        djson('Anchor', { lockU, lockV, frame0: { origin: _v3(frames[0].origin), X: _v3(frames[0].X), Y: _v3(frames[0].Y), Z: _v3(frames[0].Z) } });
+      }
+
+      return { frames, placeAt, uvOf, lockU, lockV, baseOriginW, baseX, baseY, baseZ };
+    };
+
+    const pathAlignCtx = (doPathSweep && mode === 'pathAlign' && pathPts.length >= 2)
+      ? buildPathAlignContext()
+      : null;
+
     // Prefer boundary-loop based sidewalls whenever loops are available so
     // caps and walls share identical vertices and produce a watertight mesh.
     // This avoids non‑manifold vertical edges when input edges are split into
@@ -922,203 +1200,8 @@ export class Sweep extends FacesSolid {
         }
       }
 
-      // Compute face basis and path-aligned frames (for pathAlign mode)
-      let frames = null;
-      let baseOriginW = null, baseX = null, baseY = null, baseZ = null;
-      if (doPathSweep && mode === 'pathAlign') {
-        const P = pathPts.map(p => new THREE.Vector3(p[0], p[1], p[2]));
-        // Face basis from profile itself
-        baseZ = (typeof face.getAverageNormal === 'function') ? face.getAverageNormal().clone() : new THREE.Vector3(0, 0, 1);
-        if (!baseZ || !isFinite(baseZ.x) || baseZ.lengthSq() < 1e-20) baseZ = new THREE.Vector3(0, 0, 1);
-        baseZ.normalize();
-        // Choose origin as centroid of outer loop (world)
-        const outerLoop0 = boundaryLoops.find(l => !l.isHole) || boundaryLoops[0];
-        const outerPts0 = Array.isArray(outerLoop0?.pts) ? outerLoop0.pts : outerLoop0;
-        if (Array.isArray(outerPts0) && outerPts0.length) {
-          baseOriginW = new THREE.Vector3();
-          for (const p of outerPts0) baseOriginW.add(new THREE.Vector3(p[0], p[1], p[2]));
-          baseOriginW.multiplyScalar(1 / outerPts0.length);
-        } else {
-          baseOriginW = new THREE.Vector3(P[0].x, P[0].y, P[0].z);
-        }
-        // Determine anchor point in world nearest to P0 before defining axes
-        const P0 = P[0].clone();
-        let anchorWorld = null;
-        if (Array.isArray(outerPts0) && outerPts0.length) {
-          let bestD2 = Infinity; let best = outerPts0[0];
-          for (const p of outerPts0){ const dx=p[0]-P0.x, dy=p[1]-P0.y, dz=p[2]-P0.z; const d2=dx*dx+dy*dy+dz*dz; if (d2<bestD2){ bestD2=d2; best=p; } }
-          anchorWorld = new THREE.Vector3(best[0], best[1], best[2]);
-        } else {
-          anchorWorld = P0.clone();
-        }
-
-        // Choose baseX toward anchor (projected into face plane)
-        const toAnchor = anchorWorld.clone().sub(baseOriginW);
-        baseX = toAnchor.clone().sub(baseZ.clone().multiplyScalar(toAnchor.dot(baseZ)));
-        if (baseX.lengthSq() < 1e-12) baseX.set(1,0,0); // fallback
-        baseX.normalize();
-        baseY = new THREE.Vector3().crossVectors(baseZ, baseX).normalize();
-        baseX = new THREE.Vector3().crossVectors(baseY, baseZ).normalize();
-        // Tangents along path
-        const T = P.map((_, i) => {
-          if (i < P.length - 1) {
-            const t = P[i + 1].clone().sub(P[i]);
-            return (t.lengthSq() < 1e-20) ? new THREE.Vector3(0,0,1) : t.normalize();
-          } else {
-            const t = P[i].clone().sub(P[i - 1] || P[i]);
-            return (t.lengthSq() < 1e-20) ? new THREE.Vector3(0,0,1) : t.normalize();
-          }
-        });
-        // Reference world vector: prefer P0->anchor; if zero/near-zero, fall back to baseX
-        let ref = anchorWorld.clone().sub(P[0]);
-        if (ref.lengthSq() < 1e-12) ref = baseX.clone();
-        const Xs = []; const Ys = []; const Zs = [];
-        const dbgFrames = [];
-        const EPS = 1e-12;
-        for (let i = 0; i < P.length; i++) {
-          const z = T[i].clone().normalize();
-          // Project reference to plane orthogonal to z
-          let xProj = ref.clone().sub(z.clone().multiplyScalar(ref.dot(z)));
-          let xLen2 = xProj.lengthSq();
-          // If projection is ill-conditioned, fall back to face upRef cross z
-          if (xLen2 < EPS) {
-            const alt = new THREE.Vector3().crossVectors(z, baseZ);
-            if (alt.lengthSq() > EPS) xProj = alt; else if (i > 0) xProj = Xs[i - 1].clone();
-            else xProj = (Math.abs(z.x) < 0.9 ? new THREE.Vector3(1,0,0) : new THREE.Vector3(0,1,0)).sub(z.clone().multiplyScalar(z.x)).normalize();
-          }
-          let x = xProj.normalize();
-          // Choose sign to maximize alignment with both previous X and target baseX projection
-          let score = 0;
-          if (i > 0) score += x.dot(Xs[i - 1]);
-          const t = baseX.clone().sub(z.clone().multiplyScalar(baseX.dot(z)));
-          if (t.lengthSq() > EPS) { const tn = t.normalize(); score += x.dot(tn); }
-          const flipped = (score < 0); if (flipped) x.multiplyScalar(-1);
-          const y = new THREE.Vector3().crossVectors(z, x).normalize();
-          Xs[i] = x; Ys[i] = y; Zs[i] = z;
-          if (sweepDebugEnabled()) {
-            dbgFrames.push({
-              i,
-              projLen: +Math.sqrt(xLen2).toExponential(3),
-              z: [ +z.x.toFixed(5), +z.y.toFixed(5), +z.z.toFixed(5) ],
-              x: [ +x.x.toFixed(5), +x.y.toFixed(5), +x.z.toFixed(5) ],
-              y: [ +y.x.toFixed(5), +y.y.toFixed(5), +y.z.toFixed(5) ],
-              alignedScore: +score.toFixed(5),
-              flipped
-            });
-          }
-        }
-        // Bias rotation: align start frame to face's baseX projected into the start normal plane
-        const target = baseX.clone().sub(Zs[0].clone().multiplyScalar(baseX.dot(Zs[0])));
-        if (target.lengthSq() > 1e-14) {
-          const t = target.normalize();
-          const c = Xs[0].dot(t);
-          const s = Ys[0].dot(t);
-          const bias = Math.atan2(s, c);
-          if (Math.abs(bias) > 1e-8) {
-            const rotXY = (i) => {
-              const cx = Math.cos(bias), sx = Math.sin(bias);
-              const Xi = Xs[i], Yi = Ys[i];
-              const Xr = new THREE.Vector3(
-                Xi.x * cx + Yi.x * sx,
-                Xi.y * cx + Yi.y * sx,
-                Xi.z * cx + Yi.z * sx
-              );
-              const Yr = new THREE.Vector3(
-                -Xi.x * sx + Yi.x * cx,
-                -Xi.y * sx + Yi.y * cx,
-                -Xi.z * sx + Yi.z * cx
-              );
-              Xs[i] = Xr.normalize(); Ys[i] = Yr.normalize();
-            };
-            for (let i = 0; i < Xs.length; i++) rotXY(i);
-          }
-        }
-        // Enforce that start-frame Y points roughly along the original face normal
-        // (keeps the profile on the intended side at the path start and propagates along the path)
-        const y0dot = Ys[0].dot(baseZ);
-        if (y0dot < 0) {
-          for (let i = 0; i < Xs.length; i++) { Xs[i].multiplyScalar(-1); Ys[i].multiplyScalar(-1); }
-          dlog('Frames', 'flipped XY to align Y with face normal', { y0dot: _round(y0dot) });
-          djson('FramesAlignY', { y0dot: _round(y0dot) });
-        }
-        if (sweepDebugEnabled()) {
-          const pathDbg = P.map((v,i)=>({ i, p:[+v.x.toFixed(4),+v.y.toFixed(4),+v.z.toFixed(4)],
-            X:[+Xs[i].x.toFixed(4),+Xs[i].y.toFixed(4),+Xs[i].z.toFixed(4)],
-            Y:[+Ys[i].x.toFixed(4),+Ys[i].y.toFixed(4),+Ys[i].z.toFixed(4)],
-            Z:[+Zs[i].x.toFixed(4),+Zs[i].y.toFixed(4),+Zs[i].z.toFixed(4)] }));
-          const framesMeta = { anchorWorld: _v3(anchorWorld), baseOriginW: _v3(baseOriginW), baseX: _v3(baseX), baseY: _v3(baseY), flips: pathDbg.slice(1).filter((f,i)=> Xs[i].dot(Xs[i+1])<0).length };
-          dlog('Frames', 'computed frames', framesMeta);
-          console.table(pathDbg);
-          console.table(dbgFrames);
-          djson('Frames', { meta: framesMeta, rows: pathDbg });
-          djson('FramesDetail', dbgFrames);
-        }
-        // Frame origins sit on the path points so the path passes through the anchor
-        frames = P.map((_, i) => ({ origin: P[i].clone(), X: Xs[i], Y: Ys[i], Z: Zs[i] }));
-
-        // UV mapping from original profile basis at baseOriginW
-        const uvCache = new Map(); // key(point as string) -> [u,v]
-        const uvOf = (pArr) => {
-          const k = key(pArr);
-          const cached = uvCache.get(k);
-          if (cached) return cached;
-          const v = new THREE.Vector3(pArr[0] - baseOriginW.x, pArr[1] - baseOriginW.y, pArr[2] - baseOriginW.z);
-          const u = v.dot(baseX);
-          const w = v.dot(baseY);
-          const uv = [u, w];
-          uvCache.set(k, uv);
-          return uv;
-        };
-
-        // Anchor profile to the path start: pick the outer-loop point nearest to P0
-        let anchorU = 0, anchorV = 0;
-        const outerLoop = boundaryLoops.find(l => !l.isHole) || boundaryLoops[0];
-        const outerPts = Array.isArray(outerLoop?.pts) ? outerLoop.pts : outerLoop;
-        if (Array.isArray(outerPts) && outerPts.length) {
-          let bestD2 = Infinity; let best = outerPts[0];
-          const P0 = frames[0].origin;
-          for (const p of outerPts) {
-            const dx = p[0]-P0.x, dy=p[1]-P0.y, dz=p[2]-P0.z; const d2 = dx*dx + dy*dy + dz*dz;
-            if (d2 < bestD2) { bestD2 = d2; best = p; }
-          }
-          const aUV = uvOf(best); anchorU = aUV[0]; anchorV = aUV[1];
-          // If anchor is too close to base origin (ill-defined), choose farthest point instead
-          const mag2 = anchorU*anchorU + anchorV*anchorV;
-          if (mag2 < 1e-16) {
-            let farD = -1; let far = best;
-            for (const p of outerPts) { const uv = uvOf(p); const d = (uv[0]-anchorU)*(uv[0]-anchorU) + (uv[1]-anchorV)*(uv[1]-anchorV); if (d > farD) { farD = d; far = p; } }
-            const uvF = uvOf(far); anchorU = uvF[0]; anchorV = uvF[1];
-          }
-        }
-
-        // Side-of-path lock: use the anchor vector (non-zero by construction)
-        const lockU = anchorU, lockV = anchorV;
-        if ((lockU*lockU + lockV*lockV) > 1e-20) {
-          for (let i = 1; i < frames.length; i++) {
-            const prevVec = new THREE.Vector3().addScaledVector(frames[i - 1].X, lockU).addScaledVector(frames[i - 1].Y, lockV);
-            const currVec = new THREE.Vector3().addScaledVector(frames[i].X, lockU).addScaledVector(frames[i].Y, lockV);
-            const lp = prevVec.lengthSq(), lc = currVec.lengthSq();
-            if (lp > 1e-24 && lc > 1e-24) {
-              if (currVec.normalize().dot(prevVec.normalize()) < 0) { frames[i].X.multiplyScalar(-1); frames[i].Y.multiplyScalar(-1); }
-            }
-          }
-        }
-
-        // Helper to place a base boundary point at segment index
-        var placeAt = (pArr, segIndex) => {
-          const uv = uvOf(pArr);
-          const f = frames[segIndex];
-          const du = uv[0] - anchorU;
-          const dv = uv[1] - anchorV;
-          const x = f.origin.x + f.X.x * du + f.Y.x * dv;
-          const y = f.origin.y + f.X.y * du + f.Y.y * dv;
-          const z = f.origin.z + f.X.z * du + f.Y.z * dv;
-          return [x, y, z];
-        };
-        const f0 = frames[0];
-        dlog('Anchor', 'uv and start frame', { anchorU, anchorV, frame0: f0 });
-        djson('Anchor', { anchorU, anchorV, frame0: { origin: _v3(f0.origin), X: _v3(f0.X), Y: _v3(f0.Y), Z: _v3(f0.Z) } });
-      }
+      const frames = pathAlignCtx ? pathAlignCtx.frames : null;
+      const placeAt = pathAlignCtx ? pathAlignCtx.placeAt : null;
 
       // Deduplicate per-boundary segments so each undirected edge [A,B]
       // emits exactly one side-wall ribbon. This avoids duplicate walls when
@@ -1193,7 +1276,7 @@ export class Sweep extends FacesSolid {
           }
         } else {
           // Path sweep
-            if (mode === 'pathAlign' && frames) {
+            if (mode === 'pathAlign' && frames && placeAt) {
               for (let seg = 0; seg < offsets.length - 1; seg++) {
                 for (let i = 0; i < base.length - 1; i++) {
                 const a = base[i];
@@ -1244,7 +1327,7 @@ export class Sweep extends FacesSolid {
         }
       }
       // Build start/end caps for pathAlign using initial and final frames
-      if (doPathSweep && mode === 'pathAlign' && frames) {
+      if (doPathSweep && mode === 'pathAlign' && frames && placeAt) {
         const buildCap = (frameIndex, capName) => {
           const frame = frames[frameIndex];
           // Map loops using the same placeAt used for walls so vertices match exactly
@@ -1377,85 +1460,14 @@ export class Sweep extends FacesSolid {
             }
           } else {
             // Path-based
-            if (mode === 'pathAlign' && doPathSweep) {
-              // Build frames aligned to path tangents and UV from initial frame
-              const P = pathPts.map(p => new THREE.Vector3(p[0], p[1], p[2]));
-              const upRef = (typeof face.getAverageNormal === 'function') ? face.getAverageNormal().clone() : new THREE.Vector3(0,0,1);
-              if (upRef.lengthSq() < 1e-20) upRef.set(0,0,1);
-              upRef.normalize();
-              const T = P.map((_, i) => (i < P.length - 1 ? P[i + 1].clone().sub(P[i]).normalize() : P[i].clone().sub(P[i - 1] || P[i]).normalize()));
-              // Pick the edge polyline point nearest to the start of the path
-              // and use it as a stable reference for initial frame orientation.
-              let bestIndex = 0; let bestRefD2 = Infinity;
-              for (let i = 0; i < pA.length; i++) {
-                const dx = pA[i][0] - P[0].x, dy = pA[i][1] - P[0].y, dz = pA[i][2] - P[0].z;
-                const d2 = dx*dx + dy*dy + dz*dz; if (d2 < bestRefD2) { bestRefD2 = d2; bestIndex = i; }
-              }
-              const ref = new THREE.Vector3(pA[bestIndex][0], pA[bestIndex][1], pA[bestIndex][2]).sub(P[0]);
-              const Xs = []; const Ys = []; const Zs = [];
-              for (let i = 0; i < P.length; i++) {
-                const z = T[i].clone().normalize();
-                let x = ref.clone().sub(z.clone().multiplyScalar(ref.dot(z)));
-                if (x.lengthSq() < 1e-14) {
-                  if (i > 0) x = Xs[i - 1].clone(); else x = new THREE.Vector3().crossVectors(upRef, z);
-                }
-                x.normalize();
-                const t = new THREE.Vector3(pA[Math.min(bestIndex+1, pA.length-1)][0]-pA[bestIndex][0], pA[Math.min(bestIndex+1, pA.length-1)][1]-pA[bestIndex][1], pA[Math.min(bestIndex+1, pA.length-1)][2]-pA[bestIndex][2]);
-                const tp = t.sub(z.clone().multiplyScalar(t.dot(z)));
-                if (tp.lengthSq() > 1e-14) {
-                  if (x.dot(tp.normalize()) < 0) x.multiplyScalar(-1);
-                } else if (i > 0 && x.dot(Xs[i - 1]) < 0) {
-                  x.multiplyScalar(-1);
-                }
-                const y = new THREE.Vector3().crossVectors(z, x).normalize();
-                Xs[i] = x; Ys[i] = y; Zs[i] = z;
-              }
-              // Bias rotation at start to align with base edge direction
-              const baseDir = new THREE.Vector3(pA[Math.min(bestIndex+1, pA.length-1)][0]-pA[bestIndex][0], pA[Math.min(bestIndex+1, pA.length-1)][1]-pA[bestIndex][1], pA[Math.min(bestIndex+1, pA.length-1)][2]-pA[bestIndex][2]).normalize();
-              const tgt = baseDir.sub(Zs[0].clone().multiplyScalar(baseDir.dot(Zs[0])));
-              if (tgt.lengthSq()>1e-14){
-                const t = tgt.normalize();
-                const c = Xs[0].dot(t), s = Ys[0].dot(t); const bias = Math.atan2(s,c);
-                if (Math.abs(bias)>1e-8){
-                  const cx=Math.cos(bias), sx=Math.sin(bias);
-                  for (let i=0;i<Xs.length;i++){
-                    const Xi=Xs[i], Yi=Ys[i];
-                    const Xr=new THREE.Vector3(Xi.x*cx+Yi.x*sx, Xi.y*cx+Yi.y*sx, Xi.z*cx+Yi.z*sx);
-                    const Yr=new THREE.Vector3(-Xi.x*sx+Yi.x*cx, -Xi.y*sx+Yi.y*cx, -Xi.z*sx+Yi.z*cx);
-                    Xs[i]=Xr.normalize(); Ys[i]=Yr.normalize();
-                  }
-                }
-              }
-              const framesE = P.map((_, i) => ({ origin: P[i].clone(), X: Xs[i], Y: Ys[i] }));
-              // Side-of-path lock using edge polyline centroid in initial frame
-              let refU = 0, refV = 0; const m = pA.length; if (m>0){
-                for (const p of pA){ const v = new THREE.Vector3(p[0]-framesE[0].origin.x, p[1]-framesE[0].origin.y, p[2]-framesE[0].origin.z); refU += v.dot(framesE[0].X); refV += v.dot(framesE[0].Y); }
-                refU/=m; refV/=m;
-                for (let i=1;i<framesE.length;i++){ const prev=new THREE.Vector3().addScaledVector(framesE[i-1].X,refU).addScaledVector(framesE[i-1].Y,refV).normalize(); const cur=new THREE.Vector3().addScaledVector(framesE[i].X,refU).addScaledVector(framesE[i].Y,refV).normalize(); if (cur.dot(prev)<0){ framesE[i].X.multiplyScalar(-1); framesE[i].Y.multiplyScalar(-1); } }
-              }
-              const uv = pA.map(p => {
-                const v = new THREE.Vector3(p[0] - framesE[0].origin.x, p[1] - framesE[0].origin.y, p[2] - framesE[0].origin.z);
-                return [v.dot(framesE[0].X), v.dot(framesE[0].Y)];
-              });
-              // Anchor to nearest polyline point to P0 so path passes through it
-              let aU = 0, aV = 0, best = 0, bestD2 = Infinity;
-              for (let i=0;i<pA.length;i++){
-                const dx = pA[i][0]-framesE[0].origin.x, dy=pA[i][1]-framesE[0].origin.y, dz=pA[i][2]-framesE[0].origin.z;
-                const d2 = dx*dx + dy*dy + dz*dz; if (d2 < bestD2){ bestD2 = d2; best = i; }
-              }
-              aU = uv[best][0]; aV = uv[best][1];
-              // Use anchor (aU,aV) as lock vector for side-of-path
-              for (let i=1;i<framesE.length;i++){
-                const prev = new THREE.Vector3().addScaledVector(framesE[i-1].X, aU).addScaledVector(framesE[i-1].Y, aV);
-                const curr = new THREE.Vector3().addScaledVector(framesE[i].X, aU).addScaledVector(framesE[i].Y, aV);
-                if (prev.lengthSq()>1e-24 && curr.lengthSq()>1e-24 && curr.normalize().dot(prev.normalize())<0){ framesE[i].X.multiplyScalar(-1); framesE[i].Y.multiplyScalar(-1); }
-              }
+            if (mode === 'pathAlign' && doPathSweep && pathAlignCtx && pathAlignCtx.placeAt) {
+              const placeAtEdge = pathAlignCtx.placeAt;
               for (let seg = 0; seg < offsets.length - 1; seg++) {
                 for (let i = 0; i < n - 1; i++) {
-                  const A0 = [framesE[seg].origin.x + framesE[seg].X.x * (uv[i][0]-aU) + framesE[seg].Y.x * (uv[i][1]-aV), framesE[seg].origin.y + framesE[seg].X.y * (uv[i][0]-aU) + framesE[seg].Y.y * (uv[i][1]-aV), framesE[seg].origin.z + framesE[seg].X.z * (uv[i][0]-aU) + framesE[seg].Y.z * (uv[i][1]-aV)];
-                  const B0 = [framesE[seg].origin.x + framesE[seg].X.x * (uv[i+1][0]-aU) + framesE[seg].Y.x * (uv[i+1][1]-aV), framesE[seg].origin.y + framesE[seg].X.y * (uv[i+1][0]-aU) + framesE[seg].Y.y * (uv[i+1][1]-aV), framesE[seg].origin.z + framesE[seg].X.z * (uv[i+1][0]-aU) + framesE[seg].Y.z * (uv[i+1][1]-aV)];
-                  const A1 = [framesE[seg+1].origin.x + framesE[seg+1].X.x * (uv[i][0]-aU) + framesE[seg+1].Y.x * (uv[i][1]-aV), framesE[seg+1].origin.y + framesE[seg+1].X.y * (uv[i][0]-aU) + framesE[seg+1].Y.y * (uv[i][1]-aV), framesE[seg+1].origin.z + framesE[seg+1].X.z * (uv[i][0]-aU) + framesE[seg+1].Y.z * (uv[i][1]-aV)];
-                  const B1 = [framesE[seg+1].origin.x + framesE[seg+1].X.x * (uv[i+1][0]-aU) + framesE[seg+1].Y.x * (uv[i+1][1]-aV), framesE[seg+1].origin.y + framesE[seg+1].X.y * (uv[i+1][0]-aU) + framesE[seg+1].Y.y * (uv[i+1][1]-aV), framesE[seg+1].origin.z + framesE[seg+1].X.z * (uv[i+1][0]-aU) + framesE[seg+1].Y.z * (uv[i+1][1]-aV)];
+                  const A0 = placeAtEdge(pA[i], seg);
+                  const B0 = placeAtEdge(pA[i + 1], seg);
+                  const A1 = placeAtEdge(pA[i], seg + 1);
+                  const B1 = placeAtEdge(pA[i + 1], seg + 1);
                   addQuad(name, A0, B0, B1, A1, isHole);
                 }
               }
@@ -1480,35 +1492,38 @@ export class Sweep extends FacesSolid {
         }
       }
       // If we are in pathAlign mode here, also build start/end caps from face geometry via frames
-      if (doPathSweep && mode === 'pathAlign') {
-        // Build frames aligned to path
-        const P = pathPts.map(p => new THREE.Vector3(p[0], p[1], p[2]));
-        const upRef = (typeof face.getAverageNormal === 'function') ? face.getAverageNormal().clone() : new THREE.Vector3(0,0,1);
-        if (upRef.lengthSq() < 1e-20) upRef.set(0,0,1);
-        upRef.normalize();
-        const T = P.map((_, i) => (i < P.length - 1 ? P[i + 1].clone().sub(P[i]).normalize() : P[i].clone().sub(P[i - 1] || P[i]).normalize()));
-        const Z0 = T[0].clone().normalize();
-        let X0 = new THREE.Vector3().crossVectors(upRef, Z0); if (X0.lengthSq() < 1e-12) { const alt = Math.abs(Z0.z) < 0.9 ? new THREE.Vector3(0,0,1) : new THREE.Vector3(1,0,0); X0 = new THREE.Vector3().crossVectors(alt, Z0); }
-        X0.normalize(); const Y0 = new THREE.Vector3().crossVectors(Z0, X0).normalize();
-        const Xs=[X0], Ys=[Y0], Zs=[Z0];
-        for (let i=1;i<P.length;i++){ const z=T[i].clone().normalize(); let x=Xs[i-1].clone().sub(z.clone().multiplyScalar(Xs[i-1].dot(z))); if (x.lengthSq()<1e-14){ x=Ys[i-1].clone().sub(z.clone().multiplyScalar(Ys[i-1].dot(z))); if (x.lengthSq()<1e-14){ const tmp=Math.abs(z.z)<0.9? new THREE.Vector3(0,0,1): new THREE.Vector3(1,0,0); x=new THREE.Vector3().crossVectors(tmp,z);} } x.normalize(); const y=new THREE.Vector3().crossVectors(z,x).normalize(); Xs[i]=x; Ys[i]=y; Zs[i]=z; }
-        const framesF = P.map((_,i)=>({ origin:P[i].clone(), X: Xs[i], Y: Ys[i] }));
-        // Read face geometry world vertices once
-        const baseGeom = face.geometry; const posAttr = baseGeom && baseGeom.getAttribute && baseGeom.getAttribute('position'); if (posAttr){
-          const idxAttr = baseGeom.getIndex && baseGeom.getIndex(); const hasIndex = !!idxAttr;
-          const v = new THREE.Vector3(); const faceWorld = new Array(posAttr.count);
-          for (let i=0;i<posAttr.count;i++){ v.set(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)).applyMatrix4(face.matrixWorld); faceWorld[i] = [v.x,v.y,v.z]; }
-          const mapAt = (p, f)=>{ const d = new THREE.Vector3(p[0]-framesF[0].origin.x, p[1]-framesF[0].origin.y, p[2]-framesF[0].origin.z); const u = d.dot(framesF[0].X), w = d.dot(framesF[0].Y); return [f.origin.x + f.X.x*u + f.Y.x*w, f.origin.y + f.X.y*u + f.Y.y*w, f.origin.z + f.X.z*u + f.Y.z*w]; };
-          const addTriAt = (i0,i1,i2, fStart, fEnd)=>{
-            const p0=faceWorld[i0], p1=faceWorld[i1], p2=faceWorld[i2];
-            const s0 = mapAt(p0, fStart), s1 = mapAt(p1, fStart), s2 = mapAt(p2, fStart);
+      if (doPathSweep && mode === 'pathAlign' && pathAlignCtx && pathAlignCtx.placeAt) {
+        const placeAtCap = pathAlignCtx.placeAt;
+        const fStart = 0;
+        const fEnd = pathAlignCtx.frames.length - 1;
+        const baseGeom = face.geometry;
+        const posAttr = baseGeom && baseGeom.getAttribute && baseGeom.getAttribute('position');
+        if (posAttr) {
+          const idxAttr = baseGeom.getIndex && baseGeom.getIndex();
+          const hasIndex = !!idxAttr;
+          const v = new THREE.Vector3();
+          const faceWorld = new Array(posAttr.count);
+          for (let i = 0; i < posAttr.count; i++) {
+            v.set(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)).applyMatrix4(face.matrixWorld);
+            faceWorld[i] = [v.x, v.y, v.z];
+          }
+          const addTriAt = (i0, i1, i2) => {
+            const p0 = faceWorld[i0], p1 = faceWorld[i1], p2 = faceWorld[i2];
+            const s0 = placeAtCap(p0, fStart), s1 = placeAtCap(p1, fStart), s2 = placeAtCap(p2, fStart);
             this.addTriangle(startName, s0, s2, s1);
-            const e0 = mapAt(p0, fEnd), e1 = mapAt(p1, fEnd), e2 = mapAt(p2, fEnd);
+            const e0 = placeAtCap(p0, fEnd), e1 = placeAtCap(p1, fEnd), e2 = placeAtCap(p2, fEnd);
             this.addTriangle(endName, e0, e1, e2);
           };
-          const fStart = framesF[0], fEnd = framesF[framesF.length-1];
-          if (hasIndex) { for (let t=0;t<idxAttr.count;t+=3){ addTriAt(idxAttr.getX(t+0)>>>0, idxAttr.getX(t+1)>>>0, idxAttr.getX(t+2)>>>0, fStart, fEnd); } }
-          else { const triCount = (posAttr.count/3)|0; for (let t=0;t<triCount;t++){ addTriAt(3*t+0, 3*t+1, 3*t+2, fStart, fEnd); } }
+          if (hasIndex) {
+            for (let t = 0; t < idxAttr.count; t += 3) {
+              addTriAt(idxAttr.getX(t + 0) >>> 0, idxAttr.getX(t + 1) >>> 0, idxAttr.getX(t + 2) >>> 0);
+            }
+          } else {
+            const triCount = (posAttr.count / 3) >>> 0;
+            for (let t = 0; t < triCount; t++) {
+              addTriAt(3 * t + 0, 3 * t + 1, 3 * t + 2);
+            }
+          }
         }
       }
 
