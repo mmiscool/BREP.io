@@ -1890,7 +1890,7 @@ export class Viewer {
         }
     }
 
-    _computeSceneBounds({ reuse = false } = {}) {
+    _computeSceneBounds({ reuse = false, includeExcluded = false } = {}) {
         if (reuse && this._sceneBoundsCache) return this._sceneBoundsCache;
         const box = new THREE.Box3();
         const tmp = new THREE.Box3();
@@ -1900,7 +1900,9 @@ export class Viewer {
 
         const shouldSkip = (obj) => {
             const ud = obj?.userData;
-            return !!(ud?.excludeFromFit || ud?.axisHelper);
+            if (ud?.axisHelper) return true;
+            if (!includeExcluded && ud?.excludeFromFit) return true;
+            return false;
         };
         const visit = (obj, skipParent) => {
             if (!obj) return;
@@ -1940,7 +1942,7 @@ export class Viewer {
 
     _updateDepthRange({ reuseBounds = false } = {}) {
         if (!this.camera) return false;
-        const box = this._computeSceneBounds({ reuse: reuseBounds });
+        const box = this._computeSceneBounds({ reuse: reuseBounds, includeExcluded: true });
         if (!box) return false;
         try { this.camera.updateMatrixWorld(true); } catch { /* ignore */ }
 
