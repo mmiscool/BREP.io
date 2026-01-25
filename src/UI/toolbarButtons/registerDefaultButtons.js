@@ -19,8 +19,6 @@ export function registerDefaultToolbarButtons(viewer) {
   if (!viewer || typeof viewer.addToolbarButton !== 'function') return;
 
   const creators = [
-    createUndoButton,
-    createRedoButton,
     createSaveButton,
     createZoomToFitButton,
     createOrientToFaceButton,
@@ -33,6 +31,8 @@ export function registerDefaultToolbarButtons(viewer) {
     createAboutButton,
     createTestsButton,
     createScriptRunnerButton,
+    createUndoButton,
+    createRedoButton,
   ];
 
   for (const make of creators) {

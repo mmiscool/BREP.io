@@ -1803,30 +1803,6 @@ export class SketchMode3D {
       try { child.style.display = "none"; } catch { }
     }
 
-    const mkAction = ({ label, tooltip, onClick }) => {
-      const btn = toolbar.addCustomButton({
-        label,
-        title: tooltip,
-        onClick,
-      });
-      if (!btn) return null;
-      if (tooltip) btn.setAttribute("aria-label", tooltip);
-      if (label && label.length <= 2) btn.classList.add("mtb-icon");
-      this._toolbarButtons.push(btn);
-      return btn;
-    };
-
-    this._undoButtons.undo = mkAction({
-      label: "↶",
-      tooltip: "Undo (Ctrl+Z)",
-      onClick: () => this.undo(),
-    });
-    this._undoButtons.redo = mkAction({
-      label: "↷",
-      tooltip: "Redo (Ctrl+Y)",
-      onClick: () => this.redo(),
-    });
-
     const mk = ({ label, tool, tooltip }) => {
       const btn = toolbar.addCustomButton({
         label,
@@ -1853,6 +1829,28 @@ export class SketchMode3D {
       { label: "🔗", tool: "pickEdges", tooltip: "Link external edge" },
     ];
     buttons.forEach((btn) => mk(btn));
+    const mkAction = ({ label, tooltip, onClick }) => {
+      const btn = toolbar.addCustomButton({
+        label,
+        title: tooltip,
+        onClick,
+      });
+      if (!btn) return null;
+      if (tooltip) btn.setAttribute("aria-label", tooltip);
+      if (label && label.length <= 2) btn.classList.add("mtb-icon");
+      this._toolbarButtons.push(btn);
+      return btn;
+    };
+    this._undoButtons.undo = mkAction({
+      label: "↶",
+      tooltip: "Undo (Ctrl+Z)",
+      onClick: () => this.undo(),
+    });
+    this._undoButtons.redo = mkAction({
+      label: "↷",
+      tooltip: "Redo (Ctrl+Y)",
+      onClick: () => this.redo(),
+    });
     this.#refreshTopToolbarActive();
     this.#updateSketchUndoButtons();
   }
