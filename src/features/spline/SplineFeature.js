@@ -532,6 +532,14 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
       const rowEl = document.createElement("div");
       rowEl.className = "spw-point-row";
       rowEl.dataset.pointId = String(pt.id);
+      rowEl.addEventListener("click", (event) => {
+        if (event?.defaultPrevented) return;
+        const target = event?.target;
+        if (target && typeof target.closest === "function") {
+          if (target.closest("button")) return;
+        }
+        activatePoint(pt.id);
+      });
 
       // Header: title + actions
       const headerEl = document.createElement('div');
