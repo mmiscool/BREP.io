@@ -203,15 +203,16 @@ export class Sweep extends FacesSolid {
    * @param {'translate'|'rotate'|string} [opts.mode='translate'] Sweep mode
    * @param {string} [opts.name='Sweep'] Name of the resulting solid
    * @param {boolean} [opts.omitBaseCap=false] Whether to skip the base cap
+   * @param {number} [opts.twistAngle=0] Twist angle in degrees distributed along the path (pathAlign mode)
    */
-  constructor({ face, sweepPathEdges = [], distance = 1, distanceBack = 0, mode = 'translate', name = 'Sweep', omitBaseCap = false } = {}) {
+  constructor({ face, sweepPathEdges = [], distance = 1, distanceBack = 0, mode = 'translate', name = 'Sweep', omitBaseCap = false, twistAngle = 0 } = {}) {
     super({ name });
-    this.params = { face, distance, distanceBack, sweepPathEdges, mode, name, omitBaseCap };
+    this.params = { face, distance, distanceBack, sweepPathEdges, mode, name, omitBaseCap, twistAngle };
     this.generate();
   }
 
   generate() {
-    const { face, distance, distanceBack, sweepPathEdges, mode, omitBaseCap } = this.params;
+    const { face, distance, distanceBack, sweepPathEdges, mode, omitBaseCap, twistAngle } = this.params;
     if (!face || !face.geometry) return;
 
     // Clear any existing children (visualization) and reset authoring arrays
@@ -1008,14 +1009,16 @@ export class Sweep extends FacesSolid {
       return T;
     };
 
-    const computeRMFFrames = (P, baseX, baseY, baseZ) => {
+    const computeRMFFrames = (P, baseX, baseY, baseZ, tangents = null) => {
       if (!P || P.length < 2) return null;
-      const T = computePathTangents(P);
+      const T = (Array.isArray(tangents) && tangents.length === P.length)
+        ? tangents
+        : computePathTangents(P);
       const frames = new Array(P.length);
       let X = baseX.clone();
       let Y = baseY.clone();
       let Z = baseZ.clone();
-      frames[0] = { origin: P[0].clone(), X: X.clone(), Y: Y.clone(), Z: Z.clone() };
+      frames[0] = { origin: P[0].clone(), X: X.clone(), Y: Y.clone(), Z: Z.clone(), tangent: T[0]?.clone?.() };
       const EPS = 1e-12;
       for (let i = 1; i < P.length; i++) {
         const tPrev = T[i - 1];
@@ -1050,7 +1053,7 @@ export class Sweep extends FacesSolid {
           Y.applyQuaternion(q);
           Z.applyQuaternion(q);
         }
-        frames[i] = { origin: P[i].clone(), X: X.clone(), Y: Y.clone(), Z: Z.clone() };
+        frames[i] = { origin: P[i].clone(), X: X.clone(), Y: Y.clone(), Z: Z.clone(), tangent: T[i]?.clone?.() };
       }
       return frames;
     };
@@ -1061,12 +1064,13 @@ export class Sweep extends FacesSolid {
       const basis = computeProfileBasis(boundaryLoops, getFaceWorldPoints());
       if (!basis) return null;
       let { baseOriginW, baseX, baseY, baseZ, anchorWorld, outerPts } = basis;
-      const T0 = computePathTangents(P)[0];
+      const tangents = computePathTangents(P);
+      const T0 = tangents[0];
       if (T0 && baseZ && baseZ.dot(T0) < 0) {
         baseZ = baseZ.clone().multiplyScalar(-1);
         baseY = baseY.clone().multiplyScalar(-1);
       }
-      const frames = computeRMFFrames(P, baseX, baseY, baseZ);
+      const frames = computeRMFFrames(P, baseX, baseY, baseZ, tangents);
       if (!frames || frames.length < 2) return null;
 
       const P0 = P[0].clone();
@@ -1113,6 +1117,34 @@ export class Sweep extends FacesSolid {
               frames[i].Z.multiplyScalar(-1);
             }
           }
+        }
+      }
+
+      // Apply an optional user twist distributed by arc length so it is uniform
+      // along the path regardless of segment lengths.
+      const twistDeg = Number(twistAngle);
+      const twistRad = Number.isFinite(twistDeg) ? THREE.MathUtils.degToRad(twistDeg) : 0;
+      if (Math.abs(twistRad) > 1e-12 && frames.length >= 2) {
+        const cumulative = new Array(P.length);
+        cumulative[0] = 0;
+        let totalLen = 0;
+        for (let i = 1; i < P.length; i++) {
+          totalLen += P[i].distanceTo(P[i - 1]);
+          cumulative[i] = totalLen;
+        }
+        const invTotal = totalLen > 1e-12 ? (1 / totalLen) : 0;
+        const denom = Math.max(1, frames.length - 1);
+        for (let i = 0; i < frames.length; i++) {
+          const frac = invTotal > 0 ? (cumulative[i] * invTotal) : (i / denom);
+          const angle = twistRad * frac;
+          if (Math.abs(angle) <= 1e-12) continue;
+          const axis = (frames[i].tangent || tangents[i] || new THREE.Vector3(0, 0, 1)).clone();
+          if (axis.lengthSq() <= 1e-20) continue;
+          axis.normalize();
+          const q = new THREE.Quaternion().setFromAxisAngle(axis, angle);
+          frames[i].X.applyQuaternion(q);
+          frames[i].Y.applyQuaternion(q);
+          frames[i].Z.applyQuaternion(q);
         }
       }
 

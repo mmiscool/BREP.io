@@ -84,13 +84,21 @@ export class SweepFeature {
       removed.push(faceObj.parent);
     }
 
+    const twistAngleNum = Number(twistAngle);
+
     // Create the sweep solid
     const sweep = new BREP.Sweep({
       face: faceObj,
       sweepPathEdges: pathArr,
       mode: (orientationMode === 'pathAlign') ? 'pathAlign' : 'translate',
+      twistAngle: Number.isFinite(twistAngleNum) ? twistAngleNum : 0,
       name: this.inputParams.featureID
     });
+
+    sweep.collapseTinyTriangles(0.1);
+    sweep.simplify(0.1);
+
+
     // Build and show the solid. Let errors surface so we can debug if needed.
     sweep.visualize();
 
