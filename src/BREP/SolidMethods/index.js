@@ -38,6 +38,7 @@ export {
     removeOppositeSingleEdgeFaces,
     removeTinyBoundaryTriangles,
     collapseTinyTriangles,
+    cleanupTinyFaceIslands,
     remesh,
     splitSelfIntersectingTriangles,
     removeDegenerateTriangles,

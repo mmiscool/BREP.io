@@ -133,6 +133,7 @@ export class FilletFeature {
                 inflate: Number(this.inputParams.inflate) || 0,
                 debug: !!this.inputParams.debug,
                 showTangentOverlays: !!this.inputParams.showTangentOverlays,
+                cleanupTinyFaceIslandsArea: this.inputParams?.cleanupTinyFaceIslandsArea,
             });
         } catch (err) {
             console.error('[FilletFeature] Fillet threw an error; attempting to continue with debug solids.', {

@@ -756,6 +756,25 @@ export async function fillet(opts = {}) {
     console.warn('[Solid.fillet] simplify failed; continuing without simplification', { featureID, error: err?.message || err });
   }
 
+  // Reassign tiny disconnected islands within the same face label.
+  try {
+    const cleanupArea = (opts.cleanupTinyFaceIslandsArea === undefined)
+      ? 0.01
+      : Number(opts.cleanupTinyFaceIslandsArea);
+    if (Number.isFinite(cleanupArea) && cleanupArea > 0 && typeof result.cleanupTinyFaceIslands === 'function') {
+      const reassigned = await result.cleanupTinyFaceIslands(cleanupArea);
+      if (reassigned > 0) {
+        consoleLogReplacement('[Solid.fillet] cleanupTinyFaceIslands reassigned triangles', {
+          featureID,
+          cleanupArea,
+          reassigned,
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[Solid.fillet] cleanupTinyFaceIslands failed; continuing without face-island cleanup', { featureID, error: err?.message || err });
+  }
+
   const finalTriCount = Array.isArray(result?._triVerts) ? (result._triVerts.length / 3) : 0;
   const finalVertCount = Array.isArray(result?._vertProperties) ? (result._vertProperties.length / 3) : 0;
   if (!result || finalTriCount === 0 || finalVertCount === 0) {

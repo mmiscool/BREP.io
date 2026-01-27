@@ -615,6 +615,16 @@ export class Solid extends THREE.Group {
     }
 
     /**
+     * Reassign tiny disconnected islands within the same face label to the
+     * largest adjacent face by surface area.
+     * @param {number} size area threshold
+     * @returns {number} triangles reassigned
+     */
+    cleanupTinyFaceIslands(size) {
+        return SolidMethods.cleanupTinyFaceIslands.apply(this, arguments);
+    }
+
+    /**
      * Merge faces smaller than the given area into their largest neighbor.
      * @param {number} [maxArea=0.001] area threshold
      * @returns {this}
@@ -658,6 +668,7 @@ export class Solid extends THREE.Group {
      * @param {boolean} [options.showTangentOverlays=false] overlay tangency polylines on the helper tube for debugging/PMI
      * @param {boolean} [options.debug=false] enable builder debug aids
      * @param {string} [options.featureID='FILLET'] name prefix for generated solids
+     * @param {number} [options.cleanupTinyFaceIslandsArea=0.001] area threshold for face-island relabeling (<= 0 disables)
      * @returns {Promise<Solid>}
      */
     fillet(options = {}) {
