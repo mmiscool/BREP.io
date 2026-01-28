@@ -1041,6 +1041,53 @@ export function generateSTEP(solids, opts = {}) {
           const polyId = builder.add(`POLYLINE('${_safeStepName(name)}',(${pointRefs.join(',')}))`);
           curveItems.push(polyId);
         }
+
+        const auxEdges = Array.isArray(s?._auxEdges) ? s._auxEdges : [];
+        for (const aux of auxEdges) {
+          if (!aux) continue;
+          const auxName = aux?.name || 'CENTERLINE';
+          const isCenterline = !!aux?.centerline || (typeof auxName === 'string' && /centerline/i.test(auxName));
+          if (!isCenterline) continue;
+          const pts = Array.isArray(aux?.points) ? aux.points : [];
+          if (pts.length < 2) continue;
+
+          const polyPoints = [];
+          for (const p of pts) {
+            if (!Array.isArray(p) || p.length < 3) continue;
+            let x = p[0];
+            let y = p[1];
+            let z = p[2];
+            if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+            if (applyWorldTransform && worldMatrixElements && !aux?.polylineWorld) {
+              const t = _applyMatrix4(worldMatrixElements, x, y, z);
+              x = t[0]; y = t[1]; z = t[2];
+            }
+            polyPoints.push([x * scale, y * scale, z * scale]);
+          }
+          if (polyPoints.length < 2) continue;
+
+          if (aux?.closedLoop && polyPoints.length >= 2) {
+            const first = polyPoints[0];
+            const last = polyPoints[polyPoints.length - 1];
+            if (first[0] !== last[0] || first[1] !== last[1] || first[2] !== last[2]) {
+              polyPoints.push([first[0], first[1], first[2]]);
+            }
+          }
+
+          const pointRefs = [];
+          let invalid = false;
+          for (const pt of polyPoints) {
+            if (!pt || pt.length < 3) { invalid = true; break; }
+            const pointId = builder.add(
+              `CARTESIAN_POINT('',(${_fmtNumber(pt[0], precision)},${_fmtNumber(pt[1], precision)},${_fmtNumber(pt[2], precision)}))`,
+            );
+            pointRefs.push(`#${pointId}`);
+          }
+          if (invalid || pointRefs.length < 2) continue;
+          const name = edgeNameAllocator.allocate(auxName);
+          const polyId = builder.add(`POLYLINE('${_safeStepName(name)}',(${pointRefs.join(',')}))`);
+          curveItems.push(polyId);
+        }
       }
     } catch (err) {
       skipped.push(String(s?.name || `solid_${solidIdx + 1}`));
