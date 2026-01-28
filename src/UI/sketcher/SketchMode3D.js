@@ -2215,6 +2215,12 @@ export class SketchMode3D {
           this.#refreshContextBar();
         },
       });
+    const addCleanupButton = () =>
+      appendButton({
+        label: "🧹",
+        tooltip: "Remove unused points",
+        onClick: () => this.#cleanupUnusedPoints(),
+      });
     const addDeleteButton = () =>
       appendButton({
         label: "🗑",
@@ -2222,6 +2228,9 @@ export class SketchMode3D {
         variant: "danger",
         onClick: () => this.#deleteSelection(),
       });
+
+    // Always offer cleanup
+    addCleanupButton();
 
     // Constraint-specific actions
     const constraintItems = items.filter((i) => i.type === "constraint");
@@ -2369,6 +2378,58 @@ export class SketchMode3D {
       this.#rebuildSketchGraphics();
       this.#refreshContextBar();
     } catch { }
+  }
+
+  // Remove points not used by any geometry and with no constraints,
+  // or with only a single coincident/point-on-line constraint.
+  #cleanupUnusedPoints() {
+    const solver = this._solver;
+    const sketch = solver?.sketchObject;
+    if (!solver || !sketch) return;
+
+    const usedByGeo = new Set();
+    for (const g of sketch.geometries || []) {
+      if (!g || !Array.isArray(g.points)) continue;
+      for (const pid of g.points) usedByGeo.add(parseInt(pid));
+    }
+
+    const constraintsByPoint = new Map();
+    for (const c of sketch.constraints || []) {
+      if (!c || c.temporary || !Array.isArray(c.points)) continue;
+      for (const pid of c.points) {
+        const id = parseInt(pid);
+        if (!Number.isFinite(id)) continue;
+        const arr = constraintsByPoint.get(id);
+        if (arr) arr.push(c);
+        else constraintsByPoint.set(id, [c]);
+      }
+    }
+
+    const toRemove = [];
+    for (const p of sketch.points || []) {
+      const pid = parseInt(p.id);
+      if (!Number.isFinite(pid) || pid === 0) continue; // never remove origin
+      if (usedByGeo.has(pid)) continue;
+      const cons = constraintsByPoint.get(pid) || [];
+      if (cons.length === 0) {
+        toRemove.push(pid);
+        continue;
+      }
+      if (cons.length === 1) {
+        const t = cons[0]?.type;
+        if (t === "≡" || t === "⏛") toRemove.push(pid);
+      }
+    }
+
+    if (!toRemove.length) return;
+    for (const pid of toRemove) {
+      try { solver.removePointById?.(pid); } catch { }
+    }
+    try { solver.solveSketch("full"); } catch { }
+    this._selection.clear();
+    this.#rebuildSketchGraphics();
+    this.#refreshLists();
+    this.#refreshContextBar();
   }
 
   #reverseAngleConstraint(cid) {
