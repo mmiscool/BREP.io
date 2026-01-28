@@ -598,6 +598,19 @@ export class SketchMode3D {
         return;
       }
 
+      if (this._tool === "trim") {
+        const ghit = this.#hitTestGeometry(e);
+        if (ghit) {
+          const trimmed = this.#trimGeometry(ghit, e);
+          if (trimmed) {
+            this._selection.clear();
+          }
+          try { e.preventDefault(); e.stopImmediatePropagation?.(); e.stopPropagation(); } catch { }
+          consumed = true;
+        }
+        return;
+      }
+
       // Point tool: drop a new point directly on the sketch plane
       if (this._tool === "point") {
         const pid = this.#createPointAtCursor(e);
@@ -903,9 +916,12 @@ export class SketchMode3D {
     }
     // Passive hover highlighting
     {
-      // Edge picking cursor hint
+      // Edge/trim cursor hint
       if (this._tool === 'pickEdges') {
         const h = this.#hitTestSceneEdge(e);
+        try { this.viewer.renderer.domElement.style.cursor = h ? 'crosshair' : ''; } catch { }
+      } else if (this._tool === 'trim') {
+        const h = this.#hitTestGeometry(e);
         try { this.viewer.renderer.domElement.style.cursor = h ? 'crosshair' : ''; } catch { }
       }
       const pid = this.#hitTestPoint(e);
@@ -1967,6 +1983,7 @@ export class SketchMode3D {
     };
     const buttons = [
       { label: "👆", tool: "select", tooltip: "Select and edit sketch items" },
+      { label: "✂", tool: "trim", tooltip: "Trim curve" },
       { label: "⌖", tool: "point", tooltip: "Create point" },
       { label: "/", tool: "line", tooltip: "Create line" },
       { label: "☐", tool: "rect", tooltip: "Create rectangle" },
@@ -2648,6 +2665,831 @@ export class SketchMode3D {
     if (best && bestDist <= tol) return best;
     return null;
   }
+
+  #trimGeometry(hit, e) {
+    if (!this._solver) return false;
+    const s = this._solver.sketchObject;
+    if (!s) return false;
+    const geo = (s.geometries || []).find(g => g && g.id === parseInt(hit.id));
+    if (!geo) return false;
+    const uv = this.#pointerToPlaneUV(e);
+    if (!uv) return false;
+
+    const pointById = new Map((s.points || []).map((p) => [p.id, p]));
+    const target = this.#sampleGeometry(geo, pointById);
+    if (!target || !Array.isArray(target.samples) || target.samples.length < 2) return false;
+
+    const click = this.#closestParamOnSamples(uv, target.samples);
+    if (!click || !Number.isFinite(click.param)) return false;
+
+    const targetEndpoints = this.#getGeometryEndpoints(geo, pointById);
+    const intersections = [];
+    const cache = new Map();
+    let overlap = false;
+    let endpointTouch = false;
+    for (const other of (s.geometries || [])) {
+      if (!other || other.id === geo.id) continue;
+      let sample = cache.get(other.id);
+      if (!sample) {
+        sample = this.#sampleGeometry(other, pointById);
+        cache.set(other.id, sample);
+      }
+      if (!sample) continue;
+      this.#collectIntersections(target, sample, intersections, other);
+      if (!overlap && this.#isTrimOverlap(geo, other, pointById)) overlap = true;
+      if (!endpointTouch && targetEndpoints.length) {
+        if (this.#endpointsTouchSample(targetEndpoints, sample)) endpointTouch = true;
+      }
+    }
+
+    const bounds = this.#selectTrimBounds(intersections, click.param, target);
+    if (!bounds) {
+      if (overlap || endpointTouch) {
+        this._solver.removeGeometryById?.(geo.id);
+        this._selection.clear();
+        try { this._solver.solveSketch("full"); } catch { }
+        this.#rebuildSketchGraphics();
+        this.#refreshContextBar();
+        return true;
+      }
+      return false;
+    }
+
+    let trimmed = false;
+    if (geo.type === "line") trimmed = this.#trimLineGeometry(geo, bounds);
+    else if (geo.type === "circle") trimmed = this.#trimCircleGeometry(geo, bounds);
+    else if (geo.type === "arc") {
+      if (target.closed) trimmed = this.#trimCircleGeometry(geo, bounds);
+      else trimmed = this.#trimArcGeometry(geo, bounds);
+    }
+    else if (geo.type === "bezier") trimmed = this.#trimBezierGeometry(geo, bounds, target);
+
+    if (trimmed) {
+      this._selection.clear();
+      try { this._solver.solveSketch("full"); } catch { }
+      this.#rebuildSketchGraphics();
+      this.#refreshContextBar();
+    }
+    return trimmed;
+  }
+
+  #trimLineGeometry(geo, bounds) {
+    const s = this._solver?.sketchObject;
+    if (!s) return false;
+    const ids = Array.isArray(geo?.points) ? geo.points : [];
+    if (ids.length < 2) return false;
+    const p0 = s.points.find(p => p.id === ids[0]);
+    const p1 = s.points.find(p => p.id === ids[1]);
+    if (!p0 || !p1) return false;
+
+    const epsParam = 1e-5;
+    const usePrev = bounds.prev && bounds.prev.param > epsParam;
+    const useNext = bounds.next && bounds.next.param < 1 - epsParam;
+    if (!usePrev && !useNext) return false;
+    if (usePrev && useNext && (bounds.next.param - bounds.prev.param) <= epsParam) return false;
+
+    const pointAt = (t) => {
+      const x = p0.x + (p1.x - p0.x) * t;
+      const y = p0.y + (p1.y - p0.y) * t;
+      return { x, y };
+    };
+
+    const prevId = usePrev
+      ? this.#getOrCreatePointId(pointAt(bounds.prev.param))
+      : ids[0];
+    const nextId = useNext
+      ? this.#getOrCreatePointId(pointAt(bounds.next.param))
+      : ids[1];
+
+    const addLine = (aId, bId) => {
+      if (aId == null || bId == null || aId === bId) return false;
+      const a = s.points.find(p => p.id === aId);
+      const b = s.points.find(p => p.id === bId);
+      if (!a || !b) return false;
+      if (Math.hypot(a.x - b.x, a.y - b.y) < 1e-7) return false;
+      this.#addGeometry("line", [aId, bId], geo);
+      return true;
+    };
+
+    let added = false;
+    if (usePrev) added = addLine(ids[0], prevId) || added;
+    if (useNext) added = addLine(nextId, ids[1]) || added;
+
+    if (usePrev) this.#applyTrimIntersectionConstraint(prevId, bounds.prev);
+    if (useNext) this.#applyTrimIntersectionConstraint(nextId, bounds.next);
+
+    if (added) this._solver.removeGeometryById?.(geo.id);
+    return added;
+  }
+
+  #trimArcGeometry(geo, bounds) {
+    const s = this._solver?.sketchObject;
+    if (!s) return false;
+    const ids = Array.isArray(geo?.points) ? geo.points : [];
+    if (ids.length < 3) return false;
+    const pc = s.points.find(p => p.id === ids[0]);
+    const pa = s.points.find(p => p.id === ids[1]);
+    const pb = s.points.find(p => p.id === ids[2]);
+    if (!pc || !pa || !pb) return false;
+
+    const r = Math.hypot(pa.x - pc.x, pa.y - pc.y);
+    if (!Number.isFinite(r) || r < 1e-9) return false;
+
+    const epsParam = 1e-5;
+    const usePrev = bounds.prev && bounds.prev.param > epsParam;
+    const useNext = bounds.next && bounds.next.param < 1 - epsParam;
+    if (!usePrev && !useNext) return false;
+    if (usePrev && useNext && (bounds.next.param - bounds.prev.param) <= epsParam) return false;
+
+    const pointOnCircle = (inter) => {
+      const ang = Math.atan2(inter.y - pc.y, inter.x - pc.x);
+      return {
+        x: pc.x + r * Math.cos(ang),
+        y: pc.y + r * Math.sin(ang),
+      };
+    };
+
+    const prevId = usePrev ? this.#getOrCreatePointId(pointOnCircle(bounds.prev)) : ids[1];
+    const nextId = useNext ? this.#getOrCreatePointId(pointOnCircle(bounds.next)) : ids[2];
+
+    const addArc = (startId, endId) => {
+      if (startId == null || endId == null || startId === endId) return false;
+      const a = s.points.find(p => p.id === startId);
+      const b = s.points.find(p => p.id === endId);
+      if (!a || !b) return false;
+      if (Math.hypot(a.x - b.x, a.y - b.y) < 1e-7) return false;
+      this.#addGeometry("arc", [ids[0], startId, endId], geo);
+      return true;
+    };
+
+    let added = false;
+    if (usePrev) added = addArc(ids[1], prevId) || added;
+    if (useNext) added = addArc(nextId, ids[2]) || added;
+
+    if (usePrev) {
+      this.#applyTrimIntersectionConstraint(prevId, bounds.prev);
+      this.#ensurePointOnArcConstraint(geo, prevId);
+    }
+    if (useNext) {
+      this.#applyTrimIntersectionConstraint(nextId, bounds.next);
+      this.#ensurePointOnArcConstraint(geo, nextId);
+    }
+
+    if (added) this._solver.removeGeometryById?.(geo.id);
+    return added;
+  }
+
+  #trimCircleGeometry(geo, bounds) {
+    const s = this._solver?.sketchObject;
+    if (!s) return false;
+    const ids = Array.isArray(geo?.points) ? geo.points : [];
+    if (ids.length < 2) return false;
+    const pc = s.points.find(p => p.id === ids[0]);
+    const pr = s.points.find(p => p.id === ids[1]);
+    if (!pc || !pr) return false;
+    const r = Math.hypot(pr.x - pc.x, pr.y - pc.y);
+    if (!Number.isFinite(r) || r < 1e-9) return false;
+
+    if (!bounds.prev || !bounds.next) return false;
+    const maxParam = bounds.maxParam || 1;
+    const delta = (bounds.next.param - bounds.prev.param + maxParam) % maxParam;
+    if (delta < 1e-5 || delta > maxParam - 1e-5) return false;
+
+    const pointOnCircle = (inter) => {
+      const ang = Math.atan2(inter.y - pc.y, inter.x - pc.x);
+      return {
+        x: pc.x + r * Math.cos(ang),
+        y: pc.y + r * Math.sin(ang),
+      };
+    };
+
+    const prevId = this.#getOrCreatePointId(pointOnCircle(bounds.prev));
+    const nextId = this.#getOrCreatePointId(pointOnCircle(bounds.next));
+    if (prevId == null || nextId == null || prevId === nextId) return false;
+
+    const newId = this.#addGeometry("arc", [ids[0], nextId, prevId], geo);
+    if (!newId) return false;
+    this.#applyTrimIntersectionConstraint(prevId, bounds.prev);
+    this.#applyTrimIntersectionConstraint(nextId, bounds.next);
+    this.#ensurePointOnArcConstraint(geo, prevId);
+    this.#ensurePointOnArcConstraint(geo, nextId);
+    this._solver.removeGeometryById?.(geo.id);
+    return true;
+  }
+
+  #trimBezierGeometry(geo, bounds, target) {
+    const s = this._solver?.sketchObject;
+    if (!s || !geo || !Array.isArray(geo.points)) return false;
+    const segCount = target?.segCount || Math.floor((geo.points.length - 1) / 3);
+    if (segCount < 1) return false;
+
+    const prevInt = bounds.prev || null;
+    const nextInt = bounds.next || null;
+    if (!prevInt && !nextInt) return false;
+    if (prevInt && nextInt && (nextInt.param - prevInt.param) <= 1e-5) return false;
+
+    const boundaries = [];
+    if (prevInt) {
+      const segIndex = Math.min(segCount - 1, Math.max(0, Math.floor(prevInt.param)));
+      const t = prevInt.param - segIndex;
+      boundaries.push({ kind: "prev", segIndex, t, pos: prevInt.param });
+    }
+    if (nextInt) {
+      const segIndex = Math.min(segCount - 1, Math.max(0, Math.floor(nextInt.param)));
+      const t = nextInt.param - segIndex;
+      boundaries.push({ kind: "next", segIndex, t, pos: nextInt.param });
+    }
+    boundaries.sort((a, b) => a.pos - b.pos);
+
+    let splitsBefore = 0;
+    if (boundaries.length === 2 && boundaries[0].segIndex === boundaries[1].segIndex) {
+      const first = boundaries[0];
+      const second = boundaries[1];
+      if (second.t - first.t < 1e-5) return false;
+      const res1 = this.#splitBezierAt(geo, first.segIndex + splitsBefore, first.t);
+      if (!res1) return false;
+      first.anchorIndex = res1.anchorIndex;
+      splitsBefore += 1;
+      const t2 = (second.t - first.t) / (1 - first.t);
+      const res2 = this.#splitBezierAt(geo, first.segIndex + splitsBefore, t2);
+      if (!res2) return false;
+      second.anchorIndex = res2.anchorIndex;
+    } else {
+      for (const b of boundaries) {
+        const res = this.#splitBezierAt(geo, b.segIndex + splitsBefore, b.t);
+        if (!res) return false;
+        b.anchorIndex = res.anchorIndex;
+        splitsBefore += 1;
+      }
+    }
+
+    const totalSegs = Math.floor((geo.points.length - 1) / 3);
+    const prevBoundary = boundaries.find(b => b.kind === "prev");
+    const nextBoundary = boundaries.find(b => b.kind === "next");
+    const prevSeg = prevBoundary ? Math.floor(prevBoundary.anchorIndex / 3) : 0;
+    const nextSeg = nextBoundary ? Math.floor(nextBoundary.anchorIndex / 3) : totalSegs;
+    if (nextSeg <= prevSeg) return false;
+
+    const keepRanges = [];
+    if (prevSeg > 0) keepRanges.push([0, prevSeg]);
+    if (nextSeg < totalSegs) keepRanges.push([nextSeg, totalSegs]);
+
+    let added = false;
+    for (const [a, b] of keepRanges) {
+      if (b - a < 1) continue;
+      const startIdx = a * 3;
+      const endIdx = b * 3;
+      const pts = geo.points.slice(startIdx, endIdx + 1);
+      if (pts.length >= 4) {
+        this.#addGeometry("bezier", pts, geo);
+        added = true;
+      }
+    }
+
+    if (added) this._solver.removeGeometryById?.(geo.id);
+    return added;
+  }
+
+  #getGeometryEndpoints(geo, pointById) {
+    if (!geo || !pointById || !Array.isArray(geo.points)) return [];
+    if (geo.type === "line" && geo.points.length >= 2) {
+      const a = pointById.get(geo.points[0]);
+      const b = pointById.get(geo.points[1]);
+      return [a, b].filter(Boolean);
+    }
+    if (geo.type === "arc" && geo.points.length >= 3) {
+      const a = pointById.get(geo.points[1]);
+      const b = pointById.get(geo.points[2]);
+      return [a, b].filter(Boolean);
+    }
+    return [];
+  }
+
+  #endpointsTouchSample(endpoints, sample) {
+    if (!Array.isArray(endpoints) || endpoints.length === 0) return false;
+    const samples = sample?.samples;
+    if (!Array.isArray(samples) || samples.length < 2) return false;
+    const tol = this.#sampleTol(samples);
+    for (const pt of endpoints) {
+      if (pt && this.#pointNearSamples(pt, samples, tol)) return true;
+    }
+    return false;
+  }
+
+  #sampleTol(samples) {
+    if (!Array.isArray(samples) || samples.length === 0) return 1e-3;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const s of samples) {
+      if (!s) continue;
+      if (s.x < minX) minX = s.x;
+      if (s.y < minY) minY = s.y;
+      if (s.x > maxX) maxX = s.x;
+      if (s.y > maxY) maxY = s.y;
+    }
+    const dx = maxX - minX;
+    const dy = maxY - minY;
+    const diag = Math.hypot(dx, dy);
+    if (!Number.isFinite(diag) || diag < 1e-9) return 1e-3;
+    return Math.max(1e-5, Math.min(1e-2, diag * 1e-3));
+  }
+
+  #pointNearSamples(pt, samples, tol) {
+    if (!pt || !Array.isArray(samples) || samples.length < 2) return false;
+    const px = pt.x, py = pt.y;
+    for (let i = 0; i < samples.length - 1; i++) {
+      const a = samples[i];
+      const b = samples[i + 1];
+      if (!a || !b) continue;
+      const d = this.#distancePointToSeg(a.x, a.y, b.x, b.y, px, py);
+      if (d <= tol) return true;
+    }
+    return false;
+  }
+
+  #distancePointToSeg(ax, ay, bx, by, px, py) {
+    const vx = bx - ax;
+    const vy = by - ay;
+    const wx = px - ax;
+    const wy = py - ay;
+    const L2 = vx * vx + vy * vy || 1e-12;
+    let t = (wx * vx + wy * vy) / L2;
+    if (t < 0) t = 0; else if (t > 1) t = 1;
+    const nx = ax + vx * t;
+    const ny = ay + vy * t;
+    return Math.hypot(px - nx, py - ny);
+  }
+
+  #isTrimOverlap(targetGeo, otherGeo, pointById) {
+    if (!targetGeo || !otherGeo || !pointById) return false;
+    if (targetGeo.type === "line" && otherGeo.type === "line") {
+      return this.#lineLiesOnLine(targetGeo, otherGeo, pointById);
+    }
+    if ((targetGeo.type === "arc" || targetGeo.type === "circle") &&
+      (otherGeo.type === "arc" || otherGeo.type === "circle")) {
+      return this.#arcLiesOnArc(targetGeo, otherGeo, pointById);
+    }
+    return false;
+  }
+
+  #lineLiesOnLine(targetGeo, otherGeo, pointById) {
+    const tIds = Array.isArray(targetGeo.points) ? targetGeo.points : [];
+    const oIds = Array.isArray(otherGeo.points) ? otherGeo.points : [];
+    if (tIds.length < 2 || oIds.length < 2) return false;
+    const t0 = pointById.get(tIds[0]);
+    const t1 = pointById.get(tIds[1]);
+    const o0 = pointById.get(oIds[0]);
+    const o1 = pointById.get(oIds[1]);
+    if (!t0 || !t1 || !o0 || !o1) return false;
+
+    const dx = o1.x - o0.x;
+    const dy = o1.y - o0.y;
+    const len2 = dx * dx + dy * dy;
+    if (len2 < 1e-12) return false;
+    const len = Math.sqrt(len2);
+    const tol = Math.max(1e-5, Math.min(1e-2, len * 1e-3));
+    const eps = 1e-4;
+
+    const onOther = (p) => {
+      const t = ((p.x - o0.x) * dx + (p.y - o0.y) * dy) / len2;
+      if (t < -eps || t > 1 + eps) return false;
+      const cx = o0.x + t * dx;
+      const cy = o0.y + t * dy;
+      return Math.hypot(p.x - cx, p.y - cy) <= tol;
+    };
+
+    return onOther(t0) && onOther(t1);
+  }
+
+  #arcLiesOnArc(targetGeo, otherGeo, pointById) {
+    const tInfo = this.#arcInfo(targetGeo, pointById);
+    const oInfo = this.#arcInfo(otherGeo, pointById);
+    if (!tInfo || !oInfo) return false;
+    const r = Math.max(tInfo.r, oInfo.r);
+    const tol = Math.max(1e-5, Math.min(1e-2, r * 1e-3));
+    if (Math.hypot(tInfo.cx - oInfo.cx, tInfo.cy - oInfo.cy) > tol) return false;
+    if (Math.abs(tInfo.r - oInfo.r) > tol) return false;
+    if (oInfo.full) return true;
+    if (tInfo.full) return false;
+
+    const endAng = this.#normAngle(tInfo.a0 + tInfo.d);
+    return this.#angleOnArc(oInfo, tInfo.a0) && this.#angleOnArc(oInfo, endAng);
+  }
+
+  #arcInfo(geo, pointById) {
+    if (!geo || !pointById || !Array.isArray(geo.points)) return null;
+    if (geo.type === "circle" && geo.points.length >= 2) {
+      const pc = pointById.get(geo.points[0]);
+      const pr = pointById.get(geo.points[1]);
+      if (!pc || !pr) return null;
+      const r = Math.hypot(pr.x - pc.x, pr.y - pc.y);
+      if (!Number.isFinite(r) || r < 1e-9) return null;
+      return { cx: pc.x, cy: pc.y, r, a0: 0, d: Math.PI * 2, full: true };
+    }
+    if (geo.type === "arc" && geo.points.length >= 3) {
+      const pc = pointById.get(geo.points[0]);
+      const pa = pointById.get(geo.points[1]);
+      const pb = pointById.get(geo.points[2]);
+      if (!pc || !pa || !pb) return null;
+      const r = Math.hypot(pa.x - pc.x, pa.y - pc.y);
+      if (!Number.isFinite(r) || r < 1e-9) return null;
+      let a0 = this.#normAngle(Math.atan2(pa.y - pc.y, pa.x - pc.x));
+      let a1 = this.#normAngle(Math.atan2(pb.y - pc.y, pb.x - pc.x));
+      let d = a1 - a0;
+      if (d < 0) d += Math.PI * 2;
+      const full = d < 1e-6;
+      if (full) d = Math.PI * 2;
+      return { cx: pc.x, cy: pc.y, r, a0, d, full };
+    }
+    return null;
+  }
+
+  #normAngle(a) {
+    const twoPi = Math.PI * 2;
+    a = a % twoPi;
+    if (a < 0) a += twoPi;
+    return a;
+  }
+
+  #angleOnArc(arcInfo, ang) {
+    if (!arcInfo) return false;
+    if (arcInfo.full) return true;
+    const twoPi = Math.PI * 2;
+    const delta = this.#normAngle(ang - arcInfo.a0);
+    return delta <= arcInfo.d + Math.max(1e-6, twoPi * 1e-6);
+  }
+
+  #splitBezierAt(geo, segIndex, t) {
+    const s = this._solver?.sketchObject;
+    if (!s || !geo || !Array.isArray(geo.points)) return null;
+    const ids = geo.points;
+    const segCount = Math.floor((ids.length - 1) / 3);
+    if (segIndex < 0 || segIndex >= segCount) return null;
+    const base = segIndex * 3;
+    const p0 = s.points.find((p) => p.id === ids[base]);
+    const p1 = s.points.find((p) => p.id === ids[base + 1]);
+    const p2 = s.points.find((p) => p.id === ids[base + 2]);
+    const p3 = s.points.find((p) => p.id === ids[base + 3]);
+    if (!p0 || !p1 || !p2 || !p3) return null;
+
+    const tt = Math.min(0.9999, Math.max(0.0001, t));
+    const lerp = (a, b, tVal) => ({ x: a.x + (b.x - a.x) * tVal, y: a.y + (b.y - a.y) * tVal });
+    const P0 = { x: p0.x, y: p0.y };
+    const P1 = { x: p1.x, y: p1.y };
+    const P2 = { x: p2.x, y: p2.y };
+    const P3 = { x: p3.x, y: p3.y };
+
+    const q0 = lerp(P0, P1, tt);
+    const q1 = lerp(P1, P2, tt);
+    const q2 = lerp(P2, P3, tt);
+    const r0 = lerp(q0, q1, tt);
+    const r1 = lerp(q1, q2, tt);
+    const sPt = lerp(r0, r1, tt);
+
+    p1.x = q0.x; p1.y = q0.y;
+    p2.x = q2.x; p2.y = q2.y;
+
+    const r0Id = this.#createPointAtUV(r0.x, r0.y, false);
+    const sId = this.#createPointAtUV(sPt.x, sPt.y, false);
+    const r1Id = this.#createPointAtUV(r1.x, r1.y, false);
+    if (r0Id == null || sId == null || r1Id == null) return null;
+
+    geo.points.splice(base + 2, 0, r0Id, sId, r1Id);
+    this.#addGeometry("line", [sId, r0Id], null, { construction: true });
+    this.#addGeometry("line", [sId, r1Id], null, { construction: true });
+    return { anchorIndex: base + 3, anchorId: sId };
+  }
+
+  #sampleGeometry(geo, pointById) {
+    if (!geo || !pointById) return null;
+    const get = (id) => pointById.get(id);
+
+    if (geo.type === "line" && Array.isArray(geo.points) && geo.points.length >= 2) {
+      const p0 = get(geo.points[0]);
+      const p1 = get(geo.points[1]);
+      if (!p0 || !p1) return null;
+      return {
+        type: "line",
+        closed: false,
+        maxParam: 1,
+        segCount: 1,
+        samples: [
+          { x: p0.x, y: p0.y, param: 0 },
+          { x: p1.x, y: p1.y, param: 1 },
+        ],
+      };
+    }
+
+    if (geo.type === "circle" && Array.isArray(geo.points) && geo.points.length >= 2) {
+      const pc = get(geo.points[0]);
+      const pr = get(geo.points[1]);
+      if (!pc || !pr) return null;
+      const r = Math.hypot(pr.x - pc.x, pr.y - pc.y);
+      if (!Number.isFinite(r) || r < 1e-9) return null;
+      const segs = 96;
+      const samples = [];
+      for (let i = 0; i <= segs; i++) {
+        const t = i / segs;
+        const a = t * Math.PI * 2;
+        samples.push({ x: pc.x + r * Math.cos(a), y: pc.y + r * Math.sin(a), param: t });
+      }
+      return { type: "circle", closed: true, maxParam: 1, segCount: 1, samples };
+    }
+
+    if (geo.type === "arc" && Array.isArray(geo.points) && geo.points.length >= 3) {
+      const pc = get(geo.points[0]);
+      const pa = get(geo.points[1]);
+      const pb = get(geo.points[2]);
+      if (!pc || !pa || !pb) return null;
+      const r = Math.hypot(pa.x - pc.x, pa.y - pc.y);
+      if (!Number.isFinite(r) || r < 1e-9) return null;
+      let a0 = Math.atan2(pa.y - pc.y, pa.x - pc.x);
+      let a1 = Math.atan2(pb.y - pc.y, pb.x - pc.x);
+      let d = a1 - a0;
+      d = ((d % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      const full = d < 1e-6;
+      if (full) d = 2 * Math.PI;
+      const segs = Math.max(8, Math.ceil(96 * (d / (2 * Math.PI))));
+      const samples = [];
+      for (let i = 0; i <= segs; i++) {
+        const t = i / segs;
+        const a = a0 + d * t;
+        samples.push({ x: pc.x + r * Math.cos(a), y: pc.y + r * Math.sin(a), param: t });
+      }
+      return { type: "arc", closed: full, maxParam: 1, segCount: 1, samples };
+    }
+
+    if (geo.type === "bezier" && Array.isArray(geo.points) && geo.points.length >= 4) {
+      const ids = geo.points;
+      const segCount = Math.floor((ids.length - 1) / 3);
+      if (segCount < 1) return null;
+      const segSamples = 24;
+      const samples = [];
+      for (let seg = 0; seg < segCount; seg++) {
+        const i0 = seg * 3;
+        const p0 = get(ids[i0]);
+        const p1 = get(ids[i0 + 1]);
+        const p2 = get(ids[i0 + 2]);
+        const p3 = get(ids[i0 + 3]);
+        if (!p0 || !p1 || !p2 || !p3) continue;
+        for (let i = 0; i <= segSamples; i++) {
+          if (seg > 0 && i === 0) continue;
+          const t = i / segSamples;
+          const mt = 1 - t;
+          const bx = mt * mt * mt * p0.x + 3 * mt * mt * t * p1.x + 3 * mt * t * t * p2.x + t * t * t * p3.x;
+          const by = mt * mt * mt * p0.y + 3 * mt * mt * t * p1.y + 3 * mt * t * t * p2.y + t * t * t * p3.y;
+          samples.push({ x: bx, y: by, param: seg + t });
+        }
+      }
+      return { type: "bezier", closed: false, maxParam: segCount, segCount, samples };
+    }
+
+    return null;
+  }
+
+  #closestParamOnSamples(uv, samples) {
+    if (!uv || !Array.isArray(samples) || samples.length < 2) return null;
+    let best = { param: samples[0].param, dist: Infinity };
+    for (let i = 0; i < samples.length - 1; i++) {
+      const a = samples[i];
+      const b = samples[i + 1];
+      const vx = b.x - a.x, vy = b.y - a.y;
+      const wx = uv.u - a.x, wy = uv.v - a.y;
+      const L2 = vx * vx + vy * vy || 1e-12;
+      let t = (wx * vx + wy * vy) / L2;
+      if (t < 0) t = 0; else if (t > 1) t = 1;
+      const nx = a.x + vx * t, ny = a.y + vy * t;
+      const d = Math.hypot(uv.u - nx, uv.v - ny);
+      const param = a.param + (b.param - a.param) * t;
+      if (d < best.dist) best = { param, dist: d };
+    }
+    return best;
+  }
+
+  #collectIntersections(target, other, out, otherGeo) {
+    const A = target?.samples;
+    const B = other?.samples;
+    if (!Array.isArray(A) || !Array.isArray(B) || A.length < 2 || B.length < 2) return;
+    for (let i = 0; i < A.length - 1; i++) {
+      const a0 = A[i];
+      const a1 = A[i + 1];
+      for (let j = 0; j < B.length - 1; j++) {
+        const b0 = B[j];
+        const b1 = B[j + 1];
+        const hit = this.#segmentIntersection(a0, a1, b0, b1);
+        if (!hit) continue;
+        const param = a0.param + (a1.param - a0.param) * hit.ta;
+        const otherParam = b0.param + (b1.param - b0.param) * hit.tb;
+        out.push({
+          param,
+          x: hit.x,
+          y: hit.y,
+          otherParam,
+          otherGeoId: otherGeo?.id ?? null,
+          otherType: otherGeo?.type ?? null,
+        });
+      }
+    }
+  }
+
+  #segmentIntersection(a, b, c, d, eps = 1e-9) {
+    const rdx = b.x - a.x;
+    const rdy = b.y - a.y;
+    const sdx = d.x - c.x;
+    const sdy = d.y - c.y;
+    const denom = rdx * sdy - rdy * sdx;
+    if (Math.abs(denom) < eps) return null;
+    const t = ((c.x - a.x) * sdy - (c.y - a.y) * sdx) / denom;
+    const u = ((c.x - a.x) * rdy - (c.y - a.y) * rdx) / denom;
+    if (t < -eps || t > 1 + eps || u < -eps || u > 1 + eps) return null;
+    const tt = Math.min(1, Math.max(0, t));
+    return { x: a.x + rdx * tt, y: a.y + rdy * tt, ta: tt, tb: Math.min(1, Math.max(0, u)) };
+  }
+
+  #selectTrimBounds(intersections, clickParam, target) {
+    const maxParam = target?.maxParam || 1;
+    const paramEps = Math.max(1e-5, maxParam * 1e-4);
+    const cleaned = [];
+    for (const inter of intersections || []) {
+      if (!inter || !Number.isFinite(inter.param)) continue;
+      let p = inter.param;
+      if (target?.closed) {
+        p = ((p % maxParam) + maxParam) % maxParam;
+        if (p < paramEps || p > maxParam - paramEps) p = 0;
+      } else {
+        if (p <= paramEps || p >= maxParam - paramEps) continue;
+      }
+      cleaned.push({
+        ...inter,
+        param: p,
+        x: inter.x,
+        y: inter.y,
+      });
+    }
+    cleaned.sort((a, b) => a.param - b.param);
+    const uniq = [];
+    for (const inter of cleaned) {
+      if (!uniq.length || Math.abs(inter.param - uniq[uniq.length - 1].param) > paramEps) {
+        uniq.push(inter);
+      }
+    }
+    if (target?.closed) {
+      if (uniq.length < 2) return null;
+      let prev = null;
+      let next = null;
+      let bestNext = Infinity;
+      let bestPrev = -Infinity;
+      for (const inter of uniq) {
+        let delta = inter.param - clickParam;
+        delta = ((delta % maxParam) + maxParam) % maxParam;
+        if (delta < paramEps) continue;
+        if (delta < bestNext) { bestNext = delta; next = inter; }
+        if (delta > bestPrev) { bestPrev = delta; prev = inter; }
+      }
+      if (!prev || !next) return null;
+      return { prev, next, closed: true, maxParam };
+    }
+    if (!uniq.length) return null;
+    let prev = null;
+    let next = null;
+    for (const inter of uniq) {
+      if (inter.param < clickParam - paramEps) prev = inter;
+      else if (inter.param > clickParam + paramEps) { next = inter; break; }
+    }
+    if (!prev && !next) return null;
+    return { prev, next, closed: false, maxParam };
+  }
+
+  #findExistingPointId(x, y, eps = 1e-6) {
+    const s = this._solver?.sketchObject;
+    if (!s || !Array.isArray(s.points)) return null;
+    for (const p of s.points) {
+      if (Math.hypot(p.x - x, p.y - y) <= eps) return p.id;
+    }
+    return null;
+  }
+
+  #getOrCreatePointId(pt) {
+    const existing = this.#findExistingPointId(pt.x, pt.y);
+    if (existing != null) return existing;
+    return this.#createPointAtUV(pt.x, pt.y, false);
+  }
+
+  #applyTrimIntersectionConstraint(pointId, inter) {
+    if (!inter || pointId == null) return false;
+    const s = this._solver?.sketchObject;
+    if (!s) return false;
+    const otherId = inter.otherGeoId;
+    if (otherId == null) return false;
+    const other = (s.geometries || []).find((g) => g && g.id === parseInt(otherId));
+    if (!other || !other.type) return false;
+    if (other.type === "line") {
+      return this.#ensurePointOnLineConstraint(other, pointId, inter);
+    }
+    if (other.type === "arc" || other.type === "circle") {
+      return this.#ensurePointOnArcConstraint(other, pointId);
+    }
+    return false;
+  }
+
+  #ensurePointOnLineConstraint(lineGeo, pointId, inter) {
+    const s = this._solver?.sketchObject;
+    if (!s || !lineGeo) return false;
+    const ids = Array.isArray(lineGeo.points) ? lineGeo.points : [];
+    if (ids.length < 2) return false;
+    const aId = ids[0];
+    const bId = ids[1];
+    const a = s.points.find(p => p.id === aId);
+    const b = s.points.find(p => p.id === bId);
+    const p = s.points.find(p => p.id === pointId);
+    if (!a || !b || !p) return false;
+
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const epsParam = 1e-3;
+    const epsDist = Math.max(1e-5, Math.min(1e-2, len * 1e-3));
+    const otherParam = Number.isFinite(inter?.otherParam) ? inter.otherParam : null;
+    const nearA = (otherParam != null && otherParam <= epsParam) || (Math.hypot(p.x - a.x, p.y - a.y) <= epsDist);
+    const nearB = (otherParam != null && otherParam >= 1 - epsParam) || (Math.hypot(p.x - b.x, p.y - b.y) <= epsDist);
+
+    if (nearA && pointId !== aId) return this.#addConstraintIfMissing("≡", [aId, pointId]);
+    if (nearB && pointId !== bId) return this.#addConstraintIfMissing("≡", [bId, pointId]);
+    if (pointId === aId || pointId === bId) return false;
+    return this.#addConstraintIfMissing("⏛", [aId, bId, pointId]);
+  }
+
+  #ensurePointOnArcConstraint(arcGeo, pointId) {
+    const s = this._solver?.sketchObject;
+    if (!s || !arcGeo) return false;
+    const ids = Array.isArray(arcGeo.points) ? arcGeo.points : [];
+    if (ids.length < 2) return false;
+    const centerId = ids[0];
+    const radiusId = ids[1];
+    if (centerId == null || radiusId == null) return false;
+    if (pointId === centerId || pointId === radiusId) return false;
+    return this.#addConstraintIfMissing("⇌", [centerId, radiusId, centerId, pointId]);
+  }
+
+  #addConstraintIfMissing(type, points) {
+    const s = this._solver?.sketchObject;
+    if (!s || !Array.isArray(points)) return false;
+    if (!Array.isArray(s.constraints)) s.constraints = [];
+    const exists = s.constraints.some((c) => this.#constraintMatches(c, type, points));
+    if (exists) return false;
+    const cid = Math.max(0, ...s.constraints.map((c) => +c.id || 0)) + 1;
+    s.constraints.push({
+      id: cid,
+      type,
+      points: points.slice(),
+      labelX: 0,
+      labelY: 0,
+      displayStyle: "",
+      value: null,
+      valueNeedsSetup: true,
+    });
+    return true;
+  }
+
+  #constraintMatches(c, type, points) {
+    if (!c || c.type !== type || !Array.isArray(c.points)) return false;
+    if (type === "≡") {
+      if (points.length < 2 || c.points.length < 2) return false;
+      const [a, b] = points;
+      const [p0, p1] = c.points;
+      return (p0 === a && p1 === b) || (p0 === b && p1 === a);
+    }
+    if (type === "⏛") {
+      if (points.length < 3 || c.points.length < 3) return false;
+      const [a, b, p] = points;
+      const [p0, p1, p2] = c.points;
+      return ((p0 === a && p1 === b) || (p0 === b && p1 === a)) && p2 === p;
+    }
+    if (type === "⇌") {
+      if (points.length < 4 || c.points.length < 4) return false;
+      const [a, b, c0, d] = points;
+      const [p0, p1, p2, p3] = c.points;
+      const samePair = (x0, x1, y0, y1) => (x0 === y0 && x1 === y1) || (x0 === y1 && x1 === y0);
+      const first = samePair(p0, p1, a, b) && samePair(p2, p3, c0, d);
+      const second = samePair(p0, p1, c0, d) && samePair(p2, p3, a, b);
+      return first || second;
+    }
+    return false;
+  }
+
+  #addGeometry(type, pointIds, templateGeo = null, opts = {}) {
+    const s = this._solver?.sketchObject;
+    if (!s) return null;
+    const gid = Math.max(0, ...s.geometries.map((g) => +g.id || 0)) + 1;
+    const construction = (typeof opts.construction === "boolean")
+      ? opts.construction
+      : !!templateGeo?.construction;
+    s.geometries.push({
+      id: gid,
+      type,
+      points: pointIds,
+      construction,
+    });
+    return gid;
+  }
+
   // Hit-test any EDGE in the whole scene (for external ref picking)
   #hitTestSceneEdge(e) {
     const v = this.viewer;
