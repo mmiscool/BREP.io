@@ -64,20 +64,37 @@ class ConstraintEngine {
     solve(iterations = 100) {
         const decimalsPlaces = 6;
 
-        // Implied constraints for certain geometry types (e.g., arcs)
+        // Implied constraints for certain geometry types (e.g., arcs, bezier splines)
+        let nextTempId =
+            Math.max(0, ...this.constraints.map(c => Number.isFinite(+c.id) ? +c.id : 0)) + 1;
+        const pushTemp = (type, points) => {
+            this.constraints.push({
+                id: nextTempId++,
+                type,
+                points,
+                temporary: true,
+                labelX: 0,
+                labelY: 0
+            });
+        };
+
         this.geometries.forEach(g => {
             if (g.type === "arc") {
                 // Insert a temporary equal-chord constraint between (0-1) and (0-2)
-                const maxId =
-                    Math.max(0, ...this.constraints.map(c => Number.isFinite(+c.id) ? +c.id : 0)) + 1;
-                this.constraints.push({
-                    id: maxId,
-                    type: "⇌",
-                    points: [g.points[0], g.points[1], g.points[0], g.points[2]],
-                    temporary: true,
-                    labelX: 0,
-                    labelY: 0
-                });
+                pushTemp("⇌", [g.points[0], g.points[1], g.points[0], g.points[2]]);
+            } else if (g.type === "bezier" && Array.isArray(g.points) && g.points.length >= 4) {
+                // Keep internal spline anchors colinear with their adjacent control points
+                const ids = g.points || [];
+                const segCount = Math.floor((ids.length - 1) / 3);
+                const lastAnchorIndex = segCount * 3;
+                for (let i = 3; i < lastAnchorIndex; i += 3) {
+                    const prevHandle = ids[i - 1];
+                    const anchor = ids[i];
+                    const nextHandle = ids[i + 1];
+                    if (prevHandle == null || anchor == null || nextHandle == null) continue;
+                    if (prevHandle === anchor || nextHandle === anchor || prevHandle === nextHandle) continue;
+                    pushTemp("⏛", [prevHandle, nextHandle, anchor]);
+                }
             }
         });
 

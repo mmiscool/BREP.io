@@ -612,6 +612,14 @@ export class SketchMode3D {
       }
 
       const hit = this.#hitTestPoint(e);
+      if (this._tool === "bezier" && hit == null) {
+        const inserted = this.#tryInsertBezierPointAtCursor(e);
+        if (inserted) {
+          try { e.preventDefault(); e.stopImmediatePropagation?.(); e.stopPropagation(); } catch { }
+          consumed = true;
+          return;
+        }
+      }
       let pid = hit;
       if (pid == null) {
         pid = this.#createPointAtCursor(e);
@@ -1027,18 +1035,152 @@ export class SketchMode3D {
     return { u: d.dot(bx), v: d.dot(by) };
   }
 
-  #createPointAtCursor(e) {
+  #createPointAtUV(u, v, fixed = false) {
     if (!this._solver) return null;
     const s = this._solver.sketchObject;
     if (!s) return null;
-    const uv = this.#pointerToPlaneUV(e);
-    if (!uv) return null;
     const pts = Array.isArray(s.points) ? s.points : (s.points = []);
     const nextId = Math.max(0, ...pts.map((p) => +p.id || 0)) + 1;
-    pts.push({ id: nextId, x: uv.u, y: uv.v, fixed: false });
+    pts.push({ id: nextId, x: u, y: v, fixed: !!fixed });
+    return nextId;
+  }
+
+  #createPointAtCursor(e) {
+    if (!this._solver) return null;
+    const uv = this.#pointerToPlaneUV(e);
+    if (!uv) return null;
+    const nextId = this.#createPointAtUV(uv.u, uv.v, false);
+    if (nextId == null) return null;
     try { this._solver.solveSketch("full"); } catch { }
     this.#rebuildSketchGraphics();
     return nextId;
+  }
+
+  #createConstructionLine(aId, bId) {
+    if (!this._solver) return;
+    try {
+      const sObj = this._solver.sketchObject;
+      this._solver.createGeometry("line", [aId, bId]);
+      const gid = Math.max(0, ...sObj.geometries.map((g) => +g.id || 0));
+      const g = sObj.geometries.find((geo) => geo.id === gid);
+      if (g) g.construction = true;
+    } catch { }
+  }
+
+  #closestBezierParam(p0, p1, p2, p3, uv, segs = 64) {
+    const distToSeg = (ax, ay, bx, by, px, py) => {
+      const vx = bx - ax, vy = by - ay;
+      const wx = px - ax, wy = py - ay;
+      const L2 = vx * vx + vy * vy || 1e-12;
+      let t = (wx * vx + wy * vy) / L2;
+      if (t < 0) t = 0; else if (t > 1) t = 1;
+      const nx = ax + vx * t, ny = ay + vy * t;
+      return { d: Math.hypot(px - nx, py - ny), t };
+    };
+
+    let bestT = null;
+    let bestD = Infinity;
+    let prevx = p0.x, prevy = p0.y, prevt = 0;
+    for (let i = 1; i <= segs; i++) {
+      const t = i / segs;
+      const mt = 1 - t;
+      const bx = mt * mt * mt * p0.x + 3 * mt * mt * t * p1.x + 3 * mt * t * t * p2.x + t * t * t * p3.x;
+      const by = mt * mt * mt * p0.y + 3 * mt * mt * t * p1.y + 3 * mt * t * t * p2.y + t * t * t * p3.y;
+      const hit = distToSeg(prevx, prevy, bx, by, uv.u, uv.v);
+      if (hit.d < bestD) {
+        bestD = hit.d;
+        bestT = prevt + hit.t * (t - prevt);
+      }
+      prevx = bx; prevy = by; prevt = t;
+    }
+    return bestT == null ? null : { t: bestT, dist: bestD };
+  }
+
+  #tryInsertBezierPointAtCursor(e) {
+    if (!this._solver || !this._lock) return false;
+    const s = this._solver.sketchObject;
+    if (!s) return false;
+    const uv = this.#pointerToPlaneUV(e);
+    if (!uv) return false;
+    const v = this.viewer;
+    const { width, height } = this.#canvasClientSize(v.renderer.domElement);
+    const wpp = this.#worldPerPixel(v.camera, width, height);
+    const tol = Math.max(0.05, wpp * 6);
+
+    let best = null;
+    for (const geo of s.geometries || []) {
+      if (geo.type !== "bezier" || !Array.isArray(geo.points) || geo.points.length < 4) continue;
+      const ids = geo.points;
+      const segCount = Math.floor((ids.length - 1) / 3);
+      if (segCount < 1) continue;
+      for (let seg = 0; seg < segCount; seg++) {
+        const i0 = seg * 3;
+        const p0 = s.points.find((p) => p.id === ids[i0]);
+        const p1 = s.points.find((p) => p.id === ids[i0 + 1]);
+        const p2 = s.points.find((p) => p.id === ids[i0 + 2]);
+        const p3 = s.points.find((p) => p.id === ids[i0 + 3]);
+        if (!p0 || !p1 || !p2 || !p3) continue;
+        const closest = this.#closestBezierParam(p0, p1, p2, p3, uv);
+        if (!closest) continue;
+        if (!best || closest.dist < best.dist) {
+          best = { geo, segmentIndex: seg, t: closest.t, dist: closest.dist };
+        }
+      }
+    }
+    if (!best || !Number.isFinite(best.t) || best.dist > tol) return false;
+
+    const geo = best.geo;
+    const ids = geo.points;
+    const segCount = Math.floor((ids.length - 1) / 3);
+    if (segCount < 1) return false;
+    const segmentIndex = best.segmentIndex;
+    const t = best.t;
+
+    if (segmentIndex < 0 || segmentIndex >= segCount) return false;
+    const base = segmentIndex * 3;
+    const p0 = s.points.find((p) => p.id === ids[base]);
+    const p1 = s.points.find((p) => p.id === ids[base + 1]);
+    const p2 = s.points.find((p) => p.id === ids[base + 2]);
+    const p3 = s.points.find((p) => p.id === ids[base + 3]);
+    if (!p0 || !p1 || !p2 || !p3) return false;
+
+    const tt = Math.min(0.9999, Math.max(0.0001, t));
+    if (!Number.isFinite(tt)) return false;
+    const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    const P0 = { x: p0.x, y: p0.y };
+    const P1 = { x: p1.x, y: p1.y };
+    const P2 = { x: p2.x, y: p2.y };
+    const P3 = { x: p3.x, y: p3.y };
+    // Split cubic bezier via de Casteljau to preserve shape.
+    const q0 = lerp(P0, P1, tt);
+    const q1 = lerp(P1, P2, tt);
+    const q2 = lerp(P2, P3, tt);
+    const r0 = lerp(q0, q1, tt);
+    const r1 = lerp(q1, q2, tt);
+    const sPt = lerp(r0, r1, tt);
+
+    // Update existing handles to preserve curve shape
+    p1.x = q0.x; p1.y = q0.y;
+    p2.x = q2.x; p2.y = q2.y;
+
+    const r0Id = this.#createPointAtUV(r0.x, r0.y, false);
+    const sId = this.#createPointAtUV(sPt.x, sPt.y, false);
+    const r1Id = this.#createPointAtUV(r1.x, r1.y, false);
+    if (r0Id == null || sId == null || r1Id == null) return false;
+
+    // Insert new handle + anchor points between existing handles
+    geo.points.splice(base + 2, 0, r0Id, sId, r1Id);
+
+    this.#createConstructionLine(sId, r0Id);
+    this.#createConstructionLine(sId, r1Id);
+
+    try { this._solver.solveSketch("full"); } catch { }
+    this._bezierSel = null;
+    this._selection.clear();
+    this._selection.add({ type: "point", id: sId });
+    this.#rebuildSketchGraphics();
+    this.#refreshContextBar();
+    return true;
   }
 
   // Helper: set ray from camera and shift origin far behind camera along ray direction
@@ -2483,21 +2625,21 @@ export class SketchMode3D {
           if (d < bestDist) { bestDist = d; best = { id: geo.id, type: 'arc' }; }
         }
       } else if (geo.type === 'bezier' && Array.isArray(geo.points) && geo.points.length >= 4) {
-        const p0 = s.points.find(p => p.id === geo.points[0]);
-        const p1 = s.points.find(p => p.id === geo.points[1]);
-        const p2 = s.points.find(p => p.id === geo.points[2]);
-        const p3 = s.points.find(p => p.id === geo.points[3]);
-        if (!p0 || !p1 || !p2 || !p3) continue;
-        const segs = 64;
-        let prevx = p0.x, prevy = p0.y;
-        for (let i = 1; i <= segs; i++) {
-          const t = i / segs;
-          const mt = 1 - t;
-          const bx = mt * mt * mt * p0.x + 3 * mt * mt * t * p1.x + 3 * mt * t * t * p2.x + t * t * t * p3.x;
-          const by = mt * mt * mt * p0.y + 3 * mt * mt * t * p1.y + 3 * mt * t * t * p2.y + t * t * t * p3.y;
-          const d = distToSeg(prevx, prevy, bx, by, uv.u, uv.v);
-          if (d < bestDist) { bestDist = d; best = { id: geo.id, type: 'bezier' }; }
-          prevx = bx; prevy = by;
+        const ids = geo.points || [];
+        const segCount = Math.floor((ids.length - 1) / 3);
+        for (let seg = 0; seg < segCount; seg++) {
+          const i0 = seg * 3;
+          const p0 = s.points.find(p => p.id === ids[i0]);
+          const p1 = s.points.find(p => p.id === ids[i0 + 1]);
+          const p2 = s.points.find(p => p.id === ids[i0 + 2]);
+          const p3 = s.points.find(p => p.id === ids[i0 + 3]);
+          if (!p0 || !p1 || !p2 || !p3) continue;
+          const closest = this.#closestBezierParam(p0, p1, p2, p3, uv, 64);
+          if (!closest) continue;
+          if (closest.dist < bestDist) {
+            bestDist = closest.dist;
+            best = { id: geo.id, type: 'bezier', segmentIndex: seg, t: closest.t };
+          }
         }
       }
     }
@@ -2746,19 +2888,25 @@ export class SketchMode3D {
         grp.add(ln);
       } else if (geo.type === "bezier") {
         const ids = geo.points || [];
-        const p0 = s.points.find((p) => p.id === ids[0]);
-        const p1 = s.points.find((p) => p.id === ids[1]);
-        const p2 = s.points.find((p) => p.id === ids[2]);
-        const p3 = s.points.find((p) => p.id === ids[3]);
-        if (!p0 || !p1 || !p2 || !p3) continue;
+        const segCount = Math.floor((ids.length - 1) / 3);
+        if (segCount < 1) continue;
         const segs = 64;
         const pts = [];
-        for (let i = 0; i <= segs; i++) {
-          const t = i / segs;
-          const mt = 1 - t;
-          const bx = mt * mt * mt * p0.x + 3 * mt * mt * t * p1.x + 3 * mt * t * t * p2.x + t * t * t * p3.x;
-          const by = mt * mt * mt * p0.y + 3 * mt * mt * t * p1.y + 3 * mt * t * t * p2.y + t * t * t * p3.y;
-          pts.push(to3(bx, by));
+        for (let seg = 0; seg < segCount; seg++) {
+          const i0 = seg * 3;
+          const p0 = s.points.find((p) => p.id === ids[i0]);
+          const p1 = s.points.find((p) => p.id === ids[i0 + 1]);
+          const p2 = s.points.find((p) => p.id === ids[i0 + 2]);
+          const p3 = s.points.find((p) => p.id === ids[i0 + 3]);
+          if (!p0 || !p1 || !p2 || !p3) continue;
+          for (let i = 0; i <= segs; i++) {
+            if (seg > 0 && i === 0) continue;
+            const t = i / segs;
+            const mt = 1 - t;
+            const bx = mt * mt * mt * p0.x + 3 * mt * mt * t * p1.x + 3 * mt * t * t * p2.x + t * t * t * p3.x;
+            const by = mt * mt * mt * p0.y + 3 * mt * mt * t * p1.y + 3 * mt * t * t * p2.y + t * t * t * p3.y;
+            pts.push(to3(bx, by));
+          }
         }
         const bg = new THREE.BufferGeometry().setFromPoints(pts);
         const sel = Array.from(this._selection).some(
