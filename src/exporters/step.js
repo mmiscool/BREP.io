@@ -782,10 +782,10 @@ export function generateSTEP(solids, opts = {}) {
       const bboxDy = boundsMax[1] - boundsMin[1];
       const bboxDz = boundsMax[2] - boundsMin[2];
       const bboxDiag = Math.hypot(bboxDx, bboxDy, bboxDz) || 1;
-      const normalTol = Number.isFinite(opts.planarNormalTolerance) ? opts.planarNormalTolerance : 1e-5;
+      const normalTol = Number.isFinite(opts.planarNormalTolerance) ? opts.planarNormalTolerance : 2e-4;
       const distTol = Number.isFinite(opts.planarDistanceTolerance)
         ? opts.planarDistanceTolerance
-        : Math.max(1e-6, bboxDiag * 1e-6);
+        : Math.max(2e-5, bboxDiag * 2e-5);
 
       const triData = new Array(triCount);
       const faceIDs = (mesh.faceID && mesh.faceID.length === triCount) ? mesh.faceID : null;
