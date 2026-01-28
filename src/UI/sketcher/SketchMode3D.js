@@ -917,6 +917,7 @@ export class SketchMode3D {
   }
 
   #onPointerUp(e) {
+    const draggedPointId = this._drag.active ? this._drag.pointId : null;
     // If no drag happened, treat as selection toggle
     if (
       !this._drag.active &&
@@ -962,6 +963,10 @@ export class SketchMode3D {
       this._dragGeo.ids = [];
       this._dragGeo.pointsStart = null;
       try { if (this.viewer?.controls) this.viewer.controls.enabled = true; } catch { }
+    }
+    // If a point drag ended atop another point, add coincident constraint
+    if (draggedPointId != null) {
+      try { this.#maybeAddCoincidentOnDrop(draggedPointId); } catch { }
     }
     // Re-enable camera controls after any sketch drag
     try { if (this.viewer?.controls) this.viewer.controls.enabled = true; } catch { }
@@ -2367,6 +2372,41 @@ export class SketchMode3D {
       if (d < bestD) { bestD = d; bestId = p.id; }
     }
     return (bestId != null && bestD <= tol) ? bestId : null;
+  }
+
+  #maybeAddCoincidentOnDrop(pointId) {
+    if (!this._solver || pointId == null) return;
+    const s = this._solver.sketchObject;
+    if (!s || !Array.isArray(s.points)) return;
+    const p = this._solver.getPointById?.(pointId) || s.points.find((pp) => pp.id === pointId);
+    if (!p) return;
+    const v = this.viewer;
+    if (!v?.renderer || !v?.camera) return;
+    const { width, height } = this.#canvasClientSize(v.renderer.domElement);
+    const wpp = this.#worldPerPixel(v.camera, width, height);
+    const handleR = Math.max(0.02, wpp * 8 * 0.5);
+    const tol = handleR * 1.2;
+    let bestId = null;
+    let bestD = Infinity;
+    for (const q of s.points) {
+      if (q.id === pointId) continue;
+      const d = Math.hypot(p.x - q.x, p.y - q.y);
+      if (d < bestD) { bestD = d; bestId = q.id; }
+    }
+    if (bestId == null || bestD > tol) return;
+    const existing = (s.constraints || []).some((c) => {
+      if (c?.type !== "≡" || !Array.isArray(c.points) || c.points.length < 2) return false;
+      const a = c.points[0];
+      const b = c.points[1];
+      return (a === pointId && b === bestId) || (a === bestId && b === pointId);
+    });
+    if (existing) return;
+    this._solver.createConstraint("≡", [
+      { type: "point", id: pointId },
+      { type: "point", id: bestId },
+    ]);
+    this.#refreshLists();
+    this.#refreshContextBar();
   }
 
   #hitTestGeometry(e) {
