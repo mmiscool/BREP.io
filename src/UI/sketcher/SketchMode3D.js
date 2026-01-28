@@ -2277,6 +2277,7 @@ export class SketchMode3D {
       addConstraintButton({ label: "⟂", type: "⟂", tooltip: "Perpendicular" });
       addConstraintButton({ label: "∠", type: "∠", tooltip: "Angle" });
       addConstraintButton({ label: "⇌", type: "⇌", tooltip: "Equal distance" });
+      addConstraintButton({ label: "⏛", type: "⏛", tooltip: "Point on line" });
       // Also allow delete when any selection exists
       if (items.length) addDeleteButton();
       return;

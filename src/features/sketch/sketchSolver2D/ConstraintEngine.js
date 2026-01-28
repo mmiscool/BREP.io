@@ -505,6 +505,41 @@ export class ConstraintSolver {
         }
 
         if (selected.length === 4 || selected.length === 5) {
+            if (type === "⏛") {
+                // Allow Point-on-Line from two selected lines: use first line as target,
+                // constrain both endpoints of the second line onto it (all points colinear).
+                const geometries = items.filter(i => i.type === "geometry");
+                if (geometries.length === 2) {
+                    const g0 = this.sketchObject.geometries.find(gg => gg.id === parseInt(geometries[0].id));
+                    const g1 = this.sketchObject.geometries.find(gg => gg.id === parseInt(geometries[1].id));
+                    if (g0?.type === "line" && g1?.type === "line" &&
+                        Array.isArray(g0.points) && g0.points.length >= 2 &&
+                        Array.isArray(g1.points) && g1.points.length >= 2) {
+                        const a = this.sketchObject.points.find(p => p.id === g0.points[0]);
+                        const b = this.sketchObject.points.find(p => p.id === g0.points[1]);
+                        const c0 = this.sketchObject.points.find(p => p.id === g1.points[0]);
+                        const c1 = this.sketchObject.points.find(p => p.id === g1.points[1]);
+                        if (a && b && c0 && c1) {
+                            const base = {
+                                type,
+                                labelX: 0,
+                                labelY: 0,
+                                displayStyle: "",
+                                value: null,
+                                valueNeedsSetup: true
+                            };
+                            const maxId = Math.max(0, ...this.sketchObject.constraints.map(c => +c.id || 0)) + 1;
+                            const cA = { ...base, id: maxId, points: [a.id, b.id, c0.id] };
+                            const cB = { ...base, id: maxId + 1, points: [a.id, b.id, c1.id] };
+                            this.sketchObject.constraints.push(cA, cB);
+                            this.sketchObject = this.solveSketch("full");
+                            this.hooks.updateCanvas();
+                            this.hooks.notifyUser("Constraint added", "info");
+                            return true;
+                        }
+                    }
+                }
+            }
             if (type === "⟂") {
                 // Check if this is a tangent constraint (line + arc/circle)
                 const isTangentConstraint = this.#detectTangentConstraint(items);
