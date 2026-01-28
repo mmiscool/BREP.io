@@ -4,7 +4,6 @@ import { Manifold } from '../SolidShared.js';
 import { resolveEdgesFromInputs } from './edgeResolution.js';
 import { computeFaceAreaFromTriangles } from '../fillets/filletGeometry.js';
 import { createQuantizer, deriveTolerance } from '../../utils/geometryTolerance.js';
-import { computeBoundsFromVertices } from '../boundsUtils.js';
 
 const debugMode = false;
 
@@ -309,8 +308,20 @@ function averageFaceNormalSimple(solid, faceName) {
 function deriveSolidToleranceFromVerts(solid, baseTol = 1e-5) {
   const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : null;
   if (!vp || vp.length < 6) return baseTol;
-  const bounds = computeBoundsFromVertices(vp);
-  const diag = (bounds && bounds.diag) ? bounds.diag : 1;
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < vp.length; i += 3) {
+    const x = vp[i + 0];
+    const y = vp[i + 1];
+    const z = vp[i + 2];
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+  }
+  const dx = maxX - minX;
+  const dy = maxY - minY;
+  const dz = maxZ - minZ;
+  const diag = Math.hypot(dx, dy, dz) || 1;
   return Math.max(baseTol, diag * 1e-6);
 }
 
@@ -491,10 +502,7 @@ export async function fillet(opts = {}) {
     throw new Error(`Solid.fillet: radius must be > 0, got ${opts.radius}`);
   }
   const dir = String(opts.direction || 'INSET').toUpperCase();
-  const inflateRaw = Number.isFinite(opts.inflate) ? Number(opts.inflate) : 0.1;
-  // Mirror chamfer behavior: OUTSET should shrink the tool slightly to
-  // encourage robust overlap with the base body, especially on shallow angles.
-  const inflateForSolid = (dir === 'OUTSET') ? -Math.abs(inflateRaw) : inflateRaw;
+  const inflate = Number.isFinite(opts.inflate) ? Number(opts.inflate) : 0.1;
   const debug = !!opts.debug;
   const resolutionRaw = Number(opts.resolution);
   const resolution = (Number.isFinite(resolutionRaw) && resolutionRaw > 0)
@@ -509,8 +517,7 @@ export async function fillet(opts = {}) {
     solid: this?.name,
     radius,
     direction: dir,
-    inflate: inflateRaw,
-    inflateApplied: inflateForSolid,
+    inflate,
     resolution,
     debug,
     showTangentOverlays,
@@ -548,16 +555,7 @@ export async function fillet(opts = {}) {
   };
   for (const e of filletEdges) {
     const name = `${featureID}_FILLET_${idx++}`;
-    const res = filletSolid({
-      edgeToFillet: e,
-      radius,
-      sideMode: dir,
-      inflate: inflateForSolid,
-      resolution,
-      debug,
-      name,
-      showTangentOverlays,
-    }) || {};
+    const res = filletSolid({ edgeToFillet: e, radius, sideMode: dir, inflate, resolution, debug, name, showTangentOverlays }) || {};
 
     // Handle debug solids even on failure
     if (debug || !res.finalSolid) {
@@ -769,25 +767,6 @@ export async function fillet(opts = {}) {
     console.warn('[Solid.fillet] simplify failed; continuing without simplification', { featureID, error: err?.message || err });
   }
 
-  // Reassign tiny disconnected islands within the same face label.
-  try {
-    const cleanupArea = (opts.cleanupTinyFaceIslandsArea === undefined)
-      ? 0.01
-      : Number(opts.cleanupTinyFaceIslandsArea);
-    if (Number.isFinite(cleanupArea) && cleanupArea > 0 && typeof result.cleanupTinyFaceIslands === 'function') {
-      const reassigned = await result.cleanupTinyFaceIslands(cleanupArea);
-      if (reassigned > 0) {
-        consoleLogReplacement('[Solid.fillet] cleanupTinyFaceIslands reassigned triangles', {
-          featureID,
-          cleanupArea,
-          reassigned,
-        });
-      }
-    }
-  } catch (err) {
-    console.warn('[Solid.fillet] cleanupTinyFaceIslands failed; continuing without face-island cleanup', { featureID, error: err?.message || err });
-  }
-
   const finalTriCount = Array.isArray(result?._triVerts) ? (result._triVerts.length / 3) : 0;
   const finalVertCount = Array.isArray(result?._vertProperties) ? (result._vertProperties.length / 3) : 0;
   if (!result || finalTriCount === 0 || finalVertCount === 0) {
@@ -797,7 +776,7 @@ export async function fillet(opts = {}) {
       finalVertCount,
       edgeCount: unique.length,
       direction: dir,
-      inflate: inflateRaw,
+      inflate,
     });
   } else {
     consoleLogReplacement('[Solid.fillet] Completed', { featureID, triangles: finalTriCount, vertices: finalVertCount });
