@@ -370,7 +370,10 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
                     if (dir2.lengthSq() > 1e-16) {
                         dir2.normalize();
                         const dir3 = bisector3.set(0, 0, 0).addScaledVector(u, dir2.x).addScaledVector(v, dir2.y).normalize();
-                        center = p.clone().addScaledVector(dir3, expectDist);
+                        // Clamp the bisector distance so acute/near-parallel face
+                        // configurations do not explode the centerline far from the edge.
+                        const safeDist = Math.min(expectDist, hardCap);
+                        center = p.clone().addScaledVector(dir3, safeDist);
                         // Recompute tangency points using latest normals
                         tA = center.clone().addScaledVector(nA, -sA * rEff);
                         tB = center.clone().addScaledVector(nB, -sB * rEff);
@@ -781,8 +784,9 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
         // Keep OUTSET behavior unchanged: move tangents slightly toward the centerline;
         // INSET moves them outward. Closed loops skip inflation to avoid self‑intersection.
         {
-            const base = Math.abs(inflate || 0);
-            const offsetDistance = base;
+            // Respect the sign of `inflate` so callers can shrink the tool for
+            // OUTSET (negative) while expanding for INSET (positive).
+            const offsetDistance = Number.isFinite(inflate) ? Number(inflate) : 0;
             const n = Math.min(centerlineCopy.length, tangentACopy.length, tangentBCopy.length);
             for (let i = 0; i < n; i++) {
                 const c = centerlineCopy[i];
@@ -815,10 +819,10 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
         // nudge is inward (toward the centerline). For INSET it must be the
         // opposite direction (away from the centerline) to build the correct wedge.
         // Slightly offset edge points to guarantee robust boolean overlap.
-        // Preserve OUTSET behavior (unchanged): use a small fixed nudge.
-        // INSET uses the same magnitude but opposite direction to ensure the
-        // cutter exits the target.
-        const wedgeInsetMagnitude = closedLoop ? 0 : ((side === 'INSET') ? inflate : -0.05);
+        // Use a small radius-scaled inward nudge for OUTSET, capped to avoid
+        // large displacements on big models.
+        const outsetInsetMagnitude = Math.max(1e-4, Math.min(0.05, Math.abs(radius) * 0.05));
+        const wedgeInsetMagnitude = closedLoop ? 0 : ((side === 'INSET') ? Math.abs(inflate) : outsetInsetMagnitude);
         for (let i = 0; i < edgeWedgeCopy.length; i++) {
             const edgeWedgePt = edgeWedgeCopy[i];
             const centerPt = centerlineCopy[i] || centerlineCopy[centerlineCopy.length - 1]; // Fallback to last point

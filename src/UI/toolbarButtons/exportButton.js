@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import { generate3MF } from '../../exporters/threeMF.js';
+import { generateSTEP } from '../../exporters/step.js';
 import { buildSheetMetalFlatPatternSvgs } from '../../exporters/sheetMetalFlatPattern.js';
 import { FloatingWindow } from '../FloatingWindow.js';
 
@@ -280,6 +281,7 @@ function _openExportDialog(viewer) {
   const selFmt = document.createElement('select'); selFmt.className = 'exp-select';
   const opt3mf = document.createElement('option'); opt3mf.value = '3mf'; opt3mf.textContent = '3MF (+history)'; selFmt.appendChild(opt3mf);
   const optStl = document.createElement('option'); optStl.value = 'stl'; optStl.textContent = 'STL (ASCII)'; selFmt.appendChild(optStl);
+  const optStep = document.createElement('option'); optStep.value = 'step'; optStep.textContent = 'STEP (faceted)'; selFmt.appendChild(optStep);
   const optJson = document.createElement('option'); optJson.value = 'json'; optJson.textContent = 'BREP JSON (history only)'; selFmt.appendChild(optJson);
   const optObj = document.createElement('option'); optObj.value = 'obj'; optObj.textContent = 'OBJ (ASCII)'; selFmt.appendChild(optObj);
   rowFmt.appendChild(labFmt); rowFmt.appendChild(selFmt);
@@ -299,6 +301,40 @@ function _openExportDialog(viewer) {
   for (const [v, label] of units) { const o = document.createElement('option'); o.value = v; o.textContent = label; selUnit.appendChild(o); }
   try { selUnit.value = 'millimeter'; } catch {}
   rowUnit.appendChild(labUnit); rowUnit.appendChild(selUnit);
+
+  // STEP tessellation options
+  const rowTess = document.createElement('div'); rowTess.className = 'exp-row';
+  const labTess = document.createElement('div'); labTess.className = 'exp-label'; labTess.textContent = 'STEP';
+  const chkTess = document.createElement('input'); chkTess.type = 'checkbox'; chkTess.checked = false;
+  const tessWrap = document.createElement('label');
+  tessWrap.style.display = 'flex';
+  tessWrap.style.alignItems = 'center';
+  tessWrap.style.gap = '6px';
+  tessWrap.appendChild(chkTess);
+  tessWrap.appendChild(document.createTextNode('Use tessellated faces (AP242)'));
+  rowTess.appendChild(labTess); rowTess.appendChild(tessWrap);
+
+  const rowStepFaces = document.createElement('div'); rowStepFaces.className = 'exp-row';
+  const labStepFaces = document.createElement('div'); labStepFaces.className = 'exp-label'; labStepFaces.textContent = 'STEP';
+  const chkStepFaces = document.createElement('input'); chkStepFaces.type = 'checkbox'; chkStepFaces.checked = true;
+  const stepFacesWrap = document.createElement('label');
+  stepFacesWrap.style.display = 'flex';
+  stepFacesWrap.style.alignItems = 'center';
+  stepFacesWrap.style.gap = '6px';
+  stepFacesWrap.appendChild(chkStepFaces);
+  stepFacesWrap.appendChild(document.createTextNode('Export faces'));
+  rowStepFaces.appendChild(labStepFaces); rowStepFaces.appendChild(stepFacesWrap);
+
+  const rowStepEdges = document.createElement('div'); rowStepEdges.className = 'exp-row';
+  const labStepEdges = document.createElement('div'); labStepEdges.className = 'exp-label'; labStepEdges.textContent = 'STEP';
+  const chkStepEdges = document.createElement('input'); chkStepEdges.type = 'checkbox'; chkStepEdges.checked = true;
+  const stepEdgesWrap = document.createElement('label');
+  stepEdgesWrap.style.display = 'flex';
+  stepEdgesWrap.style.alignItems = 'center';
+  stepEdgesWrap.style.gap = '6px';
+  stepEdgesWrap.appendChild(chkStepEdges);
+  stepEdgesWrap.appendChild(document.createTextNode('Export edges as polylines'));
+  rowStepEdges.appendChild(labStepEdges); rowStepEdges.appendChild(stepEdgesWrap);
 
   // Flat pattern options (3MF only)
   const rowFlat = document.createElement('div'); rowFlat.className = 'exp-row';
@@ -334,7 +370,10 @@ function _openExportDialog(viewer) {
   // Toggle unit row visibility based on format
   const updateUnitVisibility = () => {
     const fmt = selFmt.value;
-    rowUnit.style.display = (fmt === 'stl' || fmt === '3mf' || fmt === 'obj') ? 'flex' : 'none';
+    rowUnit.style.display = (fmt === 'stl' || fmt === '3mf' || fmt === 'obj' || fmt === 'step') ? 'flex' : 'none';
+    rowTess.style.display = (fmt === 'step') ? 'flex' : 'none';
+    rowStepFaces.style.display = (fmt === 'step') ? 'flex' : 'none';
+    rowStepEdges.style.display = (fmt === 'step') ? 'flex' : 'none';
     rowFlat.style.display = (fmt === '3mf') ? 'flex' : 'none';
     rowNeutral.style.display = (fmt === '3mf' && chkFlat.checked) ? 'flex' : 'none';
     rowDebug.style.display = (fmt === '3mf' && chkFlat.checked) ? 'flex' : 'none';
@@ -343,7 +382,7 @@ function _openExportDialog(viewer) {
   chkFlat.addEventListener('change', updateUnitVisibility);
   updateUnitVisibility();
 
-  const hint = document.createElement('div'); hint.className = 'exp-hint'; hint.textContent = '3MF includes feature history when available. STL/OBJ export triangulated meshes. BREP JSON saves editable feature history only.';
+  const hint = document.createElement('div'); hint.className = 'exp-hint'; hint.textContent = '3MF includes feature history when available. STL/OBJ/STEP export triangulated meshes. BREP JSON saves editable feature history only.';
 
   // Buttons
   const buttons = document.createElement('div'); buttons.className = 'exp-buttons';
@@ -460,6 +499,36 @@ function _openExportDialog(viewer) {
         return;
       }
 
+      if (fmt === 'step') {
+        if (!chkStepFaces.checked && !chkStepEdges.checked) {
+          try { alert('STEP export: enable faces and/or edges.'); } catch {}
+          return;
+        }
+        const { data, exported, skipped } = generateSTEP(solids, {
+          name: base,
+          unit,
+          precision: 6,
+          scale,
+          applyWorldTransform: true,
+          useTessellatedFaces: chkTess.checked,
+          exportFaces: chkStepFaces.checked,
+          exportEdgesAsPolylines: chkStepEdges.checked,
+        });
+        if (!exported) {
+          const msg = skipped.length
+            ? `STEP export failed. Skipped solids: ${skipped.join(', ')}`
+            : 'STEP export failed.';
+          try { alert(msg); } catch {}
+          return;
+        }
+        _download(`${base}.step`, data, 'application/step');
+        close();
+        if (skipped.length > 0) {
+          try { alert(`Exported STEP. Skipped solids: ${skipped.join(', ')}`); } catch {}
+        }
+        return;
+      }
+
       if (fmt === 'obj') {
         // Single solid -> OBJ
         if (solids.length === 1) {
@@ -525,6 +594,9 @@ function _openExportDialog(viewer) {
   modal.appendChild(rowName);
   modal.appendChild(rowFmt);
   modal.appendChild(rowUnit);
+  modal.appendChild(rowTess);
+  modal.appendChild(rowStepFaces);
+  modal.appendChild(rowStepEdges);
   modal.appendChild(rowFlat);
   modal.appendChild(rowNeutral);
   modal.appendChild(rowDebug);

@@ -1,5 +1,7 @@
+import { generateSTEP } from '../../exporters/step.js';
+
 /**
- * Export helpers (STL output).
+ * Export helpers (STL + STEP output).
  */
 
 export function toSTL(name = "solid", precision = 6) {
@@ -67,3 +69,37 @@ export async function writeSTL(filePath, name = "solid", precision = 6) {
     return filePath;
 }
 
+/**
+ * Generate a triangulated STEP (faceted BREP) string for this solid.
+ * @param {string} [name=this.name||'part']
+ * @param {{unit?: string, precision?: number, scale?: number, applyWorldTransform?: boolean, useTessellatedFaces?: boolean}} [options]
+ * @returns {string}
+ */
+export function toSTEP(name = undefined, options = {}) {
+    const opts = (options && typeof options === 'object') ? options : {};
+    const unit = opts.unit || 'millimeter';
+    const precision = Number.isFinite(opts.precision) ? opts.precision : 6;
+    const scale = Number.isFinite(opts.scale) ? opts.scale : 1;
+    const applyWorldTransform = opts.applyWorldTransform !== false;
+    const baseName = name || this?.name || 'part';
+    const stepOpts = { ...opts, name: baseName, unit, precision, scale, applyWorldTransform };
+    const { data } = generateSTEP([this], stepOpts);
+    return data;
+}
+
+/**
+ * Write a triangulated STEP file to disk (Node.js only).
+ * @param {string} filePath
+ * @param {string} [name=this.name||'part']
+ * @param {{unit?: string, precision?: number, scale?: number, applyWorldTransform?: boolean, useTessellatedFaces?: boolean}} [options]
+ * @returns {Promise<string>} resolves with file path
+ */
+export async function writeSTEP(filePath, name = undefined, options = {}) {
+    if (typeof window !== "undefined") {
+        throw new Error("writeSTEP is only available in Node.js environments");
+    }
+    const { writeFile } = await import('node:fs/promises');
+    const step = this.toSTEP(name, options);
+    await writeFile(filePath, step, 'utf8');
+    return filePath;
+}

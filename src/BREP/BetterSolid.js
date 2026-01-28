@@ -49,6 +49,8 @@
  *   - `toSTL()` returns an ASCII STL string from the current Manifold mesh.
  *   - `writeSTL(path)` writes the STL to disk using a dynamic `fs` import so
  *     the module stays browser‑safe.
+ *   - `toSTEP()` returns a triangulated STEP (faceted BREP) string.
+ *   - `writeSTEP(path)` writes the STEP file to disk in Node.js environments.
  *
  * Performance Notes
  * - Manifoldization is cached and only recomputed when authoring arrays change
@@ -423,6 +425,27 @@ export class Solid extends THREE.Group {
      */
     async writeSTL(filePath, name = "solid", precision = 6) {
         return SolidMethods.writeSTL.apply(this, arguments);
+    }
+
+    /**
+     * Generate a triangulated STEP string for this solid.
+     * @param {string} [name=this.name||'part']
+     * @param {{unit?: string, precision?: number, scale?: number, applyWorldTransform?: boolean}} [options]
+     * @returns {string}
+     */
+    toSTEP(name = undefined, options = {}) {
+        return SolidMethods.toSTEP.apply(this, arguments);
+    }
+
+    /**
+     * Write a triangulated STEP file to disk (Node.js only).
+     * @param {string} filePath
+     * @param {string} [name=this.name||'part']
+     * @param {{unit?: string, precision?: number, scale?: number, applyWorldTransform?: boolean}} [options]
+     * @returns {Promise<string>} resolves with file path
+     */
+    async writeSTEP(filePath, name = undefined, options = {}) {
+        return SolidMethods.writeSTEP.apply(this, arguments);
     }
 
     /**

@@ -491,7 +491,10 @@ export async function fillet(opts = {}) {
     throw new Error(`Solid.fillet: radius must be > 0, got ${opts.radius}`);
   }
   const dir = String(opts.direction || 'INSET').toUpperCase();
-  const inflate = Number.isFinite(opts.inflate) ? Number(opts.inflate) : 0.1;
+  const inflateRaw = Number.isFinite(opts.inflate) ? Number(opts.inflate) : 0.1;
+  // Mirror chamfer behavior: OUTSET should shrink the tool slightly to
+  // encourage robust overlap with the base body, especially on shallow angles.
+  const inflateForSolid = (dir === 'OUTSET') ? -Math.abs(inflateRaw) : inflateRaw;
   const debug = !!opts.debug;
   const resolutionRaw = Number(opts.resolution);
   const resolution = (Number.isFinite(resolutionRaw) && resolutionRaw > 0)
@@ -506,7 +509,8 @@ export async function fillet(opts = {}) {
     solid: this?.name,
     radius,
     direction: dir,
-    inflate,
+    inflate: inflateRaw,
+    inflateApplied: inflateForSolid,
     resolution,
     debug,
     showTangentOverlays,
@@ -544,7 +548,16 @@ export async function fillet(opts = {}) {
   };
   for (const e of filletEdges) {
     const name = `${featureID}_FILLET_${idx++}`;
-    const res = filletSolid({ edgeToFillet: e, radius, sideMode: dir, inflate, resolution, debug, name, showTangentOverlays }) || {};
+    const res = filletSolid({
+      edgeToFillet: e,
+      radius,
+      sideMode: dir,
+      inflate: inflateForSolid,
+      resolution,
+      debug,
+      name,
+      showTangentOverlays,
+    }) || {};
 
     // Handle debug solids even on failure
     if (debug || !res.finalSolid) {
@@ -784,7 +797,7 @@ export async function fillet(opts = {}) {
       finalVertCount,
       edgeCount: unique.length,
       direction: dir,
-      inflate,
+      inflate: inflateRaw,
     });
   } else {
     consoleLogReplacement('[Solid.fillet] Completed', { featureID, triangles: finalTriCount, vertices: finalVertCount });
