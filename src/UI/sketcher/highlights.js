@@ -49,7 +49,8 @@ export function applyHoverAndSelectionColors(inst) {
   for (const ch of inst._sketchGroup.children) {
     const ud = ch.userData || {};
     if (ud.kind === 'point') {
-      const col = isSel('point', ud.id) ? 0x6fe26f : (isHov('point', ud.id) ? 0xffd54a : 0x9ec9ff);
+      const base = ud.underConstrained ? 0xffb347 : 0x9ec9ff;
+      const col = isSel('point', ud.id) ? 0x6fe26f : (isHov('point', ud.id) ? 0xffd54a : base);
       try { ch.material.color.setHex(col); } catch {}
     } else if (ud.kind === 'geometry') {
       const col = isSel('geometry', ud.id) ? 0x6fe26f : (isHov('geometry', ud.id) ? 0xffd54a : 0xffff88);

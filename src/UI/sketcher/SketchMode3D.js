@@ -186,7 +186,8 @@ export class SketchMode3D {
     this._solverSettings = {
       maxIterations: 500,
       tolerance: 0.00001,
-      decimalPlaces: 6
+      decimalPlaces: 6,
+      autoCleanupOrphans: true
     };
 
     // Load persisted dimension offsets (plane-space {du,dv}) if present
@@ -309,57 +310,11 @@ export class SketchMode3D {
         return;
       }
       if (k === 'Delete' || k === 'Backspace') {
-        // Remove selected items (constraints, geometries/curves, and points)
-        const selection = Array.from(this._selection);
-        const constraints = selection.filter(i => i.type === 'constraint');
-        const geometries = selection.filter(i => i.type === 'geometry');
-        const points = selection.filter(i => i.type === 'point');
-
-        let deletedAny = false;
-
-        if (this._solver) {
-          // Remove constraints first
-          if (constraints.length > 0) {
-            try {
-              for (const item of constraints) {
-                this._solver.removeConstraintById?.(parseInt(item.id));
-              }
-              deletedAny = true;
-            } catch { }
-          }
-
-          // Remove geometries/curves
-          if (geometries.length > 0) {
-            try {
-              for (const item of geometries) {
-                this._solver.removeGeometryById?.(parseInt(item.id));
-              }
-              deletedAny = true;
-            } catch { }
-          }
-
-          // Remove points (but not point 0 which is the origin)
-          if (points.length > 0) {
-            try {
-              for (const item of points) {
-                const pointId = parseInt(item.id);
-                if (pointId !== 0) {  // Protect the origin point
-                  this._solver.removePointById?.(pointId);
-                  deletedAny = true;
-                }
-              }
-            } catch { }
-          }
-
-          // If anything was deleted, update the sketch
-          if (deletedAny) {
-            try { this._solver.solveSketch('full'); } catch { }
-            this._selection.clear();
-            this.#rebuildSketchGraphics();
-            this.#refreshContextBar();
-            try { ev.preventDefault(); ev.stopPropagation(); } catch { }
-          }
+        if (this._selection.size) {
+          this.#deleteSelection();
+          try { ev.preventDefault(); ev.stopPropagation(); } catch { }
         }
+        return;
       }
     };
     window.addEventListener('keydown', this._onKeyDown, { passive: false });
@@ -1383,7 +1338,8 @@ export class SketchMode3D {
       this._solverSettings = {
         maxIterations: 500,
         tolerance: 0.00001,
-        decimalPlaces: 6
+        decimalPlaces: 6,
+        autoCleanupOrphans: true
       };
     }
 
@@ -1425,10 +1381,35 @@ export class SketchMode3D {
       row.appendChild(input);
       return row;
     };
+    const createCheckboxRow = (label, key) => {
+      const row = document.createElement("div");
+      row.style.display = "flex";
+      row.style.alignItems = "center";
+      row.style.gap = "6px";
+      row.style.margin = "6px 0";
+      row.style.fontSize = "12px";
+
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = !!this._solverSettings[key];
+      input.onchange = () => {
+        this._solverSettings[key] = !!input.checked;
+      };
+
+      const labelEl = document.createElement("label");
+      labelEl.textContent = label;
+      labelEl.style.color = "#ddd";
+      labelEl.style.flex = "1";
+
+      row.appendChild(input);
+      row.appendChild(labelEl);
+      return row;
+    };
 
     wrap.appendChild(createSettingRow("Max Iterations:", "maxIterations", "number", "1", "1", "10000"));
     wrap.appendChild(createSettingRow("Tolerance:", "tolerance", "number", "0.000001", "0.000001", "0.1"));
     wrap.appendChild(createSettingRow("Decimal Places:", "decimalPlaces", "number", "1", "1", "10"));
+    wrap.appendChild(createCheckboxRow("Auto-remove orphan points", "autoCleanupOrphans"));
 
     // Add a reset button
     const resetRow = document.createElement("div");
@@ -1446,7 +1427,8 @@ export class SketchMode3D {
       this._solverSettings = {
         maxIterations: 500,
         tolerance: 0.00001,
-        decimalPlaces: 6
+        decimalPlaces: 6,
+        autoCleanupOrphans: true
       };
       this.#mountSolverSettingsUI(); // Refresh the UI
       this.#applySolverSettings();
@@ -2122,11 +2104,12 @@ export class SketchMode3D {
             this._solver.removeConstraintById?.(parseInt(id));
           } catch { }
         }
-        try {
-          this._solver.solveSketch("full");
-        } catch { }
-        this.#rebuildSketchGraphics();
-        this.#refreshContextBar();
+        const cleaned = this.#maybeAutoCleanupPoints();
+        if (!cleaned) {
+          try { this._solver.solveSketch("full"); } catch { }
+          this.#rebuildSketchGraphics();
+          this.#refreshContextBar();
+        }
         try { updateListHighlights(this); } catch { }
         return;
       }
@@ -2170,6 +2153,10 @@ export class SketchMode3D {
     const points = new Set(
       items.filter((i) => i.type === "point").map((i) => i.id),
     );
+    const selectedPointIds = items
+      .filter((i) => i.type === "point")
+      .map((i) => parseInt(i.id))
+      .filter((id) => Number.isFinite(id));
     const geos = items
       .filter((i) => i.type === "geometry")
       .map((i) => s.geometries.find((g) => g.id === parseInt(i.id)))
@@ -2231,6 +2218,16 @@ export class SketchMode3D {
 
     // Always offer cleanup
     addCleanupButton();
+
+    // Fix/Unfix selected points
+    if (selectedPointIds.length) {
+      const allFixed = selectedPointIds.every((pid) => this.#pointHasGround(pid));
+      appendButton({
+        label: allFixed ? "Unfix" : "Fix",
+        tooltip: allFixed ? "Remove ground constraint" : "Add ground constraint",
+        onClick: () => this.#toggleGroundConstraints(selectedPointIds, allFixed),
+      });
+    }
 
     // Constraint-specific actions
     const constraintItems = items.filter((i) => i.type === "constraint");
@@ -2371,12 +2368,13 @@ export class SketchMode3D {
             s.removePointById?.(parseInt(it.id));
           } catch { }
         }
-      try {
-        s.solveSketch("full");
-      } catch { }
       this._selection.clear();
-      this.#rebuildSketchGraphics();
-      this.#refreshContextBar();
+      const cleaned = this.#maybeAutoCleanupPoints();
+      if (!cleaned) {
+        try { s.solveSketch("full"); } catch { }
+        this.#rebuildSketchGraphics();
+        this.#refreshContextBar();
+      }
     } catch { }
   }
 
@@ -2385,7 +2383,7 @@ export class SketchMode3D {
   #cleanupUnusedPoints() {
     const solver = this._solver;
     const sketch = solver?.sketchObject;
-    if (!solver || !sketch) return;
+    if (!solver || !sketch) return 0;
 
     const usedByGeo = new Set();
     for (const g of sketch.geometries || []) {
@@ -2421,7 +2419,7 @@ export class SketchMode3D {
       }
     }
 
-    if (!toRemove.length) return;
+    if (!toRemove.length) return 0;
     for (const pid of toRemove) {
       try { solver.removePointById?.(pid); } catch { }
     }
@@ -2429,6 +2427,54 @@ export class SketchMode3D {
     this._selection.clear();
     this.#rebuildSketchGraphics();
     this.#refreshLists();
+    this.#refreshContextBar();
+    return toRemove.length;
+  }
+
+  #maybeAutoCleanupPoints() {
+    if (!this._solverSettings?.autoCleanupOrphans) return 0;
+    return this.#cleanupUnusedPoints();
+  }
+
+  #pointHasGround(pid) {
+    const s = this._solver?.sketchObject;
+    if (!s || !Array.isArray(s.constraints)) return false;
+    return s.constraints.some((c) => c?.type === "⏚" && Array.isArray(c.points) && parseInt(c.points[0]) === pid);
+  }
+
+  #toggleGroundConstraints(pointIds, remove) {
+    const solver = this._solver;
+    const sketch = solver?.sketchObject;
+    if (!solver || !sketch || !Array.isArray(pointIds) || !pointIds.length) return;
+
+    const ids = pointIds
+      .map((id) => parseInt(id))
+      .filter((id) => Number.isFinite(id) && id !== 0);
+    if (!ids.length) return;
+
+    if (remove) {
+      sketch.constraints = (sketch.constraints || []).filter((c) => {
+        if (c?.type !== "⏚" || !Array.isArray(c.points)) return true;
+        return !ids.includes(parseInt(c.points[0]));
+      });
+      for (const pid of ids) {
+        const p = sketch.points?.find((pt) => parseInt(pt.id) === pid);
+        if (p) p.fixed = false;
+      }
+    } else {
+      const nextId = () => Math.max(0, ...(sketch.constraints || []).map((c) => +c.id || 0)) + 1;
+      for (const pid of ids) {
+        if (this.#pointHasGround(pid)) continue;
+        const cid = nextId();
+        sketch.constraints = sketch.constraints || [];
+        sketch.constraints.push({ id: cid, type: "⏚", points: [pid] });
+        const p = sketch.points?.find((pt) => parseInt(pt.id) === pid);
+        if (p) p.fixed = true;
+      }
+    }
+
+    try { solver.solveSketch("full"); } catch { }
+    this.#rebuildSketchGraphics();
     this.#refreshContextBar();
   }
 
@@ -2768,9 +2814,12 @@ export class SketchMode3D {
       if (overlap || endpointTouch) {
         this._solver.removeGeometryById?.(geo.id);
         this._selection.clear();
-        try { this._solver.solveSketch("full"); } catch { }
-        this.#rebuildSketchGraphics();
-        this.#refreshContextBar();
+        const cleaned = this.#maybeAutoCleanupPoints();
+        if (!cleaned) {
+          try { this._solver.solveSketch("full"); } catch { }
+          this.#rebuildSketchGraphics();
+          this.#refreshContextBar();
+        }
         return true;
       }
       return false;
@@ -2787,9 +2836,12 @@ export class SketchMode3D {
 
     if (trimmed) {
       this._selection.clear();
-      try { this._solver.solveSketch("full"); } catch { }
-      this.#rebuildSketchGraphics();
-      this.#refreshContextBar();
+      const cleaned = this.#maybeAutoCleanupPoints();
+      if (!cleaned) {
+        try { this._solver.solveSketch("full"); } catch { }
+        this.#rebuildSketchGraphics();
+        this.#refreshContextBar();
+      }
     }
     return trimmed;
   }
@@ -3673,6 +3725,13 @@ export class SketchMode3D {
     const s = this._solver.sketchObject;
     const b = this._lock?.basis;
     if (!b) return;
+    const constrainedPoints = new Set();
+    try {
+      for (const c of s.constraints || []) {
+        if (!c || c.temporary || !Array.isArray(c.points)) continue;
+        for (const pid of c.points) constrainedPoints.add(parseInt(pid));
+      }
+    } catch { }
     const O = b.origin,
       X = b.x,
       Y = b.y;
@@ -3840,8 +3899,10 @@ export class SketchMode3D {
       const selected = Array.from(this._selection).some(
         (it) => it.type === "point" && it.id === p.id,
       );
+      const underConstrained = !selected && !p.fixed && !constrainedPoints.has(p.id);
+      const baseColor = underConstrained ? 0xffb347 : 0x9ec9ff;
       const mat = new THREE.MeshBasicMaterial({
-        color: selected ? 0x6fe26f : 0x9ec9ff,
+        color: selected ? 0x6fe26f : baseColor,
         depthTest: false,
         depthWrite: false,
         transparent: true,
@@ -3850,7 +3911,7 @@ export class SketchMode3D {
       m.renderOrder = 10001;
 
       m.position.copy(to3(p.x, p.y));
-      m.userData = { kind: "point", id: p.id };
+      m.userData = { kind: "point", id: p.id, underConstrained };
       // Enlarge selected points 2x for better visibility
       m.scale.setScalar(selected ? r * 2 : r);
       grp.add(m);
