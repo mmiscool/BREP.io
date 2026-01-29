@@ -12,10 +12,14 @@ const htmlEntries = {
   featureDialogs: resolve(root, 'feature-dialog-capture.html'),
   pmiDialogs: resolve(root, 'pmi-dialog-capture.html'),
   assemblyConstraintDialogs: resolve(root, 'assembly-constraint-capture.html'),
-  test: resolve(root, 'test.html'),
 };
 
-export default defineConfig({
+export default defineConfig(({ command }) => {
+  const input = { ...htmlEntries };
+  if (command === 'serve') {
+    input.test = resolve(root, 'test.html');
+  }
+  return {
   // Explicitly set the public directory to ensure generated docs are included
   //
   publicDir: 'public',
@@ -35,7 +39,8 @@ export default defineConfig({
       keep_fnames: true,
     },
     rollupOptions: {
-      input: htmlEntries,
+      input,
     },
   },
+  };
 });
