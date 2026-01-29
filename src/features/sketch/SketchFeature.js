@@ -869,7 +869,22 @@ export class SketchFeature {
                 const bZ2 = new THREE.Vector3().crossVectors(bX2,bY2).normalize();
                 m.makeBasis(bX2,bY2,bZ2); m.setPosition(bO2);
                 geom2D.applyMatrix4(m); geom2D.computeVertexNormals(); geom2D.computeBoundingSphere();
-                const face = new BREP.Face(geom2D); face.name = `${sceneGroup.name}:PROFILE`; face.userData.faceName = face.name; face.edges = Array.from(boundaryEdges); face.userData.boundaryLoopsWorld = boundaryLoopsWorld; face.userData.profileGroups = profileGroups;
+                const face = new BREP.Face(geom2D);
+                face.name = `${sceneGroup.name}:PROFILE`;
+                face.userData.faceName = face.name;
+                face.edges = Array.from(boundaryEdges);
+                face.userData.boundaryLoopsWorld = boundaryLoopsWorld;
+                face.userData.profileGroups = profileGroups;
+                try {
+                    const baseMat = face.material;
+                    const sketchMat = (baseMat && typeof baseMat.clone === 'function') ? baseMat.clone() : null;
+                    if (sketchMat) {
+                        sketchMat.side = THREE.DoubleSide;
+                        sketchMat.needsUpdate = true;
+                        face.material = sketchMat;
+                        face.userData.__baseMaterial = sketchMat;
+                    }
+                } catch { }
                 sceneGroup.add(face);
                 profileFace = face;
                 this.persistentData.lastProfileDiagnostics = {
