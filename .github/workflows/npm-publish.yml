@@ -53,8 +53,7 @@ jobs:
 
       - name: Set CI version
         run: |
-          node -e 'const fs=require("fs");const pkg=JSON.parse(fs.readFileSync("package.json","utf8"));const base=pkg.version;const run=process.env.GITHUB_RUN_NUMBER||"0";pkg.version=base+"-ci."+run;fs.writeFileSync("package.json",JSON.stringify(pkg,null,2)+"\n");'
+          node -e 'const fs=require("fs");const pkg=JSON.parse(fs.readFileSync("package.json","utf8"));const base=String(pkg.version||"0.0.0");const run=process.env.GITHUB_RUN_NUMBER||"0";const parts=base.split(".");const major=parts[0]||"0";const minor=parts[1]||"0";pkg.version=`${major}.${minor}.${run}`;fs.writeFileSync("package.json",JSON.stringify(pkg,null,2)+"\n");'
 
       - name: Publish
         run: npm publish --access public --provenance --tag ci --no-git-checks
-
