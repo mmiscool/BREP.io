@@ -128,6 +128,9 @@ The published package is `brep-io-kernel`. It ships as a single ESM bundle that
 inlines the WASM, so consumers do not need any extra asset copying or loader
 configuration.
 
+- Examples (Node.js):
+  - [`brep-io-kernel-examples/README.md`](brep-io-kernel-examples/README.md)
+
 - Install:
   - `pnpm add brep-io-kernel`
 - Import (ESM):
