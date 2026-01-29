@@ -79,6 +79,14 @@ export class MainToolbar {
         color: #e9f0ff;
         box-shadow: 0 0 0 1px rgba(110,168,254,.2) inset;
       }
+      .mtb-selection {
+        display: none;
+        align-items: center;
+        gap: 6px;
+        padding-left: 6px;
+        margin-left: 2px;
+        border-left: 1px solid #364053;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -103,7 +111,8 @@ export class MainToolbar {
     b.className = 'mtb-btn';
     b.textContent = label;
     b.title = title || label;
-    b.addEventListener('click', (e) => { e.stopPropagation(); try { onClick && onClick(); } catch {} });
+    b.__mtbOnClick = onClick;
+    b.addEventListener('click', (e) => { e.stopPropagation(); try { b.__mtbOnClick && b.__mtbOnClick(); } catch {} });
     return b;
   }
 
@@ -111,9 +120,37 @@ export class MainToolbar {
   addCustomButton({ label, title, onClick }) {
     try {
       const btn = this._btn(String(label ?? '🔧'), String(title || ''), onClick);
-      this._left?.appendChild(btn);
+      const anchor = this._selectionContainer && this._selectionContainer.parentNode === this._left
+        ? this._selectionContainer
+        : null;
+      if (anchor) this._left?.insertBefore(btn, anchor);
+      else this._left?.appendChild(btn);
       return btn;
     } catch { return null; }
+  }
+
+  _ensureSelectionContainer() {
+    if (this._selectionContainer) return this._selectionContainer;
+    const wrap = document.createElement('div');
+    wrap.className = 'mtb-selection';
+    this._selectionContainer = wrap;
+    this._left?.appendChild(wrap);
+    return wrap;
+  }
+
+  // Public: allow selection-based buttons in their own cluster
+  addSelectionButton({ label, title, onClick }) {
+    try {
+      const btn = this._btn(String(label ?? '🔧'), String(title || ''), onClick);
+      if (label && String(label).length <= 2) btn.classList.add('mtb-icon');
+      const wrap = this._ensureSelectionContainer();
+      wrap.appendChild(btn);
+      return btn;
+    } catch { return null; }
+  }
+
+  getSelectionContainer() {
+    return this._ensureSelectionContainer();
   }
 
   _positionWithSidebar() {

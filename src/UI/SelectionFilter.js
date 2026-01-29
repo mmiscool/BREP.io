@@ -17,6 +17,12 @@ export class SelectionFilter {
     static previouseAllowedSelectionTypes = null;
     static _hovered = new Set(); // objects currently hover-highlighted
     static hoverColor = '#fbff00'; // default hover tint
+    static _selectionActions = new Map();
+    static _selectionActionOrder = [];
+    static _selectionActionSeq = 1;
+    static _selectionActionListenerBound = false;
+    static _selectionActionsPending = false;
+    static _selectionActionBar = null;
 
     constructor() {
         throw new Error("SelectionFilter is static and cannot be instantiated.");
@@ -429,6 +435,11 @@ export class SelectionFilter {
                 if (!targetObj) return false;
 
                 // Update the reference input with the chosen object
+                try {
+                    if (activeRefInput && typeof activeRefInput.__captureReferencePreview === 'function') {
+                        activeRefInput.__captureReferencePreview(targetObj);
+                    }
+                } catch (_) { /* ignore preview capture errors */ }
                 const objType = targetObj.type;
                 const objectName = targetObj.name || `${objType}(${targetObj.position?.x || 0},${targetObj.position?.y || 0},${targetObj.position?.z || 0})`;
 
@@ -615,6 +626,189 @@ export class SelectionFilter {
             const ev = new CustomEvent('selection-changed');
             window.dispatchEvent(ev);
         } catch (_) { /* noop */ }
+    }
+
+    static getSelectedObjects(options = {}) {
+        const scene = options.scene
+            || SelectionFilter.viewer?.partHistory?.scene
+            || SelectionFilter.viewer?.scene
+            || null;
+        const selected = [];
+        if (!scene || typeof scene.traverse !== 'function') return selected;
+        scene.traverse((obj) => {
+            if (obj && obj.selected) selected.push(obj);
+        });
+        return selected;
+    }
+
+    static registerSelectionAction(spec = {}) {
+        if (!spec) return null;
+        const id = String(spec.id || `selection-action-${SelectionFilter._selectionActionSeq++}`);
+        const entry = SelectionFilter._selectionActions.get(id) || { id };
+        entry.label = spec.label ?? entry.label ?? '';
+        entry.title = spec.title ?? entry.title ?? entry.label ?? '';
+        entry.onClick = spec.onClick ?? entry.onClick ?? null;
+        entry.shouldShow = typeof spec.shouldShow === 'function' ? spec.shouldShow : (entry.shouldShow || null);
+        SelectionFilter._selectionActions.set(id, entry);
+        if (!SelectionFilter._selectionActionOrder.includes(id)) {
+            SelectionFilter._selectionActionOrder.push(id);
+        }
+        SelectionFilter._ensureSelectionActionListener();
+        SelectionFilter._syncSelectionActions();
+        return id;
+    }
+
+    static unregisterSelectionAction(id) {
+        if (!id) return;
+        const entry = SelectionFilter._selectionActions.get(id);
+        if (entry?.btn && entry.btn.parentNode) {
+            try { entry.btn.parentNode.removeChild(entry.btn); } catch { }
+        }
+        SelectionFilter._selectionActions.delete(id);
+        SelectionFilter._selectionActionOrder = SelectionFilter._selectionActionOrder.filter((k) => k !== id);
+        SelectionFilter._syncSelectionActions();
+    }
+
+    static refreshSelectionActions() {
+        SelectionFilter._syncSelectionActions();
+    }
+
+    static _ensureSelectionActionListener() {
+        if (SelectionFilter._selectionActionListenerBound) return;
+        if (typeof window === 'undefined') return;
+        SelectionFilter._selectionActionListenerBound = true;
+        window.addEventListener('selection-changed', () => SelectionFilter._syncSelectionActions());
+    }
+
+    static _syncSelectionActions() {
+        const actions = SelectionFilter._selectionActions;
+        if (!actions || actions.size === 0) {
+            try {
+                const bar = SelectionFilter._selectionActionBar;
+                if (bar) bar.style.display = 'none';
+            } catch { }
+            return;
+        }
+        const viewer = SelectionFilter.viewer;
+        const bar = SelectionFilter._ensureSelectionActionBar(viewer);
+        if (!bar) {
+            SelectionFilter._selectionActionsPending = true;
+            return;
+        }
+        SelectionFilter._selectionActionsPending = false;
+        const selection = SelectionFilter.getSelectedObjects();
+        const hideAll = !!viewer?._sketchMode;
+        let visibleCount = 0;
+        const updateButton = (entry, show) => {
+            if (!entry || !entry.btn) return;
+            try { entry.btn.style.display = show ? '' : 'none'; } catch { }
+            if (show) visibleCount += 1;
+        };
+        for (const id of SelectionFilter._selectionActionOrder) {
+            const entry = actions.get(id);
+            if (!entry) continue;
+            if (!entry.btn) {
+                entry.btn = SelectionFilter._createSelectionActionButton(entry);
+            }
+            if (!entry.btn) continue;
+            try {
+                entry.btn.textContent = String(entry.label ?? '');
+                entry.btn.title = String(entry.title ?? entry.label ?? '');
+                entry.btn.__sabOnClick = entry.onClick;
+                const isIcon = String(entry.label || '').length <= 2;
+                entry.btn.classList.toggle('sab-icon', isIcon);
+            } catch { }
+            let show = !hideAll;
+            if (show) {
+                if (typeof entry.shouldShow === 'function') {
+                    try { show = !!entry.shouldShow(selection, viewer); } catch { show = false; }
+                } else {
+                    show = selection.length > 0;
+                }
+            }
+            updateButton(entry, show);
+            if (entry.btn.parentNode !== bar) {
+                try { bar.appendChild(entry.btn); } catch { }
+            }
+        }
+        try {
+            if (bar) bar.style.display = visibleCount > 0 ? 'flex' : 'none';
+        } catch { }
+    }
+
+    static _ensureSelectionActionBar(viewer) {
+        if (SelectionFilter._selectionActionBar && SelectionFilter._selectionActionBar.isConnected) {
+            return SelectionFilter._selectionActionBar;
+        }
+        if (typeof document === 'undefined') return null;
+        const host = viewer?.container || document.body || null;
+        if (!host) return null;
+        try {
+            if (!document.getElementById('selection-action-bar-styles')) {
+                const style = document.createElement('style');
+                style.id = 'selection-action-bar-styles';
+                style.textContent = `
+                  .selection-action-bar {
+                    position: absolute;
+                    top: 100px;
+                    right: 8px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 6px;
+                    align-items: stretch;
+                    background: rgba(20,24,30,.85);
+                    border: 1px solid #262b36;
+                    border-radius: 8px;
+                    padding: 6px;
+                    color: #ddd;
+                    min-width: 40px;
+                    max-width: 150px;
+                    z-index: 12;
+                    user-select: none;
+                  }
+                  .selection-action-bar .sab-btn {
+                    background: transparent;
+                    border-radius: 6px;
+                    padding: 4px 8px;
+                    width: 100%;
+                    min-height: 34px;
+                    box-sizing: border-box;
+                    color: #ddd;
+                    border: 1px solid #364053;
+                    cursor: pointer;
+                  }
+                  .selection-action-bar .sab-btn:hover { filter: brightness(1.08); }
+                  .selection-action-bar .sab-btn:active { filter: brightness(1.15); }
+                  .selection-action-bar .sab-btn.sab-icon {
+                    font-size: 16px;
+                    min-width: 36px;
+                  }
+                `;
+                document.head.appendChild(style);
+            }
+        } catch { }
+        const bar = document.createElement('div');
+        bar.className = 'selection-action-bar';
+        host.appendChild(bar);
+        SelectionFilter._selectionActionBar = bar;
+        return bar;
+    }
+
+    static _createSelectionActionButton(entry) {
+        try {
+            const btn = document.createElement('button');
+            btn.className = 'sab-btn';
+            btn.textContent = String(entry?.label ?? '');
+            btn.title = String(entry?.title ?? entry?.label ?? '');
+            btn.__sabOnClick = entry?.onClick ?? null;
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                try { btn.__sabOnClick && btn.__sabOnClick(); } catch { }
+            });
+            const isIcon = String(entry?.label || '').length <= 2;
+            if (isIcon) btn.classList.add('sab-icon');
+            return btn;
+        } catch { return null; }
     }
 
     static #logAllowedTypesChange(next, reason = '') {

@@ -5,6 +5,7 @@ export function renderReferenceSelectionField({ ui, key, def, id, controlWrap, v
     inputEl.type = 'hidden';
     inputEl.id = id;
     try { inputEl.dataset.key = String(key); } catch (_) { }
+    try { inputEl.__refSelectionDef = def; } catch (_) { }
 
     const isMulti = !!def.multiple;
     if (isMulti) inputEl.dataset.multiple = 'true';
@@ -132,6 +133,15 @@ export function renderReferenceSelectionField({ ui, key, def, id, controlWrap, v
         inputEl.value = initial ?? '';
 
         valueWrap.addEventListener('click', () => ui._activateReferenceSelection(inputEl, def));
+        valueWrap.addEventListener('mouseenter', () => {
+            const normalized = normalizeReferenceName(inputEl.value || readRawValue());
+            if (normalized) {
+                try { ui._hoverReferenceSelectionItem?.(inputEl, def, normalized); } catch (_) { }
+            }
+        });
+        valueWrap.addEventListener('mouseleave', () => {
+            try { ui._clearReferenceSelectionHover?.(inputEl); } catch (_) { }
+        });
         refWrap.appendChild(valueWrap);
 
         inputEl.addEventListener('change', () => {

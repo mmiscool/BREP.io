@@ -341,6 +341,7 @@ export class PartHistory {
       if (JSON.stringify(feature.inputParams) !== feature.lastRunInputParams) feature.dirty = true;
 
       instance.inputParams = await this.sanitizeInputParams(FeatureClass.inputParamsSchema, feature.inputParams);
+      try { this._captureReferencePreviewSnapshots(feature, FeatureClass.inputParamsSchema, instance.inputParams, instance.persistentData); } catch { }
       // check the timestamps of any objects referenced by reference_selection inputs; if any are newer than the feature timestamp, mark dirty
       for (const key in FeatureClass.inputParamsSchema) {
         if (Object.prototype.hasOwnProperty.call(FeatureClass.inputParamsSchema, key)) {
@@ -458,6 +459,111 @@ export class PartHistory {
     }
 
     return this;
+  }
+
+  _captureReferencePreviewSnapshots(feature, schema, resolvedParams, persistentTarget = null) {
+    if (!schema || !resolvedParams) return;
+    const stores = [];
+    if (feature) {
+      feature.persistentData = feature.persistentData || {};
+      stores.push(feature.persistentData);
+    }
+    if (persistentTarget && typeof persistentTarget === 'object') {
+      stores.push(persistentTarget);
+    }
+    if (!stores.length) return;
+    const ensureBucket = (store, key) => {
+      if (!store.__refPreviewSnapshots || typeof store.__refPreviewSnapshots !== 'object') {
+        store.__refPreviewSnapshots = {};
+      }
+      if (!store.__refPreviewSnapshots[key] || typeof store.__refPreviewSnapshots[key] !== 'object') {
+        store.__refPreviewSnapshots[key] = {};
+      }
+      return store.__refPreviewSnapshots[key];
+    };
+
+    const normalizeRefName = (obj) => {
+      if (!obj) return null;
+      const raw = obj.name != null ? String(obj.name).trim() : '';
+      if (raw) return raw;
+      const type = obj.type || 'OBJECT';
+      const pos = obj.position || {};
+      const x = Number.isFinite(pos.x) ? pos.x : 0;
+      const y = Number.isFinite(pos.y) ? pos.y : 0;
+      const z = Number.isFinite(pos.z) ? pos.z : 0;
+      return `${type}(${x},${y},${z})`;
+    };
+
+    const extractEdgeWorldPositions = (obj) => {
+      if (!obj) return [];
+      try { obj.updateMatrixWorld?.(true); } catch { }
+      try {
+        if (typeof obj.points === 'function') {
+          const pts = obj.points(true);
+          if (Array.isArray(pts) && pts.length) {
+            const flat = [];
+            for (const p of pts) {
+              if (!p) continue;
+              const x = Number(p.x);
+              const y = Number(p.y);
+              const z = Number(p.z);
+              if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+              flat.push(x, y, z);
+            }
+            if (flat.length >= 6) return flat;
+          }
+        }
+      } catch { /* ignore */ }
+
+      try {
+        const geom = obj.geometry;
+        const pos = geom && typeof geom.getAttribute === 'function' ? geom.getAttribute('position') : null;
+        if (!pos || pos.itemSize !== 3 || pos.count < 2) return [];
+        const tmp = new THREE.Vector3();
+        const flat = [];
+        for (let i = 0; i < pos.count; i++) {
+          tmp.set(pos.getX(i), pos.getY(i), pos.getZ(i));
+          tmp.applyMatrix4(obj.matrixWorld);
+          flat.push(tmp.x, tmp.y, tmp.z);
+        }
+        return flat.length >= 6 ? flat : [];
+      } catch { /* ignore */ }
+      return [];
+    };
+
+    for (const key in schema) {
+      if (!Object.prototype.hasOwnProperty.call(schema, key)) continue;
+      const def = schema[key];
+      if (!def || def.type !== 'reference_selection') continue;
+      const selected = Array.isArray(resolvedParams[key]) ? resolvedParams[key] : [];
+      if (!selected.length) continue;
+      const buckets = stores.map((store) => ensureBucket(store, key));
+      for (const obj of selected) {
+        if (!obj || typeof obj !== 'object') continue;
+        const refName = normalizeRefName(obj);
+        if (!refName) continue;
+        const objType = String(obj.type || '').toUpperCase();
+        const sourceUuid = obj.uuid || null;
+        const sourceFeatureId = obj.owningFeatureID ?? null;
+        if (objType === SelectionFilter.EDGE || objType === 'EDGE') {
+          const positions = extractEdgeWorldPositions(obj);
+          if (positions && positions.length >= 6) {
+            for (const bucket of buckets) {
+              bucket[refName] = { type: 'EDGE', positions, sourceUuid, sourceFeatureId };
+            }
+          }
+        } else if (objType === SelectionFilter.VERTEX || objType === 'VERTEX') {
+          const pos = new THREE.Vector3();
+          try {
+            if (typeof obj.getWorldPosition === 'function') obj.getWorldPosition(pos);
+            else pos.set(obj.position?.x || 0, obj.position?.y || 0, obj.position?.z || 0);
+          } catch { }
+          for (const bucket of buckets) {
+            bucket[refName] = { type: 'VERTEX', position: [pos.x, pos.y, pos.z], sourceUuid, sourceFeatureId };
+          }
+        }
+      }
+    }
   }
 
 

@@ -1,9 +1,11 @@
+import { renderReferenceSelectionField } from './referenceSelectionField.js';
+
 export function renderBooleanOperationField({ ui, key, def, controlWrap }) {
     if (!ui.params[key] || typeof ui.params[key] !== 'object') {
-        ui.params[key] = { targets: [], operation: 'NONE', operation: 'NONE' };
+        ui.params[key] = { targets: [], operation: 'NONE' };
     } else {
         if (!Array.isArray(ui.params[key].targets)) ui.params[key].targets = [];
-        if (!ui.params[key].operation && !ui.params[key].operation) ui.params[key].operation = 'NONE';
+        if (!ui.params[key].operation) ui.params[key].operation = 'NONE';
     }
 
     const wrap = document.createElement('div');
@@ -19,70 +21,49 @@ export function renderBooleanOperationField({ ui, key, def, controlWrap }) {
         opt.textContent = String(op);
         sel.appendChild(opt);
     }
-    sel.value = String((ui.params[key].operation ?? ui.params[key].operation) || 'NONE');
+    sel.value = String(ui.params[key].operation || 'NONE');
     sel.addEventListener('change', () => {
         if (!ui.params[key] || typeof ui.params[key] !== 'object') ui.params[key] = { targets: [], operation: 'NONE' };
-        ui.params[key].operation = sel.value;
         ui.params[key].operation = sel.value;
         ui._emitParamsChange(key, ui.params[key]);
     });
     wrap.appendChild(sel);
 
-    const refWrap = document.createElement('div');
-    refWrap.className = 'ref-multi-wrap';
-    const chipsWrap = document.createElement('div');
-    chipsWrap.className = 'ref-chips';
-    refWrap.appendChild(chipsWrap);
-
-    const inputElTargets = document.createElement('input');
-    inputElTargets.type = 'text';
-    inputElTargets.className = 'input';
-    inputElTargets.dataset.multiple = 'true';
-    inputElTargets.placeholder = 'Click then select solids…';
-    ui._renderChips(chipsWrap, key, Array.isArray(ui.params[key].targets) ? ui.params[key].targets : []);
-
-    const activate = () => {
-        ui._activateReferenceSelection(inputElTargets, { selectionFilter: ['SOLID'] });
+    const refMount = document.createElement('div');
+    const targetsDef = {
+        type: 'reference_selection',
+        multiple: true,
+        selectionFilter: ['SOLID'],
     };
-    chipsWrap.addEventListener('click', activate);
-    inputElTargets.addEventListener('click', activate);
-
-    inputElTargets.addEventListener('change', () => {
-        if (inputElTargets.dataset && inputElTargets.dataset.forceClear === 'true') {
-            if (!ui.params[key] || typeof ui.params[key] !== 'object') ui.params[key] = { targets: [], operation: 'NONE' };
-            ui.params[key].targets = [];
-            ui._renderChips(chipsWrap, key, ui.params[key].targets);
-            inputElTargets.value = '';
-            delete inputElTargets.dataset.forceClear;
+    const valueAdapter = {
+        read: () => {
+            const current = ui.params[key];
+            if (!current || typeof current !== 'object') return [];
+            return Array.isArray(current.targets) ? current.targets : [];
+        },
+        write: (next) => {
+            if (!ui.params[key] || typeof ui.params[key] !== 'object') ui.params[key] = { targets: [], operation: sel.value || 'NONE' };
+            ui.params[key].targets = Array.isArray(next) ? next : [];
+        },
+        emit: () => {
             ui._emitParamsChange(key, ui.params[key]);
-            return;
-        }
-        if (!ui.params[key] || typeof ui.params[key] !== 'object') ui.params[key] = { targets: [], operation: 'NONE' };
-        let incoming = [];
-        try {
-            const parsed = JSON.parse(inputElTargets.value);
-            if (Array.isArray(parsed)) incoming = parsed;
-        } catch (_) {
-            if (inputElTargets.value && String(inputElTargets.value).trim() !== '') incoming = [String(inputElTargets.value).trim()];
-        }
-        const cur = Array.isArray(ui.params[key].targets) ? ui.params[key].targets : [];
-        for (const name of incoming) {
-            if (!cur.includes(name)) cur.push(name);
-        }
-        ui.params[key].targets = cur;
-        ui._renderChips(chipsWrap, key, cur);
-        inputElTargets.value = '';
-        ui._emitParamsChange(key, ui.params[key]);
+        },
+    };
+    const refField = renderReferenceSelectionField({
+        ui,
+        key,
+        def: targetsDef,
+        id: `${key}-targets`,
+        controlWrap: refMount,
+        valueAdapter,
     });
-
-    refWrap.appendChild(inputElTargets);
-    wrap.appendChild(refWrap);
+    wrap.appendChild(refMount);
 
     controlWrap.appendChild(wrap);
 
     return {
-        inputEl: inputElTargets,
-        activate,
+        inputEl: refField.inputEl,
+        activate: refField.activate,
         readValue() {
             const current = ui.params[key];
             if (!current || typeof current !== 'object') {

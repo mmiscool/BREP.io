@@ -127,8 +127,8 @@ export const CADmaterials = {
             depthWrite: true,
             // Keep selected faces slightly behind edges as well.
             polygonOffset: true,
-            polygonOffsetFactor: 0,
-            polygonOffsetUnits: 0,
+            polygonOffsetFactor: -2,
+            polygonOffsetUnits: 1,
             emissiveIntensity: 0,
         })
     },

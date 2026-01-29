@@ -2,11 +2,17 @@
 
 import { SelectionFilter } from './SelectionFilter.js';
 import * as THREE from 'three';
+import { Line2, LineGeometry, LineMaterial } from 'three/examples/jsm/Addons.js';
 // Use hybrid translate+rotate gizmo used by the Viewer
 import { CombinedTransformControls } from './controls/CombinedTransformControls.js';
 import { getWidgetRenderer } from './featureDialogWidgets/index.js';
 import { normalizeReferenceList, normalizeReferenceName } from './featureDialogWidgets/utils.js';
-
+const REF_PREVIEW_COLORS = {
+    EDGE: '#ff00ff',
+    FACE: '#ffc400',
+    PLANE: '#2eff2e',
+    VERTEX: '#00ffff',
+};
 
 
 
@@ -29,6 +35,7 @@ export class SchemaForm {
             if (prev && prev !== el) {
                 try { prev.style.filter = 'none'; } catch (_) { }
                 try { prev.removeAttribute('active-reference-selection'); } catch (_) { }
+                try { if (typeof prev.__refPreviewCleanup === 'function') prev.__refPreviewCleanup(); } catch (_) { }
             }
         } catch (_) { }
         SchemaForm.__activeRefInput = el || null;
@@ -494,6 +501,502 @@ export class SchemaForm {
             || null;
     }
 
+    _getReferencePreviewCacheRoot() {
+        const holder = this.options?.featureRef || this;
+        if (!holder) return null;
+        if (!holder.__refPreviewCache) {
+            try {
+                Object.defineProperty(holder, '__refPreviewCache', {
+                    value: new Map(),
+                    configurable: true,
+                    enumerable: false,
+                    writable: true,
+                });
+            } catch (_) {
+                holder.__refPreviewCache = new Map();
+            }
+        }
+        return holder.__refPreviewCache;
+    }
+
+    _getReferencePreviewCache(inputEl) {
+        const root = this._getReferencePreviewCacheRoot();
+        if (!root) return null;
+        const key = (inputEl?.dataset?.key || inputEl?.dataset?.refKey || inputEl?.__refPreviewKey || '__default');
+        let bucket = root.get(key);
+        if (!bucket) {
+            bucket = new Map();
+            root.set(key, bucket);
+        }
+        return bucket;
+    }
+
+    _getReferencePreviewPersistentBucket(inputEl) {
+        const entry = this.options?.featureRef || null;
+        if (!entry) return null;
+        if (!entry.persistentData || typeof entry.persistentData !== 'object') {
+            entry.persistentData = {};
+        }
+        if (!entry.persistentData.__refPreviewSnapshots || typeof entry.persistentData.__refPreviewSnapshots !== 'object') {
+            entry.persistentData.__refPreviewSnapshots = {};
+        }
+        const key = (inputEl?.dataset?.key || inputEl?.dataset?.refKey || inputEl?.__refPreviewKey || '__default');
+        if (!entry.persistentData.__refPreviewSnapshots[key] || typeof entry.persistentData.__refPreviewSnapshots[key] !== 'object') {
+            entry.persistentData.__refPreviewSnapshots[key] = {};
+        }
+        return entry.persistentData.__refPreviewSnapshots[key];
+    }
+
+    _resolveReferencePreviewName(obj) {
+        if (!obj) return null;
+        const raw = obj.name != null ? String(obj.name).trim() : '';
+        if (raw) return raw;
+        const type = obj.type || 'OBJECT';
+        const pos = obj.position || {};
+        const x = Number.isFinite(pos.x) ? pos.x : 0;
+        const y = Number.isFinite(pos.y) ? pos.y : 0;
+        const z = Number.isFinite(pos.z) ? pos.z : 0;
+        return `${type}(${x},${y},${z})`;
+    }
+
+    _extractEdgeWorldPositions(obj) {
+        if (!obj) return [];
+        try {
+            if (typeof obj.points === 'function') {
+                const pts = obj.points(true);
+                if (Array.isArray(pts) && pts.length) {
+                    const flat = [];
+                    for (const p of pts) {
+                        if (!p) continue;
+                        const x = Number(p.x);
+                        const y = Number(p.y);
+                        const z = Number(p.z);
+                        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+                        flat.push(x, y, z);
+                    }
+                    if (flat.length >= 6) return flat;
+                }
+            }
+        } catch (_) { /* ignore */ }
+
+        try {
+            const geom = obj.geometry;
+            const pos = geom && typeof geom.getAttribute === 'function' ? geom.getAttribute('position') : null;
+            if (!pos || pos.itemSize !== 3 || pos.count < 2) return [];
+            const tmp = new THREE.Vector3();
+            const flat = [];
+            for (let i = 0; i < pos.count; i++) {
+                tmp.set(pos.getX(i), pos.getY(i), pos.getZ(i));
+                tmp.applyMatrix4(obj.matrixWorld);
+                flat.push(tmp.x, tmp.y, tmp.z);
+            }
+            return flat.length >= 6 ? flat : [];
+        } catch (_) { /* ignore */ }
+        return [];
+    }
+
+    _syncPreviewLineResolution(mat) {
+        if (!mat || !mat.resolution || typeof mat.resolution.set !== 'function') return;
+        let width = 0;
+        let height = 0;
+        try {
+            const viewer = this.options?.viewer || null;
+            const el = viewer?.renderer?.domElement || null;
+            if (el && typeof el.getBoundingClientRect === 'function') {
+                const rect = el.getBoundingClientRect();
+                width = rect.width || rect.right - rect.left;
+                height = rect.height || rect.bottom - rect.top;
+            }
+            if ((!width || !height) && viewer?.container) {
+                width = viewer.container.clientWidth || width;
+                height = viewer.container.clientHeight || height;
+            }
+        } catch (_) { /* ignore */ }
+        if (!width || !height) {
+            try {
+                if (typeof window !== 'undefined') {
+                    width = window.innerWidth || width;
+                    height = window.innerHeight || height;
+                }
+            } catch (_) { /* ignore */ }
+        }
+        if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+            try { mat.resolution.set(width, height); } catch (_) { }
+        }
+    }
+
+    _createPreviewLineMaterial(sourceMat, colorHex = REF_PREVIEW_COLORS.EDGE) {
+        let mat = null;
+        if (sourceMat && typeof sourceMat.clone === 'function') {
+            try { mat = sourceMat.clone(); } catch (_) { mat = null; }
+        }
+        if (!mat) {
+            try {
+                mat = new LineMaterial({ color: colorHex, linewidth: 3, transparent: true, opacity: 0.95, worldUnits: false });
+            } catch (_) { mat = null; }
+        }
+        if (mat && mat.color && typeof mat.color.set === 'function') {
+            try { mat.color.set(colorHex); } catch (_) { }
+        }
+        if (mat) {
+            try { mat.transparent = true; } catch (_) { }
+            try { mat.opacity = Number.isFinite(mat.opacity) ? Math.min(0.95, mat.opacity) : 0.95; } catch (_) { }
+            try { mat.depthTest = false; } catch (_) { }
+            try { mat.depthWrite = false; } catch (_) { }
+            try { this._syncPreviewLineResolution(mat); } catch (_) { }
+        }
+        return mat;
+    }
+
+    _createPreviewMeshMaterial(sourceMat, colorHex = REF_PREVIEW_COLORS.FACE) {
+        let mat = null;
+        if (sourceMat && typeof sourceMat.clone === 'function') {
+            try { mat = sourceMat.clone(); } catch (_) { mat = null; }
+        }
+        if (!mat) {
+            try {
+                mat = new THREE.MeshStandardMaterial({
+                    color: colorHex,
+                    transparent: true,
+                    opacity: 0.25,
+                    depthWrite: false,
+                    side: THREE.DoubleSide,
+                });
+            } catch (_) { mat = null; }
+        }
+        if (mat && mat.color && typeof mat.color.set === 'function') {
+            try { mat.color.set(colorHex); } catch (_) { }
+        }
+        if (mat) {
+            try { mat.transparent = true; } catch (_) { }
+            try { mat.opacity = 0.25; } catch (_) { }
+            try { mat.depthWrite = false; } catch (_) { }
+            try { mat.depthTest = true; } catch (_) { }
+            try { mat.side = THREE.DoubleSide; } catch (_) { }
+            try { mat.polygonOffset = true; mat.polygonOffsetFactor = -1; mat.polygonOffsetUnits = -1; } catch (_) { }
+        }
+        return mat;
+    }
+
+    _createPreviewPointMaterial(sourceMat, colorHex = REF_PREVIEW_COLORS.VERTEX) {
+        let mat = null;
+        if (sourceMat && typeof sourceMat.clone === 'function') {
+            try { mat = sourceMat.clone(); } catch (_) { mat = null; }
+        }
+        if (!mat || !mat.isPointsMaterial) {
+            try {
+                mat = new THREE.PointsMaterial({
+                    color: colorHex,
+                    size: 7,
+                    sizeAttenuation: false,
+                    transparent: true,
+                    opacity: 0.9,
+                });
+            } catch (_) { mat = null; }
+        }
+        if (mat && mat.color && typeof mat.color.set === 'function') {
+            try { mat.color.set(colorHex); } catch (_) { }
+        }
+        if (mat) {
+            try { mat.transparent = true; } catch (_) { }
+            try { mat.opacity = 0.9; } catch (_) { }
+        }
+        return mat;
+    }
+
+    _configurePreviewObject(obj, refName, previewType) {
+        if (!obj) return obj;
+        try { obj.name = `__refPreview__${refName}`; } catch (_) { }
+        try {
+            obj.userData = obj.userData || {};
+            obj.userData.refPreview = true;
+            obj.userData.refName = refName;
+            obj.userData.previewType = previewType;
+            obj.userData.excludeFromFit = true;
+        } catch (_) { }
+        try { obj.renderOrder = Math.max(10050, obj.renderOrder || 0); } catch (_) { }
+        try { obj.raycast = () => { }; } catch (_) { }
+        try {
+            obj.traverse?.((child) => {
+                if (!child || child === obj) return;
+                try { child.raycast = () => { }; } catch (_) { }
+                try {
+                    child.userData = child.userData || {};
+                    child.userData.refPreview = true;
+                    child.userData.refName = refName;
+                } catch (_) { }
+            });
+        } catch (_) { }
+        return obj;
+    }
+
+    _getOwningFeatureIdForObject(obj) {
+        let cur = obj;
+        let guard = 0;
+        while (cur && guard < 8) {
+            if (cur.owningFeatureID != null) return cur.owningFeatureID;
+            cur = cur.parent || null;
+            guard += 1;
+        }
+        return null;
+    }
+
+    _buildReferencePreviewObject(obj, refName) {
+        if (!obj) return null;
+        const type = String(obj.type || '').toUpperCase();
+        if (type === SelectionFilter.EDGE || type === 'EDGE') {
+            const positions = this._extractEdgeWorldPositions(obj);
+            if (!positions || positions.length < 6) return null;
+            const geom = new LineGeometry();
+            geom.setPositions(positions);
+            try { geom.computeBoundingSphere(); } catch (_) { }
+            const mat = this._createPreviewLineMaterial(obj.material, REF_PREVIEW_COLORS.EDGE);
+            const line = new Line2(geom, mat || undefined);
+            try { line.computeLineDistances?.(); } catch (_) { }
+            line.type = 'REF_PREVIEW_EDGE';
+            return this._configurePreviewObject(line, refName, 'EDGE');
+        }
+        if (type === SelectionFilter.FACE || type === SelectionFilter.PLANE || type === 'FACE' || type === 'PLANE') {
+            const geom = obj.geometry && typeof obj.geometry.clone === 'function' ? obj.geometry.clone() : null;
+            if (!geom) return null;
+            try { geom.applyMatrix4(obj.matrixWorld); } catch (_) { }
+            const color = (type === SelectionFilter.PLANE || type === 'PLANE') ? REF_PREVIEW_COLORS.PLANE : REF_PREVIEW_COLORS.FACE;
+            const mat = this._createPreviewMeshMaterial(obj.material, color);
+            const mesh = new THREE.Mesh(geom, mat || undefined);
+            mesh.type = (type === SelectionFilter.PLANE || type === 'PLANE') ? 'REF_PREVIEW_PLANE' : 'REF_PREVIEW_FACE';
+            try { mesh.matrixAutoUpdate = false; } catch (_) { }
+            return this._configurePreviewObject(mesh, refName, mesh.type);
+        }
+        if (type === SelectionFilter.VERTEX || type === 'VERTEX') {
+            const pos = new THREE.Vector3();
+            try {
+                if (typeof obj.getWorldPosition === 'function') obj.getWorldPosition(pos);
+                else pos.set(obj.position?.x || 0, obj.position?.y || 0, obj.position?.z || 0);
+            } catch (_) { }
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
+            const mat = this._createPreviewPointMaterial(obj.material, REF_PREVIEW_COLORS.VERTEX);
+            const pts = new THREE.Points(geom, mat || undefined);
+            pts.position.copy(pos);
+            pts.type = 'REF_PREVIEW_VERTEX';
+            return this._configurePreviewObject(pts, refName, 'VERTEX');
+        }
+        return null;
+    }
+
+    _buildReferencePreviewFromSnapshot(refName, snapshot) {
+        if (!snapshot || !refName) return null;
+        const type = String(snapshot.type || '').toUpperCase();
+        if (type === 'EDGE') {
+            const positions = Array.isArray(snapshot.positions) ? snapshot.positions : null;
+            if (!positions || positions.length < 6) return null;
+            const geom = new LineGeometry();
+            geom.setPositions(positions);
+            try { geom.computeBoundingSphere(); } catch (_) { }
+            const mat = this._createPreviewLineMaterial(null, REF_PREVIEW_COLORS.EDGE);
+            const line = new Line2(geom, mat || undefined);
+            try { line.computeLineDistances?.(); } catch (_) { }
+            line.type = 'REF_PREVIEW_EDGE';
+            return this._configurePreviewObject(line, refName, 'EDGE');
+        }
+        if (type === 'VERTEX') {
+            const pos = snapshot.position;
+            if (!Array.isArray(pos) || pos.length < 3) return null;
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
+            const mat = this._createPreviewPointMaterial(null, REF_PREVIEW_COLORS.VERTEX);
+            const pts = new THREE.Points(geom, mat || undefined);
+            pts.position.set(Number(pos[0]) || 0, Number(pos[1]) || 0, Number(pos[2]) || 0);
+            pts.type = 'REF_PREVIEW_VERTEX';
+            return this._configurePreviewObject(pts, refName, 'VERTEX');
+        }
+        return null;
+    }
+
+    _ensureReferencePreviewGroup(inputEl) {
+        const scene = this._getReferenceSelectionScene();
+        if (!scene || !inputEl) return null;
+        const existing = inputEl.__refPreviewGroup;
+        if (existing && existing.isObject3D) {
+            if (existing.parent !== scene) {
+                try { scene.add(existing); } catch (_) { }
+            }
+            return existing;
+        }
+        const group = new THREE.Group();
+        try { group.name = `__REF_PREVIEW_GROUP__${inputEl?.dataset?.key || ''}`; } catch (_) { }
+        try {
+            group.userData = group.userData || {};
+            group.userData.preventRemove = true;
+            group.userData.excludeFromFit = true;
+            group.userData.refPreview = true;
+        } catch (_) { }
+        try { group.renderOrder = 10040; } catch (_) { }
+        try { group.raycast = () => { }; } catch (_) { }
+        inputEl.__refPreviewGroup = group;
+        try { scene.add(group); } catch (_) { }
+        return group;
+    }
+
+    _removeReferencePreviewGroup(inputEl) {
+        const group = inputEl?.__refPreviewGroup;
+        if (!group || !group.isObject3D) return;
+        try { if (group.userData) group.userData.preventRemove = false; } catch (_) { }
+        try { if (group.parent) group.parent.remove(group); } catch (_) { }
+    }
+
+    _syncActiveReferenceSelectionPreview(inputEl, def = null) {
+        try {
+            const active = SchemaForm.__activeRefInput;
+            if (!active || active !== inputEl) return;
+            const scene = this._getReferenceSelectionScene();
+            if (!scene) return;
+            const names = this._collectReferenceSelectionNames(inputEl, def);
+            if (!names.length) {
+                this._removeReferencePreviewGroup(inputEl);
+                return;
+            }
+            const cache = this._getReferencePreviewCache(inputEl);
+            if (!cache || cache.size === 0) return;
+            const group = this._ensureReferencePreviewGroup(inputEl);
+            const wanted = new Set(names);
+            if (group && Array.isArray(group.children)) {
+                for (const child of group.children.slice()) {
+                    const refName = child?.userData?.refName;
+                    if (!refName || !wanted.has(refName)) {
+                        try { group.remove(child); } catch (_) { }
+                    }
+                }
+            }
+            for (const name of names) {
+                const entry = cache.get(name);
+                let ghost = entry && entry.object ? entry.object : entry;
+                if (!ghost) continue;
+                const sourceUuid = entry?.sourceUuid || null;
+                let originalPresent = false;
+                if (sourceUuid && typeof scene.getObjectByProperty === 'function') {
+                    try { originalPresent = !!scene.getObjectByProperty('uuid', sourceUuid); } catch (_) { originalPresent = false; }
+                } else {
+                    const real = scene.getObjectByName(name);
+                    originalPresent = !!real;
+                }
+                if (originalPresent) {
+                    if (ghost.parent === group) {
+                        try { group.remove(ghost); } catch (_) { }
+                    }
+                    continue;
+                }
+                if (ghost.parent !== group) {
+                    try { group.add(ghost); } catch (_) { }
+                }
+                try { ghost.visible = true; } catch (_) { }
+            }
+        } catch (_) { }
+    }
+
+    _seedReferencePreviewCacheFromScene(inputEl, def = null, names = null, sceneOverride = null) {
+        if (!inputEl) return;
+        const scene = sceneOverride || this._getReferenceSelectionScene();
+        if (!scene) return;
+        const list = Array.isArray(names) ? names : this._collectReferenceSelectionNames(inputEl, def);
+        if (!list.length) return;
+        const cache = this._getReferencePreviewCache(inputEl);
+        if (!cache) return;
+        const store = this._getReferencePreviewPersistentBucket(inputEl);
+        for (const name of list) {
+            if (!name || cache.has(name)) continue;
+            const obj = scene.getObjectByName(name);
+            if (obj && !obj?.userData?.refPreview) {
+                this._storeReferencePreviewSnapshot(inputEl, def, obj);
+                continue;
+            }
+            if (store && store[name]) {
+                const snapshot = store[name];
+                const ghost = this._buildReferencePreviewFromSnapshot(name, snapshot);
+                if (ghost) {
+                    cache.set(name, {
+                        object: ghost,
+                        type: snapshot.type || null,
+                        sourceUuid: snapshot.sourceUuid || null,
+                        sourceFeatureId: snapshot.sourceFeatureId || null,
+                    });
+                }
+            }
+        }
+    }
+
+    _storeReferencePreviewSnapshot(inputEl, def, obj) {
+        try {
+            if (!inputEl || !obj) return;
+            const refName = this._resolveReferencePreviewName(obj);
+            if (!refName) return;
+            const cache = this._getReferencePreviewCache(inputEl);
+            if (!cache) return;
+            const ghost = this._buildReferencePreviewObject(obj, refName);
+            if (!ghost) return;
+            const sourceUuid = obj.uuid || null;
+            const sourceFeatureId = this._getOwningFeatureIdForObject(obj);
+            cache.set(refName, {
+                object: ghost,
+                type: obj.type || null,
+                sourceUuid,
+                sourceFeatureId,
+            });
+            try {
+                const store = this._getReferencePreviewPersistentBucket(inputEl);
+                if (store) {
+                    const objType = String(obj.type || '').toUpperCase();
+                    if (objType === SelectionFilter.EDGE || objType === 'EDGE') {
+                        const positions = this._extractEdgeWorldPositions(obj);
+                        if (positions && positions.length >= 6) {
+                            store[refName] = { type: 'EDGE', positions, sourceUuid, sourceFeatureId };
+                        }
+                    } else if (objType === SelectionFilter.VERTEX || objType === 'VERTEX') {
+                        const pos = new THREE.Vector3();
+                        try {
+                            if (typeof obj.getWorldPosition === 'function') obj.getWorldPosition(pos);
+                            else pos.set(obj.position?.x || 0, obj.position?.y || 0, obj.position?.z || 0);
+                        } catch (_) { }
+                        store[refName] = { type: 'VERTEX', position: [pos.x, pos.y, pos.z], sourceUuid, sourceFeatureId };
+                    }
+                }
+            } catch (_) { }
+            if (SchemaForm.__activeRefInput === inputEl) {
+                try { this._syncActiveReferenceSelectionPreview(inputEl, def); } catch (_) { }
+            }
+        } catch (_) { }
+    }
+
+    _startReferencePreviewWatcher(inputEl, def) {
+        if (!inputEl) return;
+        if (this._refPreviewWatcher && this._refPreviewWatcher.inputEl === inputEl) return;
+        this._stopReferencePreviewWatcher();
+        const tick = () => {
+            if (!this._refPreviewWatcher || this._refPreviewWatcher.inputEl !== inputEl) return;
+            if (SchemaForm.__activeRefInput !== inputEl) {
+                this._stopReferencePreviewWatcher();
+                return;
+            }
+            try { this._syncActiveReferenceSelectionPreview(inputEl, def); } catch (_) { }
+            this._refPreviewWatcher.timer = setTimeout(tick, 300);
+        };
+        this._refPreviewWatcher = { inputEl, timer: null };
+        inputEl.__refPreviewCleanup = () => {
+            try { this._stopReferencePreviewWatcher(); } catch (_) { }
+            try { this._removeReferencePreviewGroup(inputEl); } catch (_) { }
+        };
+        tick();
+    }
+
+    _stopReferencePreviewWatcher() {
+        if (!this._refPreviewWatcher) return;
+        const timer = this._refPreviewWatcher.timer;
+        if (timer) {
+            clearTimeout(timer);
+        }
+        this._refPreviewWatcher = null;
+    }
+
     _collectReferenceSelectionNames(inputEl, def = null) {
         if (!inputEl) return [];
         const isMulti = Boolean(def && def.multiple) || (inputEl.dataset && inputEl.dataset.multiple === 'true');
@@ -530,11 +1033,48 @@ export class SchemaForm {
             const scene = this._getReferenceSelectionScene();
             if (!scene) return;
             const names = this._collectReferenceSelectionNames(inputEl, def);
+            try { this._seedReferencePreviewCacheFromScene(inputEl, def, names, scene); } catch (_) { }
             SelectionFilter.unselectAll(scene);
             for (const name of names) {
                 if (!name) continue;
                 try { SelectionFilter.selectItem(scene, name); } catch (_) { }
             }
+            try { this._syncActiveReferenceSelectionPreview(inputEl, def); } catch (_) { }
+        } catch (_) { }
+    }
+
+    _hoverReferenceSelectionItem(inputEl, def, name) {
+        try {
+            if (!inputEl || SchemaForm.__activeRefInput !== inputEl) return;
+            const normalized = normalizeReferenceName(name);
+            if (!normalized) return;
+            const scene = this._getReferenceSelectionScene();
+            if (!scene) return;
+            try { this._seedReferencePreviewCacheFromScene(inputEl, def, [normalized], scene); } catch (_) { }
+            try { this._syncActiveReferenceSelectionPreview(inputEl, def); } catch (_) { }
+
+            let target = null;
+            try { target = scene.getObjectByName(normalized); } catch (_) { target = null; }
+            if (!target) {
+                const cache = this._getReferencePreviewCache(inputEl);
+                const entry = cache ? cache.get(normalized) : null;
+                target = entry?.object || entry || null;
+            }
+            if (!target) {
+                try { target = scene.getObjectByName(`__refPreview__${normalized}`); } catch (_) { target = null; }
+            }
+            if (!target) return;
+            inputEl.__refChipHoverActive = true;
+            try { SelectionFilter.setHoverObject(target, { ignoreFilter: true }); } catch (_) { }
+        } catch (_) { }
+    }
+
+    _clearReferenceSelectionHover(inputEl) {
+        try {
+            if (!inputEl || SchemaForm.__activeRefInput !== inputEl) return;
+            if (!inputEl.__refChipHoverActive) return;
+            inputEl.__refChipHoverActive = false;
+            SelectionFilter.clearHover();
         } catch (_) { }
     }
 
@@ -581,8 +1121,37 @@ export class SchemaForm {
         SelectionFilter.SetSelectionTypes(def.selectionFilter);
         try { window.__BREP_activeRefInput = inputEl; } catch (_) { }
 
+        // Log current selected objects for this reference field on activation
+        try {
+            const scene = this._getReferenceSelectionScene();
+            const names = this._collectReferenceSelectionNames(inputEl, def);
+            const keyLabel = inputEl?.dataset?.key ? ` (${inputEl.dataset.key})` : '';
+            if (!names.length) {
+                console.log(`[ReferenceSelection] Activated${keyLabel}: no selections`);
+            } else {
+                const cache = this._getReferencePreviewCache(inputEl);
+                for (const name of names) {
+                    if (!name) continue;
+                    const obj = scene ? scene.getObjectByName(name) : null;
+                    const cached = cache ? cache.get(name) : null;
+                    const cachedObj = cached && cached.object ? cached.object : null;
+                    console.log(`[ReferenceSelection] Selected${keyLabel}: ${name}`, {
+                        object: obj || cachedObj || null,
+                        inScene: !!obj,
+                        cached: !!cachedObj,
+                    });
+                }
+            }
+        } catch (_) { }
+
         // Highlight existing selections while this reference field is active
         try { this._syncActiveReferenceSelectionHighlight(inputEl, def); } catch (_) { }
+        try {
+            if (typeof inputEl.__captureReferencePreview !== 'function') {
+                inputEl.__captureReferencePreview = (obj) => this._storeReferencePreviewSnapshot(inputEl, def, obj);
+            }
+        } catch (_) { }
+        try { this._startReferencePreviewWatcher(inputEl, def); } catch (_) { }
     }
 
     // Activate a TransformControls session for a transform widget
@@ -1044,17 +1613,25 @@ export class SchemaForm {
 
     _stopActiveReferenceSelection() {
         // Clear global active if it belongs to this instance
+        const activeInput = SchemaForm.__activeRefInput || null;
         try {
-            if (SchemaForm.__activeRefInput) {
-                try { SchemaForm.__activeRefInput.style.filter = 'none'; } catch (_) { }
-                try { SchemaForm.__activeRefInput.removeAttribute('active-reference-selection'); } catch (_) { }
+            if (activeInput) {
+                try { activeInput.style.filter = 'none'; } catch (_) { }
+                try { activeInput.removeAttribute('active-reference-selection'); } catch (_) { }
                 try {
-                    const wrap = SchemaForm.__activeRefInput.closest('.ref-single-wrap, .ref-multi-wrap');
+                    const wrap = activeInput.closest('.ref-single-wrap, .ref-multi-wrap');
                     if (wrap) wrap.classList.remove('ref-active');
                 } catch (_) { }
             }
         } catch (_) { }
-        const hadActive = !!SchemaForm.__activeRefInput;
+        const hadActive = !!activeInput;
+        try {
+            if (activeInput && typeof activeInput.__refPreviewCleanup === 'function') {
+                activeInput.__refPreviewCleanup();
+            } else if (activeInput) {
+                this._removeReferencePreviewGroup(activeInput);
+            }
+        } catch (_) { }
         SchemaForm.__activeRefInput = null;
         try { if (window.__BREP_activeRefInput === undefined || window.__BREP_activeRefInput === SchemaForm.__activeRefInput) window.__BREP_activeRefInput = null; } catch (_) { }
         if (hadActive) {
@@ -1071,6 +1648,7 @@ export class SchemaForm {
         const arr = Array.isArray(values) ? values : [];
         const normalizedValues = normalizeReferenceList(arr);
         const inputEl = (this._inputs && typeof this._inputs.get === 'function') ? this._inputs.get(key) : null;
+        const def = (inputEl && inputEl.__refSelectionDef) || (this.schema ? (this.schema[key] || null) : null);
         if (inputEl) {
             if (typeof inputEl.__updateSelectionMetadata === 'function') {
                 try { inputEl.__updateSelectionMetadata(normalizedValues); } catch (_) { }
@@ -1095,9 +1673,17 @@ export class SchemaForm {
 
             // Hover highlight on chip hover
             chip.addEventListener('mouseenter', () => {
+                if (def && def.type === 'reference_selection') {
+                    this._hoverReferenceSelectionItem(inputEl, def, name);
+                    return;
+                }
                 try { SelectionFilter.setHoverByName(this.options?.scene || null, name); } catch (_) { }
             });
             chip.addEventListener('mouseleave', () => {
+                if (def && def.type === 'reference_selection') {
+                    this._clearReferenceSelectionHover(inputEl);
+                    return;
+                }
                 try { SelectionFilter.clearHover(); } catch (_) { }
             });
 
@@ -1158,7 +1744,7 @@ export class SchemaForm {
 
         try {
             if (inputEl && inputEl === SchemaForm.__activeRefInput) {
-                const def = this.schema ? (this.schema[key] || {}) : null;
+                const def = (inputEl && inputEl.__refSelectionDef) || (this.schema ? (this.schema[key] || {}) : null);
                 this._syncActiveReferenceSelectionHighlight(inputEl, def);
             }
         } catch (_) { }

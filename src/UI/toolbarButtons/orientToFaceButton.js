@@ -92,7 +92,10 @@ function _orientCameraToFace(viewer, face) {
   try { if (controls?.target) controls.target.copy(target); } catch {}
   try { if (controls?._gizmos?.position) controls._gizmos.position.copy(target); } catch {}
   try { controls?.update?.(); } catch {}
+  try { controls?._gizmos?.updateMatrix?.(); } catch {}
+  try { controls?._gizmos?.updateMatrixWorld?.(true); } catch {}
   try { controls?.updateMatrixState?.(); } catch {}
+  try { controls?.saveState?.(); } catch {}
   try { viewer.render?.(); } catch {}
 
   return true;

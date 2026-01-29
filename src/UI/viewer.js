@@ -20,6 +20,7 @@ import './expressionsManager.js'
 import { expressionsManager } from './expressionsManager.js';
 import { MainToolbar } from './MainToolbar.js';
 import { registerDefaultToolbarButtons } from './toolbarButtons/registerDefaultButtons.js';
+import { registerSelectionToolbarButtons } from './toolbarButtons/registerSelectionButtons.js';
 import { FileManagerWidget } from './fileManagerWidget.js';
 import './mobile.js';
 import { SketchMode3D } from './sketcher/SketchMode3D.js';
@@ -1239,6 +1240,9 @@ export class Viewer {
         this.mainToolbar = new MainToolbar(this);
         // Register core/default toolbar buttons via the public API
         try { registerDefaultToolbarButtons(this); } catch { }
+        // Register selection-context toolbar buttons (shown based on selection)
+        try { registerSelectionToolbarButtons(this); } catch { }
+        try { SelectionFilter.refreshSelectionActions?.(); } catch { }
         // Drain any queued custom toolbar buttons from early plugin registration
         try {
             const q = Array.isArray(this._pendingToolbarButtons) ? this._pendingToolbarButtons : [];
@@ -3471,15 +3475,29 @@ export class Viewer {
     // Inspector panel (toggle + update-on-click)
     // ----------------------------------------
     toggleInspectorPanel() { this._inspectorOpen ? this._closeInspectorPanel() : this._openInspectorPanel(); }
+    _getInspectorSelectionTarget() {
+        const last = this._lastInspectorTarget;
+        if (last && last.selected) return last;
+        const scene = this.partHistory?.scene || this.scene || null;
+        if (!scene || typeof scene.traverse !== 'function') return null;
+        let found = null;
+        scene.traverse((obj) => {
+            if (found || !obj || !obj.selected) return;
+            found = obj;
+        });
+        return found;
+    }
     _openInspectorPanel() {
         if (this._inspectorOpen) return;
         this._ensureInspectorPanel();
         this._inspectorEl.style.display = 'flex';
         this._inspectorOpen = true;
-        // Placeholder message until user clicks an object
-        try {
-            this._setInspectorPlaceholder('Click an object in the scene to inspect.');
-        } catch { }
+        const target = this._getInspectorSelectionTarget();
+        if (target) {
+            try { this._updateInspectorFor(target); } catch { }
+            return;
+        }
+        try { this._setInspectorPlaceholder('Click an object in the scene to inspect.'); } catch { }
     }
     _closeInspectorPanel() {
         if (!this._inspectorOpen) return;
