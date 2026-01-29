@@ -1,0 +1,51 @@
+name: Publish NPM Package
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+          cache: "pnpm"
+
+      - name: Ensure npm >= 11.5.1
+        run: npm install -g npm@^11.5.1
+
+      - name: Assert tokenless publishing
+        run: |
+          if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "NODE_AUTH_TOKEN is set. Trusted Publishing should not use tokens.";
+            exit 1;
+          fi
+          if [ -f ~/.npmrc ] && grep -Eq "_authToken|_password|:_auth=" ~/.npmrc; then
+            echo "Auth token detected in ~/.npmrc. Remove token-based auth.";
+            exit 1;
+          fi
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Set CI version
+        run: |
+          node -e "const fs=require('fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));const base=pkg.version;const run=process.env.GITHUB_RUN_NUMBER||'0';pkg.version=`${base}-ci.${run}`;fs.writeFileSync('package.json',JSON.stringify(pkg,null,2)+'\n');"
+
+      - name: Publish
+        run: npm publish --access public --provenance --no-git-checks

@@ -2,8 +2,10 @@
   "name": "brep-io-kernel",
   "version": "1.0.0",
   "scripts": {
-    "dev": "pnpm generateLicenses && vite --host 0.0.0.0",
+    "dev": "pnpm generateLicenses && pnpm build:kernel && vite --host 0.0.0.0",
     "build": "pnpm generateLicenses && vite build",
+    "build:kernel": "vite build --config vite.config.kernel.js",
+    "prepublishOnly": "pnpm build:kernel",
     "start": "pnpm dev",
     "liveTesting": "nodemon --watch src --watch tests --ext js --exec \"pnpm run test\"",
     "test": "node ./src/tests/tests.js",
@@ -12,23 +14,24 @@
     "capture": "node ./scripts/capture.js & pnpm dev "
   },
   "type": "module",
-  "main": "./src/index.js",
-  "module": "./src/index.js",
+  "main": "./dist-kernel/brep-kernel.js",
+  "module": "./dist-kernel/brep-kernel.js",
   "exports": {
-    ".": "./src/index.js",
-    "./BREP": "./src/BREP/BREP.js",
-    "./PartHistory": "./src/PartHistory.js",
-    "./AssemblyConstraintHistory": "./src/assemblyConstraints/AssemblyConstraintHistory.js",
-    "./AssemblyConstraintRegistry": "./src/assemblyConstraints/AssemblyConstraintRegistry.js"
+    ".": "./dist-kernel/brep-kernel.js",
+    "./BREP": "./dist-kernel/brep-kernel.js",
+    "./PartHistory": "./dist-kernel/brep-kernel.js",
+    "./AssemblyConstraintHistory": "./dist-kernel/brep-kernel.js",
+    "./AssemblyConstraintRegistry": "./dist-kernel/brep-kernel.js"
   },
   "files": [
     "src/**",
+    "dist-kernel/**",
     "README.md",
     "LICENSE.md"
   ],
   "keywords": [],
   "author": "",
-  "license": "See licence.md",
+  "license": "SEE LICENSE IN LICENSE.md",
   "dependencies": {
     "@tarikjabiri/dxf": "^2.8.9",
     "jszip": "^3.10.1",
@@ -39,6 +42,9 @@
     "three-mesh-bvh": "^0.9.3"
   },
   "description": "",
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "nodemon": "^3.1.11",
     "playwright": "^1.57.0",

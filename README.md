@@ -122,15 +122,25 @@ PMI mode focuses on downstream manufacturing communication. Annotating the model
 
 Each annotation stores associative references and view metadata so reloading a part restores the PMI viewport, label placement, and formatting settings.
 
-## Using as an npm package (not completed yet. Will change and is not currently working)
+## Using as an npm package
+
+The published package is `brep-io-kernel`. It ships as a single ESM bundle that
+inlines the WASM, so consumers do not need any extra asset copying or loader
+configuration.
 
 - Install:
   - `pnpm add brep-io-kernel`
-- Import options:
+- Import (ESM):
   - `import { BREP, PartHistory } from 'brep-io-kernel';`
+  - `import { AssemblyConstraintHistory, AssemblyConstraintRegistry } from 'brep-io-kernel';`
+- Subpath imports (all resolve to the same bundle):
   - `import { BREP } from 'brep-io-kernel/BREP';`
   - `import { PartHistory } from 'brep-io-kernel/PartHistory';`
-  - `import { AssemblyConstraintHistory, AssemblyConstraintRegistry } from 'brep-io-kernel';`
+
+Notes:
+- This package is ESM-only. If you are in CommonJS, use dynamic import:
+  - `const { BREP } = await import('brep-io-kernel');`
+- Top-level await is used internally; target modern runtimes (Node 18+ or modern bundlers).
 
 
 

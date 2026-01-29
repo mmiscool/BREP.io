@@ -1,5 +1,6 @@
 node_modules/*
 dist/*
+dist-kernel/*
 *key*
 *aiCoder/llmConfig*
 *aiCoder/backups/*

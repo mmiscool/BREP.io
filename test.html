@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BREP Kernel Bundle Test</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: #f5f5f7;
+        color: #1b1b1f;
+      }
+      main {
+        max-width: 900px;
+        margin: 40px auto;
+        background: #ffffff;
+        border: 1px solid #e2e2e8;
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 24px;
+      }
+      p {
+        margin: 0 0 16px;
+        color: #4b4b57;
+      }
+      code {
+        background: #f0f1f6;
+        padding: 2px 6px;
+        border-radius: 6px;
+      }
+      .status {
+        display: inline-block;
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-weight: 600;
+        margin-bottom: 16px;
+      }
+      .status.pending {
+        background: #fff4cc;
+        color: #6f5600;
+      }
+      .status.ok {
+        background: #d6f7df;
+        color: #0b5d28;
+      }
+      .status.err {
+        background: #ffe1e1;
+        color: #7a0012;
+      }
+      pre {
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 16px;
+        border-radius: 10px;
+        min-height: 180px;
+        overflow: auto;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>BREP Kernel Bundle Test</h1>
+      <p>
+        This page imports the bundled kernel from
+        <code>/dist-kernel/brep-kernel.js</code> and runs a few headless
+        operations to verify the inline WASM bundle.
+      </p>
+      <div id="status" class="status pending">Loading bundle...</div>
+      <pre id="log"></pre>
+    </main>
+
+    <script type="module">
+      const statusEl = document.getElementById('status');
+      const logEl = document.getElementById('log');
+
+      const log = (...args) => {
+        const line = args
+          .map((arg) => {
+            if (typeof arg === 'string') return arg;
+            try {
+              return JSON.stringify(arg);
+            } catch {
+              return String(arg);
+            }
+          })
+          .join(' ');
+        logEl.textContent += `${line}\n`;
+        console.log(...args);
+      };
+
+      const setStatus = (text, cls) => {
+        statusEl.textContent = text;
+        statusEl.className = `status ${cls}`;
+      };
+
+      (async () => {
+        setStatus('Importing bundle...', 'pending');
+        const kernel = await import('/dist-kernel/brep-kernel.js');
+        log('Bundle exports:', Object.keys(kernel));
+
+        const { BREP } = kernel;
+        if (!BREP) {
+          throw new Error('BREP export missing from bundle');
+        }
+
+        setStatus('Running kernel checks...', 'pending');
+
+        const cube = new BREP.Cube({ x: 2, y: 3, z: 4, name: 'Cube' });
+        const cubeVol = cube.volume();
+        log('Cube volume:', cubeVol);
+
+        const sphere = new BREP.Sphere({ r: 1, resolution: 24, name: 'Sphere' });
+        const sphereTris = sphere.getTriangleCount();
+        log('Sphere triangles:', sphereTris);
+
+        const union = cube.union(sphere);
+        const unionVol = union.volume();
+        log('Union volume:', unionVol);
+        log('Union triangles:', union.getTriangleCount());
+
+        const expectedCubeVol = 24;
+        const okVol = Math.abs(cubeVol - expectedCubeVol) < 1e-6;
+        log('Cube volume check:', okVol ? 'OK' : 'FAIL', '(expected', expectedCubeVol, ')');
+        if (!okVol) {
+          throw new Error(`Cube volume mismatch: ${cubeVol} vs ${expectedCubeVol}`);
+        }
+
+        setStatus('Success: bundle + WASM OK', 'ok');
+      })().catch((err) => {
+        console.error(err);
+        log('ERROR:', err && (err.stack || err.message || String(err)));
+        setStatus('Failed: see log', 'err');
+      });
+    </script>
+  </body>
+</html>
