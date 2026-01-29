@@ -116,7 +116,7 @@ export const CADmaterials = {
         }),
         SELECTED: new THREE.MeshStandardMaterial({
             color: "#ffc400",
-            side: THREE.FrontSide,
+            side: THREE.DoubleSide,
             transparent: false,
             opacity: 1,
             wireframe: false,
@@ -127,8 +127,8 @@ export const CADmaterials = {
             depthWrite: true,
             // Keep selected faces slightly behind edges as well.
             polygonOffset: true,
-            polygonOffsetFactor: 2,
-            polygonOffsetUnits: 1,
+            polygonOffsetFactor: 0,
+            polygonOffsetUnits: 0,
             emissiveIntensity: 0,
         })
     },

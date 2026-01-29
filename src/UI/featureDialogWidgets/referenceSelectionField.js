@@ -4,6 +4,7 @@ export function renderReferenceSelectionField({ ui, key, def, id, controlWrap, v
     const inputEl = document.createElement('input');
     inputEl.type = 'hidden';
     inputEl.id = id;
+    try { inputEl.dataset.key = String(key); } catch (_) { }
 
     const isMulti = !!def.multiple;
     if (isMulti) inputEl.dataset.multiple = 'true';
@@ -108,6 +109,7 @@ export function renderReferenceSelectionField({ ui, key, def, id, controlWrap, v
             inputEl.value = '';
             updateSingleDisplay(null);
             emitChange(null);
+            try { ui._syncActiveReferenceSelectionHighlight(inputEl, def); } catch (_) { }
         };
 
         clearBtn.addEventListener('click', clearSelection);
@@ -137,6 +139,7 @@ export function renderReferenceSelectionField({ ui, key, def, id, controlWrap, v
             const normalized = normalizeReferenceName(inputEl.value);
             writeRawValue(normalized);
             emitChange(normalized);
+            try { ui._syncActiveReferenceSelectionHighlight(inputEl, def); } catch (_) { }
         });
     }
 
@@ -188,6 +191,7 @@ export function renderReferenceSelectionField({ ui, key, def, id, controlWrap, v
             inputEl.value = normalized ?? '';
             writeRawValue(normalized);
             emitChange(normalized);
+            try { ui._syncActiveReferenceSelectionHighlight(inputEl, def); } catch (_) { }
         }
     });
 

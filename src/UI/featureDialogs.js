@@ -312,6 +312,12 @@ export class SchemaForm {
                         const clearBtn = display.querySelector('.ref-chip-remove');
                         if (clearBtn) clearBtn.style.visibility = normalized ? 'visible' : 'hidden';
                     }
+                    try {
+                        const inputEl = this._inputs.get(key);
+                        if (inputEl && inputEl === SchemaForm.__activeRefInput) {
+                            this._syncActiveReferenceSelectionHighlight(inputEl, def);
+                        }
+                    } catch (_) { }
                 }
                 continue;
             }
@@ -481,13 +487,61 @@ export class SchemaForm {
         return false;
     }
 
+    _getReferenceSelectionScene() {
+        return this.options?.scene
+            || this.options?.viewer?.partHistory?.scene
+            || this.options?.viewer?.scene
+            || null;
+    }
+
+    _collectReferenceSelectionNames(inputEl, def = null) {
+        if (!inputEl) return [];
+        const isMulti = Boolean(def && def.multiple) || (inputEl.dataset && inputEl.dataset.multiple === 'true');
+        if (isMulti) {
+            let list = null;
+            if (typeof inputEl.__getSelectionList === 'function') {
+                try { list = inputEl.__getSelectionList(); } catch (_) { list = null; }
+            }
+            if (!Array.isArray(list) && inputEl.dataset && inputEl.dataset.selectedValues) {
+                try {
+                    const parsed = JSON.parse(inputEl.dataset.selectedValues);
+                    if (Array.isArray(parsed)) list = parsed;
+                } catch (_) { /* ignore */ }
+            }
+            if (!Array.isArray(list) && inputEl.dataset && inputEl.dataset.key && this.params && Array.isArray(this.params[inputEl.dataset.key])) {
+                list = this.params[inputEl.dataset.key];
+            }
+            return normalizeReferenceList(Array.isArray(list) ? list : []);
+        }
+        let value = null;
+        if (inputEl.value != null && String(inputEl.value).trim() !== '') {
+            value = inputEl.value;
+        } else if (inputEl.dataset && inputEl.dataset.key && this.params && this.params[inputEl.dataset.key] != null) {
+            value = this.params[inputEl.dataset.key];
+        }
+        const normalized = normalizeReferenceName(value);
+        return normalized ? [normalized] : [];
+    }
+
+    _syncActiveReferenceSelectionHighlight(inputEl, def = null) {
+        try {
+            const active = SchemaForm.__activeRefInput;
+            if (!active || active !== inputEl) return;
+            const scene = this._getReferenceSelectionScene();
+            if (!scene) return;
+            const names = this._collectReferenceSelectionNames(inputEl, def);
+            SelectionFilter.unselectAll(scene);
+            for (const name of names) {
+                if (!name) continue;
+                try { SelectionFilter.selectItem(scene, name); } catch (_) { }
+            }
+        } catch (_) { }
+    }
+
     _activateReferenceSelection(inputEl, def) {
         // Clear any lingering scene selection so the new reference starts fresh
         try {
-            const scene = this.options?.scene
-                || this.options?.viewer?.partHistory?.scene
-                || this.options?.viewer?.scene
-                || null;
+            const scene = this._getReferenceSelectionScene();
             if (scene) {
                 SchemaForm.__setGlobalActiveRefInput(null);
                 SelectionFilter.unselectAll(scene);
@@ -526,6 +580,9 @@ export class SchemaForm {
         SelectionFilter.stashAllowedSelectionTypes();
         SelectionFilter.SetSelectionTypes(def.selectionFilter);
         try { window.__BREP_activeRefInput = inputEl; } catch (_) { }
+
+        // Highlight existing selections while this reference field is active
+        try { this._syncActiveReferenceSelectionHighlight(inputEl, def); } catch (_) { }
     }
 
     // Activate a TransformControls session for a transform widget
@@ -997,8 +1054,15 @@ export class SchemaForm {
                 } catch (_) { }
             }
         } catch (_) { }
+        const hadActive = !!SchemaForm.__activeRefInput;
         SchemaForm.__activeRefInput = null;
         try { if (window.__BREP_activeRefInput === undefined || window.__BREP_activeRefInput === SchemaForm.__activeRefInput) window.__BREP_activeRefInput = null; } catch (_) { }
+        if (hadActive) {
+            try {
+                const scene = this._getReferenceSelectionScene();
+                if (scene) SelectionFilter.unselectAll(scene);
+            } catch (_) { }
+        }
         SelectionFilter.restoreAllowedSelectionTypes();
     }
 
@@ -1091,6 +1155,13 @@ export class SchemaForm {
                 chipsWrap.appendChild(hint);
             }
         }
+
+        try {
+            if (inputEl && inputEl === SchemaForm.__activeRefInput) {
+                const def = this.schema ? (this.schema[key] || {}) : null;
+                this._syncActiveReferenceSelectionHighlight(inputEl, def);
+            }
+        } catch (_) { }
     }
 
     _emitParamsChange(key, value) {

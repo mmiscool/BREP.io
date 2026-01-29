@@ -559,7 +559,7 @@ export class SelectionFilter {
 
     static selectItem(scene, itemName) {
         scene.traverse((child) => {
-            if (child instanceof THREE.Mesh && child.name === itemName) {
+            if (child && child.name === itemName) {
                 child.selected = true;
                 // change material to selected
                 if (child.type === SelectionFilter.FACE) {
