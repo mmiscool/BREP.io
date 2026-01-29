@@ -19,6 +19,7 @@ BREP keeps several independent “history” timelines so modeling, PMI, and ass
 - Dialog field types, defaults, and selection filters come from each entry’s `inputParamsSchema`; see [Input Params Schema](./input-params-schema.md) for every widget option.
 - `toJSON()` exports the bare inputs for every feature, expression code, PMI views, metadata, and a snapshot of the assembly constraint history (`src/PartHistory.js:426-455`). `fromJSON()` performs the inverse and forwards constraint payloads into `AssemblyConstraintHistory.replaceAll()` so the solver can pick up where it left off (`src/PartHistory.js:457-478`).
 - File manager save/load uses the JSON helper to embed the complete part history (including PMI and constraints) inside a 3MF metadata entry (`src/UI/fileManagerWidget.js:248-320`), ensuring a single file captures all three timelines.
+- Full API details live in [PartHistory Reference](./part-history.md).
 
 ## PMI Annotation History
 
