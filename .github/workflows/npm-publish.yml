@@ -23,16 +23,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          registry-url: "https://registry.npmjs.org"
           cache: "pnpm"
 
       - name: Ensure npm >= 11.5.1
         run: npm install -g npm@^11.5.1
 
-      - name: Assert tokenless publishing
+      - name: Clear token-based auth
+        run: |
+          echo "NODE_AUTH_TOKEN=" >> $GITHUB_ENV
+          npm config delete //registry.npmjs.org/:_authToken || true
+
+      - name: Enforce OIDC-only auth
         run: |
           if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
             echo "NODE_AUTH_TOKEN is set. Trusted Publishing should not use tokens.";
+            exit 1;
+          fi
+          if npm config get //registry.npmjs.org/:_authToken | grep -qv "undefined"; then
+            echo "Auth token detected in npm config. Remove token-based auth.";
             exit 1;
           fi
           if [ -f ~/.npmrc ] && grep -Eq "_authToken|_password|:_auth=" ~/.npmrc; then
