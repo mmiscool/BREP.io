@@ -1,14 +1,43 @@
 // setupManifold.js (ESM)
 // Universal loader that works in both Node.js and the browser (Vite)
 
-import Module from 'manifold-3d';
-
 const INLINE_WASM_BASE64 =
   typeof __MANIFOLD_WASM_BASE64__ !== 'undefined' && __MANIFOLD_WASM_BASE64__;
 
 const isNode =
   typeof window === 'undefined' ||
   (typeof process !== 'undefined' && process.versions?.node);
+
+const patchFileURLToPathForDataUrl = async () => {
+  if (!isNode) return;
+  try {
+    const { createRequire } = await import('node:module');
+    const require = createRequire(import.meta.url);
+    const urlMod = require('node:url');
+    if (urlMod.__brepFileUrlPatched) return;
+    const original = urlMod.fileURLToPath;
+    urlMod.fileURLToPath = (value) => {
+      try {
+        return original(value);
+      } catch (err) {
+        const href = typeof value === 'string' ? value : value?.href;
+        if (href && (href.startsWith('data:') || href.startsWith('blob:'))) {
+          return process.cwd();
+        }
+        throw err;
+      }
+    };
+    urlMod.__brepFileUrlPatched = true;
+  } catch {
+    // ignore; Node-only patch
+  }
+};
+
+const loadModule = async () => {
+  if (isNode) await patchFileURLToPathForDataUrl();
+  const mod = await import('manifold-3d');
+  return mod?.default ?? mod;
+};
 
 const decodeBase64ToUint8Array = (base64) => {
   if (!base64) return null;
@@ -31,6 +60,7 @@ const decodeBase64ToUint8Array = (base64) => {
 };
 
 const initWasm = async (opts) => {
+  const Module = await loadModule();
   const wasm = await Module(opts);
   if (typeof wasm.setup === 'function') await wasm.setup();
   return wasm;
