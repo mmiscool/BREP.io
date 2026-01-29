@@ -11,6 +11,9 @@ const wasmPath = require.resolve('manifold-3d/manifold.wasm');
 const wasmBase64 = fs.readFileSync(wasmPath, 'base64');
 
 export default defineConfig({
+  resolve: {
+    conditions: ['node', 'import', 'module', 'default'],
+  },
   esbuild: {
     keepNames: true,
   },
@@ -26,7 +29,18 @@ export default defineConfig({
     minify: 'esbuild',
     cssCodeSplit: false,
     rollupOptions: {
-      external: [],
+      external: [
+        'module',
+        'node:module',
+        'fs',
+        'node:fs',
+        'fs/promises',
+        'node:fs/promises',
+        'path',
+        'node:path',
+        'url',
+        'node:url',
+      ],
       output: {
         inlineDynamicImports: true,
         manualChunks: undefined,
