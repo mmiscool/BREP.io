@@ -106,10 +106,14 @@ function collectEdgePolylines(edges) {
   return { polys, edges: validEdges };
 }
 
-function combinePathPolylines(edges, tol = 1e-5) {
-  const { polys } = collectEdgePolylines(edges);
-  if (polys.length === 0) return [];
-  if (polys.length === 1) return polys[0];
+function combinePathPolylinesWithUsage(edges, tol = 1e-5) {
+  const { polys, edges: validEdges } = collectEdgePolylines(edges);
+  if (polys.length === 0) {
+    return { points: [], usedEdges: [], unusedEdges: validEdges };
+  }
+  if (polys.length === 1) {
+    return { points: polys[0], usedEdges: [validEdges[0]], unusedEdges: [] };
+  }
 
   const effectiveTol = deriveTolerance(polys, tol);
   const tol2 = effectiveTol * effectiveTol;
@@ -180,9 +184,12 @@ function combinePathPolylines(edges, tol = 1e-5) {
     nextKey = tryConsumeFromNode(cursorKey);
   }
 
+  const countUsed = (arr) => arr.reduce((sum, v) => sum + (v ? 1 : 0), 0);
   let best = chain.slice();
+  let bestUsed = used.slice();
+  let bestCount = countUsed(bestUsed);
+
   for (let s = 0; s < polys.length; s++) {
-    if (used[s]) continue;
     const localUsed = new Array(polys.length).fill(false);
     const localChain = [];
     localUsed[s] = true;
@@ -222,7 +229,12 @@ function combinePathPolylines(edges, tol = 1e-5) {
         }
       }
     }
-    if (localChain.length > best.length) best = localChain;
+    const localCount = countUsed(localUsed);
+    if (localCount > bestCount || (localCount === bestCount && localChain.length > best.length)) {
+      best = localChain;
+      bestUsed = localUsed;
+      bestCount = localCount;
+    }
   }
 
   for (let i = best.length - 2; i >= 0; i--) {
@@ -230,7 +242,18 @@ function combinePathPolylines(edges, tol = 1e-5) {
     const b = best[i + 1];
     if (a[0] === b[0] && a[1] === b[1] && a[2] === b[2]) best.splice(i + 1, 1);
   }
-  return best;
+
+  const usedEdges = [];
+  const unusedEdges = [];
+  for (let i = 0; i < validEdges.length; i++) {
+    if (bestUsed[i]) usedEdges.push(validEdges[i]);
+    else unusedEdges.push(validEdges[i]);
+  }
+  return { points: best, usedEdges, unusedEdges };
+}
+
+function combinePathPolylines(edges, tol = 1e-5) {
+  return combinePathPolylinesWithUsage(edges, tol).points;
 }
 
 function groupEdgesByConnectivity(edges, tol = 1e-5) {
@@ -373,6 +396,26 @@ export class TubeFeature {
       throw new Error('Unable to build a connected path for the tube.');
     }
 
+    const tubeTasks = [];
+    for (const group of edgeGroups) {
+      const { points, unusedEdges } = combinePathPolylinesWithUsage(group);
+      if (Array.isArray(points) && points.length >= 2) {
+        tubeTasks.push({ points, edge: group[0] || null });
+      }
+      if (Array.isArray(unusedEdges) && unusedEdges.length) {
+        for (const edge of unusedEdges) {
+          const edgePoints = extractPathPolylineWorld(edge);
+          if (edgePoints.length >= 2) {
+            tubeTasks.push({ points: edgePoints, edge });
+          }
+        }
+      }
+    }
+
+    if (!tubeTasks.length) {
+      throw new Error('Unable to build a connected path for the tube.');
+    }
+
     const baseResolution = Math.max(8, Math.floor(Number(resolution) || 32));
     const modeSelection = typeof mode === 'string'
       ? mode
@@ -382,9 +425,9 @@ export class TubeFeature {
     const outerSolids = [];
     const innerSolids = [];
     const debugExtras = [];
-    for (let i = 0; i < edgeGroups.length; i++) {
-      const group = edgeGroups[i];
-      const pathPoints = dedupePoints(combinePathPolylines(group));
+    for (let i = 0; i < tubeTasks.length; i++) {
+      const task = tubeTasks[i];
+      const pathPoints = dedupePoints(task.points);
       if (pathPoints.length < 2) {
         throw new Error('Unable to build a connected path for the tube.');
       }
@@ -404,12 +447,12 @@ export class TubeFeature {
       const finalPoints = isClosedLoop ? pathPoints.slice(0, -1) : pathPoints;
       const tubeName = (() => {
         if (!featureID) return featureID;
-        if (edgeGroups.length === 1) return featureID;
+        if (tubeTasks.length === 1) return featureID;
 
         // get the name of the first edge in the group if possible
-        const firstEdge = group[0];
-        if (firstEdge) {
-          const edgeName = firstEdge.name || firstEdge.id;
+        const edgeRef = task.edge;
+        if (edgeRef) {
+          const edgeName = edgeRef.name || edgeRef.id || edgeRef.userData?.edgeName;
           if (edgeName) {
             return `${featureID}_${edgeName}`;
           }
