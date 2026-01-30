@@ -57,6 +57,18 @@ export class TransformFeature {
   static shortName = "XFORM";
   static longName = "Transform";
   static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems) {
+    const items = Array.isArray(selectedItems) ? selectedItems : [];
+    const solids = items
+      .filter((it) => {
+        const type = String(it?.type || '').toUpperCase();
+        return type === 'SOLID';
+      })
+      .map((it) => it?.name)
+      .filter((name) => !!name);
+    if (!solids.length) return false;
+    return { params: { solids } };
+  }
 
   constructor() {
     this.inputParams = {};

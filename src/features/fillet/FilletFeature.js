@@ -63,6 +63,18 @@ export class FilletFeature {
     static shortName = "F";
     static longName = "Fillet";
     static inputParamsSchema = inputParamsSchema;
+    static showContexButton(selectedItems) {
+        const items = Array.isArray(selectedItems) ? selectedItems : [];
+        const edges = items
+            .filter((it) => {
+                const type = String(it?.type || '').toUpperCase();
+                return type === 'EDGE' || type === 'FACE';
+            })
+            .map((it) => it?.name || it?.userData?.edgeName || it?.userData?.faceName)
+            .filter((name) => !!name);
+        if (!edges.length) return false;
+        return { params: { edges } };
+    }
 
     constructor() {
         this.inputParams = {};

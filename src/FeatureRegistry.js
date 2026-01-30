@@ -134,6 +134,9 @@ export class FeatureRegistry {
     if (!FeatureClass.longName) {
       FeatureClass.longName = FeatureClass.featureName || FeatureClass.name || FeatureClass.shortName || 'Feature';
     }
+    if (typeof FeatureClass.showContexButton !== 'function') {
+      FeatureClass.showContexButton = () => false;
+    }
     this.features.push(FeatureClass);
   }
 

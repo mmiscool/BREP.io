@@ -82,6 +82,17 @@ export class SketchFeature {
     static shortName = "S";
     static longName = "Sketch";
     static inputParamsSchema = inputParamsSchema;
+    static showContexButton(selectedItems) {
+        const items = Array.isArray(selectedItems) ? selectedItems : [];
+        const target = items.find((it) => {
+            const type = String(it?.type || '').toUpperCase();
+            return type === 'FACE' || type === 'PLANE';
+        });
+        if (!target) return false;
+        const name = target?.name || target?.userData?.faceName || null;
+        if (!name) return false;
+        return { field: 'sketchPlane', value: name };
+    }
 
     constructor() {
         this.inputParams = {};

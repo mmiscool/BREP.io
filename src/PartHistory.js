@@ -531,6 +531,33 @@ export class PartHistory {
       return [];
     };
 
+    const extractFaceEdgePositions = (face) => {
+      if (!face) return [];
+      const out = [];
+      const addEdge = (edge) => {
+        const positions = extractEdgeWorldPositions(edge);
+        if (positions && positions.length >= 6) out.push(positions);
+      };
+
+      if (Array.isArray(face.edges) && face.edges.length) {
+        for (const edge of face.edges) addEdge(edge);
+        return out;
+      }
+
+      const faceName = face?.name || face?.userData?.faceName || null;
+      const parentSolid = face?.parentSolid || face?.userData?.parentSolid || face?.parent || null;
+      if (!faceName || !parentSolid || !Array.isArray(parentSolid.children)) return out;
+      for (const child of parentSolid.children) {
+        if (!child || child.type !== SelectionFilter.EDGE) continue;
+        const faceA = child?.userData?.faceA || null;
+        const faceB = child?.userData?.faceB || null;
+        if (faceA === faceName || faceB === faceName) {
+          addEdge(child);
+        }
+      }
+      return out;
+    };
+
     for (const key in schema) {
       if (!Object.prototype.hasOwnProperty.call(schema, key)) continue;
       const def = schema[key];
@@ -550,6 +577,14 @@ export class PartHistory {
           if (positions && positions.length >= 6) {
             for (const bucket of buckets) {
               bucket[refName] = { type: 'EDGE', positions, sourceUuid, sourceFeatureId };
+            }
+          }
+        } else if (objType === SelectionFilter.FACE || objType === 'FACE' || objType === SelectionFilter.PLANE || objType === 'PLANE') {
+          const edgePositions = extractFaceEdgePositions(obj);
+          if (edgePositions && edgePositions.length) {
+            const snapType = (objType === SelectionFilter.PLANE || objType === 'PLANE') ? 'PLANE' : 'FACE';
+            for (const bucket of buckets) {
+              bucket[refName] = { type: snapType, edgePositions, sourceUuid, sourceFeatureId };
             }
           }
         } else if (objType === SelectionFilter.VERTEX || objType === 'VERTEX') {

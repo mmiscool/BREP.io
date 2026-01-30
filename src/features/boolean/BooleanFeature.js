@@ -25,6 +25,21 @@ export class BooleanFeature {
     static shortName = "B";
     static longName = "Boolean";
     static inputParamsSchema = inputParamsSchema;
+    static showContexButton(selectedItems) {
+        const items = Array.isArray(selectedItems) ? selectedItems : [];
+        const solids = items
+            .filter((it) => String(it?.type || '').toUpperCase() === 'SOLID')
+            .map((it) => it?.name)
+            .filter((name) => !!name);
+        if (solids.length < 2) return false;
+        const [targetSolid, ...tools] = solids;
+        return {
+            params: {
+                targetSolid,
+                boolean: { operation: 'UNION', targets: tools },
+            },
+        };
+    }
 
     constructor() {
         this.inputParams = {};

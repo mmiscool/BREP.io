@@ -41,6 +41,17 @@ export class ExtrudeFeature {
   static shortName = "E";
   static longName = "Extrude";
   static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems) {
+    const items = Array.isArray(selectedItems) ? selectedItems : [];
+    const pick = items.find((it) => {
+      const type = String(it?.type || '').toUpperCase();
+      return type === 'FACE' || type === 'SKETCH';
+    });
+    if (!pick) return false;
+    const name = pick?.name || pick?.userData?.faceName || pick?.userData?.edgeName || null;
+    if (!name) return false;
+    return { field: 'profile', value: name };
+  }
 
   constructor() {
     this.inputParams = {};

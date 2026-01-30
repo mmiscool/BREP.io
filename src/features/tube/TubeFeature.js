@@ -332,6 +332,18 @@ export class TubeFeature {
   static shortName = 'TU';
   static longName = 'Tube';
   static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems) {
+    const items = Array.isArray(selectedItems) ? selectedItems : [];
+    if (items.some((it) => String(it?.type || '').toUpperCase() !== 'EDGE')) {
+      return false;
+    }
+    const edges = items
+      .filter((it) => String(it?.type || '').toUpperCase() === 'EDGE')
+      .map((it) => it?.name || it?.userData?.edgeName)
+      .filter((name) => !!name);
+    if (!edges.length) return false;
+    return { params: { path: edges } };
+  }
 
   constructor() {
     this.inputParams = {};

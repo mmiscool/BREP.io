@@ -46,6 +46,16 @@ export class PlaneFeature {
     static shortName = "P";
     static longName = "Plane";
     static inputParamsSchema = inputParamsSchema;
+    static showContexButton(selectedItems) {
+        const items = Array.isArray(selectedItems) ? selectedItems : [];
+        const ref = items.find((it) => {
+            const type = String(it?.type || '').toUpperCase();
+            return type === 'FACE' || type === 'PLANE';
+        });
+        const name = ref?.name || ref?.userData?.faceName || null;
+        if (!name) return false;
+        return { field: 'datum', value: name };
+    }
 
     constructor() {
         this.inputParams = {};

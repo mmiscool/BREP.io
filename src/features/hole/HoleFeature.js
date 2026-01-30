@@ -569,6 +569,21 @@ export class HoleFeature {
   static shortName = 'H';
   static longName = 'Hole';
   static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems) {
+    const items = Array.isArray(selectedItems) ? selectedItems : [];
+    const sketch = items.find((it) => {
+      const type = String(it?.type || '').toUpperCase();
+      if (type === 'SKETCH') return true;
+      if (it?.parent && String(it.parent.type || '').toUpperCase() === 'SKETCH') return true;
+      return false;
+    });
+    if (!sketch) return false;
+    const name = (String(sketch?.type || '').toUpperCase() === 'SKETCH')
+      ? sketch.name
+      : sketch.parent?.name;
+    if (!name) return false;
+    return { field: 'face', value: name };
+  }
 
   constructor() {
     this.inputParams = {};

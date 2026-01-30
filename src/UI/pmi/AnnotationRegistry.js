@@ -29,6 +29,9 @@ class AnnotationRegistry {
       if (!ctor.longName) {
         ctor.longName = ctor.featureName || ctor.name || ctor.shortName || ctor.type || 'Annotation';
       }
+      if (typeof ctor.showContexButton !== 'function') {
+        ctor.showContexButton = () => false;
+      }
     }
     const typeKey = normalizeKey(
       handler.type

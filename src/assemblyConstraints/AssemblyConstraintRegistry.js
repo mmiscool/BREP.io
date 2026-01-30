@@ -54,6 +54,9 @@ export class AssemblyConstraintRegistry {
     if (!ConstraintClass.longName) {
       ConstraintClass.longName = ConstraintClass.constraintName || ConstraintClass.name || ConstraintClass.shortName || 'Constraint';
     }
+    if (typeof ConstraintClass.showContexButton !== 'function') {
+      ConstraintClass.showContexButton = () => false;
+    }
     const keys = this.#collectKeys(ConstraintClass);
     if (!keys.typeKey) return;
 

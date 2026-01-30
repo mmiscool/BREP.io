@@ -23,6 +23,9 @@ export class SelectionFilter {
     static _selectionActionListenerBound = false;
     static _selectionActionsPending = false;
     static _selectionActionBar = null;
+    static _historyContextActions = new Map();
+    static _selectionActionSeparator = null;
+    static _contextSuppressReasons = new Set();
 
     constructor() {
         throw new Error("SelectionFilter is static and cannot be instantiated.");
@@ -194,6 +197,25 @@ export class SelectionFilter {
             let clone;
             try { clone = typeof origMat.clone === 'function' ? origMat.clone() : origMat; } catch { clone = origMat; }
             try { if (clone && clone.color && typeof clone.color.set === 'function') clone.color.set(SelectionFilter.hoverColor); } catch { }
+            try {
+                if (origMat && clone && origMat.resolution && clone.resolution && typeof clone.resolution.copy === 'function') {
+                    clone.resolution.copy(origMat.resolution);
+                }
+            } catch { }
+            try {
+                if (origMat && clone && typeof origMat.dashed !== 'undefined' && typeof clone.dashed !== 'undefined') {
+                    clone.dashed = origMat.dashed;
+                }
+                if (origMat && clone && typeof origMat.dashSize !== 'undefined' && typeof clone.dashSize !== 'undefined') {
+                    clone.dashSize = origMat.dashSize;
+                }
+                if (origMat && clone && typeof origMat.gapSize !== 'undefined' && typeof clone.gapSize !== 'undefined') {
+                    clone.gapSize = origMat.gapSize;
+                }
+                if (origMat && clone && typeof origMat.dashScale !== 'undefined' && typeof clone.dashScale !== 'undefined') {
+                    clone.dashScale = origMat.dashScale;
+                }
+            } catch { }
             try {
                 t.userData.__hoverOrigMat = origMat;
                 t.userData.__hoverMatApplied = true;
@@ -681,14 +703,6 @@ export class SelectionFilter {
     }
 
     static _syncSelectionActions() {
-        const actions = SelectionFilter._selectionActions;
-        if (!actions || actions.size === 0) {
-            try {
-                const bar = SelectionFilter._selectionActionBar;
-                if (bar) bar.style.display = 'none';
-            } catch { }
-            return;
-        }
         const viewer = SelectionFilter.viewer;
         const bar = SelectionFilter._ensureSelectionActionBar(viewer);
         if (!bar) {
@@ -696,14 +710,16 @@ export class SelectionFilter {
             return;
         }
         SelectionFilter._selectionActionsPending = false;
+        const suppressed = SelectionFilter._contextSuppressReasons?.size > 0;
+        if (suppressed) {
+            try { bar.style.display = 'none'; } catch { }
+            return;
+        }
         const selection = SelectionFilter.getSelectedObjects();
         const hideAll = !!viewer?._sketchMode;
-        let visibleCount = 0;
-        const updateButton = (entry, show) => {
-            if (!entry || !entry.btn) return;
-            try { entry.btn.style.display = show ? '' : 'none'; } catch { }
-            if (show) visibleCount += 1;
-        };
+        const utilityButtons = [];
+        const actions = SelectionFilter._selectionActions;
+
         for (const id of SelectionFilter._selectionActionOrder) {
             const entry = actions.get(id);
             if (!entry) continue;
@@ -726,14 +742,235 @@ export class SelectionFilter {
                     show = selection.length > 0;
                 }
             }
-            updateButton(entry, show);
-            if (entry.btn.parentNode !== bar) {
-                try { bar.appendChild(entry.btn); } catch { }
+            if (show) utilityButtons.push(entry.btn);
+        }
+
+        const historySpecs = SelectionFilter._getHistoryContextActionSpecs(selection, viewer);
+        const contextButtons = [];
+        const desiredIds = new Set();
+        for (const spec of historySpecs) {
+            if (!spec || !spec.id) continue;
+            desiredIds.add(spec.id);
+            const existing = SelectionFilter._historyContextActions.get(spec.id) || { id: spec.id };
+            existing.label = spec.label ?? existing.label ?? '';
+            existing.title = spec.title ?? existing.title ?? existing.label ?? '';
+            existing.onClick = spec.onClick ?? existing.onClick ?? null;
+            existing.shouldShow = typeof spec.shouldShow === 'function' ? spec.shouldShow : null;
+            if (!existing.btn) {
+                existing.btn = SelectionFilter._createSelectionActionButton(existing);
+            }
+            if (!existing.btn) continue;
+            try {
+                existing.btn.textContent = String(existing.label ?? '');
+                existing.btn.title = String(existing.title ?? existing.label ?? '');
+                existing.btn.__sabOnClick = existing.onClick;
+                const isIcon = String(existing.label || '').length <= 2;
+                existing.btn.classList.toggle('sab-icon', isIcon);
+            } catch { }
+            let show = !hideAll;
+            if (show && typeof existing.shouldShow === 'function') {
+                try { show = !!existing.shouldShow(selection, viewer); } catch { show = false; }
+            } else if (!existing.shouldShow) {
+                show = show && selection.length > 0;
+            }
+            if (show) contextButtons.push(existing.btn);
+            SelectionFilter._historyContextActions.set(spec.id, existing);
+        }
+
+        for (const [id, entry] of SelectionFilter._historyContextActions.entries()) {
+            if (desiredIds.has(id)) continue;
+            try { entry.btn?.remove?.(); } catch { }
+            SelectionFilter._historyContextActions.delete(id);
+        }
+
+        try { bar.textContent = ''; } catch { }
+        for (const btn of utilityButtons) {
+            try { bar.appendChild(btn); } catch { }
+        }
+        if (utilityButtons.length && contextButtons.length) {
+            const sep = SelectionFilter._ensureSelectionActionSeparator();
+            if (sep) {
+                try { bar.appendChild(sep); } catch { }
             }
         }
+        for (const btn of contextButtons) {
+            try { bar.appendChild(btn); } catch { }
+        }
+        try { bar.style.display = (utilityButtons.length + contextButtons.length) > 0 ? 'flex' : 'none'; } catch { }
+    }
+
+    static _getHistoryContextActionSpecs(selection, viewer) {
+        const out = [];
+        const items = Array.isArray(selection) ? selection : [];
+        const safeId = (prefix, key) => {
+            const raw = String(key || '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
+            return `${prefix}-${raw || 'item'}`;
+        };
+        const addSpec = (spec) => {
+            if (spec && spec.id) out.push(spec);
+        };
+
+        const featureRegistry = viewer?.partHistory?.featureRegistry || null;
+        const features = Array.isArray(featureRegistry?.features) ? featureRegistry.features : [];
+        for (const FeatureClass of features) {
+            if (!FeatureClass) continue;
+            let result = null;
+            try { result = FeatureClass.showContexButton?.(items); } catch { result = null; }
+            if (!result) continue;
+            if (result && typeof result === 'object' && result.show === false) continue;
+            const label = (result && typeof result === 'object' && result.label) || FeatureClass.longName || FeatureClass.shortName || FeatureClass.name || 'Feature';
+            const typeKey = FeatureClass.shortName || FeatureClass.type || FeatureClass.name || label;
+            const params = SelectionFilter._extractContextParams(result);
+            addSpec({
+                id: safeId('ctx-feature', typeKey),
+                label,
+                title: `Create ${label}`,
+                onClick: () => SelectionFilter._createFeatureFromContext(viewer, typeKey, params),
+            });
+        }
+
+        const constraintRegistry = viewer?.partHistory?.assemblyConstraintRegistry || null;
+        const constraintClasses = typeof constraintRegistry?.listAvailable === 'function'
+            ? constraintRegistry.listAvailable()
+            : (typeof constraintRegistry?.list === 'function' ? constraintRegistry.list() : []);
+        if (Array.isArray(constraintClasses)) {
+            for (const ConstraintClass of constraintClasses) {
+                if (!ConstraintClass) continue;
+                let result = null;
+                try { result = ConstraintClass.showContexButton?.(items); } catch { result = null; }
+                if (!result) continue;
+                if (result && typeof result === 'object' && result.show === false) continue;
+                const label = (result && typeof result === 'object' && result.label) || ConstraintClass.longName || ConstraintClass.shortName || ConstraintClass.name || 'Constraint';
+                const typeKey = ConstraintClass.constraintType || ConstraintClass.shortName || ConstraintClass.name || label;
+                const params = SelectionFilter._extractContextParams(result);
+                addSpec({
+                    id: safeId('ctx-constraint', typeKey),
+                    label,
+                    title: `Create ${label}`,
+                    onClick: () => SelectionFilter._createConstraintFromContext(viewer, typeKey, params),
+                });
+            }
+        }
+
+        const pmimode = viewer?._pmiMode || null;
+        const annotationRegistry = viewer?.annotationRegistry || null;
+        if (pmimode && annotationRegistry && typeof annotationRegistry.list === 'function') {
+            const annClasses = annotationRegistry.list();
+            for (const AnnClass of annClasses) {
+                if (!AnnClass) continue;
+                let result = null;
+                try { result = AnnClass.showContexButton?.(items); } catch { result = null; }
+                if (!result) continue;
+                if (result && typeof result === 'object' && result.show === false) continue;
+                const label = (result && typeof result === 'object' && result.label) || AnnClass.longName || AnnClass.shortName || AnnClass.name || 'Annotation';
+                const typeKey = AnnClass.type || AnnClass.entityType || AnnClass.shortName || AnnClass.name || label;
+                const params = SelectionFilter._extractContextParams(result);
+                addSpec({
+                    id: safeId('ctx-annotation', typeKey),
+                    label,
+                    title: `Create ${label}`,
+                    onClick: () => SelectionFilter._createAnnotationFromContext(viewer, typeKey, params),
+                });
+            }
+        }
+
+        return out;
+    }
+
+    static async _createFeatureFromContext(viewer, typeKey, params = null) {
+        if (!viewer || !typeKey) return;
+        SelectionFilter.setContextBarSuppressed('context-create', true);
+        setTimeout(() => SelectionFilter.setContextBarSuppressed('context-create', false), 0);
+        let entry = null;
+        if (viewer.historyWidget && typeof viewer.historyWidget._handleAddEntry === 'function') {
+            try { entry = await viewer.historyWidget._handleAddEntry(typeKey); } catch { }
+        } else {
+            try { entry = await viewer.partHistory?.newFeature?.(typeKey); } catch { }
+        }
+        if (entry && params && typeof params === 'object') {
+            SelectionFilter._applyContextParamsToEntry(viewer, entry, params);
+        }
+        return entry;
+    }
+
+    static _createConstraintFromContext(viewer, typeKey, params = null) {
+        if (!viewer || !typeKey) return;
+        SelectionFilter.setContextBarSuppressed('context-create', true);
+        setTimeout(() => SelectionFilter.setContextBarSuppressed('context-create', false), 0);
+        try { viewer.partHistory?.assemblyConstraintHistory?.addConstraint?.(typeKey, params || null); } catch { }
+    }
+
+    static _createAnnotationFromContext(viewer, typeKey, params = null) {
+        if (!viewer || !typeKey) return;
+        SelectionFilter.setContextBarSuppressed('context-create', true);
+        setTimeout(() => SelectionFilter.setContextBarSuppressed('context-create', false), 0);
+        try { viewer._pmiMode?._annotationHistory?.createAnnotation?.(typeKey, params || null); } catch { }
+    }
+
+    static _extractContextParams(result) {
+        if (!result || result === true) return null;
+        if (typeof result !== 'object') return null;
+        if (result.params && typeof result.params === 'object') return result.params;
+        if (result.field) {
+            return { [result.field]: result.value };
+        }
+        return null;
+    }
+
+    static _applyContextParamsToEntry(viewer, entry, params = {}) {
+        if (!entry || !params || typeof params !== 'object') return;
         try {
-            if (bar) bar.style.display = visibleCount > 0 ? 'flex' : 'none';
+            for (const [key, value] of Object.entries(params)) {
+                entry.inputParams = entry.inputParams || {};
+                entry.inputParams[key] = value;
+            }
         } catch { }
+        const historyWidget = viewer?.historyWidget || null;
+        if (!historyWidget || typeof historyWidget._handleSchemaChange !== 'function') return;
+        try {
+            const id = entry?.inputParams?.id ?? entry?.id ?? null;
+            const entryId = String(id ?? '');
+            historyWidget._handleSchemaChange(entryId, entry, { key: '__context', value: params });
+            const refresh = () => {
+                try {
+                    const form = historyWidget.getFormForEntry?.(entryId);
+                    if (form && typeof form.refreshFromParams === 'function') {
+                        form.refreshFromParams();
+                        return true;
+                    }
+                } catch { }
+                return false;
+            };
+            if (!refresh()) {
+                setTimeout(() => { try { refresh(); } catch { } }, 0);
+            }
+        } catch { }
+    }
+
+    static setContextBarSuppressed(key, active) {
+        if (!key) return;
+        const reasons = SelectionFilter._contextSuppressReasons || new Set();
+        SelectionFilter._contextSuppressReasons = reasons;
+        const had = reasons.has(key);
+        if (active) {
+            reasons.add(key);
+        } else {
+            reasons.delete(key);
+        }
+        if (had !== reasons.has(key)) {
+            SelectionFilter._syncSelectionActions();
+        }
+    }
+
+    static _ensureSelectionActionSeparator() {
+        if (SelectionFilter._selectionActionSeparator && SelectionFilter._selectionActionSeparator.isConnected) {
+            return SelectionFilter._selectionActionSeparator;
+        }
+        if (typeof document === 'undefined') return null;
+        const el = document.createElement('div');
+        el.className = 'selection-action-sep';
+        SelectionFilter._selectionActionSeparator = el;
+        return el;
     }
 
     static _ensureSelectionActionBar(viewer) {
@@ -782,6 +1019,13 @@ export class SelectionFilter {
                   .selection-action-bar .sab-btn.sab-icon {
                     font-size: 16px;
                     min-width: 36px;
+                  }
+                  .selection-action-bar .selection-action-sep {
+                    height: 1px;
+                    width: 100%;
+                    background: #2c3443;
+                    opacity: 0.9;
+                    margin: 4px 0;
                   }
                 `;
                 document.head.appendChild(style);

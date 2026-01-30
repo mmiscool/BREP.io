@@ -35,6 +35,20 @@ export class MirrorFeature {
     static longName = "Mirror";
 
     static inputParamsSchema = inputParamsSchema;
+    static showContexButton(selectedItems) {
+        const items = Array.isArray(selectedItems) ? selectedItems : [];
+        const solids = items
+            .filter((it) => String(it?.type || '').toUpperCase() === 'SOLID')
+            .map((it) => it?.name)
+            .filter((name) => !!name);
+        const plane = items.find((it) => {
+            const type = String(it?.type || '').toUpperCase();
+            return type === 'FACE' || type === 'PLANE';
+        });
+        const planeName = plane?.name || plane?.userData?.faceName || null;
+        if (!solids.length || !planeName) return false;
+        return { params: { solids, mirrorPlane: planeName } };
+    }
 
     constructor() {
         this.inputParams = {};

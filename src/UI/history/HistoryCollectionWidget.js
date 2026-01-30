@@ -1,4 +1,5 @@
 import { SchemaForm } from '../featureDialogs.js';
+import { SelectionFilter } from '../SelectionFilter.js';
 import { resolveEntryId, resolveHistoryDisplayInfo } from './historyDisplayInfo.js';
 import { HISTORY_COLLECTION_WIDGET_CSS } from './historyCollectionWidget.css.js';
 
@@ -43,6 +44,8 @@ export class HistoryCollectionWidget {
     this._addMenu = null;
     this._onGlobalClick = null;
     this._globalRefreshHandler = null;
+    this._contextSuppressKey = `hc-${Math.random().toString(36).slice(2, 9)}`;
+    this._contextSuppressActive = false;
 
     this.uiElement = document.createElement('div');
     this.uiElement.className = 'history-collection-widget-host';
@@ -100,6 +103,7 @@ export class HistoryCollectionWidget {
   }
 
   dispose() {
+    this._setContextSuppression(false);
     if (typeof this._listenerUnsub === 'function') {
       try { this._listenerUnsub(); } catch (_) {}
     }
@@ -152,6 +156,7 @@ export class HistoryCollectionWidget {
     this._listEl.textContent = '';
 
     if (!entries.length) {
+      this._setContextSuppression(false);
       const empty = document.createElement('div');
       empty.className = 'hc-empty';
       empty.textContent = 'No entries yet.';
@@ -185,6 +190,7 @@ export class HistoryCollectionWidget {
       targetId = null;
     }
     this._expandedId = targetId;
+    this._setContextSuppression(!!this._expandedId);
 
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
@@ -589,10 +595,22 @@ export class HistoryCollectionWidget {
   }
 
   _notifyEntryToggle(entry, isOpen) {
+    this._setContextSuppression(!!isOpen);
     if (!this._onEntryToggle) return;
     try {
       this._onEntryToggle(entry || null, isOpen);
     } catch (_) { /* ignore toggle hook errors */ }
+  }
+
+  _setContextSuppression(isOpen) {
+    const next = !!isOpen;
+    if (this._contextSuppressActive === next) return;
+    this._contextSuppressActive = next;
+    if (SelectionFilter && typeof SelectionFilter.setContextBarSuppressed === 'function') {
+      try {
+        SelectionFilter.setContextBarSuppressed(this._contextSuppressKey, next);
+      } catch (_) { /* ignore */ }
+    }
   }
 
   async _moveEntry(id, delta) {
@@ -659,7 +677,7 @@ export class HistoryCollectionWidget {
       this.render();
       this._emitCollectionChange('add', entry);
       this._deferScrollToEntry(createdEntryId);
-      return;
+      return entry;
     }
     const entry = await this._instantiateEntryForType(typeStr);
     if (!entry) return;
@@ -680,6 +698,7 @@ export class HistoryCollectionWidget {
     this.render();
     this._emitCollectionChange('add', entry);
     this._deferScrollToEntry(createdEntryId);
+    return entry;
   }
 
   _handleSchemaChange(id, entry, details) {

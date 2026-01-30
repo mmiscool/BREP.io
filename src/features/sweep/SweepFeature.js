@@ -48,6 +48,23 @@ export class SweepFeature {
   static shortName = "SW";
   static longName = "Sweep";
   static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems) {
+    const items = Array.isArray(selectedItems) ? selectedItems : [];
+    const profileObj = items.find((it) => {
+      const type = String(it?.type || '').toUpperCase();
+      return type === 'FACE' || type === 'SKETCH';
+    });
+    if (!profileObj) return false;
+    const profileName = profileObj?.name || profileObj?.userData?.faceName || null;
+    if (!profileName) return false;
+    const edges = items
+      .filter((it) => String(it?.type || '').toUpperCase() === 'EDGE')
+      .map((it) => it?.name || it?.userData?.edgeName)
+      .filter((name) => !!name);
+    const params = { profile: profileName };
+    if (edges.length) params.path = edges;
+    return { params };
+  }
 
   constructor() {
     this.inputParams = {};

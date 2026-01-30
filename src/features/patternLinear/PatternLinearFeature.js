@@ -34,6 +34,15 @@ export class PatternLinearFeature {
   static shortName = "PATLIN";
   static longName = "Pattern Linear";
   static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems) {
+    const items = Array.isArray(selectedItems) ? selectedItems : [];
+    const solids = items
+      .filter((it) => String(it?.type || '').toUpperCase() === 'SOLID')
+      .map((it) => it?.name)
+      .filter((name) => !!name);
+    if (!solids.length) return false;
+    return { params: { solids } };
+  }
 
   constructor() {
     this.inputParams = {};

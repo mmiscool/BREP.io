@@ -49,6 +49,19 @@ export class PatternRadialFeature {
   static shortName = "PATRAD";
   static longName = "Pattern Radial";
   static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems) {
+    const items = Array.isArray(selectedItems) ? selectedItems : [];
+    const solids = items
+      .filter((it) => String(it?.type || '').toUpperCase() === 'SOLID')
+      .map((it) => it?.name)
+      .filter((name) => !!name);
+    if (!solids.length) return false;
+    const axis = items.find((it) => String(it?.type || '').toUpperCase() === 'EDGE');
+    const axisName = axis?.name || axis?.userData?.edgeName || null;
+    const params = { solids };
+    if (axisName) params.axisRef = axisName;
+    return { params };
+  }
 
   constructor() {
     this.inputParams = {};

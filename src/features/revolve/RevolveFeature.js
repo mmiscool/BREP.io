@@ -47,6 +47,21 @@ export class RevolveFeature {
     static shortName = "R";
     static longName = "Revolve";
     static inputParamsSchema = inputParamsSchema;
+    static showContexButton(selectedItems) {
+        const items = Array.isArray(selectedItems) ? selectedItems : [];
+        const profileObj = items.find((it) => {
+            const type = String(it?.type || '').toUpperCase();
+            return type === 'FACE' || type === 'SKETCH';
+        });
+        if (!profileObj) return false;
+        const profileName = profileObj?.name || profileObj?.userData?.faceName || null;
+        if (!profileName) return false;
+        const axisObj = items.find((it) => String(it?.type || '').toUpperCase() === 'EDGE');
+        const axisName = axisObj?.name || axisObj?.userData?.edgeName || null;
+        const params = { profile: profileName };
+        if (axisName) params.axis = axisName;
+        return { params };
+    }
 
     constructor() {
         this.inputParams = {};

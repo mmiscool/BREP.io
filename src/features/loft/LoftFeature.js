@@ -58,6 +58,23 @@ export class LoftFeature {
   static shortName = "LOFT";
   static longName = "Loft";
   static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems) {
+    const items = Array.isArray(selectedItems) ? selectedItems : [];
+    const profiles = items
+      .filter((it) => {
+        const type = String(it?.type || '').toUpperCase();
+        return type === 'FACE' || type === 'SKETCH';
+      })
+      .map((it) => {
+        if (!it) return null;
+        if (String(it.type || '').toUpperCase() === 'SKETCH') return it.name || null;
+        if (it.parent && String(it.parent.type || '').toUpperCase() === 'SKETCH') return it.parent.name || null;
+        return it.name || it.userData?.faceName || null;
+      })
+      .filter((name) => !!name);
+    if (profiles.length < 2) return false;
+    return { params: { profiles } };
+  }
 
   constructor() {
     this.inputParams = {};
