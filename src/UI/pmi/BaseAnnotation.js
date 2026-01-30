@@ -15,6 +15,43 @@ export class BaseAnnotation extends ListEntityBase {
     this.resultArtifacts = [];
   }
 
+  static _normalizeSelectionItems(selectedItems) {
+    return Array.isArray(selectedItems) ? selectedItems : [];
+  }
+
+  static _normalizeSelectionType(type) {
+    return String(type || '').toUpperCase();
+  }
+
+  static _isSelectionType(item, allowed) {
+    if (!allowed || !allowed.size) return true;
+    return allowed.has(BaseAnnotation._normalizeSelectionType(item?.type));
+  }
+
+  static _selectionRefName(item) {
+    return item?.name
+      || item?.userData?.faceName
+      || item?.userData?.edgeName
+      || item?.userData?.vertexName
+      || item?.userData?.solidName
+      || item?.userData?.name
+      || null;
+  }
+
+  static _collectSelectionRefs(selectedItems, types = null) {
+    const items = BaseAnnotation._normalizeSelectionItems(selectedItems);
+    const allowed = Array.isArray(types)
+      ? new Set(types.map((t) => BaseAnnotation._normalizeSelectionType(t)))
+      : null;
+    const refs = [];
+    for (const item of items) {
+      if (!BaseAnnotation._isSelectionType(item, allowed)) continue;
+      const ref = BaseAnnotation._selectionRefName(item);
+      if (ref) refs.push(ref);
+    }
+    return refs;
+  }
+
   async run(renderingContext) {
     // Base implementation - subclasses should override
     // renderingContext contains: { pmimode, group, idx, ctx }

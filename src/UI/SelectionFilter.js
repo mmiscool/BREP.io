@@ -26,6 +26,20 @@ export class SelectionFilter {
     static _historyContextActions = new Map();
     static _selectionActionSeparator = null;
     static _contextSuppressReasons = new Set();
+    static _selectionFilterIndicator = null;
+    static _selectionFilterIndicatorToggle = null;
+    static _selectionFilterIndicatorPanel = null;
+    static _selectionFilterCheckboxes = new Map();
+    static _selectionFilterTypes = null;
+    static _selectionFilterOutsideBound = false;
+    static _selectionFilterTintBtn = null;
+    static _selectableTintState = {
+        active: false,
+        activeColor: null,
+        colorIndex: 0,
+        colors: ['#34d399', '#f97316', '#60a5fa', '#f43f5e'],
+        materials: new Map(),
+    };
 
     constructor() {
         throw new Error("SelectionFilter is static and cannot be instantiated.");
@@ -58,6 +72,7 @@ export class SelectionFilter {
         if (types === SelectionFilter.ALL) {
             SelectionFilter.allowedSelectionTypes = SelectionFilter.ALL;
             SelectionFilter.triggerUI();
+            SelectionFilter._ensureSceneSelectionHandlers();
             SelectionFilter.#logAllowedTypesChange(SelectionFilter.allowedSelectionTypes, 'SetSelectionTypes');
             return;
         }
@@ -66,6 +81,7 @@ export class SelectionFilter {
         if (invalid.length) throw new Error(`Unknown selection type(s): ${invalid.join(", ")}`);
         SelectionFilter.allowedSelectionTypes = new Set(list);
         SelectionFilter.triggerUI();
+        SelectionFilter._ensureSceneSelectionHandlers();
         SelectionFilter.#logAllowedTypesChange(SelectionFilter.allowedSelectionTypes, 'SetSelectionTypes');
     }
 
@@ -78,8 +94,61 @@ export class SelectionFilter {
             SelectionFilter.allowedSelectionTypes = SelectionFilter.previouseAllowedSelectionTypes;
             SelectionFilter.previouseAllowedSelectionTypes = null;
             SelectionFilter.triggerUI();
+            SelectionFilter._ensureSceneSelectionHandlers();
             SelectionFilter.#logAllowedTypesChange(SelectionFilter.allowedSelectionTypes, 'RestoreSelectionTypes');
         }
+    }
+
+    static ensureSelectionHandlers(obj, { deep = false } = {}) {
+        if (!obj || typeof obj !== 'object') return false;
+        let changed = false;
+        const attach = (target) => {
+            if (!target || typeof target !== 'object') return;
+            if (typeof target.onClick === 'function') return;
+            target.onClick = () => {
+                try {
+                    if (target.type === SelectionFilter.SOLID && target.parent && target.parent.type === SelectionFilter.COMPONENT) {
+                        const handledByParent = SelectionFilter.toggleSelection(target.parent);
+                        if (!handledByParent) SelectionFilter.toggleSelection(target);
+                        return;
+                    }
+                    SelectionFilter.toggleSelection(target);
+                } catch (error) {
+                    try { console.warn('[SelectionFilter] toggleSelection failed:', error); } catch (_) { /* ignore */ }
+                }
+            };
+            try { target.onClick.__brepSelectionHandler = true; } catch (_) { /* ignore */ }
+            changed = true;
+        };
+
+        if (!deep) {
+            attach(obj);
+            return changed;
+        }
+
+        const stack = [obj];
+        while (stack.length) {
+            const current = stack.pop();
+            attach(current);
+            const kids = Array.isArray(current?.children) ? current.children : [];
+            for (const child of kids) {
+                if (child) stack.push(child);
+            }
+        }
+        return changed;
+    }
+
+    static _ensureSceneSelectionHandlers() {
+        try {
+            const scene = SelectionFilter.viewer?.partHistory?.scene
+                || SelectionFilter.viewer?.scene
+                || null;
+            if (!scene || !Array.isArray(scene.children)) return;
+            for (const child of scene.children) {
+                if (!child || child.type !== SelectionFilter.SOLID) continue;
+                SelectionFilter.ensureSelectionHandlers(child, { deep: true });
+            }
+        } catch { }
     }
 
 
@@ -640,7 +709,10 @@ export class SelectionFilter {
     }
 
     static set uiCallback(callback) { SelectionFilter._uiCallback = callback; }
-    static triggerUI() { if (SelectionFilter._uiCallback) SelectionFilter._uiCallback(); }
+    static triggerUI() {
+        if (SelectionFilter._uiCallback) SelectionFilter._uiCallback();
+        try { SelectionFilter._updateSelectionFilterIndicator(); } catch (_) { }
+    }
 
     // Emit a global event so UI can react without polling
     static _emitSelectionChanged() {
@@ -810,49 +882,52 @@ export class SelectionFilter {
             if (spec && spec.id) out.push(spec);
         };
 
-        const featureRegistry = viewer?.partHistory?.featureRegistry || null;
-        const features = Array.isArray(featureRegistry?.features) ? featureRegistry.features : [];
-        for (const FeatureClass of features) {
-            if (!FeatureClass) continue;
-            let result = null;
-            try { result = FeatureClass.showContexButton?.(items); } catch { result = null; }
-            if (!result) continue;
-            if (result && typeof result === 'object' && result.show === false) continue;
-            const label = (result && typeof result === 'object' && result.label) || FeatureClass.longName || FeatureClass.shortName || FeatureClass.name || 'Feature';
-            const typeKey = FeatureClass.shortName || FeatureClass.type || FeatureClass.name || label;
-            const params = SelectionFilter._extractContextParams(result);
-            addSpec({
-                id: safeId('ctx-feature', typeKey),
-                label,
-                title: `Create ${label}`,
-                onClick: () => SelectionFilter._createFeatureFromContext(viewer, typeKey, params),
-            });
-        }
-
-        const constraintRegistry = viewer?.partHistory?.assemblyConstraintRegistry || null;
-        const constraintClasses = typeof constraintRegistry?.listAvailable === 'function'
-            ? constraintRegistry.listAvailable()
-            : (typeof constraintRegistry?.list === 'function' ? constraintRegistry.list() : []);
-        if (Array.isArray(constraintClasses)) {
-            for (const ConstraintClass of constraintClasses) {
-                if (!ConstraintClass) continue;
+        const pmimode = viewer?._pmiMode || null;
+        const pmiActive = !!pmimode;
+        if (!pmiActive) {
+            const featureRegistry = viewer?.partHistory?.featureRegistry || null;
+            const features = Array.isArray(featureRegistry?.features) ? featureRegistry.features : [];
+            for (const FeatureClass of features) {
+                if (!FeatureClass) continue;
                 let result = null;
-                try { result = ConstraintClass.showContexButton?.(items); } catch { result = null; }
+                try { result = FeatureClass.showContexButton?.(items); } catch { result = null; }
                 if (!result) continue;
                 if (result && typeof result === 'object' && result.show === false) continue;
-                const label = (result && typeof result === 'object' && result.label) || ConstraintClass.longName || ConstraintClass.shortName || ConstraintClass.name || 'Constraint';
-                const typeKey = ConstraintClass.constraintType || ConstraintClass.shortName || ConstraintClass.name || label;
+                const label = (result && typeof result === 'object' && result.label) || FeatureClass.longName || FeatureClass.shortName || FeatureClass.name || 'Feature';
+                const typeKey = FeatureClass.shortName || FeatureClass.type || FeatureClass.name || label;
                 const params = SelectionFilter._extractContextParams(result);
                 addSpec({
-                    id: safeId('ctx-constraint', typeKey),
+                    id: safeId('ctx-feature', typeKey),
                     label,
                     title: `Create ${label}`,
-                    onClick: () => SelectionFilter._createConstraintFromContext(viewer, typeKey, params),
+                    onClick: () => SelectionFilter._createFeatureFromContext(viewer, typeKey, params),
                 });
+            }
+
+            const constraintRegistry = viewer?.partHistory?.assemblyConstraintRegistry || null;
+            const constraintClasses = typeof constraintRegistry?.listAvailable === 'function'
+                ? constraintRegistry.listAvailable()
+                : (typeof constraintRegistry?.list === 'function' ? constraintRegistry.list() : []);
+            if (Array.isArray(constraintClasses)) {
+                for (const ConstraintClass of constraintClasses) {
+                    if (!ConstraintClass) continue;
+                    let result = null;
+                    try { result = ConstraintClass.showContexButton?.(items); } catch { result = null; }
+                    if (!result) continue;
+                    if (result && typeof result === 'object' && result.show === false) continue;
+                    const label = (result && typeof result === 'object' && result.label) || ConstraintClass.longName || ConstraintClass.shortName || ConstraintClass.name || 'Constraint';
+                    const typeKey = ConstraintClass.constraintType || ConstraintClass.shortName || ConstraintClass.name || label;
+                    const params = SelectionFilter._extractContextParams(result);
+                    addSpec({
+                        id: safeId('ctx-constraint', typeKey),
+                        label,
+                        title: `Create ${label}`,
+                        onClick: () => SelectionFilter._createConstraintFromContext(viewer, typeKey, params),
+                    });
+                }
             }
         }
 
-        const pmimode = viewer?._pmiMode || null;
         const annotationRegistry = viewer?.annotationRegistry || null;
         if (pmimode && annotationRegistry && typeof annotationRegistry.list === 'function') {
             const annClasses = annotationRegistry.list();
@@ -1036,6 +1111,369 @@ export class SelectionFilter {
         host.appendChild(bar);
         SelectionFilter._selectionActionBar = bar;
         return bar;
+    }
+
+    static _getSelectionFilterTypeList() {
+        if (!SelectionFilter._selectionFilterTypes) {
+            SelectionFilter._selectionFilterTypes = SelectionFilter.TYPES.filter((t) => t !== SelectionFilter.ALL);
+        }
+        return SelectionFilter._selectionFilterTypes;
+    }
+
+    static _getSelectionFilterLabel(type) {
+        const labels = {
+            SOLID: 'Solid',
+            COMPONENT: 'Component',
+            FACE: 'Face',
+            PLANE: 'Plane',
+            SKETCH: 'Sketch',
+            EDGE: 'Edge',
+            LOOP: 'Loop',
+            VERTEX: 'Vertex',
+        };
+        return labels[type] || type;
+    }
+
+    static _summarizeSelectionFilter(types) {
+        const list = Array.isArray(types) ? types : [];
+        const allTypes = SelectionFilter._getSelectionFilterTypeList();
+        if (list.length === 0) return 'None';
+        if (list.length === allTypes.length) return 'All';
+        return list.map((t) => SelectionFilter._getSelectionFilterLabel(t)).join(', ');
+    }
+
+    static _getAllowedTypeList() {
+        const allTypes = SelectionFilter._getSelectionFilterTypeList();
+        if (SelectionFilter.allowedSelectionTypes === SelectionFilter.ALL) return allTypes.slice();
+        const allowed = new Set(Array.from(SelectionFilter.allowedSelectionTypes || []));
+        return allTypes.filter((t) => allowed.has(t));
+    }
+
+    static _updateSelectionFilterIndicator() {
+        const wrap = SelectionFilter._selectionFilterIndicator;
+        if (!wrap) return;
+        const toggle = SelectionFilter._selectionFilterIndicatorToggle;
+        const types = SelectionFilter._getAllowedTypeList();
+        if (SelectionFilter._selectionFilterCheckboxes && SelectionFilter._selectionFilterCheckboxes.size) {
+            const set = new Set(types);
+            for (const [type, cb] of SelectionFilter._selectionFilterCheckboxes.entries()) {
+                if (cb) cb.checked = set.has(type);
+            }
+        }
+        if (toggle) {
+            toggle.textContent = `Selection filter: ${SelectionFilter._summarizeSelectionFilter(types)}`;
+        }
+        SelectionFilter._updateSelectableTintButton();
+    }
+
+    static _getSelectableTintTargets() {
+        const allowed = SelectionFilter.allowedSelectionTypes;
+        const allowAll = allowed === SelectionFilter.ALL;
+        const allowFace = allowAll || (allowed && typeof allowed.has === 'function' && allowed.has(SelectionFilter.FACE));
+        const allowEdge = allowAll || (allowed && typeof allowed.has === 'function' && allowed.has(SelectionFilter.EDGE));
+        return { allowFace, allowEdge };
+    }
+
+    static _updateSelectableTintButton() {
+        const btn = SelectionFilter._selectionFilterTintBtn;
+        if (!btn) return;
+        const state = SelectionFilter._selectableTintState;
+        const active = !!state?.active;
+        const { allowFace, allowEdge } = SelectionFilter._getSelectableTintTargets();
+        const hasTargets = allowFace || allowEdge;
+        const colors = Array.isArray(state?.colors) && state.colors.length ? state.colors : ['#60a5fa'];
+        const nextColor = colors[(state?.colorIndex ?? 0) % colors.length] || '#60a5fa';
+        const displayColor = active ? (state?.activeColor || nextColor) : nextColor;
+        btn.classList.toggle('is-active', active);
+        btn.style.setProperty('--sfi-tint', displayColor);
+        btn.textContent = active ? 'Reset selectable tint' : 'Tint selectable';
+        btn.disabled = !active && !hasTargets;
+        btn.title = active
+            ? 'Restore original face/edge colors'
+            : (hasTargets ? 'Tint selectable faces and edges' : 'Enable Face or Edge selection to tint');
+    }
+
+    static _applySelectableTint(scene, { allowFace, allowEdge, faceColor, edgeColor }) {
+        if (!scene || (!allowFace && !allowEdge)) return;
+        const state = SelectionFilter._selectableTintState;
+        const storeColor = (mat) => {
+            if (!mat || !mat.color || typeof mat.color.getHexString !== 'function') return;
+            if (state.materials.has(mat)) return;
+            try { state.materials.set(mat, `#${mat.color.getHexString()}`); } catch { }
+        };
+        const tintMaterial = (mat, color) => {
+            if (!mat || !mat.color || typeof mat.color.set !== 'function') return;
+            storeColor(mat);
+            try { mat.color.set(color); } catch { }
+            try { mat.needsUpdate = true; } catch { }
+        };
+        const tintObject = (obj, color) => {
+            if (!obj || obj.visible === false) return;
+            if (obj.selected === true) return;
+            const mat = obj.material;
+            if (Array.isArray(mat)) {
+                for (const m of mat) tintMaterial(m, color);
+            } else {
+                tintMaterial(mat, color);
+            }
+        };
+        const isPreview = (obj) => {
+            if (!obj) return true;
+            if (obj.userData?.refPreview) return true;
+            const name = typeof obj.name === 'string' ? obj.name : '';
+            const type = typeof obj.type === 'string' ? obj.type : '';
+            if (name.startsWith('__refPreview__')) return true;
+            if (type.startsWith('REF_PREVIEW')) return true;
+            return false;
+        };
+        scene.traverse((obj) => {
+            if (!obj || isPreview(obj)) return;
+            if (allowFace && obj.type === SelectionFilter.FACE) {
+                tintObject(obj, faceColor);
+            } else if (allowEdge && obj.type === SelectionFilter.EDGE) {
+                tintObject(obj, edgeColor);
+            }
+        });
+    }
+
+    static _restoreSelectableTint() {
+        const state = SelectionFilter._selectableTintState;
+        if (!state || !state.materials) return;
+        for (const [mat, color] of state.materials.entries()) {
+            if (!mat || !mat.color || typeof mat.color.set !== 'function') continue;
+            if (!color) continue;
+            try { mat.color.set(color); } catch { }
+            try { mat.needsUpdate = true; } catch { }
+        }
+        state.materials.clear();
+        state.active = false;
+        state.activeColor = null;
+        SelectionFilter._updateSelectableTintButton();
+        try { SelectionFilter.viewer?.render?.(); } catch { }
+    }
+
+    static _toggleSelectableTint(viewer) {
+        const state = SelectionFilter._selectableTintState;
+        if (!state) return;
+        if (state.active) {
+            SelectionFilter._restoreSelectableTint();
+            return;
+        }
+        const { allowFace, allowEdge } = SelectionFilter._getSelectableTintTargets();
+        if (!allowFace && !allowEdge) return;
+        const scene = viewer?.partHistory?.scene || viewer?.scene || SelectionFilter.viewer?.partHistory?.scene || SelectionFilter.viewer?.scene || null;
+        if (!scene) return;
+        const colors = Array.isArray(state.colors) && state.colors.length ? state.colors : ['#60a5fa'];
+        const color = colors[state.colorIndex % colors.length] || '#60a5fa';
+        state.colorIndex = (state.colorIndex + 1) % colors.length;
+        SelectionFilter._applySelectableTint(scene, {
+            allowFace,
+            allowEdge,
+            faceColor: color,
+            edgeColor: color,
+        });
+        state.active = true;
+        state.activeColor = color;
+        SelectionFilter._updateSelectableTintButton();
+        try { (viewer || SelectionFilter.viewer)?.render?.(); } catch { }
+    }
+
+    static _ensureSelectionFilterIndicator(viewer) {
+        if (SelectionFilter._selectionFilterIndicator && SelectionFilter._selectionFilterIndicator.isConnected) {
+            SelectionFilter._updateSelectionFilterIndicator();
+            return SelectionFilter._selectionFilterIndicator;
+        }
+        if (typeof document === 'undefined') return null;
+        const host = viewer?.container || document.body || null;
+        if (!host) return null;
+        try {
+            if (!document.getElementById('selection-filter-indicator-styles')) {
+                const style = document.createElement('style');
+                style.id = 'selection-filter-indicator-styles';
+                style.textContent = `
+                  .selection-filter-indicator {
+                    position: fixed;
+                    bottom: 8px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    display: flex;
+                    flex-direction: column;
+                    gap: 6px;
+                    background: rgba(20,24,30,.85);
+                    border: 1px solid #262b36;
+                    border-radius: 10px;
+                    padding: 6px;
+                    color: #ddd;
+                    z-index: 12;
+                    user-select: none;
+                    min-width: 220px;
+                    max-width: min(440px, calc(100vw - 16px));
+                    box-shadow: 0 6px 18px rgba(0,0,0,.35);
+                  }
+                  .selection-filter-indicator .sfi-toggle {
+                    background: transparent;
+                    border-radius: 8px;
+                    padding: 6px 10px;
+                    width: 100%;
+                    min-height: 32px;
+                    box-sizing: border-box;
+                    color: #ddd;
+                    border: 1px solid #364053;
+                    cursor: pointer;
+                    text-align: left;
+                  }
+                  .selection-filter-indicator .sfi-toggle:hover { filter: brightness(1.08); }
+                  .selection-filter-indicator .sfi-toggle:active { filter: brightness(1.15); }
+                  .selection-filter-indicator .sfi-panel {
+                    border: 1px solid #2b3240;
+                    border-radius: 8px;
+                    padding: 8px 10px;
+                    background: rgba(17,22,31,.95);
+                  }
+                  .selection-filter-indicator .sfi-panel[hidden] { display: none; }
+                  .selection-filter-indicator .sfi-list {
+                    display: grid;
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                    gap: 6px 10px;
+                  }
+                  .selection-filter-indicator .sfi-option {
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    font-size: 12px;
+                    color: #cbd5e1;
+                  }
+                  .selection-filter-indicator input[type="checkbox"] {
+                    width: 16px;
+                    height: 16px;
+                    accent-color: #60a5fa;
+                  }
+                  .selection-filter-indicator .sfi-actions {
+                    display: flex;
+                    gap: 6px;
+                    margin-top: 8px;
+                  }
+                  .selection-filter-indicator .sfi-btn {
+                    flex: 1;
+                    background: rgba(255,255,255,.04);
+                    border: 1px solid #364053;
+                    border-radius: 8px;
+                    color: #e2e8f0;
+                    padding: 6px 10px;
+                    font-size: 12px;
+                    cursor: pointer;
+                    text-align: center;
+                    min-height: 28px;
+                  }
+                  .selection-filter-indicator .sfi-btn:hover { filter: brightness(1.08); }
+                  .selection-filter-indicator .sfi-btn:active { filter: brightness(1.15); }
+                  .selection-filter-indicator .sfi-btn.is-active {
+                    border-color: var(--sfi-tint, #60a5fa);
+                    color: var(--sfi-tint, #60a5fa);
+                  }
+                `;
+                document.head.appendChild(style);
+            }
+        } catch { }
+
+        const wrap = document.createElement('div');
+        wrap.className = 'selection-filter-indicator';
+
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'sfi-toggle';
+        const panelId = `selection-filter-panel-${Math.random().toString(36).slice(2, 8)}`;
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.setAttribute('aria-controls', panelId);
+        wrap.appendChild(toggle);
+
+        const panel = document.createElement('div');
+        panel.className = 'sfi-panel';
+        panel.id = panelId;
+        panel.hidden = true;
+
+        const list = document.createElement('div');
+        list.className = 'sfi-list';
+        panel.appendChild(list);
+
+        const checkboxByType = new Map();
+        const types = SelectionFilter._getSelectionFilterTypeList();
+        for (const type of types) {
+            const option = document.createElement('label');
+            option.className = 'sfi-option';
+
+            const box = document.createElement('input');
+            box.type = 'checkbox';
+            box.dataset.type = type;
+            box.addEventListener('click', (ev) => ev.stopPropagation());
+            box.addEventListener('change', (ev) => {
+                ev.stopPropagation();
+                const next = [];
+                for (const t of types) {
+                    const cb = checkboxByType.get(t);
+                    if (cb && cb.checked) next.push(t);
+                }
+                const nextValue = next.length === types.length ? SelectionFilter.ALL : next;
+                try { SelectionFilter.SetSelectionTypes(nextValue); } catch { }
+                if (SelectionFilter.previouseAllowedSelectionTypes !== null) {
+                    SelectionFilter.previouseAllowedSelectionTypes = SelectionFilter.allowedSelectionTypes;
+                }
+                SelectionFilter._updateSelectionFilterIndicator();
+            });
+
+            const label = document.createElement('span');
+            label.textContent = SelectionFilter._getSelectionFilterLabel(type);
+
+            option.appendChild(box);
+            option.appendChild(label);
+            list.appendChild(option);
+            checkboxByType.set(type, box);
+        }
+
+        const actions = document.createElement('div');
+        actions.className = 'sfi-actions';
+        const tintBtn = document.createElement('button');
+        tintBtn.type = 'button';
+        tintBtn.className = 'sfi-btn';
+        tintBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            SelectionFilter._toggleSelectableTint(viewer);
+        });
+        actions.appendChild(tintBtn);
+        panel.appendChild(actions);
+
+        toggle.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const nextOpen = panel.hidden;
+            panel.hidden = !nextOpen;
+            toggle.setAttribute('aria-expanded', String(nextOpen));
+            if (nextOpen) SelectionFilter._updateSelectionFilterIndicator();
+        });
+        panel.addEventListener('click', (ev) => ev.stopPropagation());
+
+        if (!SelectionFilter._selectionFilterOutsideBound) {
+            SelectionFilter._selectionFilterOutsideBound = true;
+            document.addEventListener('mousedown', (ev) => {
+                const panelEl = SelectionFilter._selectionFilterIndicatorPanel;
+                const toggleEl = SelectionFilter._selectionFilterIndicatorToggle;
+                const wrapEl = SelectionFilter._selectionFilterIndicator;
+                if (wrapEl && ev && wrapEl.contains(ev.target)) return;
+                if (!panelEl || panelEl.hidden) return;
+                panelEl.hidden = true;
+                if (toggleEl) toggleEl.setAttribute('aria-expanded', 'false');
+            });
+        }
+
+        wrap.appendChild(panel);
+        host.appendChild(wrap);
+
+        SelectionFilter._selectionFilterIndicator = wrap;
+        SelectionFilter._selectionFilterIndicatorToggle = toggle;
+        SelectionFilter._selectionFilterIndicatorPanel = panel;
+        SelectionFilter._selectionFilterCheckboxes = checkboxByType;
+        SelectionFilter._selectionFilterTintBtn = tintBtn;
+        SelectionFilter._updateSelectionFilterIndicator();
+        return wrap;
     }
 
     static _createSelectionActionButton(entry) {

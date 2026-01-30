@@ -71,6 +71,17 @@ export class HoleCalloutAnnotation extends BaseAnnotation {
   static longName = 'Hole Callout';
   static title = 'Hole Callout';
   static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems) {
+    const items = BaseAnnotation._normalizeSelectionItems(selectedItems);
+    const allowed = new Set(['VERTEX', 'EDGE', 'FACE']);
+    for (const item of items) {
+      if (!BaseAnnotation._isSelectionType(item, allowed)) continue;
+      if (!hasHoleMetadata(item)) continue;
+      const ref = BaseAnnotation._selectionRefName(item);
+      if (ref) return { params: { target: ref } };
+    }
+    return false;
+  }
 
   constructor(opts = {}) {
     super(opts);
@@ -291,6 +302,46 @@ function findHoleDescriptor(partHistory, targetObj, fallbackPoint, targetName = 
   }
 
   return descriptors[0];
+}
+
+function readHoleMetadata(obj) {
+  if (!obj) return null;
+  const ud = obj.userData || null;
+  if (ud?.hole) return ud.hole;
+  if (ud?.metadata?.hole) return ud.metadata.hole;
+  if (typeof obj.getMetadata === 'function') {
+    try {
+      const meta = obj.getMetadata();
+      if (meta?.hole) return meta.hole;
+      if (meta?.metadata?.hole) return meta.metadata.hole;
+    } catch { /* ignore */ }
+  }
+  const faceName = obj?.name || ud?.faceName || null;
+  const parentSolid = obj?.parentSolid || ud?.parentSolid || null;
+  if (faceName && parentSolid && typeof parentSolid.getFaceMetadata === 'function') {
+    try {
+      const meta = parentSolid.getFaceMetadata(faceName);
+      if (meta?.hole) return meta.hole;
+    } catch { /* ignore */ }
+  }
+  return null;
+}
+
+function hasHoleMetadata(target) {
+  if (!target) return false;
+  const queue = [target];
+  const visited = new Set();
+  while (queue.length) {
+    const obj = queue.shift();
+    if (!obj || visited.has(obj)) continue;
+    visited.add(obj);
+    if (readHoleMetadata(obj)) return true;
+    if (Array.isArray(obj.faces)) {
+      for (const face of obj.faces) queue.push(face);
+    }
+    if (obj.parent) queue.push(obj.parent);
+  }
+  return false;
 }
 
 

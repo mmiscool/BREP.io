@@ -41,6 +41,11 @@ export class ExplodeBodyAnnotation extends BaseAnnotation {
   static title = 'Explode Body';
   static inputParamsSchema = inputParamsSchema;
   static aliases = ['viewTransform'];
+  static showContexButton(selectedItems) {
+    const refs = BaseAnnotation._collectSelectionRefs(selectedItems, ['SOLID']);
+    if (!refs.length) return false;
+    return { params: { targets: refs } };
+  }
 
   constructor(opts = {}) {
     super(opts);

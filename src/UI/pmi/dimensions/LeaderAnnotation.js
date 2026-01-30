@@ -65,6 +65,11 @@ export class LeaderAnnotation extends BaseAnnotation {
   static longName = 'Leader';
   static title = 'Leader';
   static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems) {
+    const refs = BaseAnnotation._collectSelectionRefs(selectedItems, ['VERTEX']);
+    if (!refs.length) return false;
+    return { params: { target: refs } };
+  }
 
   constructor(opts = {}) {
     super(opts);

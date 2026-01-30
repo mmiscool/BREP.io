@@ -455,6 +455,52 @@ export class SchemaForm {
         return false;
     }
 
+    // Focus the first available field in this form (or activate a reference selection when needed).
+    focusFirstField() {
+        const canFocus = (el) => {
+            if (!el || typeof el.focus !== 'function') return false;
+            if (el.disabled) return false;
+            const ariaDisabled = el.getAttribute ? el.getAttribute('aria-disabled') : null;
+            if (ariaDisabled === 'true') return false;
+            return true;
+        };
+        const tryFocus = (el) => {
+            if (!canFocus(el)) return false;
+            try { el.focus(); } catch (_) { return false; }
+            return true;
+        };
+
+        for (const key in this.schema) {
+            if (!Object.prototype.hasOwnProperty.call(this.schema, key)) continue;
+            if (this._excludedKeys.has(key)) continue;
+            const def = this.schema[key];
+            const row = this._fieldsWrap?.querySelector?.(`[data-key="${key}"]`) || null;
+
+            // Reference selections should auto-activate instead of just focusing the display button.
+            if (def && def.type === 'reference_selection') {
+                if (this.activateField(key)) return true;
+            }
+
+            // Prefer direct inputs first.
+            if (row) {
+                const input = row.querySelector('input:not([type="hidden"]), select, textarea');
+                if (tryFocus(input)) return true;
+                const btn = row.querySelector('button, [tabindex]:not([tabindex="-1"])');
+                if (tryFocus(btn)) return true;
+            }
+
+            const inputEl = this._inputs.get(key);
+            if (inputEl && inputEl.getAttribute && inputEl.getAttribute('type') !== 'hidden') {
+                if (tryFocus(inputEl)) return true;
+            }
+        }
+
+        const root = this._shadow || this.uiElement;
+        const any = root?.querySelector?.('input:not([type="hidden"]), select, textarea, button, [tabindex]:not([tabindex="-1"])');
+        if (tryFocus(any)) return true;
+        return false;
+    }
+
     readFieldValue(key) {
         const widget = this._widgets.get(key);
         if (widget && typeof widget.readValue === 'function') {
@@ -1287,6 +1333,15 @@ export class SchemaForm {
     }
 
     _activateReferenceSelection(inputEl, def) {
+        // If switching between reference fields, fully stop the previous session so
+        // selection filters restore correctly (prevents sticky FACE-only state).
+        try {
+            const prevActive = SchemaForm.__activeRefInput || null;
+            if (prevActive && prevActive !== inputEl) {
+                this._stopActiveReferenceSelection();
+            }
+        } catch (_) { }
+
         // Clear any lingering scene selection so the new reference starts fresh
         try {
             const scene = this._getReferenceSelectionScene();

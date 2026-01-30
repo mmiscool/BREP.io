@@ -209,6 +209,10 @@ export class AssemblyConstraintsWidget {
     this._scheduleSync();
   }
 
+  collapseExpandedDialogs() {
+    try { this._constraintList?.collapseExpandedEntries?.({ clearOpenState: true }); } catch { /* ignore */ }
+  }
+
   #handleHistoryChange() {
     this._scheduleSync();
     if (this._ignoreFullSolveChangeCount > 0) {

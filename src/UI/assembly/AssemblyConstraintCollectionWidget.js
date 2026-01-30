@@ -164,6 +164,7 @@ export class AssemblyConstraintCollectionWidget extends HistoryCollectionWidget 
 
     this.partHistory = partHistory || null;
     this.viewer = viewer || null;
+    this._autoFocusOnExpand = true;
     this._highlightCallback = typeof onHighlightRequest === 'function' ? onHighlightRequest : null;
     this._clearHighlightCallback = typeof onClearHighlight === 'function' ? onClearHighlight : null;
     this._beforeConstraintChangeHandler = callBeforeChange;

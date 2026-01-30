@@ -533,6 +533,7 @@ export class Viewer {
         this._attachRendererEvents(el);
 
         SelectionFilter.viewer = this;
+        try { SelectionFilter._ensureSelectionFilterIndicator?.(this); } catch (_) { }
         // Use capture on pointerup to ensure we end interactions even if pointerup fires off-element
         window.addEventListener('pointerup', this._onPointerUp, { passive: false, capture: true });
         document.addEventListener('dblclick', this._onGlobalDoubleClick, { passive: false, capture: true });
@@ -1476,8 +1477,15 @@ export class Viewer {
     // ----------------------------------------
     // PMI Edit Mode API
     // ----------------------------------------
+    _collapseExpandedDialogsForModeSwitch() {
+        try { this.historyWidget?.collapseExpandedEntries?.({ clearOpenState: true, notify: false }); } catch { }
+        try { this.assemblyConstraintsWidget?.collapseExpandedDialogs?.(); } catch { }
+        try { this._pmiMode?.collapseExpandedDialogs?.(); } catch { }
+    }
+
     startPMIMode(viewEntry, viewIndex, widget = this.pmiViewsWidget) {
         const alreadyActive = !!this._pmiMode;
+        try { this._collapseExpandedDialogsForModeSwitch(); } catch { }
         if (!alreadyActive) {
             try { this.assemblyConstraintsWidget?.onPMIModeEnter?.(); } catch { }
         }
@@ -1506,6 +1514,9 @@ export class Viewer {
 
     endPMIMode() {
         const hadMode = !!this._pmiMode;
+        if (hadMode) {
+            try { this._collapseExpandedDialogsForModeSwitch(); } catch { }
+        }
         try { if (this._pmiMode) this._pmiMode.dispose(); } catch { }
         this._pmiMode = null;
         if (hadMode) {
@@ -2365,23 +2376,33 @@ export class Viewer {
 
         // Prefer the intersected object if it is clickable
         let obj = intersection.object;
+        if (obj && obj.type === 'POINTS' && obj.parent && String(obj.parent.type || '').toUpperCase() === SelectionFilter.VERTEX) {
+            obj = obj.parent;
+        }
 
         // If the object (or its ancestors) doesn't expose onClick, climb to one that does
         let target = obj;
         while (target && typeof target.onClick !== 'function' && target.visible) target = target.parent;
+        if (!target) target = obj;
         if (!target) return null;
 
         // Respect selection filter: ensure target is a permitted type, or ALL
         if (typeof isAllowed === 'function') {
             // Allow selecting already-selected items regardless (toggle off), consistent with SceneListing
             if (!isAllowed(target.type) && !target.selected) {
-                // Try to find a closer ancestor/descendant of allowed type that is clickable
+                // Try to find a closer ancestor of allowed type
                 // Ascend first (e.g., FACE hit while EDGE is active should try parent SOLID only if allowed)
                 let t = target.parent;
-                while (t && typeof t.onClick === 'function' && !isAllowed(t.type)) t = t.parent;
-                if (t && typeof t.onClick === 'function' && isAllowed(t.type)) target = t;
+                while (t && !isAllowed(t.type)) t = t.parent;
+                if (t && isAllowed(t.type)) target = t;
                 else return null;
             }
+        }
+        if (target && typeof target.onClick !== 'function') {
+            try {
+                const deep = target.type === SelectionFilter.SOLID || target.type === SelectionFilter.COMPONENT;
+                SelectionFilter.ensureSelectionHandlers?.(target, { deep });
+            } catch { }
         }
         return target;
     }

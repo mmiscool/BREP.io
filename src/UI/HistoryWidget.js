@@ -12,6 +12,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
 
     // Override configurable hooks from the base widget after super() so they can access `this`.
     this._autoSyncOpenState = true;
+    this._autoFocusOnExpand = true;
     this._determineExpanded = (entry) => this.#shouldExpandEntry(entry);
     this._formOptionsProvider = (context) => this.#buildFormOptions(context);
     this._decorateEntryHeader = (context) => this.#decorateEntryHeader(context);
@@ -380,10 +381,14 @@ export class HistoryWidget extends HistoryCollectionWidget {
     if (!target) return;
     if (this._expandedId && String(this._expandedId) === String(target)) return;
     const entries = this._getEntries();
-    const exists = entries.some((entry, idx) => this._extractEntryId(entry, idx) === String(target));
-    if (!exists) return;
-    this._expandedId = String(target);
-    this.render();
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      if (this._extractEntryId(entry, i) !== String(target)) continue;
+      if (!this.#shouldExpandEntry(entry)) return;
+      this._expandedId = String(target);
+      this.render();
+      return;
+    }
   }
 
   #computeIdsSignature() {

@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { BaseAnnotation } from '../BaseAnnotation.js';
 import { getPMIStyle } from '../pmiStyle.js';
+import { objectRepresentativePoint } from '../annUtils.js';
 
 const inputParamsSchema = {
   id: {
@@ -34,6 +35,14 @@ export class NoteAnnotation extends BaseAnnotation {
   static longName = 'Note';
   static title = 'Note';
   static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems) {
+    const items = BaseAnnotation._normalizeSelectionItems(selectedItems);
+    if (!items.length) return false;
+    const anchor = items[0];
+    const point = objectRepresentativePoint(null, anchor);
+    if (!point) return false;
+    return { params: { position: { x: point.x, y: point.y, z: point.z } } };
+  }
 
   constructor(opts = {}) {
     super(opts);

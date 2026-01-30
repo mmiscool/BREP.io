@@ -71,6 +71,11 @@ export class AngleDimensionAnnotation extends BaseAnnotation {
   static longName = 'Angle Dimension';
   static title = 'Angle';
   static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems) {
+    const refs = BaseAnnotation._collectSelectionRefs(selectedItems, ['FACE', 'EDGE']);
+    if (refs.length < 2) return false;
+    return { params: { targets: refs.slice(0, 2) } };
+  }
 
   constructor(opts = {}) {
     super(opts);

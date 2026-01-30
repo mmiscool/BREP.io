@@ -95,6 +95,8 @@ export class HistoryCollectionWidget {
     this._itemEls = new Map();
     this._forms = new Map();
     this._uiFieldSignatures = new Map();
+    this._autoFocusOnExpand = false;
+    this._pendingFocusEntryId = null;
     this._boundHistoryListener = null;
     this._listenerUnsub = null;
     this._suppressHistoryListener = false;
@@ -157,6 +159,7 @@ export class HistoryCollectionWidget {
 
     if (!entries.length) {
       this._setContextSuppression(false);
+      this._pendingFocusEntryId = null;
       const empty = document.createElement('div');
       empty.className = 'hc-empty';
       empty.textContent = 'No entries yet.';
@@ -198,6 +201,8 @@ export class HistoryCollectionWidget {
       const itemEl = this._renderEntry(entry, id, i, targetId === id, entries.length);
       this._listEl.appendChild(itemEl);
     }
+
+    this._applyPendingFocus();
   }
 
   _destroyForm(id) {
@@ -221,6 +226,36 @@ export class HistoryCollectionWidget {
 
   getFormForEntry(id) {
     return this._forms.get(String(id)) || null;
+  }
+
+  // Close any expanded entry dialog and optionally clear stored open state.
+  collapseExpandedEntries({ clearOpenState = true, notify = true } = {}) {
+    const prevId = this._expandedId != null ? String(this._expandedId) : null;
+    let prevEntry = null;
+    if (prevId) {
+      const info = this._findEntryInfoById(prevId);
+      prevEntry = info?.entry || null;
+    }
+
+    if (clearOpenState && this._autoSyncOpenState) {
+      if (prevEntry) {
+        this._applyOpenState(prevEntry, false);
+      } else {
+        const entries = this._getEntries();
+        for (const entry of entries) {
+          this._applyOpenState(entry, false);
+        }
+      }
+    }
+
+    if (!prevId) {
+      this._setContextSuppression(false);
+      return;
+    }
+
+    this._expandedId = null;
+    this.render();
+    if (notify) this._notifyEntryToggle(prevEntry, false);
   }
 
   _getEntries() {
@@ -414,6 +449,7 @@ export class HistoryCollectionWidget {
         this._applyOpenState(targetEntry, false);
       }
       this._expandedId = null;
+      this._pendingFocusEntryId = null;
       this.render();
       this._notifyEntryToggle(targetEntry, false);
       return;
@@ -425,6 +461,9 @@ export class HistoryCollectionWidget {
       if (targetEntry) this._applyOpenState(targetEntry, true);
     }
     this._expandedId = targetEntry ? targetId : null;
+    if (this._autoFocusOnExpand && targetEntry) {
+      this._pendingFocusEntryId = targetId;
+    }
     this.render();
     if (previousInfo?.entry) this._notifyEntryToggle(previousInfo.entry, false);
     if (targetEntry) this._notifyEntryToggle(targetEntry, true);
@@ -613,6 +652,30 @@ export class HistoryCollectionWidget {
     }
   }
 
+  _applyPendingFocus() {
+    if (!this._autoFocusOnExpand) return;
+    const targetId = this._pendingFocusEntryId;
+    if (!targetId) return;
+    if (!this._expandedId || String(this._expandedId) !== String(targetId)) {
+      this._pendingFocusEntryId = null;
+      return;
+    }
+    const form = this.getFormForEntry(targetId);
+    if (!form) {
+      this._pendingFocusEntryId = null;
+      return;
+    }
+    const focus = () => {
+      try {
+        if (typeof form.focusFirstField === 'function') form.focusFirstField();
+        else if (typeof form.activateFirstReferenceSelection === 'function') form.activateFirstReferenceSelection();
+      } catch (_) { /* ignore */ }
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => focus());
+    else setTimeout(focus, 0);
+    this._pendingFocusEntryId = null;
+  }
+
   async _moveEntry(id, delta) {
     if (!id) return;
     const entries = this._getEntries();
@@ -671,6 +734,7 @@ export class HistoryCollectionWidget {
           }
           if (this._autoSyncOpenState) this._applyOpenState(entry, true);
           this._expandedId = normalizedId;
+          if (this._autoFocusOnExpand) this._pendingFocusEntryId = normalizedId;
           createdEntryId = normalizedId;
         }
       } catch (_) { /* ignore */ }
@@ -693,6 +757,7 @@ export class HistoryCollectionWidget {
       }
       if (this._autoSyncOpenState) this._applyOpenState(entry, true);
       this._expandedId = normalizedId;
+      if (this._autoFocusOnExpand) this._pendingFocusEntryId = normalizedId;
       createdEntryId = normalizedId;
     }
     this.render();

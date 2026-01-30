@@ -9,22 +9,7 @@ const inputParamsSchema = {
     label: 'ID',
     hint: 'unique identifier for the linear dimension',
   },
-  decimals: {
-    type: 'number',
-    default_value: 3,
-    defaultResolver: ({ pmimode }) => {
-      const dec = Number.isFinite(pmimode?._opts?.dimDecimals)
-        ? (pmimode._opts.dimDecimals | 0)
-        : undefined;
-      if (!Number.isFinite(dec)) return undefined;
-      return Math.max(0, Math.min(8, dec));
-    },
-    label: 'Decimals',
-    hint: 'Number of decimal places to display',
-    min: 0,
-    max: 8,
-    step: 1,
-  },
+
   targets: {
     type: 'reference_selection',
     selectionFilter: ['VERTEX', 'EDGE'],
@@ -67,6 +52,22 @@ const inputParamsSchema = {
     label: 'Reference',
     hint: 'Mark as reference dimension (parentheses)',
   },
+  decimals: {
+    type: 'number',
+    default_value: 3,
+    defaultResolver: ({ pmimode }) => {
+      const dec = Number.isFinite(pmimode?._opts?.dimDecimals)
+        ? (pmimode._opts.dimDecimals | 0)
+        : undefined;
+      if (!Number.isFinite(dec)) return undefined;
+      return Math.max(0, Math.min(8, dec));
+    },
+    label: 'Decimals',
+    hint: 'Number of decimal places to display',
+    min: 0,
+    max: 8,
+    step: 1,
+  },
 };
 
 export class LinearDimensionAnnotation extends BaseAnnotation {
@@ -76,6 +77,11 @@ export class LinearDimensionAnnotation extends BaseAnnotation {
   static longName = 'Linear Dimension';
   static title = 'Linear';
   static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems) {
+    const refs = BaseAnnotation._collectSelectionRefs(selectedItems, ['VERTEX', 'EDGE']);
+    if (!refs.length) return false;
+    return { params: { targets: refs.slice(0, 2) } };
+  }
 
   constructor(opts = {}) {
     super(opts);

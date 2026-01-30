@@ -9,22 +9,6 @@ const inputParamsSchema = {
     label: 'ID',
     hint: 'unique identifier for the radial dimension',
   },
-  decimals: {
-    type: 'number',
-    default_value: 3,
-    defaultResolver: ({ pmimode }) => {
-      const dec = Number.isFinite(pmimode?._opts?.dimDecimals)
-        ? (pmimode._opts.dimDecimals | 0)
-        : undefined;
-      if (!Number.isFinite(dec)) return undefined;
-      return Math.max(0, Math.min(8, dec));
-    },
-    label: 'Decimals',
-    hint: 'Number of decimal places to display',
-    min: 0,
-    max: 8,
-    step: 1,
-  },
   cylindricalFaceRef: {
     type: 'reference_selection',
     selectionFilter: ['FACE'],
@@ -68,6 +52,22 @@ const inputParamsSchema = {
     label: 'Reference',
     hint: 'Mark as reference dimension (parentheses)',
   },
+  decimals: {
+    type: 'number',
+    default_value: 3,
+    defaultResolver: ({ pmimode }) => {
+      const dec = Number.isFinite(pmimode?._opts?.dimDecimals)
+        ? (pmimode._opts.dimDecimals | 0)
+        : undefined;
+      if (!Number.isFinite(dec)) return undefined;
+      return Math.max(0, Math.min(8, dec));
+    },
+    label: 'Decimals',
+    hint: 'Number of decimal places to display',
+    min: 0,
+    max: 8,
+    step: 1,
+  },
 };
 
 export class RadialDimensionAnnotation extends BaseAnnotation {
@@ -77,6 +77,17 @@ export class RadialDimensionAnnotation extends BaseAnnotation {
   static longName = 'Radial Dimension';
   static title = 'Radial';
   static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems) {
+    const items = BaseAnnotation._normalizeSelectionItems(selectedItems);
+    const allowed = new Set(['FACE']);
+    for (const item of items) {
+      if (!BaseAnnotation._isSelectionType(item, allowed)) continue;
+      if (!hasCylindricalMetadata(item)) continue;
+      const ref = BaseAnnotation._selectionRefName(item);
+      if (ref) return { params: { cylindricalFaceRef: ref } };
+    }
+    return false;
+  }
 
   constructor(opts = {}) {
     super(opts);
@@ -343,6 +354,60 @@ function computeRadialPoints(pmimode, ann, ctx) {
   } catch {
     return null;
   }
+}
+
+function isCylindricalMetadata(meta) {
+  if (!meta || typeof meta !== 'object') return false;
+  const type = String(meta.type || '').toLowerCase();
+  if (type === 'cylindrical') {
+    const radius = Number(meta.radius);
+    return Number.isFinite(radius) && radius > 0;
+  }
+  if (type === 'conical') {
+    const r0 = Number(meta.radiusBottom);
+    const r1 = Number(meta.radiusTop);
+    if (!Number.isFinite(r0) || !Number.isFinite(r1)) return false;
+    if (Math.abs(r0 - r1) > 1e-6) return false;
+    return Math.max(r0, r1) > 0;
+  }
+  return false;
+}
+
+function readCylindricalMetadata(obj) {
+  if (!obj) return null;
+  const ud = obj.userData || null;
+  if (ud?.metadata && isCylindricalMetadata(ud.metadata)) return ud.metadata;
+  if (typeof obj.getMetadata === 'function') {
+    try {
+      const meta = obj.getMetadata();
+      if (isCylindricalMetadata(meta)) return meta;
+    } catch { /* ignore */ }
+  }
+  const faceName = obj?.name || ud?.faceName || null;
+  let owner = obj?.parentSolid || ud?.parentSolid || obj?.parent || null;
+  while (owner) {
+    if (faceName && typeof owner.getFaceMetadata === 'function') {
+      try {
+        const meta = owner.getFaceMetadata(faceName);
+        if (isCylindricalMetadata(meta)) return meta;
+      } catch { /* ignore */ }
+      break;
+    }
+    owner = owner.parent || null;
+  }
+  return null;
+}
+
+function hasCylindricalMetadata(target) {
+  if (!target) return false;
+  if (readCylindricalMetadata(target)) return true;
+  if (Array.isArray(target.faces)) {
+    for (const face of target.faces) {
+      if (readCylindricalMetadata(face)) return true;
+    }
+  }
+  if (target.parent && readCylindricalMetadata(target.parent)) return true;
+  return false;
 }
 
 function measureRadialValue(pmimode, ann) {

@@ -53,6 +53,7 @@ export class AnnotationCollectionWidget extends HistoryCollectionWidget {
     });
 
     this.pmimode = pmimode || null;
+    this._autoFocusOnExpand = true;
   }
 
   #applyEntryChange({ entry, details }) {

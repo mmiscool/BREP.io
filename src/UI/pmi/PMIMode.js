@@ -168,6 +168,10 @@ export class PMIMode {
     try { if (v.controls) v.controls.enabled = true; } catch { }
   }
 
+  collapseExpandedDialogs() {
+    try { this._annotationWidget?.collapseExpandedEntries?.({ clearOpenState: true }); } catch { /* ignore */ }
+  }
+
   applyViewTransformsSequential() {
     try {
       this.#applyViewTransforms();
