@@ -16,6 +16,7 @@ import { HistoryWidget } from './HistoryWidget.js';
 import { AssemblyConstraintsWidget } from './assembly/AssemblyConstraintsWidget.js';
 import { PartHistory } from '../PartHistory.js';
 import { SelectionFilter } from './SelectionFilter.js';
+import { SelectionState } from './SelectionState.js';
 import './expressionsManager.js'
 import { expressionsManager } from './expressionsManager.js';
 import { MainToolbar } from './MainToolbar.js';
@@ -533,6 +534,7 @@ export class Viewer {
         this._attachRendererEvents(el);
 
         SelectionFilter.viewer = this;
+        try { SelectionFilter.startClickWatcher(this); } catch (_) { }
         try { SelectionFilter._ensureSelectionFilterIndicator?.(this); } catch (_) { }
         // Use capture on pointerup to ensure we end interactions even if pointerup fires off-element
         window.addEventListener('pointerup', this._onPointerUp, { passive: false, capture: true });
@@ -2185,16 +2187,8 @@ export class Viewer {
             const ud = obj.userData;
             const defaultMaterial = ud.__defaultMaterial ?? baseMaterial;
             if (!ud.__defaultMaterial) ud.__defaultMaterial = baseMaterial;
-            const isHovered = !!ud.__hoverMatApplied;
-            const isSelected = obj.selected === true;
-
             const applyBase = (mat) => {
-                ud.__baseMaterial = mat;
-                if (isHovered) {
-                    ud.__hoverOrigMat = mat;
-                } else if (!isSelected && mat) {
-                    obj.material = mat;
-                }
+                SelectionState.setBaseMaterial(obj, mat);
             };
 
             if (!color) {
@@ -2398,12 +2392,6 @@ export class Viewer {
                 else return null;
             }
         }
-        if (target && typeof target.onClick !== 'function') {
-            try {
-                const deep = target.type === SelectionFilter.SOLID || target.type === SelectionFilter.COMPONENT;
-                SelectionFilter.ensureSelectionHandlers?.(target, { deep });
-            } catch { }
-        }
         return target;
     }
 
@@ -2587,11 +2575,23 @@ export class Viewer {
             SelectionFilter.EDGE,
             SelectionFilter.FACE,
             SelectionFilter.PLANE,
+            SelectionFilter.SKETCH,
+            SelectionFilter.DATUM,
+            SelectionFilter.HELIX,
+            SelectionFilter.LOOP,
             SelectionFilter.SOLID,
             SelectionFilter.COMPONENT,
         ].map(t => normType(t));
+        const normSolid = normType(SelectionFilter.SOLID);
+        const normComponent = normType(SelectionFilter.COMPONENT);
+        const nonSolidAllowed = Array.from(allowedSet).some(t => t && t !== normSolid && t !== normComponent);
         const getPriority = (type) => {
-            const idx = priorityOrder.indexOf(normType(type));
+            const nt = normType(type);
+            if (nonSolidAllowed && (nt === normSolid || nt === normComponent)) {
+                // Always push SOLID/COMPONENT to the end when any other type is allowed.
+                return priorityOrder.length + 2;
+            }
+            const idx = priorityOrder.indexOf(nt);
             return idx === -1 ? priorityOrder.length : idx;
         };
         const isAllowedType = (type) => {

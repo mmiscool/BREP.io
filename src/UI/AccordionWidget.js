@@ -2,7 +2,7 @@
 // ES6, framework-free, dark mode, no animations.
 // All public methods are async and resolve AFTER the DOM has painted.
 
-export class AccordionSection {
+class AccordionSection {
   /**
    * Represents a single accordion section.
    * Properties:

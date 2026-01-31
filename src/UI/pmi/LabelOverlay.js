@@ -65,6 +65,38 @@ export class LabelOverlay {
           }
         });
       }
+      if (!el.__wheelPassThrough) {
+        const onWheel = (e) => {
+          if (!el.classList.contains('constraint-label')) return;
+          const canvas = this.viewer?.renderer?.domElement;
+          if (!canvas) return;
+          let canceled = false;
+          try {
+            const forwarded = new WheelEvent(e.type, {
+              bubbles: true,
+              cancelable: true,
+              deltaX: e.deltaX,
+              deltaY: e.deltaY,
+              deltaZ: e.deltaZ,
+              deltaMode: e.deltaMode,
+              clientX: e.clientX,
+              clientY: e.clientY,
+              screenX: e.screenX,
+              screenY: e.screenY,
+              ctrlKey: e.ctrlKey,
+              shiftKey: e.shiftKey,
+              altKey: e.altKey,
+              metaKey: e.metaKey,
+            });
+            canceled = !canvas.dispatchEvent(forwarded);
+          } catch { }
+          if (canceled) {
+            try { e.preventDefault(); } catch { }
+          }
+        };
+        el.addEventListener('wheel', onWheel, { passive: false });
+        el.__wheelPassThrough = onWheel;
+      }
       if (this.onDblClick) el.addEventListener('dblclick', (e) => this.onDblClick(idx, ann, e));
       try { this._root.appendChild(el); this._labelMap.set(idx, el); } catch {}
     } else if (text != null) {

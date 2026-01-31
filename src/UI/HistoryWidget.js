@@ -386,6 +386,9 @@ export class HistoryWidget extends HistoryCollectionWidget {
       if (this._extractEntryId(entry, i) !== String(target)) continue;
       if (!this.#shouldExpandEntry(entry)) return;
       this._expandedId = String(target);
+      if (this._autoFocusOnExpand) {
+        this._pendingFocusEntryId = String(target);
+      }
       this.render();
       return;
     }

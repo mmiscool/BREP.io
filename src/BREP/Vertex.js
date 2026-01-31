@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { CADmaterials } from "../UI/CADmaterials.js";
+import { SelectionState } from "../UI/SelectionState.js";
 
 // Vertex: container at a specific position with a point marker.
 // When selected, swaps to the selected PointsMaterial; no extra sphere.
@@ -22,22 +23,6 @@ export class Vertex extends THREE.Object3D {
         this._point = new THREE.Points(ptGeom, ptMat);
         this.add(this._point);
 
-        // Selection flag accessor toggles point material
-        this._selected = false;
-        Object.defineProperty(this, 'selected', {
-            get: () => this._selected,
-            set: (v) => {
-                const nv = !!v;
-                this._selected = nv;
-                try {
-                    if (this._point && this._point.material && CADmaterials?.VERTEX) {
-                        this._point.material = nv ? (CADmaterials.VERTEX.SELECTED || this._point.material)
-                            : (CADmaterials.VERTEX.BASE || this._point.material);
-                    }
-                } catch { }
-            },
-            configurable: true,
-            enumerable: true,
-        });
+        SelectionState.attach(this);
     }
 }

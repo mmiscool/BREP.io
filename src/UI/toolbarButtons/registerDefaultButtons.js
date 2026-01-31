@@ -11,6 +11,7 @@ import { createFlatPatternButton } from './flatPatternButton.js';
 import { createAboutButton } from './aboutButton.js';
 import { createTestsButton } from './testsButton.js';
 import { createScriptRunnerButton } from './scriptRunnerButton.js';
+import { createSelectionStateButton } from './selectionStateButton.js';
 
 export function registerDefaultToolbarButtons(viewer) {
   if (!viewer || typeof viewer.addToolbarButton !== 'function') return;
@@ -25,6 +26,7 @@ export function registerDefaultToolbarButtons(viewer) {
     createAboutButton,
     createTestsButton,
     createScriptRunnerButton,
+    createSelectionStateButton,
     createUndoButton,
     createRedoButton,
   ];

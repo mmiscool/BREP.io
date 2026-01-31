@@ -38,11 +38,14 @@ export class SceneListing {
         this._expandedByName = new Map(); // name -> boolean
         // Remember expand/collapse state for non-solid nodes when showing all objects
         this._expandedByUuid = new Map(); // uuid -> boolean
+        this._hoveredUuids = new Set();
         this._running = false;
         this._raf = 0;
 
         this.#attachTypeVisibilityButtons();
         this.#attachDisplayModeToggle();
+        this._hoverListener = (ev) => this.#syncHoverFromScene(ev);
+        window.addEventListener('hover-changed', this._hoverListener);
 
         // Wire toolbar
         // this.toolbar.querySelector(".st-expand").addEventListener("click", () => this.#setAllOpen(true));
@@ -99,6 +102,10 @@ export class SceneListing {
     dispose() {
         this.stop();
         this.clear();
+        if (this._hoverListener) {
+            try { window.removeEventListener('hover-changed', this._hoverListener); } catch { }
+            this._hoverListener = null;
+        }
         this.uiElement.remove();
     }
 
@@ -228,6 +235,13 @@ export class SceneListing {
             e.stopPropagation();
         });
 
+        const hoverOn = () => {
+            try { SelectionFilter.setHoverObject(obj, { ignoreFilter: true }); } catch (_) { }
+        };
+        const hoverOff = () => {
+            try { SelectionFilter.clearHover(); } catch (_) { }
+        };
+
         // Selection: name click -> recursive toggle selection (unchanged)
         nameBtn.addEventListener("click", (e) => {
             // If any descendant (including self) is not selected, select all; otherwise deselect all.
@@ -243,13 +257,9 @@ export class SceneListing {
             e.stopPropagation();
         });
 
-        // Hover highlight respecting selection filter
-        nameBtn.addEventListener('mouseenter', () => {
-            try { SelectionFilter.setHoverByName(this.scene, obj.name); } catch (_) { }
-        });
-        nameBtn.addEventListener('mouseleave', () => {
-            try { SelectionFilter.clearHover(); } catch (_) { }
-        });
+        // Hover highlight for the full row (ignore selection filter)
+        row.addEventListener('pointerenter', hoverOn);
+        row.addEventListener('pointerleave', hoverOff);
 
         // Row assembly
         row.appendChild(toggle);
@@ -300,6 +310,8 @@ export class SceneListing {
                 info.lastSelected = sel;
                 info.li.classList.toggle("is-selected", sel);
             }
+            const hovered = this._hoveredUuids.has(obj.uuid);
+            info.li.classList.toggle("is-hovered", hovered);
 
             // Keep label fresh (names may change externally)
             const wantLabel = this.#labelFor(obj);
@@ -308,6 +320,28 @@ export class SceneListing {
                 info.nameEl.title = wantLabel;
             }
         }
+    }
+
+    #syncHoverFromScene(ev) {
+        const detail = ev?.detail || {};
+        let uuids = [];
+        if (Array.isArray(detail.uuids) && detail.uuids.length) {
+            uuids = detail.uuids;
+        } else if (Array.isArray(detail.objects)) {
+            uuids = detail.objects.map((obj) => obj?.uuid).filter(Boolean);
+        }
+        const next = new Set(uuids);
+        for (const uuid of this._hoveredUuids) {
+            if (next.has(uuid)) continue;
+            const info = this.nodes.get(uuid);
+            if (info) info.li.classList.remove('is-hovered');
+        }
+        for (const uuid of next) {
+            if (this._hoveredUuids.has(uuid)) continue;
+            const info = this.nodes.get(uuid);
+            if (info) info.li.classList.add('is-hovered');
+        }
+        this._hoveredUuids = next;
     }
 
     // ---- Actions --------------------------------------------------------------
@@ -567,6 +601,10 @@ export class SceneListing {
 .scene-tree__item.is-selected > .scene-tree__row{
   background: var(--sel);
   box-shadow: inset 0 0 0 1px var(--accent);
+}
+.scene-tree__item.is-hovered > .scene-tree__row{
+  background: #142033;
+  box-shadow: inset 0 0 0 1px rgba(74,163,255,.45);
 }
 .scene-tree__item.is-parent.open > .scene-tree__row{ border-bottom:1px solid #111a26; }
 .st-caret{

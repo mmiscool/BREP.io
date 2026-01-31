@@ -1047,50 +1047,50 @@ export class SchemaForm {
         for (const name of list) {
             if (!name) continue;
             const existing = cache.get(name) || null;
-            const snapshot = store ? store[name] : null;
-            if (snapshot) {
-                const snapType = String(snapshot.type || '').toUpperCase();
-                const snapEdges = Array.isArray(snapshot.edgePositions) ? snapshot.edgePositions : null;
-                const isFaceSnap = (snapType === 'FACE' || snapType === 'PLANE') && snapEdges && snapEdges.length;
-                const isEdgeSnap = snapType === 'EDGE' && Array.isArray(snapshot.positions) && snapshot.positions.length >= 6;
-                const isVertexSnap = snapType === 'VERTEX' && Array.isArray(snapshot.position) && snapshot.position.length >= 3;
-                if (isFaceSnap || isEdgeSnap || isVertexSnap) {
-                    const shouldOverride = !existing || !existing.fromSnapshot || isFaceSnap;
-                    if (shouldOverride) {
-                        const ghost = this._buildReferencePreviewFromSnapshot(name, snapshot);
-                        if (ghost) {
-                            cache.set(name, {
-                                object: ghost,
-                                type: snapshot.type || null,
-                                sourceUuid: snapshot.sourceUuid || null,
-                                sourceFeatureId: snapshot.sourceFeatureId || null,
-                                showWhenOriginalPresent: isFaceSnap || !!ghost?.userData?.previewHasEdges,
-                                fromSnapshot: true,
-                            });
-                            continue;
-                        }
-                    }
-                }
-            }
-            if (cache.has(name)) continue;
             const obj = scene.getObjectByName(name);
             if (obj && !obj?.userData?.refPreview) {
-                this._storeReferencePreviewSnapshot(inputEl, def, obj);
+                const objType = String(obj.type || '').toUpperCase();
+                const isEdgeObj = objType === SelectionFilter.EDGE || objType === 'EDGE';
+                const objTimestamp = (obj.timestamp ?? obj.userData?.timestamp ?? null);
+                const existingTimestamp = existing?.sourceTimestamp ?? null;
+                const shouldRefresh = !existing
+                    || existing.fromSnapshot
+                    || (!!existing?.sourceUuid && !!obj.uuid && existing.sourceUuid !== obj.uuid)
+                    || (!existing?.sourceUuid && !!obj.uuid)
+                    || (objTimestamp != null && existingTimestamp !== objTimestamp)
+                    || (isEdgeObj && !existing?.showWhenOriginalPresent);
+                if (shouldRefresh) {
+                    this._storeReferencePreviewSnapshot(inputEl, def, obj);
+                }
                 continue;
             }
-            if (store && store[name]) {
-                const snapshot = store[name];
-                const ghost = this._buildReferencePreviewFromSnapshot(name, snapshot);
-                if (ghost) {
-                    cache.set(name, {
-                        object: ghost,
-                        type: snapshot.type || null,
-                        sourceUuid: snapshot.sourceUuid || null,
-                        sourceFeatureId: snapshot.sourceFeatureId || null,
-                        showWhenOriginalPresent: String(snapshot.type || '').toUpperCase() === 'FACE' || String(snapshot.type || '').toUpperCase() === 'PLANE' || !!ghost?.userData?.previewHasEdges,
-                        fromSnapshot: true,
-                    });
-                }
+            const snapshot = store ? store[name] : null;
+            if (!snapshot) continue;
+            const snapType = String(snapshot.type || '').toUpperCase();
+            const snapEdges = Array.isArray(snapshot.edgePositions) ? snapshot.edgePositions : null;
+            const isFaceSnap = (snapType === 'FACE' || snapType === 'PLANE') && snapEdges && snapEdges.length;
+            const isEdgeSnap = snapType === 'EDGE' && Array.isArray(snapshot.positions) && snapshot.positions.length >= 6;
+            const isVertexSnap = snapType === 'VERTEX' && Array.isArray(snapshot.position) && snapshot.position.length >= 3;
+            if (!(isFaceSnap || isEdgeSnap || isVertexSnap)) continue;
+            const snapTimestamp = snapshot.sourceTimestamp ?? null;
+            const shouldOverride = !existing
+                || !existing.fromSnapshot
+                || isFaceSnap
+                || (!!snapshot.sourceUuid && !!existing?.sourceUuid && snapshot.sourceUuid !== existing.sourceUuid)
+                || (snapTimestamp != null && (existing?.sourceTimestamp ?? null) !== snapTimestamp)
+                || (isEdgeSnap && !existing?.showWhenOriginalPresent);
+            if (!shouldOverride) continue;
+            const ghost = this._buildReferencePreviewFromSnapshot(name, snapshot);
+            if (ghost) {
+                cache.set(name, {
+                    object: ghost,
+                    type: snapshot.type || null,
+                    sourceUuid: snapshot.sourceUuid || null,
+                    sourceFeatureId: snapshot.sourceFeatureId || null,
+                    sourceTimestamp: snapTimestamp,
+                    showWhenOriginalPresent: isFaceSnap || isEdgeSnap || !!ghost?.userData?.previewHasEdges,
+                    fromSnapshot: true,
+                });
             }
         }
     }
@@ -1106,21 +1106,24 @@ export class SchemaForm {
             if (!ghost) return;
             const sourceUuid = obj.uuid || null;
             const sourceFeatureId = this._getOwningFeatureIdForObject(obj);
+            const sourceTimestamp = (obj.timestamp ?? obj.userData?.timestamp ?? null);
+            const objType = String(obj.type || '').toUpperCase();
+            const isEdge = objType === SelectionFilter.EDGE || objType === 'EDGE';
             cache.set(refName, {
                 object: ghost,
                 type: obj.type || null,
                 sourceUuid,
                 sourceFeatureId,
-                showWhenOriginalPresent: !!ghost?.userData?.previewHasEdges,
+                sourceTimestamp,
+                showWhenOriginalPresent: isEdge || !!ghost?.userData?.previewHasEdges,
             });
             try {
                 const store = this._getReferencePreviewPersistentBucket(inputEl);
                 if (store) {
-                    const objType = String(obj.type || '').toUpperCase();
                     if (objType === SelectionFilter.EDGE || objType === 'EDGE') {
                         const positions = this._extractEdgeWorldPositions(obj);
                         if (positions && positions.length >= 6) {
-                            store[refName] = { type: 'EDGE', positions, sourceUuid, sourceFeatureId };
+                            store[refName] = { type: 'EDGE', positions, sourceUuid, sourceFeatureId, sourceTimestamp };
                         }
                     } else if (objType === SelectionFilter.VERTEX || objType === 'VERTEX') {
                         const pos = new THREE.Vector3();
@@ -1128,7 +1131,7 @@ export class SchemaForm {
                             if (typeof obj.getWorldPosition === 'function') obj.getWorldPosition(pos);
                             else pos.set(obj.position?.x || 0, obj.position?.y || 0, obj.position?.z || 0);
                         } catch (_) { }
-                        store[refName] = { type: 'VERTEX', position: [pos.x, pos.y, pos.z], sourceUuid, sourceFeatureId };
+                        store[refName] = { type: 'VERTEX', position: [pos.x, pos.y, pos.z], sourceUuid, sourceFeatureId, sourceTimestamp };
                     }
                 }
             } catch (_) { }
@@ -1275,60 +1278,87 @@ export class SchemaForm {
     _hoverReferenceSelectionItem(inputEl, def, name) {
         try {
             if (!inputEl) return;
-            const activeInput = SchemaForm.__activeRefInput || null;
-            if (activeInput !== inputEl) {
-                const wrap = inputEl.closest?.('.ref-active') || null;
-                if (!wrap) return;
-            }
+            const isActive = (SchemaForm.__activeRefInput || null) === inputEl;
             const normalized = normalizeReferenceName(name);
             if (!normalized) return;
             const scene = this._getReferenceSelectionScene();
             if (!scene) return;
             try { console.log('[ReferenceSelection] Hover', { name: normalized }); } catch (_) { }
-            try { this._ensureReferencePreviewSnapshots(inputEl, def); } catch (_) { }
+            if (isActive) {
+                try { this._ensureReferencePreviewSnapshots(inputEl, def); } catch (_) { }
+            }
             try { this._seedReferencePreviewCacheFromScene(inputEl, def, [normalized], scene); } catch (_) { }
-            try { this._syncActiveReferenceSelectionPreview(inputEl, def); } catch (_) { }
+            if (isActive) {
+                try { this._syncActiveReferenceSelectionPreview(inputEl, def); } catch (_) { }
+            }
 
-            let target = null;
-            try { target = scene.getObjectByName(normalized); } catch (_) { target = null; }
-            if (!target) {
-                const cache = this._getReferencePreviewCache(inputEl);
-                const entry = cache ? cache.get(normalized) : null;
-                target = entry?.object || entry || null;
-            }
-            if (!target) {
-                try { target = scene.getObjectByName(`__refPreview__${normalized}`); } catch (_) { target = null; }
-            }
-            if (!target) return;
-            if (!target.material && target.traverse) {
+            const resolveHoverCandidate = (obj) => {
+                if (!obj) return null;
+                if (obj.material) return obj;
+                if (!obj.traverse) return obj;
                 let candidate = null;
                 try {
-                    target.traverse((child) => {
+                    obj.traverse((child) => {
                         if (!child || candidate) return;
                         if (child.type === 'REF_PREVIEW_EDGE') { candidate = child; return; }
                         if (child.material) candidate = child;
                     });
                 } catch (_) { }
-                if (candidate) target = candidate;
+                return candidate || obj;
+            };
+
+            const targets = [];
+            const pushTarget = (obj) => {
+                if (!obj || !obj.isObject3D) return;
+                const candidate = resolveHoverCandidate(obj);
+                if (!candidate) return;
+                if (!targets.includes(candidate)) targets.push(candidate);
+            };
+
+            let sceneObj = null;
+            try { sceneObj = scene.getObjectByName(normalized); } catch (_) { sceneObj = null; }
+            if (sceneObj && !sceneObj?.userData?.refPreview) pushTarget(sceneObj);
+
+            const cache = this._getReferencePreviewCache(inputEl);
+            const entry = cache ? cache.get(normalized) : null;
+            const ghost = entry?.object || entry || null;
+            if (ghost && ghost !== sceneObj) pushTarget(ghost);
+
+            let namedPreview = null;
+            try { namedPreview = scene.getObjectByName(`__refPreview__${normalized}`); } catch (_) { namedPreview = null; }
+            if (namedPreview && namedPreview !== sceneObj && namedPreview !== ghost) pushTarget(namedPreview);
+
+            if (!targets.length) return;
+            if (!isActive && ghost && ghost.isObject3D && !ghost.parent) {
+                try {
+                    const group = this._ensureReferencePreviewGroup(inputEl);
+                    if (group && ghost.parent !== group) {
+                        group.add(ghost);
+                        inputEl.__refPreviewHoverGroup = true;
+                    }
+                } catch (_) { }
             }
             try {
                 console.log('[ReferenceSelection] Hover target', {
                     name: normalized,
-                    target: target || null,
-                    inScene: !!(target && target.parent),
+                    targetCount: targets.length,
                 });
             } catch (_) { }
             inputEl.__refChipHoverActive = true;
-            try { SelectionFilter.setHoverObject(target, { ignoreFilter: true }); } catch (_) { }
+            try { SelectionFilter.setHoverObjects(targets, { ignoreFilter: true }); } catch (_) { }
         } catch (_) { }
     }
 
     _clearReferenceSelectionHover(inputEl) {
         try {
-            if (!inputEl || SchemaForm.__activeRefInput !== inputEl) return;
+            if (!inputEl) return;
             if (!inputEl.__refChipHoverActive) return;
             inputEl.__refChipHoverActive = false;
             SelectionFilter.clearHover();
+            if (SchemaForm.__activeRefInput !== inputEl && inputEl.__refPreviewHoverGroup) {
+                inputEl.__refPreviewHoverGroup = false;
+                try { this._removeReferencePreviewGroup(inputEl); } catch (_) { }
+            }
         } catch (_) { }
     }
 

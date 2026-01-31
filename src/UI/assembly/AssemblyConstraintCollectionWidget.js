@@ -164,6 +164,7 @@ export class AssemblyConstraintCollectionWidget extends HistoryCollectionWidget 
 
     this.partHistory = partHistory || null;
     this.viewer = viewer || null;
+    this._pendingFocusField = null;
     this._autoFocusOnExpand = true;
     this._highlightCallback = typeof onHighlightRequest === 'function' ? onHighlightRequest : null;
     this._clearHighlightCallback = typeof onClearHighlight === 'function' ? onClearHighlight : null;
@@ -175,11 +176,15 @@ export class AssemblyConstraintCollectionWidget extends HistoryCollectionWidget 
     this.partHistory = partHistory || null;
   }
 
-  focusEntryById(targetId, { behavior = 'smooth' } = {}) {
+  focusEntryById(targetId, { behavior = 'smooth', focusField = null } = {}) {
     if (targetId == null) return;
     const id = String(targetId);
     if (!id) return;
     this._expandedId = id;
+    if (this._autoFocusOnExpand) {
+      this._pendingFocusEntryId = id;
+    }
+    this._pendingFocusField = focusField != null ? String(focusField) : null;
     this.render();
     const root = this._shadow || null;
     if (!root) return;
@@ -188,6 +193,40 @@ export class AssemblyConstraintCollectionWidget extends HistoryCollectionWidget 
     if (el && typeof el.scrollIntoView === 'function') {
       el.scrollIntoView({ behavior, block: 'center' });
     }
+  }
+
+  _applyPendingFocus() {
+    if (!this._autoFocusOnExpand) return;
+    const targetId = this._pendingFocusEntryId;
+    if (!targetId) return;
+    if (!this._expandedId || String(this._expandedId) !== String(targetId)) {
+      this._pendingFocusEntryId = null;
+      this._pendingFocusField = null;
+      return;
+    }
+    const form = this.getFormForEntry(targetId);
+    if (!form) {
+      this._pendingFocusEntryId = null;
+      this._pendingFocusField = null;
+      return;
+    }
+    const focusField = this._pendingFocusField;
+    const focus = () => {
+      let handled = false;
+      if (focusField && typeof form.activateField === 'function') {
+        try { handled = form.activateField(focusField) === true; } catch { /* ignore */ }
+      }
+      if (!handled) {
+        try {
+          if (typeof form.focusFirstField === 'function') form.focusFirstField();
+          else if (typeof form.activateFirstReferenceSelection === 'function') form.activateFirstReferenceSelection();
+        } catch { /* ignore */ }
+      }
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => focus());
+    else setTimeout(focus, 0);
+    this._pendingFocusEntryId = null;
+    this._pendingFocusField = null;
   }
 
   #decorateEntry(context = {}) {

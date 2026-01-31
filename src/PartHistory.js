@@ -572,11 +572,12 @@ export class PartHistory {
         const objType = String(obj.type || '').toUpperCase();
         const sourceUuid = obj.uuid || null;
         const sourceFeatureId = obj.owningFeatureID ?? null;
+        const sourceTimestamp = (obj.timestamp ?? obj.userData?.timestamp ?? null);
         if (objType === SelectionFilter.EDGE || objType === 'EDGE') {
           const positions = extractEdgeWorldPositions(obj);
           if (positions && positions.length >= 6) {
             for (const bucket of buckets) {
-              bucket[refName] = { type: 'EDGE', positions, sourceUuid, sourceFeatureId };
+              bucket[refName] = { type: 'EDGE', positions, sourceUuid, sourceFeatureId, sourceTimestamp };
             }
           }
         } else if (objType === SelectionFilter.FACE || objType === 'FACE' || objType === SelectionFilter.PLANE || objType === 'PLANE') {
@@ -584,7 +585,7 @@ export class PartHistory {
           if (edgePositions && edgePositions.length) {
             const snapType = (objType === SelectionFilter.PLANE || objType === 'PLANE') ? 'PLANE' : 'FACE';
             for (const bucket of buckets) {
-              bucket[refName] = { type: snapType, edgePositions, sourceUuid, sourceFeatureId };
+              bucket[refName] = { type: snapType, edgePositions, sourceUuid, sourceFeatureId, sourceTimestamp };
             }
           }
         } else if (objType === SelectionFilter.VERTEX || objType === 'VERTEX') {
@@ -594,7 +595,7 @@ export class PartHistory {
             else pos.set(obj.position?.x || 0, obj.position?.y || 0, obj.position?.z || 0);
           } catch { }
           for (const bucket of buckets) {
-            bucket[refName] = { type: 'VERTEX', position: [pos.x, pos.y, pos.z], sourceUuid, sourceFeatureId };
+            bucket[refName] = { type: 'VERTEX', position: [pos.x, pos.y, pos.z], sourceUuid, sourceFeatureId, sourceTimestamp };
           }
         }
       }
@@ -662,7 +663,6 @@ export class PartHistory {
           applyTimeStampToChildrenRecursively(a, feature.timestamp);
         } catch { }
 
-        this._attachSelectionHandlers(a);
       }
     }
 
@@ -676,27 +676,6 @@ export class PartHistory {
   // Removed unused signature/canonicalization helpers
 
 
-
-  _attachSelectionHandlers(obj) {
-    if (!obj || typeof obj !== 'object') return;
-    obj.onClick = () => {
-      try {
-        if (obj.type === SelectionFilter.SOLID && obj.parent && obj.parent.type === SelectionFilter.COMPONENT) {
-          const handledByParent = SelectionFilter.toggleSelection(obj.parent);
-          if (!handledByParent) SelectionFilter.toggleSelection(obj);
-          return;
-        }
-        SelectionFilter.toggleSelection(obj);
-      } catch (error) {
-        try { console.warn('[PartHistory] toggleSelection failed:', error); }
-        catch (_) { /* no-op */ }
-      }
-    };
-    const children = Array.isArray(obj.children) ? obj.children : [];
-    for (const child of children) {
-      this._attachSelectionHandlers(child);
-    }
-  }
 
   _safeRemove(obj) {
     if (!obj) return;

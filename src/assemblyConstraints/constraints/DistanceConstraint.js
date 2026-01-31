@@ -37,6 +37,7 @@ export class DistanceConstraint extends BaseAssemblyConstraint {
   static shortName = '⟺';
   static longName = '⟺ Distance Constraint';
   static constraintType = 'distance';
+  static focusField = 'distance';
   static aliases = ['distance', 'offset', 'gap', 'DIST'];
   static inputParamsSchema = inputParamsSchema;
 

@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { CADmaterials } from "../UI/CADmaterials.js";
+import { SelectionState } from "../UI/SelectionState.js";
 import { Line2 } from "three/examples/jsm/Addons.js";
 
 export class Edge extends Line2 {
@@ -10,6 +11,7 @@ export class Edge extends Line2 {
         this.type = 'EDGE';
         this.renderOrder = 2;
         this.closedLoop = false;
+        SelectionState.attach(this);
     }
 
     // Total polyline length in world space

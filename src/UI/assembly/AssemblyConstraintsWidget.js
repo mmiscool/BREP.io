@@ -1251,6 +1251,17 @@ export class AssemblyConstraintsWidget {
     return null;
   }
 
+  #resolveFocusFieldForConstraint(entry) {
+    const constraintClass = this._resolveConstraintClass(entry);
+    const field = constraintClass?.focusField;
+    if (field) return field;
+    const type = constraintClass?.constraintType || entry?.type || entry?.inputParams?.type;
+    const normalized = typeof type === 'string' ? type.toLowerCase() : '';
+    if (normalized === 'distance') return 'distance';
+    if (normalized === 'angle') return 'angle';
+    return null;
+  }
+
   #handleLabelClick(idx, _ann, ev) {
     if (idx == null) return;
     const id = String(idx);
@@ -1259,12 +1270,14 @@ export class AssemblyConstraintsWidget {
       try { ev.preventDefault(); } catch { }
       try { ev.stopPropagation(); } catch { }
     }
+    const entries = this.history?.list?.() || [];
+    const targetEntry = entries.find((entry) => resolveConstraintId(entry) === id) || null;
+
     let changed = false;
     if (typeof this.history?.setExclusiveOpen === 'function') {
       changed = this.history.setExclusiveOpen(id);
     }
     if (!changed) {
-      const entries = this.history?.list?.() || [];
       for (const entry of entries) {
         const entryId = resolveConstraintId(entry);
         const shouldOpen = entryId === id;
@@ -1276,7 +1289,8 @@ export class AssemblyConstraintsWidget {
       this.history?.setOpenState?.(id, true);
     }
 
-    this._constraintList?.focusEntryById?.(id);
+    const focusField = this.#resolveFocusFieldForConstraint(targetEntry);
+    this._constraintList?.focusEntryById?.(id, { focusField });
   }
 
   _createNormalArrow(object, color, label) {

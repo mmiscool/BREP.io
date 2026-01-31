@@ -12,6 +12,7 @@ import { getPMIStyle, setPMIStyle, sanitizePMIStyle } from './pmiStyle.js';
 import { AnnotationHistory } from './AnnotationHistory.js';
 import { LabelOverlay } from './LabelOverlay.js';
 import { AnnotationCollectionWidget } from './AnnotationCollectionWidget.js';
+import { SelectionFilter } from '../SelectionFilter.js';
 import { localStorage as LS } from '../../idbStorage.js';
 
 const cssEscape = (value) => {
@@ -88,6 +89,9 @@ export class PMIMode {
   open() {
     const v = this.viewer;
     if (!v || !v.container) return;
+
+    // Clear any lingering reference-selection state before PMI interactions.
+    this.#clearActiveReferenceSelection();
 
     // Save and hide existing accordion sections instead of hiding the whole sidebar
     this.#hideOriginalSidebarSections();
@@ -170,6 +174,22 @@ export class PMIMode {
 
   collapseExpandedDialogs() {
     try { this._annotationWidget?.collapseExpandedEntries?.({ clearOpenState: true }); } catch { /* ignore */ }
+  }
+
+  #clearActiveReferenceSelection() {
+    try {
+      const active = document.querySelectorAll('[active-reference-selection="true"],[active-reference-selection=true]');
+      active.forEach((el) => {
+        try { el.style.filter = 'none'; } catch { }
+        try { el.removeAttribute('active-reference-selection'); } catch { }
+        try {
+          const wrap = el.closest('.ref-single-wrap, .ref-multi-wrap');
+          if (wrap) wrap.classList.remove('ref-active');
+        } catch { }
+      });
+    } catch { }
+    try { if (window.__BREP_activeRefInput) window.__BREP_activeRefInput = null; } catch { }
+    try { SelectionFilter.restoreAllowedSelectionTypes(); } catch { }
   }
 
   applyViewTransformsSequential() {
@@ -599,6 +619,9 @@ export class PMIMode {
               this.#markAnnotationsDirty();
             },
           });
+          // Avoid auto-activating reference selection on expand; PMI scene clicks should
+          // stay as normal selections unless the user explicitly activates a ref field.
+          this._annotationWidget._autoFocusOnExpand = false;
           widgetWrap.appendChild(this._annotationWidget.uiElement);
 
           this._pmiAnnotationsSection = sec;

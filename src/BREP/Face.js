@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { CADmaterials } from "../UI/CADmaterials.js";
+import { SelectionState } from "../UI/SelectionState.js";
 import { computeTriangleArea } from "./triangleUtils.js";
 
 export class Face extends THREE.Mesh {
@@ -10,6 +11,7 @@ export class Face extends THREE.Mesh {
         this.type = 'FACE';
         this.renderOrder = 1;
         this.parentSolid = null;
+        SelectionState.attach(this);
     }
 
     // Compute the average geometric normal of this face's triangles in world space.

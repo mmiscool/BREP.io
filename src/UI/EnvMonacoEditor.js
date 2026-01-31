@@ -517,6 +517,3 @@ EnvMonacoEditor._runtimeCompletionRegistered = false;
 if (!customElements.get('env-monaco-editor')) {
   customElements.define('env-monaco-editor', EnvMonacoEditor);
 }
-
-export { EnvMonacoEditor };
-export default EnvMonacoEditor;

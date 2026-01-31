@@ -331,13 +331,19 @@ function hasHoleMetadata(target) {
   if (!target) return false;
   const queue = [target];
   const visited = new Set();
+  const hasOwnFaces = (obj) => Object.prototype.hasOwnProperty.call(obj, 'faces');
   while (queue.length) {
     const obj = queue.shift();
     if (!obj || visited.has(obj)) continue;
     visited.add(obj);
     if (readHoleMetadata(obj)) return true;
-    if (Array.isArray(obj.faces)) {
+    if (hasOwnFaces(obj) && Array.isArray(obj.faces)) {
       for (const face of obj.faces) queue.push(face);
+    } else if (obj.type === 'SOLID' || obj.type === 'COMPONENT') {
+      const kids = Array.isArray(obj.children) ? obj.children : [];
+      for (const child of kids) {
+        if (child && child.type === 'FACE') queue.push(child);
+      }
     }
     if (obj.parent) queue.push(obj.parent);
   }

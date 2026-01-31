@@ -4,6 +4,7 @@ import { BREP } from "../../BREP/BREP.js";
 const THREE = BREP.THREE;
 import { LineGeometry } from 'three/examples/jsm/Addons.js';
 import { deepClone } from '../../utils/deepClone.js';
+import { SelectionState } from '../../UI/SelectionState.js';
 
 const inputParamsSchema = {
     id: {
@@ -892,8 +893,7 @@ export class SketchFeature {
                     if (sketchMat) {
                         sketchMat.side = THREE.DoubleSide;
                         sketchMat.needsUpdate = true;
-                        face.material = sketchMat;
-                        face.userData.__baseMaterial = sketchMat;
+                        SelectionState.setBaseMaterial(face, sketchMat);
                     }
                 } catch { }
                 sceneGroup.add(face);

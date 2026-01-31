@@ -33,6 +33,7 @@ export class AngleConstraint extends BaseAssemblyConstraint {
   static shortName = '∠';
   static longName = '∠ Angle Constraint';
   static constraintType = 'angle';
+  static focusField = 'angle';
   static aliases = ['angle', 'angle_between', 'angular', 'ANGL'];
   static inputParamsSchema = inputParamsSchema;
 
