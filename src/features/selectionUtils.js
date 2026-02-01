@@ -1,16 +1,32 @@
+import { resolveSelectionObject as resolveSelectionObjectBase } from '../utils/selectionResolver.js';
+
 export function resolveSelectionObject(selection, partHistory) {
   if (!selection) return null;
-  if (typeof selection === 'string') {
+  if (typeof selection !== 'string') return selection;
+
+  const nameResolver = (name) => {
     if (partHistory && typeof partHistory.getObjectByName === 'function') {
-      return partHistory.getObjectByName(selection);
+      return partHistory.getObjectByName(name);
     }
     const scene = partHistory?.scene;
     if (scene && typeof scene.getObjectByName === 'function') {
-      return scene.getObjectByName(selection);
+      return scene.getObjectByName(name);
     }
     return null;
-  }
-  return selection;
+  };
+
+  return resolveSelectionObjectBase(partHistory?.scene || null, selection, {
+    nameResolver,
+    allowJson: false,
+    allowUuid: false,
+    allowFuzzyName: false,
+    allowNameContains: false,
+    allowPath: false,
+    allowReference: false,
+    allowTarget: false,
+    allowSelectionName: false,
+    arrayMode: 'first',
+  });
 }
 
 function getFeatureEntryId(entry) {

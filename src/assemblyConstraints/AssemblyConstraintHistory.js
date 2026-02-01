@@ -3,6 +3,7 @@ import { AssemblyConstraintRegistry } from './AssemblyConstraintRegistry.js';
 import { evaluateConstraintNumericValue } from './constraintExpressionUtils.js';
 import { deepClone } from '../utils/deepClone.js';
 import { normalizeTypeString } from '../utils/normalizeTypeString.js';
+import { resolveSelectionObject } from '../utils/selectionResolver.js';
 
 const RESERVED_KEYS = new Set(['type', 'persistentData', '__open']);
 
@@ -102,47 +103,6 @@ function removeExistingDebugArrows(scene) {
   }
 }
 
-function resolveSelectionObject(scene, selection) {
-  if (!scene || selection == null) return null;
-  let target = selection;
-  if (Array.isArray(selection)) {
-    target = selection.find((item) => item != null) ?? null;
-  }
-  if (!target) return null;
-  if (target.isObject3D) return target;
-  try {
-    if (typeof target === 'string') {
-      if (typeof scene.traverse === 'function') {
-        let best = null;
-        scene.traverse((obj) => {
-          if (!obj || obj.name !== target) return;
-          if (!best) best = obj;
-          const component = resolveComponentFromObject(obj);
-          const bestComponent = best ? resolveComponentFromObject(best) : null;
-          if (component && !bestComponent) {
-            best = obj;
-          }
-        });
-        if (best) return best;
-      }
-      return typeof scene.getObjectByName === 'function'
-        ? scene.getObjectByName(target)
-        : null;
-    }
-    if (typeof target?.uuid === 'string' && typeof scene.getObjectByProperty === 'function') {
-      const found = scene.getObjectByProperty('uuid', target.uuid);
-      if (found) return found;
-    }
-    if (typeof target?.name === 'string' && typeof scene.getObjectByName === 'function') {
-      const found = scene.getObjectByName(target.name);
-      if (found) return found;
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
 function resolveComponentFromObject(obj) {
   let current = obj;
   while (current) {
@@ -150,6 +110,10 @@ function resolveComponentFromObject(obj) {
     current = current.parent || null;
   }
   return null;
+}
+
+function scoreObjectForComponent(object) {
+  return resolveComponentFromObject(object) ? 1 : 0;
 }
 
 function vectorFrom(value) {
@@ -894,7 +858,19 @@ export class AssemblyConstraintHistory {
 
     const updatedComponents = new Set();
 
-    const resolveObject = (selection) => resolveSelectionObject(scene, selection);
+    const resolveObject = (selection) => resolveSelectionObject(scene, selection, {
+      scoreFn: scoreObjectForComponent,
+      allowJson: false,
+      allowUuidString: false,
+      allowUuidObject: true,
+      allowFuzzyName: false,
+      allowNameContains: false,
+      allowPath: false,
+      allowReference: false,
+      allowTarget: false,
+      allowSelectionName: false,
+      arrayMode: 'first',
+    });
     const resolveComponent = (selection) => {
       const obj = resolveObject(selection);
       return resolveComponentFromObject(obj);

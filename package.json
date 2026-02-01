@@ -21,7 +21,8 @@
     "./BREP": "./dist-kernel/brep-kernel.js",
     "./PartHistory": "./dist-kernel/brep-kernel.js",
     "./AssemblyConstraintHistory": "./dist-kernel/brep-kernel.js",
-    "./AssemblyConstraintRegistry": "./dist-kernel/brep-kernel.js"
+    "./AssemblyConstraintRegistry": "./dist-kernel/brep-kernel.js",
+    "./SketchSolver2D": "./src/SketchSolver2D.js"
   },
   "files": [
     "src/**",

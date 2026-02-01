@@ -7,7 +7,7 @@ import {
   computeFaceOrigin,
   computeFaceNormal,
   estimateArrowLength,
-} from './constraintFaceUtils.js';
+} from '../faceUtils.js';
 import { applyHighlightMaterial, restoreHighlightRecords } from './constraintHighlightUtils.js';
 import { extractWorldPoint } from './constraintPointUtils.js';
 import { constraintStatusInfo } from './constraintStatusUtils.js';

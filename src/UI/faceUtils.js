@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { objectRepresentativePoint } from '../pmi/annUtils.js';
+import { objectRepresentativePoint } from './pmi/annUtils.js';
 
 export function isFaceObject(object) {
   if (!object) return false;
@@ -35,6 +35,21 @@ export function computeFaceOrigin(object) {
   return null;
 }
 
+export function computeFaceCenter(object) {
+  if (!object) return null;
+  try { object.updateMatrixWorld?.(true); } catch { /* ignore */ }
+  try {
+    const box = new THREE.Box3().setFromObject(object);
+    if (!box.isEmpty()) return box.getCenter(new THREE.Vector3());
+  } catch { /* ignore */ }
+  try {
+    const geom = object.geometry;
+    const bs = geom?.boundingSphere || (geom?.computeBoundingSphere && (geom.computeBoundingSphere(), geom.boundingSphere));
+    if (bs) return object.localToWorld(bs.center.clone());
+  } catch { /* ignore */ }
+  return computeFaceOrigin(object);
+}
+
 export function computeFaceNormal(object) {
   if (!object) return null;
   try {
@@ -45,9 +60,11 @@ export function computeFaceNormal(object) {
   } catch { /* ignore */ }
 
   const geom = object.geometry;
-  if (!geom?.isBufferGeometry) return null;
+  if (!geom?.isBufferGeometry) {
+    return fallbackQuaternionNormal(object);
+  }
   const pos = geom.getAttribute?.('position');
-  if (!pos || pos.itemSize !== 3 || pos.count < 3) return null;
+  if (!pos || pos.itemSize !== 3 || pos.count < 3) return fallbackQuaternionNormal(object);
   const index = geom.getIndex?.();
 
   const v0 = new THREE.Vector3();
@@ -94,10 +111,10 @@ export function computeFaceNormal(object) {
     }
   }
 
-  if (count === 0) return null;
+  if (count === 0) return fallbackQuaternionNormal(object);
 
   accum.divideScalar(count);
-  if (accum.lengthSq() <= 1e-10) return null;
+  if (accum.lengthSq() <= 1e-10) return fallbackQuaternionNormal(object);
 
   return accum.normalize();
 }
@@ -112,4 +129,12 @@ export function estimateArrowLength(object) {
     } catch { /* ignore */ }
   }
   return 10;
+}
+
+function fallbackQuaternionNormal(object) {
+  try {
+    const q = object?.getWorldQuaternion?.(new THREE.Quaternion());
+    if (q) return new THREE.Vector3(0, 0, 1).applyQuaternion(q).normalize();
+  } catch { /* ignore */ }
+  return null;
 }

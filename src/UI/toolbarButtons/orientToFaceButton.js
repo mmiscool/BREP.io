@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { computeFaceCenter, computeFaceNormal } from '../faceUtils.js';
 
 const FACE_TYPES = new Set(['FACE', 'PLANE']);
 
@@ -26,46 +27,12 @@ function _findSelectedFace(viewer) {
   return found;
 }
 
-function _computeFaceCenter(obj) {
-  if (!obj) return null;
-  try { obj.updateMatrixWorld?.(true); } catch {}
-  try {
-    const box = new THREE.Box3().setFromObject(obj);
-    if (!box.isEmpty()) return box.getCenter(new THREE.Vector3());
-  } catch {}
-  try {
-    const geom = obj.geometry;
-    const bs = geom?.boundingSphere || (geom?.computeBoundingSphere && (geom.computeBoundingSphere(), geom.boundingSphere));
-    if (bs) return obj.localToWorld(bs.center.clone());
-  } catch {}
-  try {
-    return obj.getWorldPosition?.(new THREE.Vector3()) || null;
-  } catch {}
-  return null;
-}
-
-function _computeFaceNormal(obj) {
-  if (!obj) return null;
-  let n = null;
-  if (typeof obj.getAverageNormal === 'function') {
-    try { n = obj.getAverageNormal().clone(); } catch {}
-  }
-  if (!n || n.lengthSq() < 1e-10) {
-    try {
-      const q = obj.getWorldQuaternion?.(new THREE.Quaternion());
-      if (q) n = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
-    } catch {}
-  }
-  if (!n || n.lengthSq() < 1e-10) return null;
-  return n.normalize();
-}
-
 function _orientCameraToFace(viewer, face) {
   const cam = viewer?.camera;
   if (!viewer || !cam || !face) return false;
 
-  const target = _computeFaceCenter(face);
-  const normal = _computeFaceNormal(face);
+  const target = computeFaceCenter(face);
+  const normal = computeFaceNormal(face);
   if (!target || !normal) return false;
 
   const toCam = cam.position.clone().sub(target);

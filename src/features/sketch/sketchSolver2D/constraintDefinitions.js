@@ -689,9 +689,10 @@ const shortestAngleDelta = (target, current) => {
 
 
 export const constraints = {
-    tolerance,
+    get tolerance() { return tolerance; },
+    set tolerance(value) { tolerance = value; },
     constraintFunctions,
-}
+};
 
 
 

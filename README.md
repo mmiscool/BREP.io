@@ -23,6 +23,7 @@ This project is actively evolving; expect rough edges while APIs settle.
 - [BREP Model and Classes](docs/brep-model.md)
 - [BREP API (BREP.js exports)](docs/brep-api.md)
 - [BREP Kernel (core classes & helpers)](docs/brep-kernel.md)
+- [2D Sketch Solver (standalone)](docs/sketch-solver-2d.md)
 - [File Formats: Import and Export](docs/file-formats.md)
 - [Plugins and Examples](docs/plugins.md)
 - [Recent Inspector Improvements](docs/inspector-improvements.md)
@@ -136,9 +137,11 @@ configuration.
 - Import (ESM):
   - `import { BREP, PartHistory } from 'brep-io-kernel';`
   - `import { AssemblyConstraintHistory, AssemblyConstraintRegistry } from 'brep-io-kernel';`
-- Subpath imports (all resolve to the same bundle):
+- Subpath imports (BREP kernel bundle):
   - `import { BREP } from 'brep-io-kernel/BREP';`
   - `import { PartHistory } from 'brep-io-kernel/PartHistory';`
+- Standalone 2D sketch solver:
+  - `import { ConstraintSolver, ConstraintEngine, constraints } from 'brep-io-kernel/SketchSolver2D';`
 
 Notes:
 - This package is ESM-only. If you are in CommonJS, use dynamic import:
