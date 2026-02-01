@@ -493,6 +493,7 @@ function mergeInsetEndCapsByNormal(resultSolid, featureID, direction, dotThresho
  * @param {boolean} [opts.debug=false] Enable debug visuals in fillet builder
  * @param {boolean} [opts.showTangentOverlays=false] Show pre-inflate tangent overlays on the fillet tube
  * @param {string} [opts.featureID='FILLET'] For naming of intermediates and result
+ * @param {number} [opts.cleanupTinyFaceIslandsArea=0.001] area threshold for face-island relabeling (<= 0 disables)
  * @returns {import('../BetterSolid.js').Solid}
  */
 export async function fillet(opts = {}) {
@@ -511,6 +512,10 @@ export async function fillet(opts = {}) {
   const combineEdges = (dir !== 'INSET') && !!opts.combineEdges;
   const showTangentOverlays = !!opts.showTangentOverlays;
   const featureID = opts.featureID || 'FILLET';
+  const cleanupTinyFaceIslandsAreaRaw = Number(opts.cleanupTinyFaceIslandsArea);
+  const cleanupTinyFaceIslandsArea = Number.isFinite(cleanupTinyFaceIslandsAreaRaw)
+    ? cleanupTinyFaceIslandsAreaRaw
+    : 0.001;
   const SolidCtor = this?.constructor;
   consoleLogReplacement('[Solid.fillet] Begin', {
     featureID,
@@ -522,6 +527,7 @@ export async function fillet(opts = {}) {
     debug,
     showTangentOverlays,
     combineEdges,
+    cleanupTinyFaceIslandsArea,
     requestedEdgeNames: Array.isArray(opts.edgeNames) ? opts.edgeNames : [],
     providedEdgeCount: Array.isArray(opts.edges) ? opts.edges.length : 0,
   });
@@ -738,8 +744,16 @@ export async function fillet(opts = {}) {
   }
 
   try {
-    if (dir === 'INSET' && typeof result.mergeTinyFaces === 'function') {
-      await result.mergeTinyFaces(0.001);
+    if (cleanupTinyFaceIslandsArea > 0 && typeof result.cleanupTinyFaceIslands === 'function') {
+      await result.cleanupTinyFaceIslands(cleanupTinyFaceIslandsArea);
+    }
+  } catch (err) {
+    console.warn('[Solid.fillet] cleanupTinyFaceIslands failed', { featureID, error: err?.message || err });
+  }
+
+  try {
+    if (typeof result.mergeTinyFaces === 'function') {
+      await result.mergeTinyFaces(0.1);
     }
   } catch (err) {
     console.warn('[Solid.fillet] mergeTinyFaces failed', { featureID, error: err?.message || err });

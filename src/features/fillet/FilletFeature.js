@@ -52,6 +52,12 @@ const inputParamsSchema = {
         default_value: false,
         hint: "Show pre-inflate tangent overlays on the fillet tube",
     },
+    cleanupTinyFaceIslandsArea: {
+        type: "number",
+        step: 0.001,
+        default_value: 0.01,
+        hint: "Relabel tiny disconnected face islands below this area threshold (<= 0 disables).",
+    },
     debug: {
         type: "boolean",
         default_value: false,
@@ -96,6 +102,7 @@ export class FilletFeature {
             resolution: this.inputParams?.resolution,
             inflate: this.inputParams?.inflate,
             showTangentOverlays: this.inputParams?.showTangentOverlays,
+            cleanupTinyFaceIslandsArea: this.inputParams?.cleanupTinyFaceIslandsArea,
             debug: this.inputParams?.debug,
         });
         try { clearFilletCaches(); } catch { }

@@ -22,6 +22,83 @@ import { computeFaceAreaFromTriangles } from "./filletGeometry.js";
 export { clearFilletCaches, trimFilletCaches } from './inset.js';
 export { fixTJunctionsAndPatchHoles } from './outset.js';
 
+function buildPointInsideTester(solid) {
+    if (!solid) return null;
+    const tv = solid._triVerts;
+    const vp = solid._vertProperties;
+    if (!tv || !vp || typeof tv.length !== 'number' || typeof vp.length !== 'number') return null;
+    const triCount = (tv.length / 3) | 0;
+    if (triCount === 0 || vp.length < 9) return null;
+
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (let i = 0; i < vp.length; i += 3) {
+        const x = vp[i], y = vp[i + 1], z = vp[i + 2];
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+    const diag = Math.hypot(maxX - minX, maxY - minY, maxZ - minZ) || 1;
+    const jitter = 1e-6 * diag;
+
+    const rayTri = (ox, oy, oz, dx, dy, dz, ax, ay, az, bx, by, bz, cx, cy, cz) => {
+        const EPS = 1e-12;
+        const e1x = bx - ax, e1y = by - ay, e1z = bz - az;
+        const e2x = cx - ax, e2y = cy - ay, e2z = cz - az;
+        const px = dy * e2z - dz * e2y;
+        const py = dz * e2x - dx * e2z;
+        const pz = dx * e2y - dy * e2x;
+        const det = e1x * px + e1y * py + e1z * pz;
+        if (Math.abs(det) < EPS) return null;
+        const invDet = 1.0 / det;
+        const tvecx = ox - ax, tvecy = oy - ay, tvecz = oz - az;
+        const u = (tvecx * px + tvecy * py + tvecz * pz) * invDet;
+        if (u < -1e-12 || u > 1 + 1e-12) return null;
+        const qx = tvecy * e1z - tvecz * e1y;
+        const qy = tvecz * e1x - tvecx * e1z;
+        const qz = tvecx * e1y - tvecy * e1x;
+        const v = (dx * qx + dy * qy + dz * qz) * invDet;
+        if (v < -1e-12 || u + v > 1 + 1e-12) return null;
+        const tHit = (e2x * qx + e2y * qy + e2z * qz) * invDet;
+        return tHit > 1e-10 ? tHit : null;
+    };
+
+    const dirs = [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+    ];
+
+    return (pt) => {
+        if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y) || !Number.isFinite(pt.z)) return false;
+        const px = pt.x, py = pt.y, pz = pt.z;
+        let votes = 0;
+        for (let k = 0; k < dirs.length; k++) {
+            const dir = dirs[k];
+            const ox = px + (k + 1) * jitter;
+            const oy = py + (k + 2) * jitter;
+            const oz = pz + (k + 3) * jitter;
+            let hits = 0;
+            for (let t = 0; t < triCount; t++) {
+                const b = t * 3;
+                const ia = (tv[b + 0] >>> 0) * 3;
+                const ib = (tv[b + 1] >>> 0) * 3;
+                const ic = (tv[b + 2] >>> 0) * 3;
+                const hit = rayTri(
+                    ox, oy, oz,
+                    dir[0], dir[1], dir[2],
+                    vp[ia + 0], vp[ia + 1], vp[ia + 2],
+                    vp[ib + 0], vp[ib + 1], vp[ib + 2],
+                    vp[ic + 0], vp[ic + 1], vp[ic + 2]
+                );
+                if (hit !== null) hits++;
+            }
+            if ((hits % 2) === 1) votes++;
+        }
+        return votes >= 2;
+    };
+}
+
 /**
  * Compute the fillet centerline polyline for an input edge without building the fillet solid.
  *
@@ -823,52 +900,129 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
         // large displacements on big models.
         const outsetInsetMagnitude = Math.max(1e-4, Math.min(0.05, Math.abs(radius) * 0.05));
         const wedgeInsetMagnitude = closedLoop ? 0 : ((side === 'INSET') ? Math.abs(inflate) : outsetInsetMagnitude);
-        for (let i = 0; i < edgeWedgeCopy.length; i++) {
-            const edgeWedgePt = edgeWedgeCopy[i];
-            const centerPt = centerlineCopy[i] || centerlineCopy[centerlineCopy.length - 1]; // Fallback to last point
+        const useInsideCheck = wedgeInsetMagnitude && side === 'OUTSET';
+        const pointInsideTarget = useInsideCheck
+            ? buildPointInsideTester(edgeToFillet?.parentSolid || edgeToFillet?.parent || null)
+            : null;
+        let preferredDirSign = null;
+        let insideResults = null;
+        if (pointInsideTarget) {
+            insideResults = new Array(edgeWedgeCopy.length);
+            let countIn = 0;
+            let countOut = 0;
+            for (let i = 0; i < edgeWedgeCopy.length; i++) {
+                const edgeWedgePt = edgeWedgeCopy[i];
+                const centerPt = centerlineCopy[i] || centerlineCopy[centerlineCopy.length - 1];
+                if (!edgeWedgePt || !centerPt) continue;
+                const inwardDir = {
+                    x: centerPt.x - edgeWedgePt.x,
+                    y: centerPt.y - edgeWedgePt.y,
+                    z: centerPt.z - edgeWedgePt.z
+                };
+                const inwardLength = Math.sqrt(inwardDir.x * inwardDir.x + inwardDir.y * inwardDir.y + inwardDir.z * inwardDir.z);
+                if (inwardLength <= 1e-12) continue;
+                const nx = inwardDir.x / inwardLength;
+                const ny = inwardDir.y / inwardLength;
+                const nz = inwardDir.z / inwardLength;
+                const candidateIn = {
+                    x: edgeWedgePt.x + nx * wedgeInsetMagnitude,
+                    y: edgeWedgePt.y + ny * wedgeInsetMagnitude,
+                    z: edgeWedgePt.z + nz * wedgeInsetMagnitude
+                };
+                const candidateOut = {
+                    x: edgeWedgePt.x - nx * wedgeInsetMagnitude,
+                    y: edgeWedgePt.y - ny * wedgeInsetMagnitude,
+                    z: edgeWedgePt.z - nz * wedgeInsetMagnitude
+                };
+                const inInside = pointInsideTarget(candidateIn);
+                const outInside = pointInsideTarget(candidateOut);
+                insideResults[i] = { inInside, outInside };
+                if (inInside !== outInside) {
+                    if (inInside) countIn++; else countOut++;
+                }
+            }
+            if (countIn || countOut) {
+                preferredDirSign = countIn >= countOut ? 1 : -1;
+            }
+        }
+        if (wedgeInsetMagnitude) {
+            for (let i = 0; i < edgeWedgeCopy.length; i++) {
+                const edgeWedgePt = edgeWedgeCopy[i];
+                const centerPt = centerlineCopy[i] || centerlineCopy[centerlineCopy.length - 1]; // Fallback to last point
 
-            if (edgeWedgePt && centerPt) {
-                try {
-                    const origWedgeEdge = { ...edgeWedgePt };
+                if (edgeWedgePt && centerPt) {
+                    try {
+                        const origWedgeEdge = { ...edgeWedgePt };
 
-                    // Calculate direction from edge point toward the centerline (inward direction)
-                    const inwardDir = {
-                        x: centerPt.x - edgeWedgePt.x,
-                        y: centerPt.y - edgeWedgePt.y,
-                        z: centerPt.z - edgeWedgePt.z
-                    };
-                    const inwardLength = Math.sqrt(inwardDir.x * inwardDir.x + inwardDir.y * inwardDir.y + inwardDir.z * inwardDir.z);
-
-                    if (inwardLength > 1e-12) {
-                        // Normalize and apply inset
-                        const normalizedInward = {
-                            x: inwardDir.x / inwardLength,
-                            y: inwardDir.y / inwardLength,
-                            z: inwardDir.z / inwardLength
+                        // Calculate direction from edge point toward the centerline (inward direction)
+                        const inwardDir = {
+                            x: centerPt.x - edgeWedgePt.x,
+                            y: centerPt.y - edgeWedgePt.y,
+                            z: centerPt.z - edgeWedgePt.z
                         };
-                        // Determine direction: OUTSET -> inward, INSET -> outward (opposite)
-                        const dirSign = (side === 'INSET') ? -1 : 1;
-                        const step = dirSign * wedgeInsetMagnitude;
-                        // Apply
-                        edgeWedgePt.x += normalizedInward.x * step;
-                        edgeWedgePt.y += normalizedInward.y * step;
-                        edgeWedgePt.z += normalizedInward.z * step;
+                        const inwardLength = Math.sqrt(inwardDir.x * inwardDir.x + inwardDir.y * inwardDir.y + inwardDir.z * inwardDir.z);
 
-                        // Validate the result
-                        if (!isFiniteVec3(edgeWedgePt)) {
-                            console.warn(`Invalid wedge edge point after inset at index ${i}, reverting to original`);
-                            Object.assign(edgeWedgePt, origWedgeEdge);
+                        if (inwardLength > 1e-12) {
+                            // Normalize and apply inset
+                            const normalizedInward = {
+                                x: inwardDir.x / inwardLength,
+                                y: inwardDir.y / inwardLength,
+                                z: inwardDir.z / inwardLength
+                            };
+                            const candidateIn = {
+                                x: origWedgeEdge.x + normalizedInward.x * wedgeInsetMagnitude,
+                                y: origWedgeEdge.y + normalizedInward.y * wedgeInsetMagnitude,
+                                z: origWedgeEdge.z + normalizedInward.z * wedgeInsetMagnitude
+                            };
+                            const candidateOut = {
+                                x: origWedgeEdge.x - normalizedInward.x * wedgeInsetMagnitude,
+                                y: origWedgeEdge.y - normalizedInward.y * wedgeInsetMagnitude,
+                                z: origWedgeEdge.z - normalizedInward.z * wedgeInsetMagnitude
+                            };
+                            let chosen = null;
+
+                            if (pointInsideTarget) {
+                                const insideRes = insideResults ? insideResults[i] : null;
+                                const inInside = insideRes ? insideRes.inInside : pointInsideTarget(candidateIn);
+                                const outInside = insideRes ? insideRes.outInside : pointInsideTarget(candidateOut);
+                                if (inInside !== outInside) {
+                                    chosen = inInside ? candidateIn : candidateOut;
+                                }
+                            }
+
+                            if (!chosen) {
+                                // Fallback to previous sign-based behavior.
+                                const dirSign = (preferredDirSign !== null)
+                                    ? preferredDirSign
+                                    : ((side === 'INSET') ? -1 : 1);
+                                const step = dirSign * wedgeInsetMagnitude;
+                                chosen = {
+                                    x: origWedgeEdge.x + normalizedInward.x * step,
+                                    y: origWedgeEdge.y + normalizedInward.y * step,
+                                    z: origWedgeEdge.z + normalizedInward.z * step
+                                };
+                            }
+
+                            edgeWedgePt.x = chosen.x;
+                            edgeWedgePt.y = chosen.y;
+                            edgeWedgePt.z = chosen.z;
+
+                            // Validate the result
+                            if (!isFiniteVec3(edgeWedgePt)) {
+                                console.warn(`Invalid wedge edge point after inset at index ${i}, reverting to original`);
+                                Object.assign(edgeWedgePt, origWedgeEdge);
+                            }
+                        } else {
+                            console.warn(`Edge point ${i} is too close to centerline, skipping wedge inset`);
                         }
-                    } else {
-                        console.warn(`Edge point ${i} is too close to centerline, skipping wedge inset`);
+                    } catch (insetError) {
+                        console.warn(`Wedge edge inset failed at index ${i}: ${insetError?.message || insetError}`);
                     }
-                } catch (insetError) {
-                    console.warn(`Wedge edge inset failed at index ${i}: ${insetError?.message || insetError}`);
                 }
             }
         }
 
-        if (wedgeInsetMagnitude) logDebug(`Applied wedge inset of ${wedgeInsetMagnitude} units (${side === 'INSET' ? 'outward' : 'inward'}) to ${edgeWedgeCopy.length} edge points`);
+        if (wedgeInsetMagnitude) logDebug(`Applied wedge inset of ${wedgeInsetMagnitude} units (inside-aware) to ${edgeWedgeCopy.length} edge points`);
 
 
         // Do not reorder edge points. Centerline/tangent/edge points are produced in
