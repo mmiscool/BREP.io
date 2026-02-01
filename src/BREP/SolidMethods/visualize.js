@@ -354,12 +354,34 @@ export function visualize(options = {}) {
                     const key = (aux?.materialKey || 'OVERLAY').toUpperCase();
                     const edgeMats = CADmaterials?.EDGE || {};
                     const mat = edgeMats[key] || (key === 'OVERLAY' ? edgeMats.OVERLAY : null) || edgeMats.BASE;
-                    if (mat) edgeObj.material = mat;
-                    if (mat) SelectionState.setBaseMaterial(edgeObj, mat, { force: false });
-                    if (edgeObj.material && (key !== 'BASE')) {
-                        edgeObj.material.depthTest = false;
-                        edgeObj.material.depthWrite = false;
+                    let appliedMat = mat;
+                    const wantsOverlay = key !== 'BASE';
+                    if (mat && wantsOverlay) {
+                        const alreadyOverlay = mat.depthTest === false && mat.depthWrite === false;
+                        if (!alreadyOverlay) {
+                            const shared = Object.values(edgeMats).includes(mat);
+                            let cloned = false;
+                            if (shared && typeof mat.clone === 'function') {
+                                try {
+                                    appliedMat = mat.clone();
+                                    cloned = !!appliedMat && appliedMat !== mat;
+                                } catch { appliedMat = mat; cloned = false; }
+                                if (cloned) {
+                                    try {
+                                        if (mat.resolution && appliedMat.resolution && typeof appliedMat.resolution.copy === 'function') {
+                                            appliedMat.resolution.copy(mat.resolution);
+                                        }
+                                    } catch { }
+                                }
+                            }
+                            if ((cloned || !shared) && appliedMat) {
+                                try { appliedMat.depthTest = false; } catch { }
+                                try { appliedMat.depthWrite = false; } catch { }
+                            }
+                        }
                     }
+                    if (appliedMat) edgeObj.material = appliedMat;
+                    if (appliedMat) SelectionState.setBaseMaterial(edgeObj, appliedMat, { force: false });
                     try { edgeObj.computeLineDistances(); } catch { }
                     edgeObj.renderOrder = 10020;
                 } catch { }
