@@ -99,6 +99,31 @@ function buildPointInsideTester(solid) {
     };
 }
 
+function collectFaceVertices(tris) {
+    const verts = [];
+    if (!Array.isArray(tris)) return verts;
+    for (const t of tris) {
+        if (t?.p1) verts.push(t.p1);
+        if (t?.p2) verts.push(t.p2);
+        if (t?.p3) verts.push(t.p3);
+    }
+    return verts;
+}
+
+function computeProjectionRange(verts, dir) {
+    if (!Array.isArray(verts) || verts.length === 0 || !dir) return null;
+    let min = Infinity;
+    let max = -Infinity;
+    for (const v of verts) {
+        const x = v[0], y = v[1], z = v[2];
+        const dot = x * dir.x + y * dir.y + z * dir.z;
+        if (dot < min) min = dot;
+        if (dot > max) max = dot;
+    }
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+    return { min, max };
+}
+
 /**
  * Compute the fillet centerline polyline for an input edge without building the fillet solid.
  *
@@ -147,6 +172,8 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
         let faceKeyB = null;
         let faceDataA = null;
         let faceDataB = null;
+        let faceVertsA = null;
+        let faceVertsB = null;
 
         // Create unique cache keys that include solid identity and geometry hash to prevent cross-contamination
         const solidId = solid.uuid || solid.name || solid.constructor.name;
@@ -166,6 +193,8 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
             faceKeyB = `${solidId}:${faceNameB}:${geometryHashB}`;
             faceDataA = getCachedFaceDataForTris(trisA, faceKeyA);
             faceDataB = getCachedFaceDataForTris(trisB, faceKeyB);
+            faceVertsA = collectFaceVertices(trisA);
+            faceVertsB = collectFaceVertices(trisB);
         }
 
         // Robust closed-loop detection (prefer flags, else compare endpoints)
@@ -248,7 +277,8 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
                 const data = getCachedFaceDataForTris(tris, faceKey);
                 const avg = averageFaceNormalObjectSpace(solid, faceName);
                 if (!isFiniteVec3(avg)) return null;
-                const entry = { tris, data, key: faceKey, avg };
+                const verts = collectFaceVertices(tris);
+                const entry = { tris, data, key: faceKey, avg, verts };
                 faceCache.set(faceName, entry);
                 return entry;
             };
@@ -263,6 +293,9 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
         const avgNormalScratch = new THREE.Vector3();
 
         const rEff = Math.max(eps, radius);
+        const preferOutset = String(sideMode).toUpperCase() === 'OUTSET';
+        let maxAllowedRadius = Infinity;
+        let maxAllowedSamples = 0;
         let centers = [];
         let tanA = [];
         let tanB = [];
@@ -291,6 +324,8 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
             let faceKeyBUse = faceKeyB;
             let nAavgUse = nAavg;
             let nBavgUse = nBavg;
+            let faceVertsAUse = faceVertsA;
+            let faceVertsBUse = faceVertsB;
             let allowRefine = true;
             if (useSegmentPairs && typeof getFaceEntry === 'function') {
                 const segIdx = Array.isArray(sampleSegmentIdx) ? sampleSegmentIdx[i] : 0;
@@ -309,6 +344,7 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
                     trisAUse = entryBase.tris;
                     faceKeyAUse = entryBase.key;
                     nAavgUse = entryBase.avg;
+                    faceVertsAUse = entryBase.verts;
 
                     const qBase = projectPointOntoFaceTriangles(trisAUse, p, faceDataAUse, faceKeyAUse);
                     nA = localFaceNormalAtPoint(solid, baseName, qBase, faceDataAUse, faceKeyAUse) || nAavgUse;
@@ -326,6 +362,7 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
                     trisBUse = entrySideA.tris;
                     faceKeyBUse = entrySideA.key;
                     nBavgUse = entrySideA.avg;
+                    faceVertsBUse = entrySideA.verts;
                     allowRefine = false;
                 } else {
                     const segA = Array.isArray(pair) ? pair[0] : (pair?.faceA || pair?.a || null);
@@ -344,6 +381,8 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
                     faceKeyBUse = entryB.key;
                     nAavgUse = entryA.avg;
                     nBavgUse = entryB.avg;
+                    faceVertsAUse = entryA.verts;
+                    faceVertsBUse = entryB.verts;
                     qA = projectPointOntoFaceTriangles(trisAUse, p, faceDataAUse, faceKeyAUse);
                     qB = projectPointOntoFaceTriangles(trisBUse, p, faceDataBUse, faceKeyBUse);
                     nA = localFaceNormalAtPoint(solid, faceNameAUse, qA, faceDataAUse, faceKeyAUse) || nAavgUse;
@@ -363,29 +402,92 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
 
             const u = vA3.clone();
             const v = new THREE.Vector3().crossVectors(tangent, u).normalize();
-            const d0_2 = new THREE.Vector2(1, 0);
-            const d1_2 = new THREE.Vector2(vB3.dot(u), vB3.dot(v));
-            d1_2.normalize();
-            const dot2 = clamp(d0_2.x * d1_2.x + d0_2.y * d1_2.y, -1, 1);
-            const angAbs = Math.acos(dot2);
-            const sinHalf = Math.sin(0.5 * angAbs);
-            if (Math.abs(sinHalf) < angleTol) continue;
-            const expectDist = rEff / Math.abs(sinHalf);
 
-            // 2D inward normals in section plane for fallback
+            // 2D inward normals in section plane for fallback and angle magnitude.
+            // Use inward normals to get the interior angle consistently.
             const inA3 = tangent.clone().cross(vA3).negate();
             const inB3 = tangent.clone().cross(vB3).negate();
-            const n0_2 = new THREE.Vector2(inA3.dot(u), inA3.dot(v)).normalize();
-            const n1_2 = new THREE.Vector2(inB3.dot(u), inB3.dot(v)).normalize();
+            const n0_2 = new THREE.Vector2(inA3.dot(u), inA3.dot(v));
+            const n1_2 = new THREE.Vector2(inB3.dot(u), inB3.dot(v));
+            if (n0_2.lengthSq() < 1e-16 || n1_2.lengthSq() < 1e-16) continue;
+            n0_2.normalize();
+            n1_2.normalize();
+
+            const dotN = clamp(n0_2.x * n1_2.x + n0_2.y * n1_2.y, -1, 1);
+            const angAbs = Math.acos(dotN);
+            const sinHalf = Math.sin(0.5 * angAbs);
+            if (Math.abs(sinHalf) < angleTol) continue;
             let bis2 = new THREE.Vector2(n0_2.x + n1_2.x, n0_2.y + n1_2.y);
             const lenBis2 = bis2.length();
             if (lenBis2 > 1e-9) bis2.multiplyScalar(1 / lenBis2); else bis2.set(0, 0);
 
+            if (faceVertsAUse && faceVertsBUse) {
+                const tanHalf = Math.tan(0.5 * angAbs);
+                if (Number.isFinite(tanHalf) && tanHalf > angleTol && bis2.lengthSq() > 1e-16) {
+                    const dir3 = fallbackDir.set(0, 0, 0).addScaledVector(u, bis2.x).addScaledVector(v, bis2.y);
+                    if (preferOutset) dir3.negate();
+                    const dirLen = dir3.length();
+                    if (dirLen > 1e-12) {
+                        dir3.multiplyScalar(1 / dirLen);
+                        const rangeA = computeProjectionRange(faceVertsAUse, vA3);
+                        const rangeB = computeProjectionRange(faceVertsBUse, vB3);
+                        if (rangeA && rangeB) {
+                            const pDotA = p.x * vA3.x + p.y * vA3.y + p.z * vA3.z;
+                            const pDotB = p.x * vB3.x + p.y * vB3.y + p.z * vB3.z;
+                            const signA = Math.sign(vA3.dot(dir3)) || 1;
+                            const signB = Math.sign(vB3.dot(dir3)) || 1;
+                            const availA = signA >= 0 ? (rangeA.max - pDotA) : (pDotA - rangeA.min);
+                            const availB = signB >= 0 ? (rangeB.max - pDotB) : (pDotB - rangeB.min);
+                            const availMin = Math.min(availA, availB);
+                            if (Number.isFinite(availMin) && availMin > eps) {
+                                const maxR = availMin * tanHalf;
+                                if (Number.isFinite(maxR) && maxR > eps) {
+                                    if (maxR < maxAllowedRadius) maxAllowedRadius = maxR;
+                                    maxAllowedSamples++;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            const expectDist = rEff / Math.abs(sinHalf);
+
             // Solve with anchored offset planes in 3D
             const C_in = solveCenterFromOffsetPlanesAnchored(p, tangent, nA, qA, -1, nB, qB, -1, rEff);
             const C_out = solveCenterFromOffsetPlanesAnchored(p, tangent, nA, qA, +1, nB, qB, +1, rEff);
-            let pick = (String(sideMode).toUpperCase() === 'OUTSET') ? 'out' : 'in';
-            let center = (pick === 'in') ? (C_in || C_out) : (C_out || C_in);
+            const outwardAvg = avgNormalScratch.copy(nA).add(nB);
+            const outwardLen = outwardAvg.length();
+            if (outwardLen > eps) outwardAvg.multiplyScalar(1 / outwardLen);
+
+            // Pick the center (in/out) that best keeps tangency points on the faces.
+            let pick = preferOutset ? 'out' : 'in';
+            let center = null;
+            if (C_in || C_out) {
+                const desiredSign = preferOutset ? 1 : -1;
+                const scoreCandidate = (cand, tag) => {
+                    if (!cand) return { score: Infinity, pick: tag, center: cand };
+                    const sLocal = (tag === 'in') ? -1 : 1;
+                    const tA0 = cand.clone().addScaledVector(nA, -sLocal * rEff);
+                    const tB0 = cand.clone().addScaledVector(nB, -sLocal * rEff);
+                    const qA0 = projectPointOntoFaceTriangles(trisAUse, tA0, faceDataAUse, faceKeyAUse);
+                    const qB0 = projectPointOntoFaceTriangles(trisBUse, tB0, faceDataBUse, faceKeyBUse);
+                    const dA = qA0 ? tA0.distanceTo(qA0) : Infinity;
+                    const dB = qB0 ? tB0.distanceTo(qB0) : Infinity;
+                    let sidePenalty = 0;
+                    if (outwardLen > eps) {
+                        const dir = cand.clone().sub(p);
+                        const sign = Math.sign(dir.dot(outwardAvg)) || 0;
+                        if (sign && sign !== desiredSign) sidePenalty = rEff;
+                    }
+                    const distPenalty = Math.abs(cand.distanceTo(p) - expectDist);
+                    return { score: dA + dB + 0.2 * distPenalty + sidePenalty, pick: tag, center: cand };
+                };
+                const sIn = scoreCandidate(C_in, 'in');
+                const sOut = scoreCandidate(C_out, 'out');
+                const best = (sIn.score <= sOut.score) ? sIn : sOut;
+                pick = best.pick;
+                center = best.center;
+            }
 
 
 
@@ -414,24 +516,34 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
                     }
                 }
             }
+            if (center) {
+                tA = center.clone().addScaledVector(nA, -sA * rEff);
+                tB = center.clone().addScaledVector(nB, -sB * rEff);
+            }
 
-            // Optional refinement: if initial p->center distance far from expected, recompute
+            // Optional refinement: if initial p->center distance far from expected, or angle is acute,
+            // recompute using normals at the projected tangency points (helps curved faces).
             const initialDist = center.distanceTo(p);
             const needsRefinement = Math.abs(initialDist - expectDist) > 0.1 * rEff;
-            if (needsRefinement && allowRefine) {
+            const acuteAngle = Math.abs(sinHalf) < 0.5; // < ~60°
+            const refineIters = (allowRefine && (needsRefinement || acuteAngle)) ? (acuteAngle ? 2 : 1) : 0;
+            if (refineIters > 0) {
                 try {
-                    const qA1 = projectPointOntoFaceTriangles(trisAUse, tA, faceDataAUse);
-                    const qB1 = projectPointOntoFaceTriangles(trisBUse, tB, faceDataBUse);
-                    const nA1 = localFaceNormalAtPoint(solid, faceNameAUse, qA1, faceDataAUse, faceKeyAUse) || nAavgUse;
-                    const nB1 = localFaceNormalAtPoint(solid, faceNameBUse, qB1, faceDataBUse, faceKeyBUse) || nBavgUse;
-                    const C_ref = solveCenterFromOffsetPlanesAnchored(p, tangent, nA1, qA1, sA, nB1, qB1, sB, rEff);
-                    if (C_ref) {
+                    for (let iter = 0; iter < refineIters; iter++) {
+                        const qA1 = projectPointOntoFaceTriangles(trisAUse, tA, faceDataAUse, faceKeyAUse);
+                        const qB1 = projectPointOntoFaceTriangles(trisBUse, tB, faceDataBUse, faceKeyBUse);
+                        const nA1 = localFaceNormalAtPoint(solid, faceNameAUse, qA1, faceDataAUse, faceKeyAUse) || nAavgUse;
+                        const nB1 = localFaceNormalAtPoint(solid, faceNameBUse, qB1, faceDataBUse, faceKeyBUse) || nBavgUse;
+                        const C_ref = solveCenterFromOffsetPlanesAnchored(p, tangent, nA1, qA1, sA, nB1, qB1, sB, rEff);
+                        if (!C_ref) break;
+                        const prev = center;
                         center = C_ref;
                         // Update normals used at tangency too
                         nA = nA1;
                         nB = nB1;
                         tA = center.clone().addScaledVector(nA, -sA * rEff);
                         tB = center.clone().addScaledVector(nB, -sB * rEff);
+                        if (prev.distanceTo(center) < 1e-6 * Math.max(1, rEff)) break;
                     }
                 } catch { /* ignore */ }
             }
@@ -441,7 +553,24 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
                 const pToC = center.distanceTo(p);
                 const hardCap = 6 * rEff;
                 const factor = 3.0;
-                if (!Number.isFinite(pToC) || pToC > hardCap || pToC > factor * expectDist) {
+                const expectDistSafe = (() => {
+                    try {
+                        const vPA = tA.clone().sub(p);
+                        const vPB = tB.clone().sub(p);
+                        const lenA = vPA.length();
+                        const lenB = vPB.length();
+                        if (lenA > eps && lenB > eps) {
+                            const dotAB = clamp(vPA.dot(vPB) / (lenA * lenB), -1, 1);
+                            const ang = Math.acos(dotAB);
+                            const sinH = Math.sin(0.5 * ang);
+                            if (Math.abs(sinH) > angleTol) {
+                                return rEff / Math.abs(sinH);
+                            }
+                        }
+                    } catch { /* ignore */ }
+                    return expectDist;
+                })();
+                if (!Number.isFinite(pToC) || pToC > hardCap || pToC > factor * expectDistSafe) {
                     let dir2 = new THREE.Vector2(bis2.x, bis2.y);
                     if (String(sideMode).toUpperCase() === 'OUTSET') dir2.multiplyScalar(-1);
                     if (dir2.lengthSq() > 1e-16) {
@@ -449,7 +578,7 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
                         const dir3 = bisector3.set(0, 0, 0).addScaledVector(u, dir2.x).addScaledVector(v, dir2.y).normalize();
                         // Clamp the bisector distance so acute/near-parallel face
                         // configurations do not explode the centerline far from the edge.
-                        const safeDist = Math.min(expectDist, hardCap);
+                        const safeDist = Math.min(expectDistSafe, hardCap);
                         center = p.clone().addScaledVector(dir3, safeDist);
                         // Recompute tangency points using latest normals
                         tA = center.clone().addScaledVector(nA, -sA * rEff);
@@ -491,11 +620,21 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
                 }
             }
         }
+        const winding = fixPolylineWinding(centers, tanA, tanB, radius);
+        if (winding?.centerlineReversed) {
+            centers.reverse();
+            edgePts.reverse();
+        }
+        if (winding?.tangentAReversed) tanA.reverse();
+        if (winding?.tangentBReversed) tanB.reverse();
+
         out.points = centers;
         out.tangentA = tanA;
         out.tangentB = tanB;
         out.edge = edgePts;
-        fixPolylineWinding(centers, tanA, tanB);
+        if (Number.isFinite(maxAllowedRadius) && maxAllowedRadius < rEff && maxAllowedSamples > 0) {
+            out.radiusClamp = { requested: radius, maxAllowed: maxAllowedRadius, samples: maxAllowedSamples };
+        }
         return out;
     } catch (e) {
         console.warn('[computeFilletCenterline] failed:', e?.message || e);
@@ -785,17 +924,39 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
         }
 
         const side = String(sideMode).toUpperCase();
+        const requestedRadius = radius;
+        let radiusUsed = radius;
         const tubeResolution = (Number.isFinite(Number(resolution)) && Number(resolution) > 0)
             ? Math.max(8, Math.floor(Number(resolution)))
             : 32;
         const logDebug = (...args) => { if (debug) console.log(...args); };
-        logDebug(`🔧 Starting fillet operation: edge=${edgeToFillet?.name || 'unnamed'}, radius=${radius}, side=${side}`);
+        logDebug(`🔧 Starting fillet operation: edge=${edgeToFillet?.name || 'unnamed'}, radius=${radiusUsed}, side=${side}`);
 
-        const res = computeFilletCenterline(edgeToFillet, radius, side);
+        let res = computeFilletCenterline(edgeToFillet, radiusUsed, side);
         logDebug('The fillet centerline result is:', res);
 
         if (!res) {
             throw new Error('computeFilletCenterline returned null/undefined');
+        }
+        if (res.radiusClamp && Number.isFinite(res.radiusClamp.maxAllowed)) {
+            const maxAllowed = res.radiusClamp.maxAllowed;
+            if (maxAllowed > 0 && maxAllowed < radiusUsed * 0.999) {
+                const adjusted = Math.max(maxAllowed * 0.999, 1e-9);
+                if (adjusted < radiusUsed) {
+                    console.warn('[filletSolid] Requested radius exceeds face extents; clamping.', {
+                        edge: edgeToFillet?.name || 'unnamed',
+                        requested: radiusUsed,
+                        clamped: adjusted,
+                        maxAllowed,
+                    });
+                    radiusUsed = adjusted;
+                    res = computeFilletCenterline(edgeToFillet, radiusUsed, side);
+                    logDebug('Recomputed fillet centerline with clamped radius:', radiusUsed, res);
+                    if (!res) {
+                        throw new Error('computeFilletCenterline returned null/undefined after radius clamp');
+                    }
+                }
+            }
         }
 
         const centerline = Array.isArray(res?.points) ? res.points : [];
@@ -898,7 +1059,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
         // Slightly offset edge points to guarantee robust boolean overlap.
         // Use a small radius-scaled inward nudge for OUTSET, capped to avoid
         // large displacements on big models.
-        const outsetInsetMagnitude = Math.max(1e-4, Math.min(0.05, Math.abs(radius) * 0.05));
+        const outsetInsetMagnitude = Math.max(1e-4, Math.min(0.05, Math.abs(radiusUsed) * 0.05));
         const wedgeInsetMagnitude = closedLoop ? 0 : ((side === 'INSET') ? Math.abs(inflate) : outsetInsetMagnitude);
         const useInsideCheck = wedgeInsetMagnitude && side === 'OUTSET';
         const pointInsideTarget = useInsideCheck
@@ -1100,7 +1261,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                 error: 'Degenerate centerline: all points are identical'
             };
             }
-            const minSpacing = radius * 0.01;
+            const minSpacing = radiusUsed * 0.01;
             for (let i = 1; i < tubePathOriginal.length; i++) {
                 const curr = tubePathOriginal[i];
                 const prev = tubePathOriginal[i - 1];
@@ -1179,7 +1340,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                 }
             }
 
-            const inflatedTubeRadius = radius ;
+            const inflatedTubeRadius = radiusUsed ;
             filletTube = new Tube({
                 points: tubePoints,
                 radius: inflatedTubeRadius,
@@ -1197,9 +1358,10 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                     source: 'FilletFeature',
                     featureID: name,
                     inflatedRadius: inflatedTubeRadius,
-                    pmiRadiusOverride: radius,
-                    radiusOverride: radius,
+                    pmiRadiusOverride: radiusUsed,
+                    radiusOverride: radiusUsed,
                 };
+                if (requestedRadius !== radiusUsed) overrideMeta.requestedRadius = requestedRadius;
                 if (edgeToFillet?.name) overrideMeta.edgeReference = edgeToFillet.name;
                 filletTube.setFaceMetadata(faceTag, overrideMeta);
 
@@ -1261,7 +1423,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
         if (closedLoop) {
             // CLOSED LOOP PATH - preserve existing logic exactly
             try {
-                const minTriangleArea = radius * radius * 1e-8;
+                const minTriangleArea = radiusUsed * radiusUsed * 1e-8;
                 let validTriangles = 0;
                 let skippedTriangles = 0;
                 for (let i = 0; i < centerlineCopy.length - 1; i++) {
@@ -1345,7 +1507,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
             // NON-CLOSED LOOP PATH - specialized handling for open edges
             try {
                 logDebug('Creating wedge solid for non-closed loop...');
-                const minTriangleArea = radius * radius * 1e-8;
+                const minTriangleArea = radiusUsed * radiusUsed * 1e-8;
                 let validTriangles = 0;
                 let skippedTriangles = 0;
 

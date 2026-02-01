@@ -264,6 +264,276 @@ function ensureSidebarDockStyles() {
     document.head.appendChild(style);
 }
 
+const safe = (fn) => {
+    try { fn(); } catch { }
+};
+
+class SidebarDockController {
+    constructor(viewer) {
+        this.viewer = viewer;
+        this._cleanup = [];
+        this._hoverUpdateRaf = null;
+        this._resizer = null;
+        this._pinTab = null;
+        this._hoverStrip = null;
+    }
+
+    init() {
+        const v = this.viewer;
+        if (!v.sidebar || typeof document === 'undefined' || !document.body) return;
+        ensureSidebarResizerStyles();
+        ensureSidebarDockStyles();
+        this.dispose();
+
+        const removeById = (id) => {
+            const el = document.getElementById(id);
+            if (el && el.parentNode) el.parentNode.removeChild(el);
+        };
+        removeById('sidebar-resizer');
+        removeById('sidebar-pin-tab');
+        removeById('sidebar-hover-strip');
+
+        const on = (el, event, fn, opts) => {
+            el.addEventListener(event, fn, opts);
+            this._cleanup.push(() => el.removeEventListener(event, fn, opts));
+        };
+
+        const handleWidth = 10;
+        const resizer = document.createElement('div');
+        resizer.id = 'sidebar-resizer';
+        resizer.title = 'Drag to resize sidebar';
+        resizer.setAttribute('aria-hidden', 'true');
+        resizer.style.width = `${handleWidth}px`;
+        document.body.appendChild(resizer);
+        this._resizer = resizer;
+        v._sidebarResizer = resizer;
+
+        const hoverStrip = document.createElement('div');
+        hoverStrip.id = 'sidebar-hover-strip';
+        hoverStrip.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(hoverStrip);
+        this._hoverStrip = hoverStrip;
+        v._sidebarHoverStrip = hoverStrip;
+
+        const pinTab = document.createElement('button');
+        pinTab.id = 'sidebar-pin-tab';
+        pinTab.type = 'button';
+        pinTab.textContent = '📌';
+        pinTab.setAttribute('aria-pressed', 'true');
+        pinTab.title = 'Collapse sidebar';
+        document.body.appendChild(pinTab);
+        this._pinTab = pinTab;
+        v._sidebarPinTab = pinTab;
+
+        const hoverTargets = new Set();
+        v._sidebarHoverTargets = hoverTargets;
+
+        const updateResizer = () => {
+            const sidebar = v.sidebar;
+            if (!sidebar) return;
+            const rect = sidebar.getBoundingClientRect();
+            const hidden = !v._isSidebarVisible();
+            if (hidden || rect.width <= 0 || rect.height <= 0) {
+                resizer.style.display = 'none';
+                return;
+            }
+            resizer.style.display = '';
+            resizer.style.left = `${Math.round(rect.right - handleWidth / 2)}px`;
+            resizer.style.top = `${Math.round(rect.top)}px`;
+            resizer.style.height = `${Math.round(rect.height)}px`;
+        };
+
+        const syncLayout = () => {
+            updateResizer();
+            v._positionSidebarPinTab();
+        };
+
+        const clampWidth = (value) => {
+            let vNum = Number(value);
+            if (!Number.isFinite(vNum)) return 200;
+            const input = v.cadMaterialsUi?._widthInput;
+            const min = Number(input?.min) || 200;
+            const max = Number(input?.max) || 600;
+            if (vNum < min) vNum = min; else if (vNum > max) vNum = max;
+            return Math.round(vNum);
+        };
+
+        const persistWidthFallback = (value) => {
+            safe(() => {
+                const raw = LS.getItem('__CAD_MATERIAL_SETTINGS__');
+                const settings = raw ? JSON.parse(raw) : {};
+                settings['__SIDEBAR_WIDTH__'] = value;
+                LS.setItem('__CAD_MATERIAL_SETTINGS__', JSON.stringify(settings, null, 2));
+            });
+        };
+
+        const applyWidth = (value, { persist = false } = {}) => {
+            const next = clampWidth(value);
+            if (v.cadMaterialsUi && typeof v.cadMaterialsUi.setSidebarWidth === 'function') {
+                v.cadMaterialsUi.setSidebarWidth(next, { persist });
+            } else if (v.sidebar) {
+                v.sidebar.style.width = `${next}px`;
+                if (persist) persistWidthFallback(next);
+            }
+            syncLayout();
+            return next;
+        };
+
+        const drag = {
+            active: false,
+            startX: 0,
+            startWidth: 0,
+            lastWidth: 0,
+            pointerId: null,
+            prevCursor: '',
+            prevUserSelect: '',
+        };
+
+        const startDrag = (ev) => {
+            if (ev.button !== 0 || !v.sidebar) return;
+            ev.preventDefault();
+            drag.active = true;
+            drag.startX = ev.clientX;
+            drag.startWidth = v.sidebar.getBoundingClientRect().width;
+            drag.lastWidth = drag.startWidth;
+            drag.pointerId = ev.pointerId;
+            drag.prevCursor = document.body.style.cursor;
+            drag.prevUserSelect = document.body.style.userSelect;
+            document.body.style.cursor = 'ew-resize';
+            document.body.style.userSelect = 'none';
+            resizer.classList.add('is-active');
+            safe(() => resizer.setPointerCapture(ev.pointerId));
+        };
+
+        const onDragMove = (ev) => {
+            if (!drag.active) return;
+            const delta = ev.clientX - drag.startX;
+            drag.lastWidth = applyWidth(drag.startWidth + delta);
+        };
+
+        const stopDrag = (persist = true) => {
+            if (!drag.active) return;
+            drag.active = false;
+            resizer.classList.remove('is-active');
+            document.body.style.cursor = drag.prevCursor || '';
+            document.body.style.userSelect = drag.prevUserSelect || '';
+            const finalWidth = Number.isFinite(drag.lastWidth) ? drag.lastWidth : drag.startWidth;
+            applyWidth(finalWidth, { persist });
+            if (drag.pointerId != null) safe(() => resizer.releasePointerCapture(drag.pointerId));
+            drag.pointerId = null;
+        };
+
+        on(resizer, 'pointerdown', startDrag);
+        on(resizer, 'pointermove', onDragMove);
+        on(resizer, 'pointerup', () => stopDrag(true));
+        on(resizer, 'pointercancel', () => stopDrag(false));
+        on(window, 'pointerup', () => stopDrag(true), true);
+        on(window, 'resize', syncLayout);
+        this._cleanup.push(() => safe(() => stopDrag(false)));
+
+        if (window.ResizeObserver) {
+            const ro = new ResizeObserver(syncLayout);
+            ro.observe(v.sidebar);
+            this._cleanup.push(() => safe(() => ro.disconnect()));
+        }
+        if (window.MutationObserver) {
+            const mo = new MutationObserver(syncLayout);
+            mo.observe(v.sidebar, { attributes: true, attributeFilter: ['style', 'hidden', 'class'] });
+            this._cleanup.push(() => safe(() => mo.disconnect()));
+        }
+
+        const scheduleHoverUpdate = () => {
+            if (v._sidebarPinned || v._sidebarAutoHideSuspended) return;
+            if (this._hoverUpdateRaf != null) cancelAnimationFrame(this._hoverUpdateRaf);
+            this._hoverUpdateRaf = requestAnimationFrame(() => {
+                this._hoverUpdateRaf = null;
+                if (v._sidebarPinned || v._sidebarAutoHideSuspended) return;
+                v._setSidebarHoverVisible(hoverTargets.size > 0);
+            });
+        };
+
+        const isPointIn = (el, ev) => {
+            const rect = el?.getBoundingClientRect?.();
+            return !!(rect && ev
+                && ev.clientX >= rect.left && ev.clientX <= rect.right
+                && ev.clientY >= rect.top && ev.clientY <= rect.bottom);
+        };
+
+        const bindHover = (el, { captureSidebarOnLeave = false, capturePinOnLeave = false, requireSidebarVisible = false } = {}) => {
+            if (!el) return;
+            const onEnter = () => {
+                if (requireSidebarVisible && !v._isSidebarVisible()) return;
+                hoverTargets.add(el);
+                scheduleHoverUpdate();
+            };
+            const onLeave = (ev) => {
+                hoverTargets.delete(el);
+                const pinTabEl = v._sidebarPinTab;
+                if (capturePinOnLeave && pinTabEl) {
+                    const related = ev?.relatedTarget;
+                    if (related === pinTabEl || pinTabEl.contains?.(related)) {
+                        hoverTargets.add(pinTabEl);
+                        scheduleHoverUpdate();
+                        return;
+                    }
+                    if (v._isSidebarVisible() && isPointIn(pinTabEl, ev)) {
+                        hoverTargets.add(pinTabEl);
+                        scheduleHoverUpdate();
+                        return;
+                    }
+                }
+                if (captureSidebarOnLeave && v.sidebar && v._isSidebarVisible() && isPointIn(v.sidebar, ev)) {
+                    hoverTargets.add(v.sidebar);
+                }
+                scheduleHoverUpdate();
+            };
+            on(el, 'pointerenter', onEnter);
+            on(el, 'pointerleave', onLeave);
+        };
+
+        bindHover(hoverStrip, { captureSidebarOnLeave: true });
+        bindHover(pinTab, { captureSidebarOnLeave: true, requireSidebarVisible: true });
+        bindHover(v.sidebar, { capturePinOnLeave: true });
+        bindHover(resizer, { captureSidebarOnLeave: true, capturePinOnLeave: true });
+
+        on(window, 'pointermove', (ev) => {
+            v._sidebarLastPointer = { x: ev.clientX, y: ev.clientY };
+        }, { passive: true });
+
+        on(pinTab, 'click', (ev) => {
+            safe(() => { ev.preventDefault(); ev.stopPropagation(); });
+            v._setSidebarPinned(!v._sidebarPinned);
+        });
+
+        this._cleanup.push(() => {
+            if (this._hoverUpdateRaf != null) cancelAnimationFrame(this._hoverUpdateRaf);
+            this._hoverUpdateRaf = null;
+        });
+
+        syncLayout();
+        v._syncSidebarVisibility();
+    }
+
+    dispose() {
+        this._cleanup.forEach((fn) => safe(fn));
+        this._cleanup.length = 0;
+        if (this._hoverUpdateRaf != null) cancelAnimationFrame(this._hoverUpdateRaf);
+        this._hoverUpdateRaf = null;
+        const v = this.viewer;
+        const remove = (el) => { if (el && el.parentNode) el.parentNode.removeChild(el); };
+        remove(this._resizer);
+        remove(this._hoverStrip);
+        remove(this._pinTab);
+        if (v._sidebarResizer === this._resizer) v._sidebarResizer = null;
+        if (v._sidebarHoverStrip === this._hoverStrip) v._sidebarHoverStrip = null;
+        if (v._sidebarPinTab === this._pinTab) v._sidebarPinTab = null;
+        v._sidebarHoverTargets = null;
+        this._resizer = null;
+        this._pinTab = null;
+        this._hoverStrip = null;
+    }
+}
+
 export class Viewer {
     /**
      * @param {Object} opts
@@ -302,13 +572,12 @@ export class Viewer {
         this.container = container;
         this.sidebar = sidebar;
         this._sidebarResizer = null;
-        this._sidebarResizerCleanup = null;
+        this._sidebarDockController = null;
         this._sidebarPinned = true;
         this._sidebarHoverVisible = false;
         this._sidebarAutoHideSuspended = false;
         this._sidebarPinTab = null;
         this._sidebarHoverStrip = null;
-        this._sidebarDockCleanup = null;
         this._sidebarHoverTargets = null;
         this._sidebarStoredDisplay = null;
         this._sidebarStoredVisibility = null;
@@ -346,8 +615,8 @@ export class Viewer {
             }
         } catch { /* ignore */ }
 
-        this._setupSidebarResizer();
-        this._setupSidebarDock();
+        this._sidebarDockController = new SidebarDockController(this);
+        this._sidebarDockController.init();
 
         // Renderer
         this.pixelRatio = pixelRatio; // persist for future resizes
@@ -676,312 +945,6 @@ export class Viewer {
         try { this.renderer.domElement.style.marginTop = '0px'; } catch { }
         this._resizeRendererToDisplaySize();
         this.render();
-    }
-
-    _setupSidebarResizer() {
-        if (!this.sidebar || this._sidebarResizer) return;
-        if (typeof document === 'undefined' || !document.body) return;
-        ensureSidebarResizerStyles();
-        try {
-            const existing = document.getElementById('sidebar-resizer');
-            if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
-        } catch { /* ignore */ }
-
-        const resizer = document.createElement('div');
-        resizer.id = 'sidebar-resizer';
-        resizer.title = 'Drag to resize sidebar';
-        resizer.setAttribute('aria-hidden', 'true');
-        document.body.appendChild(resizer);
-        this._sidebarResizer = resizer;
-
-        const handleWidth = 10;
-        resizer.style.width = `${handleWidth}px`;
-
-        const updatePosition = () => {
-            if (!this.sidebar) return;
-            const rect = this.sidebar.getBoundingClientRect();
-            const hidden = !this._isSidebarVisible();
-            if (hidden || rect.width <= 0 || rect.height <= 0) {
-                resizer.style.display = 'none';
-                return;
-            }
-            resizer.style.display = '';
-            resizer.style.left = `${Math.round(rect.right - handleWidth / 2)}px`;
-            resizer.style.top = `${Math.round(rect.top)}px`;
-            resizer.style.height = `${Math.round(rect.height)}px`;
-            try { this._positionSidebarPinTab?.(); } catch { /* ignore */ }
-        };
-
-        const clampWidth = (value) => {
-            let v = Number(value);
-            if (!Number.isFinite(v)) return 200;
-            const input = this.cadMaterialsUi?._widthInput;
-            const min = Number(input?.min) || 200;
-            const max = Number(input?.max) || 600;
-            if (v < min) v = min; else if (v > max) v = max;
-            return Math.round(v);
-        };
-
-        const persistWidthFallback = (value) => {
-            try {
-                const raw = LS.getItem('__CAD_MATERIAL_SETTINGS__');
-                const settings = raw ? JSON.parse(raw) : {};
-                settings['__SIDEBAR_WIDTH__'] = value;
-                LS.setItem('__CAD_MATERIAL_SETTINGS__', JSON.stringify(settings, null, 2));
-            } catch { /* ignore */ }
-        };
-
-        const applyWidth = (value, { persist = false } = {}) => {
-            const next = clampWidth(value);
-            if (this.cadMaterialsUi && typeof this.cadMaterialsUi.setSidebarWidth === 'function') {
-                this.cadMaterialsUi.setSidebarWidth(next, { persist });
-            } else if (this.sidebar) {
-                this.sidebar.style.width = `${next}px`;
-                if (persist) persistWidthFallback(next);
-            }
-            updatePosition();
-            return next;
-        };
-
-        const dragState = {
-            active: false,
-            startX: 0,
-            startWidth: 0,
-            lastWidth: 0,
-            pointerId: null,
-            prevCursor: '',
-            prevUserSelect: '',
-        };
-
-        const startDrag = (ev) => {
-            if (ev.button !== 0 || !this.sidebar) return;
-            ev.preventDefault();
-            dragState.active = true;
-            dragState.startX = ev.clientX;
-            dragState.startWidth = this.sidebar.getBoundingClientRect().width;
-            dragState.lastWidth = dragState.startWidth;
-            dragState.pointerId = ev.pointerId;
-            dragState.prevCursor = document.body.style.cursor;
-            dragState.prevUserSelect = document.body.style.userSelect;
-            document.body.style.cursor = 'ew-resize';
-            document.body.style.userSelect = 'none';
-            resizer.classList.add('is-active');
-            try { resizer.setPointerCapture(ev.pointerId); } catch { /* ignore */ }
-        };
-
-        const onDragMove = (ev) => {
-            if (!dragState.active) return;
-            const delta = ev.clientX - dragState.startX;
-            dragState.lastWidth = applyWidth(dragState.startWidth + delta);
-        };
-
-        const stopDrag = (persist = true) => {
-            if (!dragState.active) return;
-            dragState.active = false;
-            resizer.classList.remove('is-active');
-            document.body.style.cursor = dragState.prevCursor || '';
-            document.body.style.userSelect = dragState.prevUserSelect || '';
-            const finalWidth = Number.isFinite(dragState.lastWidth) ? dragState.lastWidth : dragState.startWidth;
-            applyWidth(finalWidth, { persist });
-            if (dragState.pointerId != null) {
-                try { resizer.releasePointerCapture(dragState.pointerId); } catch { /* ignore */ }
-            }
-            dragState.pointerId = null;
-        };
-
-        const onPointerUp = () => stopDrag(true);
-        const onPointerCancel = () => stopDrag(false);
-        const onWindowPointerUp = () => stopDrag(true);
-        const onWindowResize = () => updatePosition();
-
-        resizer.addEventListener('pointerdown', startDrag);
-        resizer.addEventListener('pointermove', onDragMove);
-        resizer.addEventListener('pointerup', onPointerUp);
-        resizer.addEventListener('pointercancel', onPointerCancel);
-        window.addEventListener('pointerup', onWindowPointerUp, { capture: true });
-        window.addEventListener('resize', onWindowResize);
-
-        let ro = null;
-        try {
-            if (window.ResizeObserver) {
-                ro = new ResizeObserver(() => updatePosition());
-                ro.observe(this.sidebar);
-            }
-        } catch { /* ignore */ }
-
-        let mo = null;
-        try {
-            if (window.MutationObserver) {
-                mo = new MutationObserver(() => updatePosition());
-                mo.observe(this.sidebar, { attributes: true, attributeFilter: ['style', 'hidden', 'class'] });
-            }
-        } catch { /* ignore */ }
-
-        updatePosition();
-
-        this._sidebarResizerCleanup = () => {
-            try { stopDrag(false); } catch { /* ignore */ }
-            resizer.removeEventListener('pointerdown', startDrag);
-            resizer.removeEventListener('pointermove', onDragMove);
-            resizer.removeEventListener('pointerup', onPointerUp);
-            resizer.removeEventListener('pointercancel', onPointerCancel);
-            window.removeEventListener('pointerup', onWindowPointerUp, { capture: true });
-            window.removeEventListener('resize', onWindowResize);
-            try { ro && ro.disconnect(); } catch { /* ignore */ }
-            try { mo && mo.disconnect(); } catch { /* ignore */ }
-            if (resizer.parentNode) resizer.parentNode.removeChild(resizer);
-            if (this._sidebarResizer === resizer) this._sidebarResizer = null;
-        };
-    }
-
-    _setupSidebarDock() {
-        if (!this.sidebar || this._sidebarPinTab) return;
-        if (typeof document === 'undefined' || !document.body) return;
-        ensureSidebarDockStyles();
-        try {
-            const existingTab = document.getElementById('sidebar-pin-tab');
-            if (existingTab && existingTab.parentNode) existingTab.parentNode.removeChild(existingTab);
-        } catch { /* ignore */ }
-        try {
-            const existingStrip = document.getElementById('sidebar-hover-strip');
-            if (existingStrip && existingStrip.parentNode) existingStrip.parentNode.removeChild(existingStrip);
-        } catch { /* ignore */ }
-
-        const hoverStrip = document.createElement('div');
-        hoverStrip.id = 'sidebar-hover-strip';
-        hoverStrip.setAttribute('aria-hidden', 'true');
-        document.body.appendChild(hoverStrip);
-        this._sidebarHoverStrip = hoverStrip;
-
-        const pinTab = document.createElement('button');
-        pinTab.id = 'sidebar-pin-tab';
-        pinTab.type = 'button';
-        pinTab.textContent = '📌';
-        pinTab.setAttribute('aria-pressed', 'true');
-        pinTab.title = 'Collapse sidebar';
-        document.body.appendChild(pinTab);
-        this._sidebarPinTab = pinTab;
-
-        const hoverTargets = new Set();
-        this._sidebarHoverTargets = hoverTargets;
-        let hoverUpdateRaf = null;
-        const scheduleHoverUpdate = () => {
-            if (this._sidebarPinned || this._sidebarAutoHideSuspended) return;
-            if (hoverUpdateRaf != null) cancelAnimationFrame(hoverUpdateRaf);
-            hoverUpdateRaf = requestAnimationFrame(() => {
-                hoverUpdateRaf = null;
-                if (this._sidebarPinned || this._sidebarAutoHideSuspended) return;
-                this._setSidebarHoverVisible(hoverTargets.size > 0);
-            });
-        };
-        const bindHover = (el, { captureSidebarOnLeave = false, capturePinOnLeave = false, requireSidebarVisible = false } = {}) => {
-            const onEnter = () => {
-                if (requireSidebarVisible && !this._isSidebarVisible()) return;
-                hoverTargets.add(el);
-                scheduleHoverUpdate();
-            };
-            const onLeave = (ev) => {
-                hoverTargets.delete(el);
-                const pinTabEl = this._sidebarPinTab;
-                if (capturePinOnLeave && pinTabEl) {
-                    const related = ev?.relatedTarget;
-                    if (related === pinTabEl || (pinTabEl.contains && pinTabEl.contains(related))) {
-                        hoverTargets.add(pinTabEl);
-                        scheduleHoverUpdate();
-                        return;
-                    }
-                }
-                if (capturePinOnLeave && pinTabEl && this._isSidebarVisible()) {
-                    const rect = pinTabEl.getBoundingClientRect();
-                    if (rect
-                        && ev
-                        && ev.clientX >= rect.left
-                        && ev.clientX <= rect.right
-                        && ev.clientY >= rect.top
-                        && ev.clientY <= rect.bottom) {
-                        hoverTargets.add(pinTabEl);
-                        scheduleHoverUpdate();
-                        return;
-                    }
-                }
-                if (captureSidebarOnLeave && this.sidebar && this._isSidebarVisible()) {
-                    const rect = this.sidebar.getBoundingClientRect();
-                    if (rect
-                        && ev
-                        && ev.clientX >= rect.left
-                        && ev.clientX <= rect.right
-                        && ev.clientY >= rect.top
-                        && ev.clientY <= rect.bottom) {
-                        hoverTargets.add(this.sidebar);
-                    }
-                }
-                scheduleHoverUpdate();
-            };
-            el.addEventListener('pointerenter', onEnter);
-            el.addEventListener('pointerleave', onLeave);
-            return () => {
-                el.removeEventListener('pointerenter', onEnter);
-                el.removeEventListener('pointerleave', onLeave);
-            };
-        };
-
-        const cleanup = [];
-        cleanup.push(bindHover(hoverStrip, { captureSidebarOnLeave: true }));
-        cleanup.push(bindHover(pinTab, { captureSidebarOnLeave: true, requireSidebarVisible: true }));
-        cleanup.push(bindHover(this.sidebar, { capturePinOnLeave: true }));
-        if (this._sidebarResizer) {
-            cleanup.push(bindHover(this._sidebarResizer, { captureSidebarOnLeave: true, capturePinOnLeave: true }));
-        }
-        cleanup.push(() => {
-            if (hoverUpdateRaf != null) cancelAnimationFrame(hoverUpdateRaf);
-            hoverUpdateRaf = null;
-        });
-
-        const onPointerMove = (ev) => {
-            this._sidebarLastPointer = { x: ev.clientX, y: ev.clientY };
-        };
-        window.addEventListener('pointermove', onPointerMove, { passive: true });
-        cleanup.push(() => window.removeEventListener('pointermove', onPointerMove));
-
-        const onTabClick = (ev) => {
-            try { ev.preventDefault(); ev.stopPropagation(); } catch { }
-            this._setSidebarPinned(!this._sidebarPinned);
-        };
-        pinTab.addEventListener('click', onTabClick);
-        cleanup.push(() => pinTab.removeEventListener('click', onTabClick));
-
-        const positionTab = () => this._positionSidebarPinTab();
-        window.addEventListener('resize', positionTab);
-        cleanup.push(() => window.removeEventListener('resize', positionTab));
-
-        let ro = null;
-        try {
-            if (window.ResizeObserver) {
-                ro = new ResizeObserver(() => positionTab());
-                ro.observe(this.sidebar);
-            }
-        } catch { /* ignore */ }
-        let mo = null;
-        try {
-            if (window.MutationObserver) {
-                mo = new MutationObserver(() => positionTab());
-                mo.observe(this.sidebar, { attributes: true, attributeFilter: ['style', 'hidden', 'class'] });
-            }
-        } catch { /* ignore */ }
-        cleanup.push(() => { try { ro && ro.disconnect(); } catch { } });
-        cleanup.push(() => { try { mo && mo.disconnect(); } catch { } });
-
-        this._sidebarDockCleanup = () => {
-            cleanup.forEach((fn) => { try { fn(); } catch { } });
-            cleanup.length = 0;
-            try { if (hoverStrip.parentNode) hoverStrip.parentNode.removeChild(hoverStrip); } catch { }
-            try { if (pinTab.parentNode) pinTab.parentNode.removeChild(pinTab); } catch { }
-            if (this._sidebarHoverStrip === hoverStrip) this._sidebarHoverStrip = null;
-            if (this._sidebarPinTab === pinTab) this._sidebarPinTab = null;
-            this._sidebarHoverTargets = null;
-        };
-
-        this._syncSidebarVisibility();
     }
 
     _setSidebarAutoHideSuspended(suspended) {
@@ -1375,8 +1338,8 @@ export class Viewer {
         this._disposed = true;
         cancelAnimationFrame(this._raf);
         try { this._stopComponentTransformSession(); } catch { }
-        try { this._sidebarResizerCleanup?.(); } catch { }
-        try { this._sidebarDockCleanup?.(); } catch { }
+        safe(() => this._sidebarDockController?.dispose());
+        this._sidebarDockController = null;
         const el = this.renderer?.domElement;
         this._detachRendererEvents(el);
         window.removeEventListener('pointerup', this._onPointerUp, { capture: true });

@@ -14,6 +14,7 @@ import { test_stlLoader } from './test_stlLoader.js';
 import { test_SweepFace } from './test_sweepFace.js';
 import { test_ExtrudeFace } from './test_extrudeFace.js';
 import { test_Fillet } from './test_fillet.js';
+import { test_fillet_angle, afterRun_fillet_angle } from './test_fillet_angle.js';
 import { test_Chamfer } from './test_chamfer.js';
 import { test_mirror } from './test_mirror.js';
 import { test_fillets_more_dificult } from './test_filletsMoreDifficult.js';
@@ -73,6 +74,7 @@ export const testFunctions = [
     { test: test_SheetMetalContourFlange_StraightLine, afterRun: afterRun_SheetMetalContourFlange_StraightLine, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_ExtrudeFace, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_Fillet, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_fillet_angle, afterRun: afterRun_fillet_angle, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_Fillet_NonClosed, afterRun: afterRun_Fillet_NonClosed, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_fillets_more_dificult, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_Chamfer, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },

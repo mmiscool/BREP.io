@@ -1,0 +1,376 @@
+{
+  "features": [
+    {
+      "type": "S",
+      "inputParams": {
+        "id": "S1",
+        "sketchPlane": null,
+        "editSketch": null,
+        "dumpSketchDiagnostics": null,
+        "curveResolution": 32,
+        "__open": false
+      },
+      "persistentData": {
+        "basis": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            1,
+            0
+          ],
+          "z": [
+            0,
+            0,
+            1
+          ]
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0,
+              "y": 0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": 0,
+              "y": 0,
+              "fixed": true
+            },
+            {
+              "id": 2,
+              "x": -0.675616,
+              "y": -2.973614,
+              "fixed": false
+            },
+            {
+              "id": 3,
+              "x": -0.65791,
+              "y": 2.977507,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": -10.104034,
+              "y": 0.029983,
+              "fixed": false
+            }
+          ],
+          "geometries": [
+            {
+              "id": 1,
+              "type": "arc",
+              "points": [
+                1,
+                2,
+                3
+              ],
+              "construction": false
+            },
+            {
+              "id": 2,
+              "type": "line",
+              "points": [
+                3,
+                4
+              ],
+              "construction": false
+            },
+            {
+              "id": 3,
+              "type": "line",
+              "points": [
+                4,
+                2
+              ],
+              "construction": false
+            }
+          ],
+          "constraints": [
+            {
+              "id": 0,
+              "type": "⏚",
+              "points": [
+                0
+              ],
+              "status": "solved",
+              "previousPointValues": "[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true}]"
+            },
+            {
+              "id": 1,
+              "type": "≡",
+              "points": [
+                1,
+                0
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "previousPointValues": "[{\"id\":1,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true}]",
+              "error": null
+            },
+            {
+              "id": 2,
+              "type": "⟺",
+              "points": [
+                3,
+                4
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 9.895294552992599,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":3,\"x\":-0.65791,\"y\":2.977507,\"fixed\":false},{\"id\":4,\"x\":-10.104034,\"y\":0.029983,\"fixed\":false}]"
+            },
+            {
+              "id": 3,
+              "type": "⇌",
+              "points": [
+                4,
+                2,
+                3,
+                4
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":4,\"x\":-10.104034,\"y\":0.029983,\"fixed\":false},{\"id\":2,\"x\":-0.675616,\"y\":-2.973614,\"fixed\":false},{\"id\":3,\"x\":-0.65791,\"y\":2.977507,\"fixed\":false},{\"id\":4,\"x\":-10.104034,\"y\":0.029983,\"fixed\":false}]"
+            },
+            {
+              "id": 4,
+              "type": "∠",
+              "points": [
+                4,
+                3,
+                4,
+                2
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 35,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":4,\"x\":-10.104034,\"y\":0.029983,\"fixed\":false},{\"id\":3,\"x\":-0.65791,\"y\":2.977507,\"fixed\":false},{\"id\":4,\"x\":-10.104034,\"y\":0.029983,\"fixed\":false},{\"id\":2,\"x\":-0.675616,\"y\":-2.973614,\"fixed\":false}]",
+              "valueExpr": "angle"
+            }
+          ]
+        },
+        "lastSketchSignature": "{\"points\":[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":1,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":2,\"x\":-0.675616,\"y\":-2.973614,\"fixed\":false},{\"id\":3,\"x\":-0.65791,\"y\":2.977507,\"fixed\":false},{\"id\":4,\"x\":-10.104034,\"y\":0.029983,\"fixed\":false}],\"geometries\":[{\"id\":1,\"type\":\"arc\",\"points\":[1,2,3],\"construction\":false},{\"id\":2,\"type\":\"line\",\"points\":[3,4],\"construction\":false},{\"id\":3,\"type\":\"line\",\"points\":[4,2],\"construction\":false}],\"constraints\":[{\"id\":0,\"type\":\"⏚\",\"points\":[0],\"status\":\"solved\",\"previousPointValues\":\"[{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true}]\"},{\"id\":1,\"type\":\"≡\",\"points\":[1,0],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"previousPointValues\":\"[{\\\"id\\\":1,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true},{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true}]\",\"error\":null},{\"id\":2,\"type\":\"⟺\",\"points\":[3,4],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":9.895294552992599,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":3,\\\"x\\\":-0.65791,\\\"y\\\":2.977507,\\\"fixed\\\":false},{\\\"id\\\":4,\\\"x\\\":-10.104034,\\\"y\\\":0.029983,\\\"fixed\\\":false}]\"},{\"id\":3,\"type\":\"⇌\",\"points\":[4,2,3,4],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":4,\\\"x\\\":-10.104034,\\\"y\\\":0.029983,\\\"fixed\\\":false},{\\\"id\\\":2,\\\"x\\\":-0.675616,\\\"y\\\":-2.973614,\\\"fixed\\\":false},{\\\"id\\\":3,\\\"x\\\":-0.65791,\\\"y\\\":2.977507,\\\"fixed\\\":false},{\\\"id\\\":4,\\\"x\\\":-10.104034,\\\"y\\\":0.029983,\\\"fixed\\\":false}]\"},{\"id\":4,\"type\":\"∠\",\"points\":[4,3,4,2],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":35,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":4,\\\"x\\\":-10.104034,\\\"y\\\":0.029983,\\\"fixed\\\":false},{\\\"id\\\":3,\\\"x\\\":-0.65791,\\\"y\\\":2.977507,\\\"fixed\\\":false},{\\\"id\\\":4,\\\"x\\\":-10.104034,\\\"y\\\":0.029983,\\\"fixed\\\":false},{\\\"id\\\":2,\\\"x\\\":-0.675616,\\\"y\\\":-2.973614,\\\"fixed\\\":false}]\",\"valueExpr\":\"angle\"}]}",
+        "lastSketchChanged": false,
+        "sketchDimOffsets": {
+          "2": {
+            "d": -1.694512530355534
+          },
+          "4": {
+            "du": 2.45624439121382,
+            "dv": -0.007494957860992079
+          }
+        }
+      },
+      "timestamp": 1769984774701
+    },
+    {
+      "type": "E",
+      "inputParams": {
+        "id": "E2",
+        "profile": "S1:PROFILE",
+        "consumeProfileSketch": true,
+        "distance": "10",
+        "distanceBack": 0,
+        "boolean": {
+          "targets": [],
+          "operation": "NONE"
+        },
+        "__open": false
+      },
+      "persistentData": {
+        "__refPreviewSnapshots": {
+          "profile": {
+            "S1:PROFILE": {
+              "type": "FACE",
+              "edgePositions": [
+                [
+                  -0.675616,
+                  -2.973614,
+                  0,
+                  -0.1062802600593598,
+                  -3.047546834221537,
+                  0,
+                  0.46682272044264816,
+                  -3.013455449833384,
+                  0,
+                  1.0233785689896033,
+                  -2.872548259818238,
+                  0,
+                  1.5436594474472989,
+                  -2.62981990082186,
+                  0,
+                  2.009223330668871,
+                  -2.2938741918309047,
+                  0,
+                  2.403567707804229,
+                  -1.8766191607389928,
+                  0,
+                  2.712714535029789,
+                  -1.3928449489767745,
+                  0,
+                  2.925705705296398,
+                  -0.8596995559194528,
+                  0,
+                  3.0349914725327407,
+                  -0.296081005985768,
+                  0,
+                  3.03669806210858,
+                  0.27803251615232394,
+                  0,
+                  2.930764981760648,
+                  0.8422908180299171,
+                  0,
+                  2.7209471658187483,
+                  1.3766930381442763,
+                  0,
+                  2.4146818767272182,
+                  1.8622966022245537,
+                  0,
+                  2.022825081708572,
+                  2.281888667148927,
+                  0,
+                  1.5592666490376625,
+                  2.620596252315655,
+                  0,
+                  1.0404380037895387,
+                  2.866413431576547,
+                  0,
+                  0.4847296948364586,
+                  3.0106268987364992,
+                  0,
+                  -0.08816048181874454,
+                  3.0481248219023915,
+                  0,
+                  -0.65791,
+                  2.977507,
+                  0
+                ],
+                [
+                  -0.65791,
+                  2.977507,
+                  0,
+                  -10.104034,
+                  0.029983,
+                  0
+                ],
+                [
+                  -10.104034,
+                  0.029983,
+                  0,
+                  -0.675616,
+                  -2.973614,
+                  0
+                ]
+              ],
+              "sourceUuid": "ba24051e-3ede-4125-8b0e-4d4d480ab9fe",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1769984774701
+            }
+          }
+        }
+      },
+      "timestamp": 1769984774715
+    },
+    {
+      "type": "F",
+      "inputParams": {
+        "id": "F3",
+        "edges": [
+          "E2:S1:G2_SW|E2:S1:G3_SW[0]"
+        ],
+        "radius": "2",
+        "resolution": 32,
+        "inflate": 0.1,
+        "direction": "INSET",
+        "combineEdges": false,
+        "showTangentOverlays": true,
+        "cleanupTinyFaceIslandsArea": 0.01,
+        "debug": false,
+        "__open": false
+      },
+      "persistentData": {
+        "__refPreviewSnapshots": {
+          "edges": {
+            "E2:S1:G2_SW|E2:S1:G3_SW[0]": {
+              "type": "EDGE",
+              "positions": [
+                -10.104034423828125,
+                0.029983000829815865,
+                -10,
+                -10.104034423828125,
+                0.029983000829815865,
+                0
+              ],
+              "sourceUuid": "d6be0158-b929-4255-99bb-37ce11ba17c4",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1769984774715
+            },
+            "E2:S1:G1_SW|E2:S1:G2_SW[0]": {
+              "type": "EDGE",
+              "positions": [
+                -0.6931729912757874,
+                3.305305004119873,
+                -10,
+                -0.6931729912757874,
+                3.305305004119873,
+                0
+              ],
+              "sourceUuid": "0754e3e2-a484-4119-9a0d-3ac5f9b911a9",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1769983454933
+            },
+            "E2:S1:G1_SW|E2:S1:G3_SW[0]": {
+              "type": "EDGE",
+              "positions": [
+                -0.7134029865264893,
+                -3.300908088684082,
+                -10,
+                -0.7134029865264893,
+                -3.300908088684082,
+                0
+              ],
+              "sourceUuid": "fb0e8e7f-f65a-4eaa-935d-b1f60c6b8db4",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1769983454933
+            }
+          }
+        }
+      },
+      "timestamp": 1769984774752
+    }
+  ],
+  "idCounter": 3,
+  "expressions": "//Examples:\nangle = 35;",
+  "pmiViews": [],
+  "metadata": {},
+  "assemblyConstraints": [],
+  "assemblyConstraintIdCounter": 0
+}
