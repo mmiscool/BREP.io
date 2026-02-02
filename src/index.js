@@ -10,3 +10,10 @@ export { PartHistory, extractDefaultValues } from './PartHistory.js';
 export { AssemblyConstraintHistory } from './assemblyConstraints/AssemblyConstraintHistory.js';
 export { AssemblyConstraintRegistry } from './assemblyConstraints/AssemblyConstraintRegistry.js';
 
+// License helpers
+export {
+  getPackageLicenseInfo,
+  getPackageLicenseInfoString,
+  getPackageLicenseText,
+  getAllLicensesInfoString,
+} from './licenseInfo.js';

@@ -149,6 +149,14 @@ Notes:
   - `const { BREP } = await import('brep-io-kernel');`
 - Top-level await is used internally; target modern runtimes (Node 18+ or modern bundlers).
 
+License helpers (package-only vs full dependency summary):
+```js
+import { getPackageLicenseInfoString, getAllLicensesInfoString } from 'brep-io-kernel';
+
+console.log(getPackageLicenseInfoString()); // this package only
+console.log(getAllLicensesInfoString()); // includes prod dependency summary
+```
+
 
 
 

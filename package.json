@@ -4,13 +4,14 @@
   "scripts": {
     "dev": "pnpm generateLicenses && pnpm build:kernel && vite --host 0.0.0.0",
     "build": "pnpm generateLicenses && vite build",
-    "build:kernel": "vite build --config vite.config.kernel.js",
+    "build:kernel": "pnpm generateLicenseBundle && vite build --config vite.config.kernel.js",
     "prepublishOnly": "pnpm build:kernel",
     "start": "pnpm dev",
     "liveTesting": "nodemon --watch src --watch tests --ext js --exec \"pnpm run test\"",
     "test": "node ./src/tests/tests.js",
     "debug:boolean": "node ./src/tests/debugBoolean.js",
     "generateLicenses": "node ./generateLicenses.js",
+    "generateLicenseBundle": "node ./scripts/generateLicenseBundle.js",
     "capture": "node ./scripts/capture.js & pnpm dev "
   },
   "type": "module",

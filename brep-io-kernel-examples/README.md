@@ -18,6 +18,7 @@ node cone.js
 node pyramid.js
 node torus.js
 node boolean-union.js
+node license-info.js
 ```
 
 Note: The package is ESM-only. These example files use ESM syntax, so run them
