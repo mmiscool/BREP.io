@@ -128,6 +128,7 @@ Each annotation stores associative references and view metadata so reloading a p
 The published package is `brep-io-kernel`. It ships as a single ESM bundle that
 inlines the WASM, so consumers do not need any extra asset copying or loader
 configuration.
+[https://www.npmjs.com/package/brep-io-kernel](https://www.npmjs.com/package/brep-io-kernel)
 
 - Examples (Node.js):
   - [`brep-io-kernel-examples/README.md`](brep-io-kernel-examples/README.md)
