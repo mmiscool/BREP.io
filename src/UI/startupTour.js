@@ -245,6 +245,7 @@ export class StartupTour {
     this._closeBtn = null;
     this._onKeyDown = null;
     this._onReposition = null;
+    this._onSkipNextChange = null;
     this._positionRaf = null;
     this._currentTarget = null;
     this._prevSidebarPinned = null;
@@ -337,7 +338,6 @@ export class StartupTour {
 
     const skipNextRow = document.createElement('label');
     skipNextRow.className = 'brep-tour-skipnext';
-    skipNextRow.style.display = 'none';
     const skipNextCheckbox = document.createElement('input');
     skipNextCheckbox.type = 'checkbox';
     skipNextCheckbox.checked = false;
@@ -425,6 +425,11 @@ export class StartupTour {
     };
 
     this._onReposition = () => this._schedulePosition();
+    this._onSkipNextChange = () => {
+      if (!this._skipNextCheckbox) return;
+      if (this._skipNextCheckbox.checked) StartupTour.markDone();
+      else resetStartupTourFlag();
+    };
 
     window.addEventListener('keydown', this._onKeyDown, true);
     window.addEventListener('resize', this._onReposition);
@@ -434,6 +439,7 @@ export class StartupTour {
     this._backBtn?.addEventListener('click', () => this.prev());
     this._skipBtn?.addEventListener('click', () => this.exit());
     this._closeBtn?.addEventListener('click', () => this.exit());
+    this._skipNextCheckbox?.addEventListener('change', this._onSkipNextChange);
   }
 
   _detachEvents() {
@@ -442,8 +448,12 @@ export class StartupTour {
       window.removeEventListener('resize', this._onReposition);
       window.removeEventListener('scroll', this._onReposition, true);
     }
+    if (this._skipNextCheckbox && this._onSkipNextChange) {
+      this._skipNextCheckbox.removeEventListener('change', this._onSkipNextChange);
+    }
     this._onKeyDown = null;
     this._onReposition = null;
+    this._onSkipNextChange = null;
   }
 
   _resolveTarget(step) {
@@ -480,9 +490,6 @@ export class StartupTour {
 
     if (this._backBtn) this._backBtn.disabled = index === 0;
     if (this._nextBtn) this._nextBtn.textContent = index === this.steps.length - 1 ? 'Finish' : 'Next';
-    if (this._skipNextRow) {
-      this._skipNextRow.style.display = index === this.steps.length - 1 ? 'flex' : 'none';
-    }
 
     const finalize = () => {
       const target = this._resolveTarget(step);
@@ -601,7 +608,8 @@ export class StartupTour {
 
   exit() {
     if (!this.active) return;
-    resetStartupTourFlag();
+    if (this._skipNextCheckbox?.checked) StartupTour.markDone();
+    else resetStartupTourFlag();
     this.destroy();
   }
 
