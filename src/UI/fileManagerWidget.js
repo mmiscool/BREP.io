@@ -169,7 +169,7 @@ export class FileManagerWidget {
   }
 
   _buildUI() {
-    // Header: name input + Save + New
+    // Header: name input + Save
     const header = document.createElement('div');
     header.className = 'fm-row header';
 
@@ -191,15 +191,6 @@ export class FileManagerWidget {
     saveBtn.className = 'fm-btn';
     saveBtn.addEventListener('click', () => this.saveCurrent());
     header.appendChild(saveBtn);
-
-
-
-    const newBtn = document.createElement('button');
-    newBtn.textContent = 'New';
-    newBtn.className = 'fm-btn';
-    newBtn.addEventListener('click', () => this.newModel());
-    header.appendChild(newBtn);
-
     this.uiElement.appendChild(header);
 
     // List container

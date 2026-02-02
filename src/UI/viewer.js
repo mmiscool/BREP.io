@@ -37,6 +37,7 @@ import { PMIMode } from './pmi/PMIMode.js';
 import { annotationRegistry } from './pmi/AnnotationRegistry.js';
 import { SchemaForm } from './featureDialogs.js';
 import './dialogs.js';
+import { maybeStartStartupTour } from './startupTour.js';
 import { BREP } from '../BREP/BREP.js';
 import { createAxisHelperGroup, DEFAULT_AXIS_HELPER_PX } from '../utils/axisHelpers.js';
 
@@ -1220,6 +1221,9 @@ export class Viewer {
 
         // Ensure toolbar sits above the canvas and doesn't block controls when not hovered
         try { this.renderer.domElement.style.marginTop = '0px'; } catch { }
+
+        // Start the startup tour once the core UI is mounted, if not already completed.
+        try { await maybeStartStartupTour(this); } catch { }
     }
 
     // Public: allow plugins to add toolbar buttons even before MainToolbar is constructed

@@ -1,6 +1,7 @@
 // Registers the default toolbar buttons using the viewer's addToolbarButton API.
 // Each button's logic is implemented in its own module.
 
+import { createNewButton } from './newButton.js';
 import { createSaveButton } from './saveButton.js';
 import { createUndoButton, createRedoButton } from './undoRedoButtons.js';
 import { createZoomToFitButton } from './zoomToFitButton.js';
@@ -17,6 +18,7 @@ export function registerDefaultToolbarButtons(viewer) {
   if (!viewer || typeof viewer.addToolbarButton !== 'function') return;
 
   const creators = [
+    createNewButton,
     createSaveButton,
     createZoomToFitButton,
     createWireframeToggleButton,
