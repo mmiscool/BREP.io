@@ -1,7 +1,7 @@
 import JSZip from 'jszip';
 import { localStorage as LS } from '../idbStorage.js';
 
-export const MODEL_STORAGE_PREFIX = '__BREP_MODEL__:';
+export const MODEL_STORAGE_PREFIX = '__BREP_DATA__:';
 
 function safeParse(json) {
   try {

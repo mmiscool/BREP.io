@@ -87,7 +87,7 @@ export function createSaveButton(viewer) {
       const b64 = _uint8ToBase64(bytes);
       // Do not persist a separate thumbnail; it's embedded in the 3MF
       const payload = { savedAt: new Date().toISOString(), data3mf: b64 };
-      LS.setItem('__BREP_MODEL__:autosave', JSON.stringify(payload));
+      LS.setItem('__BREP_DATA__:autosave', JSON.stringify(payload));
       LS.setItem('__BREP_MODELS_LASTNAME__', 'autosave');
       alert('Saved as "autosave"');
     } catch {

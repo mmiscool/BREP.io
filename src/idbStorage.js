@@ -1,19 +1,24 @@
 /* idbStorage.js
-   Primary IndexedDB-backed app storage with a localStorage-like API.
+   VFS-backed app storage with a localStorage-like API.
    - Synchronous reads via in-memory cache
-   - Async persistence to IndexedDB
+   - Async persistence to VFS (fs.proxy -> __BREP_VFS_DB__)
    - Same-tab + optional cross-tab change events
+   - Migrates legacy __LS_SHIM_DB__ data into VFS
 */
 
-const STORAGE_DB_NAME = '__LS_SHIM_DB__';
-const STORE_NAME = 'kv';
-const DB_VERSION = 1;
+import { fs } from './fs.proxy.js';
+
+const SETTINGS_DIR = 'settings';
+const DATA_DIR = '__BREP_DATA__';
+const MODEL_PREFIX = '__BREP_DATA__:';
+const LEGACY_MODEL_PREFIX = '__BREP_MODEL__:';
+const LEGACY_DB_NAME = '__LS_SHIM_DB__';
+const LEGACY_STORE_NAME = 'kv';
 const BC_NAME = '__BREP_STORAGE_BC__';
 
 const hasIndexedDB = typeof indexedDB !== 'undefined' && !!indexedDB.open;
 
 function toStringValue(v) {
-  // Match Web Storage semantics: everything is coerced to string
   return v === undefined || v === null ? String(v) : String(v);
 }
 
@@ -37,119 +42,286 @@ function tryDispatchStorageEvent(storage, { key, oldValue, newValue }) {
   } catch {}
 }
 
-function promisifyRequest(req) {
-  return new Promise((resolve, reject) => {
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error || new Error('IDB request failed'));
-  });
+function joinPath(...parts) {
+  return parts.filter(Boolean).join('/');
 }
 
-function openDB() {
-  return new Promise((resolve, reject) => {
-    const openReq = indexedDB.open(STORAGE_DB_NAME, DB_VERSION);
-    openReq.onupgradeneeded = () => {
-      const db = openReq.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: 'key' });
-      }
-    };
-    openReq.onsuccess = () => resolve(openReq.result);
-    openReq.onerror = () => reject(openReq.error || new Error('Failed to open storage DB'));
-  });
+function encodeSettingKey(key) {
+  const k = String(key ?? '');
+  if (!k || k === '.' || k === '..' || k.includes('/') || k.includes('\\')) {
+    return encodeURIComponent(k);
+  }
+  return k;
 }
 
-function unwrapStoredValue(value) {
-  if (value && typeof value === 'object' && 'value' in value) return value.value;
-  return value;
+function decodeSettingKey(name) {
+  if (/%[0-9A-Fa-f]{2}/.test(name)) {
+    try { return decodeURIComponent(name); } catch {}
+  }
+  return name;
 }
 
-async function idbGetAll(db) {
-  const tx = db.transaction([STORE_NAME], 'readonly');
-  const store = tx.objectStore(STORE_NAME);
-  if (store.getAll && store.getAllKeys) {
-    const [items, keys] = await Promise.all([promisifyRequest(store.getAll()), promisifyRequest(store.getAllKeys())]);
-    const out = new Map();
-    for (let i = 0; i < keys.length; i++) {
-      out.set(String(keys[i]), unwrapStoredValue(items[i]));
+function isModelKey(key) {
+  return typeof key === 'string' && key.startsWith(MODEL_PREFIX);
+}
+
+function isLegacyModelKey(key) {
+  return typeof key === 'string' && key.startsWith(LEGACY_MODEL_PREFIX);
+}
+
+function normalizeModelKey(key) {
+  if (isModelKey(key)) return key;
+  if (isLegacyModelKey(key)) return MODEL_PREFIX + key.slice(LEGACY_MODEL_PREFIX.length);
+  return null;
+}
+
+function keyToPath(key) {
+  if (isModelKey(key)) {
+    const name = key.slice(MODEL_PREFIX.length);
+    return joinPath(DATA_DIR, name);
+  }
+  return joinPath(SETTINGS_DIR, encodeSettingKey(key));
+}
+
+async function ensureDir(path) {
+  try {
+    await fs.promises.mkdir(path, { recursive: true });
+  } catch (e) {
+    if (e && e.code !== 'EEXIST') throw e;
+  }
+}
+
+async function exists(path) {
+  try {
+    await fs.promises.stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readFileSafe(path) {
+  try {
+    return await fs.promises.readFile(path, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+async function readDirSafe(path) {
+  try {
+    return await fs.promises.readdir(path);
+  } catch {
+    return [];
+  }
+}
+
+async function deleteLegacyDb() {
+  if (!hasIndexedDB) return;
+  await new Promise((resolve) => {
+    try {
+      const req = indexedDB.deleteDatabase(LEGACY_DB_NAME);
+      req.onsuccess = () => resolve();
+      req.onerror = () => resolve();
+      req.onblocked = () => resolve();
+    } catch {
+      resolve();
     }
-    return out;
-  }
+  });
+}
+
+async function openLegacyDb() {
+  if (!hasIndexedDB) return { db: null, created: false };
   return new Promise((resolve, reject) => {
-    const out = new Map();
-    const req = store.openCursor();
-    req.onsuccess = (e) => {
-      const cursor = e.target.result;
-      if (cursor) {
-        out.set(String(cursor.key), unwrapStoredValue(cursor.value));
-        cursor.continue();
-      } else {
-        resolve(out);
+    let created = false;
+    let req;
+    try {
+      req = indexedDB.open(LEGACY_DB_NAME);
+    } catch (e) {
+      resolve({ db: null, created: false });
+      return;
+    }
+    req.onupgradeneeded = () => { created = true; };
+    req.onsuccess = () => {
+      const db = req.result;
+      if (created) {
+        try { db.close(); } catch {}
+        resolve({ db: null, created: true });
+        return;
       }
+      resolve({ db, created: false });
     };
-    req.onerror = () => reject(req.error || new Error('Cursor failed'));
+    req.onerror = () => reject(req.error || new Error('Failed to open legacy DB'));
   });
 }
 
-async function idbPut(db, key, value) {
-  const tx = db.transaction([STORE_NAME], 'readwrite');
-  const store = tx.objectStore(STORE_NAME);
-  if (store.keyPath) {
-    store.put({ key, value });
-  } else {
-    store.put(value, key);
-  }
+async function readAllLegacyEntries(db) {
   return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error || new Error('IDB put failed'));
+    try {
+      if (!db.objectStoreNames.contains(LEGACY_STORE_NAME)) {
+        resolve(new Map());
+        return;
+      }
+      const tx = db.transaction([LEGACY_STORE_NAME], 'readonly');
+      const store = tx.objectStore(LEGACY_STORE_NAME);
+      const out = new Map();
+      const req = store.openCursor();
+      req.onsuccess = (e) => {
+        const cursor = e.target.result;
+        if (cursor) {
+          const rawKey = cursor.key;
+          const rawVal = cursor.value;
+          const key = String(rawKey);
+          let value = rawVal;
+          if (value && typeof value === 'object' && 'value' in value) value = value.value;
+          out.set(key, value);
+          cursor.continue();
+        } else {
+          resolve(out);
+        }
+      };
+      req.onerror = () => reject(req.error || new Error('Legacy cursor failed'));
+    } catch (e) {
+      reject(e);
+    }
   });
 }
 
-async function idbDelete(db, key) {
-  const tx = db.transaction([STORE_NAME], 'readwrite');
-  tx.objectStore(STORE_NAME).delete(key);
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error || new Error('IDB delete failed'));
-  });
-}
-
-async function idbClear(db) {
-  const tx = db.transaction([STORE_NAME], 'readwrite');
-  tx.objectStore(STORE_NAME).clear();
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error || new Error('IDB clear failed'));
-  });
-}
-
-class IdbStorage {
+class VfsStorage {
   constructor() {
     this._cache = new Map();
     this._ready = false;
-    this._dbPromise = null;
+    this._persistChain = Promise.resolve();
     this._bc = null;
-    this._idbEnabled = hasIndexedDB;
-    this._init();
+    this._initPromise = this._init();
   }
 
   async _init() {
-    if (!this._idbEnabled) {
-      this._ready = true;
-      return;
-    }
-
     try {
-      this._dbPromise = openDB();
-      const db = await this._dbPromise;
-      const idbMap = await idbGetAll(db);
-      idbMap.forEach((v, k) => this._cache.set(k, toStringValue(v)));
+      await fs.ready();
+      await ensureDir(SETTINGS_DIR);
+      await ensureDir(DATA_DIR);
+      await this._migrateLegacyIdb();
+      await this._migrateLegacyFs();
+      await this._loadFromFs();
       this._setupBroadcast();
-    } catch (err) {
-      console.warn('[idb-storage] IndexedDB unavailable; using in-memory storage only.', err);
-      this._idbEnabled = false;
+    } catch (e) {
+      console.warn('[vfs-storage] init failed; using in-memory storage only.', e);
+    }
+    this._ready = true;
+  }
+
+  async _loadFromFs() {
+    this._cache.clear();
+    const settingFiles = await readDirSafe(SETTINGS_DIR);
+    for (const name of settingFiles) {
+      const path = joinPath(SETTINGS_DIR, name);
+      const raw = await readFileSafe(path);
+      if (raw === null) continue;
+      const key = decodeSettingKey(name);
+      this._cache.set(key, toStringValue(raw));
+    }
+    const dataFiles = await readDirSafe(DATA_DIR);
+    for (const name of dataFiles) {
+      const path = joinPath(DATA_DIR, name);
+      const raw = await readFileSafe(path);
+      if (raw === null) continue;
+      const key = MODEL_PREFIX + name;
+      this._cache.set(key, toStringValue(raw));
+    }
+  }
+
+  async _writeKeyToFs(key, value) {
+    const path = keyToPath(key);
+    await ensureDir(isModelKey(key) ? DATA_DIR : SETTINGS_DIR);
+    await fs.promises.writeFile(path, toStringValue(value), 'utf8');
+  }
+
+  async _removeKeyFromFs(key) {
+    const path = keyToPath(key);
+    try {
+      await fs.promises.unlink(path);
+    } catch (e) {
+      if (!e || e.code !== 'ENOENT') throw e;
+    }
+  }
+
+  async _resetDir(path) {
+    try {
+      await fs.promises.rm(path, { recursive: true, force: true });
+    } catch {}
+    await ensureDir(path);
+  }
+
+  async _migrateLegacyIdb() {
+    if (!hasIndexedDB) return;
+    let db;
+    try {
+      const opened = await openLegacyDb();
+      if (!opened.db) {
+        if (opened.created) await deleteLegacyDb();
+        return;
+      }
+      db = opened.db;
+      const entries = await readAllLegacyEntries(db);
+      for (const [rawKey, rawVal] of entries) {
+        const key = String(rawKey);
+        const value = toStringValue(rawVal);
+        const normalized = normalizeModelKey(key);
+        const destKey = normalized || key;
+        const destPath = keyToPath(destKey);
+        if (await exists(destPath)) continue;
+        await this._writeKeyToFs(destKey, value);
+      }
+    } catch (e) {
+      console.warn('[vfs-storage] legacy IndexedDB migration failed:', e);
+      return;
+    } finally {
+      try { db && db.close && db.close(); } catch {}
+    }
+    await deleteLegacyDb();
+  }
+
+  async _migrateLegacyFs() {
+    // Move any legacy model keys mistakenly stored under settings/
+    const settingFiles = await readDirSafe(SETTINGS_DIR);
+    for (const name of settingFiles) {
+      if (!name.startsWith(LEGACY_MODEL_PREFIX)) continue;
+      const legacyPath = joinPath(SETTINGS_DIR, name);
+      const raw = await readFileSafe(legacyPath);
+      const key = MODEL_PREFIX + name.slice(LEGACY_MODEL_PREFIX.length);
+      if (raw !== null) {
+        const destPath = keyToPath(key);
+        if (!await exists(destPath)) {
+          await this._writeKeyToFs(key, raw);
+        }
+      }
+      try { await fs.promises.unlink(legacyPath); } catch {}
     }
 
-    this._ready = true;
+    // Move any legacy data directory (__BREP_MODEL__) contents to __BREP_DATA__
+    const legacyDir = '__BREP_MODEL__';
+    const legacyFiles = await readDirSafe(legacyDir);
+    if (!legacyFiles.length) return;
+    await ensureDir(DATA_DIR);
+    for (const name of legacyFiles) {
+      const from = joinPath(legacyDir, name);
+      const to = joinPath(DATA_DIR, name);
+      if (await exists(to)) {
+        try { await fs.promises.unlink(from); } catch {}
+        continue;
+      }
+      try {
+        await fs.promises.rename(from, to);
+      } catch {
+        const raw = await readFileSafe(from);
+        if (raw !== null) {
+          await fs.promises.writeFile(to, raw, 'utf8');
+        }
+        try { await fs.promises.unlink(from); } catch {}
+      }
+    }
+    try { await fs.promises.rm(legacyDir, { recursive: true, force: true }); } catch {}
   }
 
   _setupBroadcast() {
@@ -193,17 +365,22 @@ class IdbStorage {
     return v === undefined ? null : v;
   }
 
+  _enqueuePersist(op) {
+    this._persistChain = this._persistChain
+      .then(() => this._initPromise)
+      .then(op)
+      .catch((e) => {
+        console.warn('[vfs-storage] persist failed:', e);
+      });
+  }
+
   setItem(key, value) {
     const k = toStringValue(key);
     const v = toStringValue(value);
     const oldValue = this._cache.get(k) ?? null;
     this._cache.set(k, v);
 
-    if (this._idbEnabled) {
-      this._dbPromise?.then((db) => idbPut(db, k, v)).catch((e) => {
-        console.warn('[idb-storage] setItem persist failed:', e);
-      });
-    }
+    this._enqueuePersist(() => this._writeKeyToFs(k, v));
 
     tryDispatchStorageEvent(this, { key: k, oldValue, newValue: v });
     try { this._bc?.postMessage({ type: 'set', key: k, newValue: v, oldValue }); } catch {}
@@ -214,11 +391,7 @@ class IdbStorage {
     const oldValue = this._cache.get(k) ?? null;
     this._cache.delete(k);
 
-    if (this._idbEnabled) {
-      this._dbPromise?.then((db) => idbDelete(db, k)).catch((e) => {
-        console.warn('[idb-storage] removeItem persist failed:', e);
-      });
-    }
+    this._enqueuePersist(() => this._removeKeyFromFs(k));
 
     tryDispatchStorageEvent(this, { key: k, oldValue, newValue: null });
     try { this._bc?.postMessage({ type: 'remove', key: k, oldValue, newValue: null }); } catch {}
@@ -228,11 +401,10 @@ class IdbStorage {
     if (this._cache.size === 0) return;
     this._cache.clear();
 
-    if (this._idbEnabled) {
-      this._dbPromise?.then((db) => idbClear(db)).catch((e) => {
-        console.warn('[idb-storage] clear persist failed:', e);
-      });
-    }
+    this._enqueuePersist(async () => {
+      await this._resetDir(SETTINGS_DIR);
+      await this._resetDir(DATA_DIR);
+    });
 
     tryDispatchStorageEvent(this, { key: null, oldValue: null, newValue: null });
     try { this._bc?.postMessage({ type: 'clear' }); } catch {}
@@ -243,12 +415,10 @@ class IdbStorage {
   }
 
   ready() {
-    if (!this._idbEnabled) return Promise.resolve();
-    if (this._ready) return Promise.resolve();
-    return this._dbPromise.then(() => undefined).catch(() => undefined);
+    return this._initPromise;
   }
 }
 
-const localStorage = new IdbStorage();
+const localStorage = new VfsStorage();
 
 export { localStorage };

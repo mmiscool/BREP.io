@@ -78,12 +78,48 @@ async function idbGet(db, key) {
   return promisifyRequest(store.get(key));
 }
 
-async function idbPut(db, key, value) {
+async function idbDelete(db, key) {
   const tx = db.transaction([VFS_STORE_NAME], 'readwrite');
-  tx.objectStore(VFS_STORE_NAME).put(value, key);
+  tx.objectStore(VFS_STORE_NAME).delete(key);
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error || new Error('IDB put failed'));
+    tx.onerror = () => reject(tx.error || new Error('IDB delete failed'));
+  });
+}
+
+async function idbGetAllEntries(db) {
+  const tx = db.transaction([VFS_STORE_NAME], 'readonly');
+  const store = tx.objectStore(VFS_STORE_NAME);
+  if (store.getAll && store.getAllKeys) {
+    const [items, keys] = await Promise.all([promisifyRequest(store.getAll()), promisifyRequest(store.getAllKeys())]);
+    const out = new Map();
+    for (let i = 0; i < keys.length; i++) out.set(String(keys[i]), items[i]);
+    return out;
+  }
+  return new Promise((resolve, reject) => {
+    const out = new Map();
+    const req = store.openCursor();
+    req.onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (cursor) {
+        out.set(String(cursor.key), cursor.value);
+        cursor.continue();
+      } else {
+        resolve(out);
+      }
+    };
+    req.onerror = () => reject(req.error || new Error('Cursor failed'));
+  });
+}
+
+async function idbPutDeleteEntries(db, puts, deletes) {
+  const tx = db.transaction([VFS_STORE_NAME], 'readwrite');
+  const store = tx.objectStore(VFS_STORE_NAME);
+  for (const key of deletes || []) store.delete(key);
+  for (const [key, value] of puts || []) store.put(value, key);
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error('IDB batch failed'));
   });
 }
 
@@ -198,9 +234,27 @@ class IndexedDbFS {
     this._dbPromise = openVfsDB();
     try {
       const db = await this._dbPromise;
-      const stored = coerceIndex(await idbGet(db, VFS_KEY));
-      if (stored) {
-        this.index = stored;
+      const legacyRaw = await idbGet(db, VFS_KEY);
+      const legacyIndex = coerceIndex(legacyRaw);
+      if (legacyIndex) {
+        this.index = legacyIndex;
+        const puts = Object.entries(this.index.entries);
+        await idbPutDeleteEntries(db, puts, [VFS_KEY]);
+      } else {
+        if (legacyRaw !== undefined && legacyRaw !== null) {
+          await idbDelete(db, VFS_KEY);
+        }
+        const map = await idbGetAllEntries(db);
+        if (map.size) {
+          const entries = {};
+          for (const [key, value] of map.entries()) {
+            if (key === VFS_KEY) continue;
+            if (value && typeof value === 'object' && typeof value.type === 'string') {
+              entries[key] = value;
+            }
+          }
+          if (Object.keys(entries).length) this.index = { entries };
+        }
       }
     } catch (err) {
       console.warn('[vfs] IndexedDB unavailable; using in-memory storage only.', err);
@@ -225,17 +279,25 @@ class IndexedDbFS {
     }
     if (!this.index.entries['/']) {
       this.index.entries['/'] = { type: 'dir', children: [], mtimeMs: nowMs(), mode: 0o777 };
-      this._save();
+      this._save(['/']);
     }
   }
 
-  _save() {
+  _save(puts = [], deletes = []) {
     if (!this._idbEnabled) return;
     if (!this._dbPromise) this._dbPromise = openVfsDB();
-    const snapshot = this.index;
+    const entries = this.index.entries;
+    const putList = Array.isArray(puts) ? puts : [];
+    const deleteList = Array.isArray(deletes) ? deletes : [];
+    if (!putList.length && !deleteList.length) return;
+    const putPairs = [];
+    for (const key of putList) {
+      const entry = entries[key];
+      if (entry) putPairs.push([key, entry]);
+    }
     this._persistChain = this._persistChain
       .then(() => this._dbPromise)
-      .then((db) => idbPut(db, VFS_KEY, snapshot))
+      .then((db) => idbPutDeleteEntries(db, putPairs, deleteList))
       .catch((err) => {
         console.warn('[vfs] Persist failed:', err);
       });
@@ -250,8 +312,10 @@ class IndexedDbFS {
       if (!eParent.children.includes(name)) {
         eParent.children.push(name);
         eParent.mtimeMs = nowMs();
+        return parent;
       }
     }
+    return null;
   }
   _unlinkFromParent(p) {
     const parent = dirname(p);
@@ -262,8 +326,10 @@ class IndexedDbFS {
       if (i >= 0) {
         eParent.children.splice(i, 1);
         eParent.mtimeMs = nowMs();
+        return parent;
       }
     }
+    return null;
   }
   _resolveEncoding(options) {
     if (!options) return null;
@@ -303,8 +369,12 @@ class IndexedDbFS {
       mtimeMs: nowMs(),
       mode: (options.mode ?? 0o666)
     };
-    if (!exists) this._linkIntoParent(path);
-    this._save();
+    const touched = new Set([path]);
+    if (!exists) {
+      const p = this._linkIntoParent(path);
+      if (p) touched.add(p);
+    }
+    this._save([...touched]);
   }
 
   appendFileSync(path, data, options = {}) {
@@ -337,7 +407,7 @@ class IndexedDbFS {
     existing.data = uint8ToBase64(merged);
     existing.size = merged.length;
     existing.mtimeMs = nowMs();
-    this._save();
+    this._save([path]);
   }
 
   readFileSync(path, options = {}) {
@@ -368,21 +438,28 @@ class IndexedDbFS {
       const eParent = this.index.entries[parent];
       if (!eParent || eParent.type !== 'dir') throw this._enoent('ENOENT', parent);
       this.index.entries[path] = { type: 'dir', children: [], mtimeMs: nowMs(), mode: options.mode ?? 0o777 };
-      this._linkIntoParent(path); this._save(); return;
+      const touched = new Set([path]);
+      const p = this._linkIntoParent(path);
+      if (p) touched.add(p);
+      this._save([...touched]);
+      return;
     }
     const parts = normalizePath(path).split('/').filter(Boolean);
     let cur = '/';
+    const touched = new Set();
     for (const part of parts) {
       const next = normalizePath(cur + '/' + part);
       if (!this.index.entries[next]) {
         this.index.entries[next] = { type: 'dir', children: [], mtimeMs: nowMs(), mode: 0o777 };
-        this._linkIntoParent(next);
+        touched.add(next);
+        const p = this._linkIntoParent(next);
+        if (p) touched.add(p);
       } else if (this.index.entries[next].type !== 'dir') {
         throw this._eexist('EEXIST', next);
       }
       cur = next;
     }
-    this._save();
+    if (touched.size) this._save([...touched]);
   }
 
   readdirSync(path, options = {}) {
@@ -411,8 +488,9 @@ class IndexedDbFS {
     if (!entry) throw this._enoent('ENOENT', path);
     if (entry.type !== 'file') throw this._enoent('EISDIR', path);
     delete this.index.entries[path];
-    this._unlinkFromParent(path);
-    this._save();
+    const p = this._unlinkFromParent(path);
+    const puts = p ? [p] : [];
+    this._save(puts, [path]);
   }
 
   rmdirSync(path, options = {}) {
@@ -425,6 +503,7 @@ class IndexedDbFS {
     if (entry.children.length && !recursive) {
       const err = new Error(`ENOTEMPTY: directory not empty, ${path}`); err.code = 'ENOTEMPTY'; throw err;
     }
+    const toDelete = [];
     if (recursive) {
       const stack = [path];
       while (stack.length) {
@@ -434,12 +513,16 @@ class IndexedDbFS {
         if (e.type === 'dir') {
           for (const name of e.children) stack.push(normalizePath(cur + '/' + name));
         }
-        if (cur !== path) delete this.index.entries[cur];
+        delete this.index.entries[cur];
+        toDelete.push(cur);
       }
+    } else {
+      delete this.index.entries[path];
+      toDelete.push(path);
     }
-    delete this.index.entries[path];
-    this._unlinkFromParent(path);
-    this._save();
+    const p = this._unlinkFromParent(path);
+    const puts = p ? [p] : [];
+    this._save(puts, toDelete);
   }
 
   renameSync(oldPath, newPath) {
@@ -453,18 +536,26 @@ class IndexedDbFS {
     const pEntry = this.index.entries[newParent];
     if (!pEntry || pEntry.type !== 'dir') throw this._enoent('ENOENT', newParent);
 
+    const toPut = new Set();
+    const toDelete = new Set();
     if (this.index.entries[newPath]) {
       if (this.index.entries[newPath].type === 'dir') {
         const err = new Error(`EISDIR: illegal operation on a directory, ${newPath}`); err.code = 'EISDIR'; throw err;
       }
+      toDelete.add(newPath);
       delete this.index.entries[newPath];
     }
 
     this.index.entries[newPath] = entry;
     delete this.index.entries[oldPath];
 
-    this._unlinkFromParent(oldPath);
-    this._linkIntoParent(newPath);
+    toDelete.add(oldPath);
+    toPut.add(newPath);
+
+    const oldParent = this._unlinkFromParent(oldPath);
+    const newParent2 = this._linkIntoParent(newPath);
+    if (oldParent) toPut.add(oldParent);
+    if (newParent2) toPut.add(newParent2);
 
     if (entry.type === 'dir') {
       const toFix = [];
@@ -476,11 +567,14 @@ class IndexedDbFS {
         const target = normalizePath(newPath + rel);
         this.index.entries[target] = this.index.entries[oldChild];
         delete this.index.entries[oldChild];
+        toDelete.add(oldChild);
+        toPut.add(target);
       }
     }
 
     entry.mtimeMs = nowMs();
-    this._save();
+    toPut.add(newPath);
+    this._save([...toPut], [...toDelete]);
   }
 
   statSync(path) {
