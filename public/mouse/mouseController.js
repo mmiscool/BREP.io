@@ -242,7 +242,7 @@ window.addEventListener("message", function (event) {
 
 pointerTarget.onload = function () {
   const elem = document.createElement(`script`);
-  elem.src = "./mouse/virtualMousePointer.js";
+  elem.src = "/mouse/virtualMousePointer.js";
   elem.type = "module";
 
   pointerTarget.contentDocument.body.appendChild(elem);

@@ -12,7 +12,7 @@ To use copy the "mouse.html" file and "mouse" folder to the same directory hosti
 
 In your web application add the following line to the index.html file.
 ```
-<script src="./mouse/checkIfMobile.js"></script>
+<script src="/mouse/checkIfMobile.js"></script>
 ```
 
 Now visit your application from a mobile browser. 
@@ -20,7 +20,7 @@ Now visit your application from a mobile browser.
 If you want to test on a desktop type device you will have togo to the /mouse.html file directly as it will not automatically redirect to use the virtual touchpad unless it detects you are on a mobile device. 
 
 # troubleshooting 
-On some sites setting the page to full screen will not work correctly. If you run in to an issue with the iframe contents not showing up correctly comment out the following line in ./mouse/mouseController.js
+On some sites setting the page to full screen will not work correctly. If you run in to an issue with the iframe contents not showing up correctly comment out the following line in public/mouse/mouseController.js
 ```
 if (window.innerHeight !== screen.height) document.body.requestFullscreen();
 ```

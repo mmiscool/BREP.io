@@ -15,7 +15,7 @@ if (
     if (window.location.pathname == window.parent.location.pathname) {
       //test if parent is mobile mouse emulator page and redirect if not
       if (!window.parent.location.pathname.includes("/mouse.html")) {
-        window.location = "./mouse.html" + window.location.search;
+        window.location = "/mouse.html" + window.location.search;
       }
     }
   } catch {}
