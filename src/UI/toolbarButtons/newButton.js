@@ -17,5 +17,5 @@ export function createNewButton(viewer) {
     } catch { }
   }
 
-  return { label: '🆕', title: 'New model', onClick };
+  return { label: '📄', title: 'New model', onClick };
 }
