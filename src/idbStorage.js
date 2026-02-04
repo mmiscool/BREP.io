@@ -7,6 +7,7 @@
 */
 
 import { fs } from './fs.proxy.js';
+import { GithubStorage } from './githubStorage.js';
 
 const SETTINGS_DIR = 'settings';
 const DATA_DIR = '__BREP_DATA__';
@@ -15,11 +16,47 @@ const LEGACY_MODEL_PREFIX = '__BREP_MODEL__:';
 const LEGACY_DB_NAME = '__LS_SHIM_DB__';
 const LEGACY_STORE_NAME = 'kv';
 const BC_NAME = '__BREP_STORAGE_BC__';
+const STORAGE_BACKEND_EVENT = 'brep-storage-backend-change';
+const GH_TOKEN_KEY = '__BREP_GH_TOKEN__';
+const GH_REPO_KEY = '__BREP_GH_REPO__';
+const GH_BRANCH_KEY = '__BREP_GH_BRANCH__';
 
 const hasIndexedDB = typeof indexedDB !== 'undefined' && !!indexedDB.open;
 
 function toStringValue(v) {
   return v === undefined || v === null ? String(v) : String(v);
+}
+
+function getConfigStorage() {
+  try {
+    if (typeof window !== 'undefined') {
+      return window.sessionStorage || window.localStorage || null;
+    }
+  } catch {}
+  return null;
+}
+
+function loadGithubConfig() {
+  const store = getConfigStorage();
+  if (!store) return { token: '', repoFull: '', branch: '' };
+  return {
+    token: store.getItem(GH_TOKEN_KEY) || '',
+    repoFull: store.getItem(GH_REPO_KEY) || '',
+    branch: store.getItem(GH_BRANCH_KEY) || '',
+  };
+}
+
+function saveGithubConfig({ token, repoFull, branch }) {
+  const store = getConfigStorage();
+  if (!store) return;
+  const setOrClear = (key, value) => {
+    const v = String(value || '').trim();
+    if (v) store.setItem(key, v);
+    else store.removeItem(key);
+  };
+  setOrClear(GH_TOKEN_KEY, token);
+  setOrClear(GH_REPO_KEY, repoFull);
+  setOrClear(GH_BRANCH_KEY, branch);
 }
 
 function tryDispatchStorageEvent(storage, { key, oldValue, newValue }) {
@@ -419,6 +456,130 @@ class VfsStorage {
   }
 }
 
-const localStorage = new VfsStorage();
+class StorageProxy {
+  constructor(localBackend, githubBackend) {
+    this._local = localBackend;
+    this._github = githubBackend;
+    this._backend = localBackend;
+    this._mode = 'local';
+  }
 
-export { localStorage };
+  _dispatchBackendEvent() {
+    try {
+      if (typeof window !== 'undefined') {
+        const detail = this.getBackendInfo();
+        window.dispatchEvent(new CustomEvent(STORAGE_BACKEND_EVENT, { detail }));
+      }
+    } catch {}
+  }
+
+  async useGithub(config) {
+    await this._github.configure(config);
+    this._backend = this._github;
+    this._mode = 'github';
+    this._dispatchBackendEvent();
+  }
+
+  async useLocal() {
+    this._backend = this._local;
+    this._mode = 'local';
+    this._dispatchBackendEvent();
+  }
+
+  isGithub() {
+    return this._mode === 'github';
+  }
+
+  getBackendInfo() {
+    return {
+      mode: this._mode,
+      github: this._github?.getInfo?.() || null,
+    };
+  }
+
+  get length() {
+    return this._backend?.length ?? 0;
+  }
+
+  key(n) {
+    return this._backend?.key?.(n) ?? null;
+  }
+
+  getItem(key) {
+    return this._backend?.getItem?.(key) ?? null;
+  }
+
+  setItem(key, value) {
+    return this._backend?.setItem?.(key, value);
+  }
+
+  removeItem(key) {
+    return this._backend?.removeItem?.(key);
+  }
+
+  clear() {
+    return this._backend?.clear?.();
+  }
+
+  *keys() {
+    if (this._backend && typeof this._backend.keys === 'function') {
+      yield* this._backend.keys();
+    }
+  }
+
+  ready() {
+    try { return this._backend?.ready?.() ?? Promise.resolve(); } catch { return Promise.resolve(); }
+  }
+}
+
+const _localBackend = new VfsStorage();
+const _githubBackend = new GithubStorage();
+const localStorage = new StorageProxy(_localBackend, _githubBackend);
+
+const initialGh = loadGithubConfig();
+if (initialGh.token && initialGh.repoFull) {
+  localStorage.useGithub(initialGh).catch((e) => {
+    console.warn('[storage] GitHub init failed; falling back to local.', e);
+    localStorage.useLocal();
+  });
+}
+
+function getGithubStorageConfig() {
+  const cfg = loadGithubConfig();
+  if ((!cfg.branch || !cfg.repoFull) && localStorage?.isGithub?.()) {
+    const info = localStorage.getBackendInfo?.();
+    const branch = info?.github?.branch || cfg.branch || '';
+    const repoFull = info?.github?.repoFull || cfg.repoFull || '';
+    return { ...cfg, branch, repoFull };
+  }
+  return cfg;
+}
+
+async function configureGithubStorage({ token, repoFull, branch, persist = true } = {}) {
+  const prev = loadGithubConfig();
+  const next = {
+    token: token !== undefined ? String(token || '') : prev.token,
+    repoFull: repoFull !== undefined ? String(repoFull || '') : prev.repoFull,
+    branch: branch !== undefined ? String(branch || '') : prev.branch,
+  };
+  if (persist) saveGithubConfig(next);
+  if (next.token && next.repoFull) {
+    await localStorage.useGithub(next);
+    return { enabled: true, mode: 'github' };
+  }
+  await localStorage.useLocal();
+  return { enabled: false, mode: 'local' };
+}
+
+async function clearGithubStorageConfig() {
+  saveGithubConfig({ token: '', repoFull: '', branch: '' });
+  await localStorage.useLocal();
+}
+
+export {
+  localStorage,
+  STORAGE_BACKEND_EVENT,
+  configureGithubStorage,
+  getGithubStorageConfig,
+  clearGithubStorageConfig,
+};

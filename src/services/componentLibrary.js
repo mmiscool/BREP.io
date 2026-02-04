@@ -1,7 +1,187 @@
 import JSZip from 'jszip';
-import { localStorage as LS } from '../idbStorage.js';
+import {
+  localStorage as LS,
+  getGithubStorageConfig,
+} from '../idbStorage.js';
+import {
+  listGithubDir,
+  readGithubFileBase64,
+  writeGithubFileBase64,
+  deleteGithubFile,
+  getGithubStorageRoot,
+  encodeRepoItemName,
+  decodeRepoItemName,
+} from '../githubStorage.js';
 
 export const MODEL_STORAGE_PREFIX = '__BREP_DATA__:';
+const MODEL_FILE_EXT = '.3mf';
+const MODEL_META_EXT = '.meta.json';
+
+function normalizeBase64Payload(payload) {
+  let b64 = String(payload || '');
+  if (b64.startsWith('data:') && b64.includes(';base64,')) {
+    b64 = b64.split(';base64,')[1] || '';
+  }
+  return b64.replace(/\s+/g, '');
+}
+
+function getGithubModelPaths(name) {
+  const root = getGithubStorageRoot();
+  const encName = encodeRepoItemName(name);
+  const dataDir = `${root}/__BREP_DATA__`;
+  return {
+    dataPath: `${dataDir}/${encName}${MODEL_FILE_EXT}`,
+    metaPath: `${dataDir}/${encName}${MODEL_META_EXT}`,
+  };
+}
+
+async function listGithubComponentRecords() {
+  const cfg = getGithubStorageConfig();
+  if (!cfg?.token || !cfg?.repoFull) return [];
+  const dataDir = `${getGithubStorageRoot()}/__BREP_DATA__`;
+  const items = await listGithubDir({
+    token: cfg.token,
+    repoFull: cfg.repoFull,
+    branch: cfg.branch,
+    path: dataDir,
+  });
+  const out = [];
+  const metas = new Map();
+
+  for (const it of items) {
+    if (it.type !== 'file' || !it.name) continue;
+    if (String(it.name).endsWith(MODEL_META_EXT)) {
+      const base = String(it.name).slice(0, -MODEL_META_EXT.length);
+      metas.set(base, it);
+    }
+  }
+
+  for (const it of items) {
+    if (it.type !== 'file' || !it.name) continue;
+    if (!String(it.name).endsWith(MODEL_FILE_EXT)) continue;
+    const base = String(it.name).slice(0, -MODEL_FILE_EXT.length);
+    const name = decodeRepoItemName(base);
+    let savedAt = null;
+    let thumbnail = null;
+    const meta = metas.get(base);
+    if (meta) {
+      try {
+        const metaB64 = await readGithubFileBase64({
+          token: cfg.token,
+          repoFull: cfg.repoFull,
+          branch: cfg.branch,
+          path: meta.path,
+        });
+        if (metaB64) {
+          const metaJson = JSON.parse(atob(metaB64));
+          savedAt = metaJson?.savedAt || null;
+          thumbnail = metaJson?.thumbnail || null;
+        }
+      } catch { /* ignore meta failures */ }
+    }
+    out.push({
+      name,
+      savedAt,
+      has3mf: true,
+      record: { savedAt, data3mf: null, data: null, thumbnail },
+    });
+  }
+
+  out.sort((a, b) => {
+    const aTime = a.savedAt ? Date.parse(a.savedAt) : 0;
+    const bTime = b.savedAt ? Date.parse(b.savedAt) : 0;
+    return bTime - aTime;
+  });
+
+  return out;
+}
+
+async function getGithubComponentRecord(name) {
+  const cfg = getGithubStorageConfig();
+  if (!cfg?.token || !cfg?.repoFull) return null;
+  const { dataPath, metaPath } = getGithubModelPaths(name);
+  let data3mf = null;
+  let savedAt = null;
+  let thumbnail = null;
+  try {
+    data3mf = await readGithubFileBase64({
+      token: cfg.token,
+      repoFull: cfg.repoFull,
+      branch: cfg.branch,
+      path: dataPath,
+    });
+  } catch { /* ignore */ }
+  if (!data3mf) return null;
+  try {
+    const metaB64 = await readGithubFileBase64({
+      token: cfg.token,
+      repoFull: cfg.repoFull,
+      branch: cfg.branch,
+      path: metaPath,
+    });
+    if (metaB64) {
+      const metaJson = JSON.parse(atob(metaB64));
+      savedAt = metaJson?.savedAt || null;
+      thumbnail = metaJson?.thumbnail || null;
+    }
+  } catch { /* ignore */ }
+  return {
+    name,
+    savedAt,
+    data3mf,
+    data: null,
+    thumbnail,
+  };
+}
+
+async function setGithubComponentRecord(name, dataObj) {
+  const cfg = getGithubStorageConfig();
+  if (!cfg?.token || !cfg?.repoFull) return;
+  const { dataPath, metaPath } = getGithubModelPaths(name);
+  const data3mf = normalizeBase64Payload(dataObj?.data3mf || '');
+  if (!data3mf) return;
+  await writeGithubFileBase64({
+    token: cfg.token,
+    repoFull: cfg.repoFull,
+    branch: cfg.branch,
+    path: dataPath,
+    base64: data3mf,
+    message: `BREP model update: ${name}`,
+  });
+  const meta = {
+    savedAt: dataObj?.savedAt || new Date().toISOString(),
+    thumbnail: dataObj?.thumbnail || null,
+  };
+  const metaB64 = btoa(JSON.stringify(meta));
+  await writeGithubFileBase64({
+    token: cfg.token,
+    repoFull: cfg.repoFull,
+    branch: cfg.branch,
+    path: metaPath,
+    base64: metaB64,
+    message: `BREP model meta: ${name}`,
+  });
+}
+
+async function removeGithubComponentRecord(name) {
+  const cfg = getGithubStorageConfig();
+  if (!cfg?.token || !cfg?.repoFull) return;
+  const { dataPath, metaPath } = getGithubModelPaths(name);
+  await deleteGithubFile({
+    token: cfg.token,
+    repoFull: cfg.repoFull,
+    branch: cfg.branch,
+    path: dataPath,
+    message: `BREP model delete: ${name}`,
+  });
+  await deleteGithubFile({
+    token: cfg.token,
+    repoFull: cfg.repoFull,
+    branch: cfg.branch,
+    path: metaPath,
+    message: `BREP model meta delete: ${name}`,
+  });
+}
 
 function safeParse(json) {
   try {
@@ -19,7 +199,10 @@ function decodeModelKey(key) {
   }
 }
 
-export function listComponentRecords() {
+export async function listComponentRecords() {
+  if (LS?.isGithub?.()) {
+    return await listGithubComponentRecords();
+  }
   const items = [];
   try {
     for (let i = 0; i < LS.length; i++) {
@@ -50,7 +233,10 @@ export function listComponentRecords() {
   return items;
 }
 
-export function getComponentRecord(name) {
+export async function getComponentRecord(name) {
+  if (LS?.isGithub?.()) {
+    return await getGithubComponentRecord(name);
+  }
   if (!name) return null;
   const key = MODEL_STORAGE_PREFIX + encodeURIComponent(String(name));
   try {
@@ -97,7 +283,10 @@ export function uint8ArrayToBase64(uint8) {
   return btoa(binary);
 }
 
-export function setComponentRecord(name, dataObj) {
+export async function setComponentRecord(name, dataObj) {
+  if (LS?.isGithub?.()) {
+    return await setGithubComponentRecord(name, dataObj);
+  }
   if (!name) return;
   const key = MODEL_STORAGE_PREFIX + encodeURIComponent(String(name));
   try {
@@ -105,7 +294,10 @@ export function setComponentRecord(name, dataObj) {
   } catch {}
 }
 
-export function removeComponentRecord(name) {
+export async function removeComponentRecord(name) {
+  if (LS?.isGithub?.()) {
+    return await removeGithubComponentRecord(name);
+  }
   if (!name) return;
   const key = MODEL_STORAGE_PREFIX + encodeURIComponent(String(name));
   try {

@@ -176,7 +176,7 @@ export class AssemblyComponentFeature {
     const selectedName = this.inputParams && this.inputParams.componentName;
     if (!selectedName) return null;
 
-    const record = getComponentRecord(selectedName);
+    const record = await getComponentRecord(selectedName);
     if (!record || !record.data3mf) return null;
 
     const bytes = base64ToUint8Array(record.data3mf);

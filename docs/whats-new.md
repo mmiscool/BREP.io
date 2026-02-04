@@ -12,3 +12,8 @@
 - Brush improvements include live cursor outline, multiple shapes (round, square, diamond), and an eraser that respects the selected shape.
 - Paint Bucket tool with tolerance slider (0-255) fills contiguous regions based on the composited image and applies paint only to the draw layer.
 - Finish saves the edits back to the feature and triggers a recompute; Cancel discards edits.
+
+## GitHub Repo Storage
+- New GitHub storage backend lets you save models and settings directly into a repository.
+- Storage writes real `.3mf` files plus a small `.meta.json` sidecar in `brep-storage/__BREP_DATA__/`.
+- Configure it in **Display Settings → Storage (GitHub)** using a fine‑grained PAT with Contents read/write.

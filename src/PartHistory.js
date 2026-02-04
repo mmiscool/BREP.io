@@ -993,7 +993,7 @@ export class PartHistory {
     }
   }
 
-  _collectAssemblyComponentUpdates() {
+  async _collectAssemblyComponentUpdates() {
     if (!Array.isArray(this.features) || this.features.length === 0) {
       return [];
     }
@@ -1018,7 +1018,7 @@ export class PartHistory {
       const componentName = feature?.inputParams?.componentName;
       if (!componentName) continue;
 
-      const record = getComponentRecord(componentName);
+      const record = await getComponentRecord(componentName);
       if (!record || !record.data3mf) continue;
 
       const prevData = feature?.persistentData?.componentData?.data3mf || null;
@@ -1044,13 +1044,14 @@ export class PartHistory {
     return updates;
   }
 
-  getOutdatedAssemblyComponentCount() {
-    return this._collectAssemblyComponentUpdates().length;
+  async getOutdatedAssemblyComponentCount() {
+    const updates = await this._collectAssemblyComponentUpdates();
+    return updates.length;
   }
 
   async updateAssemblyComponents(options = {}) {
     const { rerun = true } = options || {};
-    const updates = this._collectAssemblyComponentUpdates();
+    const updates = await this._collectAssemblyComponentUpdates();
     const updatedCount = updates.length;
 
     if (updatedCount === 0) {

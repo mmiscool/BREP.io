@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import JSZip from 'jszip';
 import { generate3MF } from '../exporters/threeMF.js';
-import { localStorage as LS } from '../idbStorage.js';
+import { localStorage as LS, STORAGE_BACKEND_EVENT } from '../idbStorage.js';
 import {
   listComponentRecords,
   getComponentRecord,
@@ -29,7 +29,7 @@ export class FileManagerWidget {
     this._thumbCache = new Map();
     this._ensureStyles();
     this._buildUI();
-    this.refreshList();
+    void this.refreshList();
 
     // Refresh UI thumbnails/list when any model key changes via storage events (cross-tab and other code paths)
     try {
@@ -44,16 +44,30 @@ export class FileManagerWidget {
               const name = decodeURIComponent(encName);
               if (name) this._thumbCache.delete(name);
             } catch { }
-            this.refreshList();
+            void this.refreshList();
           } else if (key === this._lastKey || key === '__BREP_FM_ICONSVIEW__') {
             // Preferences updated elsewhere; re-sync
             this.currentName = this._loadLastName() || this.currentName || '';
             this._iconsOnly = this._loadIconsPref();
-            this.refreshList();
+            void this.refreshList();
           }
         } catch { /* ignore */ }
       };
       window.addEventListener('storage', this._onStorage);
+    } catch { /* ignore */ }
+
+    // Refresh list when storage backend switches (local ↔ GitHub)
+    try {
+      this._onBackendChange = () => {
+        Promise.resolve(LS.ready()).then(() => {
+          try {
+            this.currentName = this._loadLastName() || this.currentName || '';
+            this._iconsOnly = this._loadIconsPref();
+            void this.refreshList();
+          } catch { /* ignore */ }
+        });
+      };
+      window.addEventListener(STORAGE_BACKEND_EVENT, this._onBackendChange);
     } catch { /* ignore */ }
 
     // Ensure storage hydration completes, then re-sync prefs/list and auto-load last
@@ -62,7 +76,7 @@ export class FileManagerWidget {
         try {
           this.currentName = this._loadLastName() || this.currentName || '';
           this._iconsOnly = this._loadIconsPref();
-          this.refreshList();
+        void this.refreshList();
           this.autoLoadLast();
         } catch { alert('Failed to initialize File Manager storage.'); }
       });
@@ -90,8 +104,8 @@ export class FileManagerWidget {
 
   // ----- Storage helpers -----
   // List all saved model records from per-model keys
-  _listModels() {
-    const records = listComponentRecords();
+  async _listModels() {
+    const records = await listComponentRecords();
     return records.map(({ name, savedAt, record }) => ({
       name,
       savedAt,
@@ -101,16 +115,16 @@ export class FileManagerWidget {
     }));
   }
   // Fetch one model record
-  _getModel(name) {
-    return getComponentRecord(name);
+  async _getModel(name) {
+    return await getComponentRecord(name);
   }
   // Persist one model record
-  _setModel(name, dataObj) {
-    setComponentRecord(name, dataObj);
+  async _setModel(name, dataObj) {
+    await setComponentRecord(name, dataObj);
   }
   // Remove one model record
-  _removeModel(name) {
-    removeComponentRecord(name);
+  async _removeModel(name) {
+    await removeComponentRecord(name);
   }
   _saveLastName(name) {
     if (name) LS.setItem(this._lastKey, name);
@@ -247,26 +261,82 @@ export class FileManagerWidget {
       thumbnail = await this._captureThumbnail(60);
     } catch { /* ignore thumbnail failures */ }
 
-    // Generate a compact 3MF. For local storage we only need history (no meshes), but we do embed a thumbnail.
-    const threeMfBytes = await generate3MF([], { unit: 'millimeter', precision: 6, scale: 1, additionalFiles, modelMetadata, thumbnail });
+    // Collect solids for full 3MF export (so slicers can open it).
+    const solids = this._collectSolidsForExport();
+    const solidsForExport = [];
+    const skipped = [];
+    solids.forEach((s, idx) => {
+      try {
+        const mesh = s?.getMesh?.();
+        if (mesh && mesh.vertProperties && mesh.triVerts) {
+          solidsForExport.push(s);
+        } else {
+          skipped.push(s?.name || `solid_${idx}`);
+        }
+      } catch {
+        skipped.push(s?.name || `solid_${idx}`);
+      }
+    });
+
+    let threeMfBytes;
+    try {
+      const metadataManager = this.viewer?.partHistory?.metadataManager || null;
+      threeMfBytes = await generate3MF(solidsForExport, {
+        unit: 'millimeter',
+        precision: 6,
+        scale: 1,
+        additionalFiles,
+        modelMetadata,
+        thumbnail,
+        metadataManager,
+      });
+    } catch (e) {
+      // Fallback: history only 3MF
+      const metadataManager = this.viewer?.partHistory?.metadataManager || null;
+      threeMfBytes = await generate3MF([], {
+        unit: 'millimeter',
+        precision: 6,
+        scale: 1,
+        additionalFiles,
+        modelMetadata,
+        thumbnail,
+        metadataManager,
+      });
+      console.warn('[FileManagerWidget] 3MF export failed for solids, saved history-only 3MF.', e);
+    }
     const threeMfB64 = uint8ArrayToBase64(threeMfBytes);
     const now = new Date().toISOString();
 
     // Store only the 3MF (with embedded thumbnail) and timestamp
     const record = { savedAt: now, data3mf: threeMfB64 };
     if (thumbnail) record.thumbnail = thumbnail;
-    this._setModel(name, record);
+    await this._setModel(name, record);
     // Update in-memory thumbnail cache so UI reflects the new preview immediately
     try { if (thumbnail) this._thumbCache.set(name, thumbnail); } catch { }
     this.currentName = name;
     this._saveLastName(name);
-    this.refreshList();
+    await this.refreshList();
+    if (skipped.length) {
+      try { console.warn('[FileManagerWidget] Skipped non-manifold solids:', skipped); } catch {}
+    }
+  }
+
+  _collectSolidsForExport() {
+    const scene = this.viewer?.partHistory?.scene || this.viewer?.scene;
+    if (!scene) return [];
+    const solids = [];
+    scene.traverse((o) => {
+      if (!o || !o.visible) return;
+      if (o.type === 'SOLID' && typeof o.toSTL === 'function') solids.push(o);
+    });
+    const selected = solids.filter(o => o.selected === true);
+    return selected.length ? selected : solids;
   }
 
   async loadModel(name) {
     if (!this.viewer || !this.viewer.partHistory) return;
     const seq = ++this._loadSeq; // only the last call should win
-    const rec = this._getModel(name);
+    const rec = await this._getModel(name);
     if (!rec) return alert('Model not found.');
     await this.viewer.partHistory.reset();
     // Prefer new 3MF-based storage
@@ -354,17 +424,17 @@ export class FileManagerWidget {
     this._refreshHistoryCollections('load-model');
   }
 
-  deleteModel(name) {
-    const rec = this._getModel(name);
+  async deleteModel(name) {
+    const rec = await this._getModel(name);
     if (!rec) return;
     const proceed = confirm(`Delete model "${name}"? This cannot be undone.`);
     if (!proceed) return;
-    this._removeModel(name);
+    await this._removeModel(name);
     if (this.currentName === name) {
       this.currentName = '';
       if (this.nameInput.value === name) this.nameInput.value = '';
     }
-    this.refreshList();
+    await this.refreshList();
   }
 
   _refreshHistoryCollections(reason = 'manual') {
@@ -389,8 +459,8 @@ export class FileManagerWidget {
     } catch { /* ignore */ }
   }
 
-  refreshList() {
-    const items = this._listModels();
+  async refreshList() {
+    const items = await this._listModels();
     while (this.listEl.firstChild) this.listEl.removeChild(this.listEl.firstChild);
 
     if (!items.length) {
@@ -454,7 +524,7 @@ export class FileManagerWidget {
     this._iconsOnly = !this._iconsOnly;
     this._saveIconsPref(this._iconsOnly);
     this._updateViewToggleUI();
-    this.refreshList();
+    void this.refreshList();
   }
   _updateViewToggleUI() {
     if (!this.viewToggleBtn) return;
@@ -503,6 +573,14 @@ export class FileManagerWidget {
     try {
       if (!imgEl) return;
       if (!rec?.data3mf) {
+        try {
+          const full = await this._getModel(rec?.name);
+          if (full && full.data3mf) {
+            rec = { ...rec, data3mf: full.data3mf, thumbnail: full.thumbnail };
+          }
+        } catch { /* ignore */ }
+      }
+      if (!rec?.data3mf) {
         imgEl.style.display = 'none';
         return;
       }
@@ -530,9 +608,9 @@ export class FileManagerWidget {
     }
   }
 
-  _persistThumbnail(name, thumbnail) {
+  async _persistThumbnail(name, thumbnail) {
     if (!name || !thumbnail) return;
-    const existing = getComponentRecord(name);
+    const existing = await getComponentRecord(name);
     if (!existing) return;
     const payload = {
       savedAt: existing.savedAt || new Date().toISOString(),
@@ -540,7 +618,7 @@ export class FileManagerWidget {
       data: existing.data,
       thumbnail,
     };
-    setComponentRecord(name, payload);
+    await setComponentRecord(name, payload);
   }
 
   async _captureThumbnail(size = 60) {

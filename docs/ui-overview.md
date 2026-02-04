@@ -8,3 +8,4 @@
   - Import opens a file picker for 3MF (with optional history) or BREP JSON.
 - **Export dialog** offers 3MF, STL, OBJ, or BREP JSON output.
 - **Selection Filter** now lives in the toolbar (right side) for quick changes; press Escape to clear selection.
+- **Display Settings → Storage (GitHub)** lets you connect a GitHub repo and store models/settings remotely.

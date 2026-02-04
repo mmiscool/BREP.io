@@ -118,14 +118,14 @@ export class AssemblyConstraintsWidget {
         target.insertBefore(this._updateComponentsBtn, target.firstChild);
       }
     }
-    this._refreshUpdateComponentsButton();
+    void this._refreshUpdateComponentsButton();
 
     try {
       this._onStorageEvent = (ev) => {
         try {
           const key = (ev && (ev.key ?? ev.detail?.key)) || '';
           if (typeof key === 'string' && key.startsWith(MODEL_STORAGE_PREFIX)) {
-            this._refreshUpdateComponentsButton();
+            void this._refreshUpdateComponentsButton();
           }
         } catch {
           /* ignore */
@@ -294,7 +294,7 @@ export class AssemblyConstraintsWidget {
   }
 
   _syncNow() {
-    this._refreshUpdateComponentsButton();
+    void this._refreshUpdateComponentsButton();
     this._clearHighlights();
     const entries = this.history?.list?.();
     const list = Array.isArray(entries) ? entries : [];
@@ -1323,14 +1323,14 @@ export class AssemblyConstraintsWidget {
     return btn;
   }
 
-  _refreshUpdateComponentsButton() {
+  async _refreshUpdateComponentsButton() {
     const btn = this._updateComponentsBtn;
     if (!btn) return;
 
     let count = 0;
     try {
       if (this.partHistory && typeof this.partHistory.getOutdatedAssemblyComponentCount === 'function') {
-        count = Number(this.partHistory.getOutdatedAssemblyComponentCount()) || 0;
+        count = Number(await this.partHistory.getOutdatedAssemblyComponentCount()) || 0;
       }
     } catch {
       count = 0;
@@ -1357,7 +1357,7 @@ export class AssemblyConstraintsWidget {
     if (!this.partHistory || typeof this.partHistory.updateAssemblyComponents !== 'function') return;
 
     this._updatingComponents = true;
-    this._refreshUpdateComponentsButton();
+    void this._refreshUpdateComponentsButton();
 
     try {
       const result = await this.partHistory.updateAssemblyComponents({ rerun: true });
@@ -1368,7 +1368,7 @@ export class AssemblyConstraintsWidget {
       console.warn('[AssemblyConstraintsWidget] Failed to update components:', error);
     } finally {
       this._updatingComponents = false;
-      this._refreshUpdateComponentsButton();
+      void this._refreshUpdateComponentsButton();
     }
   }
 

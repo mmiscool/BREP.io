@@ -3,7 +3,7 @@ import { ModelLibraryView } from './ModelLibraryView.js';
 
 export function openComponentSelectorModal({ title = 'Select Component' } = {}) {
   return new Promise((resolve) => {
-    const records = listComponentRecords();
+    let records = [];
 
     const overlay = document.createElement('div');
     overlay.className = 'component-selector-overlay';
@@ -72,6 +72,14 @@ export function openComponentSelectorModal({ title = 'Select Component' } = {}) 
           return;
         }
         if (!item.data3mf) {
+          try {
+            const full = await getComponentRecord(item.name);
+            if (full?.data3mf) {
+              item = { ...item, data3mf: full.data3mf, thumbnail: full.thumbnail };
+            }
+          } catch { /* ignore */ }
+        }
+        if (!item.data3mf) {
           if (thumbCache.has(item.name)) {
             const cached = thumbCache.get(item.name);
             if (cached) imgEl.src = cached;
@@ -92,14 +100,14 @@ export function openComponentSelectorModal({ title = 'Select Component' } = {}) 
         }
       },
       onOpen: async (name) => {
-        const record = getComponentRecord(name);
+        const record = await getComponentRecord(name);
         if (!record || !record.data3mf) {
           cleanup(null);
           return;
         }
         cleanup(record);
       },
-      emptyMessage: records.length ? 'No components match the search.' : 'No stored components found.',
+      emptyMessage: 'Loading components…',
     });
 
     const updateViewToggle = () => {
@@ -131,6 +139,15 @@ export function openComponentSelectorModal({ title = 'Select Component' } = {}) 
       gallery.render(mapped);
     };
 
+    const loadRecords = async () => {
+      try {
+        records = await listComponentRecords();
+      } catch {
+        records = [];
+      }
+      render();
+    };
+
     viewToggle.addEventListener('click', () => {
       iconsOnly = !iconsOnly;
       updateViewToggle();
@@ -140,6 +157,7 @@ export function openComponentSelectorModal({ title = 'Select Component' } = {}) 
 
     search.addEventListener('input', render);
     render();
+    void loadRecords();
 
     requestAnimationFrame(() => {
       try { search.focus(); } catch {}
