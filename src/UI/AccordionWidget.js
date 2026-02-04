@@ -102,6 +102,7 @@ export class AccordionWidget {
     // Title element
     const titleElement = document.createElement("div");
     titleElement.classList.add("accordion-title");
+    titleElement.classList.add("touch-pass-through");
     titleElement.textContent = title;
     titleElement.name = `accordion-title-${title}`;
     this.uiElement.appendChild(titleElement);

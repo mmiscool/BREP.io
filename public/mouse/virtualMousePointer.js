@@ -151,6 +151,19 @@ function doTheProperEvents(item) {
     exicuteEvents(item, ["mouseup", "pointerup"], { button: 2 });
   }
 
+  if (eventType == "zoom") {
+    const wheelEvent = new WheelEvent("wheel", {
+      clientX: absoluteX,
+      clientY: absoluteY,
+      deltaY: deltaY || 0,
+      deltaMode: 0,
+      bubbles: true,
+      cancelable: true,
+      shiftKey: shiftKey,
+    });
+    try { item.dispatchEvent(wheelEvent); } catch {}
+  }
+
   if (eventType == "click") {
     exicuteEvents(item, ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]);
     if (item.nodeName == "INPUT") item.focus();

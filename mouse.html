@@ -117,6 +117,23 @@
         z-index: 10001;
     }
 
+    body:fullscreen #holderHolder,
+    body:fullscreen #FakeMouseHolder,
+    body:fullscreen #mouseToggle,
+    body:fullscreen #settings {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+    }
+
+    body:fullscreen #mouseToggle {
+        inset: auto;
+        bottom: calc(30% - 20px);
+        left: 0;
+        width: 40px;
+        height: 40px;
+    }
+
     html,
     body {
         margin: 0;

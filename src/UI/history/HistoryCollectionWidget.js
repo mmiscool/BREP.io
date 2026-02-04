@@ -329,6 +329,7 @@ export class HistoryCollectionWidget {
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'hc-toggle';
+    toggle.classList.add('touch-pass-through');
     toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
     toggle.addEventListener('click', () => { this._toggleEntry(entryId); });
 

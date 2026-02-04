@@ -16,8 +16,13 @@ function goFullscreen() {
     }
 }
 
-// Run check and trigger fullscreen
+// Run check and trigger fullscreen (skip when embedded in iframe like mouse.html)
 window.addEventListener('load', () => {
+    try {
+        if (window.self !== window.top) return;
+    } catch {
+        return;
+    }
     if (isMobile()) {
         // Many browsers only allow fullscreen on user interaction (like a tap),
         // so it's safer to bind it to a user event:
