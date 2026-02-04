@@ -3,472 +3,182 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>GitHub CDN-only Repo File Editor (Device Flow)</title>
+  <title>GitHub Repo File Editor (Token, CDN-only)</title>
   <style>
-    :root {
-      color-scheme: dark;
-      --bg: #0b0f14;
-      --panel: #0f1620;
-      --panel2: #0c121a;
-      --text: #e6edf3;
-      --muted: #9aa6b2;
-      --border: #243041;
-      --accent: #4cc2ff;
-      --danger: #ff5c5c;
-      --ok: #45d483;
-      --warn: #ffd65a;
-      --shadow: 0 10px 30px rgba(0,0,0,.35);
-      --radius: 12px;
-      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: radial-gradient(1200px 800px at 20% 0%, #0f1a2a 0%, var(--bg) 55%);
-      color: var(--text);
-      font-family: var(--sans);
-    }
-    header {
-      padding: 18px 20px;
-      border-bottom: 1px solid var(--border);
-      background: rgba(10, 15, 22, .75);
-      backdrop-filter: blur(8px);
-      position: sticky;
-      top: 0;
-      z-index: 10;
-    }
-    header h1 {
-      margin: 0;
-      font-size: 16px;
-      letter-spacing: .2px;
-      font-weight: 650;
-    }
-    header .sub {
-      margin-top: 6px;
-      font-size: 12px;
-      color: var(--muted);
-    }
-    main {
-      padding: 18px 20px 26px;
-      max-width: 1200px;
-      margin: 0 auto;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: 420px 1fr;
-      gap: 14px;
-      align-items: start;
-    }
-    @media (max-width: 980px) {
-      .grid { grid-template-columns: 1fr; }
-    }
-    .card {
-      background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      overflow: hidden;
-    }
-    .card .hd {
-      padding: 12px 14px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      background: rgba(0,0,0,.15);
-    }
-    .card .hd h2 {
-      margin: 0;
-      font-size: 13px;
-      font-weight: 650;
-      letter-spacing: .2px;
-    }
-    .card .bd { padding: 12px 14px; }
-    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    .row > * { flex: 0 0 auto; }
-    label {
-      font-size: 12px;
-      color: var(--muted);
-      display: block;
-      margin-bottom: 6px;
-    }
-    input, select, button, textarea {
-      font: inherit;
-      color: var(--text);
-    }
-    input[type="text"], input[type="password"], select, textarea {
-      width: 100%;
-      background: rgba(0,0,0,.25);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 10px 10px;
-      outline: none;
-    }
-    input[type="text"]:focus, input[type="password"]:focus, select:focus, textarea:focus {
-      border-color: rgba(76,194,255,.6);
-      box-shadow: 0 0 0 3px rgba(76,194,255,.15);
-    }
-    textarea {
-      font-family: var(--mono);
-      font-size: 12.5px;
-      line-height: 1.45;
-      min-height: 460px;
-      resize: vertical;
-    }
-    button {
-      border: 1px solid var(--border);
-      background: rgba(76,194,255,.12);
-      border-radius: 10px;
-      padding: 9px 10px;
-      cursor: pointer;
-      transition: transform .04s ease, background .15s ease, border-color .15s ease;
-      user-select: none;
-      font-weight: 650;
-      font-size: 12px;
-    }
-    button:hover { background: rgba(76,194,255,.18); border-color: rgba(76,194,255,.35); }
-    button:active { transform: translateY(1px); }
-    button[disabled] {
-      opacity: .55;
-      cursor: not-allowed;
-      transform: none;
-    }
-    .btn-ghost { background: rgba(255,255,255,.04); }
-    .btn-danger { background: rgba(255,92,92,.12); }
-    .btn-danger:hover { background: rgba(255,92,92,.18); border-color: rgba(255,92,92,.35); }
-    .pill {
-      font-size: 11px;
-      padding: 4px 8px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: rgba(255,255,255,.04);
-      color: var(--muted);
-      display: inline-flex;
-      gap: 6px;
-      align-items: center;
-      white-space: nowrap;
-    }
-    .pill.ok { color: var(--ok); border-color: rgba(69,212,131,.35); background: rgba(69,212,131,.08); }
-    .pill.warn { color: var(--warn); border-color: rgba(255,214,90,.35); background: rgba(255,214,90,.08); }
-    .pill.bad { color: var(--danger); border-color: rgba(255,92,92,.35); background: rgba(255,92,92,.08); }
-
-    .status {
-      margin-top: 10px;
-      padding: 10px 10px;
-      border-radius: 10px;
-      border: 1px solid var(--border);
-      background: rgba(0,0,0,.18);
-      font-size: 12px;
-      color: var(--muted);
-      white-space: pre-wrap;
-      font-family: var(--mono);
-    }
-
-    .list {
-      margin-top: 10px;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      overflow: hidden;
-      background: rgba(0,0,0,.18);
-    }
-    .list .item {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      justify-content: space-between;
-      padding: 10px 10px;
-      border-bottom: 1px solid rgba(255,255,255,.05);
-      cursor: pointer;
-    }
-    .list .item:last-child { border-bottom: 0; }
-    .list .item:hover { background: rgba(76,194,255,.06); }
-    .left {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      min-width: 0;
-    }
-    .icon {
-      width: 26px; height: 26px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      display: grid;
-      place-items: center;
-      background: rgba(255,255,255,.04);
-      flex: 0 0 auto;
-      font-family: var(--mono);
-      font-size: 12px;
-      color: var(--muted);
-    }
-    .name {
-      font-size: 12.5px;
-      font-weight: 650;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .meta {
-      font-size: 11px;
-      color: var(--muted);
-      font-family: var(--mono);
-      white-space: nowrap;
-    }
-
-    .breadcrumb {
-      display: flex;
-      gap: 6px;
-      align-items: center;
-      flex-wrap: wrap;
-      margin-top: 8px;
-      font-size: 12px;
-      color: var(--muted);
-    }
-    .crumb {
-      cursor: pointer;
-      padding: 4px 8px;
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,.07);
-      background: rgba(255,255,255,.03);
-    }
-    .crumb:hover { border-color: rgba(76,194,255,.35); }
-
-    .split {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-    @media (max-width: 980px) { .split { grid-template-columns: 1fr; } }
-
-    .small { font-size: 12px; color: var(--muted); line-height: 1.4; }
-    .kbd {
-      font-family: var(--mono);
-      padding: 2px 6px;
-      border-radius: 6px;
-      background: rgba(255,255,255,.06);
-      border: 1px solid rgba(255,255,255,.08);
-      color: var(--text);
-      font-size: 11px;
-    }
+    /* Layout only */
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    header { padding: 10px; border-bottom: 1px solid #ccc; }
+    main { padding: 10px; }
+    .grid { display: grid; grid-template-columns: 380px 1fr; gap: 10px; align-items: start; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    .panel { border: 1px solid #ccc; padding: 10px; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .stack > * { margin-bottom: 8px; }
+    .stack > *:last-child { margin-bottom: 0; }
+    textarea { width: 100%; height: 520px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    select, input[type="text"], input[type="password"] { width: 100%; }
+    .fileList { border: 1px solid #ccc; height: 360px; overflow: auto; padding: 6px; }
+    .fileItem { padding: 6px; border-bottom: 1px solid #eee; cursor: pointer; }
+    .fileItem:hover { background: #f5f5f5; }
+    .crumbs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .crumb { cursor: pointer; text-decoration: underline; }
+    .status { white-space: pre-wrap; border: 1px solid #ddd; padding: 8px; }
   </style>
 </head>
 
 <body>
 <header>
-  <h1>GitHub CDN-only Repo File Editor (OAuth Device Flow)</h1>
-  <div class="sub">
-    No backend. Uses GitHub Device Flow for auth, then the REST Contents API to list/read/write files.
-  </div>
+  <strong>GitHub Repo File Editor (Token, CDN-only)</strong>
+  <div>Paste a GitHub token (fine-grained PAT recommended). No OAuth, no backend.</div>
 </header>
 
 <main>
   <div class="grid">
-    <!-- LEFT: Auth + Repo + Browser -->
-    <section class="card">
-      <div class="hd">
-        <h2>1) Authenticate</h2>
-        <span id="authPill" class="pill">signed out</span>
+    <!-- LEFT -->
+    <section class="panel stack">
+      <div>
+        <strong>1) Authenticate (Token)</strong>
       </div>
-      <div class="bd">
-        <div class="small">
-          Create a GitHub <span class="kbd">OAuth App</span>, copy its <span class="kbd">Client ID</span>,
-          and (in the app settings) enable <span class="kbd">Device Flow</span>.
+
+      <div>
+        <label for="token">GitHub Token</label><br />
+        <input id="token" type="password" placeholder="Paste token here" />
+        <div class="row" style="margin-top:6px;">
+          <button id="btnUseToken">Use token</button>
+          <button id="btnClearToken">Clear</button>
+          <label style="display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" id="rememberToken" />
+            Remember in session (tab only)
+          </label>
         </div>
+      </div>
 
-        <div style="height:10px"></div>
+      <div id="authStatus" class="status" style="display:none;"></div>
 
-        <div class="split">
-          <div>
-            <label for="clientId">OAuth App Client ID</label>
-            <input id="clientId" type="text" spellcheck="false" placeholder="Iv1.••••••••••••••••" />
-          </div>
-          <div>
-            <label for="scope">Scope</label>
-            <select id="scope">
-              <option value="repo">repo (read/write private & public repos)</option>
-              <option value="public_repo">public_repo (write public repos only)</option>
-              <option value="repo read:user">repo + read:user</option>
-              <option value="public_repo read:user">public_repo + read:user</option>
-            </select>
-          </div>
-        </div>
+      <hr />
 
-        <div style="height:10px"></div>
+      <div>
+        <strong>2) Select repo</strong>
+      </div>
 
-        <div class="row">
-          <button id="btnStartAuth">Start sign-in</button>
-          <button id="btnOpenVerify" class="btn-ghost" disabled>Open GitHub verify page</button>
-          <button id="btnCopyCode" class="btn-ghost" disabled>Copy code</button>
-          <button id="btnSignOut" class="btn-danger" disabled>Sign out</button>
-        </div>
-
-        <div id="authInfo" class="status" style="display:none"></div>
-
-        <div style="height:14px"></div>
-
-        <div class="row" style="justify-content:space-between">
-          <h2 style="margin:0;font-size:13px;font-weight:650;">2) Select repo</h2>
-          <span id="userBadge" class="pill" style="display:none"></span>
-        </div>
-
-        <div style="height:8px"></div>
-
-        <label for="repoSelect">Repositories (you have access to)</label>
+      <div>
+        <label for="repoSelect">Repositories</label><br />
         <select id="repoSelect" disabled>
-          <option value="">— sign in first —</option>
+          <option value="">Sign in first</option>
         </select>
-
-        <div style="height:12px"></div>
-
-        <div class="row" style="justify-content:space-between; align-items:flex-end">
-          <div>
-            <h2 style="margin:0;font-size:13px;font-weight:650;">3) Browse files</h2>
-            <div class="small">Click folders to navigate; click a file to load into the editor.</div>
-          </div>
-          <button id="btnRefreshFiles" class="btn-ghost" disabled>Refresh</button>
+        <div class="row" style="margin-top:6px;">
+          <button id="btnReloadRepos" disabled>Reload repos</button>
+          <label style="display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" id="onlyPushable" />
+            Only show repos I can push to
+          </label>
         </div>
-
-        <div id="breadcrumb" class="breadcrumb" style="display:none"></div>
-        <div id="fileList" class="list" style="display:none"></div>
-
-        <div id="leftStatus" class="status" style="margin-top:10px; display:none"></div>
       </div>
+
+      <hr />
+
+      <div>
+        <strong>3) Browse files</strong>
+        <div class="row" style="margin-top:6px;">
+          <button id="btnRefreshFiles" disabled>Refresh</button>
+          <label style="display:flex;align-items:center;gap:6px;">
+            Branch:
+            <input id="branch" type="text" placeholder="(default branch)" style="width:180px;" />
+          </label>
+        </div>
+      </div>
+
+      <div id="crumbs" class="crumbs" style="display:none;"></div>
+      <div id="fileList" class="fileList" style="display:none;"></div>
+
+      <div id="browseStatus" class="status" style="display:none;"></div>
     </section>
 
-    <!-- RIGHT: Editor -->
-    <section class="card">
-      <div class="hd">
-        <h2>4) Edit & write back</h2>
-        <span id="filePill" class="pill">no file loaded</span>
+    <!-- RIGHT -->
+    <section class="panel stack">
+      <div>
+        <strong>4) Edit & write back</strong>
       </div>
-      <div class="bd">
-        <div class="split">
-          <div>
-            <label for="currentFile">Loaded file</label>
-            <input id="currentFile" type="text" readonly value="—" />
-          </div>
-          <div>
-            <label for="branchInput">Branch (optional)</label>
-            <input id="branchInput" type="text" spellcheck="false" placeholder="(defaults to repo default branch)" />
-          </div>
-        </div>
 
-        <div style="height:10px"></div>
+      <div>
+        <label>Loaded file</label><br />
+        <input id="loadedFile" type="text" readonly value="(none)" />
+      </div>
 
-        <label for="editor">File contents</label>
-        <textarea id="editor" spellcheck="false" disabled placeholder="Load a file to edit it…"></textarea>
-
-        <div style="height:10px"></div>
-
-        <div class="split">
-          <div>
-            <label for="commitMsg">Commit message</label>
-            <input id="commitMsg" type="text" spellcheck="false" placeholder="Update <path>" />
-          </div>
-          <div>
-            <label>&nbsp;</label>
-            <div class="row" style="justify-content:flex-end">
-              <button id="btnReload" class="btn-ghost" disabled>Reload file</button>
-              <button id="btnSave" disabled>Save to repo</button>
-            </div>
-          </div>
-        </div>
-
-        <div id="rightStatus" class="status" style="margin-top:10px; display:none"></div>
-
-        <div class="small" style="margin-top:10px">
-          Tip: if you get a <span class="kbd">409</span> on save, the file changed upstream—reload, merge, and save again.
+      <div>
+        <label for="commitMsg">Commit message</label><br />
+        <input id="commitMsg" type="text" placeholder="Update <path>" />
+        <div class="row" style="margin-top:6px;">
+          <button id="btnReloadFile" disabled>Reload file</button>
+          <button id="btnSave" disabled>Save</button>
         </div>
       </div>
+
+      <div>
+        <label for="editor">File contents</label><br />
+        <textarea id="editor" disabled placeholder="Load a file to edit it..."></textarea>
+      </div>
+
+      <div id="editStatus" class="status" style="display:none;"></div>
     </section>
   </div>
 </main>
 
 <script>
 /**
- * CDN-only GitHub file editor using OAuth Device Flow + REST Contents API.
- * No backend; token is acquired and used in-browser.
- *
- * Endpoints used:
- * - https://github.com/login/device/code
- * - https://github.com/login/oauth/access_token
- * - https://api.github.com/user
- * - https://api.github.com/user/repos
- * - https://api.github.com/repos/{owner}/{repo}
- * - https://api.github.com/repos/{owner}/{repo}/contents/{path}
+ * Token-based GitHub file editor (browser-only).
+ * Works from a CDN because it only calls api.github.com (CORS allowed).
  */
 
 const GH = {
-  deviceCodeUrl: "https://github.com/login/device/code",
-  accessTokenUrl: "https://github.com/login/oauth/access_token",
   apiBase: "https://api.github.com",
   apiVersion: "2022-11-28",
 };
 
 const els = {
-  authPill: document.getElementById("authPill"),
-  clientId: document.getElementById("clientId"),
-  scope: document.getElementById("scope"),
-  btnStartAuth: document.getElementById("btnStartAuth"),
-  btnOpenVerify: document.getElementById("btnOpenVerify"),
-  btnCopyCode: document.getElementById("btnCopyCode"),
-  btnSignOut: document.getElementById("btnSignOut"),
-  authInfo: document.getElementById("authInfo"),
+  token: document.getElementById("token"),
+  btnUseToken: document.getElementById("btnUseToken"),
+  btnClearToken: document.getElementById("btnClearToken"),
+  rememberToken: document.getElementById("rememberToken"),
+  authStatus: document.getElementById("authStatus"),
 
-  userBadge: document.getElementById("userBadge"),
   repoSelect: document.getElementById("repoSelect"),
+  btnReloadRepos: document.getElementById("btnReloadRepos"),
+  onlyPushable: document.getElementById("onlyPushable"),
+
   btnRefreshFiles: document.getElementById("btnRefreshFiles"),
-
-  breadcrumb: document.getElementById("breadcrumb"),
+  branch: document.getElementById("branch"),
+  crumbs: document.getElementById("crumbs"),
   fileList: document.getElementById("fileList"),
-  leftStatus: document.getElementById("leftStatus"),
+  browseStatus: document.getElementById("browseStatus"),
 
-  filePill: document.getElementById("filePill"),
-  currentFile: document.getElementById("currentFile"),
-  branchInput: document.getElementById("branchInput"),
-  editor: document.getElementById("editor"),
+  loadedFile: document.getElementById("loadedFile"),
   commitMsg: document.getElementById("commitMsg"),
-  btnReload: document.getElementById("btnReload"),
+  btnReloadFile: document.getElementById("btnReloadFile"),
   btnSave: document.getElementById("btnSave"),
-  rightStatus: document.getElementById("rightStatus"),
+  editor: document.getElementById("editor"),
+  editStatus: document.getElementById("editStatus"),
 };
 
-// ---------- Small utils ----------
+const state = {
+  token: null,
+  user: null,
+  repos: [],
+  repoFull: null, // "owner/repo"
+  repo: null, // {owner, repo}
+  defaultBranch: null,
+  currentRef: null,
+  currentDir: "",
+  loaded: { path: null, sha: null, text: null },
+};
 
-function showStatus(el, text) {
+function show(el, text) {
   el.style.display = "block";
   el.textContent = text;
 }
-
-function hideStatus(el) {
+function hide(el) {
   el.style.display = "none";
   el.textContent = "";
-}
-
-function setPill(pillEl, { text, kind }) {
-  pillEl.textContent = text;
-  pillEl.className = "pill" + (kind ? (" " + kind) : "");
-}
-
-function formUrlEncode(obj) {
-  return Object.entries(obj)
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-    .join("&");
-}
-
-function base64EncodeUtf8(str) {
-  const bytes = new TextEncoder().encode(str);
-  let binary = "";
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary);
-}
-
-function base64DecodeUtf8(b64) {
-  const binary = atob(b64);
-  const bytes = new Uint8Array([...binary].map(ch => ch.charCodeAt(0)));
-  return new TextDecoder().decode(bytes);
 }
 
 function authHeaders(token) {
@@ -479,687 +189,446 @@ function authHeaders(token) {
   };
 }
 
-function safeJoinPath(a, b) {
-  if (!a) return b || "";
-  if (!b) return a;
-  return a.replace(/\/+$/,"") + "/" + b.replace(/^\/+/,"");
-}
-
-function parseRepoFullName(full) {
-  // "owner/repo"
-  const [owner, repo] = String(full).split("/");
-  if (!owner || !repo) return null;
-  return { owner, repo };
-}
-
-async function ghFetchJson(url, token, opts = {}) {
+async function ghFetch(url, token, opts = {}) {
   const res = await fetch(url, {
     ...opts,
-    headers: {
-      ...(opts.headers || {}),
-      ...authHeaders(token),
-    }
+    headers: { ...(opts.headers || {}), ...authHeaders(token) },
   });
-
-  // Handle rate limit / errors with useful info.
   if (!res.ok) {
     const text = await res.text();
-    const msg = [
-      `GitHub request failed: ${res.status} ${res.statusText}`,
-      `URL: ${url}`,
-      text ? `Body: ${text}` : "",
-    ].filter(Boolean).join("\n");
-    throw new Error(msg);
+    throw new Error(`HTTP ${res.status} ${res.statusText}\n${url}\n\n${text}`);
   }
-
-  // Some responses are empty; most here are JSON.
   const ct = res.headers.get("content-type") || "";
   if (ct.includes("application/json")) return await res.json();
   return await res.text();
 }
 
 async function ghFetchAllPages(url, token) {
-  // GitHub uses Link header pagination for /user/repos.
-  // We'll follow rel="next" until done.
   let out = [];
   let next = url;
-
   while (next) {
     const res = await fetch(next, { headers: authHeaders(token) });
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`GitHub request failed: ${res.status}\n${text}`);
+      throw new Error(`HTTP ${res.status} ${res.statusText}\n${next}\n\n${text}`);
     }
-    const data = await res.json();
-    out = out.concat(data);
-
-    const link = res.headers.get("link");
+    out = out.concat(await res.json());
     next = null;
+    const link = res.headers.get("link");
     if (link) {
-      const parts = link.split(",").map(s => s.trim());
-      for (const p of parts) {
-        const m = p.match(/<([^>]+)>;\s*rel="([^"]+)"/);
+      for (const part of link.split(",").map(s => s.trim())) {
+        const m = part.match(/<([^>]+)>;\s*rel="([^"]+)"/);
         if (m && m[2] === "next") next = m[1];
       }
     }
   }
-
   return out;
 }
 
-// ---------- App state ----------
+function base64EncodeUtf8(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+function base64DecodeUtf8(b64) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array([...binary].map(ch => ch.charCodeAt(0)));
+  return new TextDecoder().decode(bytes);
+}
 
-const state = {
-  token: null,
-  user: null,
+function parseRepo(full) {
+  const [owner, repo] = String(full).split("/");
+  if (!owner || !repo) return null;
+  return { owner, repo };
+}
 
-  // repo selection
-  repoFull: null, // "owner/repo"
-  repo: null,     // { owner, repo }
-  defaultBranch: null,
+function joinPath(a, b) {
+  if (!a) return b || "";
+  if (!b) return a;
+  return a.replace(/\/+$/,"") + "/" + b.replace(/^\/+/,"");
+}
 
-  // browsing
-  currentPath: "", // directory path ("" for root)
-  currentRef: null, // branch override
-
-  // file loaded
-  loadedFile: {
-    path: null,
-    sha: null,
-    text: null,
-  },
-
-  // device flow info
-  device: null,
-  pollAbort: null,
-};
-
-function resetRepoAndFileUI() {
-  els.repoSelect.innerHTML = `<option value="">— select a repo —</option>`;
+function resetRepoUI() {
+  els.repoSelect.innerHTML = `<option value="">Sign in first</option>`;
   els.repoSelect.disabled = true;
+  els.btnReloadRepos.disabled = true;
 
-  els.breadcrumb.style.display = "none";
+  els.btnRefreshFiles.disabled = true;
+  els.crumbs.style.display = "none";
   els.fileList.style.display = "none";
   els.fileList.innerHTML = "";
-  hideStatus(els.leftStatus);
+  hide(els.browseStatus);
 
-  state.repoFull = null;
-  state.repo = null;
-  state.defaultBranch = null;
-  state.currentPath = "";
-  state.currentRef = null;
-
-  clearLoadedFile();
+  clearLoaded();
 }
 
-function clearLoadedFile() {
-  state.loadedFile = { path: null, sha: null, text: null };
-  els.currentFile.value = "—";
+function clearLoaded() {
+  state.loaded = { path: null, sha: null, text: null };
+  els.loadedFile.value = "(none)";
   els.editor.value = "";
   els.editor.disabled = true;
-  els.btnReload.disabled = true;
+  els.btnReloadFile.disabled = true;
   els.btnSave.disabled = true;
   els.commitMsg.value = "";
-  setPill(els.filePill, { text: "no file loaded" });
-  hideStatus(els.rightStatus);
+  hide(els.editStatus);
 }
 
-// ---------- Device flow auth ----------
+// ---- Auth (token) ----
 
-async function startDeviceFlow(clientId, scope) {
-  const res = await fetch(GH.deviceCodeUrl, {
-    method: "POST",
-    headers: {
-      "Accept": "application/json",
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: formUrlEncode({ client_id: clientId, scope }),
-  });
+async function useToken(token) {
+  state.token = token;
+  show(els.authStatus, "Validating token...");
+  resetRepoUI();
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Device flow init failed (${res.status}): ${text}`);
-  }
-  return await res.json();
-}
-
-async function pollForAccessToken({ clientId, deviceCode, intervalSec, expiresInSec, signal }) {
-  const startedAt = Date.now();
-  let waitMs = Math.max(1, intervalSec) * 1000;
-
-  while (true) {
-    if (signal?.aborted) throw new Error("Auth polling aborted.");
-    const elapsed = (Date.now() - startedAt) / 1000;
-    if (elapsed > expiresInSec) throw new Error("Device code expired before authorization completed.");
-
-    await new Promise((r) => setTimeout(r, waitMs));
-    if (signal?.aborted) throw new Error("Auth polling aborted.");
-
-    const res = await fetch(GH.accessTokenUrl, {
-      method: "POST",
-      headers: {
-        "Accept": "application/json",
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: formUrlEncode({
-        client_id: clientId,
-        device_code: deviceCode,
-        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-      }),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Token poll failed (${res.status}): ${text}`);
-    }
-
-    const data = await res.json();
-
-    if (data.access_token) return data;
-
-    // Pending / slow-down / other errors
-    if (data.error === "authorization_pending") continue;
-
-    if (data.error === "slow_down") {
-      waitMs += 5000;
-      continue;
-    }
-
-    throw new Error(`Token poll error: ${data.error || JSON.stringify(data)}`);
-  }
-}
-
-async function postSignInSetup() {
-  // Load user identity
-  const user = await ghFetchJson(`${GH.apiBase}/user`, state.token);
+  const user = await ghFetch(`${GH.apiBase}/user`, token);
   state.user = user;
+  show(els.authStatus, `Signed in as: @${user.login}\nNow loading repositories...`);
 
-  els.userBadge.style.display = "inline-flex";
-  els.userBadge.textContent = `@${user.login}`;
-  setPill(els.authPill, { text: "signed in", kind: "ok" });
-
-  // Enable repo selection
-  els.repoSelect.disabled = false;
-  els.btnSignOut.disabled = false;
-
-  // Load repos
-  await loadReposIntoSelect();
-
-  // UI
-  els.btnStartAuth.disabled = false;
-  els.btnOpenVerify.disabled = true;
-  els.btnCopyCode.disabled = true;
-  state.device = null;
-  hideStatus(els.authInfo);
+  await loadRepos();
+  show(els.authStatus, `Signed in as: @${user.login}\nRepos loaded: ${state.repos.length}`);
 }
 
-async function loadReposIntoSelect() {
-  showStatus(els.leftStatus, "Loading repositories…");
-  els.repoSelect.disabled = true;
-  els.repoSelect.innerHTML = `<option value="">Loading…</option>`;
+function clearToken() {
+  state.token = null;
+  state.user = null;
+  state.repos = [];
+  sessionStorage.removeItem("gh_token");
+  els.token.value = "";
+  els.rememberToken.checked = false;
+  hide(els.authStatus);
+  resetRepoUI();
+}
 
-  // /user/repos lists repos the user has access to. We'll pull all pages.
-  const url = `${GH.apiBase}/user/repos?per_page=100&sort=updated&direction=desc`;
-  const repos = await ghFetchAllPages(url, state.token);
+// ---- Repo list ----
 
-  // Keep it simple: include all repos returned.
-  // If you only want ones the user can push to, filter on repo.permissions.push.
-  const options = repos
-    .map(r => ({
-      full_name: r.full_name,
-      private: r.private,
-      push: r.permissions && r.permissions.push,
-      default_branch: r.default_branch,
-    }))
-    .sort((a,b) => a.full_name.localeCompare(b.full_name));
+function renderRepoSelect() {
+  const onlyPushable = els.onlyPushable.checked;
+  const repos = onlyPushable
+    ? state.repos.filter(r => r.permissions && r.permissions.push)
+    : state.repos.slice();
 
-  els.repoSelect.innerHTML = `<option value="">— select a repo —</option>` + options.map(o => {
-    const tags = [
-      o.private ? "private" : "public",
-      o.push ? "push" : "no-push",
-    ].join(", ");
-    return `<option value="${escapeHtml(o.full_name)}">${escapeHtml(o.full_name)} (${tags})</option>`;
+  repos.sort((a,b) => a.full_name.localeCompare(b.full_name));
+
+  els.repoSelect.innerHTML = `<option value="">Select a repo</option>` + repos.map(r => {
+    const tag = r.private ? "private" : "public";
+    const push = (r.permissions && r.permissions.push) ? "push" : "no-push";
+    return `<option value="${escapeHtml(r.full_name)}">${escapeHtml(r.full_name)} (${tag}, ${push})</option>`;
   }).join("");
 
   els.repoSelect.disabled = false;
-  hideStatus(els.leftStatus);
+  els.btnReloadRepos.disabled = false;
 }
 
-// ---------- Repo & file browsing ----------
+async function loadRepos() {
+  hide(els.browseStatus);
+  els.repoSelect.disabled = true;
+  els.repoSelect.innerHTML = `<option value="">Loading...</option>`;
 
-async function onRepoSelected(repoFull) {
-  clearLoadedFile();
-  hideStatus(els.leftStatus);
+  const url = `${GH.apiBase}/user/repos?per_page=100&sort=updated&direction=desc`;
+  const repos = await ghFetchAllPages(url, state.token);
+  state.repos = repos;
+  renderRepoSelect();
+}
 
-  if (!repoFull) {
-    state.repoFull = null;
-    state.repo = null;
-    state.defaultBranch = null;
-    state.currentPath = "";
-    state.currentRef = null;
-    els.breadcrumb.style.display = "none";
-    els.fileList.style.display = "none";
+// ---- Browse contents ----
+
+async function selectRepo(full) {
+  clearLoaded();
+  hide(els.browseStatus);
+
+  state.repoFull = full || null;
+  state.repo = full ? parseRepo(full) : null;
+  state.currentDir = "";
+  state.defaultBranch = null;
+
+  if (!state.repo) {
     els.btnRefreshFiles.disabled = true;
-    return;
-  }
-
-  const parsed = parseRepoFullName(repoFull);
-  if (!parsed) return;
-
-  state.repoFull = repoFull;
-  state.repo = parsed;
-
-  // Read repo metadata to get default branch, etc.
-  showStatus(els.leftStatus, `Loading repo metadata for ${repoFull}…`);
-  const repo = await ghFetchJson(`${GH.apiBase}/repos/${parsed.owner}/${parsed.repo}`, state.token);
-  state.defaultBranch = repo.default_branch || "main";
-
-  // Set branch input default (empty means: use default branch)
-  els.branchInput.value = "";
-  state.currentRef = null;
-
-  // Start browsing at root
-  state.currentPath = "";
-  els.btnRefreshFiles.disabled = false;
-
-  await refreshFileList();
-}
-
-async function refreshFileList() {
-  if (!state.repo) return;
-
-  const ref = (els.branchInput.value || "").trim() || state.defaultBranch;
-  state.currentRef = ref;
-
-  const { owner, repo } = state.repo;
-  const path = state.currentPath; // "" means root
-
-  showStatus(els.leftStatus, `Listing contents: ${owner}/${repo}/${path || "(root)"} @ ${ref}…`);
-
-  // Contents API:
-  // GET /repos/{owner}/{repo}/contents/{path}?ref=branch
-  // For root, GitHub expects /contents/ (no path), but /contents/ works with empty.
-  const url = new URL(`${GH.apiBase}/repos/${owner}/${repo}/contents/${path}`);
-  url.searchParams.set("ref", ref);
-
-  let items;
-  try {
-    items = await ghFetchJson(url.toString(), state.token);
-  } catch (e) {
-    // If the path points to a file, GitHub returns an object not array.
-    // We only browse directories, so handle gracefully.
-    showStatus(els.leftStatus, String(e.message || e));
+    els.crumbs.style.display = "none";
     els.fileList.style.display = "none";
-    els.breadcrumb.style.display = "none";
     return;
   }
 
-  if (!Array.isArray(items)) {
-    showStatus(els.leftStatus, "This path is not a directory.");
-    return;
-  }
+  show(els.browseStatus, "Loading repo metadata...");
+  const { owner, repo } = state.repo;
+  const meta = await ghFetch(`${GH.apiBase}/repos/${owner}/${repo}`, state.token);
+  state.defaultBranch = meta.default_branch || "main";
+  hide(els.browseStatus);
 
-  // Sort: dirs first, then files, alphabetical.
-  items.sort((a,b) => {
-    if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
-
-  renderBreadcrumb(path);
-  renderFileList(items);
-
-  hideStatus(els.leftStatus);
+  els.btnRefreshFiles.disabled = false;
+  await refreshFiles();
 }
 
-function renderBreadcrumb(path) {
+function currentRef() {
+  const typed = (els.branch.value || "").trim();
+  return typed || state.defaultBranch || "main";
+}
+
+function renderCrumbs(path) {
   const parts = path ? path.split("/").filter(Boolean) : [];
-  els.breadcrumb.style.display = "flex";
-  els.breadcrumb.innerHTML = "";
+  els.crumbs.style.display = "flex";
+  els.crumbs.innerHTML = "";
 
   const root = document.createElement("span");
   root.className = "crumb";
   root.textContent = "root";
   root.addEventListener("click", async () => {
-    state.currentPath = "";
-    await refreshFileList();
+    state.currentDir = "";
+    await refreshFiles();
   });
-  els.breadcrumb.appendChild(root);
+  els.crumbs.appendChild(root);
 
   let acc = "";
   for (const part of parts) {
     const sep = document.createElement("span");
-    sep.textContent = "›";
-    sep.style.opacity = "0.7";
-    els.breadcrumb.appendChild(sep);
+    sep.textContent = ">";
+    els.crumbs.appendChild(sep);
 
-    acc = safeJoinPath(acc, part);
+    acc = joinPath(acc, part);
     const c = document.createElement("span");
     c.className = "crumb";
     c.textContent = part;
     c.addEventListener("click", async () => {
-      state.currentPath = acc;
-      await refreshFileList();
+      state.currentDir = acc;
+      await refreshFiles();
     });
-    els.breadcrumb.appendChild(c);
+    els.crumbs.appendChild(c);
   }
+}
+
+async function refreshFiles() {
+  if (!state.repo) return;
+
+  const ref = currentRef();
+  state.currentRef = ref;
+
+  const { owner, repo } = state.repo;
+  const dir = state.currentDir;
+
+  show(els.browseStatus, `Listing: ${owner}/${repo}/${dir || "(root)"} @ ${ref}`);
+  const url = new URL(`${GH.apiBase}/repos/${owner}/${repo}/contents/${dir}`);
+  url.searchParams.set("ref", ref);
+
+  const data = await ghFetch(url.toString(), state.token);
+  if (!Array.isArray(data)) throw new Error("This path is not a directory.");
+
+  data.sort((a,b) => {
+    if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  renderCrumbs(dir);
+  renderFileList(data);
+
+  hide(els.browseStatus);
 }
 
 function renderFileList(items) {
   els.fileList.style.display = "block";
   els.fileList.innerHTML = "";
-
   for (const it of items) {
-    const row = document.createElement("div");
-    row.className = "item";
-
-    const left = document.createElement("div");
-    left.className = "left";
-
-    const icon = document.createElement("div");
-    icon.className = "icon";
-    icon.textContent = it.type === "dir" ? "DIR" : "FILE";
-
-    const name = document.createElement("div");
-    name.className = "name";
-    name.textContent = it.name;
-
-    left.appendChild(icon);
-    left.appendChild(name);
-
-    const meta = document.createElement("div");
-    meta.className = "meta";
-    meta.textContent = it.type === "dir" ? "" : (it.size != null ? `${it.size} B` : "");
-
-    row.appendChild(left);
-    row.appendChild(meta);
-
-    row.addEventListener("click", async () => {
-      hideStatus(els.rightStatus);
-
-      if (it.type === "dir") {
-        state.currentPath = it.path;
-        await refreshFileList();
-      } else if (it.type === "file") {
-        await loadFile(it.path);
-      } else {
-        showStatus(els.leftStatus, `Unsupported item type: ${it.type}`);
+    const div = document.createElement("div");
+    div.className = "fileItem";
+    div.textContent = `${it.type === "dir" ? "[DIR] " : "[FILE] "}${it.name}`;
+    div.addEventListener("click", async () => {
+      try {
+        hide(els.editStatus);
+        if (it.type === "dir") {
+          state.currentDir = it.path;
+          await refreshFiles();
+        } else if (it.type === "file") {
+          await loadFile(it.path);
+        } else {
+          show(els.browseStatus, `Unsupported type: ${it.type}`);
+        }
+      } catch (e) {
+        show(els.editStatus, String(e.message || e));
       }
     });
-
-    els.fileList.appendChild(row);
+    els.fileList.appendChild(div);
   }
 }
 
-// ---------- File read/write ----------
+// ---- Load & Save file ----
 
-async function loadFile(filePath) {
+async function loadFile(path) {
   if (!state.repo) return;
-
-  const ref = state.currentRef || state.defaultBranch;
+  const ref = currentRef();
   const { owner, repo } = state.repo;
 
-  setPill(els.filePill, { text: "loading…", kind: "warn" });
-  els.btnReload.disabled = true;
-  els.btnSave.disabled = true;
+  show(els.editStatus, `Loading file: ${path}\nRef: ${ref}`);
   els.editor.disabled = true;
+  els.btnReloadFile.disabled = true;
+  els.btnSave.disabled = true;
 
-  showStatus(els.rightStatus, `Loading file: ${filePath}\nRef: ${ref}`);
-
-  const url = new URL(`${GH.apiBase}/repos/${owner}/${repo}/contents/${filePath}`);
+  const url = new URL(`${GH.apiBase}/repos/${owner}/${repo}/contents/${path}`);
   url.searchParams.set("ref", ref);
 
-  const data = await ghFetchJson(url.toString(), state.token);
-  if (!data || data.type !== "file") throw new Error("Selected path is not a file.");
+  const data = await ghFetch(url.toString(), state.token);
+  if (!data || data.type !== "file") throw new Error("Not a file.");
 
   const b64 = String(data.content || "").replace(/\n/g, "");
   const text = base64DecodeUtf8(b64);
 
-  state.loadedFile = {
-    path: data.path,
-    sha: data.sha,
-    text,
-  };
-
-  els.currentFile.value = data.path;
+  state.loaded = { path: data.path, sha: data.sha, text };
+  els.loadedFile.value = data.path;
   els.editor.value = text;
   els.editor.disabled = false;
-  els.btnReload.disabled = false;
+
+  els.commitMsg.value = `Update ${data.path}`;
+  els.btnReloadFile.disabled = false;
   els.btnSave.disabled = false;
 
-  // default commit message
-  els.commitMsg.value = `Update ${data.path}`;
+  show(els.editStatus, `Loaded.\nPath: ${data.path}\nsha: ${data.sha}\nRef: ${ref}`);
+}
 
-  setPill(els.filePill, { text: "loaded", kind: "ok" });
-  showStatus(els.rightStatus,
-    `Loaded: ${data.path}\nsha: ${data.sha}\nRef: ${ref}\n\nEdit and click "Save to repo" to commit changes.`
-  );
+async function reloadFile() {
+  if (!state.loaded.path) return;
+  await loadFile(state.loaded.path);
 }
 
 async function saveFile() {
-  if (!state.repo || !state.loadedFile.path) return;
+  if (!state.repo || !state.loaded.path) return;
 
-  const ref = state.currentRef || state.defaultBranch;
+  const ref = currentRef();
   const { owner, repo } = state.repo;
 
-  const path = state.loadedFile.path;
-  const sha = state.loadedFile.sha;
+  const path = state.loaded.path;
+  const sha = state.loaded.sha;
   const message = (els.commitMsg.value || "").trim() || `Update ${path}`;
   const text = els.editor.value;
 
-  setPill(els.filePill, { text: "saving…", kind: "warn" });
+  show(els.editStatus, `Saving...\nPath: ${path}\nBranch: ${ref}\nMessage: ${message}`);
   els.btnSave.disabled = true;
-
-  showStatus(els.rightStatus,
-    `Saving: ${path}\nBranch: ${ref}\n\nCommit message: ${message}\n\n(If this takes a moment, that's normal.)`
-  );
 
   const url = `${GH.apiBase}/repos/${owner}/${repo}/contents/${path}`;
   const body = {
     message,
     content: base64EncodeUtf8(text),
     branch: ref,
-    sha, // required for update
+    sha,
   };
 
   const res = await fetch(url, {
     method: "PUT",
-    headers: {
-      ...authHeaders(state.token),
-      "Content-Type": "application/json",
-    },
+    headers: { ...authHeaders(state.token), "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 
   if (!res.ok) {
-    const errText = await res.text();
-    setPill(els.filePill, { text: "save failed", kind: "bad" });
+    const err = await res.text();
     els.btnSave.disabled = false;
-
-    showStatus(els.rightStatus,
-      `Save failed: ${res.status} ${res.statusText}\nURL: ${url}\n\n${errText}\n\nTip: if it's a 409, reload the file (someone else updated it).`
-    );
-    return;
+    throw new Error(`Save failed: HTTP ${res.status} ${res.statusText}\n\n${err}`);
   }
 
   const data = await res.json();
-  // Update sha to latest content sha
-  const newSha = data?.content?.sha || data?.content?.sha;
-  if (newSha) state.loadedFile.sha = newSha;
+  const newSha = data?.content?.sha;
+  if (newSha) state.loaded.sha = newSha;
 
-  setPill(els.filePill, { text: "saved", kind: "ok" });
   els.btnSave.disabled = false;
-
-  const commitSha = data?.commit?.sha || "(unknown)";
-  showStatus(els.rightStatus,
-    `Saved successfully.\n\nPath: ${path}\nNew content sha: ${state.loadedFile.sha}\nCommit sha: ${commitSha}\nBranch: ${ref}`
-  );
+  show(els.editStatus, `Saved.\nPath: ${path}\nNew sha: ${state.loaded.sha}\nCommit: ${data?.commit?.sha || "(unknown)"}\nBranch: ${ref}`);
 }
 
-async function reloadFile() {
-  if (!state.loadedFile.path) return;
-  await loadFile(state.loadedFile.path);
-}
+// ---- Events ----
 
-// ---------- Event wiring ----------
-
-els.btnStartAuth.addEventListener("click", async () => {
+els.btnUseToken.addEventListener("click", async () => {
   try {
-    hideStatus(els.authInfo);
-    hideStatus(els.leftStatus);
-    hideStatus(els.rightStatus);
+    const token = (els.token.value || "").trim();
+    if (!token) { show(els.authStatus, "Paste a token first."); return; }
 
-    const clientId = (els.clientId.value || "").trim();
-    const scope = els.scope.value;
+    await useToken(token);
 
-    if (!clientId) {
-      showStatus(els.authInfo, "Enter your OAuth App Client ID first.");
-      return;
+    if (els.rememberToken.checked) {
+      sessionStorage.setItem("gh_token", token);
+    } else {
+      sessionStorage.removeItem("gh_token");
     }
-
-    // Reset any existing session
-    signOut({ quiet: true });
-
-    els.btnStartAuth.disabled = true;
-    setPill(els.authPill, { text: "auth in progress", kind: "warn" });
-
-    const device = await startDeviceFlow(clientId, scope);
-    state.device = device;
-
-    // Show the user code & link
-    const msg =
-      `1) Open: ${device.verification_uri}\n` +
-      `2) Enter code: ${device.user_code}\n` +
-      `3) Come back here—this page will finish sign-in automatically.\n\n` +
-      `Expires in: ${device.expires_in}s  |  Poll interval: ${device.interval}s`;
-    showStatus(els.authInfo, msg);
-
-    els.btnOpenVerify.disabled = false;
-    els.btnCopyCode.disabled = false;
-
-    // Start polling
-    state.pollAbort = new AbortController();
-
-    showStatus(els.authInfo, msg + "\n\nWaiting for authorization…");
-
-    const tokenData = await pollForAccessToken({
-      clientId,
-      deviceCode: device.device_code,
-      intervalSec: device.interval,
-      expiresInSec: device.expires_in,
-      signal: state.pollAbort.signal,
-    });
-
-    state.token = tokenData.access_token;
-
-    showStatus(els.authInfo, msg + "\n\nAuthorized. Fetching user + repos…");
-
-    await postSignInSetup();
   } catch (e) {
-    console.error(e);
-    setPill(els.authPill, { text: "sign-in failed", kind: "bad" });
-    showStatus(els.authInfo, String(e.message || e));
-    els.btnStartAuth.disabled = false;
-    els.btnOpenVerify.disabled = true;
-    els.btnCopyCode.disabled = true;
+    show(els.authStatus, String(e.message || e));
+    clearLoaded();
   }
 });
 
-els.btnOpenVerify.addEventListener("click", () => {
-  if (!state.device?.verification_uri) return;
-  window.open(state.device.verification_uri, "_blank", "noopener,noreferrer");
+els.btnClearToken.addEventListener("click", () => clearToken());
+
+els.rememberToken.addEventListener("change", () => {
+  if (!els.rememberToken.checked) sessionStorage.removeItem("gh_token");
+  else if (state.token) sessionStorage.setItem("gh_token", state.token);
 });
 
-els.btnCopyCode.addEventListener("click", async () => {
-  if (!state.device?.user_code) return;
+els.btnReloadRepos.addEventListener("click", async () => {
   try {
-    await navigator.clipboard.writeText(state.device.user_code);
-    showStatus(els.authInfo, els.authInfo.textContent + "\n\nCopied code to clipboard.");
-  } catch {
-    showStatus(els.authInfo, els.authInfo.textContent + "\n\nClipboard copy failed. Please copy manually.");
+    if (!state.token) return;
+    show(els.authStatus, `Signed in as: @${state.user?.login || "?"}\nReloading repos...`);
+    await loadRepos();
+    show(els.authStatus, `Signed in as: @${state.user?.login || "?"}\nRepos loaded: ${state.repos.length}`);
+  } catch (e) {
+    show(els.authStatus, String(e.message || e));
   }
 });
 
-els.btnSignOut.addEventListener("click", () => signOut({ quiet: false }));
-
-function signOut({ quiet }) {
-  // Abort polling if active
-  try { state.pollAbort?.abort(); } catch {}
-  state.pollAbort = null;
-  state.device = null;
-
-  state.token = null;
-  state.user = null;
-
-  setPill(els.authPill, { text: "signed out" });
-  els.userBadge.style.display = "none";
-  els.userBadge.textContent = "";
-
-  els.btnSignOut.disabled = true;
-  els.btnStartAuth.disabled = false;
-  els.btnOpenVerify.disabled = true;
-  els.btnCopyCode.disabled = true;
-
-  resetRepoAndFileUI();
-
-  if (!quiet) {
-    showStatus(els.authInfo, "Signed out. Token cleared from memory.");
-    els.authInfo.style.display = "block";
-  }
-}
+els.onlyPushable.addEventListener("change", () => {
+  if (!state.repos.length) return;
+  renderRepoSelect();
+});
 
 els.repoSelect.addEventListener("change", async (e) => {
   try {
-    if (!state.token) return;
-    await onRepoSelected(e.target.value);
+    await selectRepo(e.target.value);
   } catch (err) {
-    console.error(err);
-    showStatus(els.leftStatus, String(err.message || err));
+    show(els.browseStatus, String(err.message || err));
   }
 });
 
 els.btnRefreshFiles.addEventListener("click", async () => {
   try {
-    await refreshFileList();
-  } catch (err) {
-    console.error(err);
-    showStatus(els.leftStatus, String(err.message || err));
+    await refreshFiles();
+  } catch (e) {
+    show(els.browseStatus, String(e.message || e));
   }
 });
 
-els.branchInput.addEventListener("keydown", async (e) => {
+els.branch.addEventListener("keydown", async (e) => {
   if (e.key === "Enter") {
     try {
-      clearLoadedFile();
-      await refreshFileList();
+      clearLoaded();
+      await refreshFiles();
     } catch (err) {
-      console.error(err);
-      showStatus(els.leftStatus, String(err.message || err));
+      show(els.browseStatus, String(err.message || err));
     }
   }
 });
 
-els.btnReload.addEventListener("click", async () => {
+els.btnReloadFile.addEventListener("click", async () => {
   try {
     await reloadFile();
-  } catch (err) {
-    console.error(err);
-    setPill(els.filePill, { text: "reload failed", kind: "bad" });
-    showStatus(els.rightStatus, String(err.message || err));
+  } catch (e) {
+    show(els.editStatus, String(e.message || e));
   }
 });
 
 els.btnSave.addEventListener("click", async () => {
   try {
     await saveFile();
-  } catch (err) {
-    console.error(err);
-    setPill(els.filePill, { text: "save failed", kind: "bad" });
+  } catch (e) {
     els.btnSave.disabled = false;
-    showStatus(els.rightStatus, String(err.message || err));
+    show(els.editStatus, String(e.message || e));
   }
 });
 
-// ---------- HTML escape for option labels ----------
+// ---- Session restore ----
+(function restore() {
+  const tok = sessionStorage.getItem("gh_token");
+  if (tok) {
+    els.token.value = tok;
+    els.rememberToken.checked = true;
+    // Do not auto-run unless you want it. If you do want it, uncomment:
+    // els.btnUseToken.click();
+    show(els.authStatus, "Token found in sessionStorage. Click 'Use token' to sign in.");
+    els.authStatus.style.display = "block";
+  }
+})();
+
 function escapeHtml(s) {
   return String(s)
     .replaceAll("&", "&amp;")
@@ -1169,9 +638,8 @@ function escapeHtml(s) {
     .replaceAll("'", "&#039;");
 }
 
-// Initial UI state
-resetRepoAndFileUI();
-clearLoadedFile();
+// Initial
+resetRepoUI();
 </script>
 </body>
 </html>
