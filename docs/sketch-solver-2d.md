@@ -28,22 +28,22 @@ arc equal-chord and bezier handle colinearity) that are removed from the final o
 If you pass an empty sketch, the solver will seed an origin point and a fixed (ground) constraint.
 
 ## Constraint symbols and meanings
-Constraint types are single-character symbol strings. Use the ASCII-safe Unicode escapes below in
-code, or inspect `src/features/sketch/sketchSolver2D/constraintDefinitions.js` for the canonical list.
+Constraint types are single-character symbol strings. Use the Unicode symbols below in code, or
+inspect `src/features/sketch/sketchSolver2D/constraintDefinitions.js` for the canonical list.
 
 ```js
 const CONSTRAINTS = {
-  HORIZONTAL: "\u2501",      // 2 points
-  VERTICAL: "\u2502",        // 2 points
-  DISTANCE: "\u27FA",        // 2 points, value
-  EQUAL_DISTANCE: "\u21CC",  // 4 points
-  PARALLEL: "\u2225",        // 4 points
-  PERPENDICULAR: "\u27C2",   // 4 points
-  ANGLE: "\u2220",           // 4 points, value in degrees
-  COINCIDENT: "\u2261",      // 2 points
-  POINT_ON_LINE: "\u23DB",   // 3 points (line AB, point C)
-  MIDPOINT: "\u22EF",        // 3 points (A, B, midpoint)
-  FIXED: "\u23DA",           // 1 point
+  HORIZONTAL: "━",      // 2 points
+  VERTICAL: "│",        // 2 points
+  DISTANCE: "⟺",        // 2 points, value
+  EQUAL_DISTANCE: "⇌",  // 4 points
+  PARALLEL: "∥",        // 4 points
+  PERPENDICULAR: "⟂",   // 4 points
+  ANGLE: "∠",           // 4 points, value in degrees
+  COINCIDENT: "≡",      // 2 points
+  POINT_ON_LINE: "⏛",   // 3 points (line AB, point C)
+  MIDPOINT: "⋯",        // 3 points (A, B, midpoint)
+  FIXED: "⏚",           // 1 point
 };
 ```
 
