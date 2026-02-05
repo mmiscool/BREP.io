@@ -3,6 +3,19 @@ const GH = {
   apiVersion: '2022-11-28',
 };
 
+const _WRITE_CHAINS = new Map();
+
+function _enqueueGithubWrite(key, op) {
+  const prev = _WRITE_CHAINS.get(key) || Promise.resolve();
+  const next = prev.then(op);
+  let safe;
+  safe = next.catch(() => {}).finally(() => {
+    if (_WRITE_CHAINS.get(key) === safe) _WRITE_CHAINS.delete(key);
+  });
+  _WRITE_CHAINS.set(key, safe);
+  return next;
+}
+
 const STORAGE_ROOT = 'brep-storage';
 const SETTINGS_DIR = 'settings';
 const DATA_DIR = '__BREP_DATA__';
@@ -227,30 +240,51 @@ export async function readGithubFileBase64({ token, repoFull, branch, path }) {
   return null;
 }
 
-export async function writeGithubFileBase64({ token, repoFull, branch, path, base64, message }) {
+export async function writeGithubFileBase64({ token, repoFull, branch, path, base64, message, retryOn409 = 2 }) {
   const t = String(token || '').trim();
   if (!t) throw new Error('Missing GitHub token');
   const { owner, repo } = parseRepo(repoFull);
-  let sha = null;
-  try {
-    const meta = await readGithubFileMeta({ token: t, repoFull, branch, path });
-    sha = meta?.sha || null;
-  } catch (e) {
-    if (!e || e.status !== 404) throw e;
-  }
-  const body = {
-    message: message || `BREP storage update: ${path}`,
-    content: String(base64 || '').replace(/\s+/g, ''),
-  };
-  if (branch) body.branch = branch;
-  if (sha) body.sha = sha;
   const url = `${GH.apiBase}/repos/${owner}/${repo}/contents/${encodePath(path)}`;
-  const res = await ghFetch(url, t, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+  const content = String(base64 || '').replace(/\s+/g, '');
+  const maxRetry = Math.max(0, Number.isFinite(retryOn409) ? retryOn409 : 0);
+  const writeKey = `${repoFull}@${branch || ''}:${path}`;
+
+  return _enqueueGithubWrite(writeKey, async () => {
+    let sha = null;
+    const refreshSha = async () => {
+      try {
+        const meta = await readGithubFileMeta({ token: t, repoFull, branch, path });
+        sha = meta?.sha || null;
+      } catch (e) {
+        if (!e || e.status !== 404) throw e;
+        sha = null;
+      }
+    };
+
+    for (let attempt = 0; attempt <= maxRetry; attempt++) {
+      await refreshSha();
+      const body = {
+        message: message || `BREP storage update: ${path}`,
+        content,
+      };
+      if (branch) body.branch = branch;
+      if (sha) body.sha = sha;
+      try {
+        const res = await ghFetch(url, t, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        return res;
+      } catch (e) {
+        if (e && e.status === 409 && attempt < maxRetry) {
+          continue;
+        }
+        throw e;
+      }
+    }
+    return null;
   });
-  return res;
 }
 
 export async function deleteGithubFile({ token, repoFull, branch, path, message }) {
@@ -285,7 +319,10 @@ async function readGithubFileMeta({ token, repoFull, branch, path }) {
   const { owner, repo } = parseRepo(repoFull);
   const url = new URL(`${GH.apiBase}/repos/${owner}/${repo}/contents/${encodePath(path)}`);
   if (branch) url.searchParams.set('ref', branch);
-  return await ghFetch(url.toString(), t);
+  url.searchParams.set('_ts', Date.now().toString());
+  return await ghFetch(url.toString(), t, {
+    cache: 'no-store',
+  });
 }
 
 export class GithubStorage {
@@ -400,38 +437,58 @@ export class GithubStorage {
     const { owner, repo } = this._repo;
     const url = new URL(`${GH.apiBase}/repos/${owner}/${repo}/contents/${encodePath(path)}`);
     url.searchParams.set('ref', this._branch || 'main');
-    return await ghFetch(url.toString(), this._token);
+    url.searchParams.set('_ts', Date.now().toString());
+    return await ghFetch(url.toString(), this._token, {
+      cache: 'no-store',
+    });
   }
 
   async _writeKeyToRepo(key, value) {
     if (!this._token || !this._repo) return;
     const { owner, repo } = this._repo;
     const path = keyToPath(key, this._rootDir);
-    let sha = this._shaByKey.get(key) || null;
-    if (!sha) {
-      try {
-        const meta = await this._getFileMeta(path);
-        sha = meta?.sha || null;
-        if (sha) this._shaByKey.set(key, sha);
-      } catch (e) {
-        if (!e || e.status !== 404) throw e;
-      }
-    }
-    const body = {
-      message: `BREP storage update: ${key}`,
-      content: encodeBase64(value),
-      branch: this._branch || 'main',
-    };
-    if (sha) body.sha = sha;
     const url = `${GH.apiBase}/repos/${owner}/${repo}/contents/${encodePath(path)}`;
-    const res = await ghFetch(url, this._token, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+    const content = encodeBase64(value);
+    const writeKey = `${this._repoFull || ''}@${this._branch || ''}:${path}`;
+    return _enqueueGithubWrite(writeKey, async () => {
+      let sha = null;
+      const refreshSha = async () => {
+        try {
+          const meta = await this._getFileMeta(path);
+          sha = meta?.sha || null;
+          if (sha) this._shaByKey.set(key, sha);
+        } catch (e) {
+          if (!e || e.status !== 404) throw e;
+          sha = null;
+        }
+      };
+
+      for (let attempt = 0; attempt <= 1; attempt++) {
+        await refreshSha();
+        const body = {
+          message: `BREP storage update: ${key}`,
+          content,
+          branch: this._branch || 'main',
+        };
+        if (sha) body.sha = sha;
+        try {
+          const res = await ghFetch(url, this._token, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          if (res && res.content && res.content.sha) {
+            this._shaByKey.set(key, res.content.sha);
+          }
+          return;
+        } catch (e) {
+          if (e && e.status === 409 && attempt < 1) {
+            continue;
+          }
+          throw e;
+        }
+      }
     });
-    if (res && res.content && res.content.sha) {
-      this._shaByKey.set(key, res.content.sha);
-    }
   }
 
   async _removeKeyFromRepo(key) {

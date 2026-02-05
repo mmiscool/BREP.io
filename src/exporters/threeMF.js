@@ -212,9 +212,160 @@ function _resolveColorHex(meta, keys) {
 }
 
 /**
+ * Compute per-triangle material indices as they will be assigned in build3MFModelXML.
+ * Returns an array of length triCount where each entry is a material index (number),
+ * or null when the triangle would fall back to the default resource (no material).
+ *
+ * This mirrors the metadata color / face-tag fallback logic used by the exporter,
+ * so downstream importers can predict ThreeMFLoader's mesh ordering.
+ */
+export function computeTriangleMaterialIndices(solid, mesh, opts = {}) {
+  try {
+    if (!solid || !mesh) return null;
+    const triVerts = mesh.triVerts;
+    const triCount = (triVerts && triVerts.length) ? ((triVerts.length / 3) | 0) : 0;
+    if (!triCount) return null;
+
+    const faceIDs = (mesh.faceID && mesh.faceID.length === triCount) ? mesh.faceID : null;
+    if (!faceIDs || !faceIDs.length) return null;
+
+    const useMetadataColors = opts.useMetadataColors !== false;
+    const includeFaceTags = opts.includeFaceTags !== false;
+    const metadataManager = opts.metadataManager && typeof opts.metadataManager.getMetadata === 'function'
+      ? opts.metadataManager
+      : null;
+
+    let idToFaceName = (solid && solid._idToFaceName instanceof Map) ? solid._idToFaceName : null;
+    if (!idToFaceName && solid && solid._faceNameToID instanceof Map) {
+      const inverted = new Map();
+      for (const [faceName, faceId] of solid._faceNameToID.entries()) {
+        if (faceId == null || faceName == null) continue;
+        inverted.set(faceId, String(faceName));
+      }
+      if (inverted.size) idToFaceName = inverted;
+    }
+
+    let solidColorHex = null;
+    if (useMetadataColors) {
+      try {
+        const solidMeta = (metadataManager && solid?.name)
+          ? metadataManager.getMetadata(solid.name)
+          : null;
+        solidColorHex = _resolveColorHex(solidMeta, ['solidColor', 'color'])
+          || _resolveColorHex(solid?.userData?.metadata || null, ['solidColor', 'color']);
+      } catch {
+        solidColorHex = null;
+      }
+    }
+
+    let faceColorById = null;
+    if (useMetadataColors && idToFaceName) {
+      faceColorById = new Map();
+      const seen = new Set();
+      for (let t = 0; t < faceIDs.length; t++) {
+        const fid = faceIDs[t] >>> 0;
+        if (seen.has(fid)) continue;
+        seen.add(fid);
+        const faceName = idToFaceName.get(fid) || `FACE_${fid}`;
+        let faceHex = null;
+        if (metadataManager) {
+          try { faceHex = _resolveColorHex(metadataManager.getMetadata(faceName), ['faceColor', 'color']); } catch { faceHex = null; }
+        }
+        if (!faceHex) {
+          try {
+            const faceMeta = (typeof solid.getFaceMetadata === 'function') ? solid.getFaceMetadata(faceName) : null;
+            faceHex = _resolveColorHex(faceMeta, ['faceColor', 'color']);
+          } catch { faceHex = null; }
+        }
+        if (faceHex) faceColorById.set(fid, faceHex);
+      }
+    }
+
+    const hasFaceColors = !!(faceColorById && faceColorById.size);
+    const hasSolidColor = !!solidColorHex;
+    const hasMetadataColors = !!(useMetadataColors && (hasSolidColor || hasFaceColors));
+
+    let faceMatIndexById = null;
+    let solidMatIndex = null;
+    let defaultMatIndex = null;
+    let useFaceTagsFallback = false;
+
+    if (hasMetadataColors) {
+      const colorToIndex = new Map();
+      const addMaterial = (hex, label) => {
+        if (!hex) return null;
+        if (!colorToIndex.has(hex)) {
+          colorToIndex.set(hex, colorToIndex.size);
+        }
+        return colorToIndex.get(hex);
+      };
+      if (hasSolidColor) {
+        const solidLabel = solid?.name ? `${solid.name}_SOLID` : 'SOLID';
+        solidMatIndex = addMaterial(solidColorHex, solidLabel);
+      } else {
+        const defaultLabel = solid?.name ? `${solid.name}_DEFAULT` : 'DEFAULT';
+        const defaultHex = _parseColorToHex(opts.defaultFaceColor) || '#c0c0c0';
+        defaultMatIndex = addMaterial(defaultHex, defaultLabel);
+      }
+      if (hasFaceColors && faceColorById) {
+        faceMatIndexById = new Map();
+        for (const [fid, hex] of faceColorById.entries()) {
+          const faceName = idToFaceName ? (idToFaceName.get(fid) || `FACE_${fid}`) : `FACE_${fid}`;
+          const idx = addMaterial(hex, faceName);
+          faceMatIndexById.set(fid, idx);
+        }
+      }
+    } else if (includeFaceTags) {
+      useFaceTagsFallback = true;
+    }
+
+    let faceIndexOf = null;
+    if (useFaceTagsFallback) {
+      const uniqueIds = [];
+      const seen = new Set();
+      for (let t = 0; t < faceIDs.length; t++) {
+        const fid = faceIDs[t] >>> 0;
+        if (seen.has(fid)) continue;
+        seen.add(fid);
+        uniqueIds.push(fid);
+      }
+      const idToMatIdx = new Map();
+      for (let i = 0; i < uniqueIds.length; i++) idToMatIdx.set(uniqueIds[i], i);
+      faceIndexOf = (fid) => idToMatIdx.get(fid) ?? 0;
+    }
+
+    if (!hasMetadataColors && !useFaceTagsFallback && solidMatIndex == null) {
+      return null;
+    }
+
+    const triMat = new Array(triCount);
+    for (let t = 0; t < triCount; t++) {
+      const fid = faceIDs[t] >>> 0;
+      let idx = null;
+      if (faceMatIndexById && faceMatIndexById.has(fid)) {
+        idx = faceMatIndexById.get(fid);
+      } else if (useFaceTagsFallback && faceIndexOf) {
+        idx = faceIndexOf(fid);
+      } else if (solidMatIndex != null) {
+        idx = solidMatIndex;
+      } else if (defaultMatIndex != null) {
+        idx = defaultMatIndex;
+      } else {
+        idx = null;
+      }
+      triMat[t] = idx;
+    }
+
+    return triMat;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Build the core 3MF model XML for one or more solids.
  * @param {Array} solids Array of SOLID-like objects that expose getMesh() and name.
- * @param {{unit?: 'millimeter'|'inch'|'foot'|'meter'|'centimeter'|'micron', precision?: number, scale?: number, metadataManager?: any, useMetadataColors?: boolean, includeFaceTags?: boolean, applyWorldTransform?: boolean}} opts
+ * @param {{unit?: 'millimeter'|'inch'|'foot'|'meter'|'centimeter'|'micron', precision?: number, scale?: number, metadataManager?: any, useMetadataColors?: boolean, includeFaceTags?: boolean, applyWorldTransform?: boolean, defaultFaceColor?: any}} opts
  * @returns {string}
  */
 export function build3MFModelXML(solids, opts = {}) {
@@ -276,6 +427,7 @@ export function build3MFModelXML(solids, opts = {}) {
     let faceColorById = null;
     let faceMatIndexById = null;
     let solidMatIndex = null;
+    let defaultMatIndex = null;
     let useFaceTagsFallback = false;
 
     const faceIDs = (mesh.faceID && mesh.faceID.length === tCount) ? mesh.faceID : null;
@@ -324,15 +476,20 @@ export function build3MFModelXML(solids, opts = {}) {
           return colorToIndex.get(hex);
         };
 
-        if (hasSolidColor) solidMatIndex = addMaterial(solidColorHex, `${rawName}_SOLID`);
-        if (hasFaceColors) {
-          faceMatIndexById = new Map();
-          for (const [fid, hex] of faceColorById.entries()) {
-            const faceName = idToFaceName ? (idToFaceName.get(fid) || `FACE_${fid}`) : `FACE_${fid}`;
-            const idx = addMaterial(hex, faceName);
-            faceMatIndexById.set(fid, idx);
-          }
+      if (hasSolidColor) solidMatIndex = addMaterial(solidColorHex, `${rawName}_SOLID`);
+      if (!hasSolidColor) {
+        // Ensure triangles without per-face colors still map to a basematerial
+        const defaultHex = _parseColorToHex(opts.defaultFaceColor) || '#c0c0c0';
+        defaultMatIndex = addMaterial(defaultHex, `${rawName}_DEFAULT`);
+      }
+      if (hasFaceColors) {
+        faceMatIndexById = new Map();
+        for (const [fid, hex] of faceColorById.entries()) {
+          const faceName = idToFaceName ? (idToFaceName.get(fid) || `FACE_${fid}`) : `FACE_${fid}`;
+          const idx = addMaterial(hex, faceName);
+          faceMatIndexById.set(fid, idx);
         }
+      }
 
         if (materials.length > 0) {
           matPid = nextId++;
@@ -343,9 +500,10 @@ export function build3MFModelXML(solids, opts = {}) {
             lines.push(`      <base${nameAttr} displaycolor="${entry.color}"/>`);
           }
           lines.push('    </basematerials>');
-          if (solidMatIndex != null) {
+          if (solidMatIndex != null || defaultMatIndex != null) {
             objectPidAttr = ` pid="${matPid}"`;
-            objectPindexAttr = ` pindex="${solidMatIndex}"`;
+            const idx = (solidMatIndex != null) ? solidMatIndex : defaultMatIndex;
+            objectPindexAttr = ` pindex="${idx}"`;
           }
         }
       } else if (includeFaceTags && faceIDs) {
@@ -514,7 +672,7 @@ function rootRelsXML({ thumbnailPath, viewImages } = {}) {
 /**
  * Generate a 3MF zip archive as Uint8Array.
  * @param {Array} solids Array of SOLID-like objects that expose getMesh() and name.
- * @param {{unit?: string, precision?: number, scale?: number, metadataManager?: any, useMetadataColors?: boolean, includeFaceTags?: boolean, applyWorldTransform?: boolean}} opts
+ * @param {{unit?: string, precision?: number, scale?: number, metadataManager?: any, useMetadataColors?: boolean, includeFaceTags?: boolean, applyWorldTransform?: boolean, defaultFaceColor?: any}} opts
  * @returns {Promise<Uint8Array>}
  */
 export async function generate3MF(solids, opts = {}) {

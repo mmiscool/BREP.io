@@ -72,14 +72,33 @@ export class AssemblyComponentFeature {
   }
 
   async run(partHistory) {
+    try { console.log('[AssemblyComponentFeature] run: begin', { componentName: this.inputParams?.componentName || null, featureID: this.inputParams?.featureID || null }); } catch { }
     const componentData = await this._resolveComponentData();
     if (!componentData || !componentData.bytes || componentData.bytes.length === 0) {
       const hasSelectionIntent = Boolean((this.inputParams && this.inputParams.componentName) || (this.persistentData && this.persistentData.componentData));
       if (hasSelectionIntent) {
         console.warn('[AssemblyComponentFeature] Component payload missing or failed to load.');
       }
+      try { console.warn('[AssemblyComponentFeature] run: abort (no component data)'); } catch { }
       return { added: [], removed: [] };
     }
+
+    try {
+      const stats = await this._debugCount3MFTriangles(componentData.bytes);
+      if (stats) {
+        console.log('[AssemblyComponentFeature] run: 3MF model stats', stats);
+      }
+    } catch { }
+
+    try {
+      console.log('[AssemblyComponentFeature] run: component data', {
+        name: componentData.name || '',
+        savedAt: componentData.savedAt || null,
+        bytes: componentData.bytes?.length || 0,
+        hasFeatureInfo: !!componentData.featureInfo,
+        hasBrepExtras: !!componentData.featureInfo?.brepExtras,
+      });
+    } catch { }
 
     const featureId = this._sanitizeFeatureId(this.inputParams?.featureID);
     const group = await this._loadThreeMF(componentData.bytes);
@@ -91,6 +110,7 @@ export class AssemblyComponentFeature {
     const solids = await this._buildSolidsFromGroup(group, componentData);
     if (!solids.length) {
       console.warn('[AssemblyComponentFeature] No solids recovered from component.');
+      try { console.warn('[AssemblyComponentFeature] run: no solids recovered'); } catch { }
       return { added: [], removed: [] };
     }
 
@@ -150,6 +170,7 @@ export class AssemblyComponentFeature {
       featureInfo: componentData.featureInfo || null,
     };
 
+    try { console.log('[AssemblyComponentFeature] run: complete', { componentName, solids: solids.length }); } catch { }
     return { added: [component], removed: [] };
   }
 
@@ -158,12 +179,21 @@ export class AssemblyComponentFeature {
     if (persisted && persisted.data3mf) {
       const bytes = base64ToUint8Array(persisted.data3mf);
       let featureInfo = persisted.featureInfo;
-      if (!featureInfo || !featureInfo.history) {
+      if (!featureInfo || !featureInfo.history || !featureInfo.brepExtras) {
         featureInfo = await this._extractFeatureInfo(bytes);
       }
       if (featureInfo) {
         this.persistentData.componentData.featureInfo = featureInfo;
       }
+      try {
+        console.log('[AssemblyComponentFeature] _resolveComponentData: using persisted', {
+          name: persisted.name || '',
+          savedAt: persisted.savedAt || null,
+          bytes: bytes?.length || 0,
+          hasFeatureInfo: !!featureInfo,
+          hasBrepExtras: !!featureInfo?.brepExtras,
+        });
+      } catch { }
       return {
         name: persisted.name || '',
         savedAt: persisted.savedAt || null,
@@ -190,6 +220,16 @@ export class AssemblyComponentFeature {
       featureInfo,
     };
 
+    try {
+      console.log('[AssemblyComponentFeature] _resolveComponentData: loaded from library', {
+        name: record.name || selectedName,
+        savedAt: record.savedAt || null,
+        bytes: bytes?.length || 0,
+        hasFeatureInfo: !!featureInfo,
+        hasBrepExtras: !!featureInfo?.brepExtras,
+      });
+    } catch { }
+
     return {
       name: record.name || selectedName,
       savedAt: record.savedAt || null,
@@ -211,15 +251,44 @@ export class AssemblyComponentFeature {
     }
   }
 
+  async _debugCount3MFTriangles(bytes) {
+    try {
+      const buffer = this._toArrayBuffer(bytes);
+      if (!buffer) return null;
+      const zip = await JSZip.loadAsync(buffer);
+      const files = {};
+      Object.keys(zip.files || {}).forEach(p => { files[p.toLowerCase()] = p; });
+      const modelPath = files['3d/3dmodel.model'] || files['/3d/3dmodel.model'];
+      const modelFile = modelPath ? zip.file(modelPath) : null;
+      if (!modelFile) return { error: 'model-file-missing' };
+      const xml = await modelFile.async('string');
+      const triCount = (xml.match(/<triangle\b/gi) || []).length;
+      const objCount = (xml.match(/<object\b/gi) || []).length;
+      return { objects: objCount, triangles: triCount };
+    } catch (err) {
+      return { error: err?.message || String(err || 'unknown') };
+    }
+  }
+
   async _buildSolidsFromGroup(group, componentData) {
     const solids = [];
     const componentName = this.inputParams.componentName || componentData.name || 'Component';
     const facetInfo = componentData.featureInfo?.facets || null;
     const metadataMap = componentData.featureInfo?.metadata || null;
+    const brepExtras = componentData?.featureInfo?.brepExtras || null;
+
+    try {
+      console.log('[AssemblyComponentFeature] _buildSolidsFromGroup: start', {
+        componentName,
+        hasFacetInfo: !!facetInfo,
+        hasMetadataMap: !!metadataMap,
+        hasBrepExtras: !!brepExtras,
+        brepExtrasSolids: brepExtras?.solids ? Object.keys(brepExtras.solids).length : 0,
+      });
+    } catch { }
 
     group.updateMatrixWorld(true);
 
-    const faceNameCounts = new Map();
     const meshes = [];
     group.traverse((obj) => {
       const geom = obj && obj.isMesh ? obj.geometry : null;
@@ -250,7 +319,9 @@ export class AssemblyComponentFeature {
       const groupName = entry.sourceName || '';
       const groupMeshes = entry.meshes;
       const solidName = this._resolveSolidName(groupName, componentName, ++index);
-      const built = this._buildSolidFromMeshes(groupMeshes, faceNameCounts, groupName);
+      const extrasForSolid = brepExtras && brepExtras.solids ? brepExtras.solids[solidName] : null;
+      const faceNameCounts = new Map();
+      const built = this._buildSolidFromMeshes(groupMeshes, faceNameCounts, groupName, extrasForSolid);
       const solid = built?.solid || null;
       const colorHints = built?.colorHints || null;
       if (!solid || !solid._triVerts || solid._triVerts.length === 0) {
@@ -261,6 +332,19 @@ export class AssemblyComponentFeature {
       }
 
       solid.name = solidName;
+
+      if (extrasForSolid) {
+        try {
+          console.log('[AssemblyComponentFeature] _buildSolidsFromGroup: applying brepExtras', {
+            solidName,
+            triCount: (solid._triVerts?.length || 0) / 3,
+            hasTriFaceIds: !!extrasForSolid.triFaceIdsB64 || (Array.isArray(extrasForSolid.triFaceIds) && extrasForSolid.triFaceIds.length > 0),
+            triFaceOrder: extrasForSolid.triFaceOrder || null,
+            idToFaceCount: extrasForSolid.idToFaceName ? Object.keys(extrasForSolid.idToFaceName).length : 0,
+          });
+        } catch { }
+        this._applyBrepExtrasToSolid(solid, extrasForSolid);
+      }
 
       if (colorHints) {
         this._applyColorHintsToSolid(solid, colorHints);
@@ -341,6 +425,7 @@ export class AssemblyComponentFeature {
       }
     }
 
+    try { console.log('[AssemblyComponentFeature] _buildSolidsFromGroup: complete', { componentName, solids: solids.length }); } catch { }
     return solids;
   }
 
@@ -364,6 +449,116 @@ export class AssemblyComponentFeature {
     try { return `#${color.getHexString()}`; } catch { return null; }
   }
 
+  _decodeTriFaceIds(extras) {
+    if (!extras) return null;
+    if (Array.isArray(extras.triFaceIds) && extras.triFaceIds.length) return extras.triFaceIds;
+    if (extras.triFaceIdsB64 && typeof extras.triFaceIdsB64 === 'string') {
+      try {
+        const bytes = base64ToUint8Array(extras.triFaceIdsB64);
+        if (!bytes || bytes.length < 4) return null;
+        const view = new Uint32Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 4));
+        return view;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  _applyBrepExtrasToSolid(solid, extras) {
+    if (!solid || !extras) return;
+
+    if (extras.solidMetadata && typeof extras.solidMetadata === 'object') {
+      solid.userData = solid.userData || {};
+      const existing = solid.userData.metadata && typeof solid.userData.metadata === 'object'
+        ? solid.userData.metadata
+        : {};
+      solid.userData.metadata = { ...existing, ...extras.solidMetadata };
+    }
+
+    if (extras.faceMetadata && typeof extras.faceMetadata === 'object') {
+      for (const [faceName, meta] of Object.entries(extras.faceMetadata)) {
+        if (!faceName || !meta || typeof meta !== 'object') continue;
+        try { solid.setFaceMetadata(faceName, meta); } catch { /* ignore */ }
+      }
+    }
+
+    if (extras.edgeMetadata && typeof extras.edgeMetadata === 'object') {
+      const merged = new Map(solid._edgeMetadata instanceof Map ? solid._edgeMetadata : []);
+      for (const [edgeName, meta] of Object.entries(extras.edgeMetadata)) {
+        if (!edgeName || !meta || typeof meta !== 'object') continue;
+        merged.set(edgeName, { ...(merged.get(edgeName) || {}), ...meta });
+      }
+      solid._edgeMetadata = merged;
+    }
+
+    if (Array.isArray(extras.auxEdges) && extras.auxEdges.length) {
+      const cleaned = [];
+      for (const aux of extras.auxEdges) {
+        const pts = Array.isArray(aux?.points)
+          ? aux.points.filter((p) => Array.isArray(p) && p.length === 3)
+          : [];
+        if (pts.length < 2) continue;
+        cleaned.push({
+          name: aux?.name || 'EDGE',
+          points: pts.map((p) => [p[0], p[1], p[2]]),
+          closedLoop: !!aux?.closedLoop,
+          polylineWorld: !!aux?.polylineWorld,
+          materialKey: aux?.materialKey || undefined,
+          centerline: !!aux?.centerline,
+          faceA: typeof aux?.faceA === 'string' ? aux.faceA : undefined,
+          faceB: typeof aux?.faceB === 'string' ? aux.faceB : undefined,
+        });
+      }
+      solid._auxEdges = cleaned;
+    }
+
+    // If we have per-triangle face IDs ordered to match 3MF material grouping,
+    // reapply them to guarantee face names survive loader reordering.
+    try {
+      const faceIds = this._decodeTriFaceIds(extras);
+      const idToFace = extras.idToFaceName && typeof extras.idToFaceName === 'object'
+        ? extras.idToFaceName
+        : null;
+      const triCount = (Array.isArray(solid._triVerts) ? solid._triVerts.length : 0) / 3;
+      const ordered = extras.triFaceOrder === 'material';
+      try {
+        console.log('[AssemblyComponentFeature] _applyBrepExtrasToSolid: tri mapping', {
+          solidName: solid.name || '',
+          triCount,
+          faceIdsCount: faceIds?.length || 0,
+          ordered,
+          idToFaceCount: idToFace ? Object.keys(idToFace).length : 0,
+        });
+      } catch { }
+      if (ordered && idToFace && faceIds && faceIds.length === triCount && triCount > 0) {
+        solid._triIDs = Array.from(faceIds);
+        const idToName = new Map();
+        const nameToId = new Map();
+        for (const [rawId, rawName] of Object.entries(idToFace)) {
+          const idNum = Number(rawId);
+          if (!Number.isFinite(idNum)) continue;
+          const name = String(rawName || '');
+          if (!name) continue;
+          idToName.set(idNum, name);
+          nameToId.set(name, idNum);
+        }
+        if (idToName.size) {
+          solid._idToFaceName = idToName;
+          solid._faceNameToID = nameToId;
+        }
+        solid._dirty = true;
+        solid._faceIndex = null;
+        try {
+          console.log('[AssemblyComponentFeature] _applyBrepExtrasToSolid: applied tri IDs', {
+            solidName: solid.name || '',
+            idToFaceCount: idToName.size,
+          });
+        } catch { }
+      }
+    } catch { /* ignore reapply failures */ }
+  }
+
   _hasColorEntry(metadata, keys) {
     if (!metadata || typeof metadata !== 'object') return false;
     for (const key of keys) {
@@ -376,7 +571,7 @@ export class AssemblyComponentFeature {
     return false;
   }
 
-  _appendMeshToSolid(solid, mesh, faceNameCounts) {
+  _appendMeshToSolid(solid, mesh, faceNameCounts, options = {}) {
     const geometry = mesh?.geometry;
     const posAttr = geometry?.getAttribute?.('position');
     if (!solid || !geometry || !posAttr || posAttr.count < 3) return null;
@@ -388,14 +583,31 @@ export class AssemblyComponentFeature {
     const indexAttr = typeof geometry.getIndex === 'function' ? geometry.getIndex() : null;
     const materialName = this._getMaterialName(mesh.material);
     const baseFaceName = this._safeName(materialName || mesh.name || `FACE_${faceNameCounts.size + 1}`);
-    const faceName = this._uniqueName(faceNameCounts, baseFaceName);
+    const preferExact = Array.isArray(options.triFaceIds) || options.triFaceIds instanceof Uint32Array;
+    const idToFaceName = options.idToFaceName || null;
 
     const a = new THREE.Vector3();
     const b = new THREE.Vector3();
     const c = new THREE.Vector3();
 
-    let added = 0;
-    const writeTriangle = (ia, ib, ic) => {
+    const materialArray = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const triCount = indexAttr && indexAttr.count >= 3
+      ? Math.floor(indexAttr.count / 3)
+      : Math.floor(posAttr.count / 3);
+    const materialIndexByTri = new Array(triCount).fill(0);
+    if (Array.isArray(geometry.groups) && geometry.groups.length) {
+      for (const group of geometry.groups) {
+        const start = Math.max(0, group?.start || 0);
+        const count = Math.max(0, group?.count || 0);
+        const matIdx = Number.isFinite(group?.materialIndex) ? group.materialIndex : 0;
+        const triStart = Math.floor(start / 3);
+        const triEnd = Math.floor((start + count) / 3);
+        for (let t = triStart; t < triEnd && t < triCount; t++) materialIndexByTri[t] = matIdx;
+      }
+    }
+
+    const faceInfosByName = new Map();
+    const writeTriangle = (ia, ib, ic, faceName) => {
       if (!Number.isFinite(ia) || !Number.isFinite(ib) || !Number.isFinite(ic)) return;
       if (ia < 0 || ib < 0 || ic < 0) return;
       if (ia >= posAttr.count || ib >= posAttr.count || ic >= posAttr.count) return;
@@ -403,38 +615,85 @@ export class AssemblyComponentFeature {
       b.fromBufferAttribute(posAttr, ib).applyMatrix4(matrixWorld);
       c.fromBufferAttribute(posAttr, ic).applyMatrix4(matrixWorld);
       solid.addTriangle(faceName, [a.x, a.y, a.z], [b.x, b.y, b.z], [c.x, c.y, c.z]);
-      added++;
     };
 
-    if (indexAttr && indexAttr.count >= 3) {
-      const triCount = Math.floor(indexAttr.count / 3);
-      for (let i = 0; i < triCount; i++) {
-        const base = i * 3;
-        writeTriangle(indexAttr.getX(base + 0), indexAttr.getX(base + 1), indexAttr.getX(base + 2));
+    const fallbackFaceNames = new Map();
+    const resolveFallbackFaceName = (triIndex) => {
+      const matIdx = materialIndexByTri[triIndex] || 0;
+      if (!fallbackFaceNames.has(matIdx)) {
+        const mat = materialArray && materialArray.length ? materialArray[matIdx] : null;
+        const matName = this._getMaterialName(mat);
+        const base = this._safeName(matName || baseFaceName);
+        const name = faceNameCounts ? this._uniqueName(faceNameCounts, base) : base;
+        fallbackFaceNames.set(matIdx, name);
       }
-    } else {
-      const triCount = Math.floor(posAttr.count / 3);
-      for (let i = 0; i < triCount; i++) {
+      return fallbackFaceNames.get(matIdx);
+    };
+
+    const ids = options.triFaceIds;
+    const triOffset = options.triOffset || 0;
+    const hasExact = !!(preferExact && idToFaceName && ids && (triOffset + triCount) <= ids.length);
+    const resolveFaceName = (triIndex) => {
+      if (hasExact) {
+        const idx = triIndex + triOffset;
+        const fid = ids[idx];
+        const raw = idToFaceName[fid] ?? idToFaceName[String(fid)] ?? null;
+        if (raw) return String(raw);
+        return `FACE_${fid}`;
+      }
+      return resolveFallbackFaceName(triIndex);
+    };
+
+    for (let i = 0; i < triCount; i++) {
+      const faceName = resolveFaceName(i);
+      if (!faceName) continue;
+      if (indexAttr && indexAttr.count >= 3) {
         const base = i * 3;
-        writeTriangle(base + 0, base + 1, base + 2);
+        writeTriangle(indexAttr.getX(base + 0), indexAttr.getX(base + 1), indexAttr.getX(base + 2), faceName);
+      } else {
+        const base = i * 3;
+        writeTriangle(base + 0, base + 1, base + 2, faceName);
+      }
+      if (!faceInfosByName.has(faceName)) {
+        const mat = materialArray && materialArray.length ? materialArray[materialIndexByTri[i] || 0] : null;
+        faceInfosByName.set(faceName, {
+          faceName,
+          materialName: this._getMaterialName(mat) || materialName,
+          colorHex: this._getMaterialColorHex(mat || mesh.material),
+        });
       }
     }
 
-    if (added === 0) return null;
+    if (solid._triVerts.length === 0) return null;
     return {
-      faceName,
-      materialName,
-      colorHex: this._getMaterialColorHex(mesh.material),
+      faceInfos: Array.from(faceInfosByName.values()),
+      triCount,
     };
   }
 
-  _buildSolidFromMeshes(meshes, faceNameCounts, sourceName) {
+  _buildSolidFromMeshes(meshes, faceNameCounts, sourceName, extras = null) {
     if (!Array.isArray(meshes) || meshes.length === 0) return null;
     const solid = new BREP.Solid();
     const faceInfos = [];
+    const triFaceIds = this._decodeTriFaceIds(extras);
+    const idToFaceName = (extras && extras.idToFaceName && typeof extras.idToFaceName === 'object')
+      ? extras.idToFaceName
+      : null;
+    let triOffset = 0;
     for (const mesh of meshes) {
-      const info = this._appendMeshToSolid(solid, mesh, faceNameCounts);
-      if (info) faceInfos.push(info);
+      const info = this._appendMeshToSolid(solid, mesh, faceNameCounts, {
+        triFaceIds,
+        triOffset,
+        idToFaceName,
+      });
+      if (info && Array.isArray(info.faceInfos)) {
+        faceInfos.push(...info.faceInfos);
+      } else if (info) {
+        faceInfos.push(info);
+      }
+      if (info && Number.isFinite(info.triCount)) {
+        triOffset += info.triCount;
+      }
     }
     if (!solid._triVerts || solid._triVerts.length === 0) return null;
     const colorHints = this._deriveColorHints(faceInfos, sourceName);
@@ -445,11 +704,18 @@ export class AssemblyComponentFeature {
     const faceColors = new Map();
     let solidColor = null;
     const solidMaterialName = sourceName ? `${sourceName}_SOLID` : '';
+    const defaultMaterialName = sourceName ? `${sourceName}_DEFAULT` : '';
+    const isDefaultMaterial = (name) => {
+      if (!name || typeof name !== 'string') return false;
+      if (defaultMaterialName && name === defaultMaterialName) return true;
+      return name.endsWith('_DEFAULT');
+    };
 
     if (Array.isArray(faceInfos)) {
       for (const info of faceInfos) {
         const hex = info?.colorHex;
         if (!hex) continue;
+        if (isDefaultMaterial(info.materialName)) continue;
         if (solidMaterialName && info.materialName === solidMaterialName && !solidColor) {
           solidColor = hex;
           continue;
@@ -700,6 +966,23 @@ export class AssemblyComponentFeature {
       solid._faceMetadata = renamedMetadata;
     }
 
+    const edgeMetadata = solid._edgeMetadata instanceof Map ? solid._edgeMetadata : null;
+    if (edgeMetadata && edgeMetadata.size) {
+      const renamedEdges = new Map();
+      for (const [edgeName, metadata] of edgeMetadata.entries()) {
+        if (!edgeName || typeof edgeName !== 'string') continue;
+        let renamed = edgeName;
+        if (edgeName.includes('|')) {
+          const parts = edgeName.split('|').map((p) => this._withFeaturePrefix(id, p, p));
+          renamed = parts.join('|');
+        } else {
+          renamed = this._withFeaturePrefix(id, edgeName, edgeName);
+        }
+        renamedEdges.set(renamed, metadata);
+      }
+      solid._edgeMetadata = renamedEdges;
+    }
+
     if (Array.isArray(solid._auxEdges) && solid._auxEdges.length) {
       for (const aux of solid._auxEdges) {
         if (!aux) continue;
@@ -748,6 +1031,18 @@ export class AssemblyComponentFeature {
       if (!buffer) return null;
       const zip = await JSZip.loadAsync(buffer);
       const candidates = ['Metadata/featureHistory.json', 'metadata/featurehistory.json'];
+      const extrasCandidates = ['Metadata/brepExtras.json', 'metadata/brepextras.json'];
+      let brepExtras = null;
+      for (const path of extrasCandidates) {
+        const file = zip.file(path);
+        if (!file) continue;
+        try {
+          const text = await file.async('string');
+          const parsed = JSON.parse(text);
+          if (parsed && typeof parsed === 'object') brepExtras = parsed;
+        } catch { /* ignore extras parse errors */ }
+        if (brepExtras) break;
+      }
       for (const path of candidates) {
         const file = zip.file(path);
         if (!file) continue;
@@ -759,11 +1054,13 @@ export class AssemblyComponentFeature {
             facets: parsed?.facets || null,
             history: parsed || null,
             historyString: text,
+            brepExtras,
           };
         } catch {
-          return null;
+          return brepExtras ? { brepExtras } : null;
         }
       }
+      if (brepExtras) return { brepExtras };
     } catch (err) {
       console.warn('[AssemblyComponentFeature] Failed to extract feature history from component:', err);
     }

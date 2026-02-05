@@ -3,7 +3,8 @@
 // Designed to be embedded as an Accordion section (similar to expressionsManager).
 import * as THREE from 'three';
 import JSZip from 'jszip';
-import { generate3MF } from '../exporters/threeMF.js';
+import { generate3MF, computeTriangleMaterialIndices } from '../exporters/threeMF.js';
+import { CADmaterials } from './CADmaterials.js';
 import { localStorage as LS, STORAGE_BACKEND_EVENT } from '../idbStorage.js';
 import {
   listComponentRecords,
@@ -27,6 +28,9 @@ export class FileManagerWidget {
     this._iconsOnly = this._loadIconsPref();
     this._loadSeq = 0; // guards async load races
     this._thumbCache = new Map();
+    this._pendingGithubMeta = new Map();
+    this._saveOverlay = null;
+    this._saveLogEl = null;
     this._ensureStyles();
     this._buildUI();
     void this.refreshList();
@@ -115,8 +119,8 @@ export class FileManagerWidget {
     }));
   }
   // Fetch one model record
-  async _getModel(name) {
-    return await getComponentRecord(name);
+  async _getModel(name, options) {
+    return await getComponentRecord(name, options);
   }
   // Persist one model record
   async _setModel(name, dataObj) {
@@ -178,8 +182,64 @@ export class FileManagerWidget {
       .fm-item:hover { background: #0f172a; border-color: #334155; }
       .fm-item .fm-thumb { width: 60px; height: 60px; border: 1px solid #1f2937; background: #0b0e14; border-radius: 6px; }
       .fm-item .fm-del { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; padding: 0; line-height: 1; }
+
+      /* Blocking save overlay */
+      .fm-save-overlay { position: fixed; inset: 0; background: rgba(2,6,23,0.65); display: flex; align-items: center; justify-content: center; z-index: 10050; }
+      .fm-save-panel { width: min(520px, 90vw); max-height: 80vh; background: #0b0e14; color: #e5e7eb; border: 1px solid #1f2937; border-radius: 12px; padding: 16px 18px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+      .fm-save-title { font-weight: 700; font-size: 14px; letter-spacing: .01em; margin-bottom: 10px; }
+      .fm-save-log { font-size: 12px; line-height: 1.4; max-height: 52vh; overflow: auto; white-space: pre-wrap; color: #cbd5f5; background: #0a0f1a; border: 1px solid #1f2937; border-radius: 8px; padding: 10px; }
+      .fm-save-line { margin-bottom: 6px; }
     `;
     document.head.appendChild(style);
+  }
+
+  _setSaveBusy(isBusy) {
+    try {
+      if (this.saveBtn) this.saveBtn.disabled = !!isBusy;
+      if (this.nameInput) this.nameInput.disabled = !!isBusy;
+    } catch { /* ignore */ }
+  }
+
+  _startSaveProgress(title) {
+    try {
+      this._endSaveProgress();
+      const overlay = document.createElement('div');
+      overlay.className = 'fm-save-overlay';
+      const panel = document.createElement('div');
+      panel.className = 'fm-save-panel';
+      const header = document.createElement('div');
+      header.className = 'fm-save-title';
+      header.textContent = title || 'Saving...';
+      const log = document.createElement('div');
+      log.className = 'fm-save-log';
+      panel.appendChild(header);
+      panel.appendChild(log);
+      overlay.appendChild(panel);
+      document.body.appendChild(overlay);
+      this._saveOverlay = overlay;
+      this._saveLogEl = log;
+    } catch { /* ignore */ }
+  }
+
+  _logSaveProgress(message) {
+    try {
+      if (!this._saveLogEl) return;
+      const line = document.createElement('div');
+      line.className = 'fm-save-line';
+      line.textContent = message || '';
+      this._saveLogEl.appendChild(line);
+      this._saveLogEl.scrollTop = this._saveLogEl.scrollHeight;
+    } catch { /* ignore */ }
+  }
+
+  _endSaveProgress() {
+    try {
+      if (this._saveOverlay && this._saveOverlay.parentNode) {
+        this._saveOverlay.parentNode.removeChild(this._saveOverlay);
+      }
+    } catch { /* ignore */ }
+    this._saveOverlay = null;
+    this._saveLogEl = null;
   }
 
   _buildUI() {
@@ -204,6 +264,7 @@ export class FileManagerWidget {
     saveBtn.textContent = 'Save';
     saveBtn.className = 'fm-btn';
     saveBtn.addEventListener('click', () => this.saveCurrent());
+    this.saveBtn = saveBtn;
     header.appendChild(saveBtn);
     this.uiElement.appendChild(header);
 
@@ -228,6 +289,24 @@ export class FileManagerWidget {
     this._refreshHistoryCollections('new-model');
   }
 
+  async _retryGithubOperation(action, op, progress) {
+    while (true) {
+      try {
+        const value = await op();
+        return { ok: true, value };
+      } catch (err) {
+        const msg = (err && typeof err.message === 'string' && err.message.trim())
+          ? err.message.trim()
+          : (err ? String(err) : '');
+        const details = msg ? `\n\n${msg}` : '';
+        try { if (typeof progress === 'function') progress(`${action} failed.${details}`); } catch { }
+        const retry = await window.confirm(`${action} failed.${details}\n\nRetry?`);
+        try { if (typeof progress === 'function') progress(retry ? 'Retrying...' : 'Save canceled by user.'); } catch { }
+        if (!retry) return { ok: false, error: err };
+      }
+    }
+  }
+
   async saveCurrent() {
     if (!this.viewer || !this.viewer.partHistory) return;
     let name = (this.nameInput.value || '').trim();
@@ -238,86 +317,203 @@ export class FileManagerWidget {
       this.nameInput.value = name;
     }
 
-    // Get feature history JSON (now includes PMI views) and embed into a 3MF archive as Metadata/featureHistory.json
-    const jsonString = await this.viewer.partHistory.toJSON();
-    let additionalFiles = undefined;
-    let modelMetadata = undefined;
-    if (jsonString) {
-      additionalFiles = { 'Metadata/featureHistory.json': jsonString };
-      modelMetadata = { featureHistoryPath: '/Metadata/featureHistory.json' };
-    }
-    // Embed PMI view images under /views
+    try { console.log('[FileManagerWidget] saveCurrent: begin', { name }); } catch { }
+    this._setSaveBusy(true);
+    this._startSaveProgress(`Saving "${name}"...`);
     try {
-      const viewFiles = await this.viewer?.pmiViewsWidget?.captureViewImagesForPackage?.();
-      if (viewFiles && typeof viewFiles === 'object') {
-        additionalFiles = { ...(additionalFiles || {}), ...viewFiles };
+      this._logSaveProgress('Preparing feature history...');
+      // Get feature history JSON (now includes PMI views) and embed into a 3MF archive as Metadata/featureHistory.json
+      const jsonString = await this.viewer.partHistory.toJSON();
+      try { console.log('[FileManagerWidget] saveCurrent: feature history', { bytes: jsonString ? jsonString.length : 0 }); } catch { }
+      let additionalFiles = {};
+      let modelMetadata = undefined;
+      if (jsonString) {
+        additionalFiles['Metadata/featureHistory.json'] = jsonString;
+        modelMetadata = { featureHistoryPath: '/Metadata/featureHistory.json' };
       }
-    } catch (err) {
-      console.error('Failed to embed PMI view images:', err);
-    }
-    // Capture a 60x60 thumbnail of the current view
-    let thumbnail = null;
-    try {
-      thumbnail = await this._captureThumbnail(60);
-    } catch { /* ignore thumbnail failures */ }
-
-    // Collect solids for full 3MF export (so slicers can open it).
-    const solids = this._collectSolidsForExport();
-    const solidsForExport = [];
-    const skipped = [];
-    solids.forEach((s, idx) => {
+      // Embed PMI view images under /views
       try {
-        const mesh = s?.getMesh?.();
-        if (mesh && mesh.vertProperties && mesh.triVerts) {
-          solidsForExport.push(s);
-        } else {
+        this._logSaveProgress('Capturing PMI view images...');
+        const viewFiles = await this.viewer?.pmiViewsWidget?.captureViewImagesForPackage?.();
+        if (viewFiles && typeof viewFiles === 'object') {
+          additionalFiles = { ...(additionalFiles || {}), ...viewFiles };
+        }
+      } catch (err) {
+        console.error('Failed to embed PMI view images:', err);
+      }
+      // Capture a 60x60 thumbnail of the current view
+      let thumbnail = null;
+      try {
+        this._logSaveProgress('Capturing thumbnail...');
+        thumbnail = await this._captureThumbnail(60);
+      } catch { /* ignore thumbnail failures */ }
+
+      // Collect solids for full 3MF export (so slicers can open it).
+      this._logSaveProgress('Collecting solids...');
+      const solids = this._collectSolidsForExport();
+      try { console.log('[FileManagerWidget] saveCurrent: collected solids', { count: solids.length, names: solids.map(s => s?.name).filter(Boolean) }); } catch { }
+      const solidsForExport = [];
+      const skipped = [];
+      solids.forEach((s, idx) => {
+        try {
+          const mesh = s?.getMesh?.();
+          if (mesh && mesh.vertProperties && mesh.triVerts) {
+            solidsForExport.push(s);
+          } else {
+            skipped.push(s?.name || `solid_${idx}`);
+          }
+        } catch {
           skipped.push(s?.name || `solid_${idx}`);
         }
-      } catch {
-        skipped.push(s?.name || `solid_${idx}`);
+      });
+      try { console.log('[FileManagerWidget] saveCurrent: solids for export', { count: solidsForExport.length, skipped }); } catch { }
+
+      // Attach BREP-specific metadata for mesh-based restores (face names, colors, centerlines).
+      try {
+        this._logSaveProgress('Packaging BREP metadata...');
+        const extras = this._buildBrepExtras(solidsForExport);
+        try { console.log('[FileManagerWidget] saveCurrent: brepExtras', { hasExtras: !!extras, solidCount: extras?.solids ? Object.keys(extras.solids).length : 0 }); } catch { }
+        if (extras) {
+          additionalFiles = additionalFiles || {};
+          additionalFiles['Metadata/brepExtras.json'] = JSON.stringify(extras);
+        }
+      } catch (err) {
+        console.warn('[FileManagerWidget] Failed to embed BREP extras:', err);
       }
-    });
 
-    let threeMfBytes;
-    try {
-      const metadataManager = this.viewer?.partHistory?.metadataManager || null;
-      threeMfBytes = await generate3MF(solidsForExport, {
-        unit: 'millimeter',
-        precision: 6,
-        scale: 1,
-        additionalFiles,
-        modelMetadata,
-        thumbnail,
-        metadataManager,
-      });
-    } catch (e) {
-      // Fallback: history only 3MF
-      const metadataManager = this.viewer?.partHistory?.metadataManager || null;
-      threeMfBytes = await generate3MF([], {
-        unit: 'millimeter',
-        precision: 6,
-        scale: 1,
-        additionalFiles,
-        modelMetadata,
-        thumbnail,
-        metadataManager,
-      });
-      console.warn('[FileManagerWidget] 3MF export failed for solids, saved history-only 3MF.', e);
-    }
-    const threeMfB64 = uint8ArrayToBase64(threeMfBytes);
-    const now = new Date().toISOString();
+      let threeMfBytes;
+      try {
+        this._logSaveProgress('Exporting 3MF...');
+        const metadataManager = this.viewer?.partHistory?.metadataManager || null;
+        const defaultFaceColor = (() => {
+          try {
+            const color = CADmaterials?.FACE?.BASE?.color;
+            if (color && typeof color.getHexString === 'function') {
+              return `#${color.getHexString()}`;
+            }
+            if (typeof color === 'string') return color;
+          } catch { }
+          return null;
+        })();
+        threeMfBytes = await generate3MF(solidsForExport, {
+          unit: 'millimeter',
+          precision: 6,
+          scale: 1,
+          additionalFiles,
+          modelMetadata,
+          thumbnail,
+          metadataManager,
+          defaultFaceColor,
+        });
+        try { console.log('[FileManagerWidget] saveCurrent: 3MF exported', { bytes: threeMfBytes?.length || 0 }); } catch { }
+        try {
+          const zip = await JSZip.loadAsync(threeMfBytes);
+          const files = {};
+          Object.keys(zip.files || {}).forEach(p => { files[p.toLowerCase()] = p; });
+          const modelPath = files['3d/3dmodel.model'] || files['/3d/3dmodel.model'];
+          const modelFile = modelPath ? zip.file(modelPath) : null;
+          if (modelFile) {
+            const xml = await modelFile.async('string');
+            const triCount = (xml.match(/<triangle\b/gi) || []).length;
+            const objCount = (xml.match(/<object\b/gi) || []).length;
+            console.log('[FileManagerWidget] saveCurrent: 3MF model stats', { objects: objCount, triangles: triCount });
+          } else {
+            console.warn('[FileManagerWidget] saveCurrent: 3MF model file not found in zip');
+          }
+        } catch (err) {
+          try { console.warn('[FileManagerWidget] saveCurrent: 3MF model stats failed', err?.message || err); } catch { }
+        }
+      } catch (e) {
+        // Fallback: history only 3MF
+        const metadataManager = this.viewer?.partHistory?.metadataManager || null;
+        const defaultFaceColor = (() => {
+          try {
+            const color = CADmaterials?.FACE?.BASE?.color;
+            if (color && typeof color.getHexString === 'function') {
+              return `#${color.getHexString()}`;
+            }
+            if (typeof color === 'string') return color;
+          } catch { }
+          return null;
+        })();
+        threeMfBytes = await generate3MF([], {
+          unit: 'millimeter',
+          precision: 6,
+          scale: 1,
+          additionalFiles,
+          modelMetadata,
+          thumbnail,
+          metadataManager,
+          defaultFaceColor,
+        });
+        console.warn('[FileManagerWidget] 3MF export failed for solids, saved history-only 3MF.', e);
+        try { console.log('[FileManagerWidget] saveCurrent: 3MF exported (history only)', { bytes: threeMfBytes?.length || 0 }); } catch { }
+        try {
+          const zip = await JSZip.loadAsync(threeMfBytes);
+          const files = {};
+          Object.keys(zip.files || {}).forEach(p => { files[p.toLowerCase()] = p; });
+          const modelPath = files['3d/3dmodel.model'] || files['/3d/3dmodel.model'];
+          const modelFile = modelPath ? zip.file(modelPath) : null;
+          if (modelFile) {
+            const xml = await modelFile.async('string');
+            const triCount = (xml.match(/<triangle\b/gi) || []).length;
+            const objCount = (xml.match(/<object\b/gi) || []).length;
+            console.log('[FileManagerWidget] saveCurrent: 3MF model stats (history only)', { objects: objCount, triangles: triCount });
+          } else {
+            console.warn('[FileManagerWidget] saveCurrent: 3MF model file not found in zip (history only)');
+          }
+        } catch (err) {
+          try { console.warn('[FileManagerWidget] saveCurrent: 3MF model stats failed (history only)', err?.message || err); } catch { }
+        }
+      }
+      const threeMfB64 = uint8ArrayToBase64(threeMfBytes);
+      const now = new Date().toISOString();
 
-    // Store only the 3MF (with embedded thumbnail) and timestamp
-    const record = { savedAt: now, data3mf: threeMfB64 };
-    if (thumbnail) record.thumbnail = thumbnail;
-    await this._setModel(name, record);
-    // Update in-memory thumbnail cache so UI reflects the new preview immediately
-    try { if (thumbnail) this._thumbCache.set(name, thumbnail); } catch { }
-    this.currentName = name;
-    this._saveLastName(name);
-    await this.refreshList();
-    if (skipped.length) {
-      try { console.warn('[FileManagerWidget] Skipped non-manifold solids:', skipped); } catch {}
+      // Store only the 3MF (with embedded thumbnail) and timestamp
+      const record = { savedAt: now, data3mf: threeMfB64 };
+      if (thumbnail) record.thumbnail = thumbnail;
+      if (LS?.isGithub?.()) {
+        this._logSaveProgress('Saving to GitHub...');
+        try { console.log('[FileManagerWidget] saveCurrent: saving to GitHub', { name }); } catch { }
+        const res = await this._retryGithubOperation(
+          `Save "${name}" to GitHub`,
+          () => this._setModel(name, record),
+          (msg) => this._logSaveProgress(msg)
+        );
+        if (!res.ok) {
+          this._logSaveProgress('Save canceled.');
+          return;
+        }
+        try {
+          this._pendingGithubMeta.set(name, {
+            savedAt: record.savedAt || null,
+            thumbnail: record.thumbnail || null,
+          });
+        } catch { /* ignore */ }
+      } else {
+        this._logSaveProgress('Saving to local storage...');
+        try { console.log('[FileManagerWidget] saveCurrent: saving locally', { name }); } catch { }
+        await this._setModel(name, record);
+      }
+      // Update in-memory thumbnail cache so UI reflects the new preview immediately
+      try { if (thumbnail) this._thumbCache.set(name, thumbnail); } catch { }
+      this.currentName = name;
+      this._saveLastName(name);
+      this._logSaveProgress('Refreshing list...');
+      await this.refreshList();
+      this._logSaveProgress('Save complete.');
+      try { console.log('[FileManagerWidget] saveCurrent: complete', { name }); } catch { }
+      if (skipped.length) {
+        try { console.warn('[FileManagerWidget] Skipped non-manifold solids:', skipped); } catch {}
+      }
+    } catch (err) {
+      const msg = (err && err.message) ? err.message : String(err || 'Unknown error');
+      this._logSaveProgress(`Save failed: ${msg}`);
+      try { console.warn('[FileManagerWidget] saveCurrent: failed', { name, error: msg }); } catch { }
+      throw err;
+    } finally {
+      this._endSaveProgress();
+      this._setSaveBusy(false);
     }
   }
 
@@ -333,10 +529,214 @@ export class FileManagerWidget {
     return selected.length ? selected : solids;
   }
 
+  _buildBrepExtras(solids) {
+    if (!Array.isArray(solids) || solids.length === 0) return null;
+
+    const cleanMeta = (value) => {
+      if (value == null) return null;
+      try {
+        return JSON.parse(JSON.stringify(value, (key, v) => {
+          if (typeof v === 'function') return undefined;
+          if (v && v.isColor && typeof v.getHexString === 'function') {
+            try { return `#${v.getHexString()}`; } catch { return v; }
+          }
+          return v;
+        }));
+      } catch {
+        return null;
+      }
+    };
+
+    const mapToObject = (map) => {
+      if (!(map instanceof Map) || map.size === 0) return null;
+      const out = {};
+      for (const [key, val] of map.entries()) {
+        if (key == null) continue;
+        const cleaned = cleanMeta(val);
+        if (cleaned != null) out[String(key)] = cleaned;
+      }
+      return Object.keys(out).length ? out : null;
+    };
+
+    const encodeTriIds = (triIds) => {
+      if (!triIds || triIds.length === 0) return '';
+      const u32 = triIds instanceof Uint32Array ? triIds : Uint32Array.from(triIds);
+      const u8 = new Uint8Array(u32.buffer, u32.byteOffset, u32.byteLength);
+      return uint8ArrayToBase64(u8);
+    };
+
+    const solidsOut = {};
+    const metadataManager = this.viewer?.partHistory?.metadataManager;
+    for (const solid of solids) {
+      if (!solid || solid.type !== 'SOLID') continue;
+      const name = String(solid.name || '').trim();
+      if (!name) continue;
+
+      const authorTriCount = Array.isArray(solid._triVerts) ? (solid._triVerts.length / 3) : 0;
+      const authorTriIdCount = Array.isArray(solid._triIDs) ? solid._triIDs.length : 0;
+      let triIds = solid._triIDs || [];
+      let triCount = (Array.isArray(triIds) || triIds instanceof Uint32Array) ? triIds.length : 0;
+      let triIdsOrdered = triIds;
+      let mesh = null;
+      let triMat = null;
+      let meshTriCount = 0;
+      let meshFaceIdCount = 0;
+      try {
+        if (typeof solid.getMesh === 'function') {
+          mesh = solid.getMesh();
+          if (mesh && mesh.faceID && mesh.faceID.length) {
+            triIds = Array.from(mesh.faceID);
+            triCount = triIds.length;
+          }
+          meshTriCount = (mesh?.triVerts && mesh.triVerts.length) ? (mesh.triVerts.length / 3) : 0;
+          meshFaceIdCount = (mesh?.faceID && mesh.faceID.length) ? mesh.faceID.length : 0;
+          try {
+            triMat = computeTriangleMaterialIndices(solid, mesh, {
+              metadataManager,
+              includeFaceTags: true,
+              useMetadataColors: true,
+            });
+          } catch { /* ignore material mapping */ }
+        }
+      } catch { /* ignore mesh failures */ }
+      finally { try { mesh?.delete?.(); } catch { } }
+
+      if (triMat && Array.isArray(triMat) && triMat.length === triCount && triCount > 0) {
+        const buckets = new Map();
+        let defaultBucket = null;
+        for (let t = 0; t < triCount; t++) {
+          const fid = triIds[t];
+          const midx = triMat[t];
+          if (midx == null || !Number.isFinite(midx)) {
+            if (!defaultBucket) defaultBucket = [];
+            defaultBucket.push(fid);
+          } else {
+            const key = Number(midx);
+            let arr = buckets.get(key);
+            if (!arr) { arr = []; buckets.set(key, arr); }
+            arr.push(fid);
+          }
+        }
+        if (buckets.size || (defaultBucket && defaultBucket.length)) {
+          const ordered = [];
+          const keys = Array.from(buckets.keys()).sort((a, b) => a - b);
+          for (const k of keys) {
+            const arr = buckets.get(k);
+            if (arr && arr.length) ordered.push(...arr);
+          }
+          if (defaultBucket && defaultBucket.length) ordered.push(...defaultBucket);
+          triIdsOrdered = ordered;
+          triCount = triIdsOrdered.length;
+        }
+      } else {
+        triIdsOrdered = triIds;
+        triCount = (Array.isArray(triIdsOrdered) || triIdsOrdered instanceof Uint32Array) ? triIdsOrdered.length : 0;
+      }
+      try {
+        console.log('[FileManagerWidget] brepExtras: counts', {
+          name,
+          authorTriCount,
+          authorTriIdCount,
+          meshTriCount,
+          meshFaceIdCount,
+          triIdsCount: (Array.isArray(triIds) || triIds instanceof Uint32Array) ? triIds.length : 0,
+          triIdsOrderedCount: (Array.isArray(triIdsOrdered) || triIdsOrdered instanceof Uint32Array) ? triIdsOrdered.length : 0,
+          triMatCount: Array.isArray(triMat) ? triMat.length : 0,
+        });
+      } catch { }
+      try {
+        console.log('[FileManagerWidget] brepExtras: solid', {
+          name,
+          triCount,
+          faceMapCount: idToFaceName ? Object.keys(idToFaceName).length : 0,
+          faceMetaCount: faceMetadata ? Object.keys(faceMetadata).length : 0,
+          edgeMetaCount: edgeMetadata ? Object.keys(edgeMetadata).length : 0,
+          triFaceOrder: 'material',
+        });
+      } catch { }
+      let idToFaceName = (solid._idToFaceName instanceof Map)
+        ? Object.fromEntries(Array.from(solid._idToFaceName.entries()).map(([k, v]) => [String(k), String(v)]))
+        : null;
+      if (!idToFaceName && solid._faceNameToID instanceof Map) {
+        const inverted = {};
+        for (const [faceName, faceId] of solid._faceNameToID.entries()) {
+          if (faceId == null || faceName == null) continue;
+          inverted[String(faceId)] = String(faceName);
+        }
+        if (Object.keys(inverted).length) idToFaceName = inverted;
+      }
+
+      let faceMetadata = mapToObject(solid._faceMetadata);
+      const edgeMetadata = mapToObject(solid._edgeMetadata);
+      const solidUserMeta = cleanMeta(solid?.userData?.metadata || null);
+      const solidManagerMeta = (metadataManager && typeof metadataManager.getMetadata === 'function')
+        ? cleanMeta(metadataManager.getMetadata(name))
+        : null;
+      const solidMetadata = solidManagerMeta
+        ? { ...(solidManagerMeta || {}), ...(solidUserMeta || {}) }
+        : solidUserMeta;
+
+      if (metadataManager && typeof metadataManager.getMetadata === 'function' && idToFaceName) {
+        const mergedFaceMeta = faceMetadata || {};
+        for (const faceName of Object.values(idToFaceName)) {
+          if (!faceName) continue;
+          const meta = cleanMeta(metadataManager.getMetadata(faceName));
+          if (meta && typeof meta === 'object' && Object.keys(meta).length) {
+            mergedFaceMeta[faceName] = { ...(meta || {}), ...(mergedFaceMeta[faceName] || {}) };
+          }
+        }
+        faceMetadata = Object.keys(mergedFaceMeta).length ? mergedFaceMeta : faceMetadata;
+      }
+
+      let auxEdges = null;
+      if (Array.isArray(solid._auxEdges) && solid._auxEdges.length) {
+        auxEdges = solid._auxEdges.map((e) => {
+          const pts = Array.isArray(e?.points)
+            ? e.points
+                .map((p) => (Array.isArray(p) && p.length === 3 ? [p[0], p[1], p[2]] : null))
+                .filter(Boolean)
+            : [];
+          return {
+            name: e?.name || '',
+            points: pts,
+            closedLoop: !!e?.closedLoop,
+            polylineWorld: !!e?.polylineWorld,
+            materialKey: e?.materialKey || undefined,
+            centerline: !!e?.centerline,
+            faceA: typeof e?.faceA === 'string' ? e.faceA : undefined,
+            faceB: typeof e?.faceB === 'string' ? e.faceB : undefined,
+          };
+        }).filter((e) => Array.isArray(e.points) && e.points.length >= 2);
+      }
+
+      if (faceMetadata && Object.keys(faceMetadata).length === 0) faceMetadata = null;
+      solidsOut[name] = {
+        triCount,
+        triFaceIdsB64: encodeTriIds(triIdsOrdered),
+        triFaceOrder: 'material',
+        idToFaceName,
+        faceMetadata,
+        edgeMetadata,
+        auxEdges,
+        solidMetadata,
+      };
+    }
+
+    if (!Object.keys(solidsOut).length) return null;
+    return { version: 1, solids: solidsOut };
+  }
+
   async loadModel(name) {
     if (!this.viewer || !this.viewer.partHistory) return;
     const seq = ++this._loadSeq; // only the last call should win
-    const rec = await this._getModel(name);
+    let rec = null;
+    if (LS?.isGithub?.()) {
+      const res = await this._retryGithubOperation(`Load "${name}" from GitHub`, () => this._getModel(name, { throwOnError: true }));
+      if (!res.ok) return;
+      rec = res.value;
+    } else {
+      rec = await this._getModel(name);
+    }
     if (!rec) return alert('Model not found.');
     await this.viewer.partHistory.reset();
     // Prefer new 3MF-based storage
@@ -461,6 +861,26 @@ export class FileManagerWidget {
 
   async refreshList() {
     const items = await this._listModels();
+    if (LS?.isGithub?.() && this._pendingGithubMeta && this._pendingGithubMeta.size) {
+      for (const it of items) {
+        const pending = this._pendingGithubMeta.get(it.name);
+        if (!pending) continue;
+        const itemTime = it.savedAt ? Date.parse(it.savedAt) : NaN;
+        const pendingTime = pending.savedAt ? Date.parse(pending.savedAt) : NaN;
+        if (!Number.isFinite(itemTime) || (Number.isFinite(pendingTime) && pendingTime > itemTime)) {
+          if (pending.savedAt) it.savedAt = pending.savedAt;
+          if (it.record && pending.savedAt) it.record.savedAt = pending.savedAt;
+          if (pending.thumbnail) {
+            it.thumbnail = pending.thumbnail;
+            if (it.record) it.record.thumbnail = pending.thumbnail;
+            try { this._thumbCache.set(it.name, pending.thumbnail); } catch { }
+          }
+        } else {
+          // Remote metadata caught up; drop the pending override.
+          this._pendingGithubMeta.delete(it.name);
+        }
+      }
+    }
     while (this.listEl.firstChild) this.listEl.removeChild(this.listEl.firstChild);
 
     if (!items.length) {

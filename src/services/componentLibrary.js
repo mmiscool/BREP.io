@@ -96,7 +96,7 @@ async function listGithubComponentRecords() {
   return out;
 }
 
-async function getGithubComponentRecord(name) {
+async function getGithubComponentRecord(name, options = {}) {
   const cfg = getGithubStorageConfig();
   if (!cfg?.token || !cfg?.repoFull) return null;
   const { dataPath, metaPath } = getGithubModelPaths(name);
@@ -110,7 +110,11 @@ async function getGithubComponentRecord(name) {
       branch: cfg.branch,
       path: dataPath,
     });
-  } catch { /* ignore */ }
+  } catch (err) {
+    if (err && err.status === 404) return null;
+    if (options?.throwOnError) throw err;
+    return null;
+  }
   if (!data3mf) return null;
   try {
     const metaB64 = await readGithubFileBase64({
@@ -147,6 +151,7 @@ async function setGithubComponentRecord(name, dataObj) {
     path: dataPath,
     base64: data3mf,
     message: `BREP model update: ${name}`,
+    retryOn409: 3,
   });
   const meta = {
     savedAt: dataObj?.savedAt || new Date().toISOString(),
@@ -160,6 +165,7 @@ async function setGithubComponentRecord(name, dataObj) {
     path: metaPath,
     base64: metaB64,
     message: `BREP model meta: ${name}`,
+    retryOn409: 3,
   });
 }
 
@@ -233,9 +239,9 @@ export async function listComponentRecords() {
   return items;
 }
 
-export async function getComponentRecord(name) {
+export async function getComponentRecord(name, options = {}) {
   if (LS?.isGithub?.()) {
-    return await getGithubComponentRecord(name);
+    return await getGithubComponentRecord(name, options);
   }
   if (!name) return null;
   const key = MODEL_STORAGE_PREFIX + encodeURIComponent(String(name));
