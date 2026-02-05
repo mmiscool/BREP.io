@@ -20,6 +20,7 @@ const STORAGE_BACKEND_EVENT = 'brep-storage-backend-change';
 const GH_TOKEN_KEY = '__BREP_GH_TOKEN__';
 const GH_REPO_KEY = '__BREP_GH_REPO__';
 const GH_BRANCH_KEY = '__BREP_GH_BRANCH__';
+const STORAGE_MODE_KEY = '__BREP_STORAGE_MODE__';
 
 const hasIndexedDB = typeof indexedDB !== 'undefined' && !!indexedDB.open;
 
@@ -34,6 +35,27 @@ function getConfigStorage() {
     }
   } catch {}
   return null;
+}
+
+function normalizeStorageMode(mode) {
+  const m = String(mode || '').trim().toLowerCase();
+  if (m === 'local' || m === 'browser' || m === 'indexeddb') return 'local';
+  if (m === 'github' || m === 'remote') return 'github';
+  return '';
+}
+
+function loadStorageMode() {
+  const store = getConfigStorage();
+  if (!store) return '';
+  return normalizeStorageMode(store.getItem(STORAGE_MODE_KEY));
+}
+
+function saveStorageMode(mode) {
+  const store = getConfigStorage();
+  if (!store) return;
+  const m = normalizeStorageMode(mode);
+  if (m) store.setItem(STORAGE_MODE_KEY, m);
+  else store.removeItem(STORAGE_MODE_KEY);
 }
 
 function loadGithubConfig() {
@@ -537,11 +559,16 @@ const _githubBackend = new GithubStorage();
 const localStorage = new StorageProxy(_localBackend, _githubBackend);
 
 const initialGh = loadGithubConfig();
-if (initialGh.token && initialGh.repoFull) {
+const initialMode = loadStorageMode();
+if (initialMode === 'local') {
+  localStorage.useLocal();
+} else if (initialGh.token && initialGh.repoFull) {
   localStorage.useGithub(initialGh).catch((e) => {
     console.warn('[storage] GitHub init failed; falling back to local.', e);
     localStorage.useLocal();
   });
+} else {
+  localStorage.useLocal();
 }
 
 function getGithubStorageConfig() {
@@ -555,7 +582,39 @@ function getGithubStorageConfig() {
   return cfg;
 }
 
-async function configureGithubStorage({ token, repoFull, branch, persist = true } = {}) {
+async function applyStorageMode(mode, config) {
+  const m = normalizeStorageMode(mode);
+  if (m === 'local') {
+    await localStorage.useLocal();
+    return { enabled: false, mode: 'local' };
+  }
+  if (m === 'github') {
+    if (config.token && config.repoFull) {
+      await localStorage.useGithub(config);
+      return { enabled: true, mode: 'github' };
+    }
+    await localStorage.useLocal();
+    return { enabled: false, mode: 'local' };
+  }
+  if (config.token && config.repoFull) {
+    await localStorage.useGithub(config);
+    return { enabled: true, mode: 'github' };
+  }
+  await localStorage.useLocal();
+  return { enabled: false, mode: 'local' };
+}
+
+function getStorageMode() {
+  return loadStorageMode();
+}
+
+async function setStorageMode(mode, { persist = true } = {}) {
+  if (persist) saveStorageMode(mode);
+  const cfg = loadGithubConfig();
+  return await applyStorageMode(mode, cfg);
+}
+
+async function configureGithubStorage({ token, repoFull, branch, persist = true, mode } = {}) {
   const prev = loadGithubConfig();
   const next = {
     token: token !== undefined ? String(token || '') : prev.token,
@@ -563,16 +622,14 @@ async function configureGithubStorage({ token, repoFull, branch, persist = true 
     branch: branch !== undefined ? String(branch || '') : prev.branch,
   };
   if (persist) saveGithubConfig(next);
-  if (next.token && next.repoFull) {
-    await localStorage.useGithub(next);
-    return { enabled: true, mode: 'github' };
-  }
-  await localStorage.useLocal();
-  return { enabled: false, mode: 'local' };
+  if (mode !== undefined && persist) saveStorageMode(mode);
+  const storedMode = mode !== undefined ? mode : loadStorageMode();
+  return await applyStorageMode(storedMode, next);
 }
 
 async function clearGithubStorageConfig() {
   saveGithubConfig({ token: '', repoFull: '', branch: '' });
+  saveStorageMode('local');
   await localStorage.useLocal();
 }
 
@@ -581,5 +638,7 @@ export {
   STORAGE_BACKEND_EVENT,
   configureGithubStorage,
   getGithubStorageConfig,
+  getStorageMode,
+  setStorageMode,
   clearGithubStorageConfig,
 };

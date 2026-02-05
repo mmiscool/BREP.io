@@ -404,6 +404,7 @@ export class FileManagerWidget {
           thumbnail,
           metadataManager,
           defaultFaceColor,
+          includeFaceTags: false,
         });
         try { console.log('[FileManagerWidget] saveCurrent: 3MF exported', { bytes: threeMfBytes?.length || 0 }); } catch { }
         try {
@@ -445,6 +446,7 @@ export class FileManagerWidget {
           thumbnail,
           metadataManager,
           defaultFaceColor,
+          includeFaceTags: false,
         });
         console.warn('[FileManagerWidget] 3MF export failed for solids, saved history-only 3MF.', e);
         try { console.log('[FileManagerWidget] saveCurrent: 3MF exported (history only)', { bytes: threeMfBytes?.length || 0 }); } catch { }
@@ -593,7 +595,7 @@ export class FileManagerWidget {
           try {
             triMat = computeTriangleMaterialIndices(solid, mesh, {
               metadataManager,
-              includeFaceTags: true,
+              includeFaceTags: false,
               useMetadataColors: true,
             });
           } catch { /* ignore material mapping */ }

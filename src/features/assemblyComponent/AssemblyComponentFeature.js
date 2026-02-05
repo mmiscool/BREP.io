@@ -707,8 +707,15 @@ export class AssemblyComponentFeature {
     const defaultMaterialName = sourceName ? `${sourceName}_DEFAULT` : '';
     const isDefaultMaterial = (name) => {
       if (!name || typeof name !== 'string') return false;
-      if (defaultMaterialName && name === defaultMaterialName) return true;
-      return name.endsWith('_DEFAULT');
+      const trimmed = name.trim();
+      if (!trimmed) return false;
+      const lower = trimmed.toLowerCase();
+      if (lower === 'default') return true;
+      if (defaultMaterialName) {
+        if (trimmed === defaultMaterialName) return true;
+        if (lower === defaultMaterialName.toLowerCase()) return true;
+      }
+      return lower.endsWith('_default');
     };
 
     if (Array.isArray(faceInfos)) {
@@ -725,10 +732,14 @@ export class AssemblyComponentFeature {
     }
 
     if (!solidColor && Array.isArray(faceInfos)) {
-      const colored = faceInfos.filter((info) => info?.colorHex);
+      const colored = faceInfos.filter((info) => info?.colorHex && !isDefaultMaterial(info.materialName));
       if (colored.length === 1) {
-        solidColor = colored[0].colorHex;
-        if (colored[0].faceName) faceColors.delete(colored[0].faceName);
+        const only = colored[0];
+        // Only promote to solid color when we don't have a meaningful face name.
+        if (!only.faceName || faceInfos.length === 1) {
+          solidColor = only.colorHex;
+          if (only.faceName) faceColors.delete(only.faceName);
+        }
       }
     }
 

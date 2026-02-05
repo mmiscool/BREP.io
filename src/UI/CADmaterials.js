@@ -5,6 +5,8 @@ import {
     localStorage as LS,
     configureGithubStorage,
     getGithubStorageConfig,
+    getStorageMode,
+    setStorageMode,
     STORAGE_BACKEND_EVENT,
 } from '../idbStorage.js';
 import { fetchGithubUserRepos } from '../githubStorage.js';
@@ -366,6 +368,24 @@ export class CADmaterialWidget {
         header.textContent = 'Storage (GitHub)';
         group.appendChild(header);
 
+        const modeRow = makeRightSpan();
+        const modeLabel = document.createElement('label');
+        modeLabel.className = 'cmw-label';
+        modeLabel.textContent = 'Mode';
+        modeRow.appendChild(modeLabel);
+        const modeSelect = document.createElement('select');
+        modeSelect.className = 'cmw-input cmw-select-wrap';
+        const modeLocal = document.createElement('option');
+        modeLocal.value = 'local';
+        modeLocal.textContent = 'Browser only (Local)';
+        const modeGithub = document.createElement('option');
+        modeGithub.value = 'github';
+        modeGithub.textContent = 'GitHub (Remote)';
+        modeSelect.appendChild(modeLocal);
+        modeSelect.appendChild(modeGithub);
+        modeRow.appendChild(modeSelect);
+        group.appendChild(modeRow);
+
         const tokenRow = makeRightSpan();
         const tokenLabel = document.createElement('label');
         tokenLabel.className = 'cmw-label';
@@ -444,6 +464,15 @@ export class CADmaterialWidget {
         let repoCache = [];
         let pendingRepo = cfg?.repoFull || '';
 
+        const syncModeSelect = () => {
+            const storedMode = getStorageMode();
+            if (storedMode) {
+                modeSelect.value = storedMode;
+                return;
+            }
+            modeSelect.value = LS?.isGithub?.() ? 'github' : 'local';
+        };
+
         const updateStatus = (override) => {
             if (override) {
                 statusValue.textContent = override;
@@ -453,6 +482,11 @@ export class CADmaterialWidget {
                 const info = LS?.getBackendInfo?.();
                 const repo = info?.github?.repoFull || repoInput.value || cfg?.repoFull || 'GitHub';
                 statusValue.textContent = `GitHub: ${repo}`;
+                return;
+            }
+            if (getStorageMode() === 'github') {
+                const hasCfg = !!(tokenInput.value.trim() && repoInput.value.trim());
+                statusValue.textContent = hasCfg ? 'Local (GitHub unavailable)' : 'Local (GitHub not configured)';
                 return;
             }
             statusValue.textContent = 'Local (IndexedDB)';
@@ -532,14 +566,26 @@ export class CADmaterialWidget {
             const repoFull = repoInput.value.trim();
             try {
                 if (token && repoFull) updateStatus('Connecting...');
-                const res = await configureGithubStorage({ token, repoFull });
-                updateStatus(res.enabled ? undefined : 'Local (IndexedDB)');
+                await configureGithubStorage({ token, repoFull });
+                updateStatus();
             } catch (e) {
                 updateStatus(`GitHub error: ${e?.message || e}`);
             }
         };
 
+        const applyMode = async () => {
+            const mode = modeSelect.value;
+            try {
+                updateStatus('Switching storage...');
+                await setStorageMode(mode);
+                updateStatus();
+            } catch (e) {
+                updateStatus(`Storage error: ${e?.message || e}`);
+            }
+        };
+
         reloadBtn.addEventListener('click', () => loadRepos());
+        modeSelect.addEventListener('change', () => { applyMode(); });
         repoInput.addEventListener('input', () => {
             renderRepoList(repoInput.value);
             repoList.style.display = 'block';
@@ -578,11 +624,15 @@ export class CADmaterialWidget {
             repoInput.value = '';
             repoList.innerHTML = '<div class=\"cmw-combo-empty\">Load repos</div>';
             configureGithubStorage({ token: '', repoFull: '' });
+            setStorageMode('local');
             updateStatus();
         });
 
         try {
-            window.addEventListener(STORAGE_BACKEND_EVENT, () => updateStatus());
+            window.addEventListener(STORAGE_BACKEND_EVENT, () => {
+                if (!getStorageMode()) syncModeSelect();
+                updateStatus();
+            });
         } catch {}
 
         if (cfg?.token) {
@@ -591,6 +641,8 @@ export class CADmaterialWidget {
         } else {
             updateStatus();
         }
+
+        syncModeSelect();
 
         try {
             document.addEventListener('click', (event) => {
