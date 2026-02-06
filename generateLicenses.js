@@ -113,12 +113,201 @@ h1{margin:0 0 18px;font-size:22px;color:var(--accent);font-weight:700}
 .pkg .meta{display:flex;gap:10px;flex-wrap:wrap}
 .pkg .name{font-weight:600}
 .pkg .desc{color:var(--muted);margin-top:2px}
+.desc{color:var(--muted);margin-top:6px}
 a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
 .chip{background:var(--chip);border:1px solid var(--border);border-radius:999px;padding:2px 8px;font-size:12px;color:var(--muted)}
 .footer{margin-top:26px;color:var(--muted);font-size:12px}
 `;
 
 const countPackages = licenseKeys.reduce((n, k) => n + (Array.isArray(data[k]) ? data[k].length : 0), 0);
+
+const FONT_EXTS = new Set([".ttf", ".otf", ".woff", ".woff2", ".ttc"]);
+const FONT_LICENSE_RE = /(license|ofl|notice)/i;
+const FONT_FAMILY_NAMES = {
+  "ibm-plex": "IBM Plex",
+  "liberation": "Liberation",
+  "dejavu": "DejaVu",
+  "noto": "Noto",
+  "hack": "Hack",
+  "ubuntu": "Ubuntu",
+  "libre-barcode": "Libre Barcode",
+};
+
+const toTitleCase = (value = "") =>
+  value
+    .split(/[-_]+/g)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
+const detectFontLicenseId = (text = "", filename = "") => {
+  const lower = String(text).toLowerCase();
+  if (lower.includes("sil open font license") || lower.includes("open font license")) return "OFL-1.1";
+  if (lower.includes("ubuntu font licence") || lower.includes("ubuntu font license")) return "Ubuntu Font Licence 1.0";
+  if (lower.includes("bitstream vera")) return "Bitstream Vera";
+  if (lower.includes("expat") || lower.includes("mit license") || lower.includes("permission is hereby granted")) return "MIT";
+  if (lower.includes("apache license")) return "Apache-2.0";
+  if (lower.includes("creative commons")) return "CC";
+  if (lower.includes("affero general public license")) return "AGPL";
+  if (lower.includes("gnu general public license")) return "GPL";
+  if (String(filename).toLowerCase().includes("ofl")) return "OFL-1.1";
+  return "UNKNOWN";
+};
+
+const collectFontFamilyDirs = (fontsRoot) => {
+  const results = [];
+  const entries = readdirSync(fontsRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory());
+  for (const entry of entries) {
+    const dirPath = path.join(fontsRoot, entry.name);
+    const children = readdirSync(dirPath, { withFileTypes: true });
+    const fileChildren = children.filter((child) => child.isFile());
+    const hasFont = fileChildren.some((file) => FONT_EXTS.has(path.extname(file.name).toLowerCase()));
+    const hasLicense = fileChildren.some((file) => FONT_LICENSE_RE.test(file.name));
+    const hasMetadata = fileChildren.some((file) => file.name === "METADATA.pb");
+    if (hasFont || hasLicense || hasMetadata) {
+      results.push({
+        id: entry.name,
+        dirPath,
+        relDir: path.join("src", "assets", "fonts", entry.name),
+      });
+      continue;
+    }
+
+    const subdirs = children.filter((child) => child.isDirectory());
+    for (const subdir of subdirs) {
+      const subPath = path.join(dirPath, subdir.name);
+      const subFiles = readdirSync(subPath, { withFileTypes: true }).filter((child) => child.isFile());
+      const subHasFont = subFiles.some((file) => FONT_EXTS.has(path.extname(file.name).toLowerCase()));
+      const subHasLicense = subFiles.some((file) => FONT_LICENSE_RE.test(file.name));
+      const subHasMetadata = subFiles.some((file) => file.name === "METADATA.pb");
+      if (!subHasFont && !subHasLicense && !subHasMetadata) continue;
+      results.push({
+        id: path.join(entry.name, subdir.name),
+        dirPath: subPath,
+        relDir: path.join("src", "assets", "fonts", entry.name, subdir.name),
+      });
+    }
+  }
+  return results;
+};
+
+const loadFontLicenses = () => {
+  const fontsRoot = path.join(rootDir, "src", "assets", "fonts");
+  if (!existsSync(fontsRoot)) {
+    return { families: [], licenseIds: [] };
+  }
+  const families = [];
+  const entries = collectFontFamilyDirs(fontsRoot);
+  for (const entry of entries) {
+    const familyDir = entry.dirPath;
+    let metadataName = "";
+    const metadataPath = path.join(familyDir, "METADATA.pb");
+    if (existsSync(metadataPath)) {
+      const metadataText = readFileSync(metadataPath, "utf-8");
+      const match = metadataText.match(/^name:\s+"([^"]+)"/m);
+      if (match) {
+        metadataName = match[1].trim();
+      }
+    }
+    const files = readdirSync(familyDir, { withFileTypes: true }).filter((f) => f.isFile());
+    const fontFiles = files
+      .filter((f) => FONT_EXTS.has(path.extname(f.name).toLowerCase()))
+      .map((f) => f.name)
+      .sort((a, b) => a.localeCompare(b));
+    const licenseFiles = files
+      .filter((f) => FONT_LICENSE_RE.test(f.name))
+      .map((f) => f.name)
+      .sort((a, b) => a.localeCompare(b));
+    const licenseTexts = licenseFiles.map((file) => {
+      const text = readFileSync(path.join(familyDir, file), "utf-8").trimEnd();
+      return { file, text };
+    });
+    const licenseIds = Array.from(
+      new Set(licenseTexts.map((lic) => detectFontLicenseId(lic.text, lic.file)).filter(Boolean))
+    );
+    families.push({
+      id: entry.id,
+      name: metadataName || FONT_FAMILY_NAMES[entry.id] || toTitleCase(entry.id),
+      fontFiles,
+      licenseFiles,
+      licenseIds,
+      licenseTexts,
+      relDir: entry.relDir,
+    });
+  }
+  families.sort((a, b) => a.name.localeCompare(b.name));
+  const licenseIds = Array.from(
+    new Set(families.flatMap((family) => family.licenseIds).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b));
+  return { families, licenseIds };
+};
+
+const renderFontLicenseMarkdown = ({ families, licenseIds }) => {
+  const lines = [];
+  lines.push("# Font Licenses");
+  lines.push("");
+  lines.push("This file lists font assets bundled in `src/assets/fonts`.");
+  lines.push("");
+  if (!families.length) {
+    lines.push("_No bundled font assets were found._");
+    lines.push("");
+    return lines.join("\n");
+  }
+  lines.push(`Font families: ${families.length}`);
+  lines.push(`License types: ${licenseIds.length ? licenseIds.join(", ") : "Unknown"}`);
+  lines.push("");
+  for (const family of families) {
+    lines.push(`## ${family.name}`);
+    lines.push(`Fonts: ${family.fontFiles.length ? family.fontFiles.join(", ") : "None found"}`);
+    lines.push(`Licenses: ${family.licenseIds.length ? family.licenseIds.join(", ") : "Unknown"}`);
+    lines.push(`License files: ${family.licenseFiles.length ? family.licenseFiles.map((f) => `${family.relDir}/${f}`).join(", ") : "None found"}`);
+    lines.push("");
+    for (const lic of family.licenseTexts) {
+      lines.push(`### ${lic.file}`);
+      lines.push("");
+      lines.push("```text");
+      lines.push(lic.text);
+      lines.push("```");
+      lines.push("");
+    }
+  }
+  lines.push("Generated by `generateLicenses.js`.");
+  lines.push("");
+  return lines.join("\n");
+};
+
+const renderFontLicenseHtml = ({ families, licenseIds }) => {
+  if (!families.length) {
+    return `<h1>Font Licenses (Bundled Assets)</h1>
+  <div class="summary">No bundled font assets were found.</div>`;
+  }
+  const summary = `${families.length} font famil${families.length === 1 ? "y" : "ies"} • ${
+    licenseIds.length
+  } license type${licenseIds.length === 1 ? "" : "s"}`;
+  let html = `<h1>Font Licenses (Bundled Assets)</h1>
+  <div class="summary">${escapeHTML(summary)}</div>`;
+  for (const family of families) {
+    const licenseLabel = family.licenseIds.length ? family.licenseIds.join(", ") : "Unknown";
+    const fontList = family.fontFiles.length ? family.fontFiles.join(", ") : "None found";
+    const licenseFileList = family.licenseFiles.length
+      ? family.licenseFiles.map((file) => `${family.relDir}/${file}`).join(", ")
+      : "None found";
+    html += `<section class="license">
+    <h2>${escapeHTML(family.name)} <span class="chip">${escapeHTML(licenseLabel)}</span></h2>
+    <div class="desc">Fonts: ${escapeHTML(fontList)}</div>
+    <div class="desc">License files: ${escapeHTML(licenseFileList)}</div>
+  `;
+    for (const lic of family.licenseTexts) {
+      html += `<h3>${escapeHTML(lic.file)}</h3>
+    <div style="white-space: pre-wrap;">${escapeHTML(lic.text)}</div>`;
+    }
+    html += `</section>`;
+  }
+  return html;
+};
+
+const fontLicenseData = loadFontLicenses();
+const fontLicenseMarkdown = renderFontLicenseMarkdown(fontLicenseData);
+const fontLicenseHtml = renderFontLicenseHtml(fontLicenseData);
 
 
 
@@ -858,6 +1047,14 @@ function generateDocsSite() {
       readmeBody += `</section>`;
     }
 
+    readmeBody += `
+  <section class="card doc-card">
+    <h2>Font Licenses</h2>
+    <div class="summary">Bundled fonts are licensed separately from npm packages.</div>
+    <div class="doc-nav-links"><a href="./fonts-licenses.html">Font license details</a></div>
+  </section>
+`;
+
     readmeBody += `<div class="footer">Generated from <code>pnpm licenses list --prod --long --json</code></div>
     <div class="prose">`;
 
@@ -891,6 +1088,10 @@ function generateDocsSite() {
 }
 
 const readmeHTML = flattenDocResources(convertMarkdownLinks(renderMarkdown(readmeText)), ".");
+
+mkdirSync(docsSourceDir, { recursive: true });
+const fontLicenseDocPath = path.join(docsSourceDir, "fonts-licenses.md");
+writeFileSync(fontLicenseDocPath, fontLicenseMarkdown, "utf-8");
 
 generateDocsSite();
 
@@ -960,6 +1161,7 @@ for (const lic of licenseKeys) {
 }
 
 html += `
+  ${fontLicenseHtml}
   <div class="footer">Generated from <code>pnpm licenses list --prod --long --json</code></div>
 </main>
 </body>

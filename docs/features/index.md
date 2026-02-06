@@ -35,5 +35,6 @@ Reference docs for the built-in modeling features.
 - [Sketch](sketch.md)
 - [Spline](spline.md)
 - [Sweep](sweep.md)
+- [Text to Face](text-to-face.md)
 - [Transform](transform.md)
 - [Tube](tube.md)

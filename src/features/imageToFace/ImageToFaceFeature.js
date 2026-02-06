@@ -3,6 +3,7 @@ const THREE = BREP.THREE;
 import { LineGeometry } from 'three/examples/jsm/Addons.js';
 import { ImageEditorUI } from './imageEditor.js';
 import { traceImageDataToPolylines, applyCurveFit, rdp, assignBreaksToLoops, splitLoopIntoEdges, sanitizeLoopsForExtrude, dropIntersectingLoops } from './traceUtils.js';
+import { SelectionState } from '../../UI/SelectionState.js';
 
 const renderHiddenField = ({ id, row }) => {
   if (row && row.style) row.style.display = 'none';
@@ -297,6 +298,22 @@ export class ImageToFaceFeature {
     const bX = new THREE.Vector3().fromArray(basis.x);
     const bY = new THREE.Vector3().fromArray(basis.y);
     const bZ = new THREE.Vector3().fromArray(basis.z);
+    if (bZ.lengthSq() < 1e-12) bZ.set(0, 0, 1);
+    const edgeBias = bZ.clone().normalize().multiplyScalar(1e-4);
+    const applySketchEdgeStyle = (edge) => {
+      if (!edge) return;
+      edge.renderOrder = 2;
+      try {
+        const baseMat = edge.material;
+        const sketchMat = (baseMat && typeof baseMat.clone === 'function') ? baseMat.clone() : null;
+        if (sketchMat) {
+          sketchMat.depthTest = false;
+          sketchMat.depthWrite = false;
+          sketchMat.needsUpdate = true;
+          SelectionState.setBaseMaterial(edge, sketchMat);
+        }
+      } catch { }
+    };
     const m = new THREE.Matrix4().makeBasis(bX, bY, bZ).setPosition(bO);
     // Quantize world coordinates to reduce FP drift and guarantee identical
     // vertices between caps and walls. Use a small absolute grid (~1e-6).
@@ -407,6 +424,18 @@ export class ImageToFaceFeature {
     face.userData.faceName = face.name;
     face.userData.boundaryLoopsWorld = boundaryLoopsWorld;
     face.userData.profileGroups = profileGroups;
+    try {
+      const baseMat = face.material;
+      const sketchMat = (baseMat && typeof baseMat.clone === 'function') ? baseMat.clone() : null;
+      if (sketchMat) {
+        sketchMat.side = THREE.DoubleSide;
+        sketchMat.polygonOffset = true;
+        sketchMat.polygonOffsetFactor = -2;
+        sketchMat.polygonOffsetUnits = 1;
+        sketchMat.needsUpdate = true;
+        SelectionState.setBaseMaterial(face, sketchMat);
+      }
+    } catch { }
 
     // Edges from loops, split at corners to enable per-edge sidewalls
     const edges = [];
@@ -430,7 +459,7 @@ export class ImageToFaceFeature {
         for (let i = 0; i < seg.length; i++) {
           const p = seg[i];
           const w = toW(p[0], p[1]);
-          positions.push(w[0], w[1], w[2]);
+          positions.push(w[0] + edgeBias.x, w[1] + edgeBias.y, w[2] + edgeBias.z);
           worldPts.push([w[0], w[1], w[2]]);
         }
         if (positions.length < 6) continue;
@@ -448,6 +477,7 @@ export class ImageToFaceFeature {
           loopIndex: loopIdx,
           segmentIndex: segIdx++
         };
+        applySketchEdgeStyle(e);
         edges.push(e);
       }
       loopIdx++;

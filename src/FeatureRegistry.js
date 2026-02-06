@@ -19,6 +19,7 @@ import { SweepFeature } from './features/sweep/SweepFeature.js';
 import { RemeshFeature } from './features/remesh/RemeshFeature.js';
 import { ImageToFaceFeature } from './features/imageToFace/ImageToFaceFeature.js';
 import { ImageHeightmapSolidFeature } from './features/imageHeightSolid/ImageHeightmapSolidFeature.js';
+import { TextToFaceFeature } from './features/textToFace/TextToFaceFeature.js';
 import { TransformFeature } from './features/transform/TransformFeature.js';
 import { OverlapCleanupFeature } from './features/overlapCleanup/OverlapCleanupFeature.js';
 import { HelixFeature } from './features/helix/HelixFeature.js';
@@ -102,6 +103,7 @@ export class FeatureRegistry {
     this.register(RemeshFeature);
     this.register(ImageToFaceFeature);
     this.register(ImageHeightmapSolidFeature);
+    this.register(TextToFaceFeature);
     this.register(TransformFeature);
     this.register(OverlapCleanupFeature);
     this.register(PatternLinearFeature);
@@ -124,6 +126,9 @@ export class FeatureRegistry {
     this.aliases.set('STL IMPORT', Import3dModelFeature);
     this.aliases.set('STLIMPORT', Import3dModelFeature);
     this.aliases.set('STLIMPORTFEATURE', Import3dModelFeature);
+    // Text-to-Face variations
+    this.aliases.set('TEXT TO FACE', TextToFaceFeature);
+    this.aliases.set('TEXTTOFACE', TextToFaceFeature);
   }
 
   register(FeatureClass) {

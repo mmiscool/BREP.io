@@ -1,6 +1,7 @@
 import { BREP } from "../../BREP/BREP.js";
 import { LineGeometry } from "three/examples/jsm/Addons.js";
 import { resolveSelectionObject } from "../selectionUtils.js";
+import { SelectionState } from '../../UI/SelectionState.js';
 
 const THREE = BREP.THREE;
 
@@ -245,7 +246,7 @@ const computeBoundaryLoopsFromFace = (faceObj) => {
   return loops;
 };
 
-const buildEdgesFromLoops = (loops, groupName) => {
+const buildEdgesFromLoops = (loops, groupName, edgeBias, applySketchEdgeStyle) => {
   const edges = [];
   let edgeIdx = 0;
   for (const loop of loops) {
@@ -253,12 +254,22 @@ const buildEdgesFromLoops = (loops, groupName) => {
     if (!Array.isArray(pts) || pts.length < 2) continue;
     const poly = pts.map((p) => [p[0], p[1], p[2]]);
     const positions = [];
-    for (const p of poly) positions.push(p[0], p[1], p[2]);
+    for (const p of poly) {
+      positions.push(
+        p[0] + (edgeBias?.x || 0),
+        p[1] + (edgeBias?.y || 0),
+        p[2] + (edgeBias?.z || 0),
+      );
+    }
     if (poly.length >= 2) {
       const first = poly[0];
       const last = poly[poly.length - 1];
       if (!(first[0] === last[0] && first[1] === last[1] && first[2] === last[2])) {
-        positions.push(first[0], first[1], first[2]);
+        positions.push(
+          first[0] + (edgeBias?.x || 0),
+          first[1] + (edgeBias?.y || 0),
+          first[2] + (edgeBias?.z || 0),
+        );
       }
     }
     const lg = new LineGeometry();
@@ -272,6 +283,7 @@ const buildEdgesFromLoops = (loops, groupName) => {
       polylineWorld: true,
       isHole: !!loop?.isHole,
     };
+    if (typeof applySketchEdgeStyle === 'function') applySketchEdgeStyle(edge);
     edges.push(edge);
   }
   return edges;
@@ -339,6 +351,18 @@ export class OffsetFaceFeature {
       offsetFace.userData.faceName = offsetFace.name;
       offsetFace.userData.sourceFaceName = sourceFaceName;
       offsetFace.userData.offsetDistance = dist;
+      try {
+        const baseMat = offsetFace.material;
+        const sketchMat = (baseMat && typeof baseMat.clone === 'function') ? baseMat.clone() : null;
+        if (sketchMat) {
+          sketchMat.side = THREE.DoubleSide;
+          sketchMat.polygonOffset = true;
+          sketchMat.polygonOffsetFactor = -2;
+          sketchMat.polygonOffsetUnits = 1;
+          sketchMat.needsUpdate = true;
+          SelectionState.setBaseMaterial(offsetFace, sketchMat);
+        }
+      } catch { }
 
       group.userData.sourceFaceName = sourceFaceName;
       group.userData.offsetDistance = dist;
@@ -348,7 +372,22 @@ export class OffsetFaceFeature {
       const loops = computeBoundaryLoopsFromFace(offsetFace);
       if (loops.length) offsetFace.userData.boundaryLoopsWorld = loops;
 
-      const edges = buildEdgesFromLoops(loops, groupName);
+      const edgeBias = normal.clone().normalize().multiplyScalar(1e-4);
+      const applySketchEdgeStyle = (edge) => {
+        if (!edge) return;
+        edge.renderOrder = 2;
+        try {
+          const baseMat = edge.material;
+          const sketchMat = (baseMat && typeof baseMat.clone === 'function') ? baseMat.clone() : null;
+          if (sketchMat) {
+            sketchMat.depthTest = false;
+            sketchMat.depthWrite = false;
+            sketchMat.needsUpdate = true;
+            SelectionState.setBaseMaterial(edge, sketchMat);
+          }
+        } catch { }
+      };
+      const edges = buildEdgesFromLoops(loops, groupName, edgeBias, applySketchEdgeStyle);
       for (const edge of edges) {
         edge.faces.push(offsetFace);
         group.add(edge);

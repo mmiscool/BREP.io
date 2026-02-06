@@ -345,6 +345,25 @@ export class SketchFeature {
         const bO = new THREE.Vector3().fromArray(basis.origin);
         const bX = new THREE.Vector3().fromArray(basis.x);
         const bY = new THREE.Vector3().fromArray(basis.y);
+        const bZ = Array.isArray(basis.z)
+            ? new THREE.Vector3().fromArray(basis.z)
+            : new THREE.Vector3().crossVectors(bX, bY).normalize();
+        if (bZ.lengthSq() < 1e-12) bZ.set(0, 0, 1);
+        const edgeBias = bZ.clone().normalize().multiplyScalar(1e-4);
+        const applySketchEdgeStyle = (edge) => {
+            if (!edge) return;
+            edge.renderOrder = 2;
+            try {
+                const baseMat = edge.material;
+                const sketchMat = (baseMat && typeof baseMat.clone === 'function') ? baseMat.clone() : null;
+                if (sketchMat) {
+                    sketchMat.depthTest = false;
+                    sketchMat.depthWrite = false;
+                    sketchMat.needsUpdate = true;
+                    SelectionState.setBaseMaterial(edge, sketchMat);
+                }
+            } catch { }
+        };
 
         // Start from persisted sketch
         let sketch = this.persistentData?.sketch || { points: [{ id:0, x:0, y:0, fixed:true }], geometries: [], constraints: [{ id:0, type:"⏚", points:[0]}] };
@@ -527,9 +546,14 @@ export class SketchFeature {
                 segs.push({ id:g.id, pts:[[a.x,a.y],[b.x,b.y]] });
                 const aw = toWorld(a.x,a.y); const bw = toWorld(b.x,b.y);
                 const lg = new LineGeometry();
-                lg.setPositions([aw.x, aw.y, aw.z, bw.x, bw.y, bw.z]);
+                lg.setPositions([
+                    aw.x + edgeBias.x, aw.y + edgeBias.y, aw.z + edgeBias.z,
+                    bw.x + edgeBias.x, bw.y + edgeBias.y, bw.z + edgeBias.z,
+                ]);
                 const edgeName = `${edgeNamePrefix}G${g.id}`;
-                const e = new BREP.Edge(lg); e.name = edgeName; e.userData = { polylineLocal:[[aw.x,aw.y,aw.z],[bw.x,bw.y,bw.z]], polylineWorld:true, sketchFeatureId: featureId, sketchGeometryId: g.id }; edges.push(e); edgeBySegId.set(g.id, e);
+                const e = new BREP.Edge(lg); e.name = edgeName; e.userData = { polylineLocal:[[aw.x,aw.y,aw.z],[bw.x,bw.y,bw.z]], polylineWorld:true, sketchFeatureId: featureId, sketchGeometryId: g.id };
+                applySketchEdgeStyle(e);
+                edges.push(e); edgeBySegId.set(g.id, e);
             } else if (g.type==='arc' && g.points?.length===3) {
                 const c = pointById.get(g.points[0]); const sa=pointById.get(g.points[1]); const sb=pointById.get(g.points[2]); if(!c||!sa||!sb) continue;
                 const cx=c.x, cy=c.y; const r=Math.hypot(sa.x-cx, sa.y-cy);
@@ -548,12 +572,13 @@ export class SketchFeature {
                     pts[pts.length-1] = [sb.x, sb.y];
                 }
                 segs.push({ id:g.id, pts });
-                const flat=[]; const worldPts=[]; for(const p of pts){ const v=toWorld(p[0],p[1]); flat.push(v.x,v.y,v.z); worldPts.push([v.x,v.y,v.z]); }
+                const flat=[]; const worldPts=[]; for(const p of pts){ const v=toWorld(p[0],p[1]); flat.push(v.x + edgeBias.x, v.y + edgeBias.y, v.z + edgeBias.z); worldPts.push([v.x,v.y,v.z]); }
                 const lg = new LineGeometry(); lg.setPositions(flat);
                 const edgeName = `${edgeNamePrefix}G${g.id}`;
                 const e = new BREP.Edge(lg); e.name = edgeName; 
                 const cw = toWorld(cx, cy);
                 e.userData = { polylineLocal: worldPts, polylineWorld:true, sketchGeomType:'arc', arcCenter:[cw.x, cw.y, cw.z], arcRadius:r, sketchFeatureId: featureId, sketchGeometryId: g.id };
+                applySketchEdgeStyle(e);
                 edges.push(e); edgeBySegId.set(g.id, e);
             } else if (g.type==='circle' && g.points?.length===2) {
                 const c = pointById.get(g.points[0]); const rp=pointById.get(g.points[1]); if(!c||!rp) continue;
@@ -566,12 +591,13 @@ export class SketchFeature {
                     pts[pts.length-1] = [first[0], first[1]];
                 }
                 segs.push({ id:g.id, pts });
-                const flat=[]; const worldPts=[]; for(const p of pts){ const v=toWorld(p[0],p[1]); flat.push(v.x,v.y,v.z); worldPts.push([v.x,v.y,v.z]); }
+                const flat=[]; const worldPts=[]; for(const p of pts){ const v=toWorld(p[0],p[1]); flat.push(v.x + edgeBias.x, v.y + edgeBias.y, v.z + edgeBias.z); worldPts.push([v.x,v.y,v.z]); }
                 const lg = new LineGeometry(); lg.setPositions(flat);
                 const edgeName = `${edgeNamePrefix}G${g.id}`;
                 const e = new BREP.Edge(lg); e.name = edgeName; 
                 const cw = toWorld(cx, cy);
                 e.userData = { polylineLocal: worldPts, polylineWorld:true, sketchGeomType:'circle', circleCenter:[cw.x,cw.y,cw.z], circleRadius:r, sketchFeatureId: featureId, sketchGeometryId: g.id };
+                applySketchEdgeStyle(e);
                 edges.push(e); edgeBySegId.set(g.id, e);
             } else if (g.type==='bezier' && g.points?.length>=4) {
                 const ids = g.points || [];
@@ -600,10 +626,12 @@ export class SketchFeature {
                 if (firstAnchor) pts[0] = [firstAnchor.x, firstAnchor.y];
                 if (lastAnchor) pts[pts.length - 1] = [lastAnchor.x, lastAnchor.y];
                 segs.push({ id:g.id, pts });
-                const flat=[]; const worldPts=[]; for(const p of pts){ const v=toWorld(p[0],p[1]); flat.push(v.x,v.y,v.z); worldPts.push([v.x,v.y,v.z]); }
+                const flat=[]; const worldPts=[]; for(const p of pts){ const v=toWorld(p[0],p[1]); flat.push(v.x + edgeBias.x, v.y + edgeBias.y, v.z + edgeBias.z); worldPts.push([v.x,v.y,v.z]); }
                 const lg = new LineGeometry(); lg.setPositions(flat);
                 const edgeName = `${edgeNamePrefix}G${g.id}`;
-                const e = new BREP.Edge(lg); e.name = edgeName; e.userData = { polylineLocal: worldPts, polylineWorld:true, sketchFeatureId: featureId, sketchGeometryId: g.id }; edges.push(e); edgeBySegId.set(g.id, e);
+                const e = new BREP.Edge(lg); e.name = edgeName; e.userData = { polylineLocal: worldPts, polylineWorld:true, sketchFeatureId: featureId, sketchGeometryId: g.id };
+                applySketchEdgeStyle(e);
+                edges.push(e); edgeBySegId.set(g.id, e);
             }
         }
 
@@ -892,6 +920,9 @@ export class SketchFeature {
                     const sketchMat = (baseMat && typeof baseMat.clone === 'function') ? baseMat.clone() : null;
                     if (sketchMat) {
                         sketchMat.side = THREE.DoubleSide;
+                        sketchMat.polygonOffset = true;
+                        sketchMat.polygonOffsetFactor = -2;
+                        sketchMat.polygonOffsetUnits = 1;
                         sketchMat.needsUpdate = true;
                         SelectionState.setBaseMaterial(face, sketchMat);
                     }

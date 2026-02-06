@@ -53,6 +53,7 @@ function isSketchFeatureType(type, partHistory) {
   if (shortName === 'S' || longName.includes('SKETCH') || className.includes('SKETCH')) return true;
   if (shortName === 'SP' || className.includes('SPLINE')) return true;
   if (shortName === 'IMAGE' || className.includes('IMAGETOFACE')) return true;
+  if (shortName === 'TEXT' || className.includes('TEXTTOFACE')) return true;
   return false;
 }
 

@@ -35,7 +35,6 @@
   "author": "",
   "license": "SEE LICENSE IN LICENSE.md",
   "dependencies": {
-    "@supabase/supabase-js": "^2.94.0",
     "@tarikjabiri/dxf": "^2.8.9",
     "jszip": "^3.10.1",
     "manifold-3d": "^3.3.2",

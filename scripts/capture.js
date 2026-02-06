@@ -29,7 +29,7 @@ const DEFAULT_TARGETS = [
 
 async function run() {
   // sleep 4 seconds
-  await new Promise(resolve => setTimeout(resolve, 4000));
+  await new Promise(resolve => setTimeout(resolve, 10000));
 
 
   const targets = resolveTargets();
