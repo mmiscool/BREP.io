@@ -26,6 +26,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
     this._itemEls = new Map();
     this._paramSignatures = new Map();
     this._idsSignature = this.#computeIdsSignature();
+    this._expressionsSig = this.#computeExpressionsSig();
     this._rafHandle = null;
     this._rafIsTimeout = false;
     this._runPromise = null;
@@ -360,6 +361,9 @@ export class HistoryWidget extends HistoryCollectionWidget {
   }
 
   #refreshOpenForms() {
+    const exprSig = this.#computeExpressionsSig();
+    const exprChanged = exprSig !== this._expressionsSig;
+    if (exprChanged) this._expressionsSig = exprSig;
     const entries = this._getEntries();
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
@@ -368,7 +372,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
       const form = this.getFormForEntry(id);
       if (!form) continue;
       const sig = this.#computeParamsSig(entry?.inputParams);
-      if (this._paramSignatures.get(id) === sig) continue;
+      if (!exprChanged && this._paramSignatures.get(id) === sig) continue;
       this._paramSignatures.set(id, sig);
       try { form.refreshFromParams?.(); } catch { /* ignore */ }
     }
@@ -429,6 +433,12 @@ export class HistoryWidget extends HistoryCollectionWidget {
       else parts.push(`${key}:${String(value)}`);
     }
     return parts.join('|');
+  }
+
+  #computeExpressionsSig() {
+    const expr = this.partHistory?.expressions;
+    if (expr == null) return '';
+    return String(expr);
   }
 
   #entryId(entry) {

@@ -195,6 +195,7 @@ export class SchemaForm {
         this._panel.appendChild(this._fieldsWrap);
 
         this._renderAllFields();
+        try { this.refreshFromParams(); } catch (_) { }
 
         // Deactivate reference selection when focusing or clicking into any other control
         const stopIfOtherControl = (target) => {
@@ -285,7 +286,7 @@ export class SchemaForm {
             if (this._skipDefaultRefresh.has(key)) {
                 continue;
             }
-            const v = this._pickInitialValue(key, def);
+            const v = this._getDisplayValue(key, def);
             // Special composite types handle their own refresh
             if (def && def.type === 'boolean_operation') {
                 const row = this._fieldsWrap.querySelector(`[data-key="${key}"]`);
@@ -296,7 +297,8 @@ export class SchemaForm {
                 }
                 const chips = row ? row.querySelector('.ref-chips') : null;
                 const targets = (v && typeof v === 'object' && Array.isArray(v.targets)) ? v.targets : [];
-                if (chips) this._renderChips(chips, key, targets);
+                const exprActive = this._hasExprForKey(key);
+                if (chips) this._renderChips(chips, key, targets, { skipWrite: exprActive });
                 this._refreshExpressionControl(key);
                 continue;
             }
@@ -305,15 +307,16 @@ export class SchemaForm {
             // If this is a reference selection, refresh custom UI
             if (def && def.type === 'reference_selection') {
                 const row = this._fieldsWrap.querySelector(`[data-key="${key}"]`);
+                const exprActive = this._hasExprForKey(key);
                 if (def.multiple) {
                     const normalized = normalizeReferenceList(Array.isArray(v) ? v : []);
-                    this.params[key] = normalized;
+                    if (!exprActive) this.params[key] = normalized;
                     const chips = row ? row.querySelector('.ref-chips') : null;
-                    if (chips) this._renderChips(chips, key, normalized);
+                    if (chips) this._renderChips(chips, key, normalized, { skipWrite: exprActive });
                 } else {
                     const display = row ? row.querySelector('.ref-single-display') : null;
                     const normalized = normalizeReferenceName(v);
-                    this.params[key] = normalized ?? null;
+                    if (!exprActive) this.params[key] = normalized ?? null;
                     if (display) {
                         const label = display.querySelector('.ref-single-label');
                         const placeholder = display.dataset?.placeholder || 'Click then select in scene…';
@@ -1943,10 +1946,11 @@ export class SchemaForm {
         SelectionFilter.restoreAllowedSelectionTypes();
     }
 
-    _renderChips(chipsWrap, key, values) {
+    _renderChips(chipsWrap, key, values, options = {}) {
         chipsWrap.textContent = '';
         const arr = Array.isArray(values) ? values : [];
         const normalizedValues = normalizeReferenceList(arr);
+        const skipWrite = options && options.skipWrite === true;
         let inputEl = (this._inputs && typeof this._inputs.get === 'function') ? this._inputs.get(key) : null;
         const resolveInput = () => {
             if (inputEl) return inputEl;
@@ -1990,10 +1994,12 @@ export class SchemaForm {
                 try { inputEl.dataset.selectedValues = JSON.stringify(normalizedValues); } catch (_) { }
             }
         }
-        if (Array.isArray(this.params[key])) {
-            this.params[key] = normalizedValues;
-        } else if (this.params[key] && typeof this.params[key] === 'object' && Array.isArray(this.params[key].targets)) {
-            this.params[key].targets = normalizedValues;
+        if (!skipWrite) {
+            if (Array.isArray(this.params[key])) {
+                this.params[key] = normalizedValues;
+            } else if (this.params[key] && typeof this.params[key] === 'object' && Array.isArray(this.params[key].targets)) {
+                this.params[key].targets = normalizedValues;
+            }
         }
         for (const name of normalizedValues) {
             const chip = document.createElement('span');
@@ -2133,6 +2139,71 @@ export class SchemaForm {
         return expr;
     }
 
+    _getExpressionsSource() {
+        const ph = this.options?.partHistory || this.options?.viewer?.partHistory || null;
+        return (ph && typeof ph.expressions === 'string') ? ph.expressions : '';
+    }
+
+    _evaluateExpression(exprText) {
+        const raw = exprText == null ? '' : String(exprText);
+        if (!raw.trim()) return { ok: false, value: null };
+        const source = this._getExpressionsSource();
+        const fnBody = `${source}; return ${raw} ;`;
+        try {
+            let result = Function(fnBody)();
+            if (typeof result === 'string') {
+                const num = Number(result);
+                if (!Number.isNaN(num)) result = num;
+            }
+            return { ok: true, value: result };
+        } catch {
+            return { ok: false, value: null };
+        }
+    }
+
+    _coerceExpressionValue(def, value, fallback) {
+        if (!def || !def.type) return value;
+        if (value == null) return fallback;
+        switch (def.type) {
+            case 'number': {
+                if (typeof value === 'number' && Number.isFinite(value)) return value;
+                const num = Number(value);
+                return Number.isFinite(num) ? num : fallback;
+            }
+            case 'boolean': {
+                if (typeof value === 'boolean') return value;
+                if (typeof value === 'number') return value !== 0;
+                if (typeof value === 'string') {
+                    const trimmed = value.trim().toLowerCase();
+                    if (trimmed === 'true') return true;
+                    if (trimmed === 'false') return false;
+                    return Boolean(value);
+                }
+                return Boolean(value);
+            }
+            case 'options':
+            case 'string':
+            case 'textarea':
+            case 'file':
+            case 'component_selector':
+                return String(value);
+            case 'reference_selection': {
+                if (Array.isArray(value) || typeof value === 'object' || typeof value === 'string') return value;
+                return fallback;
+            }
+            case 'vec3': {
+                if (Array.isArray(value)) return value;
+                if (value && typeof value === 'object') return [value.x, value.y, value.z];
+                return fallback;
+            }
+            case 'transform':
+            case 'boolean_operation':
+                return (value && typeof value === 'object') ? value : fallback;
+            default:
+                return value;
+        }
+    }
+
     _ensureExprMap() {
         const params = this.params;
         if (!params || typeof params !== 'object') return null;
@@ -2151,22 +2222,36 @@ export class SchemaForm {
     _seedExpressionValue(key, def) {
         const value = this.params ? this.params[key] : undefined;
         if (value == null) return '';
-        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-            return String(value);
+        if (typeof value === 'string') {
+            if (def && def.type === 'number') return value;
+            return JSON.stringify(value);
         }
+        if (typeof value === 'number') return String(value);
+        if (typeof value === 'boolean') return value ? 'true' : 'false';
         if (def && def.type === 'reference_selection') {
             if (Array.isArray(value)) {
                 const names = normalizeReferenceList(value);
                 if (names.length) return JSON.stringify(names);
             }
             const name = normalizeReferenceName(value);
-            return name || '';
+            return name ? JSON.stringify(name) : '';
         }
         if (Array.isArray(value)) {
             const simple = value.every((v) => v == null || ['string', 'number', 'boolean'].includes(typeof v));
             if (simple) return JSON.stringify(value);
         }
         return '';
+    }
+
+    _getDisplayValue(key, def) {
+        const raw = this._pickInitialValue(key, def);
+        const expr = this._getExprMap();
+        if (!expr || !Object.prototype.hasOwnProperty.call(expr, key)) return raw;
+        const exprText = expr[key];
+        const result = this._evaluateExpression(exprText);
+        if (!result.ok) return raw;
+        const coerced = this._coerceExpressionValue(def, result.value, raw);
+        return coerced;
     }
 
     _refreshExpressionControl(key) {
@@ -2183,6 +2268,25 @@ export class SchemaForm {
         }
         if (control.controlMain) {
             control.controlMain.classList.toggle('expr-disabled', active);
+            const controls = control.controlMain.querySelectorAll('input, select, textarea, button');
+            controls.forEach((el) => {
+                if (active) {
+                    if (!el.dataset.exprPrevDisabled) {
+                        try { el.dataset.exprPrevDisabled = String(el.disabled); } catch (_) { }
+                    }
+                    try { el.disabled = true; } catch (_) { }
+                    try { el.setAttribute('aria-disabled', 'true'); } catch (_) { }
+                } else {
+                    const prev = el.dataset ? el.dataset.exprPrevDisabled : null;
+                    if (prev != null) {
+                        try { el.disabled = prev === 'true'; } catch (_) { }
+                        try { delete el.dataset.exprPrevDisabled; } catch (_) { }
+                    } else {
+                        try { el.disabled = false; } catch (_) { }
+                    }
+                    try { el.removeAttribute('aria-disabled'); } catch (_) { }
+                }
+            });
         }
     }
 
@@ -2232,16 +2336,26 @@ export class SchemaForm {
                     expr[key] = this._seedExpressionValue(key, def);
                 }
             } else {
-                const expr = this._getExprMap();
-                if (expr && Object.prototype.hasOwnProperty.call(expr, key)) {
-                    delete expr[key];
-                    if (!Object.keys(expr).length) {
+                const exprMap = this._getExprMap();
+                if (exprMap && Object.prototype.hasOwnProperty.call(exprMap, key)) {
+                    const evalRes = this._evaluateExpression(exprMap[key]);
+                    if (evalRes.ok) {
+                        const coerced = this._coerceExpressionValue(def, evalRes.value, this.params[key]);
+                        if (coerced !== undefined) {
+                            this.params[key] = coerced;
+                        }
+                    }
+                }
+                if (exprMap && Object.prototype.hasOwnProperty.call(exprMap, key)) {
+                    delete exprMap[key];
+                    if (!Object.keys(exprMap).length) {
                         try { delete this.params.__expr; } catch (_) { }
                     }
                 }
             }
             this._refreshExpressionControl(key);
             this._emitParamsChange(key, this.params[key]);
+            try { this.refreshFromParams(); } catch (_) { }
         };
 
         toggleBtn.addEventListener('click', () => {
@@ -2257,6 +2371,7 @@ export class SchemaForm {
             if (!expr) return;
             expr[key] = exprInput.value;
             this._emitParamsChange(key, this.params[key]);
+            try { this.refreshFromParams(); } catch (_) { }
         });
 
         exprInput.addEventListener('focus', () => {
