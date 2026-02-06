@@ -408,6 +408,22 @@ export class HistoryWidget extends HistoryCollectionWidget {
     const parts = [];
     for (const key of keys) {
       const value = params[key];
+      if (key === '__expr') {
+        if (!value || typeof value !== 'object') {
+          parts.push('__expr:null');
+          continue;
+        }
+        const exprKeys = Object.keys(value).sort();
+        if (!exprKeys.length) {
+          parts.push('__expr:{}');
+          continue;
+        }
+        for (const exprKey of exprKeys) {
+          const exprVal = value[exprKey];
+          parts.push(`__expr.${exprKey}:${exprVal == null ? '' : String(exprVal)}`);
+        }
+        continue;
+      }
       if (value == null) parts.push(`${key}:null`);
       else if (typeof value === 'object' || typeof value === 'function') parts.push(`${key}:[obj]`);
       else parts.push(`${key}:${String(value)}`);

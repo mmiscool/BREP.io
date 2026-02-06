@@ -168,6 +168,7 @@ export class SchemaForm {
             : true;
         this._inputs = new Map();
         this._widgets = new Map();
+        this._exprControls = new Map();
         this._skipDefaultRefresh = new Set();
         this._excludedKeys = new Set(['id', 'featureID']); // exclude from defaults & rendering
         if (Array.isArray(options.excludeKeys)) {
@@ -296,6 +297,7 @@ export class SchemaForm {
                 const chips = row ? row.querySelector('.ref-chips') : null;
                 const targets = (v && typeof v === 'object' && Array.isArray(v.targets)) ? v.targets : [];
                 if (chips) this._renderChips(chips, key, targets);
+                this._refreshExpressionControl(key);
                 continue;
             }
             this._setInputValue(el, def.type, v);
@@ -327,6 +329,7 @@ export class SchemaForm {
                         }
                     } catch (_) { }
                 }
+                this._refreshExpressionControl(key);
                 continue;
             }
 
@@ -346,8 +349,10 @@ export class SchemaForm {
                     const r = Array.isArray(v?.rotationEuler) ? v.rotationEuler : [0, 0, 0];
                     info.textContent = `pos(${fmt(p[0])}, ${fmt(p[1])}, ${fmt(p[2])})  rot(${fmt(r[0])}, ${fmt(r[1])}, ${fmt(r[2])})`;
                 }
+                this._refreshExpressionControl(key);
                 continue;
             }
+            this._refreshExpressionControl(key);
         }
     }
 
@@ -443,6 +448,7 @@ export class SchemaForm {
             if (inputRegistered && inputEl instanceof HTMLElement) {
                 this._inputs.set(key, inputEl);
             }
+            this._attachExpressionToggle({ key, def, row, controlWrap });
         }
     }
 
@@ -2119,6 +2125,155 @@ export class SchemaForm {
         }
     }
 
+    _getExprMap() {
+        const params = this.params;
+        if (!params || typeof params !== 'object') return null;
+        const expr = params.__expr;
+        if (!expr || typeof expr !== 'object' || Array.isArray(expr)) return null;
+        return expr;
+    }
+
+    _ensureExprMap() {
+        const params = this.params;
+        if (!params || typeof params !== 'object') return null;
+        if (!params.__expr || typeof params.__expr !== 'object' || Array.isArray(params.__expr)) {
+            params.__expr = {};
+        }
+        return params.__expr;
+    }
+
+    _hasExprForKey(key) {
+        const expr = this._getExprMap();
+        if (!expr) return false;
+        return Object.prototype.hasOwnProperty.call(expr, key);
+    }
+
+    _seedExpressionValue(key, def) {
+        const value = this.params ? this.params[key] : undefined;
+        if (value == null) return '';
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+            return String(value);
+        }
+        if (def && def.type === 'reference_selection') {
+            if (Array.isArray(value)) {
+                const names = normalizeReferenceList(value);
+                if (names.length) return JSON.stringify(names);
+            }
+            const name = normalizeReferenceName(value);
+            return name || '';
+        }
+        if (Array.isArray(value)) {
+            const simple = value.every((v) => v == null || ['string', 'number', 'boolean'].includes(typeof v));
+            if (simple) return JSON.stringify(value);
+        }
+        return '';
+    }
+
+    _refreshExpressionControl(key) {
+        const control = this._exprControls.get(key);
+        if (!control) return;
+        const expr = this._getExprMap();
+        const active = expr ? Object.prototype.hasOwnProperty.call(expr, key) : false;
+        const exprValue = active ? (expr[key] ?? '') : '';
+        control.row?.classList.toggle('expr-active', active);
+        control.toggleBtn?.classList.toggle('active', active);
+        if (control.exprInput) {
+            control.exprInput.disabled = !active;
+            control.exprInput.value = String(exprValue ?? '');
+        }
+        if (control.controlMain) {
+            control.controlMain.classList.toggle('expr-disabled', active);
+        }
+    }
+
+    _attachExpressionToggle({ key, def, row, controlWrap }) {
+        if (!row || !controlWrap) return;
+        const type = def && def.type ? String(def.type) : '';
+        if (def?.disableExpression || def?.noExpression || type === 'button') return;
+
+        const controlRow = document.createElement('div');
+        controlRow.className = 'control-row';
+
+        const controlMain = document.createElement('div');
+        controlMain.className = 'control-main';
+        while (controlWrap.firstChild) {
+            controlMain.appendChild(controlWrap.firstChild);
+        }
+
+        const toggleWrap = document.createElement('div');
+        toggleWrap.className = 'expr-toggle-wrap';
+
+        const toggleBtn = document.createElement('button');
+        toggleBtn.type = 'button';
+        toggleBtn.className = 'expr-toggle-btn';
+        toggleBtn.setAttribute('aria-label', 'Toggle expression');
+        toggleBtn.title = 'Toggle expression';
+        toggleBtn.textContent = 'f(x)';
+
+        toggleWrap.appendChild(toggleBtn);
+        controlRow.appendChild(controlMain);
+        controlRow.appendChild(toggleWrap);
+        controlWrap.appendChild(controlRow);
+
+        const exprRow = document.createElement('div');
+        exprRow.className = 'expr-input-row';
+        const exprInput = document.createElement('input');
+        exprInput.type = 'text';
+        exprInput.className = 'input expr-input';
+        exprInput.placeholder = 'Expression';
+        exprInput.disabled = true;
+        exprRow.appendChild(exprInput);
+        controlWrap.appendChild(exprRow);
+
+        const toggleExpression = (nextActive) => {
+            if (nextActive) {
+                const expr = this._ensureExprMap();
+                if (expr && !Object.prototype.hasOwnProperty.call(expr, key)) {
+                    expr[key] = this._seedExpressionValue(key, def);
+                }
+            } else {
+                const expr = this._getExprMap();
+                if (expr && Object.prototype.hasOwnProperty.call(expr, key)) {
+                    delete expr[key];
+                    if (!Object.keys(expr).length) {
+                        try { delete this.params.__expr; } catch (_) { }
+                    }
+                }
+            }
+            this._refreshExpressionControl(key);
+            this._emitParamsChange(key, this.params[key]);
+        };
+
+        toggleBtn.addEventListener('click', () => {
+            const active = this._hasExprForKey(key);
+            toggleExpression(!active);
+            if (!active) {
+                try { exprInput.focus(); } catch (_) { }
+            }
+        });
+
+        exprInput.addEventListener('change', () => {
+            const expr = this._ensureExprMap();
+            if (!expr) return;
+            expr[key] = exprInput.value;
+            this._emitParamsChange(key, this.params[key]);
+        });
+
+        exprInput.addEventListener('focus', () => {
+            this._stopActiveReferenceSelection();
+        });
+
+        this._exprControls.set(key, {
+            row,
+            controlMain,
+            toggleBtn,
+            exprInput,
+            exprRow,
+        });
+
+        this._refreshExpressionControl(key);
+    }
+
     _setInputValue(el, type, value) {
         switch (type) {
             case 'boolean':
@@ -2240,6 +2395,29 @@ export class SchemaForm {
       }
 
       .control-wrap { display: flex; flex-direction: column; gap: 6px; }
+      .control-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+      .control-main { min-width: 0; }
+      .control-main.expr-disabled { opacity: 0.45; pointer-events: none; }
+      .expr-toggle-wrap { display: flex; align-items: center; }
+      .expr-toggle-btn {
+        appearance: none;
+        background: transparent;
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 6px 10px;
+        font-weight: 700;
+        font-family: 'Courier New', ui-monospace, monospace;
+        cursor: pointer;
+        transition: border-color .15s ease, box-shadow .15s ease, color .15s ease;
+        min-width: 52px;
+        text-align: center;
+        user-select: none;
+      }
+      .expr-toggle-btn:hover { border-color: var(--focus); box-shadow: 0 0 0 3px rgba(59,130,246,.15); }
+      .expr-toggle-btn.active { border-color: var(--focus); color: #fff; box-shadow: 0 0 0 3px rgba(59,130,246,.25); }
+      .expr-input-row { display: none; }
+      .field-row.expr-active .expr-input-row { display: block; }
 
       .input, .select {
    

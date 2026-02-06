@@ -42,7 +42,15 @@
 
       <div>
         <label for="token">GitHub Token</label><br />
-        <input id="token" type="password" placeholder="Paste token here" />
+        <input
+          id="token"
+          type="password"
+          placeholder="Paste token here"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+        />
         <div class="row" style="margin-top:6px;">
           <button id="btnUseToken">Use token</button>
           <button id="btnClearToken">Clear</button>

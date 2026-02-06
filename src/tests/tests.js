@@ -32,6 +32,7 @@ import { test_pushFace, afterRun_pushFace } from './test_pushFace.js';
 import { test_sketch_openLoop, afterRun_sketch_openLoop } from './test_sketch_openLoop.js';
 import { test_Fillet_NonClosed, afterRun_Fillet_NonClosed } from './test_fillet_nonClosed.js';
 import { test_history_features_basic, afterRun_history_features_basic } from './test_history_features_basic.js';
+import { test_textToFace, afterRun_textToFace } from './test_textToFace.js';
 import { generate3MF } from '../exporters/threeMF.js';
 import { buildSheetMetalFlatPatternSvgs } from '../exporters/sheetMetalFlatPattern.js';
 import {
@@ -86,6 +87,7 @@ export const testFunctions = [
     { test: test_pushFace, afterRun: afterRun_pushFace, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_mirror, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_history_features_basic, afterRun: afterRun_history_features_basic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_textToFace, afterRun: afterRun_textToFace, printArtifacts: false, exportFaces: true, exportSolids: false, resetHistory: true },
     { test: test_solidMetrics, afterRun: afterRun_solidMetrics, printArtifacts: true, exportFaces: true, exportSolids: true, resetHistory: true },
 
 ];

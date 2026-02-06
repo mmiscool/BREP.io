@@ -396,6 +396,9 @@ export class CADmaterialWidget {
         tokenInput.className = 'cmw-input';
         tokenInput.placeholder = 'ghp_...';
         tokenInput.autocomplete = 'off';
+        tokenInput.autocorrect = 'off';
+        tokenInput.autocapitalize = 'off';
+        tokenInput.spellcheck = false;
         tokenInput.style.flex = '1 1 auto';
         tokenRow.appendChild(tokenInput);
         const clearBtn = document.createElement('button');

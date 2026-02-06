@@ -368,12 +368,26 @@ export class PartHistory {
         if (Object.prototype.hasOwnProperty.call(FeatureClass.inputParamsSchema, key)) {
           const paramDef = FeatureClass.inputParamsSchema[key];
           if (feature.previouseExpressions === undefined) feature.previouseExpressions = {};
-          if (paramDef.type === 'number') {
+          const exprMap = feature?.inputParams && typeof feature.inputParams === 'object'
+            ? feature.inputParams.__expr
+            : null;
+          const hasExpr = !!(exprMap && Object.prototype.hasOwnProperty.call(exprMap, key));
+          const trackExpr = paramDef.type === 'number'
+            || hasExpr
+            || (paramDef.type === 'string' && paramDef.allowExpression);
+          if (trackExpr) {
             try {
-
+              const makeSig = (value) => {
+                if (value == null) return 'null';
+                if (typeof value === 'object') {
+                  try { return JSON.stringify(value); } catch { return String(value); }
+                }
+                return String(value);
+              };
+              const nextSig = makeSig(instance.inputParams[key]);
               if (feature.previouseExpressions[key] === undefined) feature.dirty = true;
-              else if (Number(feature.previouseExpressions[key]) !== Number(instance.inputParams[key])) feature.dirty = true;
-              feature.previouseExpressions[key] = instance.inputParams[key];
+              else if (String(feature.previouseExpressions[key]) !== nextSig) feature.dirty = true;
+              feature.previouseExpressions[key] = nextSig;
             } catch {
               feature.dirty = true;
               feature.previouseExpressions[key] = instance.inputParams[key];
@@ -1123,17 +1137,67 @@ export class PartHistory {
   async sanitizeInputParams(schema, inputParams) {
 
     let sanitized = {};
+    const exprMap = (inputParams && typeof inputParams === 'object' && inputParams.__expr && typeof inputParams.__expr === 'object' && !Array.isArray(inputParams.__expr))
+      ? inputParams.__expr
+      : null;
+    const evalExpression = (equation) => {
+      const exprSource = typeof this.expressions === 'string' ? this.expressions : '';
+      const fnBody = `${exprSource}; return ${equation} ;`;
+      try {
+        let result = Function(fnBody)();
+        if (typeof result === 'string') {
+          const num = Number(result);
+          if (!Number.isNaN(num)) result = num;
+        }
+        return { ok: true, value: result };
+      } catch {
+        return { ok: false, value: null };
+      }
+    };
 
     for (const key in schema) {
       //console.log(`Sanitizing ${key}:`, inputParams[key]);
-      if (inputParams[key] !== undefined) {
+      const hasExpr = !!(exprMap && Object.prototype.hasOwnProperty.call(exprMap, key));
+      let exprValue = null;
+      let exprOk = false;
+      if (hasExpr) {
+        const exprText = (exprMap[key] == null) ? '' : String(exprMap[key]);
+        if (exprText.trim().length) {
+          const res = evalExpression(exprText);
+          exprOk = res.ok;
+          exprValue = res.value;
+        }
+      }
+      const rawValue = (hasExpr && exprOk) ? exprValue : inputParams[key];
+      if (inputParams[key] !== undefined || hasExpr) {
         // check if the schema type is number
         if (schema[key].type === "number") {
           // if it is a string use the eval() function to do some math and return it as a number
-          sanitized[key] = PartHistory.evaluateExpression(this.expressions, inputParams[key]);
+          if (hasExpr && exprOk) {
+            const num = Number(rawValue);
+            sanitized[key] = Number.isFinite(num)
+              ? num
+              : PartHistory.evaluateExpression(this.expressions, inputParams[key]);
+          } else {
+            sanitized[key] = PartHistory.evaluateExpression(this.expressions, inputParams[key]);
+          }
+        } else if (schema[key].type === "string" && hasExpr && exprOk) {
+          if (exprValue == null) sanitized[key] = '';
+          else sanitized[key] = String(exprValue);
+        } else if (schema[key].type === "string" && schema[key].allowExpression) {
+          const raw = rawValue;
+          const rawStr = (raw == null) ? '' : String(raw);
+          if (rawStr.trim().length) {
+            const res = evalExpression(rawStr);
+            const result = res.ok ? res.value : null;
+            if (result == null) sanitized[key] = rawStr;
+            else sanitized[key] = String(result);
+          } else {
+            sanitized[key] = rawStr;
+          }
         } else if (schema[key].type === "reference_selection") {
           // Resolve references: accept objects directly or look up by name
-          const val = inputParams[key];
+          const val = rawValue;
           if (Array.isArray(val)) {
             const arr = [];
             for (const it of val) {
@@ -1155,7 +1219,7 @@ export class PartHistory {
         } else if (schema[key].type === "boolean_operation") {
           // If it's a boolean operation, normalize op key and resolve targets to objects.
           // Also pass through optional biasDistance (numeric) and new sweep cap offset controls.
-          const raw = inputParams[key] || {};
+          const raw = rawValue || {};
           const op = raw.operation;
           const items = Array.isArray(raw.targets) ? raw.targets : [];
           const targets = [];
@@ -1178,7 +1242,7 @@ export class PartHistory {
           sanitized[key] = out;
         } else if (schema[key].type === "transform") {
           // Evaluate each component; allow expressions in position/rotation/scale entries
-          const raw = inputParams[key] || {};
+          const raw = rawValue || {};
           const evalOne = (v) => {
             if (typeof v === 'number' && Number.isFinite(v)) return v;
             if (typeof v === 'string') return PartHistory.evaluateExpression(this.expressions, v);
@@ -1191,7 +1255,7 @@ export class PartHistory {
           sanitized[key] = { position: pos, rotationEuler: rot, scale: scl };
         } else if (schema[key].type === "vec3") {
           // Evaluate vec3 entries; accept array [x,y,z] or object {x,y,z}
-          const raw = inputParams[key];
+          const raw = rawValue;
           const evalOne = (v) => {
             if (typeof v === 'number' && Number.isFinite(v)) return v;
             if (typeof v === 'string') return PartHistory.evaluateExpression(this.expressions, v);
@@ -1206,9 +1270,22 @@ export class PartHistory {
             sanitized[key] = [0, 0, 0];
           }
         } else if (schema[key].type === "boolean") {
-          sanitized[key] = Boolean(Object.prototype.hasOwnProperty.call(inputParams, key) ? inputParams[key] : schema[key].default_value);
+          if (hasExpr && exprOk) {
+            if (typeof exprValue === 'boolean') sanitized[key] = exprValue;
+            else if (typeof exprValue === 'number') sanitized[key] = exprValue !== 0;
+            else if (typeof exprValue === 'string') {
+              const trimmed = exprValue.trim().toLowerCase();
+              if (trimmed === 'true') sanitized[key] = true;
+              else if (trimmed === 'false') sanitized[key] = false;
+              else sanitized[key] = Boolean(exprValue);
+            } else {
+              sanitized[key] = Boolean(exprValue);
+            }
+          } else {
+            sanitized[key] = Boolean(Object.prototype.hasOwnProperty.call(inputParams, key) ? inputParams[key] : schema[key].default_value);
+          }
         } else {
-          sanitized[key] = inputParams[key];
+          sanitized[key] = rawValue;
         }
       } else {
         // Clone structured defaults to avoid shared references across features
