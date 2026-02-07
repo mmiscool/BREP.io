@@ -21,5 +21,6 @@ about.html
 junk.*
 public/docs/*
 public/help/*
+public/fonts
 pnpm-lock.yaml
 pnpm-lock.yaml

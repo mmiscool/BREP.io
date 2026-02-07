@@ -6,21 +6,44 @@ import { combineBaseWithDeltaDeg } from '../../utils/xformMath.js';
 import { renderTransformField } from '../../UI/featureDialogWidgets/transformField.js';
 import { GOOGLE_OFL_FONTS } from '../../assets/fonts/google-ofl/catalog.js';
 import { SelectionState } from '../../UI/SelectionState.js';
-
-const FONT_URL_LOADERS = import.meta.glob('../../assets/fonts/**/*.{ttf,otf,woff,woff2,ttc}', { query: '?url', import: 'default' });
+import { FONT_URL_LOADERS } from '#textToFace/fontUrlLoaders';
 
 const normalizeFontKey = (relPath) => (
   `../../assets/fonts/${relPath}`.replace(/\\/g, "/")
 );
+
+const getFontBaseUrl = () => {
+  if (typeof globalThis !== 'undefined') {
+    const override = globalThis.BREP_FONT_BASE_URL;
+    if (typeof override === 'string' && override.length > 0) {
+      return override;
+    }
+  }
+  const baseUrl = (import.meta && import.meta.env && typeof import.meta.env.BASE_URL === 'string')
+    ? import.meta.env.BASE_URL
+    : '/';
+  return baseUrl;
+};
+
+const buildPublicFontUrl = (relPath) => {
+  const base = getFontBaseUrl();
+  const prefix = base.endsWith('/') ? base : `${base}/`;
+  return `${prefix}fonts/${relPath}`.replace(/\\/g, "/");
+};
 
 const resolveFontUrl = async (entry) => {
   if (!entry) return null;
   if (entry.url) return entry.url;
   if (!entry.path) return null;
   const key = normalizeFontKey(entry.path);
-  const loader = FONT_URL_LOADERS[key];
-  if (!loader) throw new Error('Unknown font asset: ' + entry.path);
-  return loader();
+  const loader = FONT_URL_LOADERS && FONT_URL_LOADERS[key];
+  if (loader) {
+    return loader();
+  }
+  if (FONT_URL_LOADERS) {
+    console.warn('Unknown font asset; falling back to public path:', entry.path);
+  }
+  return buildPublicFontUrl(entry.path);
 };
 
 const THREE = BREP.THREE;

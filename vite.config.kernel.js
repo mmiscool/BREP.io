@@ -13,6 +13,9 @@ const wasmBase64 = fs.readFileSync(wasmPath, 'base64');
 export default defineConfig({
   resolve: {
     conditions: ['node', 'import', 'module', 'default'],
+    alias: {
+      '#textToFace/fontUrlLoaders': resolve(__dirname, 'src/features/textToFace/fontUrlLoaders.kernel.js'),
+    },
   },
   esbuild: {
     keepNames: true,

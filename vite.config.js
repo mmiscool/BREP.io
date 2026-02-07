@@ -24,6 +24,11 @@ export default defineConfig(({ command }) => {
   // Explicitly set the public directory to ensure generated docs are included
   //
   publicDir: 'public',
+  resolve: {
+    alias: {
+      '#textToFace/fontUrlLoaders': resolve(root, 'src/features/textToFace/fontUrlLoaders.vite.js'),
+    },
+  },
   esbuild: {
     keepNames: true,
   },

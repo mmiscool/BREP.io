@@ -2,9 +2,11 @@
   "name": "brep-io-kernel",
   "version": "1.0.0",
   "scripts": {
-    "dev": "pnpm generateLicenses && pnpm build:kernel && vite --host 0.0.0.0",
-    "build": "pnpm generateLicenses && vite build",
-    "build:kernel": "pnpm generateLicenseBundle && vite build --config vite.config.kernel.js",
+    "dev": "pnpm prepareFonts && pnpm generateLicenses && pnpm build:kernel && vite --host 0.0.0.0",
+    "build": "pnpm prepareFonts && pnpm generateLicenses && pnpm build:kernel && vite build",
+    "clean:kernel": "rm -rf dist-kernel",
+    "prebuild:kernel": "pnpm clean:kernel && pnpm generateLicenseBundle",
+    "build:kernel": "vite build --config vite.config.kernel.js",
     "prepublishOnly": "pnpm build:kernel",
     "start": "pnpm dev",
     "liveTesting": "nodemon --watch src --watch tests --ext js --exec \"pnpm run test\"",
@@ -12,6 +14,7 @@
     "debug:boolean": "node ./src/tests/debugBoolean.js",
     "generateLicenses": "node ./generateLicenses.js",
     "generateLicenseBundle": "node ./scripts/generateLicenseBundle.js",
+    "prepareFonts": "node ./scripts/prepareFontAssets.js",
     "capture": "node ./scripts/capture.js & pnpm dev "
   },
   "type": "module",
@@ -24,6 +27,9 @@
     "./AssemblyConstraintHistory": "./dist-kernel/brep-kernel.js",
     "./AssemblyConstraintRegistry": "./dist-kernel/brep-kernel.js",
     "./SketchSolver2D": "./src/SketchSolver2D.js"
+  },
+  "imports": {
+    "#textToFace/fontUrlLoaders": "./src/features/textToFace/fontUrlLoaders.kernel.js"
   },
   "files": [
     "src/**",
