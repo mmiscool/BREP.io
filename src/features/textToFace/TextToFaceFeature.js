@@ -6,79 +6,22 @@ import { combineBaseWithDeltaDeg } from '../../utils/xformMath.js';
 import { renderTransformField } from '../../UI/featureDialogWidgets/transformField.js';
 import { GOOGLE_OFL_FONTS } from '../../assets/fonts/google-ofl/catalog.js';
 import { SelectionState } from '../../UI/SelectionState.js';
-import NotoSansUrl from '../../assets/fonts/noto/NotoSans-Regular.ttf?url';
-import NotoSerifUrl from '../../assets/fonts/noto/NotoSerif-Regular.ttf?url';
-import NotoSansMonoUrl from '../../assets/fonts/noto/NotoSansMono-Regular.ttf?url';
-import NotoSansDisplayUrl from '../../assets/fonts/noto/NotoSansDisplay-Regular.ttf?url';
-import NotoSerifDisplayUrl from '../../assets/fonts/noto/NotoSerifDisplay-Regular.ttf?url';
-import NotoSansBoldUrl from '../../assets/fonts/noto/NotoSans-Bold.ttf?url';
-import NotoSansItalicUrl from '../../assets/fonts/noto/NotoSans-Italic.ttf?url';
-import NotoSansBoldItalicUrl from '../../assets/fonts/noto/NotoSans-BoldItalic.ttf?url';
-import NotoSerifBoldUrl from '../../assets/fonts/noto/NotoSerif-Bold.ttf?url';
-import NotoSerifItalicUrl from '../../assets/fonts/noto/NotoSerif-Italic.ttf?url';
-import NotoSerifBoldItalicUrl from '../../assets/fonts/noto/NotoSerif-BoldItalic.ttf?url';
-import NotoSansMonoBoldUrl from '../../assets/fonts/noto/NotoSansMono-Bold.ttf?url';
-import DejaVuSansUrl from '../../assets/fonts/dejavu/DejaVuSans.ttf?url';
-import DejaVuSansBoldUrl from '../../assets/fonts/dejavu/DejaVuSans-Bold.ttf?url';
-import DejaVuSerifUrl from '../../assets/fonts/dejavu/DejaVuSerif.ttf?url';
-import DejaVuSerifBoldUrl from '../../assets/fonts/dejavu/DejaVuSerif-Bold.ttf?url';
-import DejaVuSansMonoUrl from '../../assets/fonts/dejavu/DejaVuSansMono.ttf?url';
-import DejaVuSansMonoBoldUrl from '../../assets/fonts/dejavu/DejaVuSansMono-Bold.ttf?url';
-import DejaVuSansMonoObliqueUrl from '../../assets/fonts/dejavu/DejaVuSansMono-Oblique.ttf?url';
-import DejaVuSansMonoBoldObliqueUrl from '../../assets/fonts/dejavu/DejaVuSansMono-BoldOblique.ttf?url';
-import LiberationSansUrl from '../../assets/fonts/liberation/LiberationSans-Regular.ttf?url';
-import LiberationSansBoldUrl from '../../assets/fonts/liberation/LiberationSans-Bold.ttf?url';
-import LiberationSansItalicUrl from '../../assets/fonts/liberation/LiberationSans-Italic.ttf?url';
-import LiberationSansBoldItalicUrl from '../../assets/fonts/liberation/LiberationSans-BoldItalic.ttf?url';
-import LiberationSansNarrowUrl from '../../assets/fonts/liberation/LiberationSansNarrow-Regular.ttf?url';
-import LiberationSansNarrowBoldUrl from '../../assets/fonts/liberation/LiberationSansNarrow-Bold.ttf?url';
-import LiberationSerifUrl from '../../assets/fonts/liberation/LiberationSerif-Regular.ttf?url';
-import LiberationSerifBoldUrl from '../../assets/fonts/liberation/LiberationSerif-Bold.ttf?url';
-import LiberationSerifItalicUrl from '../../assets/fonts/liberation/LiberationSerif-Italic.ttf?url';
-import LiberationSerifBoldItalicUrl from '../../assets/fonts/liberation/LiberationSerif-BoldItalic.ttf?url';
-import LiberationMonoUrl from '../../assets/fonts/liberation/LiberationMono-Regular.ttf?url';
-import LiberationMonoBoldUrl from '../../assets/fonts/liberation/LiberationMono-Bold.ttf?url';
-import LiberationMonoItalicUrl from '../../assets/fonts/liberation/LiberationMono-Italic.ttf?url';
-import LiberationMonoBoldItalicUrl from '../../assets/fonts/liberation/LiberationMono-BoldItalic.ttf?url';
-import IbmPlexSansUrl from '../../assets/fonts/ibm-plex/IBMPlexSans-Regular.ttf?url';
-import IbmPlexSansBoldUrl from '../../assets/fonts/ibm-plex/IBMPlexSans-Bold.ttf?url';
-import IbmPlexSansItalicUrl from '../../assets/fonts/ibm-plex/IBMPlexSans-Italic.ttf?url';
-import IbmPlexSansBoldItalicUrl from '../../assets/fonts/ibm-plex/IBMPlexSans-BoldItalic.ttf?url';
-import IbmPlexSansCondensedUrl from '../../assets/fonts/ibm-plex/IBMPlexSansCondensed-Regular.ttf?url';
-import IbmPlexSansCondensedBoldUrl from '../../assets/fonts/ibm-plex/IBMPlexSansCondensed-Bold.ttf?url';
-import IbmPlexSerifUrl from '../../assets/fonts/ibm-plex/IBMPlexSerif-Regular.ttf?url';
-import IbmPlexSerifBoldUrl from '../../assets/fonts/ibm-plex/IBMPlexSerif-Bold.ttf?url';
-import IbmPlexSerifItalicUrl from '../../assets/fonts/ibm-plex/IBMPlexSerif-Italic.ttf?url';
-import IbmPlexSerifBoldItalicUrl from '../../assets/fonts/ibm-plex/IBMPlexSerif-BoldItalic.ttf?url';
-import IbmPlexMonoUrl from '../../assets/fonts/ibm-plex/IBMPlexMono-Regular.ttf?url';
-import IbmPlexMonoBoldUrl from '../../assets/fonts/ibm-plex/IBMPlexMono-Bold.ttf?url';
-import IbmPlexMonoItalicUrl from '../../assets/fonts/ibm-plex/IBMPlexMono-Italic.ttf?url';
-import IbmPlexMonoBoldItalicUrl from '../../assets/fonts/ibm-plex/IBMPlexMono-BoldItalic.ttf?url';
-import HackUrl from '../../assets/fonts/hack/Hack-Regular.ttf?url';
-import HackBoldUrl from '../../assets/fonts/hack/Hack-Bold.ttf?url';
-import HackItalicUrl from '../../assets/fonts/hack/Hack-Italic.ttf?url';
-import HackBoldItalicUrl from '../../assets/fonts/hack/Hack-BoldItalic.ttf?url';
-import UbuntuSansUrl from '../../assets/fonts/ubuntu/Ubuntu-R.ttf?url';
-import UbuntuBoldUrl from '../../assets/fonts/ubuntu/Ubuntu-B.ttf?url';
-import UbuntuLightUrl from '../../assets/fonts/ubuntu/Ubuntu-L.ttf?url';
-import UbuntuBoldItalicUrl from '../../assets/fonts/ubuntu/Ubuntu-BI.ttf?url';
-import UbuntuLightItalicUrl from '../../assets/fonts/ubuntu/Ubuntu-LI.ttf?url';
-import UbuntuMediumUrl from '../../assets/fonts/ubuntu/Ubuntu-M.ttf?url';
-import UbuntuMediumItalicUrl from '../../assets/fonts/ubuntu/Ubuntu-MI.ttf?url';
-import UbuntuRegularItalicUrl from '../../assets/fonts/ubuntu/Ubuntu-RI.ttf?url';
-import UbuntuThinUrl from '../../assets/fonts/ubuntu/Ubuntu-Th.ttf?url';
-import UbuntuCondensedUrl from '../../assets/fonts/ubuntu/Ubuntu-C.ttf?url';
-import UbuntuMonoUrl from '../../assets/fonts/ubuntu/UbuntuMono-R.ttf?url';
-import UbuntuMonoBoldUrl from '../../assets/fonts/ubuntu/UbuntuMono-B.ttf?url';
-import UbuntuMonoBoldItalicUrl from '../../assets/fonts/ubuntu/UbuntuMono-BI.ttf?url';
-import UbuntuMonoItalicUrl from '../../assets/fonts/ubuntu/UbuntuMono-RI.ttf?url';
-import LibreBarcode39ExtendedUrl from '../../assets/fonts/libre-barcode/LibreBarcode39Extended-Regular.ttf?url';
-import LibreBarcode39ExtendedTextUrl from '../../assets/fonts/libre-barcode/LibreBarcode39ExtendedText-Regular.ttf?url';
-import LibreBarcode39Url from '../../assets/fonts/libre-barcode/LibreBarcode39-Regular.ttf?url';
-import LibreBarcode39TextUrl from '../../assets/fonts/libre-barcode/LibreBarcode39Text-Regular.ttf?url';
-import LibreBarcode128Url from '../../assets/fonts/libre-barcode/LibreBarcode128-Regular.ttf?url';
-import LibreBarcode128TextUrl from '../../assets/fonts/libre-barcode/LibreBarcode128Text-Regular.ttf?url';
-import LibreBarcodeEan13TextUrl from '../../assets/fonts/libre-barcode/LibreBarcodeEAN13Text-Regular.ttf?url';
+
+const FONT_URL_LOADERS = import.meta.glob('../../assets/fonts/**/*.{ttf,otf,woff,woff2,ttc}', { query: '?url', import: 'default' });
+
+const normalizeFontKey = (relPath) => (
+  `../../assets/fonts/${relPath}`.replace(/\\/g, "/")
+);
+
+const resolveFontUrl = async (entry) => {
+  if (!entry) return null;
+  if (entry.url) return entry.url;
+  if (!entry.path) return null;
+  const key = normalizeFontKey(entry.path);
+  const loader = FONT_URL_LOADERS[key];
+  if (!loader) throw new Error('Unknown font asset: ' + entry.path);
+  return loader();
+};
 
 const THREE = BREP.THREE;
 
@@ -93,79 +36,79 @@ const dedupeFonts = (fonts) => {
 };
 
 const BASE_FONT_CATALOG = [
-  { id: 'Noto Sans', url: NotoSansUrl },
-  { id: 'Noto Sans Bold', url: NotoSansBoldUrl },
-  { id: 'Noto Sans Italic', url: NotoSansItalicUrl },
-  { id: 'Noto Sans Bold Italic', url: NotoSansBoldItalicUrl },
-  { id: 'Noto Serif', url: NotoSerifUrl },
-  { id: 'Noto Serif Bold', url: NotoSerifBoldUrl },
-  { id: 'Noto Serif Italic', url: NotoSerifItalicUrl },
-  { id: 'Noto Serif Bold Italic', url: NotoSerifBoldItalicUrl },
-  { id: 'Noto Sans Mono', url: NotoSansMonoUrl },
-  { id: 'Noto Sans Mono Bold', url: NotoSansMonoBoldUrl },
-  { id: 'Noto Sans Display', url: NotoSansDisplayUrl },
-  { id: 'Noto Serif Display', url: NotoSerifDisplayUrl },
-  { id: 'DejaVu Sans', url: DejaVuSansUrl },
-  { id: 'DejaVu Sans Bold', url: DejaVuSansBoldUrl },
-  { id: 'DejaVu Serif', url: DejaVuSerifUrl },
-  { id: 'DejaVu Serif Bold', url: DejaVuSerifBoldUrl },
-  { id: 'DejaVu Sans Mono', url: DejaVuSansMonoUrl },
-  { id: 'DejaVu Sans Mono Bold', url: DejaVuSansMonoBoldUrl },
-  { id: 'DejaVu Sans Mono Oblique', url: DejaVuSansMonoObliqueUrl },
-  { id: 'DejaVu Sans Mono Bold Oblique', url: DejaVuSansMonoBoldObliqueUrl },
-  { id: 'Liberation Sans', url: LiberationSansUrl },
-  { id: 'Liberation Sans Bold', url: LiberationSansBoldUrl },
-  { id: 'Liberation Sans Italic', url: LiberationSansItalicUrl },
-  { id: 'Liberation Sans Bold Italic', url: LiberationSansBoldItalicUrl },
-  { id: 'Liberation Sans Narrow', url: LiberationSansNarrowUrl },
-  { id: 'Liberation Sans Narrow Bold', url: LiberationSansNarrowBoldUrl },
-  { id: 'Liberation Serif', url: LiberationSerifUrl },
-  { id: 'Liberation Serif Bold', url: LiberationSerifBoldUrl },
-  { id: 'Liberation Serif Italic', url: LiberationSerifItalicUrl },
-  { id: 'Liberation Serif Bold Italic', url: LiberationSerifBoldItalicUrl },
-  { id: 'Liberation Mono', url: LiberationMonoUrl },
-  { id: 'Liberation Mono Bold', url: LiberationMonoBoldUrl },
-  { id: 'Liberation Mono Italic', url: LiberationMonoItalicUrl },
-  { id: 'Liberation Mono Bold Italic', url: LiberationMonoBoldItalicUrl },
-  { id: 'IBM Plex Sans', url: IbmPlexSansUrl },
-  { id: 'IBM Plex Sans Bold', url: IbmPlexSansBoldUrl },
-  { id: 'IBM Plex Sans Italic', url: IbmPlexSansItalicUrl },
-  { id: 'IBM Plex Sans Bold Italic', url: IbmPlexSansBoldItalicUrl },
-  { id: 'IBM Plex Sans Condensed', url: IbmPlexSansCondensedUrl },
-  { id: 'IBM Plex Sans Condensed Bold', url: IbmPlexSansCondensedBoldUrl },
-  { id: 'IBM Plex Serif', url: IbmPlexSerifUrl },
-  { id: 'IBM Plex Serif Bold', url: IbmPlexSerifBoldUrl },
-  { id: 'IBM Plex Serif Italic', url: IbmPlexSerifItalicUrl },
-  { id: 'IBM Plex Serif Bold Italic', url: IbmPlexSerifBoldItalicUrl },
-  { id: 'IBM Plex Mono', url: IbmPlexMonoUrl },
-  { id: 'IBM Plex Mono Bold', url: IbmPlexMonoBoldUrl },
-  { id: 'IBM Plex Mono Italic', url: IbmPlexMonoItalicUrl },
-  { id: 'IBM Plex Mono Bold Italic', url: IbmPlexMonoBoldItalicUrl },
-  { id: 'Hack', url: HackUrl },
-  { id: 'Hack Bold', url: HackBoldUrl },
-  { id: 'Hack Italic', url: HackItalicUrl },
-  { id: 'Hack Bold Italic', url: HackBoldItalicUrl },
-  { id: 'Ubuntu', url: UbuntuSansUrl },
-  { id: 'Ubuntu Italic', url: UbuntuRegularItalicUrl },
-  { id: 'Ubuntu Bold', url: UbuntuBoldUrl },
-  { id: 'Ubuntu Bold Italic', url: UbuntuBoldItalicUrl },
-  { id: 'Ubuntu Light', url: UbuntuLightUrl },
-  { id: 'Ubuntu Light Italic', url: UbuntuLightItalicUrl },
-  { id: 'Ubuntu Medium', url: UbuntuMediumUrl },
-  { id: 'Ubuntu Medium Italic', url: UbuntuMediumItalicUrl },
-  { id: 'Ubuntu Thin', url: UbuntuThinUrl },
-  { id: 'Ubuntu Condensed', url: UbuntuCondensedUrl },
-  { id: 'Ubuntu Mono', url: UbuntuMonoUrl },
-  { id: 'Ubuntu Mono Italic', url: UbuntuMonoItalicUrl },
-  { id: 'Ubuntu Mono Bold', url: UbuntuMonoBoldUrl },
-  { id: 'Ubuntu Mono Bold Italic', url: UbuntuMonoBoldItalicUrl },
-  { id: 'Libre Barcode 39', url: LibreBarcode39Url },
-  { id: 'Libre Barcode 39 Text', url: LibreBarcode39TextUrl },
-  { id: 'Libre Barcode 39 Extended', url: LibreBarcode39ExtendedUrl },
-  { id: 'Libre Barcode 39 Extended Text', url: LibreBarcode39ExtendedTextUrl },
-  { id: 'Libre Barcode 128', url: LibreBarcode128Url },
-  { id: 'Libre Barcode 128 Text', url: LibreBarcode128TextUrl },
-  { id: 'Libre Barcode EAN13 Text', url: LibreBarcodeEan13TextUrl },
+  { id: 'Noto Sans', path: "noto/NotoSans-Regular.ttf" },
+  { id: 'Noto Sans Bold', path: "noto/NotoSans-Bold.ttf" },
+  { id: 'Noto Sans Italic', path: "noto/NotoSans-Italic.ttf" },
+  { id: 'Noto Sans Bold Italic', path: "noto/NotoSans-BoldItalic.ttf" },
+  { id: 'Noto Serif', path: "noto/NotoSerif-Regular.ttf" },
+  { id: 'Noto Serif Bold', path: "noto/NotoSerif-Bold.ttf" },
+  { id: 'Noto Serif Italic', path: "noto/NotoSerif-Italic.ttf" },
+  { id: 'Noto Serif Bold Italic', path: "noto/NotoSerif-BoldItalic.ttf" },
+  { id: 'Noto Sans Mono', path: "noto/NotoSansMono-Regular.ttf" },
+  { id: 'Noto Sans Mono Bold', path: "noto/NotoSansMono-Bold.ttf" },
+  { id: 'Noto Sans Display', path: "noto/NotoSansDisplay-Regular.ttf" },
+  { id: 'Noto Serif Display', path: "noto/NotoSerifDisplay-Regular.ttf" },
+  { id: 'DejaVu Sans', path: "dejavu/DejaVuSans.ttf" },
+  { id: 'DejaVu Sans Bold', path: "dejavu/DejaVuSans-Bold.ttf" },
+  { id: 'DejaVu Serif', path: "dejavu/DejaVuSerif.ttf" },
+  { id: 'DejaVu Serif Bold', path: "dejavu/DejaVuSerif-Bold.ttf" },
+  { id: 'DejaVu Sans Mono', path: "dejavu/DejaVuSansMono.ttf" },
+  { id: 'DejaVu Sans Mono Bold', path: "dejavu/DejaVuSansMono-Bold.ttf" },
+  { id: 'DejaVu Sans Mono Oblique', path: "dejavu/DejaVuSansMono-Oblique.ttf" },
+  { id: 'DejaVu Sans Mono Bold Oblique', path: "dejavu/DejaVuSansMono-BoldOblique.ttf" },
+  { id: 'Liberation Sans', path: "liberation/LiberationSans-Regular.ttf" },
+  { id: 'Liberation Sans Bold', path: "liberation/LiberationSans-Bold.ttf" },
+  { id: 'Liberation Sans Italic', path: "liberation/LiberationSans-Italic.ttf" },
+  { id: 'Liberation Sans Bold Italic', path: "liberation/LiberationSans-BoldItalic.ttf" },
+  { id: 'Liberation Sans Narrow', path: "liberation/LiberationSansNarrow-Regular.ttf" },
+  { id: 'Liberation Sans Narrow Bold', path: "liberation/LiberationSansNarrow-Bold.ttf" },
+  { id: 'Liberation Serif', path: "liberation/LiberationSerif-Regular.ttf" },
+  { id: 'Liberation Serif Bold', path: "liberation/LiberationSerif-Bold.ttf" },
+  { id: 'Liberation Serif Italic', path: "liberation/LiberationSerif-Italic.ttf" },
+  { id: 'Liberation Serif Bold Italic', path: "liberation/LiberationSerif-BoldItalic.ttf" },
+  { id: 'Liberation Mono', path: "liberation/LiberationMono-Regular.ttf" },
+  { id: 'Liberation Mono Bold', path: "liberation/LiberationMono-Bold.ttf" },
+  { id: 'Liberation Mono Italic', path: "liberation/LiberationMono-Italic.ttf" },
+  { id: 'Liberation Mono Bold Italic', path: "liberation/LiberationMono-BoldItalic.ttf" },
+  { id: 'IBM Plex Sans', path: "ibm-plex/IBMPlexSans-Regular.ttf" },
+  { id: 'IBM Plex Sans Bold', path: "ibm-plex/IBMPlexSans-Bold.ttf" },
+  { id: 'IBM Plex Sans Italic', path: "ibm-plex/IBMPlexSans-Italic.ttf" },
+  { id: 'IBM Plex Sans Bold Italic', path: "ibm-plex/IBMPlexSans-BoldItalic.ttf" },
+  { id: 'IBM Plex Sans Condensed', path: "ibm-plex/IBMPlexSansCondensed-Regular.ttf" },
+  { id: 'IBM Plex Sans Condensed Bold', path: "ibm-plex/IBMPlexSansCondensed-Bold.ttf" },
+  { id: 'IBM Plex Serif', path: "ibm-plex/IBMPlexSerif-Regular.ttf" },
+  { id: 'IBM Plex Serif Bold', path: "ibm-plex/IBMPlexSerif-Bold.ttf" },
+  { id: 'IBM Plex Serif Italic', path: "ibm-plex/IBMPlexSerif-Italic.ttf" },
+  { id: 'IBM Plex Serif Bold Italic', path: "ibm-plex/IBMPlexSerif-BoldItalic.ttf" },
+  { id: 'IBM Plex Mono', path: "ibm-plex/IBMPlexMono-Regular.ttf" },
+  { id: 'IBM Plex Mono Bold', path: "ibm-plex/IBMPlexMono-Bold.ttf" },
+  { id: 'IBM Plex Mono Italic', path: "ibm-plex/IBMPlexMono-Italic.ttf" },
+  { id: 'IBM Plex Mono Bold Italic', path: "ibm-plex/IBMPlexMono-BoldItalic.ttf" },
+  { id: 'Hack', path: "hack/Hack-Regular.ttf" },
+  { id: 'Hack Bold', path: "hack/Hack-Bold.ttf" },
+  { id: 'Hack Italic', path: "hack/Hack-Italic.ttf" },
+  { id: 'Hack Bold Italic', path: "hack/Hack-BoldItalic.ttf" },
+  { id: 'Ubuntu', path: "ubuntu/Ubuntu-R.ttf" },
+  { id: 'Ubuntu Italic', path: "ubuntu/Ubuntu-RI.ttf" },
+  { id: 'Ubuntu Bold', path: "ubuntu/Ubuntu-B.ttf" },
+  { id: 'Ubuntu Bold Italic', path: "ubuntu/Ubuntu-BI.ttf" },
+  { id: 'Ubuntu Light', path: "ubuntu/Ubuntu-L.ttf" },
+  { id: 'Ubuntu Light Italic', path: "ubuntu/Ubuntu-LI.ttf" },
+  { id: 'Ubuntu Medium', path: "ubuntu/Ubuntu-M.ttf" },
+  { id: 'Ubuntu Medium Italic', path: "ubuntu/Ubuntu-MI.ttf" },
+  { id: 'Ubuntu Thin', path: "ubuntu/Ubuntu-Th.ttf" },
+  { id: 'Ubuntu Condensed', path: "ubuntu/Ubuntu-C.ttf" },
+  { id: 'Ubuntu Mono', path: "ubuntu/UbuntuMono-R.ttf" },
+  { id: 'Ubuntu Mono Italic', path: "ubuntu/UbuntuMono-RI.ttf" },
+  { id: 'Ubuntu Mono Bold', path: "ubuntu/UbuntuMono-B.ttf" },
+  { id: 'Ubuntu Mono Bold Italic', path: "ubuntu/UbuntuMono-BI.ttf" },
+  { id: 'Libre Barcode 39', path: "libre-barcode/LibreBarcode39-Regular.ttf" },
+  { id: 'Libre Barcode 39 Text', path: "libre-barcode/LibreBarcode39Text-Regular.ttf" },
+  { id: 'Libre Barcode 39 Extended', path: "libre-barcode/LibreBarcode39Extended-Regular.ttf" },
+  { id: 'Libre Barcode 39 Extended Text', path: "libre-barcode/LibreBarcode39ExtendedText-Regular.ttf" },
+  { id: 'Libre Barcode 128', path: "libre-barcode/LibreBarcode128-Regular.ttf" },
+  { id: 'Libre Barcode 128 Text', path: "libre-barcode/LibreBarcode128Text-Regular.ttf" },
+  { id: 'Libre Barcode EAN13 Text', path: "libre-barcode/LibreBarcodeEAN13Text-Regular.ttf" },
 ];
 
 const FONT_CATALOG = dedupeFonts([...BASE_FONT_CATALOG, ...GOOGLE_OFL_FONTS]);
@@ -704,8 +647,9 @@ async function resolveFont(params) {
 
   const fontId = (params && typeof params.font === 'string') ? params.font : null;
   const entry = FONT_CATALOG.find((f) => f.id === fontId) || FONT_CATALOG[0];
-  if (!entry || !entry.url) throw new Error('No font available');
-  return loadFontFromSource(entry.url, { type: 'url' });
+  const url = await resolveFontUrl(entry);
+  if (!url) throw new Error('No font available');
+  return loadFontFromSource(url, { type: 'url' });
 }
 
 async function loadFontFromSource(source, { type }) {

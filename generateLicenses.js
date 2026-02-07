@@ -122,7 +122,7 @@ a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
 const countPackages = licenseKeys.reduce((n, k) => n + (Array.isArray(data[k]) ? data[k].length : 0), 0);
 
 const FONT_EXTS = new Set([".ttf", ".otf", ".woff", ".woff2", ".ttc"]);
-const FONT_LICENSE_RE = /(license|ofl|notice)/i;
+const FONT_LICENSE_RE = /^(?:OFL|LICENSE|NOTICE)(?:\\.[^.]+)?$/i;
 const FONT_FAMILY_NAMES = {
   "ibm-plex": "IBM Plex",
   "liberation": "Liberation",

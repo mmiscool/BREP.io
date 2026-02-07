@@ -1,203 +1,102 @@
-import RobotoUrl from './roboto/Roboto[wdth,wght].ttf?url';
-import OpenSansUrl from './opensans/OpenSans[wdth,wght].ttf?url';
-import NotoSansJPUrl from './notosansjp/NotoSansJP[wght].ttf?url';
-import InterUrl from './inter/Inter[opsz,wght].ttf?url';
-import MontserratUrl from './montserrat/Montserrat[wght].ttf?url';
-import PoppinsUrl from './poppins/Poppins-Regular.ttf?url';
-import LatoUrl from './lato/Lato-Regular.ttf?url';
-import RobotoCondensedUrl from './robotocondensed/RobotoCondensed[wght].ttf?url';
-import RobotoMonoUrl from './robotomono/RobotoMono[wght].ttf?url';
-import OswaldUrl from './oswald/Oswald[wght].ttf?url';
-import NotoSansUrl from './notosans/NotoSans[wdth,wght].ttf?url';
-import RalewayUrl from './raleway/Raleway[wght].ttf?url';
-import NunitoSansUrl from './nunitosans/NunitoSans[YTLC,opsz,wdth,wght].ttf?url';
-import NunitoUrl from './nunito/Nunito[wght].ttf?url';
-import PlayfairDisplayUrl from './playfairdisplay/PlayfairDisplay[wght].ttf?url';
-import RubikUrl from './rubik/Rubik[wght].ttf?url';
-import DMSansUrl from './dmsans/DMSans[opsz,wght].ttf?url';
-import MerriweatherUrl from './merriweather/Merriweather[opsz,wdth,wght].ttf?url';
-import NotoSansKRUrl from './notosanskr/NotoSansKR[wght].ttf?url';
-import WorkSansUrl from './worksans/WorkSans[wght].ttf?url';
-import KanitUrl from './kanit/Kanit-Regular.ttf?url';
-import PTSansUrl from './ptsans/PT_Sans-Web-Regular.ttf?url';
-import BricolageGrotesqueUrl from './bricolagegrotesque/BricolageGrotesque[opsz,wdth,wght].ttf?url';
-import LoraUrl from './lora/Lora[wght].ttf?url';
-import ArchivoBlackUrl from './archivoblack/ArchivoBlack-Regular.ttf?url';
-import MulishUrl from './mulish/Mulish[wght].ttf?url';
-import OutfitUrl from './outfit/Outfit[wght].ttf?url';
-import NotoSansTCUrl from './notosanstc/NotoSansTC[wght].ttf?url';
-import ArchivoUrl from './archivo/Archivo[wdth,wght].ttf?url';
-import ManropeUrl from './manrope/Manrope[wght].ttf?url';
-import FjallaOneUrl from './fjallaone/FjallaOne-Regular.ttf?url';
-import FigtreeUrl from './figtree/Figtree[wght].ttf?url';
-import IBMPlexSansUrl from './ibmplexsans/IBMPlexSans[wdth,wght].ttf?url';
-import BebasNeueUrl from './bebasneue/BebasNeue-Regular.ttf?url';
-import QuicksandUrl from './quicksand/Quicksand[wght].ttf?url';
-import FiraSansUrl from './firasans/FiraSans-Regular.ttf?url';
-import PromptUrl from './prompt/Prompt-Regular.ttf?url';
-import BarlowUrl from './barlow/Barlow-Regular.ttf?url';
-import BungeeUrl from './bungee/Bungee-Regular.ttf?url';
-import SairaUrl from './saira/Saira[wdth,wght].ttf?url';
-import SourceSans3Url from './sourcesans3/SourceSans3[wght].ttf?url';
-import HeeboUrl from './heebo/Heebo[wght].ttf?url';
-import KarlaUrl from './karla/Karla[wght].ttf?url';
-import TitilliumWebUrl from './titilliumweb/TitilliumWeb-Regular.ttf?url';
-import JostUrl from './jost/Jost[wght].ttf?url';
-import NotoSerifUrl from './notoserif/NotoSerif[wdth,wght].ttf?url';
-import ShareTechUrl from './sharetech/ShareTech-Regular.ttf?url';
-import SmoochSansUrl from './smoochsans/SmoochSans[wght].ttf?url';
-import PTSerifUrl from './ptserif/PT_Serif-Web-Regular.ttf?url';
-import LobsterTwoUrl from './lobstertwo/LobsterTwo-Regular.ttf?url';
-import InconsolataUrl from './inconsolata/Inconsolata[wdth,wght].ttf?url';
-import HindSiliguriUrl from './hindsiliguri/HindSiliguri-Regular.ttf?url';
-import NotoColorEmojiUrl from './notocoloremoji/NotoColorEmoji-Regular.ttf?url';
-import DancingScriptUrl from './dancingscript/DancingScript[wght].ttf?url';
-import MuktaUrl from './mukta/Mukta-Regular.ttf?url';
-import CairoUrl from './cairo/Cairo[slnt,wght].ttf?url';
-import LibreBaskervilleUrl from './librebaskerville/LibreBaskerville[wght].ttf?url';
-import PlusJakartaSansUrl from './plusjakartasans/PlusJakartaSans[wght].ttf?url';
-import JosefinSansUrl from './josefinsans/JosefinSans[wght].ttf?url';
-import EBGaramondUrl from './ebgaramond/EBGaramond[wght].ttf?url';
-import NotoSerifJPUrl from './notoserifjp/NotoSerifJP[wght].ttf?url';
-import LibreFranklinUrl from './librefranklin/LibreFranklin[wght].ttf?url';
-import AntonUrl from './anton/Anton-Regular.ttf?url';
-import SourceCodeProUrl from './sourcecodepro/SourceCodePro[wght].ttf?url';
-import NanumGothicUrl from './nanumgothic/NanumGothic-Regular.ttf?url';
-import ChangaOneUrl from './changaone/ChangaOne-Regular.ttf?url';
-import NotoSansSCUrl from './notosanssc/NotoSansSC[wght].ttf?url';
-import DosisUrl from './dosis/Dosis[wght].ttf?url';
-import CabinUrl from './cabin/Cabin[wdth,wght].ttf?url';
-import RobotoFlexUrl from './robotoflex/RobotoFlex[GRAD,XOPQ,XTRA,YOPQ,YTAS,YTDE,YTFI,YTLC,YTUC,opsz,slnt,wdth,wght].ttf?url';
-import BarlowCondensedUrl from './barlowcondensed/BarlowCondensed-Regular.ttf?url';
-import PublicSansUrl from './publicsans/PublicSans[wght].ttf?url';
-import SchibstedGroteskUrl from './schibstedgrotesk/SchibstedGrotesk[wght].ttf?url';
-import BitterUrl from './bitter/Bitter[wght].ttf?url';
-import NotoSansTeluguUrl from './notosanstelugu/NotoSansTelugu[wdth,wght].ttf?url';
-import RamabhadraUrl from './ramabhadra/Ramabhadra-Regular.ttf?url';
-import AssistantUrl from './assistant/Assistant[wght].ttf?url';
-import AnekTeluguUrl from './anektelugu/AnekTelugu[wdth,wght].ttf?url';
-import AlfaSlabOneUrl from './alfaslabone/AlfaSlabOne-Regular.ttf?url';
-import SpaceGroteskUrl from './spacegrotesk/SpaceGrotesk[wght].ttf?url';
-import PacificoUrl from './pacifico/Pacifico-Regular.ttf?url';
-import Exo2Url from './exo2/Exo2[wght].ttf?url';
-import MPLUSRounded1cUrl from './mplusrounded1c/MPLUSRounded1c-Regular.ttf?url';
-import Slabo27pxUrl from './slabo27px/Slabo27px-Regular.ttf?url';
-import RedHatDisplayUrl from './redhatdisplay/RedHatDisplay[wght].ttf?url';
-import GravitasOneUrl from './gravitasone/GravitasOne.ttf?url';
-import OxygenUrl from './oxygen/Oxygen-Regular.ttf?url';
-import HindUrl from './hind/Hind-Regular.ttf?url';
-import TajawalUrl from './tajawal/Tajawal-Regular.ttf?url';
-import CrimsonTextUrl from './crimsontext/CrimsonText-Regular.ttf?url';
-import CormorantGaramondUrl from './cormorantgaramond/CormorantGaramond[wght].ttf?url';
-import LobsterUrl from './lobster/Lobster-Regular.ttf?url';
-import UrbanistUrl from './urbanist/Urbanist[wght].ttf?url';
-import InterTightUrl from './intertight/InterTight[wght].ttf?url';
-import LexendUrl from './lexend/Lexend[wght].ttf?url';
-import ComfortaaUrl from './comfortaa/Comfortaa[wght].ttf?url';
-import CaveatUrl from './caveat/Caveat[wght].ttf?url';
-import PTSansNarrowUrl from './ptsansnarrow/PT_Sans-Narrow-Web-Regular.ttf?url';
-import ArvoUrl from './arvo/Arvo-Regular.ttf?url';
-import OverpassUrl from './overpass/Overpass[wght].ttf?url';
-
 export const GOOGLE_OFL_FONTS = [
-  { id: "Roboto", url: RobotoUrl },
-  { id: "Open Sans", url: OpenSansUrl },
-  { id: "Noto Sans JP", url: NotoSansJPUrl },
-  { id: "Inter", url: InterUrl },
-  { id: "Montserrat", url: MontserratUrl },
-  { id: "Poppins", url: PoppinsUrl },
-  { id: "Lato", url: LatoUrl },
-  { id: "Roboto Condensed", url: RobotoCondensedUrl },
-  { id: "Roboto Mono", url: RobotoMonoUrl },
-  { id: "Oswald", url: OswaldUrl },
-  { id: "Noto Sans", url: NotoSansUrl },
-  { id: "Raleway", url: RalewayUrl },
-  { id: "Nunito Sans", url: NunitoSansUrl },
-  { id: "Nunito", url: NunitoUrl },
-  { id: "Playfair Display", url: PlayfairDisplayUrl },
-  { id: "Rubik", url: RubikUrl },
-  { id: "DM Sans", url: DMSansUrl },
-  { id: "Merriweather", url: MerriweatherUrl },
-  { id: "Noto Sans KR", url: NotoSansKRUrl },
-  { id: "Work Sans", url: WorkSansUrl },
-  { id: "Kanit", url: KanitUrl },
-  { id: "PT Sans", url: PTSansUrl },
-  { id: "Bricolage Grotesque", url: BricolageGrotesqueUrl },
-  { id: "Lora", url: LoraUrl },
-  { id: "Archivo Black", url: ArchivoBlackUrl },
-  { id: "Mulish", url: MulishUrl },
-  { id: "Outfit", url: OutfitUrl },
-  { id: "Noto Sans TC", url: NotoSansTCUrl },
-  { id: "Archivo", url: ArchivoUrl },
-  { id: "Manrope", url: ManropeUrl },
-  { id: "Fjalla One", url: FjallaOneUrl },
-  { id: "Figtree", url: FigtreeUrl },
-  { id: "IBM Plex Sans", url: IBMPlexSansUrl },
-  { id: "Bebas Neue", url: BebasNeueUrl },
-  { id: "Quicksand", url: QuicksandUrl },
-  { id: "Fira Sans", url: FiraSansUrl },
-  { id: "Prompt", url: PromptUrl },
-  { id: "Barlow", url: BarlowUrl },
-  { id: "Bungee", url: BungeeUrl },
-  { id: "Saira", url: SairaUrl },
-  { id: "Source Sans 3", url: SourceSans3Url },
-  { id: "Heebo", url: HeeboUrl },
-  { id: "Karla", url: KarlaUrl },
-  { id: "Titillium Web", url: TitilliumWebUrl },
-  { id: "Jost", url: JostUrl },
-  { id: "Noto Serif", url: NotoSerifUrl },
-  { id: "Share Tech", url: ShareTechUrl },
-  { id: "Smooch Sans", url: SmoochSansUrl },
-  { id: "PT Serif", url: PTSerifUrl },
-  { id: "Lobster Two", url: LobsterTwoUrl },
-  { id: "Inconsolata", url: InconsolataUrl },
-  { id: "Hind Siliguri", url: HindSiliguriUrl },
-  { id: "Noto Color Emoji", url: NotoColorEmojiUrl },
-  { id: "Dancing Script", url: DancingScriptUrl },
-  { id: "Mukta", url: MuktaUrl },
-  { id: "Cairo", url: CairoUrl },
-  { id: "Libre Baskerville", url: LibreBaskervilleUrl },
-  { id: "Plus Jakarta Sans", url: PlusJakartaSansUrl },
-  { id: "Josefin Sans", url: JosefinSansUrl },
-  { id: "EB Garamond", url: EBGaramondUrl },
-  { id: "Noto Serif JP", url: NotoSerifJPUrl },
-  { id: "Libre Franklin", url: LibreFranklinUrl },
-  { id: "Anton", url: AntonUrl },
-  { id: "Source Code Pro", url: SourceCodeProUrl },
-  { id: "Nanum Gothic", url: NanumGothicUrl },
-  { id: "Changa One", url: ChangaOneUrl },
-  { id: "Noto Sans SC", url: NotoSansSCUrl },
-  { id: "Dosis", url: DosisUrl },
-  { id: "Cabin", url: CabinUrl },
-  { id: "Roboto Flex", url: RobotoFlexUrl },
-  { id: "Barlow Condensed", url: BarlowCondensedUrl },
-  { id: "Public Sans", url: PublicSansUrl },
-  { id: "Schibsted Grotesk", url: SchibstedGroteskUrl },
-  { id: "Bitter", url: BitterUrl },
-  { id: "Noto Sans Telugu", url: NotoSansTeluguUrl },
-  { id: "Ramabhadra", url: RamabhadraUrl },
-  { id: "Assistant", url: AssistantUrl },
-  { id: "Anek Telugu", url: AnekTeluguUrl },
-  { id: "Alfa Slab One", url: AlfaSlabOneUrl },
-  { id: "Space Grotesk", url: SpaceGroteskUrl },
-  { id: "Pacifico", url: PacificoUrl },
-  { id: "Exo 2", url: Exo2Url },
-  { id: "M PLUS Rounded 1c", url: MPLUSRounded1cUrl },
-  { id: "Slabo 27px", url: Slabo27pxUrl },
-  { id: "Red Hat Display", url: RedHatDisplayUrl },
-  { id: "Gravitas One", url: GravitasOneUrl },
-  { id: "Oxygen", url: OxygenUrl },
-  { id: "Hind", url: HindUrl },
-  { id: "Tajawal", url: TajawalUrl },
-  { id: "Crimson Text", url: CrimsonTextUrl },
-  { id: "Cormorant Garamond", url: CormorantGaramondUrl },
-  { id: "Lobster", url: LobsterUrl },
-  { id: "Urbanist", url: UrbanistUrl },
-  { id: "Inter Tight", url: InterTightUrl },
-  { id: "Lexend", url: LexendUrl },
-  { id: "Comfortaa", url: ComfortaaUrl },
-  { id: "Caveat", url: CaveatUrl },
-  { id: "PT Sans Narrow", url: PTSansNarrowUrl },
-  { id: "Arvo", url: ArvoUrl },
-  { id: "Overpass", url: OverpassUrl },
+  { id: "Roboto", path: "google-ofl/roboto/Roboto[wdth,wght].ttf" },
+  { id: "Open Sans", path: "google-ofl/opensans/OpenSans[wdth,wght].ttf" },
+  { id: "Noto Sans JP", path: "google-ofl/notosansjp/NotoSansJP[wght].ttf" },
+  { id: "Inter", path: "google-ofl/inter/Inter[opsz,wght].ttf" },
+  { id: "Montserrat", path: "google-ofl/montserrat/Montserrat[wght].ttf" },
+  { id: "Poppins", path: "google-ofl/poppins/Poppins-Regular.ttf" },
+  { id: "Lato", path: "google-ofl/lato/Lato-Regular.ttf" },
+  { id: "Roboto Condensed", path: "google-ofl/robotocondensed/RobotoCondensed[wght].ttf" },
+  { id: "Roboto Mono", path: "google-ofl/robotomono/RobotoMono[wght].ttf" },
+  { id: "Oswald", path: "google-ofl/oswald/Oswald[wght].ttf" },
+  { id: "Noto Sans", path: "google-ofl/notosans/NotoSans[wdth,wght].ttf" },
+  { id: "Raleway", path: "google-ofl/raleway/Raleway[wght].ttf" },
+  { id: "Nunito Sans", path: "google-ofl/nunitosans/NunitoSans[YTLC,opsz,wdth,wght].ttf" },
+  { id: "Nunito", path: "google-ofl/nunito/Nunito[wght].ttf" },
+  { id: "Playfair Display", path: "google-ofl/playfairdisplay/PlayfairDisplay[wght].ttf" },
+  { id: "Rubik", path: "google-ofl/rubik/Rubik[wght].ttf" },
+  { id: "DM Sans", path: "google-ofl/dmsans/DMSans[opsz,wght].ttf" },
+  { id: "Merriweather", path: "google-ofl/merriweather/Merriweather[opsz,wdth,wght].ttf" },
+  { id: "Noto Sans KR", path: "google-ofl/notosanskr/NotoSansKR[wght].ttf" },
+  { id: "Work Sans", path: "google-ofl/worksans/WorkSans[wght].ttf" },
+  { id: "Kanit", path: "google-ofl/kanit/Kanit-Regular.ttf" },
+  { id: "PT Sans", path: "google-ofl/ptsans/PT_Sans-Web-Regular.ttf" },
+  { id: "Bricolage Grotesque", path: "google-ofl/bricolagegrotesque/BricolageGrotesque[opsz,wdth,wght].ttf" },
+  { id: "Lora", path: "google-ofl/lora/Lora[wght].ttf" },
+  { id: "Archivo Black", path: "google-ofl/archivoblack/ArchivoBlack-Regular.ttf" },
+  { id: "Mulish", path: "google-ofl/mulish/Mulish[wght].ttf" },
+  { id: "Outfit", path: "google-ofl/outfit/Outfit[wght].ttf" },
+  { id: "Noto Sans TC", path: "google-ofl/notosanstc/NotoSansTC[wght].ttf" },
+  { id: "Archivo", path: "google-ofl/archivo/Archivo[wdth,wght].ttf" },
+  { id: "Manrope", path: "google-ofl/manrope/Manrope[wght].ttf" },
+  { id: "Fjalla One", path: "google-ofl/fjallaone/FjallaOne-Regular.ttf" },
+  { id: "Figtree", path: "google-ofl/figtree/Figtree[wght].ttf" },
+  { id: "IBM Plex Sans", path: "google-ofl/ibmplexsans/IBMPlexSans[wdth,wght].ttf" },
+  { id: "Bebas Neue", path: "google-ofl/bebasneue/BebasNeue-Regular.ttf" },
+  { id: "Quicksand", path: "google-ofl/quicksand/Quicksand[wght].ttf" },
+  { id: "Fira Sans", path: "google-ofl/firasans/FiraSans-Regular.ttf" },
+  { id: "Prompt", path: "google-ofl/prompt/Prompt-Regular.ttf" },
+  { id: "Barlow", path: "google-ofl/barlow/Barlow-Regular.ttf" },
+  { id: "Bungee", path: "google-ofl/bungee/Bungee-Regular.ttf" },
+  { id: "Saira", path: "google-ofl/saira/Saira[wdth,wght].ttf" },
+  { id: "Source Sans 3", path: "google-ofl/sourcesans3/SourceSans3[wght].ttf" },
+  { id: "Heebo", path: "google-ofl/heebo/Heebo[wght].ttf" },
+  { id: "Karla", path: "google-ofl/karla/Karla[wght].ttf" },
+  { id: "Titillium Web", path: "google-ofl/titilliumweb/TitilliumWeb-Regular.ttf" },
+  { id: "Jost", path: "google-ofl/jost/Jost[wght].ttf" },
+  { id: "Noto Serif", path: "google-ofl/notoserif/NotoSerif[wdth,wght].ttf" },
+  { id: "Share Tech", path: "google-ofl/sharetech/ShareTech-Regular.ttf" },
+  { id: "Smooch Sans", path: "google-ofl/smoochsans/SmoochSans[wght].ttf" },
+  { id: "PT Serif", path: "google-ofl/ptserif/PT_Serif-Web-Regular.ttf" },
+  { id: "Lobster Two", path: "google-ofl/lobstertwo/LobsterTwo-Regular.ttf" },
+  { id: "Inconsolata", path: "google-ofl/inconsolata/Inconsolata[wdth,wght].ttf" },
+  { id: "Hind Siliguri", path: "google-ofl/hindsiliguri/HindSiliguri-Regular.ttf" },
+  { id: "Noto Color Emoji", path: "google-ofl/notocoloremoji/NotoColorEmoji-Regular.ttf" },
+  { id: "Dancing Script", path: "google-ofl/dancingscript/DancingScript[wght].ttf" },
+  { id: "Mukta", path: "google-ofl/mukta/Mukta-Regular.ttf" },
+  { id: "Cairo", path: "google-ofl/cairo/Cairo[slnt,wght].ttf" },
+  { id: "Libre Baskerville", path: "google-ofl/librebaskerville/LibreBaskerville[wght].ttf" },
+  { id: "Plus Jakarta Sans", path: "google-ofl/plusjakartasans/PlusJakartaSans[wght].ttf" },
+  { id: "Josefin Sans", path: "google-ofl/josefinsans/JosefinSans[wght].ttf" },
+  { id: "EB Garamond", path: "google-ofl/ebgaramond/EBGaramond[wght].ttf" },
+  { id: "Noto Serif JP", path: "google-ofl/notoserifjp/NotoSerifJP[wght].ttf" },
+  { id: "Libre Franklin", path: "google-ofl/librefranklin/LibreFranklin[wght].ttf" },
+  { id: "Anton", path: "google-ofl/anton/Anton-Regular.ttf" },
+  { id: "Source Code Pro", path: "google-ofl/sourcecodepro/SourceCodePro[wght].ttf" },
+  { id: "Nanum Gothic", path: "google-ofl/nanumgothic/NanumGothic-Regular.ttf" },
+  { id: "Changa One", path: "google-ofl/changaone/ChangaOne-Regular.ttf" },
+  { id: "Noto Sans SC", path: "google-ofl/notosanssc/NotoSansSC[wght].ttf" },
+  { id: "Dosis", path: "google-ofl/dosis/Dosis[wght].ttf" },
+  { id: "Cabin", path: "google-ofl/cabin/Cabin[wdth,wght].ttf" },
+  { id: "Roboto Flex", path: "google-ofl/robotoflex/RobotoFlex[GRAD,XOPQ,XTRA,YOPQ,YTAS,YTDE,YTFI,YTLC,YTUC,opsz,slnt,wdth,wght].ttf" },
+  { id: "Barlow Condensed", path: "google-ofl/barlowcondensed/BarlowCondensed-Regular.ttf" },
+  { id: "Public Sans", path: "google-ofl/publicsans/PublicSans[wght].ttf" },
+  { id: "Schibsted Grotesk", path: "google-ofl/schibstedgrotesk/SchibstedGrotesk[wght].ttf" },
+  { id: "Bitter", path: "google-ofl/bitter/Bitter[wght].ttf" },
+  { id: "Noto Sans Telugu", path: "google-ofl/notosanstelugu/NotoSansTelugu[wdth,wght].ttf" },
+  { id: "Ramabhadra", path: "google-ofl/ramabhadra/Ramabhadra-Regular.ttf" },
+  { id: "Assistant", path: "google-ofl/assistant/Assistant[wght].ttf" },
+  { id: "Anek Telugu", path: "google-ofl/anektelugu/AnekTelugu[wdth,wght].ttf" },
+  { id: "Alfa Slab One", path: "google-ofl/alfaslabone/AlfaSlabOne-Regular.ttf" },
+  { id: "Space Grotesk", path: "google-ofl/spacegrotesk/SpaceGrotesk[wght].ttf" },
+  { id: "Pacifico", path: "google-ofl/pacifico/Pacifico-Regular.ttf" },
+  { id: "Exo 2", path: "google-ofl/exo2/Exo2[wght].ttf" },
+  { id: "M PLUS Rounded 1c", path: "google-ofl/mplusrounded1c/MPLUSRounded1c-Regular.ttf" },
+  { id: "Slabo 27px", path: "google-ofl/slabo27px/Slabo27px-Regular.ttf" },
+  { id: "Red Hat Display", path: "google-ofl/redhatdisplay/RedHatDisplay[wght].ttf" },
+  { id: "Gravitas One", path: "google-ofl/gravitasone/GravitasOne.ttf" },
+  { id: "Oxygen", path: "google-ofl/oxygen/Oxygen-Regular.ttf" },
+  { id: "Hind", path: "google-ofl/hind/Hind-Regular.ttf" },
+  { id: "Tajawal", path: "google-ofl/tajawal/Tajawal-Regular.ttf" },
+  { id: "Crimson Text", path: "google-ofl/crimsontext/CrimsonText-Regular.ttf" },
+  { id: "Cormorant Garamond", path: "google-ofl/cormorantgaramond/CormorantGaramond[wght].ttf" },
+  { id: "Lobster", path: "google-ofl/lobster/Lobster-Regular.ttf" },
+  { id: "Urbanist", path: "google-ofl/urbanist/Urbanist[wght].ttf" },
+  { id: "Inter Tight", path: "google-ofl/intertight/InterTight[wght].ttf" },
+  { id: "Lexend", path: "google-ofl/lexend/Lexend[wght].ttf" },
+  { id: "Comfortaa", path: "google-ofl/comfortaa/Comfortaa[wght].ttf" },
+  { id: "Caveat", path: "google-ofl/caveat/Caveat[wght].ttf" },
+  { id: "PT Sans Narrow", path: "google-ofl/ptsansnarrow/PT_Sans-Narrow-Web-Regular.ttf" },
+  { id: "Arvo", path: "google-ofl/arvo/Arvo-Regular.ttf" },
+  { id: "Overpass", path: "google-ofl/overpass/Overpass[wght].ttf" },
 ];
