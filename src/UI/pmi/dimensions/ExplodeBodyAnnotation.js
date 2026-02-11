@@ -17,8 +17,8 @@ const inputParamsSchema = {
     multiple: true,
     default_value: [],
     label: 'Target Objects',
-    selectionFilter: ['SOLID'],
-    hint: 'Choose the solids to reposition in this view',
+    selectionFilter: ['SOLID', 'COMPONENT'],
+    hint: 'Choose the solids or components to reposition in this view',
   },
   transform: {
     type: 'transform',
@@ -42,7 +42,7 @@ export class ExplodeBodyAnnotation extends BaseAnnotation {
   static inputParamsSchema = inputParamsSchema;
   static aliases = ['viewTransform'];
   static showContexButton(selectedItems) {
-    const refs = BaseAnnotation._collectSelectionRefs(selectedItems, ['SOLID']);
+    const refs = BaseAnnotation._collectSelectionRefs(selectedItems, ['SOLID', 'COMPONENT']);
     if (!refs.length) return false;
     return { params: { targets: refs } };
   }

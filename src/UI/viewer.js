@@ -791,8 +791,6 @@ export class Viewer {
         this._loop = this._loop.bind(this);
         this._updateHover = this._updateHover.bind(this);
         this._selectAt = this._selectAt.bind(this);
-        this._onDoubleClick = this._onDoubleClick.bind(this);
-        this._onGlobalDoubleClick = this._onGlobalDoubleClick.bind(this);
         this._onPointerLeave = () => {
             try { SelectionFilter.clearHover(); } catch (_) { }
             this._lastPointerEvent = null;
@@ -808,7 +806,6 @@ export class Viewer {
         try { SelectionFilter._ensureSelectionFilterIndicator?.(this); } catch (_) { }
         // Use capture on pointerup to ensure we end interactions even if pointerup fires off-element
         window.addEventListener('pointerup', this._onPointerUp, { passive: false, capture: true });
-        document.addEventListener('dblclick', this._onGlobalDoubleClick, { passive: false, capture: true });
         window.addEventListener('resize', this._onResize);
         this._onKeyDown = this._onKeyDown.bind(this);
         window.addEventListener('keydown', this._onKeyDown, { passive: false });
@@ -862,7 +859,6 @@ export class Viewer {
         el.addEventListener('pointerleave', this._onPointerLeave, { passive: true });
         el.addEventListener('pointerenter', this._onPointerEnter, { passive: true });
         el.addEventListener('pointerdown', this._onPointerDown, { passive: false });
-        el.addEventListener('dblclick', this._onDoubleClick, { passive: false });
         el.addEventListener('contextmenu', this._onContextMenu);
     }
 
@@ -872,7 +868,6 @@ export class Viewer {
         el.removeEventListener('pointerleave', this._onPointerLeave);
         el.removeEventListener('pointerenter', this._onPointerEnter);
         el.removeEventListener('pointerdown', this._onPointerDown);
-        el.removeEventListener('dblclick', this._onDoubleClick);
         el.removeEventListener('contextmenu', this._onContextMenu);
     }
 
@@ -1347,7 +1342,6 @@ export class Viewer {
         const el = this.renderer?.domElement;
         this._detachRendererEvents(el);
         window.removeEventListener('pointerup', this._onPointerUp, { capture: true });
-        document.removeEventListener('dblclick', this._onGlobalDoubleClick, { capture: true });
         window.removeEventListener('resize', this._onResize);
         window.removeEventListener('keydown', this._onKeyDown, { passive: false });
         this.controls?.dispose?.();
@@ -3104,6 +3098,21 @@ export class Viewer {
         void event;
     }
 
+    _handleEscapeAction() {
+        if (this._disposed) return;
+        try { this._clearSelectionOverlayTimer(); } catch { }
+        try { this._hideSelectionOverlay(); } catch { }
+        try { this._toggleComponentTransform?.(null); } catch { }
+        try { this._stopComponentTransformSession?.(); } catch { }
+        try {
+            const scene = this.partHistory?.scene || this.scene;
+            if (scene) {
+                SelectionFilter.unselectAll(scene);
+                SelectionFilter.restoreAllowedSelectionTypes();
+            }
+        } catch { }
+    }
+
     _onKeyDown(event) {
         if (this._disposed) return;
         const target = event?.target || null;
@@ -3135,14 +3144,7 @@ export class Viewer {
         }
         const k = event?.key || event?.code || '';
         if (k === 'Escape' || k === 'Esc') {
-            try { this._hideSelectionOverlay(); } catch { }
-            try {
-                const scene = this.partHistory?.scene || this.scene;
-                if (scene) {
-                    SelectionFilter.unselectAll(scene);
-                    SelectionFilter.restoreAllowedSelectionTypes();
-                }
-            } catch { }
+            this._handleEscapeAction();
         }
     }
 
@@ -3388,33 +3390,7 @@ export class Viewer {
         this.render();
     }
 
-    _onGlobalDoubleClick(event) {
-        if (this._disposed) return;
-        const lastDownAge = Date.now() - (this._lastCanvasPointerDownAt || 0);
-        // Only honor double-clicks that are closely preceded by a canvas pointerdown,
-        // even if the second click lands on the selection popover.
-        if (!Number.isFinite(lastDownAge) || lastDownAge > 750) return;
-        this._clearSelectionOverlayTimer();
-        this._onDoubleClick(event);
-    }
-
-    _onDoubleClick(event) {
-        if (this._disposed) return;
-        if (event && event.__brepHandledDblclick) return;
-        if (event) event.__brepHandledDblclick = true;
-        try { event?.preventDefault?.(); } catch { }
-        try {
-            this._clearSelectionOverlayTimer();
-            this._hideSelectionOverlay();
-        } catch { }
-        try {
-            const ax = window.__BREP_activeXform;
-            if (ax && typeof ax.isOver === 'function' && ax.isOver(event)) return;
-        } catch { }
-
-        const pick = this._pickAtEvent(event, { ignoreSelectionFilter: true, allowAnyAllowedType: true });
-        const component = pick && pick.target ? this._findOwningComponent(pick.target) : null;
-
+    _toggleComponentTransform(component) {
         if (!component) {
             this._stopComponentTransformSession();
             return;
@@ -3430,7 +3406,9 @@ export class Viewer {
         const session = this._componentTransformSession;
         if (session && session.component === component) {
             const controls = session.controls;
-            const currentMode = (typeof controls?.getMode === 'function') ? controls.getMode() : (controls?.mode || session.mode || 'translate');
+            const currentMode = (typeof controls?.getMode === 'function')
+                ? controls.getMode()
+                : (controls?.mode || session.mode || 'translate');
             if (currentMode === 'translate') {
                 const nextMode = 'rotate';
                 try { controls?.setMode(nextMode); } catch { if (controls) controls.mode = nextMode; }
