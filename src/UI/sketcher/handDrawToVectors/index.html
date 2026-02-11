@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FuzzyDraw Demo</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <p class="eyebrow">FuzzyDraw</p>
+        <h1>Sketch to clean geometry.</h1>
+        <p class="lead">
+          Draw a line, circle, or arc. Click Vectorize to see the detected geometry rendered as SVG.
+        </p>
+      </header>
+
+      <section class="workspace">
+        <div class="panel">
+          <div class="panel__header">
+            <h2>Input canvas</h2>
+            <div class="controls">
+              <div class="tool-toggle" role="group" aria-label="Canvas tools">
+                <button id="tool-draw" class="ghost is-active" type="button">Draw</button>
+                <button id="tool-erase" class="ghost" type="button">Erase</button>
+              </div>
+              <button id="vectorize" type="button">Vectorize</button>
+              <button id="clear" class="ghost" type="button">Clear</button>
+            </div>
+          </div>
+          <canvas id="draw" width="520" height="360"></canvas>
+          <p id="status" class="status"></p>
+          <div class="tuning">
+            <div class="tuning__header">
+              <h3>Tuning</h3>
+              <div class="tuning__actions">
+                <label class="toggle">
+                  <input id="auto-update" type="checkbox" checked />
+                  Auto update
+                </label>
+                <button id="reset-tuning" class="ghost small">Reset</button>
+              </div>
+            </div>
+            <div id="tuning-controls" class="tuning__grid" aria-live="polite"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel__header">
+            <h2>Output SVG</h2>
+            <span class="badge">live result</span>
+          </div>
+          <svg id="output" width="520" height="360" aria-label="Vectorized output"></svg>
+          <p id="confidence" class="status"></p>
+          <p class="status hint">SVG updates when you click Vectorize.</p>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./demo.js"></script>
+  </body>
+</html>

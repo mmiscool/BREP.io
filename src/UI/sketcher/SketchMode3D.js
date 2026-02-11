@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { ConstraintSolver } from "../../features/sketch/sketchSolver2D/ConstraintEngine.js";
 import { updateListHighlights, applyHoverAndSelectionColors } from "./highlights.js";
 import { renderDimensions as dimsRender } from "./dimensions.js";
+import { vectorizeImageData } from "./handDrawToVectors/fuzzydraw.js";
 import { AccordionWidget } from "../AccordionWidget.js";
 import { deepClone } from "../../utils/deepClone.js";
 
@@ -58,6 +59,21 @@ export class SketchMode3D {
     this._undoReady = false;
     this._undoApplying = false;
     this._undoButtons = { undo: null, redo: null };
+    // Hand-draw (freehand) tool state
+    this._handDraw = {
+      active: false,
+      points: [],
+      minX: Infinity,
+      minY: Infinity,
+      maxX: -Infinity,
+      maxY: -Infinity,
+      last: null,
+      overlay: null,
+      ctx: null,
+      offscreen: null,
+      lineWidth: 8,
+      minDist: 1.2,
+    };
   }
 
   open() {
@@ -187,7 +203,8 @@ export class SketchMode3D {
       maxIterations: 500,
       tolerance: 0.00001,
       decimalPlaces: 6,
-      autoCleanupOrphans: true
+      autoCleanupOrphans: true,
+      pointConstraintPx: 12,
     };
 
     // Load persisted dimension offsets (plane-space {du,dv}) if present
@@ -404,6 +421,18 @@ export class SketchMode3D {
     } catch { }
     this._dimRoot = null;
     this._dimOffsets.clear();
+    // Remove hand-draw overlay
+    try {
+      if (this._handDraw?.overlay && v?.container) v.container.removeChild(this._handDraw.overlay);
+    } catch { }
+    if (this._handDraw) {
+      this._handDraw.overlay = null;
+      this._handDraw.ctx = null;
+      this._handDraw.offscreen = null;
+      this._handDraw.active = false;
+      this._handDraw.points = [];
+      this._handDraw.last = null;
+    }
 
     // No camera layer changes to restore
 
@@ -535,6 +564,11 @@ export class SketchMode3D {
 
   #onPointerDown(e) {
     let consumed = false; // whether we handled the event and should block controls
+    if (this._tool === "handdraw" && e.button === 0) {
+      try { this.#startHandDraw(e); } catch { }
+      try { e.preventDefault(); e.stopImmediatePropagation?.(); e.stopPropagation(); } catch { }
+      return;
+    }
     // Tool-based behavior
     if (this._tool !== "select" && e.button === 0) {
       // Pick Edges tool: click scene edges to add external refs
@@ -788,6 +822,11 @@ export class SketchMode3D {
   }
 
   #onPointerMove(e) {
+    if (this._handDraw?.active) {
+      try { this.#continueHandDraw(e); } catch { }
+      try { e.preventDefault(); e.stopImmediatePropagation?.(); e.stopPropagation(); } catch { }
+      return;
+    }
     // Promote pending to active when moved sufficiently
     const threshold = 4;
     if (!this._drag.active && this._pendingDrag.pointId != null) {
@@ -872,22 +911,26 @@ export class SketchMode3D {
     // Passive hover highlighting
     {
       // Edge/trim cursor hint
-      if (this._tool === 'pickEdges') {
-        const h = this.#hitTestSceneEdge(e);
-        try { this.viewer.renderer.domElement.style.cursor = h ? 'crosshair' : ''; } catch { }
-      } else if (this._tool === 'trim') {
-        const h = this.#hitTestGeometry(e);
-        try { this.viewer.renderer.domElement.style.cursor = h ? 'crosshair' : ''; } catch { }
-      }
-      const pid = this.#hitTestPoint(e);
-      if (pid != null) this.#setHover({ type: "point", id: pid });
-      else {
-        const gh = this.#hitTestGeometry(e);
-        if (gh) this.#setHover({ type: "geometry", id: gh.id });
+      if (this._tool === 'handdraw') {
+        try { this.viewer.renderer.domElement.style.cursor = 'crosshair'; } catch { }
+      } else {
+        if (this._tool === 'pickEdges') {
+          const h = this.#hitTestSceneEdge(e);
+          try { this.viewer.renderer.domElement.style.cursor = h ? 'crosshair' : ''; } catch { }
+        } else if (this._tool === 'trim') {
+          const h = this.#hitTestGeometry(e);
+          try { this.viewer.renderer.domElement.style.cursor = h ? 'crosshair' : ''; } catch { }
+        }
+        const pid = this.#hitTestPoint(e);
+        if (pid != null) this.#setHover({ type: "point", id: pid });
         else {
-          const dh = this.#hitTestDim(e) || this.#hitTestGlyph(e);
-          if (dh && dh.cid != null) this.#setHover({ type: 'constraint', id: dh.cid });
-          else this.#setHover(null);
+          const gh = this.#hitTestGeometry(e);
+          if (gh) this.#setHover({ type: "geometry", id: gh.id });
+          else {
+            const dh = this.#hitTestDim(e) || this.#hitTestGlyph(e);
+            if (dh && dh.cid != null) this.#setHover({ type: 'constraint', id: dh.cid });
+            else this.#setHover(null);
+          }
         }
       }
     }
@@ -896,6 +939,11 @@ export class SketchMode3D {
   }
 
   #onPointerUp(e) {
+    if (this._handDraw?.active) {
+      try { this.#finishHandDraw(e); } catch { }
+      try { e.preventDefault(); e.stopImmediatePropagation?.(); e.stopPropagation(); } catch { }
+      return;
+    }
     const draggedPointId = this._drag.active ? this._drag.pointId : null;
     // If no drag happened, treat as selection toggle
     if (
@@ -957,6 +1005,386 @@ export class SketchMode3D {
     this._pendingGeo = { ids: null, x: 0, y: 0, startUV: null, started: false, geometryId: null };
   }
 
+  #ensureHandDrawOverlay() {
+    const v = this.viewer;
+    const hd = this._handDraw;
+    if (!v || !hd) return null;
+    const host = v.container;
+    if (!host) return null;
+    if (!hd.overlay) {
+      const canvas = document.createElement("canvas");
+      canvas.className = "sketch-handdraw";
+      canvas.style.position = "absolute";
+      canvas.style.left = "0";
+      canvas.style.top = "0";
+      canvas.style.right = "0";
+      canvas.style.bottom = "0";
+      canvas.style.width = "100%";
+      canvas.style.height = "100%";
+      canvas.style.pointerEvents = "none";
+      canvas.style.zIndex = "1";
+      const anchor = this._dimRoot;
+      if (anchor && anchor.parentNode === host) host.insertBefore(canvas, anchor);
+      else host.appendChild(canvas);
+      hd.overlay = canvas;
+    }
+    const rect = v.renderer?.domElement?.getBoundingClientRect?.();
+    const w = Math.max(1, Math.round(rect?.width || 1));
+    const h = Math.max(1, Math.round(rect?.height || 1));
+    if (hd.overlay.width !== w || hd.overlay.height !== h) {
+      hd.overlay.width = w;
+      hd.overlay.height = h;
+    }
+    const ctx = hd.overlay.getContext("2d", { willReadFrequently: true });
+    hd.ctx = ctx;
+    return ctx;
+  }
+
+  #clearHandDrawOverlay() {
+    const hd = this._handDraw;
+    if (!hd?.overlay || !hd.ctx) return;
+    try { hd.ctx.clearRect(0, 0, hd.overlay.width, hd.overlay.height); } catch { }
+  }
+
+  #cancelHandDraw() {
+    const hd = this._handDraw;
+    if (!hd) return;
+    hd.active = false;
+    hd.points = [];
+    hd.last = null;
+    hd.minX = Infinity;
+    hd.minY = Infinity;
+    hd.maxX = -Infinity;
+    hd.maxY = -Infinity;
+    this.#clearHandDrawOverlay();
+    try { if (this.viewer?.controls) this.viewer.controls.enabled = true; } catch { }
+  }
+
+  #startHandDraw(e) {
+    const v = this.viewer;
+    const hd = this._handDraw;
+    if (!v || !hd) return false;
+    const rect = v.renderer?.domElement?.getBoundingClientRect?.();
+    if (!rect) return false;
+    const x = (e.clientX || 0) - rect.left;
+    const y = (e.clientY || 0) - rect.top;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    const ctx = this.#ensureHandDrawOverlay();
+    if (!ctx) return false;
+    hd.active = true;
+    hd.points = [];
+    hd.minX = x;
+    hd.maxX = x;
+    hd.minY = y;
+    hd.maxY = y;
+    hd.last = { x, y };
+    this.#clearHandDrawOverlay();
+    ctx.globalCompositeOperation = "source-over";
+    ctx.lineWidth = hd.lineWidth;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "rgba(110,168,254,0.9)";
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + 0.01, y + 0.01);
+    ctx.stroke();
+    hd.points.push({ x, y });
+    try { this._selection.clear(); } catch { }
+    try { this.#refreshContextBar(); } catch { }
+    try { if (this.viewer?.controls) this.viewer.controls.enabled = false; } catch { }
+    try { e.target.setPointerCapture?.(e.pointerId); } catch { }
+    return true;
+  }
+
+  #continueHandDraw(e) {
+    const v = this.viewer;
+    const hd = this._handDraw;
+    if (!v || !hd?.active) return false;
+    const rect = v.renderer?.domElement?.getBoundingClientRect?.();
+    if (!rect) return false;
+    const x = (e.clientX || 0) - rect.left;
+    const y = (e.clientY || 0) - rect.top;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    const last = hd.last;
+    if (last) {
+      const d = Math.hypot(x - last.x, y - last.y);
+      if (d < hd.minDist) return true;
+    }
+    hd.points.push({ x, y });
+    hd.minX = Math.min(hd.minX, x);
+    hd.maxX = Math.max(hd.maxX, x);
+    hd.minY = Math.min(hd.minY, y);
+    hd.maxY = Math.max(hd.maxY, y);
+    hd.last = { x, y };
+    if (hd.ctx) {
+      hd.ctx.lineTo(x, y);
+      hd.ctx.stroke();
+    }
+    return true;
+  }
+
+  #finishHandDraw(e) {
+    const hd = this._handDraw;
+    if (!hd?.active) return false;
+    this.#continueHandDraw(e);
+    hd.active = false;
+    let created = false;
+    try { created = this.#vectorizeHandDrawStroke(); } catch { created = false; }
+    this.#clearHandDrawOverlay();
+    hd.points = [];
+    hd.last = null;
+    hd.minX = Infinity;
+    hd.minY = Infinity;
+    hd.maxX = -Infinity;
+    hd.maxY = -Infinity;
+    try { e.target.releasePointerCapture?.(e.pointerId); } catch { }
+    try { if (this.viewer?.controls) this.viewer.controls.enabled = true; } catch { }
+    try { this.#notifyControlsEnd(e); } catch { }
+    if (!created) {
+      try { this.viewer?._toast?.("No hand-drawn shape detected."); } catch { }
+    }
+    return created;
+  }
+
+  #vectorizeHandDrawStroke() {
+    const hd = this._handDraw;
+    if (!hd || !Array.isArray(hd.points) || hd.points.length < 2) return false;
+    const v = this.viewer;
+    if (!v || !this._solver) return false;
+    const rect = v.renderer?.domElement?.getBoundingClientRect?.();
+    if (!rect) return false;
+    const pad = Math.max(4, hd.lineWidth * 2);
+    const minX = Math.max(0, Math.floor(hd.minX - pad));
+    const minY = Math.max(0, Math.floor(hd.minY - pad));
+    const maxX = Math.min(rect.width, Math.ceil(hd.maxX + pad));
+    const maxY = Math.min(rect.height, Math.ceil(hd.maxY + pad));
+    const w = Math.max(1, Math.ceil(maxX - minX));
+    const h = Math.max(1, Math.ceil(maxY - minY));
+    if (w < 2 || h < 2) return false;
+
+    if (!hd.offscreen) hd.offscreen = document.createElement("canvas");
+    const off = hd.offscreen;
+    off.width = w;
+    off.height = h;
+    const octx = off.getContext("2d", { willReadFrequently: true });
+    if (!octx) return false;
+    octx.clearRect(0, 0, w, h);
+    octx.lineWidth = hd.lineWidth;
+    octx.lineCap = "round";
+    octx.lineJoin = "round";
+    octx.strokeStyle = "#000";
+    octx.beginPath();
+    const first = hd.points[0];
+    octx.moveTo(first.x - minX, first.y - minY);
+    for (let i = 1; i < hd.points.length; i++) {
+      const p = hd.points[i];
+      octx.lineTo(p.x - minX, p.y - minY);
+    }
+    octx.stroke();
+
+    const imageData = octx.getImageData(0, 0, w, h);
+    const shapes = vectorizeImageData(imageData);
+    const created = [];
+    if (Array.isArray(shapes)) {
+      for (const shape of shapes) {
+        if (shape && shape.type && shape.type !== "unknown") {
+          const desc = this.#createGeometryFromHandDrawShape(shape, minX, minY);
+          if (desc) created.push(desc);
+        }
+      }
+    }
+    if (!created.length) {
+      const desc = this.#createBezierFromStroke(hd.points);
+      if (desc) created.push(desc);
+    }
+    if (created.length) {
+      try { this.#autoCoincidentForHandDrawStroke(created, hd.points); } catch { }
+      try { this._selection.clear(); } catch { }
+      try { this._solver.solveSketch("full"); } catch { }
+      this.#rebuildSketchGraphics();
+      this.#refreshContextBar();
+      return true;
+    }
+    return false;
+  }
+
+  #createGeometryFromHandDrawShape(shape, offsetX, offsetY) {
+    if (!shape || !shape.type) return false;
+    const toUV = (x, y) => this.#screenToPlaneUV(x + offsetX, y + offsetY);
+    if (shape.type === "line") {
+      const a = toUV(shape.x1, shape.y1);
+      const b = toUV(shape.x2, shape.y2);
+      if (!a || !b) return false;
+      if (Math.hypot(a.u - b.u, a.v - b.v) < 1e-6) return false;
+      const aId = this.#createPointAtUV(a.u, a.v, false);
+      const bId = this.#createPointAtUV(b.u, b.v, false);
+      if (aId == null || bId == null) return false;
+      this.#addGeometry("line", [aId, bId]);
+      return { type: "line", pointIds: [aId, bId], endpointIds: [aId, bId] };
+    }
+    if (shape.type === "circle") {
+      const c = toUV(shape.cx, shape.cy);
+      const r = toUV(shape.cx + shape.radius, shape.cy);
+      if (!c || !r) return false;
+      if (Math.hypot(c.u - r.u, c.v - r.v) < 1e-6) return false;
+      const cId = this.#createPointAtUV(c.u, c.v, false);
+      const rId = this.#createPointAtUV(r.u, r.v, false);
+      if (cId == null || rId == null) return false;
+      this.#addGeometry("circle", [cId, rId]);
+      return { type: "circle", pointIds: [cId, rId], endpointIds: [] };
+    }
+    if (shape.type === "arc") {
+      const c = toUV(shape.cx, shape.cy);
+      const s = toUV(shape.sx, shape.sy);
+      const e = toUV(shape.ex, shape.ey);
+      if (!c || !s || !e) return false;
+      if (Math.hypot(s.u - e.u, s.v - e.v) < 1e-6) return false;
+      const cId = this.#createPointAtUV(c.u, c.v, false);
+      // Swap start/end to match sketcher arc direction expectations.
+      const sId = this.#createPointAtUV(e.u, e.v, false);
+      const eId = this.#createPointAtUV(s.u, s.v, false);
+      if (cId == null || sId == null || eId == null) return false;
+      this.#addGeometry("arc", [cId, sId, eId]);
+      return { type: "arc", pointIds: [cId, sId, eId], endpointIds: [sId, eId] };
+    }
+    return false;
+  }
+
+  #createBezierFromStroke(points) {
+    if (!Array.isArray(points) || points.length < 2) return false;
+    const uvPts = [];
+    for (const p of points) {
+      const uv = this.#screenToPlaneUV(p.x, p.y);
+      if (uv) uvPts.push(uv);
+    }
+    if (uvPts.length < 2) return false;
+    const lengths = [0];
+    for (let i = 1; i < uvPts.length; i++) {
+      const a = uvPts[i - 1];
+      const b = uvPts[i];
+      lengths[i] = lengths[i - 1] + Math.hypot(b.u - a.u, b.v - a.v);
+    }
+    const total = lengths[lengths.length - 1] || 0;
+    if (total < 1e-6) return false;
+    const sampleAt = (t) => {
+      const target = total * t;
+      let idx = lengths.findIndex((d) => d >= target);
+      if (idx <= 0) return { u: uvPts[0].u, v: uvPts[0].v };
+      if (idx < 0) idx = lengths.length - 1;
+      const d0 = lengths[idx - 1];
+      const d1 = lengths[idx];
+      const span = d1 - d0 || 1e-9;
+      const tt = Math.min(1, Math.max(0, (target - d0) / span));
+      const p0 = uvPts[idx - 1];
+      const p1 = uvPts[idx];
+      return { u: p0.u + (p1.u - p0.u) * tt, v: p0.v + (p1.v - p0.v) * tt };
+    };
+    const p0 = sampleAt(0);
+    const p1 = sampleAt(1 / 3);
+    const p2 = sampleAt(2 / 3);
+    const p3 = sampleAt(1);
+    const ids = [
+      this.#createPointAtUV(p0.u, p0.v, false),
+      this.#createPointAtUV(p1.u, p1.v, false),
+      this.#createPointAtUV(p2.u, p2.v, false),
+      this.#createPointAtUV(p3.u, p3.v, false),
+    ];
+    if (ids.some((id) => id == null)) return false;
+    this.#addGeometry("bezier", ids);
+    this.#addGeometry("line", [ids[0], ids[1]], null, { construction: true });
+    this.#addGeometry("line", [ids[3], ids[2]], null, { construction: true });
+    return { type: "bezier", pointIds: ids.slice(), endpointIds: [ids[0], ids[3]] };
+  }
+
+  #autoCoincidentForHandDrawStroke(descriptors, strokePoints) {
+    const v = this.viewer;
+    if (!v || !this._solver) return false;
+    if (!Array.isArray(descriptors) || descriptors.length === 0) return false;
+    if (!Array.isArray(strokePoints) || strokePoints.length < 2) return false;
+    const s = this._solver.sketchObject;
+    if (!s || !Array.isArray(s.points)) return false;
+
+    const start = strokePoints[0];
+    const end = strokePoints[strokePoints.length - 1];
+    const uvStart = this.#screenToPlaneUV(start.x, start.y);
+    const uvEnd = this.#screenToPlaneUV(end.x, end.y);
+    if (!uvStart && !uvEnd) return false;
+
+    const newPointIds = new Set();
+    const endpoints = [];
+    for (const d of descriptors) {
+      if (!d) continue;
+      if (Array.isArray(d.pointIds)) {
+        for (const id of d.pointIds) newPointIds.add(id);
+      }
+      if (Array.isArray(d.endpointIds)) {
+        for (const id of d.endpointIds) {
+          const p = s.points.find((pp) => pp.id === id);
+          if (p) endpoints.push({ id, x: p.x, y: p.y });
+        }
+      }
+    }
+    if (endpoints.length === 0) return false;
+
+    const { width, height } = this.#canvasClientSize(v.renderer.domElement);
+    const wpp = this.#worldPerPixel(v.camera, width, height);
+    const strokeWidth = this._handDraw?.lineWidth || 8;
+    const basePx = Number(this._solverSettings?.pointConstraintPx);
+    const pixelTol = Math.max(Number.isFinite(basePx) ? basePx : 12, strokeWidth * 1.5);
+    const tol = Math.max(0.05, wpp * pixelTol);
+    const endpointTol = tol * 2.5;
+
+    const existingPoints = (s.points || []).filter((p) => !newPointIds.has(p.id));
+    if (!existingPoints.length) return false;
+
+    const assignClosestEndpoint = (uv, used) => {
+      if (!uv) return null;
+      let best = null;
+      let bestD = Infinity;
+      for (const e of endpoints) {
+        if (used.has(e.id)) continue;
+        const d = Math.hypot(uv.u - e.x, uv.v - e.y);
+        if (d < bestD) { bestD = d; best = e; }
+      }
+      if (!best || bestD > endpointTol) return null;
+      return best;
+    };
+
+    const used = new Set();
+    const mappings = [];
+    if (uvStart) {
+      const ep = assignClosestEndpoint(uvStart, used);
+      if (ep) { used.add(ep.id); mappings.push({ newId: ep.id, uv: uvStart }); }
+    }
+    if (uvEnd) {
+      const ep = assignClosestEndpoint(uvEnd, used);
+      if (ep) { used.add(ep.id); mappings.push({ newId: ep.id, uv: uvEnd }); }
+    }
+
+    let added = false;
+    for (const map of mappings) {
+      let bestId = null;
+      let bestD = Infinity;
+      for (const p of existingPoints) {
+        const d = Math.hypot(map.uv.u - p.x, map.uv.v - p.y);
+        if (d < bestD) { bestD = d; bestId = p.id; }
+      }
+      if (bestId != null && bestD <= tol) {
+        const newPt = s.points.find((p) => p.id === map.newId);
+        const target = s.points.find((p) => p.id === bestId);
+        if (newPt && target) {
+          newPt.x = target.x;
+          newPt.y = target.y;
+        }
+        if (this.#addConstraintIfMissing("≡", [bestId, map.newId])) {
+          added = true;
+        }
+      }
+    }
+
+    return added;
+  }
+
   #canvasClientSize(canvas) {
     return {
       width: canvas.clientWidth || canvas.width || 1,
@@ -992,6 +1420,29 @@ export class SketchMode3D {
     const ndc = new THREE.Vector2(
       ((e.clientX - rect.left) / rect.width) * 2 - 1,
       -(((e.clientY - rect.top) / rect.height) * 2 - 1),
+    );
+    this.#setRayFromCamera(ndc);
+    const pl = this.#plane();
+    if (!pl) return null;
+    const hit = new THREE.Vector3();
+    const ok = this.#_intersectPlaneBothSides(this._raycaster.ray, pl, hit);
+    if (!ok) return null;
+    const o = this._lock.basis.origin;
+    const bx = this._lock.basis.x;
+    const by = this._lock.basis.y;
+    const d = hit.clone().sub(o);
+    return { u: d.dot(bx), v: d.dot(by) };
+  }
+
+  // Convert canvas-local screen coordinates (0..width/height) to plane-space UV.
+  #screenToPlaneUV(x, y) {
+    const v = this.viewer;
+    if (!v || !this._lock) return null;
+    const rect = v.renderer.domElement.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const ndc = new THREE.Vector2(
+      (x / rect.width) * 2 - 1,
+      -((y / rect.height) * 2 - 1),
     );
     this.#setRayFromCamera(ndc);
     const pl = this.#plane();
@@ -1339,7 +1790,8 @@ export class SketchMode3D {
         maxIterations: 500,
         tolerance: 0.00001,
         decimalPlaces: 6,
-        autoCleanupOrphans: true
+        autoCleanupOrphans: true,
+        pointConstraintPx: 12,
       };
     }
 
@@ -1409,6 +1861,7 @@ export class SketchMode3D {
     wrap.appendChild(createSettingRow("Max Iterations:", "maxIterations", "number", "1", "1", "10000"));
     wrap.appendChild(createSettingRow("Tolerance:", "tolerance", "number", "0.000001", "0.000001", "0.1"));
     wrap.appendChild(createSettingRow("Decimal Places:", "decimalPlaces", "number", "1", "1", "10"));
+    wrap.appendChild(createSettingRow("Point Constraint (px):", "pointConstraintPx", "number", "1", "2", "60"));
     wrap.appendChild(createCheckboxRow("Auto-remove orphan points", "autoCleanupOrphans"));
 
     // Add a reset button
@@ -1428,7 +1881,8 @@ export class SketchMode3D {
         maxIterations: 500,
         tolerance: 0.00001,
         decimalPlaces: 6,
-        autoCleanupOrphans: true
+        autoCleanupOrphans: true,
+        pointConstraintPx: 12,
       };
       this.#mountSolverSettingsUI(); // Refresh the UI
       this.#applySolverSettings();
@@ -1972,6 +2426,7 @@ export class SketchMode3D {
       { label: "◯", tool: "circle", tooltip: "Create circle" },
       { label: "◠", tool: "arc", tooltip: "Create arc" },
       { label: "∿", tool: "bezier", tooltip: "Create Bezier curve" },
+      { label: "✍", tool: "handdraw", tooltip: "Hand draw curve (auto-convert)" },
       { label: "🔗", tool: "pickEdges", tooltip: "Link external edge" },
     ];
     buttons.forEach((btn) => mk(btn));
@@ -2006,6 +2461,9 @@ export class SketchMode3D {
     // Clear any pending creation state when switching tools
     try { this._arcSel = null; } catch { }
     try { this._bezierSel = null; } catch { }
+    if (tool !== "handdraw") {
+      try { this.#cancelHandDraw(); } catch { }
+    }
     this.#refreshTopToolbarActive();
   }
 
@@ -2652,7 +3110,8 @@ export class SketchMode3D {
     const { width, height } = this.#canvasClientSize(v.renderer.domElement);
     const wpp = this.#worldPerPixel(v.camera, width, height);
     const handleR = Math.max(0.02, wpp * 8 * 0.5);
-    const tol = handleR * 1.2;
+    const pxTol = Number(this._solverSettings?.pointConstraintPx);
+    const tol = Math.max(handleR * 1.2, wpp * (Number.isFinite(pxTol) ? pxTol : 12));
     let bestId = null;
     let bestD = Infinity;
     for (const q of s.points) {
