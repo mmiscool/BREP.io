@@ -16,6 +16,7 @@ export const defaultOptions = {
   fullCircleRatio: 0.9, // span fraction to consider a full circle
   arcMinSpan: Math.PI / 6, // minimum arc span (radians)
   circleByArcLengthRatio: 0.9, // arc length / circumference to promote to circle
+  arcLineRatio: 0.15, // treat short arcs (< ratio of full circle) as lines
 };
 
 export async function loadPNGToImageData(source) {
@@ -303,6 +304,11 @@ function classifyShape(points, outline, bbox, opts) {
 
     circleConfidence = computeCircleConfidence(circle, arcLengthRatio, spanRatio, opts);
     arcConfidence = computeArcConfidence(circle, arcLengthRatio, spanRatio, opts);
+  }
+
+  // Very short arcs should be treated as lines to avoid misclassification.
+  if (arcLengthRatio > 0 && arcLengthRatio < (opts.arcLineRatio ?? 0.15) && line) {
+    return { type: "line", ...line, weak: !lineOk, confidence: lineConfidence * (lineOk ? 1 : 0.7) };
   }
 
   if (lineOk && (!circleOk || line.rms / diag <= (circle.rms / circle.radius) * 1.1)) {

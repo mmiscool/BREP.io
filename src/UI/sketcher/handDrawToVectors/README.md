@@ -49,7 +49,8 @@ Each detected shape also includes a `confidence` value in the range `[0,1]`.
   circleMinCurvatureRatio: 0.2, // component diag / radius
   fullCircleRatio: 0.9,         // arc span to classify as circle
   arcMinSpan: Math.PI / 6,      // minimum arc span
-  circleByArcLengthRatio: 0.9   // arc length / circumference
+  circleByArcLengthRatio: 0.9,  // arc length / circumference
+  arcLineRatio: 0.15            // short arcs -> line
 }
 ```
 
