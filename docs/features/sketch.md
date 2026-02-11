@@ -33,6 +33,7 @@ Sketch Mode uses Unicode icon buttons for quick tool switching. The top toolbar 
 | ◯ | Circle | Create a circle from center → radius point. |
 | ◠ | Arc | Create an arc from center → start → end. |
 | ∿ | Bezier | Create a cubic Bezier (end0 → ctrl0 → ctrl1 → end1). |
+| ✍ | Hand draw | Draw a freehand stroke; on release it auto-converts to line/arc/circle or a Bezier fallback. |
 | 🔗 | Link external edge | Project edge endpoints into the sketch as fixed points. |
 | ↶ | Undo | Undo the last sketch operation. |
 | ↷ | Redo | Redo the last undone sketch operation. |
@@ -101,6 +102,12 @@ The sketcher includes direct Bezier editing with construction‑line helpers.
 - **Construction guides** – After creation, construction lines connect each endpoint to its adjacent handle so you can constrain handles with regular sketch constraints.
 - **Insert point** – With the Bezier tool active, clicking near an existing Bezier inserts a new anchor at the closest location. The curve is split using de Casteljau so its shape is preserved, and new handle points plus construction guides are added.
 
+## Hand Draw Tool
+The ✍ hand draw tool lets you sketch a stroke directly on the plane and automatically converts it into clean sketch geometry.
+
+- **Auto‑vectorize** – On stroke end, the system detects lines, circles, or arcs; if nothing fits it falls back to a Bezier curve.
+- **Endpoint snapping** – Stroke endpoints can auto‑snap to existing sketch points with coincident constraints based on the current zoom and the `Point Constraint (px)` threshold in Solver Settings.
+
 ## Visual Feedback
 - **Under‑constrained points** – Points that are not fixed and are not referenced by any non‑temporary constraint are rendered in orange to flag areas that still need intent.
 
@@ -108,6 +115,7 @@ The sketcher includes direct Bezier editing with construction‑line helpers.
 The sketch sidebar exposes solver settings for iteration count, tolerance, and decimal precision. It also includes:
 
 - **Auto‑remove orphan points (default on)** – After delete and trim operations, the sketcher removes points that are not used by any geometry and either have no constraints or only a single coincident/point‑on‑line constraint. This is the same logic used by the 🧹 cleanup action in the context toolbar.
+- **Point Constraint (px)** – Sets the screen‑space snap distance used for automatic coincident constraints when drawing or manipulating points.
 
 ## Linking External Geometry
 Sketch Mode can link to edges that live outside the current sketch so profiles stay tied to upstream solids:
