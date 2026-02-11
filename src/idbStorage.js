@@ -21,6 +21,7 @@ const GH_TOKEN_KEY = '__BREP_GH_TOKEN__';
 const GH_REPO_KEY = '__BREP_GH_REPO__';
 const GH_BRANCH_KEY = '__BREP_GH_BRANCH__';
 const STORAGE_MODE_KEY = '__BREP_STORAGE_MODE__';
+const STORAGE_SETTINGS_KEY = '__BREP_STORAGE_SETTINGS__';
 
 const hasIndexedDB = typeof indexedDB !== 'undefined' && !!indexedDB.open;
 
@@ -28,13 +29,31 @@ function toStringValue(v) {
   return v === undefined || v === null ? String(v) : String(v);
 }
 
-function getConfigStorage() {
+function getSettingsStorage() {
+  // Special-case: storage settings panel is persisted as a single JSON string
+  // directly in browser localStorage. This intentionally bypasses all other
+  // persistence/storage abstractions used elsewhere in the app.
   try {
     if (typeof window !== 'undefined') {
-      return window.sessionStorage || window.localStorage || null;
+      return window.localStorage || null;
     }
   } catch {}
   return null;
+}
+
+function readLegacyKey(key) {
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const v = window.sessionStorage.getItem(key);
+      if (v) return v;
+    }
+  } catch {}
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return window.localStorage.getItem(key) || '';
+    }
+  } catch {}
+  return '';
 }
 
 function normalizeStorageMode(mode) {
@@ -44,41 +63,99 @@ function normalizeStorageMode(mode) {
   return '';
 }
 
+function normalizeSettings(input) {
+  const obj = (input && typeof input === 'object') ? input : {};
+  return {
+    token: String(obj.token || '').trim(),
+    repoFull: String(obj.repoFull || obj.repo || '').trim(),
+    branch: String(obj.branch || '').trim(),
+    mode: normalizeStorageMode(obj.mode || ''),
+  };
+}
+
+function clearLegacySettings() {
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      window.sessionStorage.removeItem(GH_TOKEN_KEY);
+      window.sessionStorage.removeItem(GH_REPO_KEY);
+      window.sessionStorage.removeItem(GH_BRANCH_KEY);
+      window.sessionStorage.removeItem(STORAGE_MODE_KEY);
+    }
+  } catch {}
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem(GH_TOKEN_KEY);
+      window.localStorage.removeItem(GH_REPO_KEY);
+      window.localStorage.removeItem(GH_BRANCH_KEY);
+      window.localStorage.removeItem(STORAGE_MODE_KEY);
+    }
+  } catch {}
+}
+
+function saveStorageSettings(settings, { clearLegacy = false } = {}) {
+  const store = getSettingsStorage();
+  if (!store) return;
+  const next = normalizeSettings(settings);
+  store.setItem(STORAGE_SETTINGS_KEY, JSON.stringify(next));
+  if (clearLegacy) clearLegacySettings();
+}
+
+function loadStorageSettings() {
+  const store = getSettingsStorage();
+  if (!store) return normalizeSettings({});
+  let parsed = null;
+  const raw = store.getItem(STORAGE_SETTINGS_KEY);
+  if (raw) {
+    try { parsed = JSON.parse(raw); } catch { parsed = null; }
+  }
+  let settings = normalizeSettings(parsed);
+
+  const legacy = normalizeSettings({
+    token: readLegacyKey(GH_TOKEN_KEY),
+    repoFull: readLegacyKey(GH_REPO_KEY),
+    branch: readLegacyKey(GH_BRANCH_KEY),
+    mode: readLegacyKey(STORAGE_MODE_KEY),
+  });
+  const hasLegacy = !!(legacy.token || legacy.repoFull || legacy.branch || legacy.mode);
+  if (hasLegacy) {
+    const merged = {
+      token: settings.token || legacy.token,
+      repoFull: settings.repoFull || legacy.repoFull,
+      branch: settings.branch || legacy.branch,
+      mode: settings.mode || legacy.mode,
+    };
+    settings = normalizeSettings(merged);
+    saveStorageSettings(settings, { clearLegacy: true });
+  }
+
+  return settings;
+}
+
 function loadStorageMode() {
-  const store = getConfigStorage();
-  if (!store) return '';
-  return normalizeStorageMode(store.getItem(STORAGE_MODE_KEY));
+  return loadStorageSettings().mode;
 }
 
 function saveStorageMode(mode) {
-  const store = getConfigStorage();
-  if (!store) return;
-  const m = normalizeStorageMode(mode);
-  if (m) store.setItem(STORAGE_MODE_KEY, m);
-  else store.removeItem(STORAGE_MODE_KEY);
+  const settings = loadStorageSettings();
+  settings.mode = normalizeStorageMode(mode);
+  saveStorageSettings(settings);
 }
 
 function loadGithubConfig() {
-  const store = getConfigStorage();
-  if (!store) return { token: '', repoFull: '', branch: '' };
+  const settings = loadStorageSettings();
   return {
-    token: store.getItem(GH_TOKEN_KEY) || '',
-    repoFull: store.getItem(GH_REPO_KEY) || '',
-    branch: store.getItem(GH_BRANCH_KEY) || '',
+    token: settings.token,
+    repoFull: settings.repoFull,
+    branch: settings.branch,
   };
 }
 
 function saveGithubConfig({ token, repoFull, branch }) {
-  const store = getConfigStorage();
-  if (!store) return;
-  const setOrClear = (key, value) => {
-    const v = String(value || '').trim();
-    if (v) store.setItem(key, v);
-    else store.removeItem(key);
-  };
-  setOrClear(GH_TOKEN_KEY, token);
-  setOrClear(GH_REPO_KEY, repoFull);
-  setOrClear(GH_BRANCH_KEY, branch);
+  const settings = loadStorageSettings();
+  if (token !== undefined) settings.token = String(token || '').trim();
+  if (repoFull !== undefined) settings.repoFull = String(repoFull || '').trim();
+  if (branch !== undefined) settings.branch = String(branch || '').trim();
+  saveStorageSettings(settings);
 }
 
 function tryDispatchStorageEvent(storage, { key, oldValue, newValue }) {
