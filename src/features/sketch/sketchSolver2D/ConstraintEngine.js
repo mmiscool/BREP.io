@@ -222,8 +222,8 @@ export class ConstraintSolver {
 
         const engine = new ConstraintEngine(JSON.stringify(this.sketchObject));
         const solved = engine.solve(iters);
-        console.log(`Solver completed in ${iters} iterations.`);
-        console.log(solved.constraints);
+        //console.log(`Solver completed in ${iters} iterations.`);
+        //console.log(solved.constraints);
         this.sketchObject = solved;
         return this.sketchObject;
     }
