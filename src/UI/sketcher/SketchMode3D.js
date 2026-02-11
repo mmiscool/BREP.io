@@ -1392,6 +1392,11 @@ export class SketchMode3D {
     };
   }
 
+  #hitTestScale(e) {
+    // Touch targets need a larger pick radius for reliable selection.
+    return (e && e.pointerType === 'touch') ? 2 : 1;
+  }
+
   #worldPerPixel(camera, width, height) {
     if (camera && camera.isOrthographicCamera) {
       const zoom =
@@ -3088,8 +3093,9 @@ export class SketchMode3D {
     const s = this._solver.sketchObject;
     const { width, height } = this.#canvasClientSize(v.renderer.domElement);
     const wpp = this.#worldPerPixel(v.camera, width, height);
+    const hitScale = this.#hitTestScale(e);
     // Match handle radius used for point spheres
-    const handleR = Math.max(0.02, wpp * 8 * 0.5);
+    const handleR = Math.max(0.02, wpp * 8 * 0.5) * hitScale;
     const tol = handleR * 1.2;
     let bestId = null, bestD = Infinity;
     for (const p of s.points || []) {
@@ -3147,7 +3153,7 @@ export class SketchMode3D {
     // Tolerance based on screen scale (world units per pixel)
     const { width, height } = this.#canvasClientSize(v.renderer.domElement);
     const wpp = this.#worldPerPixel(v.camera, width, height);
-    const tol = Math.max(0.05, wpp * 6);
+    const tol = Math.max(0.05, wpp * 6) * this.#hitTestScale(e);
 
     let best = null;
     let bestDist = Infinity;
