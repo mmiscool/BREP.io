@@ -46,6 +46,7 @@ export class HistoryCollectionWidget {
     this._globalRefreshHandler = null;
     this._contextSuppressKey = `hc-${Math.random().toString(36).slice(2, 9)}`;
     this._contextSuppressActive = false;
+    this._selectionFilterSnapshot = null;
 
     this.uiElement = document.createElement('div');
     this.uiElement.className = 'history-collection-widget-host';
@@ -646,11 +647,42 @@ export class HistoryCollectionWidget {
     const next = !!isOpen;
     if (this._contextSuppressActive === next) return;
     this._contextSuppressActive = next;
+    if (next) {
+      this._captureSelectionFilterSnapshot();
+    } else {
+      this._restoreSelectionFilterSnapshot();
+    }
     if (SelectionFilter && typeof SelectionFilter.setContextBarSuppressed === 'function') {
       try {
         SelectionFilter.setContextBarSuppressed(this._contextSuppressKey, next);
       } catch (_) { /* ignore */ }
     }
+  }
+
+  _captureSelectionFilterSnapshot() {
+    if (!SelectionFilter || typeof SelectionFilter.GetSelectionTypes !== 'function') return;
+    const current = SelectionFilter.GetSelectionTypes();
+    if (current === SelectionFilter.ALL) {
+      this._selectionFilterSnapshot = SelectionFilter.ALL;
+      return;
+    }
+    if (Array.isArray(current)) {
+      this._selectionFilterSnapshot = current.slice();
+      return;
+    }
+    if (current == null) {
+      this._selectionFilterSnapshot = [];
+      return;
+    }
+    this._selectionFilterSnapshot = [current];
+  }
+
+  _restoreSelectionFilterSnapshot() {
+    if (this._selectionFilterSnapshot == null) return;
+    const snapshot = this._selectionFilterSnapshot;
+    this._selectionFilterSnapshot = null;
+    if (!SelectionFilter || typeof SelectionFilter.SetSelectionTypes !== 'function') return;
+    try { SelectionFilter.SetSelectionTypes(snapshot); } catch (_) { /* ignore */ }
   }
 
   _applyPendingFocus() {

@@ -42,6 +42,7 @@ export class SelectionFilter {
     static _selectionFilterTypes = null;
     static _selectionFilterOutsideBound = false;
     static _selectionFilterTintBtn = null;
+    static _selectionFilterAllToggleBtn = null;
     static _clickWatcherTimer = null;
     static _missingClickLogged = new Map();
     static _clickWatcherIntervalMs = 2000;
@@ -1175,6 +1176,17 @@ export class SelectionFilter {
         return allTypes.filter((t) => allowed.has(t));
     }
 
+    static _areAllSelectionTypesEnabled() {
+        const allTypes = SelectionFilter._getSelectionFilterTypeList();
+        const allowed = SelectionFilter.allowedSelectionTypes;
+        if (allowed === SelectionFilter.ALL) return true;
+        if (!allowed || typeof allowed.has !== 'function') return false;
+        for (const t of allTypes) {
+            if (!allowed.has(t)) return false;
+        }
+        return true;
+    }
+
     static _updateSelectionFilterIndicator() {
         const wrap = SelectionFilter._selectionFilterIndicator;
         if (!wrap) return;
@@ -1188,6 +1200,15 @@ export class SelectionFilter {
         }
         if (toggle) {
             toggle.textContent = `Selection filter: ${SelectionFilter._summarizeSelectionFilter(types)}`;
+        }
+        const allToggle = SelectionFilter._selectionFilterAllToggleBtn;
+        if (allToggle) {
+            const allEnabled = SelectionFilter._areAllSelectionTypesEnabled();
+            allToggle.textContent = allEnabled ? '⊖' : '⊕';
+            const label = allEnabled ? 'Disable all selection types' : 'Enable all selection types';
+            allToggle.title = label;
+            allToggle.setAttribute('aria-label', label);
+            allToggle.classList.toggle('is-active', allEnabled);
         }
         SelectionFilter._updateSelectableTintButton();
     }
@@ -1340,16 +1361,22 @@ export class SelectionFilter {
                     background: transparent;
                     border-radius: 8px;
                     padding: 6px 10px;
-                    width: 100%;
+                    flex: 1;
                     min-height: 32px;
                     box-sizing: border-box;
                     color: #ddd;
                     border: 1px solid #364053;
                     cursor: pointer;
                     text-align: left;
+                    min-width: 0;
                   }
                   .selection-filter-indicator .sfi-toggle:hover { filter: brightness(1.08); }
                   .selection-filter-indicator .sfi-toggle:active { filter: brightness(1.15); }
+                  .selection-filter-indicator .sfi-header {
+                    display: flex;
+                    gap: 6px;
+                    align-items: stretch;
+                  }
                   .selection-filter-indicator .sfi-panel {
                     border: 1px solid #2b3240;
                     border-radius: 8px;
@@ -1397,6 +1424,15 @@ export class SelectionFilter {
                     border-color: var(--sfi-tint, #60a5fa);
                     color: var(--sfi-tint, #60a5fa);
                   }
+                  .selection-filter-indicator .sfi-quick-btn {
+                    flex: 0 0 auto;
+                    width: 32px;
+                    min-width: 32px;
+                    height: 32px;
+                    min-height: 32px;
+                    padding: 0;
+                    white-space: nowrap;
+                  }
                 `;
                 document.head.appendChild(style);
             }
@@ -1411,7 +1447,25 @@ export class SelectionFilter {
         const panelId = `selection-filter-panel-${Math.random().toString(36).slice(2, 8)}`;
         toggle.setAttribute('aria-expanded', 'false');
         toggle.setAttribute('aria-controls', panelId);
-        wrap.appendChild(toggle);
+        const header = document.createElement('div');
+        header.className = 'sfi-header';
+        header.appendChild(toggle);
+
+        const allToggleBtn = document.createElement('button');
+        allToggleBtn.type = 'button';
+        allToggleBtn.className = 'sfi-btn sfi-quick-btn';
+        allToggleBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const enableAll = !SelectionFilter._areAllSelectionTypesEnabled();
+            try { SelectionFilter.SetSelectionTypes(enableAll ? SelectionFilter.ALL : []); } catch { }
+            if (SelectionFilter.previouseAllowedSelectionTypes !== null) {
+                SelectionFilter.previouseAllowedSelectionTypes = SelectionFilter.allowedSelectionTypes;
+            }
+            SelectionFilter._updateSelectionFilterIndicator();
+        });
+        header.appendChild(allToggleBtn);
+
+        wrap.appendChild(header);
 
         const panel = document.createElement('div');
         panel.className = 'sfi-panel';
@@ -1498,6 +1552,7 @@ export class SelectionFilter {
         SelectionFilter._selectionFilterIndicatorPanel = panel;
         SelectionFilter._selectionFilterCheckboxes = checkboxByType;
         SelectionFilter._selectionFilterTintBtn = tintBtn;
+        SelectionFilter._selectionFilterAllToggleBtn = allToggleBtn;
         SelectionFilter._updateSelectionFilterIndicator();
         return wrap;
     }
