@@ -2294,6 +2294,7 @@ export class SchemaForm {
         if (!row || !controlWrap) return;
         const type = def && def.type ? String(def.type) : '';
         if (def?.disableExpression || def?.noExpression || type === 'button') return;
+        if (this._fieldSupportsInlineExpression(controlWrap)) return;
 
         const controlRow = document.createElement('div');
         controlRow.className = 'control-row';
@@ -2387,6 +2388,24 @@ export class SchemaForm {
         });
 
         this._refreshExpressionControl(key);
+    }
+
+    _fieldSupportsInlineExpression(controlWrap) {
+        if (!(controlWrap instanceof HTMLElement)) return false;
+        const textLikeInputTypes = new Set(['text', 'number', 'search', 'email', 'url', 'tel', 'password']);
+        const inputs = controlWrap.querySelectorAll('input, textarea');
+        for (const el of inputs) {
+            if (el instanceof HTMLTextAreaElement) {
+                if (!el.readOnly && !el.disabled) return true;
+                continue;
+            }
+            if (!(el instanceof HTMLInputElement)) continue;
+            const type = String(el.type || '').toLowerCase();
+            if (!textLikeInputTypes.has(type)) continue;
+            if (el.readOnly || el.disabled) continue;
+            return true;
+        }
+        return false;
     }
 
     _setInputValue(el, type, value) {
