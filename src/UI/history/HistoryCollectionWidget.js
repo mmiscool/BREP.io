@@ -636,6 +636,8 @@ export class HistoryCollectionWidget {
   }
 
   _notifyEntryToggle(entry, isOpen) {
+    if (isOpen) this._captureSelectionFilterSnapshot({ force: true });
+    else this._restoreSelectionFilterSnapshot();
     this._setContextSuppression(!!isOpen);
     if (!this._onEntryToggle) return;
     try {
@@ -659,7 +661,8 @@ export class HistoryCollectionWidget {
     }
   }
 
-  _captureSelectionFilterSnapshot() {
+  _captureSelectionFilterSnapshot({ force = false } = {}) {
+    if (!force && this._selectionFilterSnapshot != null) return;
     if (!SelectionFilter || typeof SelectionFilter.GetSelectionTypes !== 'function') return;
     const current = SelectionFilter.GetSelectionTypes();
     if (current === SelectionFilter.ALL) {
