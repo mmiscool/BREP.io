@@ -586,6 +586,7 @@ export class Viewer {
         this._sidebarStoredPointerEvents = null;
         this._sidebarLastPointer = null;
         this._sidebarOffscreen = false;
+        this._sketchSidebarPrev = null;
         this.scene = partHistory instanceof PartHistory ? partHistory.scene : new THREE.Scene();
         this._axisHelpers = new Set();
         this._axisHelpersDirty = true;
@@ -1373,7 +1374,18 @@ export class Viewer {
         debugLog(this);
 
         try { if (this._sketchMode) this._sketchMode.dispose(); } catch { }
-        this._setSidebarAutoHideSuspended(true);
+        try {
+            if (!this._sketchSidebarPrev) {
+                this._sketchSidebarPrev = {
+                    pinned: this._sidebarPinned,
+                    autoHideSuspended: this._sidebarAutoHideSuspended,
+                    hoverVisible: this._sidebarHoverVisible,
+                };
+            }
+            this._setSidebarPinned(false);
+            this._setSidebarAutoHideSuspended(false);
+            this._setSidebarHoverVisible(false);
+        } catch { }
         this._sketchMode = new SketchMode3D(this, featureID);
         this._sketchMode.open();
 
@@ -1411,7 +1423,15 @@ export class Viewer {
         try { if (this._sketchMode) this._sketchMode.close(); } catch { }
         this._sketchMode = null;
         // Ensure core UI is visible and controls enabled
-        try { this._setSidebarAutoHideSuspended(false); } catch { }
+        const prevSidebar = this._sketchSidebarPrev;
+        this._sketchSidebarPrev = null;
+        if (prevSidebar) {
+            try { this._setSidebarPinned(!!prevSidebar.pinned); } catch { }
+            try { this._setSidebarAutoHideSuspended(!!prevSidebar.autoHideSuspended); } catch { }
+            try { this._setSidebarHoverVisible(!!prevSidebar.hoverVisible); } catch { }
+        } else {
+            try { this._setSidebarAutoHideSuspended(false); } catch { }
+        }
         try { if (this.controls) this.controls.enabled = true; } catch { }
 
         // Clean up any legacy overlays that might still be mounted (from old 2D mode)
