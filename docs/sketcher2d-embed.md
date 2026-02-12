@@ -3,7 +3,7 @@
 This document covers the library-facing API for embedding the 2D sketcher in another application using an iframe container.
 
 ## Demo Page
-- Hosted demo: <a href="https://BREP.io/test.html" target="_blank" rel="noopener noreferrer">https://BREP.io/test.html</a>
+- Hosted demo: [https://BREP.io/test.html](https://BREP.io/test.html)
 
 ## Import and Create
 ```js

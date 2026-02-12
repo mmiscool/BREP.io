@@ -1,5 +1,6 @@
 import { deepClone } from "../../utils/deepClone.js";
 import { sketchToSVG } from "./sketchToSVG.js";
+import frameModuleUrl from "./Sketcher2DFrameBootstrap.js?url";
 
 const DEFAULT_CHANNEL = "brep:sketcher2d";
 const DEFAULT_TIMEOUT_MS = 12000;
@@ -73,7 +74,7 @@ export class Sketcher2DEmbed {
     this._onCancelled = typeof this._options.onCancelled === "function"
       ? this._options.onCancelled
       : (typeof this._options.onCanceled === "function" ? this._options.onCanceled : null);
-    this._frameModuleUrl = new URL("./Sketcher2DFrameApp.js", import.meta.url).href;
+    this._frameModuleUrl = frameModuleUrl;
     this._ready = createDeferred();
     this._initialized = createDeferred();
     this._initStarted = false;
@@ -245,7 +246,7 @@ export class Sketcher2DEmbed {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <style>
-      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; overscroll-behavior: none; }
       body { background: ${JSON.stringify(this._theme.backgroundColor || "#f5f6f8")}; }
     </style>
   </head>
@@ -254,10 +255,11 @@ export class Sketcher2DEmbed {
       const config = ${configJSON};
       try {
         const mod = await import(config.frameModuleUrl);
-        if (!mod || typeof mod.bootSketcher2DFrame !== "function") {
-          throw new Error("Sketcher2DFrameApp missing bootSketcher2DFrame export");
+        const boot = mod?.bootSketcher2DFrame || mod?.boot || window.__BREP_bootSketcher2DFrame;
+        if (typeof boot !== "function") {
+          throw new Error("Sketcher2D frame bootstrap missing boot function");
         }
-        mod.bootSketcher2DFrame({ channel: config.channel, instanceId: config.instanceId });
+        boot({ channel: config.channel, instanceId: config.instanceId });
       } catch (error) {
         window.parent.postMessage(
           {
