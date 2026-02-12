@@ -2,7 +2,7 @@
 
 This file lists font assets bundled in `src/assets/fonts`.
 
-Font families: 107
+Font families: 108
 License types: Unknown
 
 ## Alfa Slab One
@@ -57,6 +57,11 @@ License files: None found
 
 ## Bitter
 Fonts: Bitter[wght].ttf
+Licenses: Unknown
+License files: None found
+
+## Braille Hc
+Fonts: BrailleGridHC-Regular.otf, BrailleLatinHC-Regular.otf, BraillePinboardHC-Regular.otf, BraillePixelHC-Regular.otf
 Licenses: Unknown
 License files: None found
 
