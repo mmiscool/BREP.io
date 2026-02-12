@@ -1,6 +1,6 @@
 import { deepClone } from "../../utils/deepClone.js";
 import { sketchToSVG } from "./sketchToSVG.js";
-import frameModuleUrl from "./Sketcher2DFrameBootstrap.js?url&no-inline";
+import frameModuleUrl from "./Sketcher2DFrameApp.js?url&no-inline";
 
 const DEFAULT_CHANNEL = "brep:sketcher2d";
 const DEFAULT_TIMEOUT_MS = 12000;
