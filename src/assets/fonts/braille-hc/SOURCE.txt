@@ -1,0 +1,15 @@
+Source: https://fontlibrary.org/en/font/braille-hc
+Direct download used: https://fontlibrary.org/assets/downloads/braille-hc/29500eb56ad80ae33efe0c96c6643692/braille-hc.zip
+Downloaded: 2026-02-12
+
+Bundled in this folder:
+- BrailleGridHC-Regular.otf (from braille_grid_hc.otf)
+- BrailleLatinHC-Regular.otf (from braille_latin_hc.otf)
+- BraillePinboardHC-Regular.otf (from braille_pinboard_hc.otf)
+- BraillePixelHC-Regular.otf (from braille_pixel_hc.otf)
+- OFL.txt (from license_braille_grid_hc.txt)
+- OFL_BrailleLatinHC.txt (from license_braille_latin_hc.txt)
+- OFL_BraillePinboardHC.txt (from license_braille_pinboard_hc.txt)
+- LICENSE.txt (from license_braille_pixel_hc.txt, CC0 1.0)
+- LICENSE_BraillePixelHC_CC0.txt (from license_braille_pixel_hc.txt, CC0 1.0)
+- UPSTREAM_INFO.txt (from info.txt)

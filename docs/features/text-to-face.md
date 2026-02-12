@@ -31,4 +31,6 @@ Text to Face converts a text string into a sketch-like face that can be used dow
 ## Tips
 - Lower `curveResolution` for faster rebuilds; increase it for smoother curves.
 - Use the flip controls for mirrored labels or stamped text.
+- Built-in Braille HC options include `Braille Grid HC`, `Braille Latin HC`, `Braille Pinboard HC`, and `Braille Pixel HC` (font rendering only; no runtime character remapping code).
+- Use `fontFile` if you need a different Braille convention or style.
 - If a font fails to load, try a different file or remove exotic glyphs from the text string.

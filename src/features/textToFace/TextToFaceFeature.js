@@ -132,6 +132,10 @@ const BASE_FONT_CATALOG = [
   { id: 'Libre Barcode 128', path: "libre-barcode/LibreBarcode128-Regular.ttf" },
   { id: 'Libre Barcode 128 Text', path: "libre-barcode/LibreBarcode128Text-Regular.ttf" },
   { id: 'Libre Barcode EAN13 Text', path: "libre-barcode/LibreBarcodeEAN13Text-Regular.ttf" },
+  { id: 'Braille Grid HC', path: "braille-hc/BrailleGridHC-Regular.otf" },
+  { id: 'Braille Latin HC', path: "braille-hc/BrailleLatinHC-Regular.otf" },
+  { id: 'Braille Pinboard HC', path: "braille-hc/BraillePinboardHC-Regular.otf" },
+  { id: 'Braille Pixel HC', path: "braille-hc/BraillePixelHC-Regular.otf" },
 ];
 
 const FONT_CATALOG = dedupeFonts([...BASE_FONT_CATALOG, ...GOOGLE_OFL_FONTS]);
@@ -244,19 +248,21 @@ export class TextToFaceFeature {
   }
 
   async run(partHistory) {
-    const rawText = (this.inputParams?.text != null) ? String(this.inputParams.text) : '';
+    const params = this.inputParams || {};
+    const fontEntry = getSelectedFontEntry(params);
+    const rawText = (params.text != null) ? String(params.text) : '';
     const text = rawText.trim();
     if (!text) return { added: [], removed: [] };
 
-    const heightRaw = Number(this.inputParams?.textHeight ?? 10);
+    const heightRaw = Number(params?.textHeight ?? 10);
     const textHeight = Number.isFinite(heightRaw) ? Math.abs(heightRaw) : 10;
     if (!(textHeight > 0)) return { added: [], removed: [] };
 
-    const curveRes = Math.max(4, Math.floor(Number(this.inputParams?.curveResolution) || 12));
+    const curveRes = Math.max(4, Math.floor(Number(params?.curveResolution) || 12));
 
     let font;
     try {
-      font = await resolveFont(this.inputParams || {});
+      font = await resolveFont(params, fontEntry);
     } catch (e) {
       console.warn('[TEXT] Failed to load font:', e?.message || e);
       return { added: [], removed: [] };
@@ -466,7 +472,9 @@ function sanitizeTransform(raw) {
 }
 
 function shapesToGroups(shapes, curveSegments) {
-  const groups = [];
+  const loops = collectUniqueLoopsFromShapes(shapes, curveSegments);
+  if (!loops.length) return { groups: [], bounds: null };
+
   const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
   const updateBounds = (x, y) => {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
@@ -475,27 +483,159 @@ function shapesToGroups(shapes, curveSegments) {
     if (y < bounds.minY) bounds.minY = y;
     if (y > bounds.maxY) bounds.maxY = y;
   };
-
-  for (const shape of shapes) {
-    if (!shape) continue;
-    const outerRaw = shape.getPoints(curveSegments) || [];
-    const outer = toPointArray(outerRaw);
-    if (outer.length < 2) continue;
-    const holes = (shape.holes || [])
-      .map((h) => toPointArray(h.getPoints(curveSegments) || []))
-      .filter((h) => h.length >= 2);
-
-    for (const p of outer) updateBounds(p[0], p[1]);
-    for (const h of holes) for (const p of h) updateBounds(p[0], p[1]);
-
-    groups.push({ outer, holes });
-  }
+  for (const loop of loops) for (const p of loop.pts) updateBounds(p[0], p[1]);
 
   if (!Number.isFinite(bounds.minX) || !Number.isFinite(bounds.minY)) {
     return { groups: [], bounds: null };
   }
 
+  // Some fonts emit unreliable shape.holes associations. Rebuild containment using even-odd nesting.
+  const { parents, depths } = buildLoopContainment(loops);
+  const groups = [];
+  for (let i = 0; i < loops.length; i++) {
+    if ((depths[i] % 2) !== 0) continue; // odd depth loops are holes of their parent
+    const holes = [];
+    for (let j = 0; j < loops.length; j++) {
+      if (parents[j] === i && depths[j] === depths[i] + 1) holes.push(loops[j].pts);
+    }
+    groups.push({ outer: loops[i].pts, holes });
+  }
+
   return { groups, bounds };
+}
+
+function collectUniqueLoopsFromShapes(shapes, curveSegments) {
+  const loops = [];
+  const seen = new Set();
+  const addLoop = (rawPoints) => {
+    const pts = ensureOpen(toPointArray(rawPoints));
+    if (pts.length < 3) return;
+    const areaAbs = Math.abs(signedArea(closeLoop(pts)));
+    if (!(areaAbs > 1e-10)) return;
+    const key = canonicalLoopKey(pts);
+    if (seen.has(key)) return;
+    seen.add(key);
+    loops.push({ pts, areaAbs });
+  };
+
+  for (const shape of shapes || []) {
+    if (!shape) continue;
+    addLoop(shape.getPoints(curveSegments) || []);
+    for (const h of (shape.holes || [])) {
+      addLoop(h.getPoints(curveSegments) || []);
+    }
+  }
+
+  return loops;
+}
+
+function canonicalLoopKey(loop, eps = 1e-6) {
+  const quant = (loop || []).map((p) => [
+    Math.round(Number(p[0]) / eps),
+    Math.round(Number(p[1]) / eps),
+  ]);
+  if (!quant.length) return '';
+  const forward = normalizeQuantizedLoopKey(quant);
+  const reverse = normalizeQuantizedLoopKey(quant.slice().reverse());
+  return forward < reverse ? forward : reverse;
+}
+
+function normalizeQuantizedLoopKey(qLoop) {
+  if (!Array.isArray(qLoop) || !qLoop.length) return '';
+  let minIdx = 0;
+  for (let i = 1; i < qLoop.length; i++) {
+    if (qLoop[i][0] < qLoop[minIdx][0] || (qLoop[i][0] === qLoop[minIdx][0] && qLoop[i][1] < qLoop[minIdx][1])) {
+      minIdx = i;
+    }
+  }
+  const parts = [];
+  for (let k = 0; k < qLoop.length; k++) {
+    const p = qLoop[(minIdx + k) % qLoop.length];
+    parts.push(`${p[0]},${p[1]}`);
+  }
+  return parts.join(';');
+}
+
+function buildLoopContainment(loops) {
+  const n = loops.length;
+  const parents = new Array(n).fill(-1);
+
+  for (let i = 0; i < n; i++) {
+    const probe = polygonCentroid(loops[i].pts);
+    let best = -1;
+    let bestArea = Infinity;
+    for (let j = 0; j < n; j++) {
+      if (i === j) continue;
+      if (!(loops[j].areaAbs > loops[i].areaAbs + 1e-12)) continue;
+      if (!pointInLoop(probe, loops[j].pts)) continue;
+      if (loops[j].areaAbs < bestArea) {
+        bestArea = loops[j].areaAbs;
+        best = j;
+      }
+    }
+    parents[i] = best;
+  }
+
+  const depths = new Array(n).fill(-1);
+  const computeDepth = (idx) => {
+    if (depths[idx] >= 0) return depths[idx];
+    const parent = parents[idx];
+    depths[idx] = (parent >= 0) ? computeDepth(parent) + 1 : 0;
+    return depths[idx];
+  };
+  for (let i = 0; i < n; i++) computeDepth(i);
+
+  return { parents, depths };
+}
+
+function polygonCentroid(loop) {
+  const pts = ensureOpen(loop);
+  if (!pts.length) return [0, 0];
+  const closed = closeLoop(pts);
+  let twiceArea = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < closed.length - 1; i++) {
+    const p = closed[i];
+    const q = closed[i + 1];
+    const cross = p[0] * q[1] - q[0] * p[1];
+    twiceArea += cross;
+    cx += (p[0] + q[0]) * cross;
+    cy += (p[1] + q[1]) * cross;
+  }
+  if (Math.abs(twiceArea) < 1e-12) {
+    const avg = pts.reduce((acc, p) => [acc[0] + p[0], acc[1] + p[1]], [0, 0]);
+    return [avg[0] / pts.length, avg[1] / pts.length];
+  }
+  return [cx / (3 * twiceArea), cy / (3 * twiceArea)];
+}
+
+function pointInLoop(point, loop) {
+  const x = Number(point?.[0]);
+  const y = Number(point?.[1]);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+  const pts = ensureOpen(loop);
+  if (pts.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i][0], yi = pts[i][1];
+    const xj = pts[j][0], yj = pts[j][1];
+    if (pointOnSegment([x, y], [xj, yj], [xi, yi])) return true;
+    const intersects = ((yi > y) !== (yj > y))
+      && (x < ((xj - xi) * (y - yi)) / ((yj - yi) || 1e-30) + xi);
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function pointOnSegment(p, a, b, eps = 1e-9) {
+  const cross = (p[1] - a[1]) * (b[0] - a[0]) - (p[0] - a[0]) * (b[1] - a[1]);
+  if (Math.abs(cross) > eps) return false;
+  const dot = (p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1]);
+  if (dot < -eps) return false;
+  const lenSq = (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2;
+  if (dot - lenSq > eps) return false;
+  return true;
 }
 
 function toPointArray(points) {
@@ -662,17 +802,21 @@ function computeSketchBasis(base, delta) {
   };
 }
 
-async function resolveFont(params) {
+async function resolveFont(params, selectedEntry = null) {
   const fontFile = (params && typeof params.fontFile === 'string') ? params.fontFile.trim() : '';
   if (fontFile) {
     return loadFontFromSource(fontFile, { type: 'data' });
   }
 
-  const fontId = (params && typeof params.font === 'string') ? params.font : null;
-  const entry = FONT_CATALOG.find((f) => f.id === fontId) || FONT_CATALOG[0];
+  const entry = selectedEntry || getSelectedFontEntry(params);
   const url = await resolveFontUrl(entry);
   if (!url) throw new Error('No font available');
   return loadFontFromSource(url, { type: 'url' });
+}
+
+function getSelectedFontEntry(params) {
+  const fontId = (params && typeof params.font === 'string') ? params.font : null;
+  return FONT_CATALOG.find((f) => f.id === fontId) || FONT_CATALOG[0];
 }
 
 async function loadFontFromSource(source, { type }) {

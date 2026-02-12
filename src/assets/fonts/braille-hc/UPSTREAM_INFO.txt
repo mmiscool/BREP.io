@@ -1,0 +1,42 @@
+Common questions and answers
+
+1. What is Braille HC?
+
+Braille HC is a work-in-progress family based on the first version of the Braille language. The styles included are:
+  - Latin
+  - Pixel
+  - Pinboard
+  - Grid
+  - Color [to be made]
+
+2. Is Braille HC family free for commercial purposes?
+   
+   Yes! Please read the license carefully. Latin, Pinboard and Grid are OFL. Color and Pixel are CC0.
+
+3. Is credit/attribution required?
+
+   Braille Grid / Pinboard / Latin HC are OFL. If you are going to modify or redistribute, you need to credit; if you are going to make raster material there's no need to credit. Please read the licenses attached.
+
+   Braille Pixel HC and Color HC are public domain. 
+
+4. How to give support?
+
+   Donations: patreon.com/rmocci
+   PayPal: da.iosonor@gmail.com
+   Itch.io: rmocci.itch.io
+   Twitter: twitter.com/avreference
+   Instagram: instagram.com/audiovisualreference
+
+5. What is AV Reference?
+
+   It is a library of resources by me, for you. All of those resources are randomly made and of raw nature; in other words, you need to add your creative touch to re-use them!
+
+6. Is there a warranty?
+
+   No! Braille HC family is released "AS IS". Use at your own risk.
+
+7. Any refund?
+
+   No! Braille HC family is free.
+
+Check for updates at: fontlibrary.org/en/member/rmocci
