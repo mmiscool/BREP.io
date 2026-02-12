@@ -219,8 +219,8 @@
   color: #e8fff6 !important;
 }</textarea>
       <div id="sketch-status">Sketcher not created.</div>
-      <pre id="event-output">(No sketch events yet)</pre>
       <div id="sketch-host"></div>
+      <pre id="event-output">(No sketch events yet)</pre>
       <div id="svg-preview"></div>
       <pre id="path-output"></pre>
     </main>
@@ -379,6 +379,7 @@
           ? result.paths.map((row) => `id=${row.id} type=${row.type} d="${row.d}"`).join('\n')
           : '(No sketch geometry to export)';
         setSketchStatus(`Exported ${result.paths.length} SVG paths.`);
+        svgPreview.scrollIntoView({ behavior: 'smooth', block: 'start' });
       };
 
       btnCreate.addEventListener('click', () => {
