@@ -63,12 +63,13 @@ export function applyHoverAndSelectionColors(inst) {
   const hov = inst._hover;
   const themeGeometry = toHexColor(inst?._theme?.geometryColor, 0xffff88);
   const themePoint = toHexColor(inst?._theme?.pointColor, 0x9ec9ff);
+  const useUnderConstrainedColor = inst?._uniformPointColor !== true;
   const isSel = (kind, id) => Array.from(inst._selection).some(s => s.type === (kind === 'point' ? 'point' : 'geometry') && s.id === id);
   const isHov = (kind, id) => hov && ((hov.type === 'point' && kind === 'point' && hov.id === id) || (hov.type === 'geometry' && kind === 'geometry' && hov.id === id));
   for (const ch of inst._sketchGroup.children) {
     const ud = ch.userData || {};
     if (ud.kind === 'point') {
-      const base = ud.underConstrained ? 0xffb347 : themePoint;
+      const base = (useUnderConstrainedColor && ud.underConstrained) ? 0xffb347 : themePoint;
       const col = isSel('point', ud.id) ? 0x6fe26f : (isHov('point', ud.id) ? 0xffd54a : base);
       try { ch.material.color.setHex(col); } catch {}
     } else if (ud.kind === 'geometry') {

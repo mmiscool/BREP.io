@@ -1,6 +1,7 @@
 // SketchMode3D: In-scene sketch editing overlay (no camera locking).
 
 import * as THREE from "three";
+import { Line2, LineGeometry, LineMaterial } from "three/examples/jsm/Addons.js";
 import { ConstraintSolver } from "../../features/sketch/sketchSolver2D/ConstraintEngine.js";
 import { updateListHighlights, applyHoverAndSelectionColors } from "./highlights.js";
 import { renderDimensions as dimsRender } from "./dimensions.js";
@@ -18,6 +19,8 @@ export class SketchMode3D {
       ? this._opts.onSketchChange
       : null;
     this._theme = this._opts.theme || {};
+    this._uniformPointColor = this._opts.uniformPointColor === true;
+    this._useFatCurveLines = this._opts.useFatCurveLines === true;
     this._ui = null;
     this._lock = null; // { basis:{x,y,z,origin} }
     // Editing state
@@ -3173,10 +3176,9 @@ export class SketchMode3D {
     if (!uv) return null;
     const s = this._solver.sketchObject;
     const { width, height } = this.#canvasClientSize(v.renderer.domElement);
-    const wpp = this.#worldPerPixel(v.camera, width, height);
     const hitScale = this.#hitTestScale(e);
     // Match handle radius used for point spheres
-    const handleR = Math.max(0.02, wpp * 8 * 0.5) * hitScale;
+    const handleR = this.#pointRadiusWorld(width, height) * hitScale;
     const tol = handleR * 1.2;
     let bestId = null, bestD = Infinity;
     for (const p of s.points || []) {
@@ -3196,7 +3198,7 @@ export class SketchMode3D {
     if (!v?.renderer || !v?.camera) return;
     const { width, height } = this.#canvasClientSize(v.renderer.domElement);
     const wpp = this.#worldPerPixel(v.camera, width, height);
-    const handleR = Math.max(0.02, wpp * 8 * 0.5);
+    const handleR = this.#pointRadiusWorld(width, height);
     const pxTol = Number(this._solverSettings?.pointConstraintPx);
     const tol = Math.max(handleR * 1.2, wpp * (Number.isFinite(pxTol) ? pxTol : 12));
     let bestId = null;
@@ -4327,6 +4329,20 @@ export class SketchMode3D {
     }
   }
 
+  #themeNumber(name, fallback, min = -Infinity, max = Infinity) {
+    const raw = this._theme?.[name];
+    const n = Number(raw);
+    const base = Number.isFinite(n) ? n : fallback;
+    if (!Number.isFinite(base)) return fallback;
+    return Math.max(min, Math.min(max, base));
+  }
+
+  #pointRadiusWorld(width, height) {
+    const wpp = this.#worldPerPixel(this.viewer.camera, width, height);
+    const pointSizePx = this.#themeNumber("pointSizePx", 8, 1, 128);
+    return Math.max(0.02, wpp * pointSizePx * 0.5);
+  }
+
   #rebuildSketchGraphics() {
     const grp = this._sketchGroup;
     if (!grp || !this._solver) return;
@@ -4353,17 +4369,21 @@ export class SketchMode3D {
       Y = b.y;
     const geometryColor = this.#themeColor("geometryColor", 0xffff88);
     const pointColor = this.#themeColor("pointColor", 0x9ec9ff);
+    const curveThicknessPx = this.#themeNumber("curveThicknessPx", 1, 0.5, 48);
+    const useFatLines = this._useFatCurveLines === true || curveThicknessPx > 1;
     const to3 = (u, v) =>
       new THREE.Vector3().copy(O).addScaledVector(X, u).addScaledVector(Y, v);
     // Sketch curves should always render on top of scene geometry
     const lineMat = new THREE.LineBasicMaterial({
       color: geometryColor,
+      linewidth: curveThicknessPx,
       depthTest: false,        // <- renders on top regardless of depth
       depthWrite: false,       // <- doesn't modify the depth buffer
       transparent: true,
     });
     const dashedMatBase = new THREE.LineDashedMaterial({
       color: geometryColor,
+      linewidth: curveThicknessPx,
       depthTest: false,        // <- renders on top regardless of depth
       depthWrite: false,       // <- doesn't modify the depth buffer
       transparent: true,
@@ -4372,34 +4392,63 @@ export class SketchMode3D {
     });
     // Determine world-per-pixel to scale dash size for consistent screen appearance
     let wpp = 0.05;
+    let canvasWidth = 1;
+    let canvasHeight = 1;
     try {
       const { width, height } = this.#canvasClientSize(this.viewer.renderer.domElement);
+      canvasWidth = Math.max(1, width || 1);
+      canvasHeight = Math.max(1, height || 1);
       wpp = this.#worldPerPixel(this.viewer.camera, width, height);
     } catch { }
+    const addCurveObject = (pts, geo, type) => {
+      if (!Array.isArray(pts) || pts.length < 2 || !geo) return;
+      const sel = Array.from(this._selection).some(
+        (it) => it.type === "geometry" && it.id === geo.id,
+      );
+      const color = sel ? 0x6fe26f : geometryColor;
+      const isConstruction = geo.construction === true;
+      let ln = null;
+      if (!isConstruction && useFatLines) {
+        const flat = [];
+        for (const p of pts) flat.push(p.x, p.y, p.z);
+        const lg = new LineGeometry();
+        lg.setPositions(flat);
+        const lm = new LineMaterial({
+          color,
+          linewidth: curveThicknessPx,
+          worldUnits: false,
+          dashed: false,
+          transparent: true,
+          depthTest: false,
+          depthWrite: false,
+          toneMapped: false,
+        });
+        try { lm.resolution?.set?.(canvasWidth, canvasHeight); } catch { }
+        ln = new Line2(lg, lm);
+      } else {
+        const bg = new THREE.BufferGeometry().setFromPoints(pts);
+        const mat = (isConstruction ? dashedMatBase.clone() : lineMat.clone());
+        if (isConstruction) {
+          try {
+            mat.dashSize = Math.max(0.02, 8 * wpp);
+            mat.gapSize = Math.max(0.01, 6 * wpp);
+          } catch { }
+        }
+        try { mat.color.set(color); } catch { }
+        ln = new THREE.Line(bg, mat);
+        if (isConstruction) { try { ln.computeLineDistances(); } catch { } }
+      }
+      if (!ln) return;
+      ln.renderOrder = 10000;
+      ln.userData = { kind: "geometry", id: geo.id, type };
+      grp.add(ln);
+    };
     for (const geo of s.geometries || []) {
       if (geo.type === "line" && geo.points?.length === 2) {
         const p0 = s.points.find((p) => p.id === geo.points[0]);
         const p1 = s.points.find((p) => p.id === geo.points[1]);
         if (!p0 || !p1) continue;
-        const a = to3(p0.x, p0.y),
-          b3 = to3(p1.x, p1.y);
-        const bg = new THREE.BufferGeometry().setFromPoints([a, b3]);
-        const sel = Array.from(this._selection).some(
-          (it) => it.type === "geometry" && it.id === geo.id,
-        );
-        const mat = (geo.construction ? dashedMatBase.clone() : lineMat.clone());
-        if (geo.construction) {
-          try { mat.dashSize = Math.max(0.02, 8 * wpp); mat.gapSize = Math.max(0.01, 6 * wpp); } catch { }
-        }
-        try {
-          mat.color.set(sel ? 0x6fe26f : geometryColor);
-        } catch { }
-        const ln = new THREE.Line(bg, mat);
-        if (geo.construction) { try { ln.computeLineDistances(); } catch { } }
-        ln.renderOrder = 10000;
-
-        ln.userData = { kind: "geometry", id: geo.id, type: "line" };
-        grp.add(ln);
+        addCurveObject([to3(p0.x, p0.y), to3(p1.x, p1.y)], geo, "line");
       } else if (geo.type === "circle") {
         const ids = geo.points || [];
         const pC = s.points.find((p) => p.id === ids[0]);
@@ -4412,23 +4461,7 @@ export class SketchMode3D {
           const t = (i / segs) * Math.PI * 2;
           pts.push(to3(pC.x + rr * Math.cos(t), pC.y + rr * Math.sin(t)));
         }
-        const bg = new THREE.BufferGeometry().setFromPoints(pts);
-        const sel = Array.from(this._selection).some(
-          (it) => it.type === "geometry" && it.id === geo.id,
-        );
-        const mat = (geo.construction ? dashedMatBase.clone() : lineMat.clone());
-        if (geo.construction) {
-          try { mat.dashSize = Math.max(0.02, 8 * wpp); mat.gapSize = Math.max(0.01, 6 * wpp); } catch { }
-        }
-        try {
-          mat.color.set(sel ? 0x6fe26f : geometryColor);
-        } catch { }
-        const ln = new THREE.Line(bg, mat);
-        if (geo.construction) { try { ln.computeLineDistances(); } catch { } }
-        ln.renderOrder = 10000;
-
-        ln.userData = { kind: "geometry", id: geo.id, type: geo.type };
-        grp.add(ln);
+        addCurveObject(pts, geo, geo.type);
       } else if (geo.type === "arc") {
         const ids = geo.points || [];
         const pC = s.points.find((p) => p.id === ids[0]);
@@ -4450,23 +4483,7 @@ export class SketchMode3D {
           const t = a0 + d * (i / segs);
           pts.push(to3(cx + rr * Math.cos(t), cy + rr * Math.sin(t)));
         }
-        const bg = new THREE.BufferGeometry().setFromPoints(pts);
-        const sel = Array.from(this._selection).some(
-          (it) => it.type === "geometry" && it.id === geo.id,
-        );
-        const mat = (geo.construction ? dashedMatBase.clone() : lineMat.clone());
-        if (geo.construction) {
-          try { mat.dashSize = Math.max(0.02, 8 * wpp); mat.gapSize = Math.max(0.01, 6 * wpp); } catch { }
-        }
-        try {
-          mat.color.set(sel ? 0x6fe26f : geometryColor);
-        } catch { }
-        const ln = new THREE.Line(bg, mat);
-        if (geo.construction) { try { ln.computeLineDistances(); } catch { } }
-        ln.renderOrder = 10000;
-
-        ln.userData = { kind: "geometry", id: geo.id, type: geo.type };
-        grp.add(ln);
+        addCurveObject(pts, geo, geo.type);
       } else if (geo.type === "bezier") {
         const ids = geo.points || [];
         const segCount = Math.floor((ids.length - 1) / 3);
@@ -4489,21 +4506,7 @@ export class SketchMode3D {
             pts.push(to3(bx, by));
           }
         }
-        const bg = new THREE.BufferGeometry().setFromPoints(pts);
-        const sel = Array.from(this._selection).some(
-          (it) => it.type === "geometry" && it.id === geo.id,
-        );
-        const mat = (geo.construction ? dashedMatBase.clone() : lineMat.clone());
-        if (geo.construction) {
-          try { mat.dashSize = Math.max(0.02, 8 * wpp); mat.gapSize = Math.max(0.01, 6 * wpp); } catch { }
-        }
-        try { mat.color.set(sel ? 0x6fe26f : geometryColor); } catch { }
-        const ln = new THREE.Line(bg, mat);
-        if (geo.construction) { try { ln.computeLineDistances(); } catch { } }
-        ln.renderOrder = 10000;
-
-        ln.userData = { kind: "geometry", id: geo.id, type: geo.type };
-        grp.add(ln);
+        addCurveObject(pts, geo, geo.type);
 
         // No explicit guide rendering here: actual construction lines are created on curve creation
       }
@@ -4512,13 +4515,13 @@ export class SketchMode3D {
       this.viewer.renderer.domElement,
     );
     wpp = this.#worldPerPixel(this.viewer.camera, width, height);
-    const r = Math.max(0.02, wpp * 8 * 0.5);
+    const r = this.#pointRadiusWorld(width, height);
     for (const p of s.points || []) {
       const selected = Array.from(this._selection).some(
         (it) => it.type === "point" && it.id === p.id,
       );
       const underConstrained = !selected && !p.fixed && !constrainedPoints.has(p.id);
-      const baseColor = underConstrained ? 0xffb347 : pointColor;
+      const baseColor = (this._uniformPointColor ? pointColor : (underConstrained ? 0xffb347 : pointColor));
       const mat = new THREE.MeshBasicMaterial({
         color: selected ? 0x6fe26f : baseColor,
         depthTest: false,
@@ -4545,10 +4548,8 @@ export class SketchMode3D {
     const { width, height } = this.#canvasClientSize(
       this.viewer.renderer.domElement,
     );
-    const r = Math.max(
-      0.02,
-      this.#worldPerPixel(this.viewer.camera, width, height) * 8 * 0.5,
-    );
+    this.#updateFatLineResolutions(width, height);
+    const r = this.#pointRadiusWorld(width, height);
     if (Math.abs(r - this._lastHandleScale) < 1e-4) return;
     this._lastHandleScale = r;
     for (const ch of this._sketchGroup.children) {
@@ -4558,6 +4559,20 @@ export class SketchMode3D {
         );
         ch.scale.setScalar(isSelected ? r * 2 : r);
       }
+    }
+  }
+
+  #updateFatLineResolutions(width, height) {
+    const w = Math.max(1, Number(width) || 1);
+    const h = Math.max(1, Number(height) || 1);
+    for (const ch of this._sketchGroup?.children || []) {
+      const mat = ch?.material;
+      if (!mat || typeof mat !== "object") continue;
+      try {
+        if (mat.resolution && typeof mat.resolution.set === "function") {
+          mat.resolution.set(w, h);
+        }
+      } catch { }
     }
   }
 

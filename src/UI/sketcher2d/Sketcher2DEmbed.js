@@ -4,11 +4,15 @@ export { bootSketcher2DFrame } from "./Sketcher2DFrameApp.js";
 
 const DEFAULT_CHANNEL = "brep:sketcher2d";
 const DEFAULT_TIMEOUT_MS = 12000;
+const DEFAULT_GRID_VISIBLE = false;
+const DEFAULT_GRID_SPACING = 1;
 const DEFAULT_THEME = {
   geometryColor: null,
   pointColor: null,
   constraintColor: null,
   backgroundColor: null,
+  pointSizePx: null,
+  curveThicknessPx: null,
 };
 
 function createDeferred() {
@@ -50,12 +54,37 @@ function makeInstanceId() {
 }
 
 function normalizeTheme(theme = {}) {
+  const pointSizePx = Number(theme?.pointSizePx ?? theme?.pointSize);
+  const curveThicknessPx = Number(theme?.curveThicknessPx ?? theme?.curveThickness);
   return {
     geometryColor: theme?.geometryColor ?? null,
     pointColor: theme?.pointColor ?? null,
     constraintColor: theme?.constraintColor ?? null,
     backgroundColor: theme?.backgroundColor ?? null,
+    pointSizePx: Number.isFinite(pointSizePx) && pointSizePx > 0 ? pointSizePx : null,
+    curveThicknessPx: Number.isFinite(curveThicknessPx) && curveThicknessPx > 0 ? curveThicknessPx : null,
   };
+}
+
+function normalizeSidebarExpanded(value, fallback = false) {
+  if (value == null) return fallback;
+  return value !== false;
+}
+
+function normalizeGridVisible(value, fallback = DEFAULT_GRID_VISIBLE) {
+  if (value == null) return fallback;
+  if (typeof value === "string") {
+    const next = value.trim().toLowerCase();
+    if (next === "false" || next === "0" || next === "off" || next === "no") return false;
+    if (next === "true" || next === "1" || next === "on" || next === "yes") return true;
+  }
+  return value !== false && value !== 0;
+}
+
+function normalizeGridSpacing(value, fallback = DEFAULT_GRID_SPACING) {
+  const next = Number(value);
+  if (!Number.isFinite(next) || next <= 0) return fallback;
+  return Math.max(0.0001, Math.min(1000000, next));
 }
 
 export class Sketcher2DEmbed {
@@ -90,8 +119,15 @@ export class Sketcher2DEmbed {
       pointColor: this._options.pointColor,
       constraintColor: this._options.constraintColor,
       backgroundColor: this._options.backgroundColor,
+      pointSizePx: this._options.pointSizePx ?? this._options.pointSize,
+      curveThicknessPx: this._options.curveThicknessPx ?? this._options.curveThickness,
     });
-    this._sidebarExpanded = this._options.sidebarExpanded !== false;
+    this._sidebarExpanded = normalizeSidebarExpanded(this._options.sidebarExpanded, false);
+    this._gridVisible = normalizeGridVisible(
+      this._options.gridVisible ?? this._options.showGrid,
+      DEFAULT_GRID_VISIBLE,
+    );
+    this._gridSpacing = normalizeGridSpacing(this._options.gridSpacing, DEFAULT_GRID_SPACING);
     this._iframe = null;
     this._host = null;
     this._boundMessage = (event) => this.#onMessage(event);
@@ -191,9 +227,44 @@ export class Sketcher2DEmbed {
     await this.#request("setTheme", { theme: deepClone(this._theme) });
   }
 
+  async setPointSize(pointSizePx) {
+    await this.setTheme({ pointSizePx });
+  }
+
+  async setCurveThickness(curveThicknessPx) {
+    await this.setTheme({ curveThicknessPx });
+  }
+
   async setSidebarExpanded(sidebarExpanded) {
-    this._sidebarExpanded = sidebarExpanded !== false;
+    this._sidebarExpanded = normalizeSidebarExpanded(sidebarExpanded, false);
     await this.#request("setSidebarExpanded", { sidebarExpanded: this._sidebarExpanded });
+  }
+
+  async setGridVisible(gridVisible) {
+    this._gridVisible = normalizeGridVisible(gridVisible, this._gridVisible);
+    await this.#request("setGrid", {
+      gridVisible: this._gridVisible,
+      gridSpacing: this._gridSpacing,
+    });
+  }
+
+  async setGridSpacing(gridSpacing) {
+    this._gridSpacing = normalizeGridSpacing(gridSpacing, this._gridSpacing);
+    await this.#request("setGrid", {
+      gridVisible: this._gridVisible,
+      gridSpacing: this._gridSpacing,
+    });
+  }
+
+  async setGrid(options = {}) {
+    const nextVisible = options?.gridVisible ?? options?.visible;
+    const nextSpacing = options?.gridSpacing ?? options?.spacing;
+    this._gridVisible = normalizeGridVisible(nextVisible, this._gridVisible);
+    this._gridSpacing = normalizeGridSpacing(nextSpacing, this._gridSpacing);
+    await this.#request("setGrid", {
+      gridVisible: this._gridVisible,
+      gridSpacing: this._gridSpacing,
+    });
   }
 
   async exportSVG(options = {}) {
@@ -314,6 +385,8 @@ export class Sketcher2DEmbed {
       cssText: this._initialCss,
       theme: deepClone(this._theme),
       sidebarExpanded: this._sidebarExpanded,
+      gridVisible: this._gridVisible,
+      gridSpacing: this._gridSpacing,
     })
       .then(() => this._initialized.resolve(true))
       .catch((error) => this._initialized.reject(error));

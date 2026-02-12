@@ -4,20 +4,52 @@ import { SketchMode3D } from "../sketcher/SketchMode3D.js";
 import { deepClone } from "../../utils/deepClone.js";
 
 const DEFAULT_FEATURE_ID = "__embed_sketch_feature__";
+const DEFAULT_GRID_VISIBLE = false;
+const DEFAULT_GRID_SPACING = 1;
+const GRID_EXTENT_MULTIPLIER = 100;
+const MIN_ORTHO_ZOOM = 0.0001;
+const MAX_ORTHO_ZOOM = 300;
 const DEFAULT_THEME = {
   geometryColor: null,
   pointColor: null,
   constraintColor: null,
   backgroundColor: null,
+  pointSizePx: null,
+  curveThicknessPx: null,
 };
 
 function normalizeTheme(theme = {}) {
+  const pointSizePx = Number(theme?.pointSizePx ?? theme?.pointSize);
+  const curveThicknessPx = Number(theme?.curveThicknessPx ?? theme?.curveThickness);
   return {
     geometryColor: theme?.geometryColor ?? null,
     pointColor: theme?.pointColor ?? null,
     constraintColor: theme?.constraintColor ?? null,
     backgroundColor: theme?.backgroundColor ?? null,
+    pointSizePx: Number.isFinite(pointSizePx) && pointSizePx > 0 ? pointSizePx : null,
+    curveThicknessPx: Number.isFinite(curveThicknessPx) && curveThicknessPx > 0 ? curveThicknessPx : null,
   };
+}
+
+function normalizeSidebarExpanded(value, fallback = false) {
+  if (value == null) return fallback;
+  return value !== false;
+}
+
+function normalizeGridVisible(value, fallback = DEFAULT_GRID_VISIBLE) {
+  if (value == null) return fallback;
+  if (typeof value === "string") {
+    const next = value.trim().toLowerCase();
+    if (next === "false" || next === "0" || next === "off" || next === "no") return false;
+    if (next === "true" || next === "1" || next === "on" || next === "yes") return true;
+  }
+  return value !== false && value !== 0;
+}
+
+function normalizeGridSpacing(value, fallback = DEFAULT_GRID_SPACING) {
+  const next = Number(value);
+  if (!Number.isFinite(next) || next <= 0) return fallback;
+  return Math.max(0.0001, Math.min(1000000, next));
 }
 
 function toCssColor(value, fallback) {
@@ -115,7 +147,7 @@ class Simple2DControls extends THREE.EventDispatcher {
     event.preventDefault();
     const factor = Math.exp(event.deltaY * 0.0015);
     const nextZoom = this.camera.zoom / factor;
-    this.camera.zoom = Math.max(0.05, Math.min(300, nextZoom));
+    this.camera.zoom = Math.max(MIN_ORTHO_ZOOM, Math.min(MAX_ORTHO_ZOOM, nextZoom));
     this.camera.updateProjectionMatrix();
     this.camera.updateMatrixWorld(true);
     this.dispatchEvent({ type: "change" });
@@ -127,6 +159,8 @@ class EmbeddedSketchViewer {
     container,
     sidebar,
     theme = DEFAULT_THEME,
+    gridVisible = DEFAULT_GRID_VISIBLE,
+    gridSpacing = DEFAULT_GRID_SPACING,
     featureID = DEFAULT_FEATURE_ID,
     onSketchChange = null,
     onSketchFinished = null,
@@ -140,6 +174,9 @@ class EmbeddedSketchViewer {
     this._onSketchChange = onSketchChange;
     this._onSketchFinished = onSketchFinished;
     this._onSketchCancelled = onSketchCancelled;
+    this._gridVisible = normalizeGridVisible(gridVisible, DEFAULT_GRID_VISIBLE);
+    this._gridSpacing = normalizeGridSpacing(gridSpacing, DEFAULT_GRID_SPACING);
+    this._gridHelper = null;
     this.scene = new THREE.Scene();
     this.camera = new THREE.OrthographicCamera(-20, 20, 20, -20, 0.01, 5000);
     this.camera.position.set(0, 0, 80);
@@ -165,6 +202,7 @@ class EmbeddedSketchViewer {
     };
     this.controls.addEventListener("change", this._boundControlsChange);
     this.controls.addEventListener("end", this._boundControlsChange);
+    this.#rebuildGrid();
     this.mainToolbar = new MainToolbar(this);
     this._feature = {
       inputParams: {
@@ -235,6 +273,7 @@ class EmbeddedSketchViewer {
     try { this.controls?.removeEventListener?.("end", this._boundControlsChange); } catch { }
     try { this.mainToolbar?._ro?.disconnect?.(); } catch { }
     try { this.mainToolbar?.root?.parentNode?.removeChild(this.mainToolbar.root); } catch { }
+    this.#clearGrid();
     try { this.renderer?.dispose?.(); } catch { }
     try {
       if (this.renderer?.domElement?.parentNode) {
@@ -270,6 +309,14 @@ class EmbeddedSketchViewer {
     }
   }
 
+  setGridOptions(options = {}) {
+    const nextVisible = options?.gridVisible ?? options?.visible;
+    const nextSpacing = options?.gridSpacing ?? options?.spacing;
+    this._gridVisible = normalizeGridVisible(nextVisible, this._gridVisible);
+    this._gridSpacing = normalizeGridSpacing(nextSpacing, this._gridSpacing);
+    this.#rebuildGrid();
+  }
+
   onSketchFinished(_featureID, sketchObject) {
     this.#setFeatureSketch(sketchObject);
     try { this._onSketchFinished && this._onSketchFinished(deepClone(sketchObject || null)); } catch { }
@@ -291,6 +338,8 @@ class EmbeddedSketchViewer {
     try { this._sketchMode?.dispose?.(); } catch { }
     this._sketchMode = new SketchMode3D(this, this._featureID, {
       theme: this.theme,
+      uniformPointColor: true,
+      useFatCurveLines: true,
       onSketchChange: (sketch) => {
         this.#setFeatureSketch(sketch);
         try { this._onSketchChange && this._onSketchChange(deepClone(sketch)); } catch { }
@@ -341,6 +390,46 @@ class EmbeddedSketchViewer {
     });
   }
 
+  #clearGrid() {
+    if (!this._gridHelper) return;
+    try { this.scene.remove(this._gridHelper); } catch { }
+    try {
+      const mats = Array.isArray(this._gridHelper.material)
+        ? this._gridHelper.material
+        : [this._gridHelper.material];
+      for (const mat of mats) {
+        try { mat?.dispose?.(); } catch { }
+      }
+      try { this._gridHelper.geometry?.dispose?.(); } catch { }
+    } catch { }
+    this._gridHelper = null;
+  }
+
+  #rebuildGrid() {
+    this.#clearGrid();
+    if (!this._gridVisible) return;
+    const baseDivisions = 200;
+    const divisions = baseDivisions * GRID_EXTENT_MULTIPLIER;
+    const size = this._gridSpacing * divisions;
+    const grid = new THREE.GridHelper(size, divisions, 0x5c6472, 0x3d4554);
+    grid.rotation.x = Math.PI / 2;
+    grid.position.z = -0.001;
+    grid.renderOrder = 9000;
+    grid.frustumCulled = false;
+    const mats = Array.isArray(grid.material) ? grid.material : [grid.material];
+    for (let i = 0; i < mats.length; i += 1) {
+      const mat = mats[i];
+      if (!mat) continue;
+      mat.depthTest = false;
+      mat.depthWrite = false;
+      mat.transparent = true;
+      mat.opacity = i === 0 ? 0.38 : 0.2;
+      mat.toneMapped = false;
+    }
+    this.scene.add(grid);
+    this._gridHelper = grid;
+  }
+
   #startRenderLoop() {
     if (this._running) return;
     this._running = true;
@@ -365,7 +454,9 @@ class Sketcher2DFrameApp {
     this._sidebarHost = null;
     this._disposed = false;
     this._theme = normalizeTheme(DEFAULT_THEME);
-    this._sidebarExpanded = true;
+    this._sidebarExpanded = false;
+    this._gridVisible = DEFAULT_GRID_VISIBLE;
+    this._gridSpacing = DEFAULT_GRID_SPACING;
     this._boundMessage = (event) => this.#onMessage(event);
   }
 
@@ -494,7 +585,8 @@ class Sketcher2DFrameApp {
   async #handleRequest(type, payload) {
     if (type === "init") {
       this.#applyTheme(payload?.theme || null);
-      this.#setSidebarExpanded(payload?.sidebarExpanded !== false);
+      this.#setSidebarExpanded(payload?.sidebarExpanded);
+      this.#applyGridOptions(payload);
       this.#ensureViewer(payload?.sketch || null);
       this.#setCustomCss(payload?.cssText || "");
       return { sketch: this._viewer.getSketch() };
@@ -515,7 +607,19 @@ class Sketcher2DFrameApp {
       return { ok: true };
     }
     if (type === "setSidebarExpanded") {
-      this.#setSidebarExpanded(payload?.sidebarExpanded !== false);
+      this.#setSidebarExpanded(payload?.sidebarExpanded);
+      return { ok: true };
+    }
+    if (type === "setGrid") {
+      this.#applyGridOptions(payload || {});
+      return { ok: true };
+    }
+    if (type === "setGridVisible") {
+      this.#applyGridOptions({ gridVisible: payload?.gridVisible });
+      return { ok: true };
+    }
+    if (type === "setGridSpacing") {
+      this.#applyGridOptions({ gridSpacing: payload?.gridSpacing });
       return { ok: true };
     }
     if (type === "dispose") {
@@ -531,6 +635,8 @@ class Sketcher2DFrameApp {
       container: this._canvasHost,
       sidebar: this._sidebarHost,
       theme: this._theme,
+      gridVisible: this._gridVisible,
+      gridSpacing: this._gridSpacing,
       featureID: DEFAULT_FEATURE_ID,
       onSketchChange: (sketch) => this.#post("sketchChanged", { sketch }),
       onSketchFinished: (sketch) => this.#post("sketchFinished", { sketch }),
@@ -562,9 +668,24 @@ class Sketcher2DFrameApp {
   }
 
   #setSidebarExpanded(sidebarExpanded) {
-    this._sidebarExpanded = sidebarExpanded !== false;
+    this._sidebarExpanded = normalizeSidebarExpanded(sidebarExpanded, false);
     if (!this._root) return;
     this._root.classList.toggle("is-sidebar-collapsed", !this._sidebarExpanded);
+  }
+
+  #applyGridOptions(payload = {}) {
+    this._gridVisible = normalizeGridVisible(
+      payload?.gridVisible ?? payload?.showGrid ?? payload?.visible,
+      this._gridVisible,
+    );
+    this._gridSpacing = normalizeGridSpacing(
+      payload?.gridSpacing ?? payload?.spacing,
+      this._gridSpacing,
+    );
+    this._viewer?.setGridOptions?.({
+      gridVisible: this._gridVisible,
+      gridSpacing: this._gridSpacing,
+    });
   }
 }
 
