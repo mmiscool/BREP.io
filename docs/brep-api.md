@@ -51,3 +51,6 @@ const result = box.subtract(cyl);
 result.name = 'BoxWithHole';
 result.visualize();
 ```
+
+## Related docs
+- Embeddable 2D sketcher API: `docs/sketcher2d-embed.md`

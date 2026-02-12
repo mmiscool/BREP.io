@@ -4,12 +4,23 @@ const COLOR_DEFAULT = 0x69a8ff;
 const COLOR_HOVER = 0xffd54a;
 const COLOR_SELECTED = 0x6fe26f;
 
+function themedConstraintColor(inst) {
+  const value = inst?._theme?.constraintColor;
+  if (value == null) return COLOR_DEFAULT;
+  try {
+    return new THREE.Color(value).getHex();
+  } catch {
+    return COLOR_DEFAULT;
+  }
+}
+
 // Grouped glyph renderer: draws small glyphs for non-dimension constraints,
 // grouping those that act on the same set of points at a single location.
 // Also records per-constraint centers for hit-testing.
 export function drawConstraintGlyphs(inst, constraints) {
   if (!inst || !inst._dim3D || !inst._lock || !inst._solver) return;
   const s = inst._solver.sketchObject;
+  const colorDefault = themedConstraintColor(inst);
   inst._glyphCenters = new Map();
   const to3 = (u, v) => new THREE.Vector3()
     .copy(inst._lock.basis.origin)
@@ -216,7 +227,7 @@ export function drawConstraintGlyphs(inst, constraints) {
 
       // Draw the glyph symbol itself as unicode character from constraint.type
       try {
-        const color = selSet.has(c.id) ? COLOR_SELECTED : (hovId === c.id ? COLOR_HOVER : COLOR_DEFAULT);
+        const color = selSet.has(c.id) ? COLOR_SELECTED : (hovId === c.id ? COLOR_HOVER : colorDefault);
         placeGlyphLabel(c, c.type || '?', adj.u, adj.v, color);
       } catch { }
     }

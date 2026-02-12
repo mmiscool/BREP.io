@@ -65,6 +65,97 @@
         font-size: 13px;
         line-height: 1.5;
       }
+      .divider {
+        border: 0;
+        height: 1px;
+        background: #e6e6ef;
+        margin: 24px 0;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 12px 0;
+      }
+      button {
+        border: 1px solid #c8ccda;
+        border-radius: 8px;
+        background: #f7f8fc;
+        color: #1b1b1f;
+        font-weight: 600;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      textarea {
+        width: 100%;
+        min-height: 120px;
+        box-sizing: border-box;
+        border: 1px solid #d5d9e6;
+        border-radius: 8px;
+        padding: 10px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+      }
+      #sketch-host {
+        margin-top: 12px;
+        border: 1px solid #dde1ee;
+        border-radius: 10px;
+        min-height: 520px;
+        overflow: hidden;
+        background: #ffffff;
+      }
+      #sketch-status {
+        margin-top: 10px;
+        font-size: 13px;
+        color: #3c4152;
+      }
+      #svg-preview {
+        margin-top: 12px;
+        border: 1px solid #d5d9e6;
+        border-radius: 8px;
+        min-height: 220px;
+        padding: 10px;
+        background: #fcfcff;
+        overflow: auto;
+      }
+      #svg-preview svg {
+        max-width: 100%;
+        display: block;
+      }
+      #path-output {
+        min-height: 130px;
+      }
+      #event-output {
+        min-height: 90px;
+      }
+      .control-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        gap: 10px;
+        margin: 12px 0;
+      }
+      .control-grid label {
+        font-size: 12px;
+        color: #4b4b57;
+        display: block;
+      }
+      .control-grid input[type="color"] {
+        width: 100%;
+        height: 36px;
+        border: 1px solid #d5d9e6;
+        border-radius: 8px;
+        background: #fff;
+      }
+      .control-grid .toggle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+      }
     </style>
   </head>
   <body>
@@ -77,11 +168,88 @@
       </p>
       <div id="status" class="status pending">Loading bundle...</div>
       <pre id="log"></pre>
+
+      <hr class="divider" />
+
+      <h1>Sketcher 2D Embed Test</h1>
+      <p>
+        This section mounts the new iframe-based 2D sketcher component and
+        exports SVG paths in the main page.
+      </p>
+      <div class="row">
+        <button id="btn-create">Create Sketcher Iframe</button>
+        <button id="btn-destroy" disabled>Destroy Sketcher</button>
+        <button id="btn-apply-css" disabled>Apply CSS</button>
+        <button id="btn-apply-theme" disabled>Apply Theme</button>
+        <button id="btn-export-svg" disabled>Export SVG Paths</button>
+      </div>
+      <div class="control-grid">
+        <div>
+          <label for="geometry-color">Geometry Color</label>
+          <input id="geometry-color" type="color" value="#d9f99d" />
+        </div>
+        <div>
+          <label for="point-color">Point Color</label>
+          <input id="point-color" type="color" value="#93c5fd" />
+        </div>
+        <div>
+          <label for="constraint-color">Constraint Color</label>
+          <input id="constraint-color" type="color" value="#60a5fa" />
+        </div>
+        <div>
+          <label for="background-color">Background Color</label>
+          <input id="background-color" type="color" value="#ffffff" />
+        </div>
+        <label class="toggle" for="sidebar-expanded">
+          <input id="sidebar-expanded" type="checkbox" checked />
+          Sidebar Expanded
+        </label>
+      </div>
+      <label for="css-input">Custom CSS injected into iframe:</label>
+      <textarea id="css-input">.sketch-dims .dim-label {
+  background: rgba(10, 18, 32, 0.92) !important;
+  border-color: #4f8cff !important;
+  color: #dce9ff !important;
+}
+#main-toolbar {
+  background: rgba(12, 16, 24, 0.92) !important;
+}
+#main-toolbar .mtb-btn.is-active {
+  border-color: #0aa36c !important;
+  color: #e8fff6 !important;
+}</textarea>
+      <div id="sketch-status">Sketcher not created.</div>
+      <pre id="event-output">(No sketch events yet)</pre>
+      <div id="sketch-host"></div>
+      <div id="svg-preview"></div>
+      <pre id="path-output"></pre>
     </main>
 
     <script type="module">
       const statusEl = document.getElementById('status');
       const logEl = document.getElementById('log');
+      const btnCreate = document.getElementById('btn-create');
+      const btnDestroy = document.getElementById('btn-destroy');
+      const btnApplyCss = document.getElementById('btn-apply-css');
+      const btnApplyTheme = document.getElementById('btn-apply-theme');
+      const btnExportSvg = document.getElementById('btn-export-svg');
+      const geometryColorInput = document.getElementById('geometry-color');
+      const pointColorInput = document.getElementById('point-color');
+      const constraintColorInput = document.getElementById('constraint-color');
+      const backgroundColorInput = document.getElementById('background-color');
+      const sidebarExpandedInput = document.getElementById('sidebar-expanded');
+      const cssInput = document.getElementById('css-input');
+      const sketchStatusEl = document.getElementById('sketch-status');
+      const sketchHost = document.getElementById('sketch-host');
+      const eventOutput = document.getElementById('event-output');
+      const svgPreview = document.getElementById('svg-preview');
+      const pathOutput = document.getElementById('path-output');
+      let sketcher = null;
+      let latestSketch = null;
+      let changeCount = 0;
+      let finishCount = 0;
+      let cancelCount = 0;
+      const MAX_EVENT_LINES = 5;
 
       const log = (...args) => {
         const line = args
@@ -102,6 +270,171 @@
         statusEl.textContent = text;
         statusEl.className = `status ${cls}`;
       };
+
+      const setSketchStatus = (text) => {
+        sketchStatusEl.textContent = text;
+      };
+
+      const setSketchButtons = (mounted) => {
+        btnCreate.disabled = mounted;
+        btnDestroy.disabled = !mounted;
+        btnApplyCss.disabled = !mounted;
+        btnApplyTheme.disabled = !mounted;
+        btnExportSvg.disabled = !mounted;
+      };
+
+      const pushEvent = (label, payload = null) => {
+        const now = new Date().toLocaleTimeString();
+        const line = payload == null
+          ? `[${now}] ${label}`
+          : `[${now}] ${label} ${JSON.stringify(payload)}`;
+        const existing = eventOutput.textContent === '(No sketch events yet)'
+          ? []
+          : eventOutput.textContent.split('\n').filter(Boolean);
+        const next = [line, ...existing].slice(0, MAX_EVENT_LINES);
+        eventOutput.textContent = next.length ? next.join('\n') : '(No sketch events yet)';
+      };
+
+      const currentTheme = () => ({
+        geometryColor: geometryColorInput.value,
+        pointColor: pointColorInput.value,
+        constraintColor: constraintColorInput.value,
+        backgroundColor: backgroundColorInput.value,
+      });
+
+      const attachSketcher = async () => {
+        if (sketcher) return;
+        const { Sketcher2DEmbed } = await import('/src/Sketcher2D.js');
+        sketcher = new Sketcher2DEmbed({
+          cssText: cssInput.value,
+          ...currentTheme(),
+          sidebarExpanded: sidebarExpandedInput.checked,
+          onChange: (sketch) => {
+            latestSketch = sketch;
+            changeCount += 1;
+            const pathCount = Array.isArray(sketch?.geometries) ? sketch.geometries.length : 0;
+            setSketchStatus(`Sketch updated (${changeCount}). Geometries: ${pathCount}`);
+            pushEvent('onChange', { geometries: pathCount });
+          },
+          onFinished: (sketch) => {
+            latestSketch = sketch;
+            finishCount += 1;
+            const pathCount = Array.isArray(sketch?.geometries) ? sketch.geometries.length : 0;
+            setSketchStatus(`Sketch finished (${finishCount}). Geometries: ${pathCount}`);
+            pushEvent('onFinished', { geometries: pathCount });
+          },
+          onCancelled: () => {
+            cancelCount += 1;
+            setSketchStatus(`Sketch cancelled (${cancelCount}).`);
+            pushEvent('onCancelled');
+          },
+        });
+        await sketcher.mount(sketchHost);
+        latestSketch = await sketcher.getSketch();
+        setSketchButtons(true);
+        setSketchStatus('Sketcher iframe mounted. Draw geometry and click Export SVG Paths.');
+      };
+
+      const detachSketcher = async () => {
+        if (!sketcher) return;
+        await sketcher.destroy();
+        sketcher = null;
+        latestSketch = null;
+        changeCount = 0;
+        finishCount = 0;
+        cancelCount = 0;
+        setSketchButtons(false);
+        setSketchStatus('Sketcher destroyed.');
+        eventOutput.textContent = '(No sketch events yet)';
+        svgPreview.innerHTML = '';
+        pathOutput.textContent = '';
+      };
+
+      const applySketchCss = async () => {
+        if (!sketcher) return;
+        await sketcher.setCss(cssInput.value);
+        setSketchStatus('Custom CSS applied to iframe.');
+      };
+
+      const applySketchTheme = async () => {
+        if (!sketcher) return;
+        await sketcher.setTheme(currentTheme());
+        await sketcher.setSidebarExpanded(sidebarExpandedInput.checked);
+        setSketchStatus('Theme + sidebar state applied to iframe.');
+      };
+
+      const exportSvg = async () => {
+        if (!sketcher) return;
+        const result = await sketcher.exportSVG({
+          flipY: true,
+          precision: 3,
+          stroke: '#111111',
+          strokeWidth: 1.5,
+          fill: 'none',
+          padding: 12,
+        });
+        latestSketch = await sketcher.getSketch({ preferCached: true });
+        svgPreview.innerHTML = result.svg;
+        pathOutput.textContent = result.paths.length
+          ? result.paths.map((row) => `id=${row.id} type=${row.type} d="${row.d}"`).join('\n')
+          : '(No sketch geometry to export)';
+        setSketchStatus(`Exported ${result.paths.length} SVG paths.`);
+      };
+
+      btnCreate.addEventListener('click', () => {
+        attachSketcher().catch((error) => {
+          console.error(error);
+          setSketchStatus(`Failed to create sketcher: ${error?.message || String(error)}`);
+        });
+      });
+
+      btnDestroy.addEventListener('click', () => {
+        detachSketcher().catch((error) => {
+          console.error(error);
+          setSketchStatus(`Failed to destroy sketcher: ${error?.message || String(error)}`);
+        });
+      });
+
+      btnApplyCss.addEventListener('click', () => {
+        applySketchCss().catch((error) => {
+          console.error(error);
+          setSketchStatus(`Failed to apply CSS: ${error?.message || String(error)}`);
+        });
+      });
+
+      btnExportSvg.addEventListener('click', () => {
+        exportSvg().catch((error) => {
+          console.error(error);
+          setSketchStatus(`Failed to export SVG: ${error?.message || String(error)}`);
+        });
+      });
+
+      btnApplyTheme.addEventListener('click', () => {
+        applySketchTheme().catch((error) => {
+          console.error(error);
+          setSketchStatus(`Failed to apply theme: ${error?.message || String(error)}`);
+        });
+      });
+
+      [geometryColorInput, pointColorInput, constraintColorInput, backgroundColorInput].forEach((input) => {
+        input.addEventListener('input', () => {
+          if (!sketcher) return;
+          applySketchTheme().catch((error) => {
+            console.error(error);
+            setSketchStatus(`Failed to apply theme: ${error?.message || String(error)}`);
+          });
+        });
+      });
+      sidebarExpandedInput.addEventListener('change', () => {
+        if (!sketcher) return;
+        applySketchTheme().catch((error) => {
+          console.error(error);
+          setSketchStatus(`Failed to apply sidebar state: ${error?.message || String(error)}`);
+        });
+      });
+
+      setSketchButtons(false);
+      pathOutput.textContent = '(No SVG exported yet)';
 
       (async () => {
         setStatus('Importing bundle...', 'pending');

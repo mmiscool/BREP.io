@@ -1,4 +1,21 @@
 // Sidebar + 3D hover/selection coloring helpers
+function toHexColor(value, fallback) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(0, Math.min(0xffffff, value | 0));
+  }
+  if (typeof value === 'string') {
+    const s = value.trim();
+    if (s.startsWith('#')) {
+      const hex = s.slice(1);
+      const norm = hex.length === 3
+        ? hex.split('').map((c) => `${c}${c}`).join('')
+        : hex;
+      if (/^[0-9a-fA-F]{6}$/.test(norm)) return parseInt(norm, 16);
+    }
+    if (/^0x[0-9a-fA-F]{1,6}$/.test(s)) return parseInt(s, 16);
+  }
+  return fallback;
+}
 
 export function updateListHighlights(inst) {
   if (!inst || !inst._acc) return;
@@ -44,16 +61,18 @@ export function updateListHighlights(inst) {
 export function applyHoverAndSelectionColors(inst) {
   if (!inst || !inst._sketchGroup) return;
   const hov = inst._hover;
+  const themeGeometry = toHexColor(inst?._theme?.geometryColor, 0xffff88);
+  const themePoint = toHexColor(inst?._theme?.pointColor, 0x9ec9ff);
   const isSel = (kind, id) => Array.from(inst._selection).some(s => s.type === (kind === 'point' ? 'point' : 'geometry') && s.id === id);
   const isHov = (kind, id) => hov && ((hov.type === 'point' && kind === 'point' && hov.id === id) || (hov.type === 'geometry' && kind === 'geometry' && hov.id === id));
   for (const ch of inst._sketchGroup.children) {
     const ud = ch.userData || {};
     if (ud.kind === 'point') {
-      const base = ud.underConstrained ? 0xffb347 : 0x9ec9ff;
+      const base = ud.underConstrained ? 0xffb347 : themePoint;
       const col = isSel('point', ud.id) ? 0x6fe26f : (isHov('point', ud.id) ? 0xffd54a : base);
       try { ch.material.color.setHex(col); } catch {}
     } else if (ud.kind === 'geometry') {
-      const col = isSel('geometry', ud.id) ? 0x6fe26f : (isHov('geometry', ud.id) ? 0xffd54a : 0xffff88);
+      const col = isSel('geometry', ud.id) ? 0x6fe26f : (isHov('geometry', ud.id) ? 0xffd54a : themeGeometry);
       try { ch.material.color.setHex(col); } catch {}
     }
   }

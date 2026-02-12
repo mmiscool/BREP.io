@@ -11,6 +11,16 @@ const DIM_COLOR_DEFAULT = 0x69a8ff;   // blue
 const DIM_COLOR_HOVER = 0xffd54a;   // yellow
 const DIM_COLOR_SELECTED = 0x6fe26f;   // green
 
+function getConstraintBaseColor(inst) {
+  const value = inst?._theme?.constraintColor;
+  if (value == null) return DIM_COLOR_DEFAULT;
+  try {
+    return new THREE.Color(value).getHex();
+  } catch {
+    return DIM_COLOR_DEFAULT;
+  }
+}
+
 function clearDims(inst) {
   if (!inst._dimRoot) return;
   const labels = Array.from(inst._dimRoot.querySelectorAll('.dim-label, .glyph-label'));
@@ -36,6 +46,7 @@ export function renderDimensions(inst) {
   // Reset per-frame angle geometry cache used to center labels on arc midpoints
   try { inst._dimAngleGeom = new Map(); } catch {}
   const s = inst._solver.sketchObject;
+  const dimBaseColor = getConstraintBaseColor(inst);
   const to3 = (u, v) => new THREE.Vector3()
     .copy(inst._lock.basis.origin)
     .addScaledVector(inst._lock.basis.x, u)
@@ -103,7 +114,7 @@ export function renderDimensions(inst) {
     if (c.type === '⟺') {
       if (c.displayStyle === 'radius' && c.points?.length >= 2) {
         const pc = P(c.points[0]), pr = P(c.points[1]); if (!pc || !pr) continue;
-        const col = sel ? DIM_COLOR_SELECTED : (hov ? DIM_COLOR_HOVER : DIM_COLOR_DEFAULT);
+        const col = sel ? DIM_COLOR_SELECTED : (hov ? DIM_COLOR_HOVER : dimBaseColor);
         dimRadius3D(inst, pc, pr, c.id, col);
         const v = new THREE.Vector2(pr.x - pc.x, pr.y - pc.y); const L = v.length() || 1; const rx = v.x / L, ry = v.y / L; const nx = -ry, ny = rx;
         const offSaved = inst._dimOffsets.get(c.id) || {};
@@ -126,7 +137,7 @@ export function renderDimensions(inst) {
         const d = typeof offSaved.d === 'number' ? offSaved.d : (offSaved.du || 0) * basis.nx + (offSaved.dv || 0) * basis.ny;
         // Constrain label to center of the dimension line: lock tangential offset to 0
         const t = 0;
-        const col = sel ? DIM_COLOR_SELECTED : (hov ? DIM_COLOR_HOVER : DIM_COLOR_DEFAULT);
+        const col = sel ? DIM_COLOR_SELECTED : (hov ? DIM_COLOR_HOVER : dimBaseColor);
         dimDistance3D(inst, p0, p1, c.id, col);
         mk(c, String((Number(c.value) ?? 0).toFixed(3)), to3((p0.x + p1.x) / 2, (p0.y + p1.y) / 2), { du: basis.tx * t + basis.nx * (base + d), dv: basis.ty * t + basis.ny * (base + d) }, true);
       }
@@ -134,7 +145,7 @@ export function renderDimensions(inst) {
     if (c.type === '∠' && c.points?.length >= 4) {
       const p0 = P(c.points[0]), p1 = P(c.points[1]), p2 = P(c.points[2]), p3 = P(c.points[3]); if (!p0 || !p1 || !p2 || !p3) continue;
       const I = intersect(p0, p1, p2, p3);
-      const col = sel ? DIM_COLOR_SELECTED : (hov ? DIM_COLOR_HOVER : DIM_COLOR_DEFAULT);
+      const col = sel ? DIM_COLOR_SELECTED : (hov ? DIM_COLOR_HOVER : dimBaseColor);
       // Pass current numeric value to renderer so the arc length matches the annotation
       const angleValueDeg = (typeof c.value === 'number' && Number.isFinite(c.value)) ? Number(c.value) : null;
       dimAngle3D(inst, p0, p1, p2, p3, c.id, I, col, angleValueDeg);
@@ -174,6 +185,7 @@ function _redrawDim3D(inst, onlyCid = null) {
       }
     }
     const s = inst._solver.sketchObject || {};
+    const dimBaseColor = getConstraintBaseColor(inst);
     const P = (id) => (s.points || []).find((p) => p.id === id);
     const selSet = new Set(Array.from(inst._selection || []).filter(it => it.type === 'constraint').map(it => it.id));
     const hovId = (inst._hover && inst._hover.type === 'constraint') ? inst._hover.id : null;
@@ -181,7 +193,7 @@ function _redrawDim3D(inst, onlyCid = null) {
       if (onlyCid != null && c?.id !== onlyCid) continue;
       const sel = selSet.has(c?.id);
       const hov = (hovId === c?.id);
-      const col = sel ? DIM_COLOR_SELECTED : (hov ? DIM_COLOR_HOVER : DIM_COLOR_DEFAULT);
+      const col = sel ? DIM_COLOR_SELECTED : (hov ? DIM_COLOR_HOVER : dimBaseColor);
       if (!c) continue;
       if (c.type === '⟺') {
         if (c.displayStyle === 'radius' && Array.isArray(c.points) && c.points.length >= 2) {

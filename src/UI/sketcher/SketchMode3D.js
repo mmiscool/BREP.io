@@ -9,9 +9,14 @@ import { AccordionWidget } from "../AccordionWidget.js";
 import { deepClone } from "../../utils/deepClone.js";
 
 export class SketchMode3D {
-  constructor(viewer, featureID) {
+  constructor(viewer, featureID, opts = {}) {
     this.viewer = viewer;
     this.featureID = featureID;
+    this._opts = opts || {};
+    this._onSketchChange = typeof this._opts.onSketchChange === "function"
+      ? this._opts.onSketchChange
+      : null;
+    this._theme = this._opts.theme || {};
     this._ui = null;
     this._lock = null; // { basis:{x,y,z,origin} }
     // Editing state
@@ -479,6 +484,27 @@ export class SketchMode3D {
     this.#redoSketch();
   }
 
+  getSketchData() {
+    try {
+      return deepClone(this._solver?.sketchObject || null);
+    } catch {
+      return null;
+    }
+  }
+
+  setSketchData(sketch) {
+    if (!this._solver) return false;
+    const normalized = this.#normalizeSketchInput(sketch);
+    this._solver.sketchObject = normalized;
+    try { this._solver.solveSketch("full"); } catch { }
+    this._selection.clear();
+    this.#rebuildSketchGraphics();
+    this.#renderDimensions();
+    this.#refreshContextBar();
+    this.#initSketchUndo();
+    return true;
+  }
+
   finish() {
     // Persist dimension offsets onto the feature before delegating to viewer
     try {
@@ -557,7 +583,16 @@ export class SketchMode3D {
     };
     ui.appendChild(mk("Finish", true, () => this.finish()));
     ui.appendChild(mk("Cancel", false, () => this.cancel()));
-    host.style.position = host.style.position || "relative";
+    // Only force positioning when the host is truly static. This preserves
+    // externally-managed layouts (e.g. iframe embed containers that are absolute).
+    try {
+      const pos = (typeof window !== "undefined" && window.getComputedStyle)
+        ? window.getComputedStyle(host).position
+        : host.style.position;
+      if (!pos || pos === "static") host.style.position = "relative";
+    } catch {
+      if (!host.style.position) host.style.position = "relative";
+    }
     host.appendChild(ui);
     this._ui = ui;
   }
@@ -2038,6 +2073,39 @@ export class SketchMode3D {
     };
   }
 
+  #normalizeSketchInput(sketch) {
+    const next = deepClone(sketch || {});
+    next.points = Array.isArray(next.points) ? next.points : [];
+    next.geometries = Array.isArray(next.geometries) ? next.geometries : [];
+    next.constraints = Array.isArray(next.constraints) ? next.constraints : [];
+
+    if (!next.points.length) {
+      next.points.push({ id: 0, x: 0, y: 0, fixed: true });
+    }
+    for (const pt of next.points) {
+      if (pt && pt.fixed === true) continue;
+      if (pt) pt.fixed = false;
+    }
+    const originId = Number(next.points[0]?.id);
+    const hasGround = Number.isFinite(originId) && next.constraints.some((c) =>
+      c && c.type === "⏚" && Array.isArray(c.points) && Number(c.points[0]) === originId);
+    if (Number.isFinite(originId) && !hasGround) {
+      const maxId = Math.max(0, ...next.constraints.map((c) => Number(c?.id) || 0)) + 1;
+      next.constraints.push({ id: maxId, type: "⏚", points: [originId] });
+      if (next.points[0]) next.points[0].fixed = true;
+    }
+    return next;
+  }
+
+  #emitSketchChange(snapshot = null) {
+    if (!this._onSketchChange) return;
+    try {
+      const sketch = deepClone(snapshot?.sketch || this._solver?.sketchObject || null);
+      if (!sketch) return;
+      this._onSketchChange(sketch);
+    } catch { }
+  }
+
   #pushSketchSnapshot({ force = false } = {}) {
     if (!this._undoReady || this._undoApplying) return;
     const snap = this.#captureSketchSnapshot();
@@ -2048,6 +2116,7 @@ export class SketchMode3D {
     if (this._undoStack.length > this._undoMax) this._undoStack.shift();
     this._redoStack.length = 0;
     this._undoSignature = signature || this._undoSignature;
+    this.#emitSketchChange(snap);
     this.#updateSketchUndoButtons();
   }
 
@@ -2502,6 +2571,9 @@ export class SketchMode3D {
     ctx.style.color = "#ddd";
     ctx.style.minWidth = "40px";
     ctx.style.maxWidth = "150px";
+    // Keep above dim overlays and renderer surface in embedded hosts.
+    ctx.style.zIndex = "1200";
+    ctx.style.pointerEvents = "auto";
     host.appendChild(ctx);
     this._ctxBar = ctx;
     this.#refreshContextBar();
@@ -3267,7 +3339,7 @@ export class SketchMode3D {
         cache.set(other.id, sample);
       }
       if (!sample) continue;
-      this.#collectIntersections(target, sample, intersections, other);
+      this.#collectIntersections(target, sample, intersections, other, pointById);
       if (!overlap && this.#isTrimOverlap(geo, other, pointById)) overlap = true;
       if (!endpointTouch && targetEndpoints.length) {
         if (this.#endpointsTouchSample(targetEndpoints, sample)) endpointTouch = true;
@@ -3529,16 +3601,36 @@ export class SketchMode3D {
   }
 
   #getGeometryEndpoints(geo, pointById) {
+    return this.#getGeometryEndpointInfos(geo, pointById).map((entry) => entry.point).filter(Boolean);
+  }
+
+  #getGeometryEndpointInfos(geo, pointById) {
     if (!geo || !pointById || !Array.isArray(geo.points)) return [];
     if (geo.type === "line" && geo.points.length >= 2) {
       const a = pointById.get(geo.points[0]);
       const b = pointById.get(geo.points[1]);
-      return [a, b].filter(Boolean);
+      return [
+        a ? { point: a, param: 0 } : null,
+        b ? { point: b, param: 1 } : null,
+      ].filter(Boolean);
     }
     if (geo.type === "arc" && geo.points.length >= 3) {
       const a = pointById.get(geo.points[1]);
       const b = pointById.get(geo.points[2]);
-      return [a, b].filter(Boolean);
+      return [
+        a ? { point: a, param: 0 } : null,
+        b ? { point: b, param: 1 } : null,
+      ].filter(Boolean);
+    }
+    if (geo.type === "bezier" && geo.points.length >= 4) {
+      const segCount = Math.floor((geo.points.length - 1) / 3);
+      if (segCount < 1) return [];
+      const a = pointById.get(geo.points[0]);
+      const b = pointById.get(geo.points[geo.points.length - 1]);
+      return [
+        a ? { point: a, param: 0 } : null,
+        b ? { point: b, param: segCount } : null,
+      ].filter(Boolean);
     }
     return [];
   }
@@ -3826,24 +3918,34 @@ export class SketchMode3D {
 
   #closestParamOnSamples(uv, samples) {
     if (!uv || !Array.isArray(samples) || samples.length < 2) return null;
-    let best = { param: samples[0].param, dist: Infinity };
+    const best = this.#closestPointOnSamples(uv.u, uv.v, samples);
+    if (!best) return null;
+    return { param: best.param, dist: best.dist };
+  }
+
+  #closestPointOnSamples(px, py, samples) {
+    if (!Array.isArray(samples) || samples.length < 2) return null;
+    let best = { param: samples[0].param, x: samples[0].x, y: samples[0].y, dist: Infinity };
     for (let i = 0; i < samples.length - 1; i++) {
       const a = samples[i];
       const b = samples[i + 1];
-      const vx = b.x - a.x, vy = b.y - a.y;
-      const wx = uv.u - a.x, wy = uv.v - a.y;
+      const vx = b.x - a.x;
+      const vy = b.y - a.y;
+      const wx = px - a.x;
+      const wy = py - a.y;
       const L2 = vx * vx + vy * vy || 1e-12;
       let t = (wx * vx + wy * vy) / L2;
       if (t < 0) t = 0; else if (t > 1) t = 1;
-      const nx = a.x + vx * t, ny = a.y + vy * t;
-      const d = Math.hypot(uv.u - nx, uv.v - ny);
+      const nx = a.x + vx * t;
+      const ny = a.y + vy * t;
+      const d = Math.hypot(px - nx, py - ny);
       const param = a.param + (b.param - a.param) * t;
-      if (d < best.dist) best = { param, dist: d };
+      if (d < best.dist) best = { param, x: nx, y: ny, dist: d };
     }
     return best;
   }
 
-  #collectIntersections(target, other, out, otherGeo) {
+  #collectIntersections(target, other, out, otherGeo, pointById) {
     const A = target?.samples;
     const B = other?.samples;
     if (!Array.isArray(A) || !Array.isArray(B) || A.length < 2 || B.length < 2) return;
@@ -3866,6 +3968,33 @@ export class SketchMode3D {
           otherType: otherGeo?.type ?? null,
         });
       }
+    }
+    const endpointInfos = this.#getGeometryEndpointInfos(otherGeo, pointById);
+    if (endpointInfos.length) {
+      this.#collectEndpointIntersectionsOnTarget(target, endpointInfos, out, otherGeo);
+    }
+  }
+
+  #collectEndpointIntersectionsOnTarget(target, endpointInfos, out, otherGeo) {
+    const samples = target?.samples;
+    if (!Array.isArray(samples) || samples.length < 2) return;
+    if (!Array.isArray(endpointInfos) || endpointInfos.length < 1) return;
+    const tol = this.#sampleTol(samples);
+    for (const info of endpointInfos) {
+      const pt = info?.point;
+      if (!pt) continue;
+      const closest = this.#closestPointOnSamples(pt.x, pt.y, samples);
+      if (!closest || !Number.isFinite(closest.param) || !Number.isFinite(closest.dist)) continue;
+      if (closest.dist > tol) continue;
+      out.push({
+        param: closest.param,
+        x: pt.x,
+        y: pt.y,
+        otherParam: Number.isFinite(info.param) ? info.param : null,
+        otherGeoId: otherGeo?.id ?? null,
+        otherType: otherGeo?.type ?? null,
+        endpointSnap: true,
+      });
     }
   }
 
@@ -3906,8 +4035,11 @@ export class SketchMode3D {
     cleaned.sort((a, b) => a.param - b.param);
     const uniq = [];
     for (const inter of cleaned) {
-      if (!uniq.length || Math.abs(inter.param - uniq[uniq.length - 1].param) > paramEps) {
+      const prev = uniq[uniq.length - 1];
+      if (!prev || Math.abs(inter.param - prev.param) > paramEps) {
         uniq.push(inter);
+      } else if (!prev.endpointSnap && inter.endpointSnap) {
+        uniq[uniq.length - 1] = inter;
       }
     }
     if (target?.closed) {
@@ -4176,6 +4308,16 @@ export class SketchMode3D {
     return (best != null && bestD <= tol) ? { cid: best } : null;
   }
 
+  #themeColor(name, fallback) {
+    const value = this._theme?.[name];
+    if (value == null) return fallback;
+    try {
+      return new THREE.Color(value).getHex();
+    } catch {
+      return fallback;
+    }
+  }
+
   #rebuildSketchGraphics() {
     const grp = this._sketchGroup;
     if (!grp || !this._solver) return;
@@ -4200,17 +4342,19 @@ export class SketchMode3D {
     const O = b.origin,
       X = b.x,
       Y = b.y;
+    const geometryColor = this.#themeColor("geometryColor", 0xffff88);
+    const pointColor = this.#themeColor("pointColor", 0x9ec9ff);
     const to3 = (u, v) =>
       new THREE.Vector3().copy(O).addScaledVector(X, u).addScaledVector(Y, v);
     // Sketch curves should always render on top of scene geometry
     const lineMat = new THREE.LineBasicMaterial({
-      color: 0xffff88,
+      color: geometryColor,
       depthTest: false,        // <- renders on top regardless of depth
       depthWrite: false,       // <- doesn't modify the depth buffer
       transparent: true,
     });
     const dashedMatBase = new THREE.LineDashedMaterial({
-      color: 0xffff88,
+      color: geometryColor,
       depthTest: false,        // <- renders on top regardless of depth
       depthWrite: false,       // <- doesn't modify the depth buffer
       transparent: true,
@@ -4239,7 +4383,7 @@ export class SketchMode3D {
           try { mat.dashSize = Math.max(0.02, 8 * wpp); mat.gapSize = Math.max(0.01, 6 * wpp); } catch { }
         }
         try {
-          mat.color.set(sel ? 0x6fe26f : 0xffff88);
+          mat.color.set(sel ? 0x6fe26f : geometryColor);
         } catch { }
         const ln = new THREE.Line(bg, mat);
         if (geo.construction) { try { ln.computeLineDistances(); } catch { } }
@@ -4268,7 +4412,7 @@ export class SketchMode3D {
           try { mat.dashSize = Math.max(0.02, 8 * wpp); mat.gapSize = Math.max(0.01, 6 * wpp); } catch { }
         }
         try {
-          mat.color.set(sel ? 0x6fe26f : 0xffff88);
+          mat.color.set(sel ? 0x6fe26f : geometryColor);
         } catch { }
         const ln = new THREE.Line(bg, mat);
         if (geo.construction) { try { ln.computeLineDistances(); } catch { } }
@@ -4306,7 +4450,7 @@ export class SketchMode3D {
           try { mat.dashSize = Math.max(0.02, 8 * wpp); mat.gapSize = Math.max(0.01, 6 * wpp); } catch { }
         }
         try {
-          mat.color.set(sel ? 0x6fe26f : 0xffff88);
+          mat.color.set(sel ? 0x6fe26f : geometryColor);
         } catch { }
         const ln = new THREE.Line(bg, mat);
         if (geo.construction) { try { ln.computeLineDistances(); } catch { } }
@@ -4344,7 +4488,7 @@ export class SketchMode3D {
         if (geo.construction) {
           try { mat.dashSize = Math.max(0.02, 8 * wpp); mat.gapSize = Math.max(0.01, 6 * wpp); } catch { }
         }
-        try { mat.color.set(sel ? 0x6fe26f : 0xffff88); } catch { }
+        try { mat.color.set(sel ? 0x6fe26f : geometryColor); } catch { }
         const ln = new THREE.Line(bg, mat);
         if (geo.construction) { try { ln.computeLineDistances(); } catch { } }
         ln.renderOrder = 10000;
@@ -4365,7 +4509,7 @@ export class SketchMode3D {
         (it) => it.type === "point" && it.id === p.id,
       );
       const underConstrained = !selected && !p.fixed && !constrainedPoints.has(p.id);
-      const baseColor = underConstrained ? 0xffb347 : 0x9ec9ff;
+      const baseColor = underConstrained ? 0xffb347 : pointColor;
       const mat = new THREE.MeshBasicMaterial({
         color: selected ? 0x6fe26f : baseColor,
         depthTest: false,

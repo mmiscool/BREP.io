@@ -26,7 +26,9 @@
     "./PartHistory": "./dist-kernel/brep-kernel.js",
     "./AssemblyConstraintHistory": "./dist-kernel/brep-kernel.js",
     "./AssemblyConstraintRegistry": "./dist-kernel/brep-kernel.js",
-    "./SketchSolver2D": "./src/SketchSolver2D.js"
+    "./SketchSolver2D": "./src/SketchSolver2D.js",
+    "./Sketcher2D": "./src/Sketcher2D.js",
+    "./Sketcher2DUtils": "./src/Sketcher2DUtils.js"
   },
   "imports": {
     "#textToFace/fontUrlLoaders": "./src/features/textToFace/fontUrlLoaders.kernel.js"
