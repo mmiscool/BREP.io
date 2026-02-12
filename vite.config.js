@@ -13,13 +13,11 @@ const htmlEntries = {
   pmiDialogs: resolve(root, 'pmi-dialog-capture.html'),
   assemblyConstraintDialogs: resolve(root, 'assembly-constraint-capture.html'),
   mouse: resolve(root, 'mouse.html'),
+  test: resolve(root, 'test.html'),
 };
 
-export default defineConfig(({ command }) => {
+export default defineConfig(() => {
   const input = { ...htmlEntries };
-  if (command === 'serve') {
-    input.test = resolve(root, 'test.html');
-  }
   return {
   // Explicitly set the public directory to ensure generated docs are included
   //

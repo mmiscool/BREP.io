@@ -16,6 +16,7 @@ This project is actively evolving; expect rough edges while APIs settle.
 - [Highlights](docs/highlights.md)
 - [What's New](docs/whats-new.md)
 - [Getting Started](docs/getting-started.md)
+- [Developer Docs Index](docs/developer-index.md)
 - [UI Overview (Browser)](docs/ui-overview.md)
 - [How It Works](docs/how-it-works.md)
 - [History Systems](docs/history-systems.md)
