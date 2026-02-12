@@ -83,7 +83,8 @@ export function drawConstraintGlyphs(inst, constraints) {
     } catch { }
   };
   const rect = inst.viewer.renderer.domElement.getBoundingClientRect();
-  const wpp = worldPerPixel(inst.viewer.camera, rect.width, rect.height);
+  const wppRaw = worldPerPixel(inst.viewer.camera, rect.width, rect.height);
+  const wpp = Number.isFinite(wppRaw) && wppRaw > 0 ? wppRaw : 0.05;
   const base = Math.max(0.1, wpp * 14);
   const handleR = Math.max(0.02, wpp * 8 * 0.5);
   const iconR = Math.max(base * 0.9, handleR * 1.9); // approx glyph half size in world units
@@ -209,7 +210,7 @@ export function drawConstraintGlyphs(inst, constraints) {
       placedIcons.push({ u: adj.u, v: adj.v });
       // Small pick radius disk (invisible) for selection
       try {
-        const pickR = iconR;
+        const pickR = Number.isFinite(iconR) && iconR > 0 ? iconR : 0.1;
         const g = new THREE.CircleGeometry(pickR, 20);
         // Orient the circle in plane XY mapped to sketch plane
         const X = inst._lock.basis.x.clone().normalize();
@@ -235,13 +236,15 @@ export function drawConstraintGlyphs(inst, constraints) {
 }
 
 function worldPerPixel(camera, width, height) {
+  const w = Math.max(1, Number(width) || 0);
+  const h = Math.max(1, Number(height) || 0);
   if (camera && camera.isOrthographicCamera) {
     const zoom = typeof camera.zoom === 'number' && camera.zoom > 0 ? camera.zoom : 1;
-    const wppX = (camera.right - camera.left) / (width * zoom);
-    const wppY = (camera.top - camera.bottom) / (height * zoom);
+    const wppX = (camera.right - camera.left) / (w * zoom);
+    const wppY = (camera.top - camera.bottom) / (h * zoom);
     return Math.max(wppX, wppY);
   }
   const dist = camera.position.length();
   const fovRad = (camera.fov * Math.PI) / 180;
-  return (2 * Math.tan(fovRad / 2) * dist) / height;
+  return (2 * Math.tan(fovRad / 2) * dist) / h;
 }

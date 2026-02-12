@@ -304,7 +304,7 @@
 
       const attachSketcher = async () => {
         if (sketcher) return;
-        const { Sketcher2DEmbed } = await import('/src/Sketcher2D.js');
+        const { Sketcher2DEmbed } = await import('/dist-kernel/brep-kernel.js');
         sketcher = new Sketcher2DEmbed({
           cssText: cssInput.value,
           ...currentTheme(),

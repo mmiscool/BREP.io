@@ -1,5 +1,6 @@
 import { deepClone } from "../../utils/deepClone.js";
 import { sketchToSVG } from "./sketchToSVG.js";
+export { bootSketcher2DFrame } from "./Sketcher2DFrameApp.js";
 
 const DEFAULT_CHANNEL = "brep:sketcher2d";
 const DEFAULT_TIMEOUT_MS = 12000;
@@ -73,7 +74,7 @@ export class Sketcher2DEmbed {
     this._onCancelled = typeof this._options.onCancelled === "function"
       ? this._options.onCancelled
       : (typeof this._options.onCanceled === "function" ? this._options.onCanceled : null);
-    this._frameModuleUrl = new URL("./Sketcher2DFrameApp.js", import.meta.url).href;
+    this._frameModuleUrl = this._options.frameModuleUrl || import.meta.url;
     this._ready = createDeferred();
     this._initialized = createDeferred();
     this._initStarted = false;
