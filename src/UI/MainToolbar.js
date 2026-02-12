@@ -4,6 +4,8 @@
 export class MainToolbar {
   constructor(viewer) {
     this.viewer = viewer;
+    this._rightReserveByKey = new Map();
+    this._rightReserveWatchers = new Map();
     // Guard against duplicate toolbars if constructed twice (e.g., hot reloads)
     try {
       const existing = document.getElementById('main-toolbar');
@@ -39,7 +41,8 @@ export class MainToolbar {
         align-items: center;
         justify-content: flex-start;
         gap: 6px;
-        padding: 6px;
+        padding: 6px calc(6px + var(--mtb-reserved-right, 0px)) 6px 6px;
+        box-sizing: border-box;
         background: rgba(20,24,30,.85);
         border: 1px solid #262b36;
         border-radius: 8px;
@@ -164,5 +167,77 @@ export class MainToolbar {
         : 0;
       this.root.style.left = `${w}px`;
     } catch { this.root.style.left = '0px'; }
+  }
+
+  _applyRightReserve() {
+    let reserve = 0;
+    for (const value of this._rightReserveByKey.values()) {
+      const px = Number(value);
+      if (Number.isFinite(px) && px > reserve) reserve = px;
+    }
+    try {
+      this.root.style.setProperty('--mtb-reserved-right', `${Math.max(0, Math.ceil(reserve))}px`);
+    } catch { /* ignore */ }
+  }
+
+  _teardownRightReserveWatcher(key) {
+    const watcher = this._rightReserveWatchers.get(key);
+    if (!watcher) return;
+    try { window.removeEventListener('resize', watcher.onResize); } catch { /* ignore */ }
+    try { watcher.ro?.disconnect?.(); } catch { /* ignore */ }
+    this._rightReserveWatchers.delete(key);
+  }
+
+  setRightReserve(key, widthPx = 0) {
+    if (!key) return 0;
+    const px = Number(widthPx);
+    if (!Number.isFinite(px) || px <= 0) this._rightReserveByKey.delete(key);
+    else this._rightReserveByKey.set(key, Math.ceil(px));
+    this._applyRightReserve();
+    return this._rightReserveByKey.get(key) || 0;
+  }
+
+  clearRightReserve(key) {
+    if (!key) return;
+    this._teardownRightReserveWatcher(key);
+    this._rightReserveByKey.delete(key);
+    this._applyRightReserve();
+  }
+
+  reserveRightSpaceForElement(key, element, { extraPx = 12, minPx = 0 } = {}) {
+    if (!key) return () => {};
+    this._teardownRightReserveWatcher(key);
+    const canMeasure = !!element && typeof element.getBoundingClientRect === 'function';
+    if (!canMeasure) {
+      this.setRightReserve(key, minPx);
+      return () => this.clearRightReserve(key);
+    }
+
+    const measure = () => {
+      try {
+        const rect = element.getBoundingClientRect();
+        const viewportW = window.innerWidth || document.documentElement?.clientWidth || 0;
+        const rightGap = Math.max(0, viewportW - rect.right);
+        const reserve = rect && rect.width > 0
+          ? (rect.width + rightGap + Number(extraPx || 0))
+          : Number(minPx || 0);
+        this.setRightReserve(key, Math.max(Number(minPx || 0), reserve));
+      } catch {
+        this.setRightReserve(key, minPx);
+      }
+    };
+
+    const onResize = () => measure();
+    try { window.addEventListener('resize', onResize); } catch { /* ignore */ }
+    let ro = null;
+    try {
+      if (window.ResizeObserver) {
+        ro = new ResizeObserver(() => measure());
+        ro.observe(element);
+      }
+    } catch { /* ignore */ }
+    this._rightReserveWatchers.set(key, { onResize, ro });
+    measure();
+    return () => this.clearRightReserve(key);
   }
 }

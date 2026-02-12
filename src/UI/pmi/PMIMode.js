@@ -32,6 +32,7 @@ export class PMIMode {
    */
   constructor(viewer, viewEntry, viewIndex, pmiWidget) {
     this.viewer = viewer;
+    this._toolbarRightReserveKey = `pmi-mode-actions:${viewIndex ?? 'active'}`;
     this.viewEntry = (viewEntry && typeof viewEntry === 'object')
       ? viewEntry
       : { viewName: 'View', name: 'View', camera: {}, annotations: [] };
@@ -228,6 +229,7 @@ export class PMIMode {
     } catch { }
     // Remove overlay UI
     try { this._uiTopRight?.remove(); } catch { }
+    try { this.viewer?.mainToolbar?.clearRightReserve?.(this._toolbarRightReserveKey); } catch { }
 
     // IMPORTANT: Remove PMI-specific accordion sections FIRST, then restore original sections
     // This prevents visual glitches where both sets of sections are visible simultaneously
@@ -321,7 +323,7 @@ export class PMIMode {
     style.id = 'pmi-mode-styles';
     style.textContent = `
       /* Top-right buttons */
-      .pmi-top-right { position: absolute; top: 48px; right: 0px; display: flex; gap: 8px; z-index: 1001; }
+      .pmi-top-right { position: absolute; top: 8px; right: 8px; display: flex; gap: 8px; z-index: 1001; }
       .pmi-btn { appearance: none; border: 1px solid #262b36; border-radius: 8px; padding: 6px 10px; cursor: pointer; background: rgba(255,255,255,.05); color: #e6e6e6; font-weight: 700; }
       .pmi-btn.primary { background: linear-gradient(180deg, rgba(110,168,254,.25), rgba(110,168,254,.15)); }
 
@@ -367,6 +369,13 @@ export class PMIMode {
     wrap.appendChild(btnFinish);
     host.appendChild(wrap);
     this._uiTopRight = wrap;
+    try {
+      this.viewer?.mainToolbar?.reserveRightSpaceForElement?.(
+        this._toolbarRightReserveKey,
+        wrap,
+        { extraPx: 16, minPx: 84 },
+      );
+    } catch { }
   }
   #hideOriginalSidebarSections() {
     try {

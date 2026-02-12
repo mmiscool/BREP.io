@@ -12,6 +12,7 @@ export class SketchMode3D {
   constructor(viewer, featureID, opts = {}) {
     this.viewer = viewer;
     this.featureID = featureID;
+    this._toolbarRightReserveKey = `sketch-mode-actions:${featureID || "active"}`;
     this._opts = opts || {};
     this._onSketchChange = typeof this._opts.onSketchChange === "function"
       ? this._opts.onSketchChange
@@ -350,6 +351,7 @@ export class SketchMode3D {
       } catch { }
       this._ui = null;
     }
+    try { v?.mainToolbar?.clearRightReserve?.(this._toolbarRightReserveKey); } catch { }
     if (this._left && this._sidebarHost) {
       try {
         this._sidebarHost.removeChild(this._left);
@@ -595,6 +597,13 @@ export class SketchMode3D {
     }
     host.appendChild(ui);
     this._ui = ui;
+    try {
+      this.viewer?.mainToolbar?.reserveRightSpaceForElement?.(
+        this._toolbarRightReserveKey,
+        ui,
+        { extraPx: 16, minPx: 120 },
+      );
+    } catch { }
   }
 
   #onPointerDown(e) {

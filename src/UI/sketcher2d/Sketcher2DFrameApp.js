@@ -423,6 +423,11 @@ class Sketcher2DFrameApp {
         overscroll-behavior: none;
       }
       .sk2d-root.is-sidebar-collapsed .sk2d-sidebar { display: none; }
+      /* In iframe sketch mode, keep room for top-right Finish/Cancel controls so
+         icon buttons wrap instead of rendering underneath those actions. */
+      .sk2d-root #main-toolbar {
+        padding-right: calc(6px + max(var(--mtb-reserved-right, 0px), 180px));
+      }
     `;
     document.head.appendChild(style);
   }
