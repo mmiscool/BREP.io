@@ -4,6 +4,7 @@ This page is a quick entry point for implementation and integration docs.
 
 ## Start Here
 - [Getting Started](./getting-started.md)
+- [API Examples](./api-examples.md)
 - [BREP API (BREP.js exports)](./brep-api.md)
 - [BREP Kernel Reference](./brep-kernel.md)
 - [PartHistory Reference](./part-history.md)

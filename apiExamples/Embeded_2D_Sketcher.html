@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BREP API Example: Embeded 2D Sketcher</title>
+    <link rel="stylesheet" href="./example.css" />
+  </head>
+  <body>
+    <main>
+      <header class="example-header">
+        <div>
+          <h1>Embeded 2D Sketcher</h1>
+          <p class="lead">
+            Mounts the iframe-based <code>Sketcher2DEmbed</code> API and exports SVG paths from the host page.
+          </p>
+        </div>
+        <nav class="example-nav">
+          <a href="./index.html">All Examples</a>
+          <a href="../index.html">BREP CAD App</a>
+          <a href="https://github.com/mmiscool/BREP/blob/main/apiExamples/Embeded_2D_Sketcher.html" target="_blank" rel="noopener noreferrer">Source on GitHub</a>
+        </nav>
+      </header>
+
+      <div class="row">
+        <button id="btn-create">Create Sketcher Iframe</button>
+        <button id="btn-destroy" disabled>Destroy Sketcher</button>
+        <button id="btn-apply-css" disabled>Apply CSS</button>
+        <button id="btn-apply-theme" disabled>Apply Theme</button>
+        <button id="btn-export-svg" disabled>Export SVG Paths</button>
+      </div>
+
+      <div class="control-grid">
+        <div>
+          <label for="geometry-color">Geometry Color</label>
+          <input id="geometry-color" type="color" value="#d9f99d" />
+        </div>
+        <div>
+          <label for="point-color">Point Color</label>
+          <input id="point-color" type="color" value="#93c5fd" />
+        </div>
+        <div>
+          <label for="constraint-color">Constraint Color</label>
+          <input id="constraint-color" type="color" value="#60a5fa" />
+        </div>
+        <div>
+          <label for="background-color">Background Color</label>
+          <input id="background-color" type="color" value="#ffffff" />
+        </div>
+        <div>
+          <label for="point-size-px">Point Size (px)</label>
+          <input id="point-size-px" type="number" value="10" min="1" max="128" step="1" />
+        </div>
+        <div>
+          <label for="curve-thickness-px">Curve Thickness (px)</label>
+          <input id="curve-thickness-px" type="number" value="2" min="0.5" max="48" step="0.5" />
+        </div>
+        <label class="toggle" for="sidebar-expanded">
+          <input id="sidebar-expanded" type="checkbox" />
+          Sidebar Expanded
+        </label>
+        <label class="toggle" for="grid-visible">
+          <input id="grid-visible" type="checkbox" checked />
+          Show Grid
+        </label>
+        <div>
+          <label for="grid-spacing">Grid Spacing</label>
+          <input id="grid-spacing" type="number" value="1" min="0.0001" step="0.1" />
+        </div>
+      </div>
+
+      <label for="css-input">Custom CSS injected into iframe:</label>
+      <textarea id="css-input">.sketch-dims .dim-label {
+  background: rgba(10, 18, 32, 0.92) !important;
+  border-color: #4f8cff !important;
+  color: #dce9ff !important;
+}
+#main-toolbar {
+  background: rgba(12, 16, 24, 0.92) !important;
+}
+#main-toolbar .mtb-btn.is-active {
+  border-color: #0aa36c !important;
+  color: #e8fff6 !important;
+}</textarea>
+
+      <div id="sketch-status">Sketcher not created.</div>
+      <div id="sketch-host"></div>
+      <pre id="event-output">(No sketch events yet)</pre>
+      <div id="svg-preview"></div>
+      <pre id="path-output">(No SVG exported yet)</pre>
+    </main>
+
+    <script type="module">
+      import { Sketcher2DEmbed } from '../dist-kernel/brep-kernel.js';
+
+      const btnCreate = document.getElementById('btn-create');
+      const btnDestroy = document.getElementById('btn-destroy');
+      const btnApplyCss = document.getElementById('btn-apply-css');
+      const btnApplyTheme = document.getElementById('btn-apply-theme');
+      const btnExportSvg = document.getElementById('btn-export-svg');
+      const geometryColorInput = document.getElementById('geometry-color');
+      const pointColorInput = document.getElementById('point-color');
+      const constraintColorInput = document.getElementById('constraint-color');
+      const backgroundColorInput = document.getElementById('background-color');
+      const pointSizePxInput = document.getElementById('point-size-px');
+      const curveThicknessPxInput = document.getElementById('curve-thickness-px');
+      const sidebarExpandedInput = document.getElementById('sidebar-expanded');
+      const gridVisibleInput = document.getElementById('grid-visible');
+      const gridSpacingInput = document.getElementById('grid-spacing');
+      const cssInput = document.getElementById('css-input');
+      const sketchStatusEl = document.getElementById('sketch-status');
+      const sketchHost = document.getElementById('sketch-host');
+      const eventOutput = document.getElementById('event-output');
+      const svgPreview = document.getElementById('svg-preview');
+      const pathOutput = document.getElementById('path-output');
+
+      let sketcher = null;
+      let latestSketch = null;
+      let changeCount = 0;
+      let finishCount = 0;
+      let cancelCount = 0;
+      const maxEventLines = 6;
+
+      const setSketchStatus = (text) => {
+        sketchStatusEl.textContent = text;
+      };
+
+      const setSketchButtons = (mounted) => {
+        btnCreate.disabled = mounted;
+        btnDestroy.disabled = !mounted;
+        btnApplyCss.disabled = !mounted;
+        btnApplyTheme.disabled = !mounted;
+        btnExportSvg.disabled = !mounted;
+      };
+
+      const pushEvent = (label, payload = null) => {
+        const now = new Date().toLocaleTimeString();
+        const line = payload == null
+          ? `[${now}] ${label}`
+          : `[${now}] ${label} ${JSON.stringify(payload)}`;
+        const existing = eventOutput.textContent === '(No sketch events yet)'
+          ? []
+          : eventOutput.textContent.split('\n').filter(Boolean);
+        const next = [line, ...existing].slice(0, maxEventLines);
+        eventOutput.textContent = next.length ? next.join('\n') : '(No sketch events yet)';
+      };
+
+      const currentTheme = () => ({
+        geometryColor: geometryColorInput.value,
+        pointColor: pointColorInput.value,
+        constraintColor: constraintColorInput.value,
+        backgroundColor: backgroundColorInput.value,
+        pointSizePx: Math.max(1, Number(pointSizePxInput.value) || 10),
+        curveThicknessPx: Math.max(0.5, Number(curveThicknessPxInput.value) || 2),
+      });
+
+      const currentGridSpacing = () => {
+        const parsed = Number(gridSpacingInput.value);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+      };
+
+      const attachSketcher = async () => {
+        if (sketcher) return;
+
+        sketcher = new Sketcher2DEmbed({
+          cssText: cssInput.value,
+          ...currentTheme(),
+          sidebarExpanded: sidebarExpandedInput.checked,
+          gridVisible: gridVisibleInput.checked,
+          gridSpacing: currentGridSpacing(),
+          onChange: (sketch) => {
+            latestSketch = sketch;
+            changeCount += 1;
+            const pathCount = Array.isArray(sketch?.geometries) ? sketch.geometries.length : 0;
+            setSketchStatus(`Sketch updated (${changeCount}). Geometries: ${pathCount}`);
+            pushEvent('onChange', { geometries: pathCount });
+          },
+          onFinished: (sketch) => {
+            latestSketch = sketch;
+            finishCount += 1;
+            const pathCount = Array.isArray(sketch?.geometries) ? sketch.geometries.length : 0;
+            setSketchStatus(`Sketch finished (${finishCount}). Geometries: ${pathCount}`);
+            pushEvent('onFinished', { geometries: pathCount });
+            exportSvg().catch((error) => {
+              console.error(error);
+              setSketchStatus(`Failed to export SVG after Finish: ${error?.message || String(error)}`);
+            });
+          },
+          onCancelled: () => {
+            cancelCount += 1;
+            setSketchStatus(`Sketch cancelled (${cancelCount}).`);
+            pushEvent('onCancelled');
+          },
+        });
+
+        await sketcher.mount(sketchHost);
+        latestSketch = await sketcher.getSketch();
+        setSketchButtons(true);
+        setSketchStatus('Sketcher iframe mounted. Draw geometry and click Export SVG Paths.');
+      };
+
+      const detachSketcher = async () => {
+        if (!sketcher) return;
+        await sketcher.destroy();
+        sketcher = null;
+        latestSketch = null;
+        changeCount = 0;
+        finishCount = 0;
+        cancelCount = 0;
+        setSketchButtons(false);
+        setSketchStatus('Sketcher destroyed.');
+        eventOutput.textContent = '(No sketch events yet)';
+        svgPreview.innerHTML = '';
+        pathOutput.textContent = '(No SVG exported yet)';
+      };
+
+      const applySketchCss = async () => {
+        if (!sketcher) return;
+        await sketcher.setCss(cssInput.value);
+        setSketchStatus('Custom CSS applied to iframe.');
+      };
+
+      const applySketchTheme = async () => {
+        if (!sketcher) return;
+        await sketcher.setTheme(currentTheme());
+        await sketcher.setSidebarExpanded(sidebarExpandedInput.checked);
+        if (typeof sketcher.setGrid === 'function') {
+          await sketcher.setGrid({
+            visible: gridVisibleInput.checked,
+            spacing: currentGridSpacing(),
+          });
+        } else {
+          if (typeof sketcher.setGridVisible === 'function') {
+            await sketcher.setGridVisible(gridVisibleInput.checked);
+          }
+          if (typeof sketcher.setGridSpacing === 'function') {
+            await sketcher.setGridSpacing(currentGridSpacing());
+          }
+        }
+        setSketchStatus('Theme + sidebar + grid state applied to iframe.');
+      };
+
+      const exportSvg = async () => {
+        if (!sketcher) return;
+        const result = await sketcher.exportSVG({
+          flipY: true,
+          precision: 3,
+          stroke: '#111111',
+          strokeWidth: 1.5,
+          fill: 'none',
+          padding: 12,
+        });
+        latestSketch = await sketcher.getSketch({ preferCached: true });
+        svgPreview.innerHTML = result.svg;
+        pathOutput.textContent = result.paths.length
+          ? result.paths.map((row) => `id=${row.id} type=${row.type} d="${row.d}"`).join('\n')
+          : '(No sketch geometry to export)';
+        setSketchStatus(`Exported ${result.paths.length} SVG paths.`);
+        svgPreview.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      };
+
+      btnCreate.addEventListener('click', () => {
+        attachSketcher().catch((error) => {
+          console.error(error);
+          setSketchStatus(`Failed to create sketcher: ${error?.message || String(error)}`);
+        });
+      });
+
+      btnDestroy.addEventListener('click', () => {
+        detachSketcher().catch((error) => {
+          console.error(error);
+          setSketchStatus(`Failed to destroy sketcher: ${error?.message || String(error)}`);
+        });
+      });
+
+      btnApplyCss.addEventListener('click', () => {
+        applySketchCss().catch((error) => {
+          console.error(error);
+          setSketchStatus(`Failed to apply CSS: ${error?.message || String(error)}`);
+        });
+      });
+
+      btnApplyTheme.addEventListener('click', () => {
+        applySketchTheme().catch((error) => {
+          console.error(error);
+          setSketchStatus(`Failed to apply theme: ${error?.message || String(error)}`);
+        });
+      });
+
+      btnExportSvg.addEventListener('click', () => {
+        exportSvg().catch((error) => {
+          console.error(error);
+          setSketchStatus(`Failed to export SVG: ${error?.message || String(error)}`);
+        });
+      });
+
+      [geometryColorInput, pointColorInput, constraintColorInput, backgroundColorInput, pointSizePxInput, curveThicknessPxInput].forEach((input) => {
+        input.addEventListener('input', () => {
+          if (!sketcher) return;
+          applySketchTheme().catch((error) => {
+            console.error(error);
+            setSketchStatus(`Failed to apply theme: ${error?.message || String(error)}`);
+          });
+        });
+      });
+
+      sidebarExpandedInput.addEventListener('change', () => {
+        if (!sketcher) return;
+        applySketchTheme().catch((error) => {
+          console.error(error);
+          setSketchStatus(`Failed to apply sidebar state: ${error?.message || String(error)}`);
+        });
+      });
+
+      gridVisibleInput.addEventListener('change', () => {
+        if (!sketcher) return;
+        applySketchTheme().catch((error) => {
+          console.error(error);
+          setSketchStatus(`Failed to apply grid visibility: ${error?.message || String(error)}`);
+        });
+      });
+
+      gridSpacingInput.addEventListener('input', () => {
+        if (!sketcher) return;
+        applySketchTheme().catch((error) => {
+          console.error(error);
+          setSketchStatus(`Failed to apply grid spacing: ${error?.message || String(error)}`);
+        });
+      });
+
+      window.addEventListener('beforeunload', () => {
+        if (sketcher) {
+          sketcher.destroy().catch(() => {});
+        }
+      });
+
+      setSketchButtons(false);
+
+      if (latestSketch && !Array.isArray(latestSketch?.geometries)) {
+        console.warn('Unexpected sketch payload shape', latestSketch);
+      }
+    </script>
+  </body>
+</html>
