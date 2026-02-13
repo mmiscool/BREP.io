@@ -8,7 +8,6 @@ import { createZoomToFitButton } from './zoomToFitButton.js';
 import { createWireframeToggleButton } from './wireframeToggleButton.js';
 import { createImportButton } from './importButton.js';
 import { createExportButton } from './exportButton.js';
-import { createFlatPatternButton } from './flatPatternButton.js';
 import { createAboutButton } from './aboutButton.js';
 import { createTestsButton } from './testsButton.js';
 import { createScriptRunnerButton } from './scriptRunnerButton.js';
@@ -24,7 +23,6 @@ export function registerDefaultToolbarButtons(viewer) {
     createWireframeToggleButton,
     createImportButton,
     createExportButton,
-    createFlatPatternButton,
     createAboutButton,
     createTestsButton,
     createScriptRunnerButton,

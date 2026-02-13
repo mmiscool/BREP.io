@@ -21,20 +21,12 @@ import { test_fillets_more_dificult } from './test_filletsMoreDifficult.js';
 import { test_tube } from './test_tube.js';
 import { test_tube_closedLoop } from './test_tube_closedLoop.js';
 import { test_offsetShellGrouping } from './test_offsetShellGrouping.js';
-import { test_sheetMetal_tab, test_sheetMetal_flange, test_sheetMetal_hem, test_sheetMetal_cutout } from './test_sheetMetal_features.js';
-import {
-    test_SheetMetalContourFlange_Basic,
-    test_SheetMetalContourFlange_StraightLine,
-    afterRun_SheetMetalContourFlange_Basic,
-    afterRun_SheetMetalContourFlange_StraightLine,
-} from './test_sheetMetalContourFlange.js';
 import { test_pushFace, afterRun_pushFace } from './test_pushFace.js';
 import { test_sketch_openLoop, afterRun_sketch_openLoop } from './test_sketch_openLoop.js';
 import { test_Fillet_NonClosed, afterRun_Fillet_NonClosed } from './test_fillet_nonClosed.js';
 import { test_history_features_basic, afterRun_history_features_basic } from './test_history_features_basic.js';
 import { test_textToFace, afterRun_textToFace } from './test_textToFace.js';
 import { generate3MF } from '../exporters/threeMF.js';
-import { buildSheetMetalFlatPatternSvgs } from '../exporters/sheetMetalFlatPattern.js';
 import {
     test_hole_through,
     afterRun_hole_through,
@@ -67,12 +59,6 @@ export const testFunctions = [
     { test: test_tube_closedLoop, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_sketch_openLoop, afterRun: afterRun_sketch_openLoop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_offsetShellGrouping, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_sheetMetal_tab, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
-    { test: test_sheetMetal_flange, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
-    { test: test_sheetMetal_hem, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
-    { test: test_sheetMetal_cutout, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
-    { test: test_SheetMetalContourFlange_Basic, afterRun: afterRun_SheetMetalContourFlange_Basic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
-    { test: test_SheetMetalContourFlange_StraightLine, afterRun: afterRun_SheetMetalContourFlange_StraightLine, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_ExtrudeFace, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_Fillet, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_fillet_angle, afterRun: afterRun_fillet_angle, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -106,7 +92,6 @@ async function registerPartFileTests() {
                 const baseName = String(file).replace(/\.[^.]+$/, '');
                 const safeName = baseName.replace(/[^a-zA-Z0-9._-]+/g, '_').substring(0, 100);
                 const testName = `import_part_${safeName}`;
-                const isSheetMetalHem = file.toLowerCase() === 'sheetmetalhem.brep.json';
 
                 const importTest = async function (partHistory) {
                     // Read file and load into PartHistory
@@ -130,26 +115,9 @@ async function registerPartFileTests() {
                 };
                 try { Object.defineProperty(importTest, 'name', { value: testName, configurable: true }); } catch {}
 
-                const afterRun = isSheetMetalHem ? async function (partHistory) {
-                    const solids = (partHistory.scene?.children || []).filter(o => o && o.type === 'SOLID' && typeof o.getMesh === 'function');
-                    const svgEntries = buildSheetMetalFlatPatternSvgs(solids, {
-                        metadataManager: partHistory?.metadataManager || null,
-                    });
-                    if (!svgEntries.length) {
-                        console.warn(`[runTests] No flat pattern SVG produced for ${testName}`);
-                        return;
-                    }
-                    const exportPath = `./tests/results/${testName}/`;
-                    for (const entry of svgEntries) {
-                        const safeEntryName = sanitizeFileName(entry.name || 'SHEET');
-                        const outPath = path.join(exportPath, `${safeEntryName}_flat-pattern.svg`);
-                        writeFile(outPath, entry.svg);
-                    }
-                } : null;
-
                 testFunctions.push({
                     test: importTest,
-                    afterRun,
+                    afterRun: null,
                     printArtifacts: false,
                     exportFaces: true,
                     exportSolids: true,
