@@ -1196,23 +1196,27 @@ export class PartHistory {
             sanitized[key] = rawStr;
           }
         } else if (schema[key].type === "reference_selection") {
-          // Resolve references: accept objects directly or look up by name
+          // Resolve references: accept objects directly, look up by name,
+          // and preserve unresolved string refs for features that do their own mapping.
           const val = rawValue;
           if (Array.isArray(val)) {
             const arr = [];
             for (const it of val) {
               if (!it) continue;
               if (typeof it === 'object') { arr.push(it); continue; }
-              const obj = this.getObjectByName(String(it));
+              const refName = String(it);
+              const obj = this.getObjectByName(refName);
               if (obj) arr.push(obj);
+              else arr.push(refName);
             }
             sanitized[key] = arr;
           } else {
             if (!val) { sanitized[key] = []; }
             else if (typeof val === 'object') { sanitized[key] = [val]; }
             else {
-              const obj = this.getObjectByName(String(val));
-              sanitized[key] = obj ? [obj] : [];
+              const refName = String(val);
+              const obj = this.getObjectByName(refName);
+              sanitized[key] = obj ? [obj] : [refName];
             }
           }
 

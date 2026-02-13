@@ -8,7 +8,6 @@ import {
     Face
 } from "../SolidShared.js";
 import { SelectionState } from "../../UI/SelectionState.js";
-import { SHEET_METAL_FACE_TYPES, resolveSheetMetalFaceType } from "../../features/sheetMetal/sheetMetalFaceTypes.js";
 
 
 
@@ -478,9 +477,9 @@ function annotateEdgeFromMetadata(edgeObj, solid) {
         let hasSheetMeta = false;
         let hasABCandidate = false;
         for (const f of faces) {
-            const t = resolveSheetMetalFaceType(f);
+            const t = resolveSheetTypeFromFace(f);
             if (t) hasSheetMeta = true;
-            if (t === SHEET_METAL_FACE_TYPES.A || t === SHEET_METAL_FACE_TYPES.B) {
+            if (isSheetSurfaceType(t)) {
                 faceTypes.add(t);
                 hasABCandidate = true;
             }
@@ -494,7 +493,7 @@ function annotateEdgeFromMetadata(edgeObj, solid) {
                 const m = typeof solid.getFaceMetadata === "function" ? solid.getFaceMetadata(n) : null;
                 const t = m?.sheetMetalFaceType;
                 if (t) hasSheetMeta = true;
-                if (t === SHEET_METAL_FACE_TYPES.A || t === SHEET_METAL_FACE_TYPES.B) {
+                if (isSheetSurfaceType(t)) {
                     faceTypes.add(t);
                     hasABCandidate = true;
                 }
@@ -514,7 +513,7 @@ function annotateEdgeFromMetadata(edgeObj, solid) {
                 const meta = solid && typeof solid.getFaceMetadata === "function" ? solid.getFaceMetadata(p) : null;
                 const t = meta?.sheetMetalFaceType;
                 if (t) hasSheetMeta = true;
-                if (t === SHEET_METAL_FACE_TYPES.A || t === SHEET_METAL_FACE_TYPES.B) {
+                if (isSheetSurfaceType(t)) {
                     hasABCandidate = true;
                     derivedType = t;
                     break;
@@ -534,4 +533,28 @@ function annotateEdgeFromMetadata(edgeObj, solid) {
             }
         }
     } catch { /* ignore */ }
+}
+
+function normalizeSheetSurfaceType(rawType) {
+    const t = String(rawType || "").trim().toUpperCase();
+    if (t === "A" || t === "B") return t;
+    return null;
+}
+
+function isSheetSurfaceType(rawType) {
+    return normalizeSheetSurfaceType(rawType) != null;
+}
+
+function resolveSheetTypeFromFace(faceObj) {
+    if (!faceObj || typeof faceObj !== "object") return null;
+    const direct = normalizeSheetSurfaceType(faceObj?.userData?.sheetMetalFaceType);
+    if (direct) return direct;
+    const solid = faceObj?.parentSolid || faceObj?.parent || null;
+    const faceName = faceObj?.name || faceObj?.userData?.faceName || null;
+    if (!solid || !faceName || typeof solid.getFaceMetadata !== "function") return null;
+    try {
+        return normalizeSheetSurfaceType(solid.getFaceMetadata(faceName)?.sheetMetalFaceType);
+    } catch {
+        return null;
+    }
 }
