@@ -140,7 +140,7 @@ function openFlatExportDialog(viewer) {
 
   const hint = document.createElement("div");
   hint.className = "flat-exp-hint";
-  hint.textContent = "Cut lines export as red solid lines. Bend centerlines export as blue dashed lines.";
+  hint.textContent = "Cut lines export as black solid lines. Bend UP lines export as blue dashed lines, bend DOWN lines as magenta dashed lines, with UP/DOWN angle labels.";
 
   const buttons = document.createElement("div");
   buttons.className = "flat-exp-buttons";

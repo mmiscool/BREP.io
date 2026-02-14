@@ -595,88 +595,250 @@ function buildPathPolylineFromSelections(pathSelections) {
   return deduped.length >= 2 ? deduped : null;
 }
 
-function offsetPath2D(path2, offset) {
+function choosePerpendicularNormal(xAxis) {
+  const candidates = [
+    new THREE.Vector3(0, 0, 1),
+    new THREE.Vector3(0, 1, 0),
+    new THREE.Vector3(1, 0, 0),
+  ];
+
+  for (const seed of candidates) {
+    const projected = seed.clone().sub(xAxis.clone().multiplyScalar(seed.dot(xAxis)));
+    if (projected.lengthSq() > EPS * EPS) return projected.normalize();
+  }
+  return null;
+}
+
+function buildContourPathFrame(path3, reverseSheetSide = false) {
+  if (!Array.isArray(path3) || path3.length < 2) return null;
+  const origin = path3[0].clone();
+
+  let xAxis = null;
+  for (let i = 1; i < path3.length; i += 1) {
+    const delta = path3[i].clone().sub(origin);
+    if (delta.lengthSq() > EPS * EPS) {
+      xAxis = delta.normalize();
+      break;
+    }
+  }
+  if (!xAxis) return null;
+
+  let planeNormal = null;
+  for (let i = 0; i < path3.length - 2; i += 1) {
+    const a = path3[i + 1].clone().sub(path3[i]);
+    const b = path3[i + 2].clone().sub(path3[i + 1]);
+    if (a.lengthSq() <= EPS * EPS || b.lengthSq() <= EPS * EPS) continue;
+    const cross = new THREE.Vector3().crossVectors(a, b);
+    if (cross.lengthSq() > EPS * EPS) {
+      planeNormal = cross.normalize();
+      break;
+    }
+  }
+  if (!planeNormal) {
+    planeNormal = choosePerpendicularNormal(xAxis);
+  }
+  if (!planeNormal) return null;
+
+  const extensionDir = reverseSheetSide ? planeNormal.clone().multiplyScalar(-1) : planeNormal.clone();
+  let zAxis = new THREE.Vector3().crossVectors(xAxis, extensionDir);
+  if (zAxis.lengthSq() <= EPS * EPS) return null;
+  zAxis.normalize();
+
+  let yAxis = new THREE.Vector3().crossVectors(zAxis, xAxis);
+  if (yAxis.lengthSq() <= EPS * EPS) return null;
+  yAxis.normalize();
+
+  if (yAxis.dot(extensionDir) < 0) {
+    yAxis.multiplyScalar(-1);
+    zAxis.multiplyScalar(-1);
+  }
+
+  const matrix = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
+  matrix.setPosition(origin);
+  return { origin, xAxis, yAxis, zAxis, matrix };
+}
+
+function projectPointToContourAxes(point, frame) {
+  const delta = point.clone().sub(frame.origin);
+  return [delta.dot(frame.xAxis), delta.dot(frame.zAxis)];
+}
+
+function simplifyContourPath2(path2) {
+  const deduped = dedupeConsecutivePoints2(path2 || []);
+  if (deduped.length < 2) return deduped;
+
+  const compact = [deduped[0]];
+  for (let i = 1; i < deduped.length; i += 1) {
+    const point = deduped[i];
+    const prev = compact[compact.length - 1];
+    if (pointDistance2(point, prev) > POINT_EPS) compact.push(point);
+  }
+  if (compact.length < 3) return compact;
+
+  const merged = [compact[0]];
+  for (let i = 1; i < compact.length - 1; i += 1) {
+    const prev = merged[merged.length - 1];
+    const curr = compact[i];
+    const next = compact[i + 1];
+
+    const v1x = curr[0] - prev[0];
+    const v1y = curr[1] - prev[1];
+    const v2x = next[0] - curr[0];
+    const v2y = next[1] - curr[1];
+    const l1 = Math.hypot(v1x, v1y);
+    const l2 = Math.hypot(v2x, v2y);
+    if (!(l1 > POINT_EPS) || !(l2 > POINT_EPS)) continue;
+
+    const cross = (v1x * v2y - v1y * v2x) / (l1 * l2);
+    const dot = (v1x * v2x + v1y * v2y) / (l1 * l2);
+    if (Math.abs(cross) <= 1e-6 && dot > 0.9999) continue;
+    merged.push(curr);
+  }
+  merged.push(compact[compact.length - 1]);
+  return merged;
+}
+
+function signedTurnRadians2(dirA, dirB) {
+  const ax = toFiniteNumber(dirA?.[0]);
+  const ay = toFiniteNumber(dirA?.[1]);
+  const bx = toFiniteNumber(dirB?.[0]);
+  const by = toFiniteNumber(dirB?.[1]);
+  return Math.atan2((ax * by) - (ay * bx), (ax * bx) + (ay * by));
+}
+
+function buildContourSegments(path2) {
   const out = [];
   if (!Array.isArray(path2) || path2.length < 2) return out;
 
-  for (let i = 0; i < path2.length; i += 1) {
-    const current = path2[i];
-    let nx = 0;
-    let ny = 0;
-    let contributions = 0;
-
-    if (i > 0) {
-      const prev = path2[i - 1];
-      const dx = current[0] - prev[0];
-      const dy = current[1] - prev[1];
-      const len = Math.hypot(dx, dy);
-      if (len > EPS) {
-        nx += -dy / len;
-        ny += dx / len;
-        contributions += 1;
-      }
-    }
-
-    if (i < path2.length - 1) {
-      const next = path2[i + 1];
-      const dx = next[0] - current[0];
-      const dy = next[1] - current[1];
-      const len = Math.hypot(dx, dy);
-      if (len > EPS) {
-        nx += -dy / len;
-        ny += dx / len;
-        contributions += 1;
-      }
-    }
-
-    if (contributions === 0 || Math.hypot(nx, ny) <= EPS) {
-      out.push([current[0], current[1]]);
-      continue;
-    }
-
-    const inv = 1 / Math.hypot(nx, ny);
-    out.push([current[0] + nx * inv * offset, current[1] + ny * inv * offset]);
+  for (let i = 0; i < path2.length - 1; i += 1) {
+    const a = path2[i];
+    const b = path2[i + 1];
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const length = Math.hypot(dx, dy);
+    if (!(length > POINT_EPS)) continue;
+    out.push({
+      index: out.length,
+      start: [a[0], a[1]],
+      end: [b[0], b[1]],
+      length,
+      dir: [dx / length, dy / length],
+    });
   }
-
   return out;
 }
 
-function buildFlatFromPath(pathSelections, featureID, distance, reverseSheetSide = false) {
-  const path3 = buildPathPolylineFromSelections(pathSelections);
-  if (!path3 || path3.length < 2) return null;
+function makeContourSegmentFlat(featureID, segmentIndex, length, height, usedIds, isRoot = false) {
+  const safeLength = Math.max(MIN_LEG, toFiniteNumber(length, MIN_LEG));
+  const safeHeight = Math.max(MIN_LEG, toFiniteNumber(height, MIN_LEG));
+  const baseFlatId = isRoot ? `${featureID}:flat_root` : `${featureID}:flat_${segmentIndex + 1}`;
+  const flatId = uniqueId(baseFlatId, usedIds);
 
-  const frame = buildProfileFrame(path3, null);
-  if (!frame) return null;
-
-  let path2 = path3.map((point) => projectPointToFrame(point, frame));
-  path2 = dedupeConsecutivePoints2(path2);
-  if (path2.length < 2) return null;
-
-  const width = Math.max(MIN_LEG, Math.abs(toFiniteNumber(distance, 0)));
-  const sign = reverseSheetSide ? -1 : 1;
-  const shifted = offsetPath2D(path2, sign * width);
-  if (shifted.length !== path2.length || shifted.length < 2) return null;
-
-  let outline2 = [...path2, ...shifted.slice().reverse()];
-  outline2 = dedupeConsecutivePoints2(outline2);
-  if (outline2.length < 3) return null;
-
-  if (signedArea2D(outline2) < 0) outline2 = outline2.slice().reverse();
-
-  const flatId = `${featureID}:flat_root`;
-  const edges = buildFlatEdgesFromOutline(outline2, flatId);
-  if (edges.length < 3) return null;
+  const topEdgeId = uniqueId(`${flatId}:top`, usedIds);
+  const endEdgeId = uniqueId(`${flatId}:end`, usedIds);
+  const bottomEdgeId = uniqueId(`${flatId}:bottom`, usedIds);
+  const startEdgeId = uniqueId(`${flatId}:start`, usedIds);
 
   const flat = {
     kind: "flat",
     id: flatId,
-    label: "Contour Flange",
-    color: colorFromString(flatId),
-    outline: outline2,
-    edges,
+    label: `Contour Segment ${segmentIndex + 1}`,
+    color: colorFromString(`${featureID}:${flatId}`),
+    outline: [
+      [0, 0],
+      [safeLength, 0],
+      [safeLength, safeHeight],
+      [0, safeHeight],
+    ],
+    edges: [
+      { id: topEdgeId, polyline: [[0, 0], [safeLength, 0]] },
+      { id: endEdgeId, polyline: [[safeLength, 0], [safeLength, safeHeight]] },
+      { id: bottomEdgeId, polyline: [[safeLength, safeHeight], [0, safeHeight]] },
+      { id: startEdgeId, isAttachEdge: !isRoot, polyline: [[0, 0], [0, safeHeight]] },
+    ],
   };
 
-  return { flat, frame };
+  return { flat, flatId, startEdgeId, endEdgeId, topEdgeId, bottomEdgeId };
+}
+
+function buildContourFlangeFromPath(pathSelections, featureID, options = {}) {
+  const path3 = buildPathPolylineFromSelections(pathSelections);
+  if (!path3 || path3.length < 2) return null;
+
+  const reverseSheetSide = !!options.reverseSheetSide;
+  const frame = buildContourPathFrame(path3, reverseSheetSide);
+  if (!frame) return null;
+
+  const path2Raw = path3.map((point) => projectPointToContourAxes(point, frame));
+  const path2 = simplifyContourPath2(path2Raw);
+  if (path2.length < 2) return null;
+
+  const segments = buildContourSegments(path2);
+  if (!segments.length) return null;
+
+  const height = Math.max(MIN_LEG, Math.abs(toFiniteNumber(options.distance, 0)));
+  const thickness = Math.max(MIN_THICKNESS, Math.abs(toFiniteNumber(options.thickness, 1)));
+  const insideRadius = Math.max(0, toFiniteNumber(options.bendRadius, thickness * 0.5));
+  const midRadius = Math.max(MIN_LEG, insideRadius + thickness * 0.5);
+  const kFactor = clamp(toFiniteNumber(options.kFactor, 0.5), 0, 1);
+
+  const usedIds = new Set();
+  const first = makeContourSegmentFlat(featureID, 0, segments[0].length, height, usedIds, true);
+  let current = first;
+  const bendSummary = [];
+
+  for (let i = 0; i < segments.length - 1; i += 1) {
+    const parentSeg = segments[i];
+    const childSeg = segments[i + 1];
+    const child = makeContourSegmentFlat(featureID, i + 1, childSeg.length, height, usedIds, false);
+
+    let angleDeg = -THREE.MathUtils.radToDeg(signedTurnRadians2(parentSeg.dir, childSeg.dir));
+    if (Math.abs(angleDeg) < 1e-4) angleDeg = angleDeg >= 0 ? 1e-4 : -1e-4;
+
+    const bendId = uniqueId(`${featureID}:bend_${i + 1}`, usedIds);
+    const endEdge = findEdgeById(current.flat, current.endEdgeId);
+    if (!endEdge) return null;
+
+    endEdge.bend = {
+      kind: "bend",
+      id: bendId,
+      color: colorFromString(bendId, 0.7, 0.5),
+      angleDeg,
+      midRadius,
+      kFactor,
+      children: [{
+        flat: child.flat,
+        attachEdgeId: child.startEdgeId,
+        reverseEdge: false,
+      }],
+    };
+
+    bendSummary.push({
+      bendId,
+      fromFlatId: current.flatId,
+      toFlatId: child.flatId,
+      angleDeg,
+      turnDeg: THREE.MathUtils.radToDeg(signedTurnRadians2(parentSeg.dir, childSeg.dir)),
+    });
+    current = child;
+  }
+
+  const tree = {
+    thickness,
+    root: first.flat,
+  };
+
+  return {
+    tree,
+    frame,
+    path2,
+    segments,
+    bends: bendSummary,
+    height,
+    insideRadius,
+    midRadius,
+    kFactor,
+  };
 }
 
 function ensureSheetMeta(tree) {
@@ -2149,10 +2311,16 @@ export function runSheetMetalContourFlange(instance) {
   const thickness = Math.max(MIN_THICKNESS, Math.abs(toFiniteNumber(instance?.inputParams?.thickness, 1)));
   const distance = toFiniteNumber(instance?.inputParams?.distance, 20);
   const reverseSheetSide = !!instance?.inputParams?.reverseSheetSide;
-  const bendRadius = Math.max(MIN_LEG, toFiniteNumber(instance?.inputParams?.bendRadius, thickness * 0.5));
+  const bendRadius = Math.max(0, toFiniteNumber(instance?.inputParams?.bendRadius, thickness * 0.5));
   const kFactor = clamp(toFiniteNumber(instance?.inputParams?.neutralFactor, 0.5), 0, 1);
 
-  const built = buildFlatFromPath(pathSelections, featureID, distance, reverseSheetSide);
+  const built = buildContourFlangeFromPath(pathSelections, featureID, {
+    distance,
+    thickness,
+    bendRadius,
+    kFactor,
+    reverseSheetSide,
+  });
   if (!built) {
     instance.persistentData = {
       ...basePersistentPayload(instance),
@@ -2165,17 +2333,15 @@ export function runSheetMetalContourFlange(instance) {
     return { added: [], removed: [] };
   }
 
-  const tree = { thickness, root: built.flat };
+  const tree = built.tree;
   const meta = ensureSheetMeta(tree);
   meta.baseType = "CONTOUR_FLANGE";
-  meta.defaultInsideRadius = bendRadius;
-  meta.defaultKFactor = kFactor;
+  meta.defaultInsideRadius = built.insideRadius;
+  meta.defaultKFactor = built.kFactor;
   meta.lastFeatureID = featureID;
 
   const rootMatrix = built.frame.matrix.clone();
-  rootMatrix.setPosition(
-    built.frame.origin.clone().addScaledVector(built.frame.normal, reverseSheetSide ? -thickness * 0.5 : thickness * 0.5)
-  );
+  rootMatrix.setPosition(built.frame.origin.clone().addScaledVector(built.frame.yAxis, thickness * 0.5));
 
   const { root, evaluated } = buildRenderableSheetModel({
     featureID,
@@ -2196,6 +2362,11 @@ export function runSheetMetalContourFlange(instance) {
       status: "ok",
       tree: cloneTree(tree),
       rootTransform: matrixToArray(rootMatrix),
+      contourSummary: {
+        segmentCount: built.segments.length,
+        bendCount: built.bends.length,
+        wallHeight: built.height,
+      },
       summary: summarizeEvaluatedModel(evaluated),
     },
   };
