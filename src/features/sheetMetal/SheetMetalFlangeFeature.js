@@ -1,3 +1,5 @@
+import { runSheetMetalFlange } from "./sheetMetalEngineBridge.js";
+
 const inputParamsSchema = {
   id: {
     type: "string",
@@ -6,10 +8,10 @@ const inputParamsSchema = {
   },
   faces: {
     type: "reference_selection",
-    selectionFilter: ["FACE"],
+    selectionFilter: ["FACE", "EDGE"],
     multiple: true,
     default_value: null,
-    hint: "Select one or more thin side faces where the flange will be constructed.",
+    hint: "Select one or more sheet-metal edge overlays where the flange will be constructed.",
   },
   useOppositeCenterline: {
     label: "Reverse direction",
@@ -21,13 +23,13 @@ const inputParamsSchema = {
     type: "number",
     default_value: 10,
     min: 0,
-    hint: "Placeholder: retained for UI compatibility (currently unused).",
+    hint: "Straight leg length extending away from the bend edge.",
   },
   flangeLengthReference: {
     type: "options",
     options: ["inside", "outside", "web"],
     default_value: "outside",
-    hint: "Placeholder: retained for UI compatibility (currently unused).",
+    hint: "Specifies how the flange length dimension is interpreted for the new web face (inside/outside/web).",
   },
   angle: {
     type: "number",
@@ -40,45 +42,32 @@ const inputParamsSchema = {
     type: "options",
     options: ["material_inside", "material_outside", "bend_outside"],
     default_value: "material_inside",
-    hint: "Placeholder: retained for UI compatibility (currently unused).",
+    hint: "Edge shift before bend: material_inside = thickness + bendRadius, material_outside = bendRadius, bend_outside = 0.",
   },
   reliefWidth: {
     type: "number",
     default_value: 0,
     step: 0.1,
     min: 0,
-    hint: "Placeholder reserved for future relief cut options.",
+    hint: "Relief placeholder retained for compatibility.",
   },
   bendRadius: {
     type: "number",
     default_value: 0,
     min: 0,
-    hint: "Placeholder reserved for future bend radius overrides.",
+    hint: "Inside bend radius override. Defaults to the model’s stored value.",
   },
   offset: {
     type: "number",
     default_value: 0,
-    hint: "Placeholder reserved for future offset support.",
+    hint: "Additional signed offset for bend-edge repositioning (positive = outward, negative = inward).",
   },
   debugSkipUnion: {
     type: "boolean",
     default_value: false,
-    hint: "Debug: Skip boolean union with the parent sheet metal.",
+    hint: "Debug field retained for compatibility.",
   },
 };
-
-function buildStubPersistentData(instance) {
-  const featureID = instance?.inputParams?.featureID ?? instance?.inputParams?.id ?? null;
-  return {
-    ...(instance?.persistentData || {}),
-    sheetMetal: {
-      stubbed: true,
-      feature: instance?.constructor?.shortName || instance?.constructor?.name || "SheetMetal",
-      featureID,
-      message: "Sheet metal execution is intentionally disabled.",
-    },
-  };
-}
 
 export class SheetMetalFlangeFeature {
   static shortName = "SM.F";
@@ -95,8 +84,18 @@ export class SheetMetalFlangeFeature {
     this.persistentData = {};
   }
 
-  async run() {
-    this.persistentData = buildStubPersistentData(this);
-    return { added: [], removed: [] };
+  async run(partHistory) {
+    void partHistory;
+    const angleOverride = this.constructor?.angleOverride;
+    const defaultBendRadius = this.constructor?.defaultBendRadius;
+    const hasAngleOverride = angleOverride != null && Number.isFinite(Number(angleOverride));
+    const hasDefaultBendRadius = defaultBendRadius != null && Number.isFinite(Number(defaultBendRadius));
+
+    return runSheetMetalFlange(this, {
+      baseType: this.constructor?.baseType || "FLANGE",
+      angleDeg: hasAngleOverride ? Number(angleOverride) : undefined,
+      defaultInsideRadius: hasDefaultBendRadius ? Number(defaultBendRadius) : undefined,
+      lockAngleToAbsolute: hasAngleOverride,
+    });
   }
 }

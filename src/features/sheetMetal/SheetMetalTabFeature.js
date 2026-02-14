@@ -1,3 +1,5 @@
+import { runSheetMetalTab } from "./sheetMetalEngineBridge.js";
+
 const inputParamsSchema = {
   id: {
     type: "string",
@@ -49,19 +51,6 @@ const inputParamsSchema = {
   },
 };
 
-function buildStubPersistentData(instance) {
-  const featureID = instance?.inputParams?.featureID ?? instance?.inputParams?.id ?? null;
-  return {
-    ...(instance?.persistentData || {}),
-    sheetMetal: {
-      stubbed: true,
-      feature: instance?.constructor?.shortName || instance?.constructor?.name || "SheetMetal",
-      featureID,
-      message: "Sheet metal execution is intentionally disabled.",
-    },
-  };
-}
-
 export class SheetMetalTabFeature {
   static shortName = "SM.TAB";
   static longName = "Sheet Metal Tab";
@@ -76,8 +65,8 @@ export class SheetMetalTabFeature {
     return [];
   }
 
-  async run() {
-    this.persistentData = buildStubPersistentData(this);
-    return { added: [], removed: [] };
+  async run(partHistory) {
+    void partHistory;
+    return runSheetMetalTab(this);
   }
 }

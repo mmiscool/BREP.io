@@ -140,6 +140,12 @@ export function visualize(options = {}) {
         faceObj.name = faceName;
         faceObj.userData.faceName = faceName;
         faceObj.userData.__defaultMaterial = faceObj.material;
+        try {
+            const faceMeta = (typeof this.getFaceMetadata === 'function') ? this.getFaceMetadata(faceName) : null;
+            if (faceMeta && typeof faceMeta === 'object') {
+                faceObj.userData = { ...(faceObj.userData || {}), ...faceMeta };
+            }
+        } catch { /* ignore face metadata lookup errors */ }
         faceObj.parentSolid = this;
         // Tag with the owning feature for inspector/debug traceability.
         try { faceObj.owningFeatureID = this?.owningFeatureID || null; } catch { }

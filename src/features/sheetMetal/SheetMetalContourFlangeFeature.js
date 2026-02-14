@@ -1,3 +1,5 @@
+import { runSheetMetalContourFlange } from "./sheetMetalEngineBridge.js";
+
 const inputParamsSchema = {
   id: {
     type: "string",
@@ -6,7 +8,7 @@ const inputParamsSchema = {
   },
   path: {
     type: "reference_selection",
-    selectionFilter: ["SKETCH", "EDGE"],
+    selectionFilter: ["SKETCH", "EDGE", "FACE"],
     multiple: true,
     default_value: null,
     hint: "Open sketch (or connected edges) defining the flange centerline.",
@@ -49,19 +51,6 @@ const inputParamsSchema = {
   },
 };
 
-function buildStubPersistentData(instance) {
-  const featureID = instance?.inputParams?.featureID ?? instance?.inputParams?.id ?? null;
-  return {
-    ...(instance?.persistentData || {}),
-    sheetMetal: {
-      stubbed: true,
-      feature: instance?.constructor?.shortName || instance?.constructor?.name || "SheetMetal",
-      featureID,
-      message: "Sheet metal execution is intentionally disabled.",
-    },
-  };
-}
-
 export class SheetMetalContourFlangeFeature {
   static shortName = "SM.CF";
   static longName = "Sheet Metal Contour Flange";
@@ -76,8 +65,8 @@ export class SheetMetalContourFlangeFeature {
     return [];
   }
 
-  async run() {
-    this.persistentData = buildStubPersistentData(this);
-    return { added: [], removed: [] };
+  async run(partHistory) {
+    void partHistory;
+    return runSheetMetalContourFlange(this);
   }
 }

@@ -1,3 +1,5 @@
+import { runSheetMetalCutout } from "./sheetMetalEngineBridge.js";
+
 const inputParamsSchema = {
   id: {
     type: "string",
@@ -47,19 +49,6 @@ const inputParamsSchema = {
   },
 };
 
-function buildStubPersistentData(instance) {
-  const featureID = instance?.inputParams?.featureID ?? instance?.inputParams?.id ?? null;
-  return {
-    ...(instance?.persistentData || {}),
-    sheetMetal: {
-      stubbed: true,
-      feature: instance?.constructor?.shortName || instance?.constructor?.name || "SheetMetal",
-      featureID,
-      message: "Sheet metal execution is intentionally disabled.",
-    },
-  };
-}
-
 export class SheetMetalCutoutFeature {
   static shortName = "SM.CUTOUT";
   static longName = "Sheet Metal Cutout";
@@ -75,9 +64,9 @@ export class SheetMetalCutoutFeature {
     return [];
   }
 
-  async run() {
+  async run(partHistory) {
+    void partHistory;
     this.debugTool = null;
-    this.persistentData = buildStubPersistentData(this);
-    return { added: [], removed: [] };
+    return runSheetMetalCutout(this);
   }
 }
