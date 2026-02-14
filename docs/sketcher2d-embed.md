@@ -5,7 +5,7 @@ This document covers the iframe-based `Sketcher2DEmbed` API for embedding the 2D
 ## Demo Page
 - Hosted demo: [https://BREP.io/apiExamples/Embeded_2D_Sketcher.html](https://BREP.io/apiExamples/Embeded_2D_Sketcher.html)
 - Repo demo page: `apiExamples/Embeded_2D_Sketcher.html`
-- Source on GitHub: [apiExamples/Embeded_2D_Sketcher.html](https://github.com/mmiscool/BREP/blob/main/apiExamples/Embeded_2D_Sketcher.html)
+- Source on GitHub: [apiExamples/Embeded_2D_Sketcher.html](https://github.com/mmiscool/BREP/blob/master/apiExamples/Embeded_2D_Sketcher.html)
 
 ## Import
 Package usage:
