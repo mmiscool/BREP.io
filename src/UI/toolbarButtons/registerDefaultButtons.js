@@ -12,6 +12,7 @@ import { createAboutButton } from './aboutButton.js';
 import { createTestsButton } from './testsButton.js';
 import { createScriptRunnerButton } from './scriptRunnerButton.js';
 import { createSelectionStateButton } from './selectionStateButton.js';
+import { createSheetMetalFlatExportButton } from './sheetMetalFlatExportButton.js';
 
 export function registerDefaultToolbarButtons(viewer) {
   if (!viewer || typeof viewer.addToolbarButton !== 'function') return;
@@ -23,6 +24,7 @@ export function registerDefaultToolbarButtons(viewer) {
     createWireframeToggleButton,
     createImportButton,
     createExportButton,
+    createSheetMetalFlatExportButton,
     createAboutButton,
     createTestsButton,
     createScriptRunnerButton,
