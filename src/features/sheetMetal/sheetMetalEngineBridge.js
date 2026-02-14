@@ -12,6 +12,7 @@ const ENGINE_TAG = "sheet-metal-core";
 const TRIANGLE_AREA_EPS = 1e-14;
 const COORD_QUANT = 1e-7;
 const EDGE_MATCH_EPS = 1e-3;
+const OVERLAP_RELIEF_GAP = .0001;
 
 function toFiniteNumber(value, fallback = 0) {
   const num = Number(value);
@@ -880,6 +881,30 @@ function moveFlatEdgeForFlangeReference(flat, targetEdge, inwardDistance, usedId
     return { edge: targetEdge, moved: false, shiftDistance: 0, bridgeCount: 0, reason: "degenerate_moved_edge" };
   }
 
+  const oldEdges = Array.isArray(flat.edges) ? flat.edges : [];
+  const oldBySig = new Map();
+  for (const edge of oldEdges) {
+    if (!edge || !Array.isArray(edge.polyline) || edge.polyline.length < 2) continue;
+    const sig = segmentSignature2(edge.polyline[0], edge.polyline[edge.polyline.length - 1]);
+    if (!sig) continue;
+    if (!oldBySig.has(sig)) oldBySig.set(sig, []);
+    oldBySig.get(sig).push(edge);
+  }
+  const findExistingEdgeBySegment = (a, b, excludeId = null) => {
+    const sig = segmentSignature2(a, b);
+    if (!sig) return null;
+    const list = oldBySig.get(sig);
+    if (!Array.isArray(list) || !list.length) return null;
+    for (let i = 0; i < list.length; i += 1) {
+      const candidate = list[i];
+      if (!candidate) continue;
+      const candidateId = candidate.id != null ? String(candidate.id) : null;
+      if (excludeId != null && candidateId === String(excludeId)) continue;
+      return candidate;
+    }
+    return null;
+  };
+
   const dot2 = (u, v) => (u[0] * v[0]) + (u[1] * v[1]);
   const collinear2 = (u, v) => {
     const lu = Math.hypot(u[0], u[1]);
@@ -908,11 +933,46 @@ function moveFlatEdgeForFlangeReference(flat, targetEdge, inwardDistance, usedId
   const trimStartAdjacent = collinear2(incomingPrev, outgoingStartBridge) && dot2(incomingPrev, outgoingStartBridge) < 0;
   const trimEndAdjacent = collinear2(incomingEndBridge, outgoingNext) && dot2(incomingEndBridge, outgoingNext) < 0;
 
+  const prevAdjEdge = findExistingEdgeBySegment(prevPoint, match.start, targetEdge?.id ?? null);
+  const nextAdjEdge = findExistingEdgeBySegment(match.end, nextPoint, targetEdge?.id ?? null);
+  const prevProtected = !!(prevAdjEdge?.bend || prevAdjEdge?.isAttachEdge);
+  const nextProtected = !!(nextAdjEdge?.bend || nextAdjEdge?.isAttachEdge);
+  // Never reshape an adjacent bend/attach edge. We still move the selected edge and bridge to the
+  // original endpoint (overlap/double-back is allowed), so inset options remain active in-place.
+  const trimStart = trimStartAdjacent && !prevProtected;
+  const trimEnd = trimEndAdjacent && !nextProtected;
+  const startNeedsReliefJog = trimStartAdjacent && prevProtected;
+  const endNeedsReliefJog = trimEndAdjacent && nextProtected;
+
+  const tangent = [dx / segLen, dy / segLen];
+  const reliefDistance = Math.min(segLen * 0.25, OVERLAP_RELIEF_GAP);
+  const reliefStartPoint = [
+    match.start[0] + (tangent[0] * reliefDistance),
+    match.start[1] + (tangent[1] * reliefDistance),
+  ];
+  const reliefEndPoint = [
+    match.end[0] - (tangent[0] * reliefDistance),
+    match.end[1] - (tangent[1] * reliefDistance),
+  ];
+  const movedReliefStartPoint = [
+    movedStart[0] + (tangent[0] * reliefDistance),
+    movedStart[1] + (tangent[1] * reliefDistance),
+  ];
+  const movedReliefEndPoint = [
+    movedEnd[0] - (tangent[0] * reliefDistance),
+    movedEnd[1] - (tangent[1] * reliefDistance),
+  ];
+  const effectiveMovedStart = startNeedsReliefJog ? movedReliefStartPoint : movedStart;
+  const effectiveMovedEnd = endNeedsReliefJog ? movedReliefEndPoint : movedEnd;
+  if (!(segmentLength2(effectiveMovedStart, effectiveMovedEnd) > POINT_EPS)) {
+    return { edge: targetEdge, moved: false, shiftDistance: 0, bridgeCount: 0, reason: "relief_consumed_target_edge" };
+  }
+
   const edgeDefs = [];
   for (let i = 0; i < outline.length; i += 1) {
     const a = outline[i];
     const b = outline[(i + 1) % outline.length];
-    if (i === prevIndex && trimStartAdjacent) {
+    if (i === prevIndex && trimStart) {
       edgeDefs.push({
         kind: "existing",
         a: copyPoint2(a),
@@ -922,7 +982,7 @@ function moveFlatEdgeForFlangeReference(flat, targetEdge, inwardDistance, usedId
       });
       continue;
     }
-    if (i === nextIndex && trimEndAdjacent) {
+    if (i === nextIndex && trimEnd) {
       edgeDefs.push({
         kind: "existing",
         a: copyPoint2(movedEnd),
@@ -936,28 +996,28 @@ function moveFlatEdgeForFlangeReference(flat, targetEdge, inwardDistance, usedId
       edgeDefs.push({ kind: "existing", a: copyPoint2(a), b: copyPoint2(b) });
       continue;
     }
-    if (!trimStartAdjacent) {
-      edgeDefs.push({ kind: "bridge_start", a: copyPoint2(a), b: copyPoint2(movedStart) });
+    if (!trimStart) {
+      if (startNeedsReliefJog && segmentLength2(a, reliefStartPoint) >= POINT_EPS && segmentLength2(reliefStartPoint, effectiveMovedStart) > POINT_EPS) {
+        edgeDefs.push({ kind: "bridge_start", a: copyPoint2(a), b: copyPoint2(reliefStartPoint) });
+        edgeDefs.push({ kind: "bridge_start", a: copyPoint2(reliefStartPoint), b: copyPoint2(effectiveMovedStart) });
+      } else {
+        edgeDefs.push({ kind: "bridge_start", a: copyPoint2(a), b: copyPoint2(effectiveMovedStart) });
+      }
     }
-    edgeDefs.push({ kind: "target", a: copyPoint2(movedStart), b: copyPoint2(movedEnd) });
-    if (!trimEndAdjacent) {
-      edgeDefs.push({ kind: "bridge_end", a: copyPoint2(movedEnd), b: copyPoint2(b) });
+    edgeDefs.push({ kind: "target", a: copyPoint2(effectiveMovedStart), b: copyPoint2(effectiveMovedEnd) });
+    if (!trimEnd) {
+      if (endNeedsReliefJog && segmentLength2(effectiveMovedEnd, reliefEndPoint) > POINT_EPS && segmentLength2(reliefEndPoint, b) >= POINT_EPS) {
+        edgeDefs.push({ kind: "bridge_end", a: copyPoint2(effectiveMovedEnd), b: copyPoint2(reliefEndPoint) });
+        edgeDefs.push({ kind: "bridge_end", a: copyPoint2(reliefEndPoint), b: copyPoint2(b) });
+      } else {
+        edgeDefs.push({ kind: "bridge_end", a: copyPoint2(effectiveMovedEnd), b: copyPoint2(b) });
+      }
     }
   }
 
   const filteredDefs = edgeDefs.filter((entry) => segmentLength2(entry.a, entry.b) > POINT_EPS);
   if (filteredDefs.length < 3) {
     return { edge: targetEdge, moved: false, shiftDistance: 0, bridgeCount: 0, reason: "insufficient_segments" };
-  }
-
-  const oldEdges = Array.isArray(flat.edges) ? flat.edges : [];
-  const oldBySig = new Map();
-  for (const edge of oldEdges) {
-    if (!edge || !Array.isArray(edge.polyline) || edge.polyline.length < 2) continue;
-    const sig = segmentSignature2(edge.polyline[0], edge.polyline[edge.polyline.length - 1]);
-    if (!sig) continue;
-    if (!oldBySig.has(sig)) oldBySig.set(sig, []);
-    oldBySig.get(sig).push(edge);
   }
 
   const consumed = new Set();
@@ -1721,6 +1781,87 @@ function addBendPlacementToSolid({ solid, bendPlacement, featureID, thickness, b
   });
 }
 
+function addBendCenterlinesToSolid({ solid, bends3D, featureID }) {
+  if (!solid || !Array.isArray(bends3D) || bends3D.length === 0) return;
+  const usedNames = new Set();
+
+  for (let i = 0; i < bends3D.length; i += 1) {
+    const bendPlacement = bends3D[i];
+    const axisStart = bendPlacement?.axisStart;
+    const axisEnd = bendPlacement?.axisEnd;
+    if (!axisStart?.isVector3 || !axisEnd?.isVector3) continue;
+    if (axisStart.distanceToSquared(axisEnd) <= POINT_EPS * POINT_EPS) continue;
+
+    const bendId = String(bendPlacement?.bend?.id || `bend_${i + 1}`);
+    let name = `${featureID}:BEND:${bendId}:CENTERLINE`;
+    let suffix = 1;
+    while (usedNames.has(name)) {
+      name = `${featureID}:BEND:${bendId}:CENTERLINE:${suffix}`;
+      suffix += 1;
+    }
+    usedNames.add(name);
+
+    solid.addAuxEdge(name, [quantizePoint3(axisStart), quantizePoint3(axisEnd)], {
+      centerline: true,
+      materialKey: "OVERLAY",
+      polylineWorld: false,
+    });
+  }
+}
+
+function buildFlatPatternBendCenterlinePoints(bend2D) {
+  const edgeWorld = Array.isArray(bend2D?.edgeWorld) ? bend2D.edgeWorld : [];
+  if (edgeWorld.length < 2) return [];
+
+  const allowance = Math.max(0, toFiniteNumber(bend2D?.allowance, 0));
+  const shiftRaw = Array.isArray(bend2D?.shiftDir) ? bend2D.shiftDir : [0, 0];
+  const shift = new THREE.Vector3(toFiniteNumber(shiftRaw[0]), toFiniteNumber(shiftRaw[1]), 0);
+  const shiftLen = shift.length();
+  if (!(shiftLen > EPS)) return [];
+
+  shift.multiplyScalar((allowance * 0.5) / shiftLen);
+  const out = [];
+  for (const point of edgeWorld) {
+    if (!point?.isVector3) continue;
+    out.push(point.clone().add(shift));
+  }
+  return out.length >= 2 ? out : [];
+}
+
+function addBendCenterlinesToFlatPatternGroup(group2D, bends2D) {
+  if (!group2D || !Array.isArray(bends2D) || bends2D.length === 0) return;
+  const material = new THREE.LineBasicMaterial({
+    color: 0xffe27a,
+    transparent: true,
+    opacity: 0.95,
+    depthTest: false,
+    depthWrite: false,
+  });
+
+  for (let i = 0; i < bends2D.length; i += 1) {
+    const bendPlacement = bends2D[i];
+    const points = buildFlatPatternBendCenterlinePoints(bendPlacement);
+    if (points.length < 2) continue;
+
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material);
+    line.renderOrder = 30;
+    line.name = `${bendPlacement?.bend?.id || `bend_${i + 1}`}:CENTERLINE`;
+    line.userData = {
+      ...(line.userData || {}),
+      sheetMetalFlatPattern: true,
+      centerline: true,
+      sheetMetal: {
+        kind: "bend_centerline",
+        representation: "2D",
+        bendId: bendPlacement?.bend?.id || null,
+        parentFlatId: bendPlacement?.parentFlatId || null,
+        childFlatId: bendPlacement?.childFlatId || null,
+      },
+    };
+    group2D.add(line);
+  }
+}
+
 function assignSheetMetalEdgeMetadata(solid, edgeCandidates) {
   if (!solid || !Array.isArray(edgeCandidates) || !edgeCandidates.length) return;
 
@@ -1774,6 +1915,7 @@ function makeSheetMetal2DGroup({ solid, model, featureID, thickness, rootMatrix,
   const group2D = buildTwoDGroup(model.flats2D, model.bends2D, {
     showTriangulation: false,
   });
+  addBendCenterlinesToFlatPatternGroup(group2D, model.bends2D);
   group2D.name = `${featureID}:2D`;
   group2D.visible = true;
   group2D.userData = {
@@ -1846,6 +1988,11 @@ function buildRenderableSheetModel({ featureID, tree, rootMatrix = null, showFla
       bendLookup,
     });
   }
+  addBendCenterlinesToSolid({
+    solid: root,
+    bends3D: model.bends3D || [],
+    featureID,
+  });
 
   if (rootMatrix) {
     root.bakeTransform(rootTransform);
