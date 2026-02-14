@@ -10,6 +10,14 @@ import {
 
 const EPS = 1e-8;
 const SEG_KEY_QUANT = 1e-6;
+const BEND_LABEL_CHAR_WIDTH_FACTOR = 0.62;
+const BEND_LABEL_WIDTH_UTILIZATION = 0.56;
+const BEND_LABEL_HEIGHT_SCALE = 0.55;
+const BEND_LABEL_MAX_SCENE_HEIGHT_FACTOR = 0.015;
+const BEND_LABEL_MAX_SCENE_HEIGHT_MIN = 0.8;
+const BEND_LABEL_BASE_OFFSET_ALLOWANCE_FACTOR = 0.22;
+const BEND_LABEL_BASE_OFFSET_MIN = 0.12;
+const BEND_LABEL_OFFSET_FROM_HEIGHT_FACTOR = 0.3;
 const FLAT_PATTERN_STYLES = {
   CUT: {
     layer: "CUT",
@@ -166,6 +174,19 @@ function polylineLength2(points) {
   return len;
 }
 
+function estimateLabelCharUnits(label) {
+  const text = String(label || "");
+  let units = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === " ") units += 0.42;
+    else if (ch === ".") units += 0.32;
+    else if (ch === "\u00B0") units += 0.54;
+    else units += 1;
+  }
+  return Math.max(units, 1);
+}
+
 function polylineMidpoint2(points) {
   if (!Array.isArray(points) || points.length === 0) return [0, 0];
   if (points.length === 1) return [toFiniteNumber(points[0][0]), toFiniteNumber(points[0][1])];
@@ -241,10 +262,14 @@ function buildBendCenterlineRecords(bends2D) {
     }
 
     const midpoint = polylineMidpoint2(centerlinePoints);
-    const labelOffset = Math.max(allowance * 0.65, 0.75);
+    const labelOffset = Math.max(
+      allowance * BEND_LABEL_BASE_OFFSET_ALLOWANCE_FACTOR,
+      BEND_LABEL_BASE_OFFSET_MIN
+    );
     const labelPosition = [midpoint[0] + (nx * labelOffset), midpoint[1] + (ny * labelOffset)];
     const labelRotationDeg = THREE.MathUtils.radToDeg(Math.atan2(tangent[1], tangent[0]));
     const label = `${direction} ${formatAngleLabel(angleDeg)}`;
+    const lineLength = polylineLength2(centerlinePoints);
 
     out.push({
       points: centerlinePoints,
@@ -253,6 +278,10 @@ function buildBendCenterlineRecords(bends2D) {
       label,
       labelPosition,
       labelRotationDeg,
+      lineLength,
+      midpoint,
+      labelNormal: [nx, ny],
+      labelOffsetBase: labelOffset,
     });
   }
   return out;
@@ -308,7 +337,25 @@ function buildFlatPatternScene({ cutSegments, bendCenterlineRecords, bounds }) {
   }
 
   const bb = bounds || computeTwoDSceneBounds(scene);
-  const labelHeight = Math.max(Math.max(bb.width, bb.height) * 0.018, 1.8);
+
+  let shortestBendLength = Number.POSITIVE_INFINITY;
+  let maxLabelCharUnits = 1;
+  for (const record of bendCenterlineRecords || []) {
+    const length = Math.max(0, toFiniteNumber(record?.lineLength, 0));
+    if (length > EPS && length < shortestBendLength) shortestBendLength = length;
+    const charUnits = estimateLabelCharUnits(record?.label || "");
+    if (charUnits > maxLabelCharUnits) maxLabelCharUnits = charUnits;
+  }
+  if (!Number.isFinite(shortestBendLength)) shortestBendLength = Math.max(bb.width, bb.height) * 0.2;
+
+  const fitHeight = ((shortestBendLength * BEND_LABEL_WIDTH_UTILIZATION)
+    / (Math.max(maxLabelCharUnits, 1) * BEND_LABEL_CHAR_WIDTH_FACTOR))
+    * BEND_LABEL_HEIGHT_SCALE;
+  const maxByScene = Math.max(
+    Math.max(bb.width, bb.height) * BEND_LABEL_MAX_SCENE_HEIGHT_FACTOR,
+    BEND_LABEL_MAX_SCENE_HEIGHT_MIN
+  );
+  const labelHeight = Math.max(0.1, Math.min(maxByScene, fitHeight));
 
   for (const record of bendCenterlineRecords || []) {
     const lineStyle = record?.direction === "DOWN" ? "BEND_DOWN" : "BEND_UP";
@@ -324,13 +371,25 @@ function buildFlatPatternScene({ cutSegments, bendCenterlineRecords, bounds }) {
     }
 
     if (record?.label && Array.isArray(record?.labelPosition)) {
+      const mid = Array.isArray(record?.midpoint) ? record.midpoint : null;
+      const normal = Array.isArray(record?.labelNormal) ? record.labelNormal : null;
+      const baseOffset = Math.max(0, toFiniteNumber(record?.labelOffsetBase, 0));
+      const resolvedOffset = Math.max(baseOffset, labelHeight * BEND_LABEL_OFFSET_FROM_HEIGHT_FACTOR);
+      const at = (mid && normal)
+        ? [
+          toFiniteNumber(mid[0]) + (toFiniteNumber(normal[0]) * resolvedOffset),
+          toFiniteNumber(mid[1]) + (toFiniteNumber(normal[1]) * resolvedOffset),
+        ]
+        : [toFiniteNumber(record.labelPosition[0]), toFiniteNumber(record.labelPosition[1])];
       scene.entities.push({
         type: "text",
         style: labelStyle,
         value: String(record.label),
-        at: [toFiniteNumber(record.labelPosition[0]), toFiniteNumber(record.labelPosition[1])],
+        at,
         rotationDeg: toFiniteNumber(record.labelRotationDeg, 0),
         height: labelHeight,
+        anchor: "center",
+        baseline: "middle",
       });
     }
   }

@@ -3,6 +3,7 @@ import { SelectionState } from "../../UI/SelectionState.js";
 import { Solid } from "../../BREP/BetterSolid.js";
 import { deepClone } from "../../utils/deepClone.js";
 import { buildTwoDGroup, evaluateSheetMetal } from "./engine/index.js";
+import { buildFlatPatternExportData } from "./flatPatternExport.js";
 
 const EPS = 1e-8;
 const POINT_EPS = 1e-4;
@@ -13,6 +14,11 @@ const TRIANGLE_AREA_EPS = 1e-14;
 const COORD_QUANT = 1e-7;
 const EDGE_MATCH_EPS = 1e-3;
 const OVERLAP_RELIEF_GAP = .0001;
+const FLAT_PATTERN_OVERLAY_Z = 1e-3;
+const FLAT_PATTERN_TEXT_RENDER_ORDER = 38;
+const FLAT_PATTERN_LINE_RENDER_ORDER = 36;
+const FLAT_PATTERN_TEXT_FONT_PX = 220;
+const FLAT_PATTERN_TEXT_FONT_FAMILY = "Arial, Helvetica, sans-serif";
 
 function toFiniteNumber(value, fallback = 0) {
   const num = Number(value);
@@ -1971,57 +1977,224 @@ function addBendCenterlinesToSolid({ solid, bends3D, featureID }) {
   }
 }
 
-function buildFlatPatternBendCenterlinePoints(bend2D) {
-  const edgeWorld = Array.isArray(bend2D?.edgeWorld) ? bend2D.edgeWorld : [];
-  if (edgeWorld.length < 2) return [];
-
-  const allowance = Math.max(0, toFiniteNumber(bend2D?.allowance, 0));
-  const shiftRaw = Array.isArray(bend2D?.shiftDir) ? bend2D.shiftDir : [0, 0];
-  const shift = new THREE.Vector3(toFiniteNumber(shiftRaw[0]), toFiniteNumber(shiftRaw[1]), 0);
-  const shiftLen = shift.length();
-  if (!(shiftLen > EPS)) return [];
-
-  shift.multiplyScalar((allowance * 0.5) / shiftLen);
-  const out = [];
-  for (const point of edgeWorld) {
-    if (!point?.isVector3) continue;
-    out.push(point.clone().add(shift));
-  }
-  return out.length >= 2 ? out : [];
+function sceneStyleForKey(scene, styleKey) {
+  const styles = scene?.styles && typeof scene.styles === "object" ? scene.styles : {};
+  if (styleKey && styles[styleKey] && typeof styles[styleKey] === "object") return styles[styleKey];
+  if (styles.DEFAULT && typeof styles.DEFAULT === "object") return styles.DEFAULT;
+  return {};
 }
 
-function addBendCenterlinesToFlatPatternGroup(group2D, bends2D) {
-  if (!group2D || !Array.isArray(bends2D) || bends2D.length === 0) return;
-  const material = new THREE.LineBasicMaterial({
-    color: 0xffe27a,
+function styleColorHex(style, fallback = "#ffffff", key = "stroke") {
+  const raw = style?.[key] ?? style?.stroke ?? fallback;
+  const color = new THREE.Color();
+  try {
+    color.set(raw);
+    return color.getHex();
+  } catch {
+    color.set(fallback);
+    return color.getHex();
+  }
+}
+
+function parseDashPattern(style = {}) {
+  const raw = style.svgDash ?? style.dxfDashPattern ?? null;
+  let values = null;
+  if (Array.isArray(raw)) {
+    values = raw;
+  } else if (typeof raw === "string") {
+    values = raw
+      .split(/[\s,]+/)
+      .map((token) => Number(token))
+      .filter((num) => Number.isFinite(num));
+  }
+  if (!Array.isArray(values) || values.length === 0) return null;
+  const normalized = values
+    .map((value) => Math.abs(toFiniteNumber(value, 0)))
+    .filter((value) => value > EPS);
+  if (!normalized.length) return null;
+  if (normalized.length === 1) return [normalized[0], normalized[0]];
+  return [normalized[0], normalized[1]];
+}
+
+function lineMaterialForStyle(style, materialCache, key = "DEFAULT") {
+  const cacheKey = String(key || "DEFAULT");
+  if (materialCache.has(cacheKey)) return materialCache.get(cacheKey);
+
+  const color = styleColorHex(style, "#ffffff", "stroke");
+  const dash = parseDashPattern(style);
+  const baseProps = {
+    color,
     transparent: true,
-    opacity: 0.95,
+    opacity: 0.98,
     depthTest: false,
     depthWrite: false,
-  });
+    toneMapped: false,
+  };
+  const material = dash
+    ? new THREE.LineDashedMaterial({
+      ...baseProps,
+      dashSize: dash[0],
+      gapSize: dash[1],
+    })
+    : new THREE.LineBasicMaterial(baseProps);
+  materialCache.set(cacheKey, material);
+  return material;
+}
 
-  for (let i = 0; i < bends2D.length; i += 1) {
-    const bendPlacement = bends2D[i];
-    const points = buildFlatPatternBendCenterlinePoints(bendPlacement);
-    if (points.length < 2) continue;
-
-    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material);
-    line.renderOrder = 30;
-    line.name = `${bendPlacement?.bend?.id || `bend_${i + 1}`}:CENTERLINE`;
-    line.userData = {
-      ...(line.userData || {}),
-      sheetMetalFlatPattern: true,
-      centerline: true,
-      sheetMetal: {
-        kind: "bend_centerline",
-        representation: "2D",
-        bendId: bendPlacement?.bend?.id || null,
-        parentFlatId: bendPlacement?.parentFlatId || null,
-        childFlatId: bendPlacement?.childFlatId || null,
-      },
-    };
-    group2D.add(line);
+function pointsFromEntity(entity) {
+  if (!entity || typeof entity !== "object") return [];
+  if (entity.type === "line") {
+    const a = Array.isArray(entity.a) ? entity.a : [];
+    const b = Array.isArray(entity.b) ? entity.b : [];
+    return [
+      new THREE.Vector3(toFiniteNumber(a[0]), toFiniteNumber(a[1]), FLAT_PATTERN_OVERLAY_Z),
+      new THREE.Vector3(toFiniteNumber(b[0]), toFiniteNumber(b[1]), FLAT_PATTERN_OVERLAY_Z),
+    ];
   }
+  if (entity.type === "polyline") {
+    const raw = Array.isArray(entity.points) ? entity.points : [];
+    const points = raw.map((point) => new THREE.Vector3(
+      toFiniteNumber(point?.[0]),
+      toFiniteNumber(point?.[1]),
+      FLAT_PATTERN_OVERLAY_Z,
+    ));
+    if (entity.closed && points.length > 2) points.push(points[0].clone());
+    return points;
+  }
+  return [];
+}
+
+function textAnchorOffset(entity, width, height) {
+  const anchor = String(entity?.anchor || "left").toLowerCase();
+  const baseline = String(entity?.baseline || "baseline").toLowerCase();
+
+  let ox = 0;
+  if (anchor === "center" || anchor === "middle") ox = 0;
+  else if (anchor === "right" || anchor === "end") ox = -width * 0.5;
+  else ox = width * 0.5;
+
+  let oy = 0;
+  if (baseline === "middle" || baseline === "center") oy = 0;
+  else if (baseline === "top" || baseline === "hanging") oy = -height * 0.5;
+  else if (baseline === "bottom") oy = height * 0.5;
+  else oy = height * 0.18;
+
+  return [ox, oy];
+}
+
+function buildFlatPatternTextMesh(entity, style) {
+  if (!entity || typeof entity !== "object") return null;
+  if (typeof document === "undefined") return null;
+
+  const value = String(entity.value || "").trim();
+  if (!value) return null;
+
+  const worldHeight = Math.max(0.05, toFiniteNumber(entity.height, 1));
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+
+  context.font = `bold ${FLAT_PATTERN_TEXT_FONT_PX}px ${FLAT_PATTERN_TEXT_FONT_FAMILY}`;
+  const measuredWidth = Math.max(1, context.measureText(value).width);
+  const padX = Math.ceil(FLAT_PATTERN_TEXT_FONT_PX * 0.35);
+  const padY = Math.ceil(FLAT_PATTERN_TEXT_FONT_PX * 0.5);
+  canvas.width = Math.max(64, Math.ceil(measuredWidth + padX * 2));
+  canvas.height = Math.max(64, Math.ceil(FLAT_PATTERN_TEXT_FONT_PX + padY * 2));
+
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.font = `bold ${FLAT_PATTERN_TEXT_FONT_PX}px ${FLAT_PATTERN_TEXT_FONT_FAMILY}`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillStyle = new THREE.Color(styleColorHex(style, "#ffffff", "textColor")).getStyle();
+  context.fillText(value, canvas.width * 0.5, canvas.height * 0.5);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+
+  const worldWidth = worldHeight * (canvas.width / canvas.height);
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false,
+    side: THREE.DoubleSide,
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(worldWidth, worldHeight), material);
+  mesh.renderOrder = FLAT_PATTERN_TEXT_RENDER_ORDER;
+
+  const atX = toFiniteNumber(entity?.at?.[0], 0);
+  const atY = toFiniteNumber(entity?.at?.[1], 0);
+  const rotationDeg = toFiniteNumber(entity?.rotationDeg, 0);
+  const rotationRad = THREE.MathUtils.degToRad(rotationDeg);
+  const [offsetX, offsetY] = textAnchorOffset(entity, worldWidth, worldHeight);
+  const cos = Math.cos(rotationRad);
+  const sin = Math.sin(rotationRad);
+  const wx = (offsetX * cos) - (offsetY * sin);
+  const wy = (offsetX * sin) + (offsetY * cos);
+
+  mesh.position.set(atX + wx, atY + wy, FLAT_PATTERN_OVERLAY_Z * 2);
+  mesh.rotation.set(0, 0, rotationRad);
+  mesh.userData = {
+    ...(mesh.userData || {}),
+    sheetMetalFlatPattern: true,
+    bendLabel: true,
+    style: entity?.style || null,
+  };
+  return mesh;
+}
+
+function addFlatPatternOverlayToGroup(group2D, tree) {
+  if (!group2D || !tree) return;
+
+  const exportData = buildFlatPatternExportData(tree);
+  const scene = exportData?.scene;
+  const entities = Array.isArray(scene?.entities) ? scene.entities : [];
+  if (!entities.length) return;
+
+  const overlay = new THREE.Group();
+  overlay.name = "FLAT_PATTERN_OVERLAY";
+  overlay.userData = {
+    ...(overlay.userData || {}),
+    sheetMetalFlatPattern: true,
+    overlay: true,
+  };
+
+  const materialCache = new Map();
+  for (let i = 0; i < entities.length; i += 1) {
+    const entity = entities[i];
+    if (!entity || typeof entity !== "object") continue;
+
+    if (entity.type === "line" || entity.type === "polyline") {
+      const points = pointsFromEntity(entity);
+      if (points.length < 2) continue;
+      const style = sceneStyleForKey(scene, entity.style);
+      const material = lineMaterialForStyle(style, materialCache, entity.style);
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material);
+      if (line.material?.isLineDashedMaterial) {
+        try { line.computeLineDistances(); } catch { }
+      }
+      line.renderOrder = FLAT_PATTERN_LINE_RENDER_ORDER;
+      line.userData = {
+        ...(line.userData || {}),
+        sheetMetalFlatPattern: true,
+        style: entity.style || null,
+      };
+      overlay.add(line);
+      continue;
+    }
+
+    if (entity.type === "text") {
+      const style = sceneStyleForKey(scene, entity.style);
+      const mesh = buildFlatPatternTextMesh(entity, style);
+      if (mesh) overlay.add(mesh);
+    }
+  }
+
+  if (overlay.children.length) group2D.add(overlay);
 }
 
 function assignSheetMetalEdgeMetadata(solid, edgeCandidates) {
@@ -2071,13 +2244,13 @@ function assignSheetMetalEdgeMetadata(solid, edgeCandidates) {
   }
 }
 
-function makeSheetMetal2DGroup({ solid, model, featureID, thickness, rootMatrix, showFlatPattern }) {
+function makeSheetMetal2DGroup({ solid, model, tree, featureID, thickness, rootMatrix, showFlatPattern }) {
   if (!solid || !model || showFlatPattern === false) return null;
 
   const group2D = buildTwoDGroup(model.flats2D, model.bends2D, {
     showTriangulation: false,
   });
-  addBendCenterlinesToFlatPatternGroup(group2D, model.bends2D);
+  addFlatPatternOverlayToGroup(group2D, tree);
   group2D.name = `${featureID}:2D`;
   group2D.visible = true;
   group2D.userData = {
@@ -2108,6 +2281,7 @@ function installSheetMetalVisualizeHook(root, config) {
     const pattern = makeSheetMetal2DGroup({
       solid: this,
       model: config?.model,
+      tree: config?.tree,
       featureID: config?.featureID,
       thickness: config?.thickness,
       rootMatrix: config?.rootMatrix,
@@ -2182,6 +2356,7 @@ function buildRenderableSheetModel({ featureID, tree, rootMatrix = null, showFla
 
   installSheetMetalVisualizeHook(root, {
     model,
+    tree: cloneTree(tree),
     featureID,
     thickness,
     rootMatrix: rootTransform,

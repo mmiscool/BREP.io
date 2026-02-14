@@ -1,6 +1,17 @@
 import { DxfWriter, point3d, Colors, Units } from "@tarikjabiri/dxf";
 
 const EPS = 1e-8;
+const DXF_TEXT_HALIGN = {
+  left: 0,
+  center: 1,
+  right: 2,
+};
+const DXF_TEXT_VALIGN = {
+  baseline: 0,
+  bottom: 1,
+  middle: 2,
+  top: 3,
+};
 
 function toFiniteNumber(value, fallback = 0) {
   const num = Number(value);
@@ -179,6 +190,21 @@ function sceneUnitsToDxf(unitsRaw) {
   return Units.Unitless;
 }
 
+function normalizeTextAnchor(value) {
+  const key = String(value || "left").trim().toLowerCase();
+  if (key === "center" || key === "middle") return "center";
+  if (key === "right" || key === "end") return "right";
+  return "left";
+}
+
+function normalizeTextBaseline(value) {
+  const key = String(value || "baseline").trim().toLowerCase();
+  if (key === "middle" || key === "center") return "middle";
+  if (key === "top" || key === "hanging") return "top";
+  if (key === "bottom") return "bottom";
+  return "baseline";
+}
+
 export function buildDxfFromTwoDScene(sceneLike) {
   const scene = sceneLike || {};
   const styleMap = normalizeSceneStyles(scene);
@@ -239,16 +265,29 @@ export function buildDxfFromTwoDScene(sceneLike) {
 
     const height = Math.max(0.01, toFiniteNumber(entity.height, 2));
     const angle = toFiniteNumber(entity.rotationDeg, 0);
+    const anchor = normalizeTextAnchor(entity.anchor);
+    const baseline = normalizeTextBaseline(entity.baseline);
+    const isDefaultAlign = anchor === "left" && baseline === "baseline";
+    const textOptions = {
+      layerName: style.layer,
+      colorNumber: style.dxfColor,
+      lineType: style.resolvedLineType || style.dxfLineType || "Continuous",
+      rotation: angle,
+    };
+    if (!isDefaultAlign) {
+      textOptions.horizontalAlignment = DXF_TEXT_HALIGN[anchor] ?? DXF_TEXT_HALIGN.left;
+      textOptions.verticalAlignment = DXF_TEXT_VALIGN[baseline] ?? DXF_TEXT_VALIGN.baseline;
+      textOptions.secondAlignmentPoint = point3d(
+        toFiniteNumber(entity?.at?.[0]),
+        toFiniteNumber(entity?.at?.[1]),
+        0
+      );
+    }
     writer.addText(
       point3d(toFiniteNumber(entity?.at?.[0]), toFiniteNumber(entity?.at?.[1]), 0),
       height,
       value,
-      {
-        layerName: style.layer,
-        colorNumber: style.dxfColor,
-        lineType: style.resolvedLineType || style.dxfLineType || "Continuous",
-        rotation: angle,
-      }
+      textOptions
     );
   }
 
@@ -303,9 +342,15 @@ export function buildSvgFromTwoDScene(sceneLike) {
     const y = mapY(entity?.at?.[1]);
     const rot = -toFiniteNumber(entity.rotationDeg, 0);
     const fontSize = Math.max(0.1, toFiniteNumber(entity.height, defaultTextHeight));
+    const anchor = normalizeTextAnchor(entity.anchor);
+    const baseline = normalizeTextBaseline(entity.baseline);
+    const svgAnchor = anchor === "center" ? "middle" : (anchor === "right" ? "end" : "start");
+    const svgBaseline = baseline === "middle"
+      ? "middle"
+      : (baseline === "top" ? "hanging" : (baseline === "bottom" ? "text-after-edge" : "alphabetic"));
     pushText(
       style.key,
-      `<text x="${fmt(x)}" y="${fmt(y)}" font-size="${fmt(fontSize)}" fill="${escapeXml(style.textColor)}" font-family="${escapeXml(style.svgFontFamily)}" transform="rotate(${fmt(rot, 3)} ${fmt(x)} ${fmt(y)})">${escapeXml(value)}</text>`
+      `<text x="${fmt(x)}" y="${fmt(y)}" text-anchor="${svgAnchor}" dominant-baseline="${svgBaseline}" font-size="${fmt(fontSize)}" fill="${escapeXml(style.textColor)}" font-family="${escapeXml(style.svgFontFamily)}" transform="rotate(${fmt(rot, 3)} ${fmt(x)} ${fmt(y)})">${escapeXml(value)}</text>`
     );
   }
 
