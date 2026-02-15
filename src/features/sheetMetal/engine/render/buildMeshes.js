@@ -1,9 +1,71 @@
 import * as THREE from 'three';
-function shapeFromOutline(outline) {
-    return new THREE.Shape(outline.map((point) => new THREE.Vector2(point[0], point[1])));
+function normalizeLoop2(loop) {
+    if (!Array.isArray(loop) || loop.length < 3) {
+        return [];
+    }
+    const out = [];
+    for (const point of loop) {
+        const x = Number(point?.[0]);
+        const y = Number(point?.[1]);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            continue;
+        }
+        if (!out.length) {
+            out.push([x, y]);
+            continue;
+        }
+        const prev = out[out.length - 1];
+        if (Math.hypot(prev[0] - x, prev[1] - y) <= 1e-8) {
+            continue;
+        }
+        out.push([x, y]);
+    }
+    if (out.length >= 2) {
+        const first = out[0];
+        const last = out[out.length - 1];
+        if (Math.hypot(first[0] - last[0], first[1] - last[1]) <= 1e-8) {
+            out.pop();
+        }
+    }
+    return out.length >= 3 ? out : [];
+}
+function holeOutlineFromEntry(entry) {
+    if (Array.isArray(entry)) {
+        return entry;
+    }
+    if (entry && typeof entry === 'object' && Array.isArray(entry.outline)) {
+        return entry.outline;
+    }
+    return null;
+}
+function collectHoleOutlines(flat) {
+    const holes = Array.isArray(flat?.holes) ? flat.holes : [];
+    const out = [];
+    for (const hole of holes) {
+        const outline = normalizeLoop2(holeOutlineFromEntry(hole));
+        if (outline.length >= 3) {
+            out.push(outline);
+        }
+    }
+    return out;
+}
+function shapeFromFlat(flat) {
+    const outline = normalizeLoop2(flat?.outline);
+    const shape = new THREE.Shape(outline.map((point) => new THREE.Vector2(point[0], point[1])));
+    const holeLoops = collectHoleOutlines(flat);
+    for (const loop of holeLoops) {
+        const path = new THREE.Path(loop.map((point) => new THREE.Vector2(point[0], point[1])));
+        shape.holes.push(path);
+    }
+    return { shape, outline, holeLoops };
 }
 function transformedOutline(outline, matrix) {
     return outline.map((point) => new THREE.Vector3(point[0], point[1], 0).applyMatrix4(matrix));
+}
+function transformedLoops(flat, matrix) {
+    const outer = transformedOutline(flat.outline, matrix);
+    const holeLoops = collectHoleOutlines(flat).map((hole) => transformedOutline(hole, matrix));
+    return { outer, holeLoops };
 }
 function cumulativeLengths(points) {
     const lengths = [0];
@@ -239,41 +301,71 @@ function buildFlatVolumeMesh(placement, material, thickness) {
     if (placement.flat.outline.length < 3 || thickness <= 0) {
         return null;
     }
-    const contour = placement.flat.outline.map((point) => new THREE.Vector2(point[0], point[1]));
-    const triangles = THREE.ShapeUtils.triangulateShape(contour, []);
+    const contourLoop = normalizeLoop2(placement.flat.outline);
+    if (contourLoop.length < 3) {
+        return null;
+    }
+    const holeLoopsRaw = collectHoleOutlines(placement.flat);
+    const contour = contourLoop.map((point) => new THREE.Vector2(point[0], point[1]));
+    const holes = holeLoopsRaw.map((loop) => loop.map((point) => new THREE.Vector2(point[0], point[1])));
+    const triangles = THREE.ShapeUtils.triangulateShape(contour, holes);
     if (triangles.length === 0) {
         return null;
     }
     const halfT = thickness * 0.5;
-    const n = contour.length;
+    const loops = [contourLoop, ...holeLoopsRaw];
+    const loopOffsets = [];
+    let pointCount = 0;
+    for (const loop of loops) {
+        loopOffsets.push(pointCount);
+        pointCount += loop.length;
+    }
     const positions = [];
     const indices = [];
-    for (const point of contour) {
-        const top = new THREE.Vector3(point.x, point.y, halfT).applyMatrix4(placement.matrix);
-        positions.push(top.x, top.y, top.z);
+    for (const loop of loops) {
+        for (const point of loop) {
+            const top = new THREE.Vector3(point[0], point[1], halfT).applyMatrix4(placement.matrix);
+            positions.push(top.x, top.y, top.z);
+        }
     }
-    for (const point of contour) {
-        const bottom = new THREE.Vector3(point.x, point.y, -halfT).applyMatrix4(placement.matrix);
-        positions.push(bottom.x, bottom.y, bottom.z);
+    for (const loop of loops) {
+        for (const point of loop) {
+            const bottom = new THREE.Vector3(point[0], point[1], -halfT).applyMatrix4(placement.matrix);
+            positions.push(bottom.x, bottom.y, bottom.z);
+        }
     }
     for (const tri of triangles) {
         indices.push(tri[0], tri[1], tri[2]);
-        indices.push(n + tri[0], n + tri[2], n + tri[1]);
+        indices.push(pointCount + tri[0], pointCount + tri[2], pointCount + tri[1]);
     }
     const bendEdges = bendEdgeKeySet(placement);
-    for (let i = 0; i < n; i += 1) {
-        const next = (i + 1) % n;
-        const a = placement.flat.outline[i];
-        const b = placement.flat.outline[next];
+    const outerOffset = loopOffsets[0];
+    for (let i = 0; i < contourLoop.length; i += 1) {
+        const next = (i + 1) % contourLoop.length;
+        const a = contourLoop[i];
+        const b = contourLoop[next];
         if (bendEdges.has(edgeKey(a, b))) {
             continue;
         }
-        const topA = i;
-        const topB = next;
-        const botA = n + i;
-        const botB = n + next;
+        const topA = outerOffset + i;
+        const topB = outerOffset + next;
+        const botA = pointCount + topA;
+        const botB = pointCount + topB;
         indices.push(topA, botA, topB);
         indices.push(topB, botA, botB);
+    }
+    for (let loopIndex = 1; loopIndex < loops.length; loopIndex += 1) {
+        const hole = loops[loopIndex];
+        const offset = loopOffsets[loopIndex];
+        for (let i = 0; i < hole.length; i += 1) {
+            const next = (i + 1) % hole.length;
+            const topA = offset + i;
+            const topB = offset + next;
+            const botA = pointCount + topA;
+            const botB = pointCount + topB;
+            indices.push(topA, botA, topB);
+            indices.push(topB, botA, botB);
+        }
     }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
@@ -336,7 +428,11 @@ export function buildThreeDGroup(flats, bends, options = {}) {
             }
         }
         else {
-            const geometry = new THREE.ShapeGeometry(shapeFromOutline(placement.flat.outline));
+            const flatShape = shapeFromFlat(placement.flat);
+            if (flatShape.outline.length < 3) {
+                continue;
+            }
+            const geometry = new THREE.ShapeGeometry(flatShape.shape);
             const positions = geometry.getAttribute('position');
             for (let i = 0; i < positions.count; i += 1) {
                 const point = new THREE.Vector3(positions.getX(i), positions.getY(i), positions.getZ(i));
@@ -351,15 +447,19 @@ export function buildThreeDGroup(flats, bends, options = {}) {
             }
             group.add(midplane);
             const bendEdges = bendEdgeKeySet(placement);
-            for (let i = 0; i < placement.flat.outline.length; i += 1) {
-                const a = placement.flat.outline[i];
-                const b = placement.flat.outline[(i + 1) % placement.flat.outline.length];
-                if (bendEdges.has(edgeKey(a, b))) {
-                    continue;
+            const loops = [flatShape.outline, ...flatShape.holeLoops];
+            for (let loopIndex = 0; loopIndex < loops.length; loopIndex += 1) {
+                const loop = loops[loopIndex];
+                for (let i = 0; i < loop.length; i += 1) {
+                    const a = loop[i];
+                    const b = loop[(i + 1) % loop.length];
+                    if (loopIndex === 0 && bendEdges.has(edgeKey(a, b))) {
+                        continue;
+                    }
+                    const worldA = new THREE.Vector3(a[0], a[1], 0).applyMatrix4(placement.matrix);
+                    const worldB = new THREE.Vector3(b[0], b[1], 0).applyMatrix4(placement.matrix);
+                    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([worldA, worldB]), new THREE.LineBasicMaterial({ color: 0xcbd5e1, transparent: true, opacity: 0.8 })));
                 }
-                const worldA = new THREE.Vector3(a[0], a[1], 0).applyMatrix4(placement.matrix);
-                const worldB = new THREE.Vector3(b[0], b[1], 0).applyMatrix4(placement.matrix);
-                group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([worldA, worldB]), new THREE.LineBasicMaterial({ color: 0xcbd5e1, transparent: true, opacity: 0.8 })));
             }
         }
     }
@@ -386,8 +486,17 @@ export function buildTwoDGroup(flats, bends, options = {}) {
     const group = new THREE.Group();
     const showTriangulation = options.showTriangulation ?? false;
     for (const placement of flats) {
-        const outline = transformedOutline(placement.flat.outline, placement.matrix);
-        const shape = new THREE.Shape(outline.map((point) => new THREE.Vector2(point.x, point.y)));
+        const loops = transformedLoops(placement.flat, placement.matrix);
+        if (loops.outer.length < 3) {
+            continue;
+        }
+        const shape = new THREE.Shape(loops.outer.map((point) => new THREE.Vector2(point.x, point.y)));
+        for (const hole of loops.holeLoops) {
+            if (hole.length < 3) {
+                continue;
+            }
+            shape.holes.push(new THREE.Path(hole.map((point) => new THREE.Vector2(point.x, point.y))));
+        }
         const face = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshBasicMaterial({
             color: placement.flat.color,
             side: THREE.DoubleSide,
@@ -398,8 +507,13 @@ export function buildTwoDGroup(flats, bends, options = {}) {
             attachTriangulationOverlay(face, 0xb6e4ff, 0.75);
         }
         group.add(face);
-        const line = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(outline), new THREE.LineBasicMaterial({ color: 0xe2e8f0, transparent: true, opacity: 0.9 }));
-        group.add(line);
+        group.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(loops.outer), new THREE.LineBasicMaterial({ color: 0xe2e8f0, transparent: true, opacity: 0.9 })));
+        for (const hole of loops.holeLoops) {
+            if (hole.length < 2) {
+                continue;
+            }
+            group.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(hole), new THREE.LineBasicMaterial({ color: 0xe2e8f0, transparent: true, opacity: 0.9 })));
+        }
     }
     for (const bend of bends) {
         const material = new THREE.MeshBasicMaterial({

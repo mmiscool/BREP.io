@@ -112,6 +112,53 @@ function flatOutlineWorld2(placement) {
   return out;
 }
 
+function holeOutlineFromEntry(entry) {
+  if (Array.isArray(entry)) return entry;
+  if (entry && typeof entry === "object" && Array.isArray(entry.outline)) return entry.outline;
+  return null;
+}
+
+function normalizeLoop2(loop) {
+  if (!Array.isArray(loop) || loop.length < 3) return [];
+  const out = [];
+  for (const point of loop) {
+    const x = toFiniteNumber(point?.[0], Number.NaN);
+    const y = toFiniteNumber(point?.[1], Number.NaN);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    if (!out.length) {
+      out.push([x, y]);
+      continue;
+    }
+    const prev = out[out.length - 1];
+    if (Math.hypot(prev[0] - x, prev[1] - y) <= EPS) continue;
+    out.push([x, y]);
+  }
+  if (out.length >= 2) {
+    const first = out[0];
+    const last = out[out.length - 1];
+    if (Math.hypot(first[0] - last[0], first[1] - last[1]) <= EPS) out.pop();
+  }
+  return out.length >= 3 ? out : [];
+}
+
+function flatHoleWorldLoops2(placement) {
+  const holes = Array.isArray(placement?.flat?.holes) ? placement.flat.holes : [];
+  const matrix = placement?.matrix;
+  if (!holes.length || !matrix?.isMatrix4) return [];
+  const out = [];
+  for (const hole of holes) {
+    const localLoop = normalizeLoop2(holeOutlineFromEntry(hole));
+    if (localLoop.length < 3) continue;
+    const worldLoop = [];
+    for (const point of localLoop) {
+      const world = new THREE.Vector3(toFiniteNumber(point?.[0]), toFiniteNumber(point?.[1]), 0).applyMatrix4(matrix);
+      worldLoop.push([world.x, world.y]);
+    }
+    if (worldLoop.length >= 3) out.push(worldLoop);
+  }
+  return out;
+}
+
 function addFlatPlacementOutlineSegments(segments, placement) {
   const poly = flatOutlineWorld2(placement);
   if (poly.length < 2) return;
@@ -119,6 +166,15 @@ function addFlatPlacementOutlineSegments(segments, placement) {
     const a = poly[i];
     const b = poly[(i + 1) % poly.length];
     addSegmentCounter(segments, a, b);
+  }
+
+  const holeLoops = flatHoleWorldLoops2(placement);
+  for (const holeLoop of holeLoops) {
+    for (let i = 0; i < holeLoop.length; i += 1) {
+      const a = holeLoop[i];
+      const b = holeLoop[(i + 1) % holeLoop.length];
+      addSegmentCounter(segments, a, b);
+    }
   }
 }
 
