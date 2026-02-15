@@ -27,6 +27,7 @@ import { test_Fillet_NonClosed, afterRun_Fillet_NonClosed } from './test_fillet_
 import { test_history_features_basic, afterRun_history_features_basic } from './test_history_features_basic.js';
 import { test_textToFace, afterRun_textToFace } from './test_textToFace.js';
 import { test_sheetMetal_nonManifold_sm_f18 } from './test_sheetMetal_nonManifold_sm_f18.js';
+import { test_sheetMetal_cutoutEdge_flange_controls } from './test_sheetMetal_cutoutEdge_flange_controls.js';
 import { generate3MF } from '../exporters/threeMF.js';
 import {
     test_hole_through,
@@ -76,6 +77,7 @@ export const testFunctions = [
     { test: test_history_features_basic, afterRun: afterRun_history_features_basic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_textToFace, afterRun: afterRun_textToFace, printArtifacts: false, exportFaces: true, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_nonManifold_sm_f18, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sheetMetal_cutoutEdge_flange_controls, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_solidMetrics, afterRun: afterRun_solidMetrics, printArtifacts: true, exportFaces: true, exportSolids: true, resetHistory: true },
 
 ];

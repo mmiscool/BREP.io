@@ -477,6 +477,84 @@ function synchronizeBendAttachEdgeSubdivision(flat) {
   }
 }
 
+function collapseLinearOutlineSpanForEdge(flat, edge) {
+  if (!flat || !edge || !Array.isArray(edge.polyline) || edge.polyline.length < 3) return false;
+  if (!polylineIsLinear2(edge.polyline)) return false;
+
+  const outline = normalizeLoop2(flat.outline);
+  if (outline.length < 3) return false;
+
+  const start = copyPoint2(edge.polyline[0]);
+  const end = copyPoint2(edge.polyline[edge.polyline.length - 1]);
+  const segLen = segmentLength2(start, end);
+  if (!(segLen > POINT_EPS)) return false;
+
+  const endpointTol = Math.max(POINT_EPS * 4, segLen * 1e-6);
+  const closestOutlineIndex = (target) => {
+    let bestIndex = -1;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < outline.length; i += 1) {
+      const d = pointDistance2(outline[i], target);
+      if (d < bestDistance) {
+        bestDistance = d;
+        bestIndex = i;
+      }
+    }
+    return { index: bestIndex, distance: bestDistance };
+  };
+
+  const startMatch = closestOutlineIndex(start);
+  const endMatch = closestOutlineIndex(end);
+  if (startMatch.index < 0 || endMatch.index < 0) return false;
+  if (startMatch.distance > endpointTol || endMatch.distance > endpointTol) return false;
+
+  const collectPathIndices = (from, to, step) => {
+    const n = outline.length;
+    const out = [];
+    let index = from;
+    let guard = 0;
+    while (guard <= n) {
+      out.push(index);
+      if (index === to) break;
+      index = (index + step + n) % n;
+      guard += 1;
+    }
+    return out;
+  };
+
+  const lineTol = Math.max(POINT_EPS * 2, segLen * 1e-6);
+  const validatePath = (indices) => {
+    if (!Array.isArray(indices) || indices.length < 3) return false;
+    for (let i = 1; i < indices.length - 1; i += 1) {
+      const point = outline[indices[i]];
+      if (!pointOnSegment2(point, start, end, lineTol)) return false;
+    }
+    return true;
+  };
+
+  const forward = collectPathIndices(startMatch.index, endMatch.index, 1);
+  const reverse = collectPathIndices(startMatch.index, endMatch.index, -1);
+  const forwardOk = validatePath(forward);
+  const reverseOk = validatePath(reverse);
+  if (!forwardOk && !reverseOk) return false;
+
+  const chosen = (!reverseOk || (forwardOk && forward.length <= reverse.length)) ? forward : reverse;
+  const remove = new Set(chosen.slice(1, -1));
+  if (!remove.size) return false;
+
+  const rebuiltOutline = [];
+  for (let i = 0; i < outline.length; i += 1) {
+    if (remove.has(i)) continue;
+    rebuiltOutline.push(copyPoint2(outline[i]));
+  }
+  const deduped = dedupeConsecutivePoints2(rebuiltOutline);
+  if (deduped.length < 3) return false;
+
+  flat.outline = deduped;
+  edge.polyline = [start, end];
+  return true;
+}
+
 function polylineLength2D(polyline) {
   let len = 0;
   for (let i = 1; i < polyline.length; i += 1) {
@@ -4229,7 +4307,16 @@ function addFlangesToTree(tree, featureID, targets, options = {}) {
     let edgeEndSetbackApplied = 0;
     let bridgeCount = 0;
     const isInternalCutoutEdge = !!parentEdge?.isInternalCutoutEdge;
-    const supportsOutlineEdgeAdjustments = Array.isArray(parentEdge?.polyline) && parentEdge.polyline.length === 2;
+    let supportsOutlineEdgeAdjustments = Array.isArray(parentEdge?.polyline) && parentEdge.polyline.length >= 2;
+    if (
+      supportsOutlineEdgeAdjustments
+      && parentEdge.polyline.length > 2
+      && !isInternalCutoutEdge
+      && polylineIsLinear2(parentEdge.polyline)
+    ) {
+      collapseLinearOutlineSpanForEdge(flat, parentEdge);
+    }
+    supportsOutlineEdgeAdjustments = Array.isArray(parentEdge?.polyline) && parentEdge.polyline.length === 2;
     if (Math.abs(inwardEdgeShift) > POINT_EPS && !isInternalCutoutEdge && supportsOutlineEdgeAdjustments) {
       const moved = moveFlatEdgeForFlangeReference(flat, parentEdge, inwardEdgeShift, usedIds);
       if (!moved?.edge) {
@@ -5278,6 +5365,20 @@ export function __test_buildRenderableSheetModelFromTree({
     rootMatrix: rootMatrix ? matrixFromAny(rootMatrix) : null,
     showFlatPattern,
   });
+}
+
+export function __test_applyFlangesToTree({
+  tree,
+  featureID = "SM_TEST",
+  targets = [],
+  options = {},
+} = {}) {
+  if (!tree || typeof tree !== "object" || !tree.root) {
+    throw new Error("__test_applyFlangesToTree requires a valid tree with a root flat.");
+  }
+  const workingTree = cloneTree(tree);
+  const summary = addFlangesToTree(workingTree, String(featureID || "SM_TEST"), Array.isArray(targets) ? targets : [], options || {});
+  return { tree: workingTree, summary };
 }
 
 function summarizeEvaluatedModel(evaluated) {
