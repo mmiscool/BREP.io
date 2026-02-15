@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { SelectionState } from "../../UI/SelectionState.js";
+import { BREP } from "../../BREP/BREP.js";
 import { Solid } from "../../BREP/BetterSolid.js";
 import { deepClone } from "../../utils/deepClone.js";
 import { buildTwoDGroup, evaluateSheetMetal } from "./engine/index.js";
@@ -83,6 +84,139 @@ function applyMatrixToObject(object, matrix) {
 
 function cloneTree(tree) {
   return deepClone(tree || {});
+}
+
+function isSolidLikeObject(value) {
+  return !!(
+    value
+    && typeof value === "object"
+    && (
+      String(value.type || "").toUpperCase() === "SOLID"
+      || typeof value.subtract === "function"
+      || typeof value.union === "function"
+      || typeof value._manifoldize === "function"
+    )
+  );
+}
+
+function cloneSolidWorldBaked(solid, nameHint = null) {
+  if (!isSolidLikeObject(solid) || typeof solid.clone !== "function") return null;
+  const clone = solid.clone();
+  try { solid.updateMatrixWorld?.(true); } catch {
+    // ignore
+  }
+  const worldMatrix = matrixFromAny(solid?.matrixWorld);
+  try {
+    clone.bakeTransform(worldMatrix);
+  } catch {
+    // best effort; if bake fails use raw clone
+  }
+  if (nameHint) clone.name = String(nameHint);
+  return clone;
+}
+
+function serializeSolidSnapshot(solid) {
+  if (!isSolidLikeObject(solid)) return null;
+  const vertProperties = Array.isArray(solid?._vertProperties) ? solid._vertProperties.slice() : null;
+  const triVerts = Array.isArray(solid?._triVerts) ? solid._triVerts.slice() : null;
+  const triIDs = Array.isArray(solid?._triIDs) ? solid._triIDs.slice() : null;
+  if (!vertProperties || !triVerts || !triIDs || !triVerts.length || !triIDs.length) return null;
+  return {
+    vertProperties,
+    triVerts,
+    triIDs,
+    idToFaceName: (solid?._idToFaceName instanceof Map)
+      ? Array.from(solid._idToFaceName.entries()).map(([id, name]) => [toFiniteNumber(id, 0), String(name || "")])
+      : [],
+  };
+}
+
+function solidFromSnapshot(snapshot, name = "SheetMetalCutout:CUTTER") {
+  if (!snapshot || typeof snapshot !== "object") return null;
+  const vertProperties = Array.isArray(snapshot.vertProperties) ? snapshot.vertProperties : [];
+  const triVerts = Array.isArray(snapshot.triVerts) ? snapshot.triVerts : [];
+  const triIDs = Array.isArray(snapshot.triIDs) ? snapshot.triIDs : [];
+  const triCount = (triVerts.length / 3) | 0;
+  if (!vertProperties.length || triCount <= 0) return null;
+
+  const solid = new Solid();
+  solid.name = String(name || "SheetMetalCutout:CUTTER");
+  solid._numProp = 3;
+  solid._vertProperties = vertProperties.map((value) => toFiniteNumber(value, 0));
+  solid._triVerts = triVerts.map((value) => Math.max(0, toFiniteNumber(value, 0) | 0));
+  solid._triIDs = (triIDs.length === triCount)
+    ? triIDs.map((value) => Math.max(0, toFiniteNumber(value, 0) | 0))
+    : new Array(triCount).fill(0);
+  solid._vertKeyToIndex = new Map();
+  for (let i = 0; i < solid._vertProperties.length; i += 3) {
+    const x = solid._vertProperties[i];
+    const y = solid._vertProperties[i + 1];
+    const z = solid._vertProperties[i + 2];
+    solid._vertKeyToIndex.set(`${x},${y},${z}`, (i / 3) | 0);
+  }
+
+  const idToFaceName = new Map();
+  const entries = Array.isArray(snapshot.idToFaceName) ? snapshot.idToFaceName : [];
+  for (const pair of entries) {
+    if (!Array.isArray(pair) || pair.length < 2) continue;
+    const id = Math.max(0, toFiniteNumber(pair[0], 0) | 0);
+    const faceName = String(pair[1] || `CUTOUT_FACE_${id}`);
+    if (!idToFaceName.has(id)) idToFaceName.set(id, faceName);
+  }
+  for (const id of solid._triIDs) {
+    if (!idToFaceName.has(id)) idToFaceName.set(id, `CUTOUT_FACE_${id}`);
+  }
+  solid._idToFaceName = idToFaceName;
+  solid._faceNameToID = new Map(Array.from(idToFaceName.entries()).map(([id, faceName]) => [faceName, id]));
+  solid._faceMetadata = new Map();
+  solid._edgeMetadata = new Map();
+  solid._auxEdges = [];
+  solid._dirty = true;
+  solid._manifold = null;
+  solid._faceIndex = null;
+  return solid;
+}
+
+function applyRecordedCutoutsToSolid(baseSolid, tree) {
+  const summary = {
+    requested: 0,
+    applied: 0,
+    skipped: 0,
+    appliedCutouts: [],
+    skippedCutouts: [],
+  };
+  if (!isSolidLikeObject(baseSolid)) return { solid: baseSolid, summary };
+
+  const cutouts = Array.isArray(tree?.__sheetMeta?.cutouts) ? tree.__sheetMeta.cutouts : [];
+  summary.requested = cutouts.length;
+  if (!cutouts.length) return { solid: baseSolid, summary };
+
+  let result = baseSolid;
+  for (let i = 0; i < cutouts.length; i += 1) {
+    const cutout = cutouts[i] || {};
+    const cutoutId = String(cutout?.id || `cutout_${i + 1}`);
+    const cutter = solidFromSnapshot(cutout?.cutterSnapshot, `${cutoutId}:CUTTER`);
+    if (!cutter) {
+      summary.skipped += 1;
+      summary.skippedCutouts.push({ id: cutoutId, reason: "missing_cutter_snapshot" });
+      continue;
+    }
+
+    try {
+      result = result.subtract(cutter);
+      summary.applied += 1;
+      summary.appliedCutouts.push({ id: cutoutId });
+    } catch (error) {
+      summary.skipped += 1;
+      summary.skippedCutouts.push({
+        id: cutoutId,
+        reason: "boolean_subtract_failed",
+        message: String(error?.message || error || "Unknown boolean failure"),
+      });
+    }
+  }
+
+  return { solid: result, summary };
 }
 
 function signedArea2D(points) {
@@ -223,6 +357,57 @@ function resolveProfileFace(selectionValue) {
     return kids.find((child) => child && child.type === "FACE") || null;
   }
   return null;
+}
+
+function buildCutoutCutterFromProfile(profileSelections, featureID, options = {}) {
+  const selections = normalizeSelectionArray(profileSelections);
+  const first = selections[0] || null;
+  if (!first || typeof first !== "object") {
+    return { cutter: null, profileFace: null, sourceType: null, reason: "no_profile_selection" };
+  }
+
+  const firstType = String(first.type || "").toUpperCase();
+  if (firstType === "SOLID") {
+    const profileSolid = resolveCarrierFromObject(first) || (isSolidLikeObject(first) ? first : null);
+    if (!profileSolid) {
+      return { cutter: null, profileFace: null, sourceType: "solid", reason: "profile_solid_not_found" };
+    }
+    const cutter = cloneSolidWorldBaked(profileSolid, `${featureID}:CUTTER`);
+    if (!cutter) {
+      return { cutter: null, profileFace: null, sourceType: "solid", reason: "failed_to_clone_profile_solid" };
+    }
+    return { cutter, profileFace: null, sourceType: "solid", profileSolid };
+  }
+
+  const profileFace = resolveProfileFace(first);
+  if (!profileFace) {
+    return { cutter: null, profileFace: null, sourceType: "face", reason: "profile_face_not_found" };
+  }
+
+  const forwardDistance = Math.max(0, toFiniteNumber(options.forwardDistance, 1));
+  const backDistance = Math.max(0, toFiniteNumber(options.backDistance, 0));
+  if (!(forwardDistance > EPS) && !(backDistance > EPS)) {
+    return { cutter: null, profileFace, sourceType: "face", reason: "zero_cut_depth" };
+  }
+
+  const forwardBias = forwardDistance > EPS ? 1e-5 : 0;
+  const backBias = backDistance > EPS ? 1e-5 : 0;
+  const cutter = new BREP.Sweep({
+    face: profileFace,
+    distance: forwardDistance + forwardBias,
+    distanceBack: backDistance + backBias,
+    mode: "translate",
+    name: `${featureID}:CUTTER`,
+    omitBaseCap: false,
+  });
+
+  return {
+    cutter,
+    profileFace,
+    sourceType: "face",
+    forwardDistance,
+    backDistance,
+  };
 }
 
 function collectSketchParents(objects) {
@@ -1483,28 +1668,135 @@ function resolveCarrierFromObject(object) {
   return null;
 }
 
+function buildSheetSourceFromCarrier(carrier) {
+  if (!carrier) return null;
+  const tree = carrier.userData?.sheetMetalModel?.tree;
+  if (!tree || typeof tree !== "object") return null;
+
+  try { carrier.updateMatrixWorld?.(true); } catch {
+    // ignore
+  }
+
+  const storedRoot = carrier.userData?.sheetMetalModel?.rootTransform;
+  const hasStoredRoot = Array.isArray(storedRoot) && storedRoot.length === 16;
+  return {
+    carrier,
+    tree: cloneTree(tree),
+    rootMatrix: hasStoredRoot
+      ? matrixFromAny(storedRoot)
+      : (carrier.matrixWorld ? carrier.matrixWorld.clone() : new THREE.Matrix4().identity()),
+  };
+}
+
+function rootSceneFromObject(object) {
+  let current = object;
+  let last = null;
+  while (current && typeof current === "object") {
+    last = current;
+    current = current.parent || null;
+  }
+  return (last && typeof last.traverse === "function") ? last : null;
+}
+
+function rootSceneFromSelections(selections) {
+  const list = normalizeSelectionArray(selections);
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const scene = rootSceneFromObject(item);
+    if (scene) return scene;
+  }
+  return null;
+}
+
+function collectSheetMetalCarriersInScene(scene) {
+  if (!scene || typeof scene.traverse !== "function") return [];
+  const out = [];
+  const seen = new Set();
+  scene.traverse((object) => {
+    if (!object || !object.userData?.sheetMetalModel?.tree) return;
+    const key = object.uuid || object.id || object.name || object;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(object);
+  });
+  return out;
+}
+
+function worldAnchorFromSelection(selection) {
+  if (!selection || typeof selection !== "object") return null;
+  try {
+    const box = new THREE.Box3().setFromObject(selection);
+    if (!box.isEmpty()) return box.getCenter(new THREE.Vector3());
+  } catch {
+    // ignore
+  }
+  try {
+    if (typeof selection.getWorldPosition === "function") {
+      const point = selection.getWorldPosition(new THREE.Vector3());
+      if (point?.isVector3) return point;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function nearestCarrierByAnchor(carriers, anchor) {
+  if (!Array.isArray(carriers) || !carriers.length) return null;
+  if (!anchor?.isVector3) return carriers[0] || null;
+
+  let best = null;
+  let bestDistSq = Number.POSITIVE_INFINITY;
+  const box = new THREE.Box3();
+  const nearest = new THREE.Vector3();
+  for (const carrier of carriers) {
+    if (!carrier) continue;
+    try {
+      box.setFromObject(carrier);
+      const point = box.clampPoint(anchor, nearest);
+      const distSq = point.distanceToSquared(anchor);
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq;
+        best = carrier;
+      }
+    } catch {
+      // ignore broken bbox candidates
+    }
+  }
+  return best || carriers[0] || null;
+}
+
+function resolveSheetSourceWithFallback(sheetSelections, profileSelections) {
+  // Priority 1: explicit sheet target field
+  const fromSheet = resolveSheetSourceFromSelections(sheetSelections);
+  if (fromSheet) return { source: fromSheet, resolution: "explicit_sheet" };
+
+  // Priority 2: profile selection directly attached to an existing sheet model
+  const fromProfileOwner = resolveSheetSourceFromSelections(profileSelections);
+  if (fromProfileOwner) return { source: fromProfileOwner, resolution: "profile_owner" };
+
+  // Priority 3: nearest sheet model in scene to the profile selection anchor
+  const scene = rootSceneFromSelections(sheetSelections) || rootSceneFromSelections(profileSelections);
+  if (!scene) return { source: null, resolution: "no_scene" };
+  const carriers = collectSheetMetalCarriersInScene(scene);
+  if (!carriers.length) return { source: null, resolution: "no_sheet_models" };
+  const profileAnchor = worldAnchorFromSelection(normalizeSelectionArray(profileSelections)[0] || null);
+  const sheetAnchor = worldAnchorFromSelection(normalizeSelectionArray(sheetSelections)[0] || null);
+  const anchor = profileAnchor || sheetAnchor || null;
+  const picked = nearestCarrierByAnchor(carriers, anchor);
+  return {
+    source: buildSheetSourceFromCarrier(picked),
+    resolution: "nearest_sheet_in_scene",
+  };
+}
+
 function resolveSheetSourceFromSelections(selections) {
   const list = normalizeSelectionArray(selections);
   for (const item of list) {
     const carrier = resolveCarrierFromObject(item);
     if (!carrier) continue;
-
-    const tree = carrier.userData?.sheetMetalModel?.tree;
-    if (!tree || typeof tree !== "object") continue;
-
-    try { carrier.updateMatrixWorld?.(true); } catch {
-      // ignore
-    }
-
-    const storedRoot = carrier.userData?.sheetMetalModel?.rootTransform;
-    const hasStoredRoot = Array.isArray(storedRoot) && storedRoot.length === 16;
-    return {
-      carrier,
-      tree: cloneTree(tree),
-      rootMatrix: hasStoredRoot
-        ? matrixFromAny(storedRoot)
-        : (carrier.matrixWorld ? carrier.matrixWorld.clone() : new THREE.Matrix4().identity()),
-    };
+    const source = buildSheetSourceFromCarrier(carrier);
+    if (source) return source;
   }
   return null;
 }
@@ -2531,10 +2823,16 @@ function buildRenderableSheetModel({ featureID, tree, rootMatrix = null, showFla
     }
   }
 
-  assignSheetMetalEdgeMetadata(root, edgeCandidates);
+  const cutoutApplication = applyRecordedCutoutsToSolid(root, tree);
+  let outputSolid = isSolidLikeObject(cutoutApplication?.solid) ? cutoutApplication.solid : root;
+  if (outputSolid !== root) {
+    preserveSheetMetalFaceNames(outputSolid, root);
+  }
+  outputSolid.name = featureID;
+  assignSheetMetalEdgeMetadata(outputSolid, edgeCandidates);
 
-  root.userData = root.userData || {};
-  root.userData.sheetMetalModel = {
+  outputSolid.userData = outputSolid.userData || {};
+  outputSolid.userData.sheetMetalModel = {
     engine: ENGINE_TAG,
     featureID,
     tree: cloneTree(tree),
@@ -2543,12 +2841,12 @@ function buildRenderableSheetModel({ featureID, tree, rootMatrix = null, showFla
     generatedAt: Date.now(),
     geometryBaked: true,
   };
-  root.userData.sheetMetal = {
+  outputSolid.userData.sheetMetal = {
     engine: ENGINE_TAG,
     featureID,
   };
 
-  installSheetMetalVisualizeHook(root, {
+  installSheetMetalVisualizeHook(outputSolid, {
     model,
     tree: cloneTree(tree),
     featureID,
@@ -2557,10 +2855,10 @@ function buildRenderableSheetModel({ featureID, tree, rootMatrix = null, showFla
     showFlatPattern: showFlatPattern !== false,
   });
 
-  SelectionState.attach(root);
-  root.onClick = root.onClick || (() => {});
+  SelectionState.attach(outputSolid);
+  outputSolid.onClick = outputSolid.onClick || (() => {});
 
-  return { root, evaluated: model };
+  return { root: outputSolid, evaluated: model, cutoutSummary: cutoutApplication?.summary || null };
 }
 
 function summarizeEvaluatedModel(evaluated) {
@@ -2869,7 +3167,8 @@ export function runSheetMetalCutout(instance) {
   const featureID = featureIdFromInstance(instance, "SM_CUTOUT");
   const sheetSelections = normalizeSelectionArray(instance?.inputParams?.sheet);
   const profileSelections = normalizeSelectionArray(instance?.inputParams?.profile);
-  const source = resolveSheetSourceFromSelections(sheetSelections.length ? sheetSelections : profileSelections);
+  const sourceResolution = resolveSheetSourceWithFallback(sheetSelections, profileSelections);
+  const source = sourceResolution?.source || null;
 
   if (!source) {
     instance.persistentData = {
@@ -2877,7 +3176,8 @@ export function runSheetMetalCutout(instance) {
       sheetMetal: {
         ...basePersistentPayload(instance).sheetMetal,
         status: "no_source",
-        message: "Select a sheet-metal model to register cutout intent.",
+        message: "Select a sheet-metal target (or provide a profile near an existing sheet-metal model).",
+        sourceResolution: sourceResolution?.resolution || "unresolved",
       },
     };
     return { added: [], removed: [] };
@@ -2887,15 +3187,65 @@ export function runSheetMetalCutout(instance) {
   const meta = ensureSheetMeta(tree);
   if (!Array.isArray(meta.cutouts)) meta.cutouts = [];
 
+  const forwardDistance = Math.max(0, toFiniteNumber(instance?.inputParams?.forwardDistance, 1));
+  const backDistance = Math.max(0, toFiniteNumber(instance?.inputParams?.backDistance, 0));
+  const cutterBuild = buildCutoutCutterFromProfile(profileSelections, featureID, {
+    forwardDistance,
+    backDistance,
+  });
+  if (!cutterBuild?.cutter) {
+    instance.persistentData = {
+      ...basePersistentPayload(instance),
+      sheetMetal: {
+        ...basePersistentPayload(instance).sheetMetal,
+        status: "invalid_profile",
+        message: "Select a valid cutout profile (solid/face/sketch) with non-zero cut depth.",
+        reason: cutterBuild?.reason || "invalid_profile",
+      },
+    };
+    return { added: [], removed: [] };
+  }
+
+  const cutter = cutterBuild.cutter;
+  if (cutterBuild?.sourceType === "solid" && cutterBuild?.profileSolid && cutterBuild.profileSolid === source.carrier) {
+    instance.persistentData = {
+      ...basePersistentPayload(instance),
+      sheetMetal: {
+        ...basePersistentPayload(instance).sheetMetal,
+        status: "invalid_profile",
+        message: "Cutout profile solid cannot be the same as the target sheet-metal solid.",
+        reason: "profile_matches_target",
+      },
+    };
+    return { added: [], removed: [] };
+  }
+
+  const cutterSnapshot = serializeSolidSnapshot(cutter);
+  if (!cutterSnapshot) {
+    instance.persistentData = {
+      ...basePersistentPayload(instance),
+      sheetMetal: {
+        ...basePersistentPayload(instance).sheetMetal,
+        status: "invalid_cutter",
+        message: "Failed to build a valid cutter solid from the selected profile.",
+      },
+    };
+    return { added: [], removed: [] };
+  }
+
   const profileNames = profileSelections
     .map((item) => item?.name || item?.userData?.faceName || item?.userData?.edgeName || null)
     .filter(Boolean);
 
+  const existingCutoutIndex = meta.cutouts.findIndex((entry) => String(entry?.id || "") === featureID);
+  if (existingCutoutIndex >= 0) meta.cutouts.splice(existingCutoutIndex, 1);
   meta.cutouts.push({
     id: featureID,
+    sourceType: cutterBuild?.sourceType || null,
     profileNames,
-    forwardDistance: Math.max(0, toFiniteNumber(instance?.inputParams?.forwardDistance, 1)),
-    backDistance: Math.max(0, toFiniteNumber(instance?.inputParams?.backDistance, 0)),
+    forwardDistance,
+    backDistance,
+    cutterSnapshot,
     keepTool: !!instance?.inputParams?.keepTool,
     debugCutter: !!instance?.inputParams?.debugCutter,
     recordedAt: Date.now(),
@@ -2904,7 +3254,7 @@ export function runSheetMetalCutout(instance) {
   meta.lastFeatureID = featureID;
 
   const rootMatrix = source.rootMatrix || matrixFromAny(source.carrier?.userData?.sheetMetalModel?.rootTransform);
-  const { root, evaluated } = buildRenderableSheetModel({
+  const { root, evaluated, cutoutSummary } = buildRenderableSheetModel({
     featureID,
     tree,
     rootMatrix,
@@ -2919,18 +3269,29 @@ export function runSheetMetalCutout(instance) {
   if (instance?.inputParams?.consumeProfileSketch !== false) {
     removed.push(...collectSketchParents(profileSelections));
   }
+  const added = [root];
+  if (instance?.inputParams?.keepTool || instance?.inputParams?.debugCutter) {
+    cutter.name = `${featureID}:CUTTER`;
+    cutter.userData = {
+      ...(cutter.userData || {}),
+      sheetMetalCutoutTool: true,
+      featureID,
+    };
+    added.push(cutter);
+  }
 
   instance.persistentData = {
     ...basePersistentPayload(instance),
     sheetMetal: {
       ...basePersistentPayload(instance).sheetMetal,
-      status: "cutout_recorded",
-      message: "Cutout intent was recorded on the sheet-metal model metadata.",
+      status: "ok",
       tree: cloneTree(tree),
       rootTransform: matrixToArray(rootMatrix),
+      cutoutSummary,
+      sourceResolution: sourceResolution?.resolution || "explicit_sheet",
       summary: summarizeEvaluatedModel(evaluated),
     },
   };
 
-  return { added: [root], removed: dedupeObjects(removed) };
+  return { added: dedupeObjects(added), removed: dedupeObjects(removed) };
 }
