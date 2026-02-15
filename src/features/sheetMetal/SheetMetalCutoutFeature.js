@@ -18,7 +18,7 @@ const inputParamsSchema = {
     selectionFilter: ["SOLID", "FACE", "SKETCH"],
     multiple: false,
     default_value: null,
-    hint: "Solid tool or sketch/face to extrude as a cutting tool.",
+    hint: "Select a sketch profile or external solid/face cutter (do not pick a face from the same target sheet body).",
   },
   consumeProfileSketch: {
     type: "boolean",

@@ -418,6 +418,406 @@ function polygonMostlyInsidePolygon(innerLoop, outerLoop, tol = POINT_EPS * 6) {
   return true;
 }
 
+function pointOnSegment2(point, a, b, tol = POINT_EPS * 4) {
+  const px = toFiniteNumber(point?.[0], Number.NaN);
+  const py = toFiniteNumber(point?.[1], Number.NaN);
+  const ax = toFiniteNumber(a?.[0], Number.NaN);
+  const ay = toFiniteNumber(a?.[1], Number.NaN);
+  const bx = toFiniteNumber(b?.[0], Number.NaN);
+  const by = toFiniteNumber(b?.[1], Number.NaN);
+  if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) {
+    return false;
+  }
+  const segLen = Math.hypot(bx - ax, by - ay);
+  if (!(segLen > EPS)) return Math.hypot(px - ax, py - ay) <= tol;
+  const dist = segmentDistanceToPoint2([px, py], [ax, ay], [bx, by]);
+  if (dist > tol) return false;
+  const minX = Math.min(ax, bx) - tol;
+  const maxX = Math.max(ax, bx) + tol;
+  const minY = Math.min(ay, by) - tol;
+  const maxY = Math.max(ay, by) + tol;
+  return px >= minX && px <= maxX && py >= minY && py <= maxY;
+}
+
+function orientationSign2(a, b, c) {
+  const ax = toFiniteNumber(a?.[0], Number.NaN);
+  const ay = toFiniteNumber(a?.[1], Number.NaN);
+  const bx = toFiniteNumber(b?.[0], Number.NaN);
+  const by = toFiniteNumber(b?.[1], Number.NaN);
+  const cx = toFiniteNumber(c?.[0], Number.NaN);
+  const cy = toFiniteNumber(c?.[1], Number.NaN);
+  if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by) || !Number.isFinite(cx) || !Number.isFinite(cy)) {
+    return 0;
+  }
+  const cross = ((bx - ax) * (cy - ay)) - ((by - ay) * (cx - ax));
+  const scale = Math.max(1, Math.hypot(bx - ax, by - ay), Math.hypot(cx - ax, cy - ay));
+  const tol = Math.max(EPS * 10, scale * 1e-9);
+  if (Math.abs(cross) <= tol) return 0;
+  return cross > 0 ? 1 : -1;
+}
+
+function segmentsIntersect2(a, b, c, d, tol = POINT_EPS * 4) {
+  if (
+    !Array.isArray(a) || !Array.isArray(b) || !Array.isArray(c) || !Array.isArray(d)
+    || a.length < 2 || b.length < 2 || c.length < 2 || d.length < 2
+  ) return false;
+  const minAx = Math.min(a[0], b[0]) - tol;
+  const maxAx = Math.max(a[0], b[0]) + tol;
+  const minAy = Math.min(a[1], b[1]) - tol;
+  const maxAy = Math.max(a[1], b[1]) + tol;
+  const minBx = Math.min(c[0], d[0]) - tol;
+  const maxBx = Math.max(c[0], d[0]) + tol;
+  const minBy = Math.min(c[1], d[1]) - tol;
+  const maxBy = Math.max(c[1], d[1]) + tol;
+  if (maxAx < minBx || maxBx < minAx || maxAy < minBy || maxBy < minAy) return false;
+
+  const o1 = orientationSign2(a, b, c);
+  const o2 = orientationSign2(a, b, d);
+  const o3 = orientationSign2(c, d, a);
+  const o4 = orientationSign2(c, d, b);
+  if (o1 !== o2 && o3 !== o4) return true;
+  if (o1 === 0 && pointOnSegment2(c, a, b, tol)) return true;
+  if (o2 === 0 && pointOnSegment2(d, a, b, tol)) return true;
+  if (o3 === 0 && pointOnSegment2(a, c, d, tol)) return true;
+  if (o4 === 0 && pointOnSegment2(b, c, d, tol)) return true;
+  return false;
+}
+
+function polygonsOverlap2(loopA, loopB, tol = POINT_EPS * 6) {
+  if (!Array.isArray(loopA) || loopA.length < 3) return false;
+  if (!Array.isArray(loopB) || loopB.length < 3) return false;
+
+  for (const point of loopA) {
+    if (pointInPolygon2(point, loopB) || pointNearPolygonBoundary2(point, loopB, tol)) return true;
+  }
+  for (const point of loopB) {
+    if (pointInPolygon2(point, loopA) || pointNearPolygonBoundary2(point, loopA, tol)) return true;
+  }
+
+  for (let i = 0; i < loopA.length; i += 1) {
+    const a0 = loopA[i];
+    const a1 = loopA[(i + 1) % loopA.length];
+    for (let j = 0; j < loopB.length; j += 1) {
+      const b0 = loopB[j];
+      const b1 = loopB[(j + 1) % loopB.length];
+      if (segmentsIntersect2(a0, a1, b0, b1, tol)) return true;
+    }
+  }
+  return false;
+}
+
+function buildLoopSignature2(loop, precision = 5) {
+  const normalized = normalizeLoop2(loop);
+  if (normalized.length < 3) return null;
+  const fmt = (value) => Number(toFiniteNumber(value, 0)).toFixed(precision);
+  const tokens = normalized.map((point) => `${fmt(point[0])},${fmt(point[1])}`);
+  if (!tokens.length) return null;
+
+  const minRotation = (arr) => {
+    let best = null;
+    for (let i = 0; i < arr.length; i += 1) {
+      const rotated = arr.slice(i).concat(arr.slice(0, i)).join(";");
+      if (best == null || rotated < best) best = rotated;
+    }
+    return best;
+  };
+
+  const forward = minRotation(tokens);
+  const reverse = minRotation(tokens.slice().reverse());
+  if (forward == null) return reverse;
+  if (reverse == null) return forward;
+  return forward < reverse ? forward : reverse;
+}
+
+function tesselateBoundaryContours2(contours) {
+  const prepared = [];
+  for (const contour of Array.isArray(contours) ? contours : []) {
+    const loop = normalizeLoop2(contour);
+    if (loop.length < 3) continue;
+    const encoded = [];
+    for (const point of loop) {
+      encoded.push(toFiniteNumber(point?.[0]), toFiniteNumber(point?.[1]));
+    }
+    if (encoded.length >= 6) prepared.push(encoded);
+  }
+  if (!prepared.length) return [];
+
+  try {
+    const tess = Tess2?.tesselate?.({
+      contours: prepared,
+      windingRule: Tess2.WINDING_POSITIVE,
+      elementType: Tess2.BOUNDARY_CONTOURS,
+      polySize: 3,
+      vertexSize: 2,
+      normal: [0, 0, 1],
+    });
+    const vertices = Array.isArray(tess?.vertices) ? tess.vertices : [];
+    const elements = Array.isArray(tess?.elements) ? tess.elements : [];
+    if (!vertices.length || !elements.length) return [];
+
+    const out = [];
+    for (let i = 0; i + 1 < elements.length; i += 2) {
+      const start = Math.max(0, (toFiniteNumber(elements[i], -1) | 0));
+      const count = Math.max(0, (toFiniteNumber(elements[i + 1], 0) | 0));
+      if (count < 3) continue;
+      const loop = [];
+      for (let j = 0; j < count; j += 1) {
+        const idx = (start + j) * 2;
+        if (idx + 1 >= vertices.length) break;
+        loop.push([
+          toFiniteNumber(vertices[idx], Number.NaN),
+          toFiniteNumber(vertices[idx + 1], Number.NaN),
+        ]);
+      }
+      const normalized = normalizeLoop2(loop);
+      if (normalized.length >= 3) out.push(normalized);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+function orientSegmentLikeEdge(a, b, edge) {
+  const forward = [copyPoint2(a), copyPoint2(b)];
+  const reverse = [copyPoint2(b), copyPoint2(a)];
+  if (!edge || !Array.isArray(edge.polyline) || edge.polyline.length < 2) return forward;
+  const edgeStart = edge.polyline[0];
+  const edgeEnd = edge.polyline[edge.polyline.length - 1];
+  const sameDirScore = pointDistance2(edgeStart, a) + pointDistance2(edgeEnd, b);
+  const reversedScore = pointDistance2(edgeStart, b) + pointDistance2(edgeEnd, a);
+  return sameDirScore <= reversedScore ? forward : reverse;
+}
+
+function rebuildFlatOuterEdgesFromOutline(flat, outlineLoop, usedIds) {
+  const outline = normalizeLoop2(outlineLoop);
+  if (!flat || outline.length < 3) return { changed: false, reason: "invalid_outline" };
+
+  const oldEdges = Array.isArray(flat.edges) ? flat.edges : [];
+  const oldBySig = new Map();
+  for (const edge of oldEdges) {
+    if (isInternalCutoutLikeEdge(edge)) continue;
+    if (!edge || !Array.isArray(edge.polyline) || edge.polyline.length < 2) continue;
+    const sig = segmentSignature2(edge.polyline[0], edge.polyline[edge.polyline.length - 1]);
+    if (!sig) continue;
+    if (!oldBySig.has(sig)) oldBySig.set(sig, []);
+    oldBySig.get(sig).push(edge);
+  }
+
+  const consumedIds = new Set();
+  const consumeMatchingEdge = (a, b) => {
+    const sig = segmentSignature2(a, b);
+    if (!sig) return null;
+    const list = oldBySig.get(sig);
+    if (!Array.isArray(list) || !list.length) return null;
+    for (let i = 0; i < list.length; i += 1) {
+      const candidate = list[i];
+      const id = candidate?.id != null ? String(candidate.id) : null;
+      if (id && consumedIds.has(id)) continue;
+      if (id) consumedIds.add(id);
+      return candidate;
+    }
+    return null;
+  };
+
+  const newEdges = [];
+  for (let i = 0; i < outline.length; i += 1) {
+    const a = outline[i];
+    const b = outline[(i + 1) % outline.length];
+    if (segmentLength2(a, b) <= POINT_EPS) continue;
+    const matched = consumeMatchingEdge(a, b);
+    if (matched) {
+      newEdges.push({
+        ...matched,
+        polyline: orientSegmentLikeEdge(a, b, matched),
+      });
+      if (usedIds && matched?.id != null) usedIds.add(String(matched.id));
+      continue;
+    }
+    const fallbackId = uniqueId(`${flat.id}:e${newEdges.length + 1}`, usedIds);
+    newEdges.push({
+      id: fallbackId,
+      polyline: [copyPoint2(a), copyPoint2(b)],
+    });
+  }
+  const carryOverEdges = carryOverInternalCutoutEdges(oldEdges, newEdges);
+  if (carryOverEdges.length) newEdges.push(...carryOverEdges);
+
+  if (newEdges.length < 3) return { changed: false, reason: "insufficient_rebuilt_edges" };
+  flat.outline = outline.map((point) => [point[0], point[1]]);
+  flat.edges = newEdges;
+  return { changed: true };
+}
+
+function applyCutLoopsToFlat(flat, cutLoops2, featureID, usedIds) {
+  if (!flat || !Array.isArray(flat?.outline) || flat.outline.length < 3) {
+    return { applied: false, reason: "invalid_flat" };
+  }
+
+  const cutLoops = [];
+  for (const loop of Array.isArray(cutLoops2) ? cutLoops2 : []) {
+    const normalized = normalizeFilledLoop2(loop);
+    if (normalized.length >= 3) cutLoops.push(normalized);
+  }
+  if (!cutLoops.length) return { applied: false, reason: "no_cut_loops" };
+
+  const outer = normalizeFilledLoop2(flat.outline);
+  if (outer.length < 3) return { applied: false, reason: "invalid_flat_outline" };
+
+  const existingHoles = collectFlatHoleLoops(flat).map((hole) => ({
+    raw: hole.raw,
+    id: hole.id,
+    cutoutId: hole.cutoutId,
+    loop: normalizeLoop2(hole.loop),
+    signature: buildLoopSignature2(hole.loop),
+  }));
+
+  const contours = [];
+  contours.push(outer);
+  for (const hole of existingHoles) {
+    const loop = normalizeFilledLoop2(hole.loop);
+    if (loop.length < 3) continue;
+    contours.push(loop.slice().reverse());
+  }
+  for (const loop of cutLoops) {
+    contours.push(loop.slice().reverse());
+  }
+
+  const boundaryLoops = tesselateBoundaryContours2(contours);
+  if (!boundaryLoops.length) {
+    return { applied: false, reason: "empty_boolean_result" };
+  }
+
+  let newOuter = null;
+  let maxOuterArea = Number.NEGATIVE_INFINITY;
+  for (const loop of boundaryLoops) {
+    const area = signedArea2D(loop);
+    const areaAbs = Math.abs(area);
+    if (areaAbs <= EPS) continue;
+    const isCandidate = area > 0 || !newOuter;
+    if (isCandidate && areaAbs > maxOuterArea) {
+      maxOuterArea = areaAbs;
+      newOuter = loop.slice();
+    }
+  }
+  if (!newOuter || newOuter.length < 3) {
+    return { applied: false, reason: "no_outer_after_boolean" };
+  }
+  if (signedArea2D(newOuter) < 0) newOuter.reverse();
+  const newOuterSignature = buildLoopSignature2(newOuter);
+
+  const newHoles = [];
+  let disconnectedCount = 0;
+  for (const loop of boundaryLoops) {
+    const signature = buildLoopSignature2(loop);
+    if (!signature) continue;
+    if (newOuterSignature && signature === newOuterSignature) continue;
+    if (!polygonMostlyInsidePolygon(loop, newOuter, POINT_EPS * 10)) {
+      disconnectedCount += 1;
+      continue;
+    }
+    let holeLoop = normalizeLoop2(loop);
+    if (holeLoop.length < 3) continue;
+    if (signedArea2D(holeLoop) > 0) holeLoop = holeLoop.slice().reverse();
+    newHoles.push(holeLoop);
+  }
+  if (disconnectedCount > 0) {
+    return {
+      applied: false,
+      reason: "disconnected_result",
+      disconnectedCount,
+    };
+  }
+
+  const oldOuterSig = buildLoopSignature2(outer);
+  const oldHoleSigs = existingHoles
+    .map((hole) => hole.signature)
+    .filter(Boolean)
+    .sort();
+  const newOuterSig = buildLoopSignature2(newOuter);
+  const newHoleSigs = newHoles
+    .map((loop) => buildLoopSignature2(loop))
+    .filter(Boolean)
+    .sort();
+  const unchanged = oldOuterSig && newOuterSig
+    && oldOuterSig === newOuterSig
+    && oldHoleSigs.length === newHoleSigs.length
+    && oldHoleSigs.every((value, index) => value === newHoleSigs[index]);
+  if (unchanged) return { applied: false, reason: "no_effect" };
+
+  const rebuildEdges = rebuildFlatOuterEdgesFromOutline(flat, newOuter, usedIds);
+  if (!rebuildEdges.changed) {
+    return { applied: false, reason: rebuildEdges.reason || "edge_rebuild_failed" };
+  }
+
+  const existingHoleBySignature = new Map();
+  for (const hole of existingHoles) {
+    if (!hole.signature) continue;
+    if (!existingHoleBySignature.has(hole.signature)) existingHoleBySignature.set(hole.signature, []);
+    existingHoleBySignature.get(hole.signature).push(hole);
+  }
+  const usedHoleIds = new Set(existingHoles.map((hole) => String(hole.id || "")));
+  usedHoleIds.delete("");
+  let newHoleCounter = 1;
+  const nextNewHoleId = () => {
+    let candidate = `${featureID}:hole_${newHoleCounter}`;
+    while (usedHoleIds.has(candidate)) {
+      newHoleCounter += 1;
+      candidate = `${featureID}:hole_${newHoleCounter}`;
+    }
+    usedHoleIds.add(candidate);
+    newHoleCounter += 1;
+    return candidate;
+  };
+
+  const rebuiltHoleEntries = [];
+  const createdHoleIds = [];
+  for (const loop of newHoles) {
+    const signature = buildLoopSignature2(loop);
+    const reused = signature ? existingHoleBySignature.get(signature) : null;
+    const reusedHole = Array.isArray(reused) && reused.length ? reused.shift() : null;
+    const outline = loop.map((point) => [point[0], point[1]]);
+
+    if (reusedHole) {
+      const raw = reusedHole.raw;
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+        const updated = {
+          ...raw,
+          id: String(raw.id || reusedHole.id),
+          outline,
+        };
+        rebuiltHoleEntries.push(updated);
+      } else {
+        rebuiltHoleEntries.push({
+          id: String(reusedHole.id),
+          cutoutId: reusedHole.cutoutId || null,
+          outline,
+        });
+      }
+      continue;
+    }
+
+    const id = nextNewHoleId();
+    rebuiltHoleEntries.push({
+      id,
+      cutoutId: featureID,
+      outline,
+    });
+    createdHoleIds.push(id);
+  }
+
+  if (rebuiltHoleEntries.length) flat.holes = rebuiltHoleEntries;
+  else delete flat.holes;
+
+  return {
+    applied: true,
+    createdHoleIds,
+    holeCount: createdHoleIds.length,
+    totalHoleCount: rebuiltHoleEntries.length,
+    outerChanged: true,
+  };
+}
+
 function normalizeFilledLoop2(loop) {
   const normalized = normalizeLoop2(loop);
   if (normalized.length < 3) return [];
@@ -1259,6 +1659,7 @@ function applyCutoutLoopsToTree({ tree, featureID, profileLoops3 = [], rootMatri
   }
 
   removeCutoutHolesFromTree(tree, featureID);
+  const usedIds = collectTreeIds(tree);
   const thickness = Math.max(MIN_THICKNESS, Math.abs(toFiniteNumber(tree?.thickness, 1)));
   const halfT = thickness * 0.5;
   const planeTol = Math.max(POINT_EPS * 8, Math.max(1e-3, thickness * 0.1));
@@ -1332,23 +1733,26 @@ function applyCutoutLoopsToTree({ tree, featureID, profileLoops3 = [], rootMatri
         ) * 0.5;
       }
       if (!localLoop2 || localLoop2.length < 3 || !Array.isArray(holeLoops2) || !holeLoops2.length) continue;
-      let allInside = true;
+      const effectiveCutLoops = [];
       for (const holeLoop of holeLoops2) {
-        if (!polygonMostlyInsidePolygon(holeLoop, outer, insideTol)) {
-          allInside = false;
-          break;
+        if (polygonMostlyInsidePolygon(holeLoop, outer, insideTol)) {
+          effectiveCutLoops.push(holeLoop);
+          continue;
+        }
+        if (polygonsOverlap2(holeLoop, outer, insideTol)) {
+          effectiveCutLoops.push(holeLoop);
         }
       }
-      if (!allInside) continue;
+      if (!effectiveCutLoops.length) continue;
 
       const score = (projectionMode === "coplanar")
         ? (avgAbsZ + (zSpread * 10))
-        : (projectionParam * 0.1 + avgAbsZ + (zSpread * 2) + (holeLoops2.length * 0.005));
+        : (projectionParam * 0.1 + avgAbsZ + (zSpread * 2) + (effectiveCutLoops.length * 0.005));
       if (!best || score < best.score) {
         best = {
           flat,
           localLoop2,
-          holeLoops2,
+          holeLoops2: effectiveCutLoops,
           avgAbsZ,
           zSpread,
           projectionMode,
@@ -1364,31 +1768,16 @@ function applyCutoutLoopsToTree({ tree, featureID, profileLoops3 = [], rootMatri
       continue;
     }
 
-    const outerSign = signedArea2D(best.flat.outline);
-    const loopHoleIds = [];
     const holeLoops = Array.isArray(best.holeLoops2) && best.holeLoops2.length
       ? best.holeLoops2
       : [best.localLoop2];
-    if (!Array.isArray(best.flat.holes)) best.flat.holes = [];
-    for (let i = 0; i < holeLoops.length; i += 1) {
-      let holeLoop = normalizeLoop2(holeLoops[i]);
-      if (holeLoop.length < 3) continue;
-      if (outerSign * signedArea2D(holeLoop) > 0) {
-        holeLoop = holeLoop.slice().reverse();
-      }
-      const holeId = holeLoops.length === 1
-        ? `${featureID}:hole_${loopIndex + 1}`
-        : `${featureID}:hole_${loopIndex + 1}_${i + 1}`;
-      best.flat.holes.push({
-        id: holeId,
-        cutoutId: featureID,
-        outline: holeLoop.map((point) => [point[0], point[1]]),
-      });
-      loopHoleIds.push(holeId);
-    }
-    if (!loopHoleIds.length) {
+    const cutResult = applyCutLoopsToFlat(best.flat, holeLoops, featureID, usedIds);
+    if (!cutResult?.applied) {
       summary.skipped += 1;
-      summary.skippedLoops.push({ loopIndex, reason: "empty_projected_hole" });
+      summary.skippedLoops.push({
+        loopIndex,
+        reason: cutResult?.reason || "cut_apply_failed",
+      });
       continue;
     }
 
@@ -1396,12 +1785,15 @@ function applyCutoutLoopsToTree({ tree, featureID, profileLoops3 = [], rootMatri
     summary.assignments.push({
       loopIndex,
       flatId: best.flat.id,
-      holeIds: loopHoleIds,
+      holeIds: Array.isArray(cutResult.createdHoleIds) ? cutResult.createdHoleIds.slice() : [],
       avgAbsZ: best.avgAbsZ,
       zSpread: best.zSpread,
       projectionMode: best.projectionMode,
       projectionParam: best.projectionParam,
-      holeCount: loopHoleIds.length,
+      holeCount: Math.max(0, toFiniteNumber(cutResult.holeCount, 0) | 0),
+      totalHoleCount: Math.max(0, toFiniteNumber(cutResult.totalHoleCount, 0) | 0),
+      createdHoleCount: Array.isArray(cutResult.createdHoleIds) ? cutResult.createdHoleIds.length : 0,
+      outerChanged: !!cutResult.outerChanged,
       pointCount: Array.isArray(best.localLoop2) ? best.localLoop2.length : 0,
     });
   }
@@ -3024,6 +3416,13 @@ function resolveSheetSourceFromSelections(selections) {
   return null;
 }
 
+function isSketchOwnedSelection(selection) {
+  if (!selection || typeof selection !== "object") return false;
+  if (String(selection?.type || "").toUpperCase() === "SKETCH") return true;
+  if (String(selection?.parent?.type || "").toUpperCase() === "SKETCH") return true;
+  return false;
+}
+
 function readSelectionSheetMetalMetadata(selection) {
   if (!selection || typeof selection !== "object") return null;
   const fromUserData = selection?.userData?.sheetMetal;
@@ -3068,6 +3467,22 @@ function readSelectionSheetMetalMetadata(selection) {
   }
 
   return Object.keys(merged).length ? merged : null;
+}
+
+function profileReferencesTargetSheetFace(profileSelections, targetCarrier) {
+  if (!targetCarrier) return false;
+  const selections = normalizeSelectionArray(profileSelections);
+  for (const selection of selections) {
+    if (!selection || typeof selection !== "object") continue;
+    const type = String(selection.type || "").toUpperCase();
+    if (type !== "FACE") continue;
+    if (isSketchOwnedSelection(selection)) continue;
+    const carrier = resolveCarrierFromObject(selection);
+    if (!carrier || carrier !== targetCarrier) continue;
+    const smMeta = readSelectionSheetMetalMetadata(selection);
+    if (smMeta?.flatId || smMeta?.edgeId || smMeta?.bendId || smMeta?.kind) return true;
+  }
+  return false;
 }
 
 function resolveEdgeTargets(selections, tree, carrier) {
@@ -4540,6 +4955,19 @@ export function runSheetMetalCutout(instance) {
         status: "no_source",
         message: "Select a sheet-metal target (or provide a profile near an existing sheet-metal model).",
         sourceResolution: sourceResolution?.resolution || "unresolved",
+      },
+    };
+    return { added: [], removed: [] };
+  }
+
+  if (profileReferencesTargetSheetFace(profileSelections, source?.carrier)) {
+    instance.persistentData = {
+      ...basePersistentPayload(instance),
+      sheetMetal: {
+        ...basePersistentPayload(instance).sheetMetal,
+        status: "invalid_profile",
+        message: "Selected profile is a face on the target sheet-metal body. Select a sketch profile (or external tool solid) for cutout.",
+        reason: "profile_is_target_sheet_face",
       },
     };
     return { added: [], removed: [] };
