@@ -1040,23 +1040,35 @@ function buildFlatEdgesFromOutline(outline2, flatId) {
 }
 
 function buildFlatFromFace(faceObj, featureID, label = "Tab") {
-  const edgeEntries = readFaceEdgePolylines(faceObj);
-  if (!edgeEntries.length) return null;
-
-  const ordered = orderConnectedEntries(edgeEntries);
-  const outline3 = buildOutlineFromOrderedEntries(ordered);
-  if (outline3.length < 3) return null;
+  const loops3 = faceOutlineLoops3FromFace(faceObj, featureID);
+  if (!loops3.length) return null;
 
   const normalHint = (typeof faceObj?.getAverageNormal === "function")
     ? faceObj.getAverageNormal()
     : null;
-  const frame = buildProfileFrame(outline3, normalHint);
+  const frame = buildProfileFrame(loops3[0], normalHint);
   if (!frame) return null;
 
-  let outline2 = outline3.map((point) => projectPointToFrame(point, frame));
-  outline2 = dedupeConsecutivePoints2(outline2);
-  if (outline2.length < 3) return null;
+  const projectedLoops = [];
+  for (const loop3 of loops3) {
+    const projected = normalizeLoop2(loop3.map((point) => projectPointToFrame(point, frame)));
+    if (projected.length < 3) continue;
+    projectedLoops.push(projected);
+  }
+  if (!projectedLoops.length) return null;
 
+  let outerIndex = -1;
+  let maxOuterAreaAbs = 0;
+  for (let i = 0; i < projectedLoops.length; i += 1) {
+    const areaAbs = Math.abs(signedArea2D(projectedLoops[i]));
+    if (areaAbs > maxOuterAreaAbs) {
+      maxOuterAreaAbs = areaAbs;
+      outerIndex = i;
+    }
+  }
+  if (outerIndex < 0) return null;
+
+  let outline2 = projectedLoops[outerIndex];
   if (signedArea2D(outline2) < 0) outline2 = outline2.slice().reverse();
 
   const flatId = `${featureID}:flat_root`;
@@ -1071,6 +1083,20 @@ function buildFlatFromFace(faceObj, featureID, label = "Tab") {
     outline: outline2,
     edges,
   };
+
+  const holes = [];
+  for (let i = 0; i < projectedLoops.length; i += 1) {
+    if (i === outerIndex) continue;
+    let holeLoop = projectedLoops[i];
+    if (holeLoop.length < 3) continue;
+    if (!polygonMostlyInsidePolygon(holeLoop, outline2, POINT_EPS * 8)) continue;
+    if (signedArea2D(holeLoop) > 0) holeLoop = holeLoop.slice().reverse();
+    holes.push({
+      id: `${flatId}:hole_${holes.length + 1}`,
+      outline: holeLoop.map((point) => [point[0], point[1]]),
+    });
+  }
+  if (holes.length) flat.holes = holes;
 
   return { flat, frame };
 }
@@ -2682,6 +2708,12 @@ function sheetMetalFaceStableKey(metadata) {
   if (kind === "flat" && flatId && side) return `flat|${flatId}|${side}`;
   if (kind === "flat_edge_wall" && flatId && edgeId) return `flat_edge_wall|${flatId}|${edgeId}`;
   if (kind === "flat_cutout_wall" && flatId && sm.holeId != null) {
+    if (sm.edgeSignature != null) {
+      return `flat_cutout_wall|${flatId}|${String(sm.holeId)}|sig:${String(sm.edgeSignature)}`;
+    }
+    if (sm.edgeIndex != null) {
+      return `flat_cutout_wall|${flatId}|${String(sm.holeId)}|edge:${toFiniteNumber(sm.edgeIndex, 0)}`;
+    }
     return `flat_cutout_wall|${flatId}|${String(sm.holeId)}`;
   }
   if (kind === "bend" && bendId && side) return `bend|${bendId}|${side}`;
@@ -2953,26 +2985,32 @@ function addFlatPlacementToSolid({ solid, placement, featureID, thickness, edgeC
     const hole = holeEntries[holeIndex];
     const loop = hole.loop;
     const offset = loopOffsets[holeIndex + 1];
-    const sideFace = makeFlatFaceName(featureID, flat.id, `CUTOUT:${hole.id}`);
     for (let i = 0; i < loop.length; i += 1) {
       const next = (i + 1) % loop.length;
+      const edgeIndex = i + 1;
+      const sideFace = makeFlatFaceName(featureID, flat.id, `CUTOUT:${hole.id}:EDGE:${edgeIndex}`);
       const topA = offset + i;
       const topB = offset + next;
       addTriangleIfValid(solid, sideFace, topPoints[topA], bottomPoints[topA], topPoints[topB]);
       addTriangleIfValid(solid, sideFace, topPoints[topB], bottomPoints[topA], bottomPoints[topB]);
-    }
-    solid.setFaceMetadata(sideFace, {
-      flatId: flat.id,
-      holeId: hole.id,
-      cutoutId: hole.cutoutId || null,
-      sheetMetal: {
-        kind: "flat_cutout_wall",
-        representation: "3D",
+      const edgeSignature = buildQuantizedPolylineSignature([loop[i], loop[next]]);
+      solid.setFaceMetadata(sideFace, {
         flatId: flat.id,
         holeId: hole.id,
         cutoutId: hole.cutoutId || null,
-      },
-    });
+        edgeIndex,
+        edgeSignature: edgeSignature || null,
+        sheetMetal: {
+          kind: "flat_cutout_wall",
+          representation: "3D",
+          flatId: flat.id,
+          holeId: hole.id,
+          cutoutId: hole.cutoutId || null,
+          edgeIndex,
+          edgeSignature: edgeSignature || null,
+        },
+      });
+    }
   }
 
   for (const edge of flatEdges) {
