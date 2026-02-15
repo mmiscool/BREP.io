@@ -345,6 +345,45 @@ function maxPointwiseDistance(a, b) {
     }
     return max;
 }
+function resamplePolyline3(points, sampleCount) {
+    const source = Array.isArray(points) ? points : [];
+    const count = Math.max(2, Number.isFinite(sampleCount) ? Math.floor(sampleCount) : 0);
+    if (source.length === 0) {
+        return [];
+    }
+    if (source.length === 1) {
+        return Array.from({ length: count }, () => source[0].clone());
+    }
+    const cumulative = [0];
+    let total = 0;
+    for (let i = 1; i < source.length; i += 1) {
+        total += source[i].distanceTo(source[i - 1]);
+        cumulative.push(total);
+    }
+    if (!(total > EPS)) {
+        return Array.from({ length: count }, () => source[0].clone());
+    }
+    const out = [];
+    let seg = 1;
+    for (let i = 0; i < count; i += 1) {
+        const t = i / (count - 1);
+        const target = total * t;
+        while (seg < cumulative.length - 1 && cumulative[seg] < target) {
+            seg += 1;
+        }
+        const i0 = Math.max(0, seg - 1);
+        const i1 = Math.min(source.length - 1, seg);
+        const d0 = cumulative[i0];
+        const d1 = cumulative[i1];
+        if (!(d1 > d0)) {
+            out.push(source[i1].clone());
+            continue;
+        }
+        const localT = (target - d0) / (d1 - d0);
+        out.push(source[i0].clone().lerp(source[i1], localT));
+    }
+    return out;
+}
 export function calculateBendAllowance(midRadius, thickness, kFactor, angleRad) {
     const neutralRadius = midRadius + (kFactor - 0.5) * thickness;
     return Math.abs(angleRad) * neutralRadius;
@@ -405,9 +444,19 @@ export function evaluateSheetMetal(tree) {
                 });
                 const childNormal = new THREE.Vector3(0, 0, 1).transformDirection(childPlacement.matrix3D).normalize();
                 const childEdgeWorldRaw = transformPolyline(childPlacement.childEdge.polyline, childPlacement.matrix3D);
-                const childEdgeWorld = childPlacement.reverseEdge ? [...childEdgeWorldRaw].reverse() : childEdgeWorldRaw;
+                const childEdgeWorldSeed = childPlacement.reverseEdge ? [...childEdgeWorldRaw].reverse() : childEdgeWorldRaw;
+                const childEdgeWorldReversed = [...childEdgeWorldSeed].reverse();
                 const expectedChildEdgeWorld = transformPolyline(parentEdge.polyline, matrix3D.clone().multiply(bendRotation));
-                const edgeMismatch = maxPointwiseDistance(expectedChildEdgeWorld, childEdgeWorld);
+                const continuitySamples = Math.max(2, expectedChildEdgeWorld.length, childEdgeWorldSeed.length);
+                const expectedForCheck = resamplePolyline3(expectedChildEdgeWorld, continuitySamples);
+                const childForwardForCheck = resamplePolyline3(childEdgeWorldSeed, continuitySamples);
+                const childReverseForCheck = resamplePolyline3(childEdgeWorldReversed, continuitySamples);
+                const edgeMismatchForward = maxPointwiseDistance(expectedForCheck, childForwardForCheck);
+                const edgeMismatchReverse = maxPointwiseDistance(expectedForCheck, childReverseForCheck);
+                const childEdgeWorld = edgeMismatchReverse < edgeMismatchForward
+                    ? childEdgeWorldReversed
+                    : childEdgeWorldSeed;
+                const edgeMismatch = Math.min(edgeMismatchForward, edgeMismatchReverse);
                 if (edgeMismatch > 1e-5) {
                     throw new Error(`Bend "${bend.id}" failed continuity check between "${flat.id}" and "${child.flat.id}" ` +
                         `(edge mismatch ${edgeMismatch.toExponential(3)}).`);
