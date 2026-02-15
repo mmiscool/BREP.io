@@ -1279,8 +1279,15 @@ function moveFlatEdgeForFlangeReference(flat, targetEdge, inwardDistance, usedId
   // original endpoint (overlap/double-back is allowed), so inset options remain active in-place.
   const trimStart = trimStartAdjacent && !prevProtected;
   const trimEnd = trimEndAdjacent && !nextProtected;
-  const startNeedsReliefJog = trimStartAdjacent && prevProtected;
-  const endNeedsReliefJog = trimEndAdjacent && nextProtected;
+  let startNeedsReliefJog = trimStartAdjacent && prevProtected;
+  let endNeedsReliefJog = trimEndAdjacent && nextProtected;
+  // When one protected side requires an overlap-relief jog, mirror that tiny jog
+  // on the other bridged side as well. This avoids single-sided micro-overlaps
+  // that can still produce non-manifold topology in chained flange cases.
+  if (startNeedsReliefJog || endNeedsReliefJog) {
+    if (!trimStart) startNeedsReliefJog = true;
+    if (!trimEnd) endNeedsReliefJog = true;
+  }
 
   const tangent = [dx / segLen, dy / segLen];
   const reliefDistance = Math.min(segLen * 0.25, OVERLAP_RELIEF_GAP);
@@ -1353,7 +1360,9 @@ function moveFlatEdgeForFlangeReference(flat, targetEdge, inwardDistance, usedId
     }
   }
 
-  const filteredDefs = edgeDefs.filter((entry) => segmentLength2(entry.a, entry.b) > POINT_EPS);
+  // Preserve intentional overlap-relief micro segments (e.g. 0.0001) so we don't
+  // accidentally collapse the loop and create a non-manifold diagonal closure.
+  const filteredDefs = edgeDefs.filter((entry) => segmentLength2(entry.a, entry.b) >= POINT_EPS);
   if (filteredDefs.length < 3) {
     return { edge: targetEdge, moved: false, shiftDistance: 0, bridgeCount: 0, reason: "insufficient_segments" };
   }
