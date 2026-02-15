@@ -81,6 +81,71 @@ function polygonCentroidFromVector2(points) {
 function polygonCentroid(points) {
     return polygonCentroidFromVector2(points.map((point) => new THREE.Vector2(point[0], point[1])));
 }
+function holeOutlineFromEntry(entry) {
+    if (Array.isArray(entry)) {
+        return entry;
+    }
+    if (entry && Array.isArray(entry.outline)) {
+        return entry.outline;
+    }
+    return null;
+}
+function normalizeLoopPoints2D(points) {
+    if (!Array.isArray(points) || points.length < 3) {
+        return [];
+    }
+    const out = [];
+    for (const point of points) {
+        if (!Array.isArray(point) || point.length < 2) {
+            continue;
+        }
+        const x = Number(point[0]);
+        const y = Number(point[1]);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            continue;
+        }
+        const vec = new THREE.Vector2(x, y);
+        if (!out.length || out[out.length - 1].distanceTo(vec) > EPS * 10) {
+            out.push(vec);
+        }
+    }
+    if (out.length >= 2 && out[0].distanceTo(out[out.length - 1]) <= EPS * 10) {
+        out.pop();
+    }
+    return out.length >= 3 ? out : [];
+}
+function collectHoleLoops2D(flat) {
+    const raw = flat && Array.isArray(flat.holes) ? flat.holes : [];
+    const loops = [];
+    for (const entry of raw) {
+        const loop = normalizeLoopPoints2D(holeOutlineFromEntry(entry));
+        if (loop.length >= 3) {
+            loops.push(loop);
+        }
+    }
+    return loops;
+}
+function edgeMatchesLoopSegment(edgeStart, edgeEnd, loop) {
+    if (!edgeStart || !edgeEnd || !Array.isArray(loop) || loop.length < 2) {
+        return false;
+    }
+    let bestScore = Infinity;
+    let bestLen = 0;
+    for (let i = 0; i < loop.length; i += 1) {
+        const a = loop[i];
+        const b = loop[(i + 1) % loop.length];
+        const segLen = a.distanceTo(b);
+        const forward = edgeStart.distanceTo(a) + edgeEnd.distanceTo(b);
+        const reverse = edgeStart.distanceTo(b) + edgeEnd.distanceTo(a);
+        const score = Math.min(forward, reverse);
+        if (score < bestScore) {
+            bestScore = score;
+            bestLen = segLen;
+        }
+    }
+    const tol = Math.max(1e-4, bestLen * 1e-3);
+    return bestScore <= tol;
+}
 function makeRotationAroundLine(origin, axis, angleRad) {
     const normalizedAxis = axis.clone().normalize();
     const moveToAxis = new THREE.Matrix4().makeTranslation(-origin.x, -origin.y, -origin.z);
@@ -153,7 +218,7 @@ function validateFlat(flat, validatedFlats) {
     }
     validatedFlats.add(flat);
 }
-function interiorSideOfEdge(outline, edgeStart, edgeEnd) {
+function interiorSideOfBoundaryLoop(outline, edgeStart, edgeEnd) {
     const edge = edgeEnd.clone().sub(edgeStart);
     const edgeLength = edge.length();
     if (edgeLength <= EPS) {
@@ -185,6 +250,22 @@ function interiorSideOfEdge(outline, edgeStart, edgeEnd) {
     const interiorDirection = centroid.sub(edgeMid);
     return leftNormal.dot(interiorDirection) >= 0 ? 1 : -1;
 }
+function interiorSideOfEdge(flat, edgeStart, edgeEnd) {
+    if (!flat) {
+        return 1;
+    }
+    const holeLoops = collectHoleLoops2D(flat);
+    for (const holeLoop of holeLoops) {
+        if (!edgeMatchesLoopSegment(edgeStart, edgeEnd, holeLoop)) {
+            continue;
+        }
+        // Hole-loop interior is void; material interior is the opposite side.
+        const holeInteriorSide = interiorSideOfBoundaryLoop(holeLoop, edgeStart, edgeEnd);
+        return -holeInteriorSide;
+    }
+    const outline = flat.outline.map((point) => new THREE.Vector2(point[0], point[1]));
+    return interiorSideOfBoundaryLoop(outline, edgeStart, edgeEnd);
+}
 function outwardDirection(flat, edge) {
     const { start, end } = edgeEndpoints(edge.polyline, false);
     const edgeDir = end.clone().sub(start);
@@ -193,28 +274,25 @@ function outwardDirection(flat, edge) {
     }
     edgeDir.normalize();
     const leftNormal = new THREE.Vector2(-edgeDir.y, edgeDir.x);
-    const outline = flat.outline.map((point) => new THREE.Vector2(point[0], point[1]));
-    const interiorSide = interiorSideOfEdge(outline, start, end);
+    const interiorSide = interiorSideOfEdge(flat, start, end);
     return interiorSide > 0
         ? leftNormal.clone().multiplyScalar(-1).normalize()
         : leftNormal.normalize();
 }
 function hasInteriorOnLeft(flat, edge) {
     const { start, end } = edgeEndpoints(edge.polyline, false);
-    const outline = flat.outline.map((point) => new THREE.Vector2(point[0], point[1]));
-    return interiorSideOfEdge(outline, start, end) > 0;
+    return interiorSideOfEdge(flat, start, end) > 0;
 }
 function inferReverseEdge(parentFlat, parentEdge, childFlat, childEdge) {
-    const parentOutline = parentFlat.outline.map((point) => new THREE.Vector2(point[0], point[1]));
     const parentAttach = edgeEndpoints(parentEdge.polyline, false);
-    const parentInteriorSide = interiorSideOfEdge(parentOutline, parentAttach.start, parentAttach.end);
+    const parentInteriorSide = interiorSideOfEdge(parentFlat, parentAttach.start, parentAttach.end);
     const scoreFor = (reverse) => {
         const align = makeEdgeAlignment(parentEdge.polyline, childEdge.polyline, reverse);
         const childAttach = edgeEndpoints(childEdge.polyline, reverse);
         const childStart = transformPoint2(childAttach.start, align);
         const childEnd = transformPoint2(childAttach.end, align);
         const childOutline = transformOutline2D(childFlat.outline, align);
-        const childInteriorSide = interiorSideOfEdge(childOutline, childStart, childEnd);
+        const childInteriorSide = interiorSideOfBoundaryLoop(childOutline, childStart, childEnd);
         // Opposite interior sides at the shared edge are physically valid.
         return parentInteriorSide * childInteriorSide;
     };

@@ -1949,6 +1949,290 @@ function segmentSignature2(a, b) {
   return buildQuantizedPolylineSignature([[toFiniteNumber(a[0]), toFiniteNumber(a[1])], [toFiniteNumber(b[0]), toFiniteNumber(b[1])]]);
 }
 
+function makeHoleSegmentEdgeId(flatId, holeId, edgeIndex) {
+  const safeFlatId = String(flatId || "flat");
+  const safeHoleId = String(holeId || "hole");
+  const safeIndex = Math.max(1, toFiniteNumber(edgeIndex, 1) | 0);
+  return `${safeFlatId}:hole:${safeHoleId}:edge:${safeIndex}`;
+}
+
+function findHoleSegmentByEdgeId(flat, edgeId) {
+  if (!flat || !edgeId) return null;
+  const target = String(edgeId);
+  const holes = collectFlatHoleLoops(flat);
+  for (const hole of holes) {
+    const loop = hole?.loop;
+    if (!Array.isArray(loop) || loop.length < 2) continue;
+    for (let i = 0; i < loop.length; i += 1) {
+      const next = (i + 1) % loop.length;
+      const candidateId = makeHoleSegmentEdgeId(flat?.id, hole?.id, i + 1);
+      if (candidateId !== target) continue;
+      return {
+        holeId: hole.id,
+        edgeIndex: i + 1,
+        a: copyPoint2(loop[i]),
+        b: copyPoint2(loop[next]),
+        edgeSignature: segmentSignature2(loop[i], loop[next]),
+      };
+    }
+  }
+  return null;
+}
+
+function ensureFlatEdgeForHoleSegment(flat, edgeId, usedIds = null) {
+  if (!flat || !edgeId) return null;
+  const existing = findEdgeById(flat, edgeId);
+  if (existing) return existing;
+
+  const segment = findHoleSegmentByEdgeId(flat, edgeId);
+  if (!segment) return null;
+
+  const newEdge = {
+    id: String(edgeId),
+    polyline: [segment.a, segment.b],
+    isInternalCutoutEdge: true,
+    holeId: segment.holeId,
+    holeEdgeIndex: segment.edgeIndex,
+    holeEdgeSignature: segment.edgeSignature || null,
+  };
+  const edges = Array.isArray(flat.edges) ? flat.edges.slice() : [];
+  edges.push(newEdge);
+  flat.edges = edges;
+  if (usedIds && typeof usedIds.add === "function") usedIds.add(String(edgeId));
+  return newEdge;
+}
+
+function findBestMatchingSegmentIndex(loop, edgePolyline) {
+  if (!Array.isArray(loop) || loop.length < 2) return null;
+  const polyline = Array.isArray(edgePolyline) ? edgePolyline : [];
+  if (polyline.length < 2) return null;
+  const edgeStart = polyline[0];
+  const edgeEnd = polyline[polyline.length - 1];
+  let bestIndex = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  let bestLen = 0;
+  for (let i = 0; i < loop.length; i += 1) {
+    const a = loop[i];
+    const b = loop[(i + 1) % loop.length];
+    const segLen = segmentLength2(a, b);
+    const forward = pointDistance2(edgeStart, a) + pointDistance2(edgeEnd, b);
+    const reverse = pointDistance2(edgeStart, b) + pointDistance2(edgeEnd, a);
+    const score = Math.min(forward, reverse);
+    if (score < bestScore) {
+      bestScore = score;
+      bestIndex = i;
+      bestLen = segLen;
+    }
+  }
+  const tol = Math.max(POINT_EPS * 4, bestLen * 1e-3);
+  return (bestIndex != null && bestScore <= tol) ? bestIndex : null;
+}
+
+function trimHoleEdgeSpanForFlange(flat, targetEdge, startSetback, endSetback) {
+  const requestedStart = Math.max(0, toFiniteNumber(startSetback, 0));
+  const requestedEnd = Math.max(0, toFiniteNumber(endSetback, 0));
+  if (!(requestedStart > POINT_EPS || requestedEnd > POINT_EPS)) {
+    return {
+      edge: targetEdge,
+      modified: false,
+      startSetbackApplied: 0,
+      endSetbackApplied: 0,
+      bridgeCount: 0,
+    };
+  }
+  if (!flat || !targetEdge) {
+    return {
+      edge: null,
+      modified: false,
+      startSetbackApplied: 0,
+      endSetbackApplied: 0,
+      bridgeCount: 0,
+      reason: "invalid_flat_or_edge",
+    };
+  }
+
+  const rawHoles = Array.isArray(flat?.holes) ? flat.holes : [];
+  if (!rawHoles.length) {
+    return {
+      edge: null,
+      modified: false,
+      startSetbackApplied: 0,
+      endSetbackApplied: 0,
+      bridgeCount: 0,
+      reason: "no_holes_on_flat",
+    };
+  }
+
+  const edgeInfoById = findHoleSegmentByEdgeId(flat, targetEdge?.id);
+  const targetHoleId = targetEdge?.holeId != null
+    ? String(targetEdge.holeId)
+    : (edgeInfoById?.holeId != null ? String(edgeInfoById.holeId) : null);
+  let targetSegmentIndex = targetEdge?.holeEdgeIndex != null
+    ? Math.max(0, (toFiniteNumber(targetEdge.holeEdgeIndex, 1) | 0) - 1)
+    : null;
+  if (targetSegmentIndex == null && edgeInfoById?.edgeIndex != null) {
+    targetSegmentIndex = Math.max(0, (toFiniteNumber(edgeInfoById.edgeIndex, 1) | 0) - 1);
+  }
+
+  let chosen = null;
+  for (let holeIdx = 0; holeIdx < rawHoles.length; holeIdx += 1) {
+    const rawEntry = rawHoles[holeIdx];
+    const holeId = String(rawEntry?.id || `${flat.id}:hole_${holeIdx + 1}`);
+    if (targetHoleId && holeId !== targetHoleId) continue;
+
+    const loop = normalizeLoop2(holeOutlineFromEntry(rawEntry));
+    if (loop.length < 3) continue;
+
+    let segIndex = null;
+    if (targetSegmentIndex != null && targetSegmentIndex >= 0 && targetSegmentIndex < loop.length) {
+      segIndex = targetSegmentIndex;
+    } else {
+      segIndex = findBestMatchingSegmentIndex(loop, targetEdge?.polyline);
+    }
+    if (segIndex == null) continue;
+
+    chosen = {
+      holeIdx,
+      rawEntry,
+      holeId,
+      loop,
+      segIndex,
+      a: copyPoint2(loop[segIndex]),
+      b: copyPoint2(loop[(segIndex + 1) % loop.length]),
+    };
+    break;
+  }
+
+  if (!chosen) {
+    return {
+      edge: null,
+      modified: false,
+      startSetbackApplied: 0,
+      endSetbackApplied: 0,
+      bridgeCount: 0,
+      reason: "hole_segment_not_found",
+    };
+  }
+
+  const dx = chosen.b[0] - chosen.a[0];
+  const dy = chosen.b[1] - chosen.a[1];
+  const segLen = Math.hypot(dx, dy);
+  if (!(segLen > EPS)) {
+    return {
+      edge: null,
+      modified: false,
+      startSetbackApplied: 0,
+      endSetbackApplied: 0,
+      bridgeCount: 0,
+      reason: "degenerate_segment",
+    };
+  }
+
+  const maxSetbackSum = Math.max(0, segLen - MIN_LEG);
+  if ((requestedStart + requestedEnd) > (maxSetbackSum + POINT_EPS)) {
+    return {
+      edge: null,
+      modified: false,
+      startSetbackApplied: 0,
+      endSetbackApplied: 0,
+      bridgeCount: 0,
+      reason: "setback_exceeds_edge_length",
+      edgeLength: segLen,
+    };
+  }
+
+  const appliedStart = Math.min(requestedStart, maxSetbackSum);
+  const appliedEnd = Math.min(requestedEnd, Math.max(0, maxSetbackSum - appliedStart));
+  const ux = dx / segLen;
+  const uy = dy / segLen;
+
+  const trimmedStart = [
+    chosen.a[0] + (ux * appliedStart),
+    chosen.a[1] + (uy * appliedStart),
+  ];
+  const trimmedEnd = [
+    chosen.b[0] - (ux * appliedEnd),
+    chosen.b[1] - (uy * appliedEnd),
+  ];
+  if (!(segmentLength2(trimmedStart, trimmedEnd) > POINT_EPS)) {
+    return {
+      edge: null,
+      modified: false,
+      startSetbackApplied: 0,
+      endSetbackApplied: 0,
+      bridgeCount: 0,
+      reason: "degenerate_trimmed_segment",
+    };
+  }
+
+  const rebuiltPoints = [];
+  let bridgeCount = 0;
+  for (let i = 0; i < chosen.loop.length; i += 1) {
+    const point = chosen.loop[i];
+    const next = chosen.loop[(i + 1) % chosen.loop.length];
+    rebuiltPoints.push(copyPoint2(point));
+    if (i !== chosen.segIndex) continue;
+
+    if (segmentLength2(point, trimmedStart) > POINT_EPS) {
+      rebuiltPoints.push(copyPoint2(trimmedStart));
+      bridgeCount += 1;
+    }
+    if (segmentLength2(trimmedStart, trimmedEnd) > POINT_EPS) {
+      rebuiltPoints.push(copyPoint2(trimmedEnd));
+    }
+    if (segmentLength2(trimmedEnd, next) > POINT_EPS) {
+      bridgeCount += 1;
+    }
+  }
+
+  const rebuiltLoop = normalizeLoop2(rebuiltPoints);
+  if (rebuiltLoop.length < 3) {
+    return {
+      edge: null,
+      modified: false,
+      startSetbackApplied: 0,
+      endSetbackApplied: 0,
+      bridgeCount: 0,
+      reason: "invalid_rebuilt_hole_loop",
+    };
+  }
+
+  const updateRaw = chosen.rawEntry;
+  if (Array.isArray(updateRaw)) {
+    rawHoles[chosen.holeIdx] = rebuiltLoop.map((point) => [point[0], point[1]]);
+  } else if (updateRaw && typeof updateRaw === "object") {
+    updateRaw.outline = rebuiltLoop.map((point) => [point[0], point[1]]);
+  } else {
+    rawHoles[chosen.holeIdx] = {
+      id: chosen.holeId,
+      outline: rebuiltLoop.map((point) => [point[0], point[1]]),
+    };
+  }
+
+  const edgePolyline = Array.isArray(targetEdge?.polyline) ? targetEdge.polyline : null;
+  const originalStart = edgePolyline?.[0] || chosen.a;
+  const originalEnd = edgePolyline?.[edgePolyline.length - 1] || chosen.b;
+  const sameDirScore = pointDistance2(originalStart, chosen.a) + pointDistance2(originalEnd, chosen.b);
+  const reverseScore = pointDistance2(originalStart, chosen.b) + pointDistance2(originalEnd, chosen.a);
+  const keepForward = sameDirScore <= reverseScore;
+  const rebuiltEdgePolyline = keepForward
+    ? [copyPoint2(trimmedStart), copyPoint2(trimmedEnd)]
+    : [copyPoint2(trimmedEnd), copyPoint2(trimmedStart)];
+
+  targetEdge.polyline = rebuiltEdgePolyline;
+  targetEdge.isInternalCutoutEdge = true;
+  targetEdge.holeId = chosen.holeId;
+  targetEdge.holeEdgeSignature = segmentSignature2(trimmedStart, trimmedEnd);
+
+  return {
+    edge: targetEdge,
+    modified: true,
+    startSetbackApplied: appliedStart,
+    endSetbackApplied: appliedEnd,
+    bridgeCount,
+  };
+}
+
 function polygonCentroid2(outline) {
   if (!Array.isArray(outline) || !outline.length) return [0, 0];
   let crossSum = 0;
@@ -2542,6 +2826,7 @@ function chooseDefaultEdge(flat) {
     edge
     && !edge.bend
     && !edge.isAttachEdge
+    && !edge.isInternalCutoutEdge
     && Array.isArray(edge.polyline)
     && edge.polyline.length >= 2
   ));
@@ -2732,12 +3017,24 @@ function readSelectionSheetMetalMetadata(selection) {
     // ignore metadata lookup failures
   }
 
+  if (
+    merged
+    && merged.edgeId == null
+    && String(merged.kind || "").trim().toLowerCase() === "flat_cutout_wall"
+    && merged.flatId != null
+    && merged.holeId != null
+    && merged.edgeIndex != null
+  ) {
+    merged.edgeId = makeHoleSegmentEdgeId(merged.flatId, merged.holeId, merged.edgeIndex);
+  }
+
   return Object.keys(merged).length ? merged : null;
 }
 
 function resolveEdgeTargets(selections, tree, carrier) {
   const targets = [];
   const seen = new Set();
+  let hadExplicitSelection = false;
 
   for (const selection of normalizeSelectionArray(selections)) {
     if (!selection || typeof selection !== "object") continue;
@@ -2748,13 +3045,21 @@ function resolveEdgeTargets(selections, tree, carrier) {
     const flatId = meta.flatId || null;
     const edgeId = meta.edgeId || null;
     if (!flatId) continue;
+    hadExplicitSelection = true;
 
     const flat = findFlatById(tree.root, flatId);
     if (!flat) continue;
 
-    const edge = edgeId ? findEdgeById(flat, edgeId) : chooseDefaultEdge(flat);
-    if (!edge) continue;
+    if (edgeId) {
+      const key = `${flat.id}|${String(edgeId)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      targets.push({ flatId: flat.id, edgeId: String(edgeId) });
+      continue;
+    }
 
+    const edge = chooseDefaultEdge(flat);
+    if (!edge) continue;
     const key = `${flat.id}|${edge.id}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -2762,6 +3067,7 @@ function resolveEdgeTargets(selections, tree, carrier) {
   }
 
   if (targets.length) return targets;
+  if (hadExplicitSelection) return targets;
 
   const rootFlat = tree?.root;
   const defaultEdge = chooseDefaultEdge(rootFlat);
@@ -2845,7 +3151,10 @@ function addFlangesToTree(tree, featureID, targets, options = {}) {
       continue;
     }
 
-    const edge = findEdgeById(flat, target.edgeId);
+    let edge = findEdgeById(flat, target.edgeId);
+    if (!edge && target?.edgeId) {
+      edge = ensureFlatEdgeForHoleSegment(flat, target.edgeId, usedIds);
+    }
     if (!edge || !Array.isArray(edge.polyline) || edge.polyline.length < 2) {
       summary.skipped += 1;
       summary.skippedTargets.push({ ...target, reason: "edge_not_found" });
@@ -2863,8 +3172,9 @@ function addFlangesToTree(tree, featureID, targets, options = {}) {
     let edgeStartSetbackApplied = 0;
     let edgeEndSetbackApplied = 0;
     let bridgeCount = 0;
-    if (Math.abs(inwardEdgeShift) > POINT_EPS) {
-      const moved = moveFlatEdgeForFlangeReference(flat, edge, inwardEdgeShift, usedIds);
+    const isInternalCutoutEdge = !!parentEdge?.isInternalCutoutEdge;
+    if (Math.abs(inwardEdgeShift) > POINT_EPS && !isInternalCutoutEdge) {
+      const moved = moveFlatEdgeForFlangeReference(flat, parentEdge, inwardEdgeShift, usedIds);
       if (!moved?.edge) {
         summary.skipped += 1;
         summary.skippedTargets.push({ ...target, reason: moved?.reason || "edge_move_failed" });
@@ -2875,7 +3185,9 @@ function addFlangesToTree(tree, featureID, targets, options = {}) {
       bridgeCount = moved.moved ? toFiniteNumber(moved.bridgeCount, 0) : 0;
     }
     if (edgeStartSetback > POINT_EPS || edgeEndSetback > POINT_EPS) {
-      const trimmed = trimFlatEdgeSpanForFlange(flat, parentEdge, edgeStartSetback, edgeEndSetback, usedIds);
+      const trimmed = isInternalCutoutEdge
+        ? trimHoleEdgeSpanForFlange(flat, parentEdge, edgeStartSetback, edgeEndSetback)
+        : trimFlatEdgeSpanForFlange(flat, parentEdge, edgeStartSetback, edgeEndSetback, usedIds);
       if (!trimmed?.edge) {
         summary.skipped += 1;
         summary.skippedTargets.push({ ...target, reason: trimmed?.reason || "edge_span_trim_failed" });
@@ -2928,6 +3240,7 @@ function addFlangesToTree(tree, featureID, targets, options = {}) {
       edgeEndSetback,
       edgeStartSetbackApplied,
       edgeEndSetbackApplied,
+      isInternalCutoutEdge,
       bridgeCount,
     });
   }
@@ -2958,6 +3271,9 @@ function sheetMetalFaceStableKey(metadata) {
   if (kind === "flat" && flatId && side) return `flat|${flatId}|${side}`;
   if (kind === "flat_edge_wall" && flatId && edgeId) return `flat_edge_wall|${flatId}|${edgeId}`;
   if (kind === "flat_cutout_wall" && flatId && sm.holeId != null) {
+    if (edgeId) {
+      return `flat_cutout_wall|${flatId}|${String(sm.holeId)}|edgeId:${edgeId}`;
+    }
     if (sm.edgeSignature != null) {
       return `flat_cutout_wall|${flatId}|${String(sm.holeId)}|sig:${String(sm.edgeSignature)}`;
     }
@@ -3237,26 +3553,32 @@ function addFlatPlacementToSolid({ solid, placement, featureID, thickness, edgeC
     const offset = loopOffsets[holeIndex + 1];
     for (let i = 0; i < loop.length; i += 1) {
       const next = (i + 1) % loop.length;
-      const edgeIndex = i + 1;
-      const sideFace = makeFlatFaceName(featureID, flat.id, `CUTOUT:${hole.id}:EDGE:${edgeIndex}`);
+      const holeEdgeIndex = i + 1;
+      const edgeSignature = buildQuantizedPolylineSignature([loop[i], loop[next]]);
+      const mappedEdge = edgeIndex.get(edgeSignature) || null;
+      const edgeId = mappedEdge?.id || makeHoleSegmentEdgeId(flat.id, hole.id, holeEdgeIndex);
+      if (mappedEdge?.bend || mappedEdge?.isAttachEdge) continue;
+
+      const sideFace = makeFlatFaceName(featureID, flat.id, `CUTOUT:${hole.id}:EDGE:${holeEdgeIndex}`);
       const topA = offset + i;
       const topB = offset + next;
       addTriangleIfValid(solid, sideFace, topPoints[topA], bottomPoints[topA], topPoints[topB]);
       addTriangleIfValid(solid, sideFace, topPoints[topB], bottomPoints[topA], bottomPoints[topB]);
-      const edgeSignature = buildQuantizedPolylineSignature([loop[i], loop[next]]);
       solid.setFaceMetadata(sideFace, {
         flatId: flat.id,
+        edgeId,
         holeId: hole.id,
         cutoutId: hole.cutoutId || null,
-        edgeIndex,
+        edgeIndex: holeEdgeIndex,
         edgeSignature: edgeSignature || null,
         sheetMetal: {
           kind: "flat_cutout_wall",
           representation: "3D",
           flatId: flat.id,
+          edgeId,
           holeId: hole.id,
           cutoutId: hole.cutoutId || null,
-          edgeIndex,
+          edgeIndex: holeEdgeIndex,
           edgeSignature: edgeSignature || null,
         },
       });
