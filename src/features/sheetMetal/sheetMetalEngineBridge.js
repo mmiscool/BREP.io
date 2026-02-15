@@ -2390,8 +2390,8 @@ function sheetMetalFaceStableKey(metadata) {
 
   if (kind === "flat" && flatId && side) return `flat|${flatId}|${side}`;
   if (kind === "flat_edge_wall" && flatId && edgeId) return `flat_edge_wall|${flatId}|${edgeId}`;
-  if (kind === "flat_cutout_wall" && flatId && sm.holeId != null && sm.edgeIndex != null) {
-    return `flat_cutout_wall|${flatId}|${String(sm.holeId)}|${String(sm.edgeIndex)}`;
+  if (kind === "flat_cutout_wall" && flatId && sm.holeId != null) {
+    return `flat_cutout_wall|${flatId}|${String(sm.holeId)}`;
   }
   if (kind === "bend" && bendId && side) return `bend|${bendId}|${side}`;
   if (kind === "bend_end_cap" && bendId && end) return `bend_end_cap|${bendId}|${end}`;
@@ -2662,28 +2662,26 @@ function addFlatPlacementToSolid({ solid, placement, featureID, thickness, edgeC
     const hole = holeEntries[holeIndex];
     const loop = hole.loop;
     const offset = loopOffsets[holeIndex + 1];
+    const sideFace = makeFlatFaceName(featureID, flat.id, `CUTOUT:${hole.id}`);
     for (let i = 0; i < loop.length; i += 1) {
       const next = (i + 1) % loop.length;
       const topA = offset + i;
       const topB = offset + next;
-      const sideFace = makeFlatFaceName(featureID, flat.id, `CUTOUT:${hole.id}:${i + 1}`);
       addTriangleIfValid(solid, sideFace, topPoints[topA], bottomPoints[topA], topPoints[topB]);
       addTriangleIfValid(solid, sideFace, topPoints[topB], bottomPoints[topA], bottomPoints[topB]);
-      solid.setFaceMetadata(sideFace, {
+    }
+    solid.setFaceMetadata(sideFace, {
+      flatId: flat.id,
+      holeId: hole.id,
+      cutoutId: hole.cutoutId || null,
+      sheetMetal: {
+        kind: "flat_cutout_wall",
+        representation: "3D",
         flatId: flat.id,
         holeId: hole.id,
         cutoutId: hole.cutoutId || null,
-        edgeIndex: i,
-        sheetMetal: {
-          kind: "flat_cutout_wall",
-          representation: "3D",
-          flatId: flat.id,
-          holeId: hole.id,
-          cutoutId: hole.cutoutId || null,
-          edgeIndex: i,
-        },
-      });
-    }
+      },
+    });
   }
 
   for (const edge of flatEdges) {
