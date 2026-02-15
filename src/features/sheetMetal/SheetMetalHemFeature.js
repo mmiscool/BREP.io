@@ -1,43 +1,73 @@
-import { SheetMetalFlangeFeature } from "./SheetMetalFlangeFeature.js";
+import { runSheetMetalFlange } from "./sheetMetalEngineBridge.js";
 
-const baseSchema = SheetMetalFlangeFeature.inputParamsSchema || {};
 const inputParamsSchema = {
-  ...baseSchema,
   id: {
-    ...(baseSchema.id || {}),
+    type: "string",
+    default_value: null,
     hint: "Unique identifier for the hem feature",
   },
+  faces: {
+    type: "reference_selection",
+    selectionFilter: ["FACE", "EDGE"],
+    multiple: true,
+    default_value: null,
+    hint: "Select one or more sheet-metal edge overlays where the hem will be constructed.",
+  },
+  useOppositeCenterline: {
+    label: "Reverse direction",
+    type: "boolean",
+    default_value: false,
+    hint: "Flip the fold direction (up/down) for the selected hinge.",
+  },
   flangeLength: {
-    ...(baseSchema.flangeLength || {}),
-    label: "Hem length",
-    hint: "Optional straight leg length extruded from the hem end face. Set to 0 to create only the bend.",
+    type: "number",
+    default_value: 5,
+    min: 0,
+    hint: "Hem leg length extending away from the bend edge.",
   },
-  flangeLengthReference: {
-    ...(baseSchema.flangeLengthReference || {}),
-    label: "Hem length reference",
-    hint: "Measurement basis for the hem leg: inside, outside, or web.",
-  },
-  angle: {
-    ...(baseSchema.angle || {}),
-    default_value: 180,
-    min: 180,
-    max: 180,
-    hint: "Hem angle is fixed at 180 degrees.",
+  inset: {
+    type: "options",
+    options: ["material_inside", "material_outside", "bend_outside"],
+    default_value: "material_inside",
+    hint: "Edge shift before bend: material_inside = thickness + bendRadius, material_outside = bendRadius, bend_outside = 0.",
   },
   bendRadius: {
-    ...(baseSchema.bendRadius || {}),
-    default_value: 0.0001,
-    hint: "Hem bend radius (inside). Defaults to 0.0001.",
+    type: "number",
+    default_value: 0,
+    min: 0,
+    hint: "Inside bend radius override. Defaults to the model’s stored value.",
+  },
+  offset: {
+    type: "number",
+    default_value: 0,
+    hint: "Additional signed offset for bend-edge repositioning (positive = outward, negative = inward).",
   },
 };
 
-export class SheetMetalHemFeature extends SheetMetalFlangeFeature {
+export class SheetMetalHemFeature {
   static shortName = "SM.HEM";
   static longName = "Sheet Metal Hem";
   static inputParamsSchema = inputParamsSchema;
   static baseType = "HEM";
   static logTag = "SheetMetalHem";
-  static defaultAngle = 180;
-  static angleOverride = 180;
-  static defaultBendRadius = 0.0001;
+
+  constructor() {
+    this.inputParams = {};
+    this.persistentData = {};
+  }
+
+  uiFieldsTest() {
+    return [];
+  }
+
+  async run(partHistory) {
+    void partHistory;
+    return runSheetMetalFlange(this, {
+      baseType: "HEM",
+      angleDeg: 180,
+      defaultInsideRadius: 0.0001,
+      lockAngleToAbsolute: true,
+      flangeLengthReference: "web",
+    });
+  }
 }

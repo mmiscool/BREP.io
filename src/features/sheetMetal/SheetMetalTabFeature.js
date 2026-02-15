@@ -44,11 +44,6 @@ const inputParamsSchema = {
     default_value: true,
     hint: "Remove the referenced sketch after creating the tab. Turn off to keep it in the scene.",
   },
-  boolean: {
-    type: "boolean_operation",
-    default_value: { targets: [], operation: "NONE" },
-    hint: "Optional boolean operation with existing solids.",
-  },
 };
 
 export class SheetMetalTabFeature {

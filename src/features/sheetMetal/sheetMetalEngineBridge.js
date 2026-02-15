@@ -933,6 +933,51 @@ function orderConnectedEntries(entries) {
   return ordered;
 }
 
+function orderConnectedEntryGroups(entries) {
+  if (!Array.isArray(entries) || !entries.length) return [];
+  const remaining = entries.map((entry) => ({
+    ...entry,
+    polyline: Array.isArray(entry?.polyline) ? entry.polyline.map((point) => point.clone()) : [],
+  }));
+  const groups = [];
+
+  while (remaining.length) {
+    const ordered = [remaining.shift()];
+    while (remaining.length) {
+      let advanced = false;
+
+      const tail = ordered[ordered.length - 1]?.polyline?.[ordered[ordered.length - 1]?.polyline?.length - 1] || null;
+      if (tail) {
+        const tailMatch = findBestMatchAtPoint(remaining, tail);
+        if (tailMatch) {
+          const [picked] = remaining.splice(tailMatch.index, 1);
+          if (tailMatch.attachAt === "end") picked.polyline.reverse();
+          ordered.push(picked);
+          advanced = true;
+        }
+      }
+
+      if (remaining.length) {
+        const head = ordered[0]?.polyline?.[0] || null;
+        if (head) {
+          const headMatch = findBestMatchAtPoint(remaining, head);
+          if (headMatch) {
+            const [picked] = remaining.splice(headMatch.index, 1);
+            if (headMatch.attachAt === "start") picked.polyline.reverse();
+            ordered.unshift(picked);
+            advanced = true;
+          }
+        }
+      }
+
+      if (!advanced) break;
+    }
+    groups.push(ordered);
+  }
+
+  return groups;
+}
+
 function buildOutlineFromOrderedEntries(orderedEntries) {
   const points = [];
   for (let i = 0; i < orderedEntries.length; i += 1) {
@@ -950,6 +995,34 @@ function buildOutlineFromOrderedEntries(orderedEntries) {
     deduped.pop();
   }
   return deduped;
+}
+
+function normalizeWorldLoopToFacePlane(loop3, normalHint = null) {
+  if (!Array.isArray(loop3) || loop3.length < 3) return [];
+  const frame = buildProfileFrame(loop3, normalHint);
+  if (!frame) return [];
+  const projected2 = normalizeLoop2(loop3.map((point) => projectPointToFrame(point, frame)));
+  if (projected2.length < 3) return [];
+  const out = projected2.map((point) => frame.origin
+    .clone()
+    .addScaledVector(frame.xAxis, toFiniteNumber(point?.[0], 0))
+    .addScaledVector(frame.yAxis, toFiniteNumber(point?.[1], 0)));
+  const deduped = dedupeConsecutivePoints3(out);
+  if (deduped.length >= 2 && isSamePoint3(deduped[0], deduped[deduped.length - 1])) {
+    deduped.pop();
+  }
+  return deduped.length >= 3 ? deduped : [];
+}
+
+function loopKey3(loop, precision = 5) {
+  if (!Array.isArray(loop) || loop.length < 3) return null;
+  const fmt = (value) => Number(toFiniteNumber(value, 0)).toFixed(precision);
+  const encode = (points) => points.map((point) => (
+    `${fmt(point?.x)}|${fmt(point?.y)}|${fmt(point?.z)}`
+  )).join(";");
+  const forward = encode(loop);
+  const reverse = encode(loop.slice().reverse());
+  return forward < reverse ? forward : reverse;
 }
 
 function buildFlatEdgesFromOutline(outline2, flatId) {
@@ -1002,22 +1075,64 @@ function buildFlatFromFace(faceObj, featureID, label = "Tab") {
   return { flat, frame };
 }
 
+function faceOutlineLoops3FromFace(faceObj, featureID) {
+  const normalHint = (typeof faceObj?.getAverageNormal === "function")
+    ? faceObj.getAverageNormal()
+    : null;
+
+  const loops = [];
+  const seen = new Set();
+  const pushLoop = (loop3) => {
+    const normalized = normalizeWorldLoopToFacePlane(loop3, normalHint);
+    if (normalized.length < 3) return;
+    const key = loopKey3(normalized);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    loops.push(normalized);
+  };
+
+  const boundaryLoopsRaw = Array.isArray(faceObj?.userData?.boundaryLoopsWorld)
+    ? faceObj.userData.boundaryLoopsWorld
+    : [];
+  for (const entry of boundaryLoopsRaw) {
+    const ptsRaw = Array.isArray(entry?.pts) ? entry.pts : (Array.isArray(entry) ? entry : null);
+    if (!Array.isArray(ptsRaw) || ptsRaw.length < 3) continue;
+    const world = [];
+    for (const point of ptsRaw) {
+      if (point?.isVector3) world.push(point.clone());
+      else if (Array.isArray(point) && point.length >= 3) {
+        world.push(new THREE.Vector3(
+          toFiniteNumber(point[0]),
+          toFiniteNumber(point[1]),
+          toFiniteNumber(point[2]),
+        ));
+      }
+    }
+    const deduped = dedupeConsecutivePoints3(world);
+    if (deduped.length >= 2 && isSamePoint3(deduped[0], deduped[deduped.length - 1])) deduped.pop();
+    pushLoop(deduped);
+  }
+  if (loops.length) return loops;
+
+  const edgeEntries = readFaceEdgePolylines(faceObj);
+  if (!edgeEntries.length) return loops;
+  const groups = orderConnectedEntryGroups(edgeEntries);
+  for (const group of groups) {
+    if (!Array.isArray(group) || !group.length) continue;
+    const start = group[0]?.polyline?.[0] || null;
+    const lastPolyline = group[group.length - 1]?.polyline || [];
+    const end = lastPolyline[lastPolyline.length - 1] || null;
+    if (!start || !end || !isSamePoint3(start, end, POINT_EPS * 8)) continue;
+    const outline3 = buildOutlineFromOrderedEntries(group);
+    pushLoop(outline3);
+  }
+
+  return loops;
+}
+
 function faceOutlineLoop3FromFace(faceObj, featureID) {
-  const built = buildFlatFromFace(faceObj, `${featureID}:PROFILE`, "Cutout Profile");
-  if (!built?.frame || !Array.isArray(built?.flat?.outline) || built.flat.outline.length < 3) return null;
-  const loop = [];
-  for (const point of built.flat.outline) {
-    const world = built.frame.origin
-      .clone()
-      .addScaledVector(built.frame.xAxis, toFiniteNumber(point?.[0], 0))
-      .addScaledVector(built.frame.yAxis, toFiniteNumber(point?.[1], 0));
-    loop.push(world);
-  }
-  const deduped = dedupeConsecutivePoints3(loop);
-  if (deduped.length >= 2 && isSamePoint3(deduped[0], deduped[deduped.length - 1])) {
-    deduped.pop();
-  }
-  return deduped.length >= 3 ? deduped : null;
+  const loops = faceOutlineLoops3FromFace(faceObj, featureID);
+  return loops[0] || null;
 }
 
 function collectCutoutProfileLoops(profileSelections, featureID) {
@@ -1062,10 +1177,16 @@ function collectCutoutProfileLoops(profileSelections, featureID) {
   }
 
   const loops = [];
+  const seenLoops = new Set();
   for (const face of faces) {
-    const loop = faceOutlineLoop3FromFace(face, featureID);
-    if (!loop || loop.length < 3) continue;
-    loops.push(loop);
+    const faceLoops = faceOutlineLoops3FromFace(face, featureID);
+    for (const loop of faceLoops) {
+      if (!Array.isArray(loop) || loop.length < 3) continue;
+      const key = loopKey3(loop);
+      if (!key || seenLoops.has(key)) continue;
+      seenLoops.add(key);
+      loops.push(loop);
+    }
   }
 
   return {
@@ -3674,7 +3795,11 @@ export function runSheetMetalFlange(instance, options = {}) {
   }
 
   const legLengthRaw = Math.max(MIN_LEG, toFiniteNumber(instance?.inputParams?.flangeLength, options.defaultLegLength ?? 10));
-  const legLengthReference = normalizeFlangeLengthReference(instance?.inputParams?.flangeLengthReference);
+  const legLengthReference = normalizeFlangeLengthReference(
+    options?.flangeLengthReference != null
+      ? options.flangeLengthReference
+      : instance?.inputParams?.flangeLengthReference
+  );
   const legLengthReferenceSetback = computeFlangeLengthReferenceSetback({
     lengthReference: legLengthReference,
     insideRadius,

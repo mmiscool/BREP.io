@@ -44,13 +44,6 @@ const inputParamsSchema = {
     default_value: "material_inside",
     hint: "Edge shift before bend: material_inside = thickness + bendRadius, material_outside = bendRadius, bend_outside = 0.",
   },
-  reliefWidth: {
-    type: "number",
-    default_value: 0,
-    step: 0.1,
-    min: 0,
-    hint: "Relief placeholder retained for compatibility.",
-  },
   bendRadius: {
     type: "number",
     default_value: 0,
@@ -61,11 +54,6 @@ const inputParamsSchema = {
     type: "number",
     default_value: 0,
     hint: "Additional signed offset for bend-edge repositioning (positive = outward, negative = inward).",
-  },
-  debugSkipUnion: {
-    type: "boolean",
-    default_value: false,
-    hint: "Debug field retained for compatibility.",
   },
 };
 
@@ -88,6 +76,7 @@ export class SheetMetalFlangeFeature {
     void partHistory;
     const angleOverride = this.constructor?.angleOverride;
     const defaultBendRadius = this.constructor?.defaultBendRadius;
+    const flangeLengthReferenceOverride = this.constructor?.flangeLengthReferenceOverride;
     const hasAngleOverride = angleOverride != null && Number.isFinite(Number(angleOverride));
     const hasDefaultBendRadius = defaultBendRadius != null && Number.isFinite(Number(defaultBendRadius));
 
@@ -96,6 +85,7 @@ export class SheetMetalFlangeFeature {
       angleDeg: hasAngleOverride ? Number(angleOverride) : undefined,
       defaultInsideRadius: hasDefaultBendRadius ? Number(defaultBendRadius) : undefined,
       lockAngleToAbsolute: hasAngleOverride,
+      flangeLengthReference: flangeLengthReferenceOverride != null ? String(flangeLengthReferenceOverride) : undefined,
     });
   }
 }
