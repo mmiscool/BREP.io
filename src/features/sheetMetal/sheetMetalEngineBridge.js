@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import Tess2 from "tess2";
 import { SelectionState } from "../../UI/SelectionState.js";
 import { BREP } from "../../BREP/BREP.js";
 import { Solid } from "../../BREP/BetterSolid.js";
@@ -415,6 +416,117 @@ function polygonMostlyInsidePolygon(innerLoop, outerLoop, tol = POINT_EPS * 6) {
     return false;
   }
   return true;
+}
+
+function normalizeFilledLoop2(loop) {
+  const normalized = normalizeLoop2(loop);
+  if (normalized.length < 3) return [];
+  if (signedArea2D(normalized) < 0) return normalized.slice().reverse();
+  return normalized;
+}
+
+function unionFilledLoops2(loops) {
+  const normalizedLoops = [];
+  for (const loop of Array.isArray(loops) ? loops : []) {
+    const normalized = normalizeFilledLoop2(loop);
+    if (normalized.length < 3) continue;
+    normalizedLoops.push(normalized);
+  }
+  if (!normalizedLoops.length) return [];
+  if (normalizedLoops.length === 1) return normalizedLoops;
+
+  const contours = normalizedLoops.map((loop) => {
+    const contour = [];
+    for (const point of loop) {
+      contour.push(toFiniteNumber(point?.[0]), toFiniteNumber(point?.[1]));
+    }
+    return contour;
+  });
+
+  try {
+    const tess = Tess2?.tesselate?.({
+      contours,
+      windingRule: Tess2.WINDING_POSITIVE,
+      elementType: Tess2.BOUNDARY_CONTOURS,
+      polySize: 3,
+      vertexSize: 2,
+      normal: [0, 0, 1],
+    });
+    const vertices = Array.isArray(tess?.vertices) ? tess.vertices : [];
+    const elements = Array.isArray(tess?.elements) ? tess.elements : [];
+    if (!vertices.length || !elements.length) return normalizedLoops;
+
+    const out = [];
+    for (let i = 0; i + 1 < elements.length; i += 2) {
+      const start = Math.max(0, (toFiniteNumber(elements[i], -1) | 0));
+      const count = Math.max(0, (toFiniteNumber(elements[i + 1], 0) | 0));
+      if (count < 3) continue;
+      const loop = [];
+      for (let j = 0; j < count; j += 1) {
+        const idx = (start + j) * 2;
+        if (idx + 1 >= vertices.length) break;
+        loop.push([
+          toFiniteNumber(vertices[idx], Number.NaN),
+          toFiniteNumber(vertices[idx + 1], Number.NaN),
+        ]);
+      }
+      const normalized = normalizeLoop2(loop);
+      if (normalized.length >= 3) out.push(normalized);
+    }
+
+    return out.length ? out : normalizedLoops;
+  } catch {
+    return normalizedLoops;
+  }
+}
+
+function computeLoopNormal3(points3) {
+  if (!Array.isArray(points3) || points3.length < 3) return null;
+  const normal = new THREE.Vector3(0, 0, 0);
+  for (let i = 0; i < points3.length; i += 1) {
+    const a = points3[i];
+    const b = points3[(i + 1) % points3.length];
+    const ax = toFiniteNumber(a?.x, toFiniteNumber(a?.[0], Number.NaN));
+    const ay = toFiniteNumber(a?.y, toFiniteNumber(a?.[1], Number.NaN));
+    const az = toFiniteNumber(a?.z, toFiniteNumber(a?.[2], Number.NaN));
+    const bx = toFiniteNumber(b?.x, toFiniteNumber(b?.[0], Number.NaN));
+    const by = toFiniteNumber(b?.y, toFiniteNumber(b?.[1], Number.NaN));
+    const bz = toFiniteNumber(b?.z, toFiniteNumber(b?.[2], Number.NaN));
+    if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(az)) continue;
+    if (!Number.isFinite(bx) || !Number.isFinite(by) || !Number.isFinite(bz)) continue;
+    normal.x += (ay - by) * (az + bz);
+    normal.y += (az - bz) * (ax + bx);
+    normal.z += (ax - bx) * (ay + by);
+  }
+  if (!(normal.lengthSq() > EPS * EPS)) return null;
+  return normal.normalize();
+}
+
+function projectLoopToFlatMidplane(localLoop3, localProjectionDir, planeZ = 0, directionTol = 1e-6) {
+  if (!Array.isArray(localLoop3) || localLoop3.length < 3) return null;
+  if (!localProjectionDir?.isVector3) return null;
+  const dz = toFiniteNumber(localProjectionDir.z, 0);
+  if (Math.abs(dz) <= directionTol) return null;
+
+  const projected = [];
+  let sumAbsT = 0;
+  for (const point of localLoop3) {
+    if (!point?.isVector3) continue;
+    const t = (planeZ - point.z) / dz;
+    if (!Number.isFinite(t)) return null;
+    projected.push([
+      point.x + localProjectionDir.x * t,
+      point.y + localProjectionDir.y * t,
+    ]);
+    sumAbsT += Math.abs(t);
+  }
+
+  const loop2 = normalizeLoop2(projected);
+  if (loop2.length < 3) return null;
+  return {
+    loop2,
+    avgAbsParam: projected.length ? (sumAbsT / projected.length) : Number.POSITIVE_INFINITY,
+  };
 }
 
 function quantizeCoord(value, quantum = COORD_QUANT) {
@@ -1001,8 +1113,10 @@ function applyCutoutLoopsToTree({ tree, featureID, profileLoops3 = [], rootMatri
 
   removeCutoutHolesFromTree(tree, featureID);
   const thickness = Math.max(MIN_THICKNESS, Math.abs(toFiniteNumber(tree?.thickness, 1)));
+  const halfT = thickness * 0.5;
   const planeTol = Math.max(POINT_EPS * 8, Math.max(1e-3, thickness * 0.1));
   const insideTol = Math.max(POINT_EPS * 8, thickness * 0.02);
+  const projectionDirTol = Math.max(1e-6, planeTol * 0.05);
 
   for (let loopIndex = 0; loopIndex < profileLoops3.length; loopIndex += 1) {
     const worldLoopRaw = profileLoops3[loopIndex];
@@ -1022,6 +1136,7 @@ function applyCutoutLoopsToTree({ tree, featureID, profileLoops3 = [], rootMatri
       summary.skippedLoops.push({ loopIndex, reason: "degenerate_loop" });
       continue;
     }
+    const loopNormalWorld = computeLoopNormal3(worldLoop);
 
     let best = null;
     for (const candidate of flatPlacements) {
@@ -1039,20 +1154,58 @@ function applyCutoutLoopsToTree({ tree, featureID, profileLoops3 = [], rootMatri
         sumAbsZ += Math.abs(point.z);
       }
       const zSpread = maxZ - minZ;
-      if (!(zSpread <= planeTol)) continue;
-
-      const localLoop2 = normalizeLoop2(local3.map((point) => [point.x, point.y]));
-      if (localLoop2.length < 3) continue;
-      if (!polygonMostlyInsidePolygon(localLoop2, outer, insideTol)) continue;
-
       const avgAbsZ = sumAbsZ / local3.length;
-      const score = avgAbsZ + (zSpread * 10);
+
+      let localLoop2 = null;
+      let holeLoops2 = null;
+      let projectionMode = "coplanar";
+      let projectionParam = 0;
+      if (zSpread <= planeTol) {
+        localLoop2 = normalizeLoop2(local3.map((point) => [point.x, point.y]));
+        if (localLoop2.length >= 3) holeLoops2 = [localLoop2];
+      } else {
+        const projectedLoopNormal = loopNormalWorld
+          ? loopNormalWorld.clone().transformDirection(candidate.inverseWorld).normalize()
+          : computeLoopNormal3(local3);
+        const topProjected = projectLoopToFlatMidplane(local3, projectedLoopNormal, halfT, projectionDirTol);
+        const bottomProjected = projectLoopToFlatMidplane(local3, projectedLoopNormal, -halfT, projectionDirTol);
+        if (!topProjected?.loop2?.length || !bottomProjected?.loop2?.length) continue;
+
+        const projectedMidLoops = unionFilledLoops2([
+          topProjected.loop2,
+          bottomProjected.loop2,
+        ]);
+        if (!projectedMidLoops.length) continue;
+        holeLoops2 = projectedMidLoops;
+        localLoop2 = projectedMidLoops[0] || null;
+        projectionMode = "projected_top_bottom";
+        projectionParam = (
+          toFiniteNumber(topProjected.avgAbsParam, 0)
+          + toFiniteNumber(bottomProjected.avgAbsParam, 0)
+        ) * 0.5;
+      }
+      if (!localLoop2 || localLoop2.length < 3 || !Array.isArray(holeLoops2) || !holeLoops2.length) continue;
+      let allInside = true;
+      for (const holeLoop of holeLoops2) {
+        if (!polygonMostlyInsidePolygon(holeLoop, outer, insideTol)) {
+          allInside = false;
+          break;
+        }
+      }
+      if (!allInside) continue;
+
+      const score = (projectionMode === "coplanar")
+        ? (avgAbsZ + (zSpread * 10))
+        : (projectionParam * 0.1 + avgAbsZ + (zSpread * 2) + (holeLoops2.length * 0.005));
       if (!best || score < best.score) {
         best = {
           flat,
           localLoop2,
+          holeLoops2,
           avgAbsZ,
           zSpread,
+          projectionMode,
+          projectionParam,
           score,
         };
       }
@@ -1065,27 +1218,44 @@ function applyCutoutLoopsToTree({ tree, featureID, profileLoops3 = [], rootMatri
     }
 
     const outerSign = signedArea2D(best.flat.outline);
-    let holeLoop = best.localLoop2;
-    if (outerSign * signedArea2D(holeLoop) > 0) {
-      holeLoop = holeLoop.slice().reverse();
-    }
-
-    const holeId = `${featureID}:hole_${loopIndex + 1}`;
+    const loopHoleIds = [];
+    const holeLoops = Array.isArray(best.holeLoops2) && best.holeLoops2.length
+      ? best.holeLoops2
+      : [best.localLoop2];
     if (!Array.isArray(best.flat.holes)) best.flat.holes = [];
-    best.flat.holes.push({
-      id: holeId,
-      cutoutId: featureID,
-      outline: holeLoop.map((point) => [point[0], point[1]]),
-    });
+    for (let i = 0; i < holeLoops.length; i += 1) {
+      let holeLoop = normalizeLoop2(holeLoops[i]);
+      if (holeLoop.length < 3) continue;
+      if (outerSign * signedArea2D(holeLoop) > 0) {
+        holeLoop = holeLoop.slice().reverse();
+      }
+      const holeId = holeLoops.length === 1
+        ? `${featureID}:hole_${loopIndex + 1}`
+        : `${featureID}:hole_${loopIndex + 1}_${i + 1}`;
+      best.flat.holes.push({
+        id: holeId,
+        cutoutId: featureID,
+        outline: holeLoop.map((point) => [point[0], point[1]]),
+      });
+      loopHoleIds.push(holeId);
+    }
+    if (!loopHoleIds.length) {
+      summary.skipped += 1;
+      summary.skippedLoops.push({ loopIndex, reason: "empty_projected_hole" });
+      continue;
+    }
 
     summary.applied += 1;
     summary.assignments.push({
       loopIndex,
       flatId: best.flat.id,
-      holeId,
+      holeIds: loopHoleIds,
       avgAbsZ: best.avgAbsZ,
       zSpread: best.zSpread,
-      pointCount: holeLoop.length,
+      projectionMode: best.projectionMode,
+      projectionParam: best.projectionParam,
+      holeCount: loopHoleIds.length,
+      pointCount: Array.isArray(best.localLoop2) ? best.localLoop2.length : 0,
     });
   }
 
