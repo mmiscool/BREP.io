@@ -13,6 +13,7 @@ import { createTestsButton } from './testsButton.js';
 import { createScriptRunnerButton } from './scriptRunnerButton.js';
 import { createSelectionStateButton } from './selectionStateButton.js';
 import { createSheetMetalFlatExportButton } from './sheetMetalFlatExportButton.js';
+import { createSheetMetalDebugButton } from './sheetMetalDebugButton.js';
 
 export function registerDefaultToolbarButtons(viewer) {
   if (!viewer || typeof viewer.addToolbarButton !== 'function') return;
@@ -25,6 +26,7 @@ export function registerDefaultToolbarButtons(viewer) {
     createImportButton,
     createExportButton,
     createSheetMetalFlatExportButton,
+    createSheetMetalDebugButton,
     createAboutButton,
     createTestsButton,
     createScriptRunnerButton,

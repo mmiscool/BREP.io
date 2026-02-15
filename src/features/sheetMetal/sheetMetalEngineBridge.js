@@ -422,23 +422,24 @@ function readFaceEdgePolylines(faceObj) {
   return entries;
 }
 
-function findBestMatchAtTail(entries, tailPoint) {
+function findBestMatchAtPoint(entries, anchorPoint) {
   let best = null;
   for (let i = 0; i < entries.length; i += 1) {
     const candidate = entries[i];
     const start = candidate.polyline[0];
     const end = candidate.polyline[candidate.polyline.length - 1];
-    const startDist = start.distanceToSquared(tailPoint);
-    const endDist = end.distanceToSquared(tailPoint);
+    const startDist = start.distanceToSquared(anchorPoint);
+    const endDist = end.distanceToSquared(anchorPoint);
+    const thresholdSq = POINT_EPS * POINT_EPS;
 
-    if (startDist <= POINT_EPS * POINT_EPS) {
+    if (startDist <= thresholdSq) {
       if (!best || startDist < best.distance) {
-        best = { index: i, reverse: false, distance: startDist };
+        best = { index: i, attachAt: "start", distance: startDist };
       }
     }
-    if (endDist <= POINT_EPS * POINT_EPS) {
+    if (endDist <= thresholdSq) {
       if (!best || endDist < best.distance) {
-        best = { index: i, reverse: true, distance: endDist };
+        best = { index: i, attachAt: "end", distance: endDist };
       }
     }
   }
@@ -455,13 +456,29 @@ function orderConnectedEntries(entries) {
 
   const ordered = [remaining.shift()];
   while (remaining.length) {
-    const tail = ordered[ordered.length - 1].polyline[ordered[ordered.length - 1].polyline.length - 1];
-    const match = findBestMatchAtTail(remaining, tail);
-    if (!match) break;
+    let advanced = false;
 
-    const [picked] = remaining.splice(match.index, 1);
-    if (match.reverse) picked.polyline.reverse();
-    ordered.push(picked);
+    const tail = ordered[ordered.length - 1].polyline[ordered[ordered.length - 1].polyline.length - 1];
+    const tailMatch = findBestMatchAtPoint(remaining, tail);
+    if (tailMatch) {
+      const [picked] = remaining.splice(tailMatch.index, 1);
+      if (tailMatch.attachAt === "end") picked.polyline.reverse();
+      ordered.push(picked);
+      advanced = true;
+    }
+
+    if (remaining.length) {
+      const head = ordered[0].polyline[0];
+      const headMatch = findBestMatchAtPoint(remaining, head);
+      if (headMatch) {
+        const [picked] = remaining.splice(headMatch.index, 1);
+        if (headMatch.attachAt === "start") picked.polyline.reverse();
+        ordered.unshift(picked);
+        advanced = true;
+      }
+    }
+
+    if (!advanced) break;
   }
 
   return ordered;
@@ -573,6 +590,7 @@ function buildPathPolylineFromSelections(pathSelections) {
   if (!collected.length) return null;
 
   const ordered = orderConnectedEntries(collected);
+  if (!ordered.length || ordered.length !== collected.length) return null;
   const points = [];
   for (let i = 0; i < ordered.length; i += 1) {
     const polyline = ordered[i].polyline;
@@ -582,7 +600,7 @@ function buildPathPolylineFromSelections(pathSelections) {
       const prevLast = points[points.length - 1];
       const currentFirst = polyline[0];
       if (!prevLast || !isSamePoint3(prevLast, currentFirst)) {
-        break;
+        return null;
       }
     }
 
@@ -734,6 +752,147 @@ function buildContourSegments(path2) {
   return out;
 }
 
+function intersectLines2(pointA, dirA, pointB, dirB) {
+  const ax = toFiniteNumber(pointA?.[0]);
+  const ay = toFiniteNumber(pointA?.[1]);
+  const adx = toFiniteNumber(dirA?.[0]);
+  const ady = toFiniteNumber(dirA?.[1]);
+  const bx = toFiniteNumber(pointB?.[0]);
+  const by = toFiniteNumber(pointB?.[1]);
+  const bdx = toFiniteNumber(dirB?.[0]);
+  const bdy = toFiniteNumber(dirB?.[1]);
+
+  const det = (adx * bdy) - (ady * bdx);
+  if (Math.abs(det) <= EPS) return null;
+
+  const qpx = bx - ax;
+  const qpy = by - ay;
+  const t = ((qpx * bdy) - (qpy * bdx)) / det;
+  return [ax + adx * t, ay + ady * t];
+}
+
+function offsetOpenContourPath2(path2, offsetDistance) {
+  if (!Array.isArray(path2) || path2.length < 2) return null;
+  const baseSegments = buildContourSegments(path2);
+  if (baseSegments.length !== path2.length - 1) return null;
+
+  const lines = [];
+  for (const segment of baseSegments) {
+    const nx = -segment.dir[1];
+    const ny = segment.dir[0];
+    const ox = nx * offsetDistance;
+    const oy = ny * offsetDistance;
+    lines.push({
+      dir: [segment.dir[0], segment.dir[1]],
+      start: [segment.start[0] + ox, segment.start[1] + oy],
+      end: [segment.end[0] + ox, segment.end[1] + oy],
+    });
+  }
+  if (!lines.length) return null;
+
+  const out = new Array(path2.length);
+  out[0] = [lines[0].start[0], lines[0].start[1]];
+  out[path2.length - 1] = [lines[lines.length - 1].end[0], lines[lines.length - 1].end[1]];
+
+  for (let i = 1; i < path2.length - 1; i += 1) {
+    const prev = lines[i - 1];
+    const next = lines[i];
+    const hit = intersectLines2(prev.start, prev.dir, next.start, next.dir);
+    if (Array.isArray(hit)) {
+      out[i] = [hit[0], hit[1]];
+      continue;
+    }
+    out[i] = [
+      (toFiniteNumber(prev.end[0]) + toFiniteNumber(next.start[0])) * 0.5,
+      (toFiniteNumber(prev.end[1]) + toFiniteNumber(next.start[1])) * 0.5,
+    ];
+  }
+
+  return dedupeConsecutivePoints2(out);
+}
+
+function preferredContourOffsetSide(path2) {
+  const segments = buildContourSegments(path2);
+  if (segments.length < 2) return 1;
+  let turnSum = 0;
+  for (let i = 0; i < segments.length - 1; i += 1) {
+    turnSum += signedTurnRadians2(segments[i].dir, segments[i + 1].dir);
+  }
+  if (Math.abs(turnSum) <= 1e-7) return 1;
+  return turnSum > 0 ? 1 : -1;
+}
+
+function computeContourCornerTrimData(segments, midRadius) {
+  if (!Array.isArray(segments) || !segments.length) return null;
+  const safeMidRadius = Math.max(MIN_LEG, Math.abs(toFiniteNumber(midRadius, MIN_LEG)));
+  const startTrim = new Array(segments.length).fill(0);
+  const endTrim = new Array(segments.length).fill(0);
+  const joints = [];
+
+  for (let i = 0; i < segments.length - 1; i += 1) {
+    const turnRad = signedTurnRadians2(segments[i].dir, segments[i + 1].dir);
+    const absTurn = Math.abs(turnRad);
+    if (absTurn <= 1e-8) {
+      joints.push({ index: i, turnRad: 0, angleDeg: 1e-4, setback: 0 });
+      continue;
+    }
+
+    const tanHalf = Math.tan(absTurn * 0.5);
+    if (!Number.isFinite(tanHalf)) return null;
+    const setback = Math.max(0, safeMidRadius * Math.abs(tanHalf));
+    endTrim[i] += setback;
+    startTrim[i + 1] += setback;
+
+    let angleDeg = -THREE.MathUtils.radToDeg(turnRad);
+    if (Math.abs(angleDeg) < 1e-4) angleDeg = angleDeg >= 0 ? 1e-4 : -1e-4;
+    joints.push({ index: i, turnRad, angleDeg, setback });
+  }
+
+  const segmentFlatLengths = segments.map((segment, idx) => (
+    toFiniteNumber(segment.length, 0) - startTrim[idx] - endTrim[idx]
+  ));
+  if (segmentFlatLengths.some((length) => !(length > MIN_LEG))) return null;
+
+  return { startTrim, endTrim, segmentFlatLengths, joints };
+}
+
+function buildContourMidplanePathData(path2Sketch, thickness, midRadius) {
+  const halfThickness = Math.max(MIN_THICKNESS, Math.abs(toFiniteNumber(thickness, MIN_THICKNESS))) * 0.5;
+  const preferredSide = preferredContourOffsetSide(path2Sketch);
+  const candidates = [preferredSide, -preferredSide];
+  let preferredCandidate = null;
+  let fallbackCandidate = null;
+
+  for (const side of candidates) {
+    const offsetPath = offsetOpenContourPath2(path2Sketch, halfThickness * side);
+    if (!Array.isArray(offsetPath) || offsetPath.length < 2) continue;
+
+    const segments = buildContourSegments(offsetPath);
+    if (!segments.length) continue;
+
+    const trimData = computeContourCornerTrimData(segments, midRadius);
+    if (!trimData) continue;
+    const minFlatLength = Math.min(...trimData.segmentFlatLengths);
+    const candidate = {
+      side,
+      path2Midplane: offsetPath,
+      segments,
+      trimData,
+      minFlatLength,
+    };
+
+    if (side === preferredSide) {
+      preferredCandidate = candidate;
+      continue;
+    }
+    if (!fallbackCandidate || candidate.minFlatLength > fallbackCandidate.minFlatLength) {
+      fallbackCandidate = candidate;
+    }
+  }
+
+  return preferredCandidate || fallbackCandidate;
+}
+
 function makeContourSegmentFlat(featureID, segmentIndex, length, height, usedIds, isRoot = false) {
   const safeLength = Math.max(MIN_LEG, toFiniteNumber(length, MIN_LEG));
   const safeHeight = Math.max(MIN_LEG, toFiniteNumber(height, MIN_LEG));
@@ -775,31 +934,40 @@ function buildContourFlangeFromPath(pathSelections, featureID, options = {}) {
   const frame = buildContourPathFrame(path3, reverseSheetSide);
   if (!frame) return null;
 
-  const path2Raw = path3.map((point) => projectPointToContourAxes(point, frame));
-  const path2 = simplifyContourPath2(path2Raw);
-  if (path2.length < 2) return null;
-
-  const segments = buildContourSegments(path2);
-  if (!segments.length) return null;
-
   const height = Math.max(MIN_LEG, Math.abs(toFiniteNumber(options.distance, 0)));
   const thickness = Math.max(MIN_THICKNESS, Math.abs(toFiniteNumber(options.thickness, 1)));
   const insideRadius = Math.max(0, toFiniteNumber(options.bendRadius, thickness * 0.5));
   const midRadius = Math.max(MIN_LEG, insideRadius + thickness * 0.5);
   const kFactor = clamp(toFiniteNumber(options.kFactor, 0.5), 0, 1);
 
+  const path2SketchRaw = path3.map((point) => projectPointToContourAxes(point, frame));
+  const path2Sketch = simplifyContourPath2(path2SketchRaw);
+  if (path2Sketch.length < 2) return null;
+
+  const midplaneData = buildContourMidplanePathData(path2Sketch, thickness, midRadius);
+  if (!midplaneData) return null;
+
+  const path2 = midplaneData.path2Midplane;
+  const trimData = midplaneData.trimData;
+  const segments = midplaneData.segments.map((segment, idx) => ({
+    ...segment,
+    trimStart: trimData.startTrim[idx],
+    trimEnd: trimData.endTrim[idx],
+    flatLength: trimData.segmentFlatLengths[idx],
+  }));
+  if (!segments.length) return null;
+
   const usedIds = new Set();
-  const first = makeContourSegmentFlat(featureID, 0, segments[0].length, height, usedIds, true);
+  const first = makeContourSegmentFlat(featureID, 0, segments[0].flatLength, height, usedIds, true);
   let current = first;
   const bendSummary = [];
 
   for (let i = 0; i < segments.length - 1; i += 1) {
     const parentSeg = segments[i];
     const childSeg = segments[i + 1];
-    const child = makeContourSegmentFlat(featureID, i + 1, childSeg.length, height, usedIds, false);
-
-    let angleDeg = -THREE.MathUtils.radToDeg(signedTurnRadians2(parentSeg.dir, childSeg.dir));
-    if (Math.abs(angleDeg) < 1e-4) angleDeg = angleDeg >= 0 ? 1e-4 : -1e-4;
+    const child = makeContourSegmentFlat(featureID, i + 1, childSeg.flatLength, height, usedIds, false);
+    const joint = trimData.joints[i] || {};
+    const angleDeg = toFiniteNumber(joint.angleDeg, -THREE.MathUtils.radToDeg(signedTurnRadians2(parentSeg.dir, childSeg.dir)));
 
     const bendId = uniqueId(`${featureID}:bend_${i + 1}`, usedIds);
     const endEdge = findEdgeById(current.flat, current.endEdgeId);
@@ -825,6 +993,7 @@ function buildContourFlangeFromPath(pathSelections, featureID, options = {}) {
       toFlatId: child.flatId,
       angleDeg,
       turnDeg: THREE.MathUtils.radToDeg(signedTurnRadians2(parentSeg.dir, childSeg.dir)),
+      setback: Math.max(0, toFiniteNumber(joint.setback, 0)),
     });
     current = child;
   }
@@ -838,6 +1007,7 @@ function buildContourFlangeFromPath(pathSelections, featureID, options = {}) {
     tree,
     frame,
     path2,
+    path2Sketch,
     segments,
     bends: bendSummary,
     height,
@@ -1207,6 +1377,18 @@ function moveFlatEdgeForFlangeReference(flat, targetEdge, inwardDistance, usedId
   };
 
   const newEdges = [];
+  const orientSegmentLikeMatchedEdge = (a, b, matchedEdge, refA = null, refB = null) => {
+    const forward = [copyPoint2(a), copyPoint2(b)];
+    const reverse = [copyPoint2(b), copyPoint2(a)];
+    if (!matchedEdge || !Array.isArray(matchedEdge.polyline) || matchedEdge.polyline.length < 2) return forward;
+    const edgeStart = matchedEdge.polyline[0];
+    const edgeEnd = matchedEdge.polyline[matchedEdge.polyline.length - 1];
+    const sourceA = Array.isArray(refA) ? refA : a;
+    const sourceB = Array.isArray(refB) ? refB : b;
+    const sameDirScore = pointDistance2(edgeStart, sourceA) + pointDistance2(edgeEnd, sourceB);
+    const reversedScore = pointDistance2(edgeStart, sourceB) + pointDistance2(edgeEnd, sourceA);
+    return sameDirScore <= reversedScore ? forward : reverse;
+  };
   let bridgeCount = 0;
   for (const entry of filteredDefs) {
     if (entry.kind === "target") {
@@ -1224,7 +1406,10 @@ function moveFlatEdgeForFlangeReference(flat, targetEdge, inwardDistance, usedId
       const reuseB = Array.isArray(entry.reuseB) ? entry.reuseB : entry.b;
       const matchedEdge = consumeExistingEdge(reuseA, reuseB, targetEdge?.id ?? null);
       if (matchedEdge) {
-        newEdges.push({ ...matchedEdge, polyline: [copyPoint2(entry.a), copyPoint2(entry.b)] });
+        newEdges.push({
+          ...matchedEdge,
+          polyline: orientSegmentLikeMatchedEdge(entry.a, entry.b, matchedEdge, reuseA, reuseB),
+        });
       } else {
         const fallbackId = uniqueId(`${flat.id}:edge`, usedIds);
         newEdges.push({ id: fallbackId, polyline: [copyPoint2(entry.a), copyPoint2(entry.b)] });
@@ -2516,7 +2701,14 @@ export function runSheetMetalContourFlange(instance) {
   meta.lastFeatureID = featureID;
 
   const rootMatrix = built.frame.matrix.clone();
-  rootMatrix.setPosition(built.frame.origin.clone().addScaledVector(built.frame.yAxis, thickness * 0.5));
+  // The contour tree is built from midplane-segment data anchored at local origin.
+  // Re-apply the midplane path start offset so the solved body lands on the sketch edge.
+  const midplaneStart = Array.isArray(built.path2?.[0]) ? built.path2[0] : [0, 0];
+  const rootOrigin = built.frame.origin
+    .clone()
+    .addScaledVector(built.frame.xAxis, toFiniteNumber(midplaneStart[0], 0))
+    .addScaledVector(built.frame.zAxis, toFiniteNumber(midplaneStart[1], 0));
+  rootMatrix.setPosition(rootOrigin);
 
   const { root, evaluated } = buildRenderableSheetModel({
     featureID,

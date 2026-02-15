@@ -988,6 +988,10 @@ export class SchemaForm {
                 this._removeReferencePreviewGroup(inputEl);
                 return;
             }
+            // Refresh preview cache from current scene objects before syncing.
+            // Sheet-metal features frequently replace solids each rebuild, which
+            // invalidates stale UUID references but keeps stable object names.
+            try { this._seedReferencePreviewCacheFromScene(inputEl, def, names, scene); } catch (_) { }
             const cache = this._getReferencePreviewCache(inputEl);
             if (!cache || cache.size === 0) return;
             const group = this._ensureReferencePreviewGroup(inputEl);
@@ -1006,12 +1010,17 @@ export class SchemaForm {
                 if (!ghost) continue;
                 const sourceUuid = entry?.sourceUuid || null;
                 let originalPresent = false;
+                let liveObject = null;
                 if (sourceUuid && typeof scene.getObjectByProperty === 'function') {
-                    try { originalPresent = !!scene.getObjectByProperty('uuid', sourceUuid); } catch (_) { originalPresent = false; }
+                    try { liveObject = scene.getObjectByProperty('uuid', sourceUuid) || null; } catch (_) { liveObject = null; }
                 } else {
-                    const real = scene.getObjectByName(name);
-                    originalPresent = !!real;
+                    try { liveObject = scene.getObjectByName(name) || null; } catch (_) { liveObject = null; }
                 }
+                if (!liveObject) {
+                    // Fallback by name when UUID changed due to history rebuild.
+                    try { liveObject = scene.getObjectByName(name) || null; } catch (_) { liveObject = null; }
+                }
+                originalPresent = !!liveObject;
                 if (originalPresent) {
                     const keepGhost = !!(entry?.showWhenOriginalPresent || ghost?.userData?.previewHasEdges);
                     if (!keepGhost) {
