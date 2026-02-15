@@ -2308,6 +2308,234 @@ function moveFlatEdgeForFlangeReference(flat, targetEdge, inwardDistance, usedId
   };
 }
 
+function trimFlatEdgeSpanForFlange(flat, targetEdge, startSetback, endSetback, usedIds) {
+  const requestedStart = Math.max(0, toFiniteNumber(startSetback, 0));
+  const requestedEnd = Math.max(0, toFiniteNumber(endSetback, 0));
+  if (!(requestedStart > POINT_EPS || requestedEnd > POINT_EPS)) {
+    return {
+      edge: targetEdge,
+      modified: false,
+      startSetbackApplied: 0,
+      endSetbackApplied: 0,
+      bridgeCount: 0,
+    };
+  }
+  if (!flat || !targetEdge) {
+    return {
+      edge: null,
+      modified: false,
+      startSetbackApplied: 0,
+      endSetbackApplied: 0,
+      bridgeCount: 0,
+      reason: "invalid_flat_or_edge",
+    };
+  }
+
+  const outline = Array.isArray(flat.outline) ? flat.outline.map((point) => copyPoint2(point)) : [];
+  if (outline.length < 3) {
+    return {
+      edge: null,
+      modified: false,
+      startSetbackApplied: 0,
+      endSetbackApplied: 0,
+      bridgeCount: 0,
+      reason: "invalid_outline",
+    };
+  }
+
+  const match = findOutlineSegmentForEdge(flat, targetEdge);
+  if (!match) {
+    return {
+      edge: null,
+      modified: false,
+      startSetbackApplied: 0,
+      endSetbackApplied: 0,
+      bridgeCount: 0,
+      reason: "segment_not_found",
+    };
+  }
+
+  const dx = match.end[0] - match.start[0];
+  const dy = match.end[1] - match.start[1];
+  const segLen = Math.hypot(dx, dy);
+  if (!(segLen > EPS)) {
+    return {
+      edge: null,
+      modified: false,
+      startSetbackApplied: 0,
+      endSetbackApplied: 0,
+      bridgeCount: 0,
+      reason: "degenerate_segment",
+    };
+  }
+
+  const maxSetbackSum = Math.max(0, segLen - MIN_LEG);
+  if ((requestedStart + requestedEnd) > (maxSetbackSum + POINT_EPS)) {
+    return {
+      edge: null,
+      modified: false,
+      startSetbackApplied: 0,
+      endSetbackApplied: 0,
+      bridgeCount: 0,
+      reason: "setback_exceeds_edge_length",
+      edgeLength: segLen,
+    };
+  }
+
+  const appliedStart = Math.min(requestedStart, maxSetbackSum);
+  const appliedEnd = Math.min(requestedEnd, Math.max(0, maxSetbackSum - appliedStart));
+  const ux = dx / segLen;
+  const uy = dy / segLen;
+
+  const trimmedStart = [
+    match.start[0] + (ux * appliedStart),
+    match.start[1] + (uy * appliedStart),
+  ];
+  const trimmedEnd = [
+    match.end[0] - (ux * appliedEnd),
+    match.end[1] - (uy * appliedEnd),
+  ];
+  if (!(segmentLength2(trimmedStart, trimmedEnd) > POINT_EPS)) {
+    return {
+      edge: null,
+      modified: false,
+      startSetbackApplied: 0,
+      endSetbackApplied: 0,
+      bridgeCount: 0,
+      reason: "degenerate_trimmed_segment",
+    };
+  }
+
+  const edgeDefs = [];
+  for (let i = 0; i < outline.length; i += 1) {
+    const a = outline[i];
+    const b = outline[(i + 1) % outline.length];
+    if (i !== match.index) {
+      edgeDefs.push({ kind: "existing", a: copyPoint2(a), b: copyPoint2(b) });
+      continue;
+    }
+    if (segmentLength2(a, trimmedStart) > POINT_EPS) {
+      edgeDefs.push({ kind: "bridge_start", a: copyPoint2(a), b: copyPoint2(trimmedStart) });
+    }
+    edgeDefs.push({ kind: "target", a: copyPoint2(trimmedStart), b: copyPoint2(trimmedEnd) });
+    if (segmentLength2(trimmedEnd, b) > POINT_EPS) {
+      edgeDefs.push({ kind: "bridge_end", a: copyPoint2(trimmedEnd), b: copyPoint2(b) });
+    }
+  }
+
+  const filteredDefs = edgeDefs.filter((entry) => segmentLength2(entry.a, entry.b) >= POINT_EPS);
+  if (filteredDefs.length < 3) {
+    return {
+      edge: null,
+      modified: false,
+      startSetbackApplied: 0,
+      endSetbackApplied: 0,
+      bridgeCount: 0,
+      reason: "insufficient_segments",
+    };
+  }
+
+  const oldEdges = Array.isArray(flat.edges) ? flat.edges : [];
+  const oldBySig = new Map();
+  for (const edge of oldEdges) {
+    if (!edge || !Array.isArray(edge.polyline) || edge.polyline.length < 2) continue;
+    const sig = segmentSignature2(edge.polyline[0], edge.polyline[edge.polyline.length - 1]);
+    if (!sig) continue;
+    if (!oldBySig.has(sig)) oldBySig.set(sig, []);
+    oldBySig.get(sig).push(edge);
+  }
+
+  const consumed = new Set();
+  const consumeExistingEdge = (a, b, excludeId = null) => {
+    const sig = segmentSignature2(a, b);
+    if (!sig) return null;
+    const list = oldBySig.get(sig);
+    if (!Array.isArray(list) || !list.length) return null;
+    for (let i = 0; i < list.length; i += 1) {
+      const candidate = list[i];
+      if (!candidate) continue;
+      const candidateId = candidate.id != null ? String(candidate.id) : null;
+      if (excludeId != null && candidateId === String(excludeId)) continue;
+      if (candidateId != null && consumed.has(candidateId)) continue;
+      if (candidateId != null) consumed.add(candidateId);
+      return candidate;
+    }
+    return null;
+  };
+
+  const orientLikeExisting = (a, b, existingEdge) => {
+    const forward = [copyPoint2(a), copyPoint2(b)];
+    const reverse = [copyPoint2(b), copyPoint2(a)];
+    if (!existingEdge || !Array.isArray(existingEdge.polyline) || existingEdge.polyline.length < 2) return forward;
+    const edgeStart = existingEdge.polyline[0];
+    const edgeEnd = existingEdge.polyline[existingEdge.polyline.length - 1];
+    const sameDirScore = pointDistance2(edgeStart, a) + pointDistance2(edgeEnd, b);
+    const reversedScore = pointDistance2(edgeStart, b) + pointDistance2(edgeEnd, a);
+    return sameDirScore <= reversedScore ? forward : reverse;
+  };
+
+  const idSeed = targetEdge?.id || flat.id || "edge";
+  const newEdges = [];
+  let bridgeCount = 0;
+  for (const entry of filteredDefs) {
+    if (entry.kind === "target") {
+      const targetPolyline = match.reversed
+        ? [copyPoint2(entry.b), copyPoint2(entry.a)]
+        : [copyPoint2(entry.a), copyPoint2(entry.b)];
+      const rebuilt = { ...(targetEdge || {}), polyline: targetPolyline };
+      newEdges.push(rebuilt);
+      if (targetEdge?.id != null) consumed.add(String(targetEdge.id));
+      continue;
+    }
+
+    if (entry.kind === "existing") {
+      const matched = consumeExistingEdge(entry.a, entry.b, targetEdge?.id ?? null);
+      if (matched) {
+        newEdges.push({
+          ...matched,
+          polyline: orientLikeExisting(entry.a, entry.b, matched),
+        });
+      } else {
+        const fallbackId = uniqueId(`${flat.id}:edge`, usedIds);
+        newEdges.push({ id: fallbackId, polyline: [copyPoint2(entry.a), copyPoint2(entry.b)] });
+      }
+      continue;
+    }
+
+    bridgeCount += 1;
+    const bridgeId = uniqueId(`${idSeed}:bridge`, usedIds);
+    newEdges.push({ id: bridgeId, polyline: [copyPoint2(entry.a), copyPoint2(entry.b)] });
+  }
+
+  const rebuiltOutline = [copyPoint2(filteredDefs[0].a), ...filteredDefs.map((entry) => copyPoint2(entry.b))];
+  if (rebuiltOutline.length >= 2) {
+    const first = rebuiltOutline[0];
+    const last = rebuiltOutline[rebuiltOutline.length - 1];
+    if (pointDistance2(first, last) <= POINT_EPS) rebuiltOutline.pop();
+  }
+  if (rebuiltOutline.length < 3) {
+    return {
+      edge: null,
+      modified: false,
+      startSetbackApplied: 0,
+      endSetbackApplied: 0,
+      bridgeCount: 0,
+      reason: "invalid_rebuilt_outline",
+    };
+  }
+
+  flat.outline = rebuiltOutline;
+  flat.edges = newEdges;
+  const trimmedEdge = newEdges.find((edge) => String(edge?.id) === String(targetEdge?.id)) || null;
+  return {
+    edge: trimmedEdge || targetEdge,
+    modified: true,
+    startSetbackApplied: appliedStart,
+    endSetbackApplied: appliedEnd,
+    bridgeCount,
+  };
+}
+
 function chooseDefaultEdge(flat) {
   const edges = Array.isArray(flat?.edges) ? flat.edges : [];
   const candidates = edges.filter((edge) => (
@@ -2602,6 +2830,8 @@ function addFlangesToTree(tree, featureID, targets, options = {}) {
     thickness,
     insideRadius,
   });
+  const edgeStartSetback = Math.max(0, toFiniteNumber(options.edgeStartSetback, 0));
+  const edgeEndSetback = Math.max(0, toFiniteNumber(options.edgeEndSetback, 0));
   // Positive user offset pushes the bend edge outward from the flat body.
   const userOffset = toFiniteNumber(options.offset, 0);
   const inwardEdgeShift = insetReferenceShift - userOffset;
@@ -2630,6 +2860,8 @@ function addFlangesToTree(tree, featureID, targets, options = {}) {
 
     let parentEdge = edge;
     let edgeShiftApplied = 0;
+    let edgeStartSetbackApplied = 0;
+    let edgeEndSetbackApplied = 0;
     let bridgeCount = 0;
     if (Math.abs(inwardEdgeShift) > POINT_EPS) {
       const moved = moveFlatEdgeForFlangeReference(flat, edge, inwardEdgeShift, usedIds);
@@ -2641,6 +2873,20 @@ function addFlangesToTree(tree, featureID, targets, options = {}) {
       parentEdge = moved.edge;
       edgeShiftApplied = moved.moved ? toFiniteNumber(moved.shiftDistance, 0) : 0;
       bridgeCount = moved.moved ? toFiniteNumber(moved.bridgeCount, 0) : 0;
+    }
+    if (edgeStartSetback > POINT_EPS || edgeEndSetback > POINT_EPS) {
+      const trimmed = trimFlatEdgeSpanForFlange(flat, parentEdge, edgeStartSetback, edgeEndSetback, usedIds);
+      if (!trimmed?.edge) {
+        summary.skipped += 1;
+        summary.skippedTargets.push({ ...target, reason: trimmed?.reason || "edge_span_trim_failed" });
+        continue;
+      }
+      parentEdge = trimmed.edge;
+      if (trimmed.modified) {
+        edgeStartSetbackApplied = Math.max(0, toFiniteNumber(trimmed.startSetbackApplied, 0));
+        edgeEndSetbackApplied = Math.max(0, toFiniteNumber(trimmed.endSetbackApplied, 0));
+        bridgeCount += Math.max(0, toFiniteNumber(trimmed.bridgeCount, 0));
+      }
     }
 
     const created = makeFlangeChildFlat(featureID, parentEdge, legLength, `${featureID}:${flat.id}:${parentEdge.id}:${i}`, usedIds);
@@ -2678,6 +2924,10 @@ function addFlangesToTree(tree, featureID, targets, options = {}) {
       effectiveLegLength: legLength,
       userOffset,
       edgeShiftApplied,
+      edgeStartSetback,
+      edgeEndSetback,
+      edgeStartSetbackApplied,
+      edgeEndSetbackApplied,
       bridgeCount,
     });
   }
@@ -3847,6 +4097,8 @@ export function runSheetMetalFlange(instance, options = {}) {
   const legLength = Math.max(MIN_LEG, legLengthRaw - legLengthReferenceSetback);
   const insetMode = normalizeFlangeInsetMode(instance?.inputParams?.inset);
   const offset = toFiniteNumber(instance?.inputParams?.offset, 0);
+  const edgeStartSetback = Math.max(0, toFiniteNumber(instance?.inputParams?.edgeStartSetback, 0));
+  const edgeEndSetback = Math.max(0, toFiniteNumber(instance?.inputParams?.edgeEndSetback, 0));
 
   const targets = resolveEdgeTargets(selections, tree, source.carrier);
   const flangeSummary = addFlangesToTree(tree, featureID, targets, {
@@ -3861,6 +4113,8 @@ export function runSheetMetalFlange(instance, options = {}) {
     thickness,
     insetMode,
     offset,
+    edgeStartSetback,
+    edgeEndSetback,
   });
 
   if (flangeSummary.applied === 0) {

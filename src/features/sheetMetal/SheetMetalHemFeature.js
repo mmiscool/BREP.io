@@ -25,6 +25,20 @@ const inputParamsSchema = {
     min: 0,
     hint: "Hem leg length extending away from the bend edge.",
   },
+  edgeStartSetback: {
+    label: "Start setback",
+    type: "number",
+    default_value: 0,
+    min: 0,
+    hint: "Distance from the selected edge start point where the hem span begins.",
+  },
+  edgeEndSetback: {
+    label: "End setback",
+    type: "number",
+    default_value: 0,
+    min: 0,
+    hint: "Distance from the selected edge end point where the hem span ends.",
+  },
   inset: {
     type: "options",
     options: ["material_inside", "material_outside", "bend_outside"],
