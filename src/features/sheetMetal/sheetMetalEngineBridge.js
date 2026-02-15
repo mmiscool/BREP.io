@@ -2002,6 +2002,41 @@ function ensureFlatEdgeForHoleSegment(flat, edgeId, usedIds = null) {
   return newEdge;
 }
 
+function isInternalCutoutLikeEdge(edge) {
+  if (!edge || typeof edge !== "object") return false;
+  if (edge.isInternalCutoutEdge) return true;
+  if (edge.holeId != null || edge.holeEdgeIndex != null || edge.holeEdgeSignature != null) return true;
+  return String(edge.id || "").includes(":hole:");
+}
+
+function cloneFlatEdge(edge) {
+  if (!edge || typeof edge !== "object") return edge;
+  const polyline = Array.isArray(edge.polyline)
+    ? edge.polyline.map((point) => copyPoint2(point))
+    : edge.polyline;
+  return {
+    ...edge,
+    polyline,
+  };
+}
+
+function carryOverInternalCutoutEdges(oldEdges, rebuiltEdges) {
+  const out = [];
+  const existingIds = new Set();
+  for (const edge of Array.isArray(rebuiltEdges) ? rebuiltEdges : []) {
+    if (!edge || edge.id == null) continue;
+    existingIds.add(String(edge.id));
+  }
+  for (const edge of Array.isArray(oldEdges) ? oldEdges : []) {
+    if (!isInternalCutoutLikeEdge(edge)) continue;
+    const id = edge?.id != null ? String(edge.id) : null;
+    if (!id || existingIds.has(id)) continue;
+    out.push(cloneFlatEdge(edge));
+    existingIds.add(id);
+  }
+  return out;
+}
+
 function findBestMatchingSegmentIndex(loop, edgePolyline) {
   if (!Array.isArray(loop) || loop.length < 2) return null;
   const polyline = Array.isArray(edgePolyline) ? edgePolyline : [];
@@ -2570,6 +2605,8 @@ function moveFlatEdgeForFlangeReference(flat, targetEdge, inwardDistance, usedId
     const bridgeId = uniqueId(`${targetEdge?.id || flat.id}:bridge`, usedIds);
     newEdges.push({ id: bridgeId, polyline: [copyPoint2(entry.a), copyPoint2(entry.b)] });
   }
+  const carryOverEdges = carryOverInternalCutoutEdges(oldEdges, newEdges);
+  if (carryOverEdges.length) newEdges.push(...carryOverEdges);
 
   const rebuiltOutline = [copyPoint2(filteredDefs[0].a), ...filteredDefs.map((entry) => copyPoint2(entry.b))];
   if (rebuiltOutline.length >= 2) {
@@ -2790,6 +2827,8 @@ function trimFlatEdgeSpanForFlange(flat, targetEdge, startSetback, endSetback, u
     const bridgeId = uniqueId(`${idSeed}:bridge`, usedIds);
     newEdges.push({ id: bridgeId, polyline: [copyPoint2(entry.a), copyPoint2(entry.b)] });
   }
+  const carryOverEdges = carryOverInternalCutoutEdges(oldEdges, newEdges);
+  if (carryOverEdges.length) newEdges.push(...carryOverEdges);
 
   const rebuiltOutline = [copyPoint2(filteredDefs[0].a), ...filteredDefs.map((entry) => copyPoint2(entry.b))];
   if (rebuiltOutline.length >= 2) {
