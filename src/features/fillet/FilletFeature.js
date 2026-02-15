@@ -4,6 +4,7 @@ import {
     getSolidGeometryCounts,
     resolveSingleSolidFromEdges,
 } from "../edgeFeatureUtils.js";
+import { runSheetMetalCornerFillet } from "../sheetMetal/sheetMetalEngineBridge.js";
 
 const inputParamsSchema = {
     id: {
@@ -65,6 +66,115 @@ const inputParamsSchema = {
     },
 };
 
+function normalizeSelectionToken(token) {
+    const raw = String(token || '').trim();
+    if (!raw) return null;
+    return raw.replace(/\[\d+\]$/, '');
+}
+
+function expandReferenceSelections(rawSelections, partHistory) {
+    const out = [];
+    const seenObjects = new Set();
+    const unresolved = [];
+    const pushObject = (obj) => {
+        if (!obj || typeof obj !== 'object') return;
+        if (seenObjects.has(obj)) return;
+        seenObjects.add(obj);
+        out.push(obj);
+    };
+
+    const resolveByName = (name) => {
+        if (!name || typeof partHistory?.getObjectByName !== 'function') return null;
+        try {
+            return partHistory.getObjectByName(name) || null;
+        } catch {
+            return null;
+        }
+    };
+
+    for (const item of (Array.isArray(rawSelections) ? rawSelections : [])) {
+        if (!item) continue;
+        if (typeof item === 'object') {
+            pushObject(item);
+            continue;
+        }
+        const text = String(item || '').trim();
+        if (!text) continue;
+        const segments = text.includes('|') ? text.split('|') : [text];
+        for (const segment of segments) {
+            const normalized = normalizeSelectionToken(segment);
+            if (!normalized) continue;
+            const obj = resolveByName(normalized);
+            if (obj) pushObject(obj);
+            else unresolved.push(normalized);
+        }
+    }
+
+    return { selections: out, unresolved };
+}
+
+function resolveSheetMetalCarrierFromSelections(rawSelections, partHistory) {
+    const resolveByName = (name) => {
+        if (!name || typeof partHistory?.getObjectByName !== 'function') return null;
+        try {
+            return partHistory.getObjectByName(name) || null;
+        } catch {
+            return null;
+        }
+    };
+    const isSheetCarrier = (obj) => !!obj?.userData?.sheetMetalModel?.tree;
+
+    const tokens = [];
+    const collectTokens = (value) => {
+        if (value == null) return;
+        const text = String(value || '').trim();
+        if (!text) return;
+        const pieces = text.includes('|') ? text.split('|') : [text];
+        for (const piece of pieces) {
+            const normalized = normalizeSelectionToken(piece);
+            if (!normalized) continue;
+            tokens.push(normalized);
+        }
+    };
+    const selections = Array.isArray(rawSelections) ? rawSelections : [];
+    for (const item of selections) {
+        if (item && typeof item === 'object') {
+            const direct = item?.parentSolid;
+            if (isSheetCarrier(direct)) return direct;
+            let current = item;
+            while (current && typeof current === 'object') {
+                if (isSheetCarrier(current)) return current;
+                current = current.parent || null;
+            }
+            collectTokens(item?.name);
+            collectTokens(item?.userData?.edgeName);
+            collectTokens(item?.userData?.faceName);
+            continue;
+        }
+        if (typeof item !== 'string') continue;
+        collectTokens(item);
+    }
+
+    for (const token of tokens) {
+        const marker = ':FLAT:';
+        const markerIndex = token.indexOf(marker);
+        if (markerIndex <= 0) continue;
+        const carrierName = token.slice(0, markerIndex);
+        const resolved = resolveByName(carrierName);
+        if (isSheetCarrier(resolved)) return resolved;
+    }
+
+    const scene = partHistory?.scene;
+    if (scene && typeof scene.traverse === 'function') {
+        const carriers = [];
+        scene.traverse((obj) => {
+            if (isSheetCarrier(obj)) carriers.push(obj);
+        });
+        if (carriers.length === 1) return carriers[0];
+    }
+    return null;
+}
+
 export class FilletFeature {
     static shortName = "F";
     static longName = "Fillet";
@@ -110,19 +220,27 @@ export class FilletFeature {
         const removed = [];
 
         // Resolve inputs from sanitizeInputParams()
-        const inputObjects = Array.isArray(this.inputParams.edges) ? this.inputParams.edges.filter(Boolean) : [];
+        const rawInputSelections = Array.isArray(this.inputParams.edges) ? this.inputParams.edges.filter(Boolean) : [];
+        const expanded = expandReferenceSelections(rawInputSelections, partHistory);
+        const inputObjects = expanded.selections;
         const edgeObjs = collectEdgesFromSelection(inputObjects);
-        if (edgeObjs.length === 0) {
-            console.warn('[FilletFeature] No edges resolved for fillet feature; aborting.');
-            return { added: [], removed: [] };
-        }
+        const sheetCarrierFromRefs = resolveSheetMetalCarrierFromSelections(rawInputSelections, partHistory);
 
-        const { solid: targetSolid, solids } = resolveSingleSolidFromEdges(edgeObjs);
+        let { solid: targetSolid, solids } = resolveSingleSolidFromEdges(edgeObjs);
+        if (sheetCarrierFromRefs) {
+            targetSolid = sheetCarrierFromRefs;
+            solids = new Set([sheetCarrierFromRefs]);
+        } else if (!targetSolid) {
+            targetSolid = null;
+        }
         if (!targetSolid) {
             if (solids.size > 1) {
                 console.warn('[FilletFeature] Edges reference multiple solids; aborting fillet.', { solids: Array.from(solids).map(s => s?.name) });
             } else {
-                console.warn('[FilletFeature] Edges do not reference a target solid; aborting fillet.');
+                console.warn('[FilletFeature] Edges do not reference a target solid; aborting fillet.', {
+                    unresolvedRefs: expanded.unresolved,
+                    rawSelectionCount: rawInputSelections.length,
+                });
             }
             return { added: [], removed: [] };
         }
@@ -140,6 +258,39 @@ export class FilletFeature {
         }
 
         const fid = this.inputParams.featureID;
+
+        const isSheetMetalCarrier = !!targetSolid?.userData?.sheetMetalModel?.tree;
+        if (isSheetMetalCarrier) {
+            const sheetResult = runSheetMetalCornerFillet({
+                sourceCarrier: targetSolid,
+                selections: rawInputSelections,
+                edgeSelections: edgeObjs,
+                radius: r,
+                resolution: this.inputParams?.resolution,
+                featureID: fid || "SM_FILLET",
+                showFlatPattern: true,
+            });
+            this.persistentData = {
+                ...(this.persistentData || {}),
+                sheetMetalFilletSummary: sheetResult?.summary || null,
+            };
+            if (sheetResult?.root) {
+                console.log('[FilletFeature] Sheet-metal corner fillet applied; replacing target solid.', {
+                    featureID: fid,
+                    appliedTargets: sheetResult?.summary?.applied || 0,
+                    appliedCorners: sheetResult?.summary?.appliedCorners || 0,
+                });
+                added.push(sheetResult.root);
+                removed.push(targetSolid);
+            } else {
+                console.warn('[FilletFeature] Sheet-metal corner fillet produced no changes.', {
+                    featureID: fid,
+                    summary: sheetResult?.summary || null,
+                });
+            }
+            return { added, removed };
+        }
+
         let result = null;
         try {
             result = await targetSolid.fillet({

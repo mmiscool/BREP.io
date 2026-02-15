@@ -28,6 +28,9 @@ import { test_history_features_basic, afterRun_history_features_basic } from './
 import { test_textToFace, afterRun_textToFace } from './test_textToFace.js';
 import { test_sheetMetal_nonManifold_sm_f18 } from './test_sheetMetal_nonManifold_sm_f18.js';
 import { test_sheetMetal_cutoutEdge_flange_controls } from './test_sheetMetal_cutoutEdge_flange_controls.js';
+import { test_sheetMetal_corner_fillet } from './test_sheetMetal_corner_fillet.js';
+import { test_sheetMetal_corner_fillet_selection_resolution } from './test_sheetMetal_corner_fillet_selection_resolution.js';
+import { test_sheetMetal_corner_fillet_compound_reference } from './test_sheetMetal_corner_fillet_compound_reference.js';
 import { generate3MF } from '../exporters/threeMF.js';
 import {
     test_hole_through,
@@ -78,6 +81,9 @@ export const testFunctions = [
     { test: test_textToFace, afterRun: afterRun_textToFace, printArtifacts: false, exportFaces: true, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_nonManifold_sm_f18, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_cutoutEdge_flange_controls, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sheetMetal_corner_fillet, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sheetMetal_corner_fillet_selection_resolution, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sheetMetal_corner_fillet_compound_reference, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_solidMetrics, afterRun: afterRun_solidMetrics, printArtifacts: true, exportFaces: true, exportSolids: true, resetHistory: true },
 
 ];

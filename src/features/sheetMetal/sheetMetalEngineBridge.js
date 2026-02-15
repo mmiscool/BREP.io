@@ -4122,6 +4122,580 @@ function resolveEdgeTargets(selections, tree, carrier) {
   return targets;
 }
 
+function resolveSheetMetalCornerFilletTargets(selections, edgeSelections, tree, carrier) {
+  const targets = [];
+  const seen = new Set();
+
+  const normalizeSelectionToken = (token) => String(token || "").trim().replace(/\[\d+\]$/, "");
+
+  const parseStringReferenceTarget = (token) => {
+    const text = normalizeSelectionToken(token);
+    if (!text) return null;
+    const flatMarker = ":FLAT:";
+    const sideMarker = ":SIDE:";
+    const cutoutMarker = ":CUTOUT:";
+    const edgeMarker = ":EDGE:";
+    const flatPos = text.indexOf(flatMarker);
+    if (flatPos < 0) return null;
+    const carrierName = flatPos > 0 ? text.slice(0, flatPos) : null;
+    const flatStart = flatPos + flatMarker.length;
+    const sidePos = text.indexOf(sideMarker, flatStart);
+    if (sidePos > flatStart) {
+      const flatId = text.slice(flatStart, sidePos);
+      const edgeId = text.slice(sidePos + sideMarker.length);
+      if (flatId && edgeId) return { carrierName, flatId, edgeId };
+      return null;
+    }
+
+    const cutoutPos = text.indexOf(cutoutMarker, flatStart);
+    if (cutoutPos > flatStart) {
+      const flatId = text.slice(flatStart, cutoutPos);
+      const edgePos = text.indexOf(edgeMarker, cutoutPos + cutoutMarker.length);
+      if (edgePos > cutoutPos) {
+        const holeId = text.slice(cutoutPos + cutoutMarker.length, edgePos);
+        const edgeIndexRaw = text.slice(edgePos + edgeMarker.length);
+        const edgeIndex = Math.max(1, toFiniteNumber(edgeIndexRaw, 1) | 0);
+        if (flatId && holeId) {
+          return { carrierName, flatId, edgeId: makeHoleSegmentEdgeId(flatId, holeId, edgeIndex) };
+        }
+      }
+    }
+    return null;
+  };
+
+  const carrierNameMatches = (name) => {
+    if (!name) return true;
+    const carrierName = String(carrier?.name || "");
+    if (!carrierName) return true;
+    return String(name) === carrierName;
+  };
+
+  const resolveSelectionCarrier = (selection) => {
+    if (!selection || typeof selection !== "object") return null;
+    const directSolid = selection?.parentSolid;
+    if (directSolid?.userData?.sheetMetalModel?.tree) return directSolid;
+    const fromSolidParent = resolveCarrierFromObject(directSolid);
+    if (fromSolidParent) return fromSolidParent;
+    return resolveCarrierFromObject(selection);
+  };
+
+  const pushEdgeTarget = (flatIdRaw, edgeIdRaw) => {
+    const flatId = flatIdRaw != null ? String(flatIdRaw) : null;
+    const edgeId = edgeIdRaw != null ? String(edgeIdRaw) : null;
+    if (!flatId || !edgeId) return;
+    const flat = findFlatById(tree?.root, flatId);
+    if (!flat) return;
+    const key = `${flatId}|${edgeId}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    targets.push({ flatId, edgeId });
+  };
+
+  const pushCornerTarget = (flatIdRaw, cornerEdgeIdsRaw) => {
+    const flatId = flatIdRaw != null ? String(flatIdRaw) : null;
+    if (!flatId) return;
+    const flat = findFlatById(tree?.root, flatId);
+    if (!flat) return;
+    const edgeIds = Array.isArray(cornerEdgeIdsRaw)
+      ? cornerEdgeIdsRaw.map((id) => String(id || "").trim()).filter(Boolean)
+      : [];
+    if (edgeIds.length < 2) return;
+    const unique = [];
+    const seenEdges = new Set();
+    for (const edgeId of edgeIds) {
+      if (seenEdges.has(edgeId)) continue;
+      seenEdges.add(edgeId);
+      unique.push(edgeId);
+    }
+    if (unique.length < 2) return;
+    const pair = unique.slice(0, 2);
+    const signature = pair.slice().sort().join("&");
+    const key = `${flatId}|corner|${signature}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    targets.push({ flatId, cornerEdgeIds: pair });
+  };
+
+  const parseCornerPairReferenceTarget = (value) => {
+    if (typeof value !== "string") return null;
+    if (!value.includes("|")) return null;
+    const tokens = value.split("|").map((token) => String(token || "").trim()).filter(Boolean);
+    if (tokens.length < 2) return null;
+    const parsed = [];
+    for (const token of tokens) {
+      const entry = parseStringReferenceTarget(token);
+      if (!entry) continue;
+      if (!carrierNameMatches(entry.carrierName)) continue;
+      parsed.push(entry);
+    }
+    if (parsed.length < 2) return null;
+    const flatId = parsed[0].flatId;
+    if (!flatId) return null;
+    for (let i = 1; i < parsed.length; i += 1) {
+      if (String(parsed[i].flatId || "") !== String(flatId)) return null;
+    }
+    const edgeIds = [];
+    const seenEdges = new Set();
+    for (const entry of parsed) {
+      const edgeId = String(entry.edgeId || "").trim();
+      if (!edgeId || seenEdges.has(edgeId)) continue;
+      seenEdges.add(edgeId);
+      edgeIds.push(edgeId);
+    }
+    if (edgeIds.length < 2) return null;
+    return { flatId, cornerEdgeIds: edgeIds.slice(0, 2) };
+  };
+
+  const resolveObjectTarget = (selection) => {
+    if (!selection || typeof selection !== "object") return;
+    const cornerFromName = parseCornerPairReferenceTarget(selection?.name)
+      || parseCornerPairReferenceTarget(selection?.userData?.edgeName)
+      || parseCornerPairReferenceTarget(selection?.userData?.faceName);
+    if (cornerFromName) {
+      pushCornerTarget(cornerFromName.flatId, cornerFromName.cornerEdgeIds);
+      return;
+    }
+
+    const selectionCarrier = resolveSelectionCarrier(selection);
+    if (!selectionCarrier || selectionCarrier === carrier) {
+      const meta = readSelectionSheetMetalMetadata(selection) || {};
+      if (meta.flatId && meta.edgeId) {
+        pushEdgeTarget(meta.flatId, meta.edgeId);
+        return;
+      }
+      if (meta.flatId && meta.defaultEdgeId) {
+        pushEdgeTarget(meta.flatId, meta.defaultEdgeId);
+        return;
+      }
+      if (meta.kind && String(meta.kind).toLowerCase() === "flat_edge_wall" && meta.flatId && meta.edgeId) {
+        pushEdgeTarget(meta.flatId, meta.edgeId);
+        return;
+      }
+    }
+
+    resolveStringTarget(selection?.name);
+    resolveStringTarget(selection?.userData?.edgeName);
+    resolveStringTarget(selection?.userData?.faceName);
+  };
+
+  const resolveStringTarget = (value) => {
+    if (typeof value !== "string") return;
+    const cornerPair = parseCornerPairReferenceTarget(value);
+    if (cornerPair) {
+      pushCornerTarget(cornerPair.flatId, cornerPair.cornerEdgeIds);
+      return;
+    }
+    const tokens = value.includes("|") ? value.split("|") : [value];
+    for (const token of tokens) {
+      const parsed = parseStringReferenceTarget(token);
+      if (!parsed) continue;
+      if (!carrierNameMatches(parsed.carrierName)) continue;
+      pushEdgeTarget(parsed.flatId, parsed.edgeId);
+    }
+  };
+
+  for (const edge of normalizeSelectionArray(edgeSelections)) {
+    if (typeof edge === "string") resolveStringTarget(edge);
+    else resolveObjectTarget(edge);
+  }
+  for (const selection of normalizeSelectionArray(selections)) {
+    if (typeof selection === "string") resolveStringTarget(selection);
+    else resolveObjectTarget(selection);
+  }
+
+  return targets;
+}
+
+function findNearestLoopVertexIndex(loop, anchor, tolerance = POINT_EPS * 8) {
+  if (!Array.isArray(loop) || loop.length < 3 || !Array.isArray(anchor) || anchor.length < 2) return -1;
+  const target = copyPoint2(anchor);
+  let bestIndex = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < loop.length; i += 1) {
+    const dist = pointDistance2(loop[i], target);
+    if (dist < bestDistance) {
+      bestDistance = dist;
+      bestIndex = i;
+    }
+  }
+  return bestDistance <= Math.max(POINT_EPS, toFiniteNumber(tolerance, POINT_EPS * 8)) ? bestIndex : -1;
+}
+
+function unwrapAngleDelta(start, end, preferCCW) {
+  let delta = end - start;
+  const fullTurn = Math.PI * 2;
+  if (preferCCW) {
+    while (delta <= 0) delta += fullTurn;
+  } else {
+    while (delta >= 0) delta -= fullTurn;
+  }
+  return delta;
+}
+
+function roundFlatOutlineCorner(loop, vertexIndex, radius, resolution = 32) {
+  const sourceLoop = normalizeLoop2(loop);
+  if (sourceLoop.length < 3) return { changed: false, reason: "invalid_loop" };
+  const n = sourceLoop.length;
+  const idx = ((toFiniteNumber(vertexIndex, 0) | 0) % n + n) % n;
+  const prev = copyPoint2(sourceLoop[(idx - 1 + n) % n]);
+  const curr = copyPoint2(sourceLoop[idx]);
+  const next = copyPoint2(sourceLoop[(idx + 1) % n]);
+
+  const lenPrev = segmentLength2(prev, curr);
+  const lenNext = segmentLength2(curr, next);
+  if (!(lenPrev > POINT_EPS) || !(lenNext > POINT_EPS)) {
+    return { changed: false, reason: "degenerate_corner_edges" };
+  }
+
+  const dirPrev = [(prev[0] - curr[0]) / lenPrev, (prev[1] - curr[1]) / lenPrev];
+  const dirNext = [(next[0] - curr[0]) / lenNext, (next[1] - curr[1]) / lenNext];
+  const dot = clamp((dirPrev[0] * dirNext[0]) + (dirPrev[1] * dirNext[1]), -1, 1);
+  const cornerAngle = Math.acos(dot);
+  if (!(cornerAngle > THREE.MathUtils.degToRad(2)) || !(cornerAngle < (Math.PI - THREE.MathUtils.degToRad(2)))) {
+    return { changed: false, reason: "unsupported_corner_angle" };
+  }
+
+  const turn = ((curr[0] - prev[0]) * (next[1] - curr[1])) - ((curr[1] - prev[1]) * (next[0] - curr[0]));
+  const orientation = signedArea2D(sourceLoop) >= 0 ? 1 : -1;
+  if ((turn * orientation) <= (POINT_EPS * 10)) {
+    return { changed: false, reason: "non_convex_corner" };
+  }
+
+  const requestedRadius = Math.max(0, toFiniteNumber(radius, 0));
+  if (!(requestedRadius > POINT_EPS)) {
+    return { changed: false, reason: "invalid_radius" };
+  }
+
+  const tanHalf = Math.tan(cornerAngle * 0.5);
+  if (!(Math.abs(tanHalf) > EPS)) {
+    return { changed: false, reason: "invalid_corner_geometry" };
+  }
+
+  let tangentDistance = requestedRadius / tanHalf;
+  const maxTangentDistance = Math.max(POINT_EPS, Math.min(lenPrev, lenNext) - (POINT_EPS * 4));
+  if (!(maxTangentDistance > POINT_EPS)) {
+    return { changed: false, reason: "insufficient_edge_length" };
+  }
+  tangentDistance = Math.min(tangentDistance, maxTangentDistance);
+  if (!(tangentDistance > POINT_EPS)) {
+    return { changed: false, reason: "insufficient_effective_tangent_distance" };
+  }
+
+  const effectiveRadius = tangentDistance * tanHalf;
+  if (!(effectiveRadius > POINT_EPS)) {
+    return { changed: false, reason: "insufficient_effective_radius" };
+  }
+
+  const startPoint = [
+    curr[0] + (dirPrev[0] * tangentDistance),
+    curr[1] + (dirPrev[1] * tangentDistance),
+  ];
+  const endPoint = [
+    curr[0] + (dirNext[0] * tangentDistance),
+    curr[1] + (dirNext[1] * tangentDistance),
+  ];
+  if (segmentLength2(startPoint, endPoint) <= POINT_EPS) {
+    return { changed: false, reason: "collapsed_fillet_span" };
+  }
+
+  const bisector = [dirPrev[0] + dirNext[0], dirPrev[1] + dirNext[1]];
+  const bisectorLength = Math.hypot(bisector[0], bisector[1]);
+  if (!(bisectorLength > POINT_EPS)) {
+    return { changed: false, reason: "degenerate_bisector" };
+  }
+  const bisectorUnit = [bisector[0] / bisectorLength, bisector[1] / bisectorLength];
+  const centerDistance = effectiveRadius / Math.sin(cornerAngle * 0.5);
+  if (!(centerDistance > POINT_EPS)) {
+    return { changed: false, reason: "invalid_center_distance" };
+  }
+
+  const preferCCW = turn > 0;
+  const candidateCenters = [
+    [curr[0] + bisectorUnit[0] * centerDistance, curr[1] + bisectorUnit[1] * centerDistance],
+    [curr[0] - bisectorUnit[0] * centerDistance, curr[1] - bisectorUnit[1] * centerDistance],
+  ];
+
+  let chosen = null;
+  for (const center of candidateCenters) {
+    const startAngle = Math.atan2(startPoint[1] - center[1], startPoint[0] - center[0]);
+    const endAngle = Math.atan2(endPoint[1] - center[1], endPoint[0] - center[0]);
+    const delta = unwrapAngleDelta(startAngle, endAngle, preferCCW);
+    const absDelta = Math.abs(delta);
+    if (!(absDelta > THREE.MathUtils.degToRad(1)) || !(absDelta < (Math.PI - THREE.MathUtils.degToRad(1)))) continue;
+    const midAngle = startAngle + delta * 0.5;
+    const midPoint = [
+      center[0] + Math.cos(midAngle) * effectiveRadius,
+      center[1] + Math.sin(midAngle) * effectiveRadius,
+    ];
+    const score = pointDistance2(midPoint, curr);
+    if (!chosen || score < chosen.score) {
+      chosen = {
+        center,
+        startAngle,
+        delta,
+        score,
+      };
+    }
+  }
+
+  if (!chosen) {
+    return { changed: false, reason: "failed_to_resolve_arc_center" };
+  }
+
+  const safeResolution = Math.max(8, Math.min(256, toFiniteNumber(resolution, 32) | 0));
+  const arcSegments = Math.max(2, Math.ceil((Math.abs(chosen.delta) / (Math.PI * 2)) * safeResolution));
+  const arcPoints = [];
+  for (let i = 1; i < arcSegments; i += 1) {
+    const t = i / arcSegments;
+    const angle = chosen.startAngle + chosen.delta * t;
+    arcPoints.push([
+      chosen.center[0] + Math.cos(angle) * effectiveRadius,
+      chosen.center[1] + Math.sin(angle) * effectiveRadius,
+    ]);
+  }
+
+  const rebuilt = [];
+  for (let i = 0; i < sourceLoop.length; i += 1) {
+    if (i === idx) {
+      rebuilt.push(copyPoint2(startPoint));
+      for (const point of arcPoints) rebuilt.push(copyPoint2(point));
+      rebuilt.push(copyPoint2(endPoint));
+    } else {
+      rebuilt.push(copyPoint2(sourceLoop[i]));
+    }
+  }
+
+  const normalized = normalizeLoop2(rebuilt);
+  if (normalized.length < 3) {
+    return { changed: false, reason: "invalid_rebuilt_loop" };
+  }
+
+  return {
+    changed: true,
+    loop: normalized,
+    effectiveRadius,
+    arcSegmentCount: arcSegments,
+    arcPolyline: [copyPoint2(startPoint), ...arcPoints.map((point) => copyPoint2(point)), copyPoint2(endPoint)],
+  };
+}
+
+function applyCornerFilletsToTree(tree, featureID, targets, options = {}) {
+  const safeRadius = Math.max(0, toFiniteNumber(options.radius, 0));
+  const safeResolution = Math.max(8, Math.min(256, toFiniteNumber(options.resolution, 32) | 0));
+  const usedIds = options.usedIds instanceof Set ? options.usedIds : collectTreeIds(tree);
+
+  const summary = {
+    requested: Array.isArray(targets) ? targets.length : 0,
+    applied: 0,
+    skipped: 0,
+    appliedTargets: [],
+    skippedTargets: [],
+    appliedCorners: 0,
+  };
+  if (!(safeRadius > POINT_EPS)) {
+    summary.skipped = summary.requested;
+    for (const target of Array.isArray(targets) ? targets : []) {
+      summary.skippedTargets.push({ ...target, reason: "invalid_radius" });
+    }
+    return summary;
+  }
+
+  const plansByFlatId = new Map();
+  const targetList = Array.isArray(targets) ? targets : [];
+  const addPlanAnchor = (plan, anchor) => {
+    const safeAnchor = copyPoint2(anchor);
+    const key = `${safeAnchor[0].toFixed(6)},${safeAnchor[1].toFixed(6)}`;
+    if (!plan.cornerAnchorsByKey.has(key)) plan.cornerAnchorsByKey.set(key, safeAnchor);
+  };
+  const resolveOutlineEdgeMatch = (flat, edgeIdRaw) => {
+    const edgeId = edgeIdRaw != null ? String(edgeIdRaw) : null;
+    let edge = findEdgeById(flat, edgeId);
+    if (!edge && edgeId) edge = ensureFlatEdgeForHoleSegment(flat, edgeId, usedIds);
+    if (!edge) return { reason: "edge_not_found" };
+    if (edge.bend || edge.isAttachEdge) return { reason: "edge_not_supported" };
+    if (isInternalCutoutLikeEdge(edge)) return { reason: "internal_cutout_edge_not_supported" };
+    const match = findOutlineSegmentForEdge(flat, edge);
+    if (!match) return { reason: "edge_not_on_outer_outline" };
+    return { edge, match };
+  };
+  const findSharedOutlineCorner = (outline, firstMatch, secondMatch) => {
+    if (!Array.isArray(outline) || outline.length < 3 || !firstMatch || !secondMatch) return null;
+    const safeLen = outline.length;
+    const vertex = (index) => copyPoint2(outline[((index % safeLen) + safeLen) % safeLen]);
+    const first = [vertex(firstMatch.index), vertex(firstMatch.index + 1)];
+    const second = [vertex(secondMatch.index), vertex(secondMatch.index + 1)];
+    const tol = Math.max(POINT_EPS * 8, 1e-5);
+    for (const a of first) {
+      for (const b of second) {
+        if (pointDistance2(a, b) <= tol) {
+          return [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
+        }
+      }
+    }
+    return null;
+  };
+
+  for (const target of targetList) {
+    const flat = findFlatById(tree?.root, target?.flatId);
+    if (!flat) {
+      summary.skipped += 1;
+      summary.skippedTargets.push({ ...target, reason: "flat_not_found" });
+      continue;
+    }
+
+    const outline = normalizeLoop2(flat?.outline);
+    if (outline.length < 3) {
+      summary.skipped += 1;
+      summary.skippedTargets.push({ ...target, reason: "invalid_outline" });
+      continue;
+    }
+
+    if (!plansByFlatId.has(flat.id)) {
+      plansByFlatId.set(flat.id, {
+        flat,
+        cornerAnchorsByKey: new Map(),
+        sources: [],
+      });
+    }
+    const plan = plansByFlatId.get(flat.id);
+    const cornerEdgeIds = Array.isArray(target?.cornerEdgeIds)
+      ? target.cornerEdgeIds.map((id) => String(id || "").trim()).filter(Boolean)
+      : [];
+    if (cornerEdgeIds.length >= 2) {
+      const firstEdge = resolveOutlineEdgeMatch(flat, cornerEdgeIds[0]);
+      if (!firstEdge?.edge || !firstEdge?.match) {
+        summary.skipped += 1;
+        summary.skippedTargets.push({ ...target, reason: firstEdge?.reason || "edge_not_found" });
+        continue;
+      }
+      const secondEdge = resolveOutlineEdgeMatch(flat, cornerEdgeIds[1]);
+      if (!secondEdge?.edge || !secondEdge?.match) {
+        summary.skipped += 1;
+        summary.skippedTargets.push({ ...target, reason: secondEdge?.reason || "edge_not_found" });
+        continue;
+      }
+      const sharedAnchor = findSharedOutlineCorner(outline, firstEdge.match, secondEdge.match);
+      if (!sharedAnchor) {
+        summary.skipped += 1;
+        summary.skippedTargets.push({ ...target, reason: "corner_pair_not_adjacent" });
+        continue;
+      }
+      addPlanAnchor(plan, sharedAnchor);
+      plan.sources.push({
+        target,
+        edgeId: `${firstEdge.edge.id}|${secondEdge.edge.id}`,
+        cornerEdgeIds: [firstEdge.edge.id, secondEdge.edge.id],
+        cornerMode: "pair",
+      });
+      continue;
+    }
+
+    const resolved = resolveOutlineEdgeMatch(flat, target?.edgeId);
+    if (!resolved?.edge || !resolved?.match) {
+      summary.skipped += 1;
+      summary.skippedTargets.push({ ...target, reason: resolved?.reason || "edge_not_found" });
+      continue;
+    }
+    const cornerIndices = [resolved.match.index, (resolved.match.index + 1) % outline.length];
+    for (const index of cornerIndices) addPlanAnchor(plan, outline[index]);
+    plan.sources.push({ target, edgeId: resolved.edge.id });
+  }
+
+  for (const [, plan] of plansByFlatId) {
+    const flat = plan.flat;
+    const baseOutline = normalizeLoop2(flat?.outline);
+    if (baseOutline.length < 3) {
+      for (const source of plan.sources) {
+        summary.skipped += 1;
+        summary.skippedTargets.push({ ...source.target, reason: "invalid_outline" });
+      }
+      continue;
+    }
+
+    const sourceIndex = buildEdgeSegmentSourceIndex(Array.isArray(flat.edges) ? flat.edges : [], { skipInternalCutout: true });
+    const eligibleAnchors = [];
+    const ineligibleAnchors = [];
+    for (const anchor of plan.cornerAnchorsByKey.values()) {
+      const idx = findNearestLoopVertexIndex(baseOutline, anchor, POINT_EPS * 12);
+      if (idx < 0) {
+        ineligibleAnchors.push({ anchor, reason: "corner_not_found" });
+        continue;
+      }
+      const prev = baseOutline[(idx - 1 + baseOutline.length) % baseOutline.length];
+      const curr = baseOutline[idx];
+      const next = baseOutline[(idx + 1) % baseOutline.length];
+      const prevEdge = findSourceEdgeForSegment(prev, curr, sourceIndex);
+      const nextEdge = findSourceEdgeForSegment(curr, next, sourceIndex);
+      if (prevEdge?.bend || prevEdge?.isAttachEdge || nextEdge?.bend || nextEdge?.isAttachEdge) {
+        ineligibleAnchors.push({ anchor, reason: "corner_adjacent_to_bend_or_attach" });
+        continue;
+      }
+      eligibleAnchors.push(anchor);
+    }
+
+    let workingLoop = baseOutline.map((point) => copyPoint2(point));
+    let changedCorners = 0;
+    const filletSourceChains = [];
+    for (const anchor of eligibleAnchors) {
+      const idx = findNearestLoopVertexIndex(workingLoop, anchor, POINT_EPS * 20);
+      if (idx < 0) continue;
+      const rounded = roundFlatOutlineCorner(workingLoop, idx, safeRadius, safeResolution);
+      if (!rounded?.changed || !Array.isArray(rounded.loop) || rounded.loop.length < 3) continue;
+      workingLoop = rounded.loop.map((point) => copyPoint2(point));
+      changedCorners += 1;
+      if (Array.isArray(rounded.arcPolyline) && rounded.arcPolyline.length >= 3) {
+        filletSourceChains.push(rounded.arcPolyline.map((point) => copyPoint2(point)));
+      }
+    }
+
+    if (changedCorners <= 0) {
+      for (const source of plan.sources) {
+        summary.skipped += 1;
+        summary.skippedTargets.push({ ...source.target, reason: ineligibleAnchors[0]?.reason || "no_eligible_corners" });
+      }
+      continue;
+    }
+
+    const oldOutline = Array.isArray(flat.outline) ? flat.outline.map((point) => copyPoint2(point)) : [];
+    const oldEdges = Array.isArray(flat.edges) ? flat.edges.map((edge) => cloneFlatEdge(edge)) : [];
+    flat.outline = workingLoop.map((point) => copyPoint2(point));
+    const rebuilt = rebuildFlatOuterEdgesFromOutline(
+      flat,
+      flat.outline,
+      usedIds,
+      filletSourceChains.length ? [filletSourceChains] : null,
+    );
+    if (!rebuilt?.changed) {
+      flat.outline = oldOutline;
+      flat.edges = oldEdges;
+      for (const source of plan.sources) {
+        summary.skipped += 1;
+        summary.skippedTargets.push({ ...source.target, reason: rebuilt?.reason || "edge_rebuild_failed" });
+      }
+      continue;
+    }
+
+    summary.applied += plan.sources.length;
+    summary.appliedCorners += changedCorners;
+    for (const source of plan.sources) {
+      summary.appliedTargets.push({
+        ...source.target,
+        edgeId: source.edgeId,
+        radius: safeRadius,
+        resolution: safeResolution,
+        appliedCornerCount: changedCorners,
+      });
+    }
+  }
+
+  if (tree?.root) {
+    restoreFlatEdgeBoundaryVertices(tree.root);
+    synchronizeBendAttachEdgeSubdivision(tree.root);
+  }
+
+  return summary;
+}
+
 function buildCanonicalFlangeAttachPolyline(parentEdge) {
   const source = dedupeConsecutivePoints2(
     (Array.isArray(parentEdge?.polyline) ? parentEdge.polyline : []).map((point) => copyPoint2(point)),
@@ -5379,6 +5953,94 @@ export function __test_applyFlangesToTree({
   const workingTree = cloneTree(tree);
   const summary = addFlangesToTree(workingTree, String(featureID || "SM_TEST"), Array.isArray(targets) ? targets : [], options || {});
   return { tree: workingTree, summary };
+}
+
+export function __test_applyCornerFilletsToTree({
+  tree,
+  featureID = "SM_TEST_FILLET",
+  targets = [],
+  radius = 1,
+  resolution = 32,
+} = {}) {
+  if (!tree || typeof tree !== "object" || !tree.root) {
+    throw new Error("__test_applyCornerFilletsToTree requires a valid tree with a root flat.");
+  }
+  const workingTree = cloneTree(tree);
+  const summary = applyCornerFilletsToTree(
+    workingTree,
+    String(featureID || "SM_TEST_FILLET"),
+    Array.isArray(targets) ? targets : [],
+    { radius, resolution },
+  );
+  return { tree: workingTree, summary };
+}
+
+export function runSheetMetalCornerFillet({
+  sourceCarrier = null,
+  selections = [],
+  edgeSelections = [],
+  radius = 1,
+  resolution = 32,
+  featureID = "SM_FILLET",
+  showFlatPattern = true,
+} = {}) {
+  const source = buildSheetSourceFromCarrier(sourceCarrier);
+  if (!source) {
+    return {
+      handled: false,
+      root: null,
+      tree: null,
+      summary: {
+        requested: 0,
+        applied: 0,
+        skipped: 0,
+        appliedTargets: [],
+        skippedTargets: [],
+        appliedCorners: 0,
+        reason: "no_sheet_source",
+      },
+    };
+  }
+
+  const safeFeatureID = String(featureID || "SM_FILLET");
+  const tree = cloneTree(source.tree);
+  const targets = resolveSheetMetalCornerFilletTargets(selections, edgeSelections, tree, source.carrier);
+  const summary = applyCornerFilletsToTree(tree, safeFeatureID, targets, { radius, resolution });
+  if (summary.applied <= 0 || summary.appliedCorners <= 0) {
+    return {
+      handled: true,
+      root: null,
+      tree,
+      summary: {
+        ...summary,
+        reason: summary.requested > 0 ? "no_corners_modified" : "no_sheet_metal_edge_targets",
+      },
+    };
+  }
+
+  const meta = ensureSheetMeta(tree);
+  meta.lastFeatureID = safeFeatureID;
+  if (meta.baseType == null) meta.baseType = "FILLET";
+
+  const rootMatrix = source.rootMatrix || matrixFromAny(source.carrier?.userData?.sheetMetalModel?.rootTransform);
+  const { root, evaluated } = buildRenderableSheetModel({
+    featureID: safeFeatureID,
+    tree,
+    rootMatrix,
+    showFlatPattern: showFlatPattern !== false,
+  });
+  preserveSheetMetalFaceNames(root, source.carrier);
+  if (source?.carrier && typeof source.carrier.name === "string") {
+    root.name = source.carrier.name;
+  }
+
+  return {
+    handled: true,
+    root,
+    tree,
+    evaluated,
+    summary,
+  };
 }
 
 function summarizeEvaluatedModel(evaluated) {
