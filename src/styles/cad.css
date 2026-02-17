@@ -35,8 +35,9 @@ body {
 
 .cad-sidebar-home-banner {
   width: 100%;
-  min-height: 36px;
-  height: 36px;
+  min-height: 41px;
+  height: 41px;
+  max-height: 41px;
   margin: 0 0 6px;
   padding: 0 8px;
   display: flex;

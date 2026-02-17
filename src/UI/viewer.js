@@ -43,6 +43,7 @@ import { BREP } from '../BREP/BREP.js';
 import { createAxisHelperGroup, DEFAULT_AXIS_HELPER_PX } from '../utils/axisHelpers.js';
 
 const ASSEMBLY_CONSTRAINTS_TITLE = 'Assembly Constraints';
+const SIDEBAR_HOME_BANNER_HEIGHT_PX = 41;
 
 function ensureSelectionPickerStyles() {
     if (typeof document === 'undefined') return;
@@ -1110,26 +1111,15 @@ export class Viewer {
     _syncSidebarHomeBannerHeight() {
         const banner = this._sidebarHomeBanner;
         if (!banner) return;
-        let targetHeight = 0;
-        try {
-            targetHeight = Math.round(this.mainToolbar?.root?.getBoundingClientRect?.().height || 0);
-        } catch { /* ignore */ }
-        if (!Number.isFinite(targetHeight) || targetHeight <= 0) return;
-        const px = `${targetHeight}px`;
+        const px = `${SIDEBAR_HOME_BANNER_HEIGHT_PX}px`;
         banner.style.height = px;
         banner.style.minHeight = px;
+        banner.style.maxHeight = px;
     }
 
     _bindSidebarHomeBannerHeightSync() {
         try { this._sidebarHomeBannerRO?.disconnect?.(); } catch { /* ignore */ }
         this._sidebarHomeBannerRO = null;
-        const toolbarRoot = this.mainToolbar?.root;
-        if (!toolbarRoot || typeof ResizeObserver === 'undefined') return;
-        try {
-            const ro = new ResizeObserver(() => this._syncSidebarHomeBannerHeight());
-            ro.observe(toolbarRoot);
-            this._sidebarHomeBannerRO = ro;
-        } catch { /* ignore */ }
     }
 
     _ensureSidebarHomeBanner() {
