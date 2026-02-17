@@ -14,6 +14,7 @@ import {
   removeComponentRecord,
   setComponentRecord,
 } from './services/componentLibrary.js';
+import { WorkspaceFileBrowserWidget } from './UI/WorkspaceFileBrowserWidget.js';
 import './styles/landing.css';
 
 const MODEL_FILE_EXTENSION = '.3mf';
@@ -28,6 +29,7 @@ const EXPLORER_ICON_SIZE_MIN = 72;
 const EXPLORER_ICON_SIZE_MAX = 192;
 const EXPLORER_ICON_SIZE_DEFAULT = 132;
 const TRASH_FOLDER_NAME = '__BREP_TRASH__';
+const TRASH_ROOT_REPO_FULL = '__BREP_TRASH_ROOT__';
 const GITHUB_API_BASE = 'https://api.github.com';
 
 const githubDefaultBranchCache = new Map();
@@ -71,6 +73,7 @@ const state = {
   repoPickerEl: null,
   repoSummaryEl: null,
   activeFileMenuClose: null,
+  explorerWidget: null,
   loadingFiles: false,
   pendingFilesReload: false,
   workspaceReposLoading: false,
@@ -444,6 +447,17 @@ function normalizePath(input) {
   return out.join('/');
 }
 
+function isTrashPath(input) {
+  const value = normalizePath(input || '');
+  if (!value) return false;
+  return value === TRASH_FOLDER_NAME || value.startsWith(`${TRASH_FOLDER_NAME}/`);
+}
+
+function isTrashRoot(source, repoFull = '') {
+  return normalizeStorageSource(source) === 'local'
+    && String(repoFull || '').trim() === TRASH_ROOT_REPO_FULL;
+}
+
 function clampExplorerIconSize(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return EXPLORER_ICON_SIZE_DEFAULT;
@@ -501,32 +515,6 @@ function makeWorkspaceRoots() {
     });
   }
   return roots;
-}
-
-function ensureExplorerSelection(roots) {
-  const list = Array.isArray(roots) ? roots : [];
-  let changed = false;
-  if (!list.length) {
-    state.explorerWorkspaceTop = true;
-    state.explorerRootSource = 'local';
-    state.explorerRootRepoFull = '';
-    state.explorerPath = '';
-    changed = true;
-    if (changed) saveExplorerLocationPreference();
-    return;
-  }
-  const source = normalizeStorageSource(state.explorerRootSource);
-  const repoFull = String(state.explorerRootRepoFull || '').trim();
-  const exists = list.some((root) =>
-    normalizeStorageSource(root?.source) === source
-    && String(root?.repoFull || '').trim() === repoFull);
-  if (exists) return;
-  const fallback = list.find((root) => normalizeStorageSource(root?.source) === 'local') || list[0];
-  state.explorerRootSource = normalizeStorageSource(fallback?.source);
-  state.explorerRootRepoFull = String(fallback?.repoFull || '').trim();
-  state.explorerPath = '';
-  changed = true;
-  if (changed) saveExplorerLocationPreference();
 }
 
 function setExplorerWorkspaceTop() {
@@ -1441,6 +1429,10 @@ async function loadFiles() {
 
 function renderFilesList() {
   if (!state.filesListEl) return;
+  if (state.explorerWidget) {
+    try { state.explorerWidget.destroy(); } catch { /* ignore */ }
+    state.explorerWidget = null;
+  }
   closeActiveFileMenu();
   clearExplorerSizePopoverOutsideHandlers();
   state.filesListEl.innerHTML = '';
@@ -1537,8 +1529,6 @@ function renderFilesList() {
   state.filesListEl.appendChild(recentSection);
 
   const roots = makeWorkspaceRoots();
-  ensureExplorerSelection(roots);
-  renderWorkspaceFoldersList(roots);
   state.filesListEl.appendChild(createFolderExplorer(roots, term));
 }
 
@@ -2312,14 +2302,17 @@ function createExplorerSelectionToolbar() {
     trashBtn.type = 'button';
     trashBtn.className = 'hub-danger-btn hub-browser-small';
     trashBtn.textContent = selectedCount === 1 ? 'Move to Trash' : `Move ${selectedCount} to Trash`;
+    const hasTrashOnlySelection = selectedEntries.every((entry) => isTrashPath(getEntryBrowserPath(entry)));
     const hasReadOnlySelection = selectedEntries.some((entry) =>
       normalizeStorageSource(entry?.source) === 'github' && getRepoReadOnlyStatus(entry?.repoFull));
-    if (hasReadOnlySelection) {
+    if (hasReadOnlySelection || hasTrashOnlySelection) {
       trashBtn.disabled = true;
-      trashBtn.title = 'Selection includes files in read-only repositories';
+      trashBtn.title = hasReadOnlySelection
+        ? 'Selection includes files in read-only repositories'
+        : 'Selection is already in Trash';
     }
     trashBtn.addEventListener('click', () => {
-      if (hasReadOnlySelection) return;
+      if (hasReadOnlySelection || hasTrashOnlySelection) return;
       void moveEntriesToTrash(selectedEntries, { confirm: true });
     });
     actions.appendChild(trashBtn);
@@ -2339,11 +2332,124 @@ function createExplorerSelectionToolbar() {
 
 function createFolderExplorer(roots, term = '') {
   const listRoots = Array.isArray(roots) ? roots : [];
-  const searchQuery = parseSearchQuery(term);
-  const searchTerm = String(searchQuery.raw || '').trim();
-  const hasSearch = !!searchQuery.hasAny;
+  {
+  const searchTerm = String(term || '').trim();
   const panel = document.createElement('section');
   panel.className = 'hub-explorer hub-browser';
+  state.visibleExplorerEntryKeys = [];
+
+  let widget = null;
+
+  const mount = document.createElement('div');
+  mount.className = 'hub-explorer-list';
+  mount.style.minWidth = '0';
+  panel.appendChild(mount);
+
+  widget = new WorkspaceFileBrowserWidget({
+    container: mount,
+    onActivateFile: async (entry) => {
+      const source = normalizeStorageSource(entry?.source);
+      const repoFull = String(entry?.repoFull || '').trim();
+      const branch = String(entry?.branch || '').trim();
+      const path = getEntryCadLaunchModelPath(entry) || String(entry?.name || '').trim();
+      goCad({ source, repoFull, branch, path });
+    },
+    onLocationChange: (location) => {
+      state.explorerWorkspaceTop = !!location?.workspaceTop;
+      state.explorerRootSource = normalizeStorageSource(location?.source || 'local');
+      state.explorerRootRepoFull = String(location?.repoFull || '').trim();
+      state.explorerPath = state.explorerWorkspaceTop ? '' : normalizePath(location?.path || '');
+      saveExplorerLocationPreference();
+      renderWorkspaceFoldersList(widget?.getRoots?.() || listRoots);
+    },
+    onViewModeChange: (mode) => {
+      state.explorerViewMode = mode === 'icons' ? 'icons' : 'list';
+      saveUiPreference(EXPLORER_VIEW_MODE_PREF_KEY, state.explorerViewMode);
+    },
+    onCreateFolder: async ({ targetPath, source, repoFull }) => {
+      const rootSource = normalizeStorageSource(source || 'local');
+      const rootRepoFull = rootSource === 'github' ? String(repoFull || '').trim() : '';
+      if (isUiBusy()) return;
+      if (rootSource === 'github' && !String(getGithubStorageConfig()?.token || '').trim()) {
+        throw new Error('Set a GitHub token in Settings before creating folders in repositories.');
+      }
+      setFilesStatus(`Creating folder "${targetPath}"...`, 'info');
+      await runBusyUiTask(`Creating folder "${targetPath}"...`, async ({ setMessage }) => {
+        setMessage(`Creating folder "${targetPath}"...`, 'Writing folder metadata...');
+        await createWorkspaceFolder(targetPath, {
+          source: rootSource,
+          repoFull: rootRepoFull,
+        });
+        state.explorerWorkspaceTop = false;
+        state.explorerRootSource = rootSource;
+        state.explorerRootRepoFull = rootRepoFull;
+        state.explorerPath = normalizePath(targetPath);
+        saveExplorerLocationPreference();
+        setMessage('Refreshing file index...', 'Updating folder and file listing...');
+        await loadFiles();
+        await waitForFilesIdle();
+      });
+      setFilesStatus(`Created folder "${targetPath}".`, 'ok');
+    },
+    onDeleteFolder: async ({ path, source, repoFull }) => {
+      await deleteFolderPath(path, {
+        source: normalizeStorageSource(source || 'local'),
+        repoFull: String(repoFull || '').trim(),
+      });
+    },
+    onEmptyTrash: async ({ files = [], folders = [] } = {}) => {
+      await permanentlyDeleteEntries(files, {
+        confirm: false,
+        folderEntries: folders,
+      });
+    },
+    createFileActionsMenu: (entry, { tile = false } = {}) => createFileActionsMenu(entry, {
+      extraClass: tile ? 'hub-browser-tile-menu' : '',
+    }),
+    createFolderActionsMenu: (entry, { tile = false, source, repoFull } = {}) => createFolderActionsMenu(entry, {
+      source: normalizeStorageSource(source || 'local'),
+      repoFull: String(repoFull || '').trim(),
+    }, {
+      extraClass: tile ? 'hub-browser-tile-menu' : '',
+    }),
+    bindFileDragSource: (el, entry) => bindDragSource(el, entry),
+    bindDropTarget: (el, target) => bindDropTarget(el, createEntryDropTarget(
+      target?.source,
+      target?.repoFull,
+      target?.path,
+    )),
+    showSearchInput: false,
+    showCreateFolderButton: true,
+    showDeleteFolderButton: true,
+    showEmptyTrashButton: true,
+    showUpButton: true,
+    showRefreshButton: false,
+    fileActionLabel: 'Open',
+    scrollBody: false,
+  });
+  state.explorerWidget = widget;
+  widget.setData({
+    records: state.allRecords,
+    folders: state.folderRecords,
+    roots: listRoots,
+  }, { render: false });
+  widget.setSearchTerm(searchTerm, { render: false, syncInput: true });
+  widget.setViewMode(state.explorerViewMode, { persist: false });
+  widget.setLocation({
+    workspaceTop: !!state.explorerWorkspaceTop,
+    source: state.explorerRootSource,
+    repoFull: state.explorerRootRepoFull,
+    path: state.explorerPath,
+  }, { persist: false });
+  renderWorkspaceFoldersList(widget.getRoots());
+  return panel;
+  }
+
+  const searchQuery = parseSearchQuery(term);
+  const _unusedSearchTerm = String(searchQuery.raw || '').trim();
+  const hasSearch = !!searchQuery.hasAny;
+  const _unusedPanel = document.createElement('section');
+  _unusedPanel.className = 'hub-explorer hub-browser';
   state.visibleExplorerEntryKeys = [];
 
   const iconSize = clampExplorerIconSize(state.explorerIconSize);
@@ -2939,9 +3045,10 @@ function renderWorkspaceFoldersList(roots) {
 function createFolderCard(root, { isSelected = false, onOpen = null } = {}) {
   const source = normalizeStorageSource(root?.source);
   const repoFull = String(root?.repoFull || '').trim();
+  const trashRoot = isTrashRoot(source, repoFull) || !!root?.isTrash;
   const label = String(root?.label || (source === 'local' ? 'Local Browser' : repoFull)).trim() || 'Workspace';
   const isPrimary = !!root?.isPrimary && source === 'github';
-  const isLocal = source === 'local';
+  const isLocal = source === 'local' && !trashRoot;
 
   const card = document.createElement('button');
   card.type = 'button';
@@ -2950,7 +3057,7 @@ function createFolderCard(root, { isSelected = false, onOpen = null } = {}) {
 
   const icon = document.createElement('div');
   icon.className = 'hub-folder-card-icon';
-  icon.textContent = '📁';
+  icon.textContent = trashRoot ? '🗑️' : '📁';
   card.appendChild(icon);
 
   const body = document.createElement('div');
@@ -2963,7 +3070,9 @@ function createFolderCard(root, { isSelected = false, onOpen = null } = {}) {
 
   const meta = document.createElement('div');
   meta.className = 'hub-folder-card-meta';
-  if (isLocal) {
+  if (trashRoot) {
+    meta.textContent = isSelected ? 'Internal trash · browsing' : 'Internal trash';
+  } else if (isLocal) {
     meta.textContent = isSelected ? 'Local workspace · browsing' : 'Local workspace';
   } else if (isPrimary) {
     meta.textContent = isSelected ? 'Primary workspace repo · browsing' : 'Primary workspace repo';
@@ -3435,6 +3544,7 @@ function createFolderActionsMenu(folderEntry, context = {}, options = {}) {
   if (!folderPath) return null;
   const source = normalizeStorageSource(context?.source || state.explorerRootSource);
   const repoFull = String(context?.repoFull || state.explorerRootRepoFull || '').trim();
+  if (isTrashRoot(source, repoFull) || isTrashPath(folderPath)) return null;
   const isReadOnly = source === 'github' && getRepoReadOnlyStatus(repoFull);
   const extraClass = String(options?.extraClass || '').trim();
 
@@ -3471,6 +3581,7 @@ function createFileActionsMenu(entry, options = {}) {
   const source = normalizeStorageSource(entry?.source);
   const repoFull = String(entry?.repoFull || '').trim();
   const branch = String(entry?.branch || '').trim();
+  const inTrash = isTrashPath(getEntryBrowserPath(entry));
   const isReadOnly = source === 'github' && getRepoReadOnlyStatus(repoFull);
   const hasGithubUrl = source === 'github' && !!repoFull;
   const cadModelPath = getEntryCadLaunchModelPath(entry) || name;
@@ -3504,12 +3615,18 @@ function createFileActionsMenu(entry, options = {}) {
       disabled: isReadOnly,
       run: () => { void duplicateFile(entry); },
     },
-    {
+    ...(inTrash ? [{
+      label: 'Delete Permanently',
+      className: 'hub-file-menu-item is-danger',
+      disabled: isReadOnly,
+      disabledTitle: 'Read-only repository',
+      run: () => { void permanentlyDeleteEntries([entry], { confirm: true }); },
+    }] : [{
       label: 'Move to Trash',
       className: 'hub-file-menu-item is-danger',
       disabled: isReadOnly,
       run: () => { void moveEntriesToTrash([entry], { confirm: true }); },
-    },
+    }]),
   ];
 
   return createFloatingActionsMenu(actions, {
@@ -3956,6 +4073,10 @@ async function relocateEntries(entries, target, {
           skipped += 1;
           continue;
         }
+        if (isTrashPath(sourcePath)) {
+          skipped += 1;
+          continue;
+        }
         const sourceScope = {
           ...buildEntryScope(entry),
           path: sourcePath,
@@ -4035,6 +4156,102 @@ async function relocateEntries(entries, target, {
     setFilesStatus(`${actionLabel} complete: ${moved} succeeded, ${failed} failed, ${skipped} skipped.`, 'warn');
   } else {
     setFilesStatus(`${actionLabel} complete: ${moved} succeeded, ${skipped} skipped.`, 'ok');
+  }
+}
+
+async function permanentlyDeleteEntries(entries, {
+  confirm = true,
+  folderEntries = [],
+} = {}) {
+  if (isUiBusy()) return;
+  const fileList = Array.isArray(entries) ? entries.filter(Boolean) : [];
+  const folderList = Array.isArray(folderEntries) ? folderEntries.filter(Boolean) : [];
+  if (!fileList.length && !folderList.length) return;
+
+  const actionLabel = fileList.length === 1
+    ? 'Delete file permanently'
+    : (fileList.length
+      ? `Delete ${fileList.length} files permanently`
+      : 'Empty Trash permanently');
+  if (confirm) {
+    const ok = window.confirm(`${actionLabel}?\n\nThis cannot be undone.`);
+    if (!ok) return;
+  }
+
+  let removed = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  setFilesStatus('Deleting permanently...', 'info');
+  try {
+    await runBusyUiTask('Deleting permanently...', async ({ setMessage }) => {
+      for (let index = 0; index < fileList.length; index += 1) {
+        const entry = fileList[index];
+        const path = getEntryModelPath(entry);
+        setMessage(
+          'Deleting permanently...',
+          `${index + 1}/${fileList.length} - ${path || getEntryName(entry) || 'Unknown file'}`,
+        );
+        if (!path || !isTrashPath(path)) {
+          skipped += 1;
+          continue;
+        }
+        const source = normalizeStorageSource(entry?.source);
+        const repoFull = String(entry?.repoFull || '').trim();
+        if (source === 'github' && getRepoReadOnlyStatus(repoFull)) {
+          skipped += 1;
+          continue;
+        }
+        const scope = {
+          ...buildEntryScope(entry),
+          path,
+        };
+        try {
+          await removeComponentRecord(path, scope);
+          state.thumbCache.delete(getEntryCacheKey(entry));
+          removed += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+
+      const sortedFolders = folderList
+        .slice()
+        .sort((a, b) => String(b?.path || '').length - String(a?.path || '').length);
+      for (let index = 0; index < sortedFolders.length; index += 1) {
+        const folder = sortedFolders[index];
+        const path = normalizePath(folder?.path || '');
+        if (!path || !isTrashPath(path)) continue;
+        const source = normalizeStorageSource(folder?.source || 'local');
+        const repoFull = String(folder?.repoFull || '').trim();
+        if (source === 'github' && getRepoReadOnlyStatus(repoFull)) continue;
+        setMessage(
+          'Deleting permanently...',
+          `Cleaning folder marker ${index + 1}/${sortedFolders.length}: ${path}`,
+        );
+        try {
+          await removeWorkspaceFolder(path, getFolderScopeOptions(source, repoFull));
+        } catch {
+          // Ignore missing marker cleanup failures.
+        }
+      }
+
+      clearSelectedEntries({ rerender: false });
+      setMessage('Refreshing file index...', 'Updating folder and file listing...');
+      await loadFiles();
+      await waitForFilesIdle();
+    }, {
+      detail: `Items: ${fileList.length}`,
+    });
+  } catch (err) {
+    setFilesStatus(`Permanent delete failed: ${errorMessage(err)}`, 'error');
+    return;
+  }
+
+  if (failed) {
+    setFilesStatus(`Permanent delete complete: ${removed} succeeded, ${failed} failed, ${skipped} skipped.`, 'warn');
+  } else {
+    setFilesStatus(`Deleted ${removed} file${removed === 1 ? '' : 's'} permanently.`, 'ok');
   }
 }
 

@@ -358,6 +358,7 @@ export class FileManagerWidget {
       }
       .fm-save-target-panel {
         width: min(1100px, 96vw);
+        height: min(760px, 90vh);
         max-height: 90vh;
         display: flex;
         flex-direction: column;
@@ -389,16 +390,17 @@ export class FileManagerWidget {
         border: 1px solid #1f2937;
         border-radius: 8px;
         background: #0a0f1a;
-        min-height: min(64vh, 560px);
         display: flex;
         flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
         overflow: hidden;
         padding: 8px;
       }
       .fm-save-target-browser-mount {
         width: 100%;
         height: 100%;
-        min-height: min(64vh, 540px);
+        min-height: 0;
         overflow: hidden;
       }
       .fm-save-target-status {
@@ -555,7 +557,6 @@ export class FileManagerWidget {
 
       const controls = document.createElement('div');
       controls.className = 'fm-save-target-controls';
-      panel.appendChild(controls);
 
       const fileLabel = document.createElement('label');
       fileLabel.className = 'fm-save-target-field';
@@ -578,6 +579,7 @@ export class FileManagerWidget {
 
       const status = document.createElement('div');
       status.className = 'fm-save-target-status';
+      panel.appendChild(controls);
       panel.appendChild(status);
 
       const actions = document.createElement('div');
@@ -681,7 +683,7 @@ export class FileManagerWidget {
         onPickFile: async (entry) => {
           const source = this._normalizeSource(entry?.source || 'local') || 'local';
           const repoFull = String(entry?.repoFull || '').trim();
-          const pathValue = normalizeModelPath(entry?.path || entry?.name || '');
+          const pathValue = normalizeModelPath(entry?.browserPath || entry?.path || entry?.name || '');
           if (!pathValue) return;
           const idx = pathValue.lastIndexOf('/');
           const folderPath = idx >= 0 ? pathValue.slice(0, idx) : '';
@@ -697,12 +699,13 @@ export class FileManagerWidget {
           setStatus('Selected existing file. Save will overwrite it.', 'info');
           try { fileInput.focus(); fileInput.select(); } catch { /* ignore */ }
         },
+        scrollBody: true,
       });
 
       document.body.appendChild(overlay);
       document.addEventListener('keydown', onKeyDown, true);
 
-      const preferredLocation = (initialSource === 'github' && !initialRepo)
+      const fallbackLocation = (initialSource === 'github' && !initialRepo)
         ? { workspaceTop: true }
         : {
             workspaceTop: false,
@@ -710,6 +713,9 @@ export class FileManagerWidget {
             repoFull: initialSource === 'github' ? initialRepo : '',
             path: initialFolder,
           };
+      const preferredLocation = browser?.hasStoredLocation?.()
+        ? browser.getLocation()
+        : fallbackLocation;
 
       setBusy(true);
       setStatus('Loading files...', 'info');

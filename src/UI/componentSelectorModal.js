@@ -85,6 +85,7 @@ export function openComponentSelectorModal({ title = 'Select Component' } = {}) 
         }
         cleanup(record);
       },
+      scrollBody: true,
     });
 
     void browser.reload();

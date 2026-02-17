@@ -335,7 +335,7 @@ body {
   display: grid;
   gap: 12px;
   padding: 0 16px 16px;
-  overflow: auto;
+  overflow: visible;
 }
 
 .hub-recent-strip {
