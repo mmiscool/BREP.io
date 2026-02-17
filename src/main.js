@@ -3582,6 +3582,7 @@ function createFileActionsMenu(entry, options = {}) {
   const repoFull = String(entry?.repoFull || '').trim();
   const branch = String(entry?.branch || '').trim();
   const inTrash = isTrashPath(getEntryBrowserPath(entry));
+  const restorePath = inTrash ? getRestorePathFromTrashPath(getEntryModelPath(entry)) : '';
   const isReadOnly = source === 'github' && getRepoReadOnlyStatus(repoFull);
   const hasGithubUrl = source === 'github' && !!repoFull;
   const cadModelPath = getEntryCadLaunchModelPath(entry) || name;
@@ -3616,6 +3617,12 @@ function createFileActionsMenu(entry, options = {}) {
       run: () => { void duplicateFile(entry); },
     },
     ...(inTrash ? [{
+      label: 'Restore',
+      className: 'hub-file-menu-item',
+      disabled: isReadOnly || !restorePath,
+      disabledTitle: isReadOnly ? 'Read-only repository' : 'Original path unavailable',
+      run: () => { void restoreEntries([entry], { confirm: true }); },
+    }, {
       label: 'Delete Permanently',
       className: 'hub-file-menu-item is-danger',
       disabled: isReadOnly,
@@ -4018,6 +4025,16 @@ function getEntryPathBaseName(entry) {
   return parts[parts.length - 1] || modelPath;
 }
 
+function getRestorePathFromTrashPath(pathValue) {
+  const normalized = normalizePath(pathValue || '');
+  if (!isTrashPath(normalized)) return '';
+  const parts = normalized.split('/').filter(Boolean);
+  if (!parts.length || parts[0] !== TRASH_FOLDER_NAME) return '';
+  const tail = parts.slice(1);
+  if (!tail.length) return '';
+  return normalizePath(tail.join('/'));
+}
+
 function getTargetScopeForWrite(target, fallbackEntry = null) {
   const source = normalizeStorageSource(target?.source);
   const repoFull = String(target?.repoFull || '').trim();
@@ -4255,11 +4272,121 @@ async function permanentlyDeleteEntries(entries, {
   }
 }
 
+async function restoreEntries(entries, { confirm = true } = {}) {
+  if (isUiBusy()) return;
+  const list = Array.isArray(entries) ? entries.filter(Boolean) : [];
+  if (!list.length) return;
+
+  const actionLabel = list.length === 1 ? 'Restore file' : `Restore ${list.length} files`;
+  if (confirm) {
+    const ok = window.confirm(`${actionLabel} from Trash?`);
+    if (!ok) return;
+  }
+
+  let restored = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  setFilesStatus('Restoring files from Trash...', 'info');
+  try {
+    await runBusyUiTask('Restoring files from Trash...', async ({ setMessage }) => {
+      for (let index = 0; index < list.length; index += 1) {
+        const entry = list[index];
+        const trashPath = getEntryModelPath(entry);
+        setMessage(
+          'Restoring files from Trash...',
+          `${index + 1}/${list.length} - ${trashPath || getEntryName(entry) || 'Unknown file'}`,
+        );
+        if (!trashPath || !isTrashPath(trashPath)) {
+          skipped += 1;
+          continue;
+        }
+        const restorePath = getRestorePathFromTrashPath(trashPath);
+        if (!restorePath) {
+          skipped += 1;
+          continue;
+        }
+        const source = normalizeStorageSource(entry?.source);
+        const repoFull = String(entry?.repoFull || '').trim();
+        if (source === 'github' && getRepoReadOnlyStatus(repoFull)) {
+          skipped += 1;
+          continue;
+        }
+        const sourceScope = {
+          ...buildEntryScope(entry),
+          path: trashPath,
+        };
+        const targetScope = {
+          ...buildEntryScope(entry),
+          path: restorePath,
+        };
+        try {
+          const rec = await getComponentRecord(trashPath, sourceScope);
+          if (!rec || !rec.data3mf) {
+            failed += 1;
+            continue;
+          }
+
+          const existing = await getComponentRecord(restorePath, targetScope);
+          if (existing) {
+            const overwrite = window.confirm(`"${restorePath}" already exists. Overwrite it?`);
+            if (!overwrite) {
+              skipped += 1;
+              continue;
+            }
+          }
+
+          await setComponentRecord(restorePath, {
+            savedAt: new Date().toISOString(),
+            data3mf: rec.data3mf,
+            data: rec.data,
+            thumbnail: rec.thumbnail || null,
+          }, targetScope);
+          await removeComponentRecord(trashPath, sourceScope);
+
+          const oldCacheKey = getEntryCacheKey(entry);
+          const newCacheKey = getEntryCacheKey({
+            source,
+            repoFull,
+            name: restorePath,
+          });
+          const cached = state.thumbCache.get(oldCacheKey);
+          if (cached) {
+            state.thumbCache.set(newCacheKey, cached);
+            state.thumbCache.delete(oldCacheKey);
+          } else {
+            state.thumbCache.delete(oldCacheKey);
+          }
+
+          restored += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+
+      clearSelectedEntries({ rerender: false });
+      setMessage('Refreshing file index...', 'Updating folder and file listing...');
+      await loadFiles();
+      await waitForFilesIdle();
+    }, {
+      detail: `Items: ${list.length}`,
+    });
+  } catch (err) {
+    setFilesStatus(`Restore failed: ${errorMessage(err)}`, 'error');
+    return;
+  }
+
+  if (failed) {
+    setFilesStatus(`Restore complete: ${restored} succeeded, ${failed} failed, ${skipped} skipped.`, 'warn');
+  } else {
+    setFilesStatus(`Restored ${restored} file${restored === 1 ? '' : 's'} from Trash.`, 'ok');
+  }
+}
+
 async function moveEntriesToTrash(entries, { confirm = true } = {}) {
   if (isUiBusy()) return;
   const list = Array.isArray(entries) ? entries.filter(Boolean) : [];
   if (!list.length) return;
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const actionLabel = list.length === 1 ? 'Move file to Trash' : `Move ${list.length} files to Trash`;
   if (confirm) {
     const ok = window.confirm(`${actionLabel}?`);
@@ -4290,11 +4417,15 @@ async function moveEntriesToTrash(entries, { confirm = true } = {}) {
           skipped += 1;
           continue;
         }
+        if (isTrashPath(sourcePath)) {
+          skipped += 1;
+          continue;
+        }
         const sourceScope = {
           ...buildEntryScope(entry),
           path: sourcePath,
         };
-        const trashPath = normalizePath(`${TRASH_FOLDER_NAME}/${timestamp}/${sourcePath}`);
+        const trashPath = normalizePath(`${TRASH_FOLDER_NAME}/${sourcePath}`);
         if (!trashPath) {
           skipped += 1;
           continue;
@@ -4308,6 +4439,14 @@ async function moveEntriesToTrash(entries, { confirm = true } = {}) {
           if (!rec || !rec.data3mf) {
             failed += 1;
             continue;
+          }
+          const existing = await getComponentRecord(trashPath, writeScope);
+          if (existing) {
+            const overwrite = window.confirm(`"${trashPath}" already exists in Trash. Overwrite it?`);
+            if (!overwrite) {
+              skipped += 1;
+              continue;
+            }
           }
           await setComponentRecord(trashPath, {
             savedAt: new Date().toISOString(),
