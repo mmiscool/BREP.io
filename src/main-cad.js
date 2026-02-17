@@ -10,6 +10,7 @@ const sidebarEl = document.getElementById('sidebar');
 const currentFileEl = document.querySelector('[data-role="current-file"]');
 const GITHUB_HOST = 'github.com';
 const GITHUB_RAW_HOST = 'raw.githubusercontent.com';
+const JSDELIVR_GH_HOST = 'cdn.jsdelivr.net';
 
 if (!viewportEl || !sidebarEl) throw new Error('Missing CAD mount elements (#viewport, #sidebar).');
 
@@ -156,11 +157,55 @@ function parseGithubTarget(input) {
   const modelPath = stripModelFileExtension(decodedFilePath);
   if (!modelPath) return null;
 
-  const rawUrl = `https://${GITHUB_RAW_HOST}/${encodePathPart(owner)}/${encodePathPart(repo)}/${encodePathPart(branch)}/${fileSegments.map(encodePathPart).join('/')}`;
   return {
-    rawUrl,
+    owner: decodePathPart(owner),
+    repo: decodePathPart(repo),
+    branch: decodePathPart(branch),
+    filePath: decodedFilePath,
     modelPath,
   };
+}
+
+function buildGithubTargetCandidateUrls(githubTarget) {
+  const owner = String(githubTarget?.owner || '').trim();
+  const repo = String(githubTarget?.repo || '').trim();
+  const branch = String(githubTarget?.branch || '').trim();
+  const filePath = normalizeModelPath(String(githubTarget?.filePath || '').trim());
+  const encodedPath = filePath
+    .split('/')
+    .filter(Boolean)
+    .map(encodePathPart)
+    .join('/');
+  if (!owner || !repo || !branch || !encodedPath) return [];
+
+  const rawUrl = `https://${GITHUB_RAW_HOST}/${encodePathPart(owner)}/${encodePathPart(repo)}/${encodePathPart(branch)}/${encodedPath}`;
+  const jsDelivrUrl = `https://${JSDELIVR_GH_HOST}/gh/${encodePathPart(owner)}/${encodePathPart(repo)}@${encodePathPart(branch)}/${encodedPath}`;
+  return [rawUrl, jsDelivrUrl];
+}
+
+async function downloadGithubTargetBytes(githubTarget) {
+  const candidates = buildGithubTargetCandidateUrls(githubTarget);
+  if (!candidates.length) throw new Error('No valid download URL could be built for githubTarget.');
+  const failures = [];
+  for (const url of candidates) {
+    try {
+      const response = await fetch(url, {
+        mode: 'cors',
+        credentials: 'omit',
+        cache: 'no-store',
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${response.statusText}`);
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (!bytes.length) throw new Error('Downloaded 3MF is empty.');
+      return bytes;
+    } catch (err) {
+      const reason = (err && err.message) ? err.message : String(err || 'Unknown error');
+      failures.push(`${url} -> ${reason}`);
+    }
+  }
+  throw new Error(`Failed to download githubTarget model.\n${failures.join('\n')}`);
 }
 
 function parseRequestedModelScope() {
@@ -242,14 +287,7 @@ async function loadRequestedGithubTarget(viewer, githubTarget) {
   try {
     const modelPath = String(githubTarget?.modelPath || '').trim();
     if (!modelPath) return;
-    const rawUrl = String(githubTarget?.rawUrl || '').trim();
-    if (!rawUrl) return;
-    const response = await fetch(rawUrl, { cache: 'no-store' });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status} ${response.statusText}\n${rawUrl}`);
-    }
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (!bytes.length) throw new Error('Downloaded 3MF is empty.');
+    const bytes = await downloadGithubTargetBytes(githubTarget);
     await fm.loadModelRecord(modelPath, {
       source: 'local',
       path: modelPath,

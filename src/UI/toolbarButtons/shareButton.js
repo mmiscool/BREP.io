@@ -140,7 +140,7 @@ function escapeHtmlAttribute(input) {
 
 function buildIframeMarkup(shareUrl) {
   const src = escapeHtmlAttribute(shareUrl);
-  return `<iframe src="${src}" width="100%" height="640" style="border:0;" loading="lazy" allowfullscreen></iframe>`;
+  return `<iframe src="${src}" width="100%" height="640" style="border:0;" loading="lazy" allow="fullscreen; clipboard-read; clipboard-write" allowfullscreen></iframe>`;
 }
 
 function getUrlGithubTargetParam() {
