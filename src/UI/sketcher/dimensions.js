@@ -294,6 +294,12 @@ function attachDimLabelEvents(inst, el, c, world) {
   // Click: toggle constraint selection (dblclick handled separately)
   el.addEventListener('click', (e) => {
     if (e.detail > 1) return;
+    try {
+      if (inst?._tool === 'trim') {
+        const deleted = !!inst.deleteConstraintFromLabel?.(c.id, e);
+        if (deleted) return;
+      }
+    } catch { }
     try { inst.toggleSelectConstraint?.(c.id); } catch { }
     e.preventDefault(); e.stopPropagation(); try { e.stopImmediatePropagation(); } catch { }
     dbg('click', { cid: c.id, type: c.type });
@@ -370,8 +376,15 @@ function attachDimLabelEvents(inst, el, c, world) {
   let radRx = 0, radRy = 0, radNx = 0, radNy = 0, radStartDr = 0, radStartDp = 0;
   let angStartDU = 0, angStartDV = 0, angMidDX = 0, angMidDY = 0, angStartMag = 0;
   let pendingOff = null;
+  let swallowPointerCycle = false;
 
   el.addEventListener('pointerdown', (e) => {
+    if (inst?._tool === 'trim') {
+      swallowPointerCycle = true;
+      try { inst.deleteConstraintFromLabel?.(c.id, e); } catch { }
+      e.preventDefault(); e.stopPropagation(); try { e.stopImmediatePropagation(); } catch { }
+      return;
+    }
     dragging = true; moved = false; pendingOff = null;
     try { inst._suspendDimLabelRebuild = true; inst._activeDimLabelDragId = c.id; } catch { }
     try { inst._debugDragCID = c.id; } catch { }
@@ -499,6 +512,11 @@ function attachDimLabelEvents(inst, el, c, world) {
   };
 
   el.addEventListener('pointerup', (e) => {
+    if (swallowPointerCycle) {
+      swallowPointerCycle = false;
+      e.preventDefault(); e.stopPropagation(); try { e.stopImmediatePropagation(); } catch { }
+      return;
+    }
     let hadPending = !!pendingOff;
     dragging = false;
     try { el.releasePointerCapture(e.pointerId); } catch { }
@@ -513,6 +531,11 @@ function attachDimLabelEvents(inst, el, c, world) {
   });
 
   el.addEventListener('pointercancel', (e) => {
+    if (swallowPointerCycle) {
+      swallowPointerCycle = false;
+      e.preventDefault(); e.stopPropagation(); try { e.stopImmediatePropagation(); } catch { }
+      return;
+    }
     let hadPending = !!pendingOff;
     dragging = false;
     try { el.releasePointerCapture(e.pointerId); } catch { }

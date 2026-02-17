@@ -216,6 +216,8 @@ export class ConstraintSolver {
             return this.sketchObject;
         }
 
+        this.#removeConstraintsDuplicatedByImpliedGeometry();
+
         const iters = iterations === "full"
             ? this.fullSolve()
             : (iterations == null ? this.defaultLoops() : iterations);
@@ -226,6 +228,115 @@ export class ConstraintSolver {
         //console.log(solved.constraints);
         this.sketchObject = solved;
         return this.sketchObject;
+    }
+
+    #removeConstraintsDuplicatedByImpliedGeometry() {
+        const sketch = this.sketchObject;
+        if (!sketch || !Array.isArray(sketch.constraints) || !Array.isArray(sketch.geometries)) return 0;
+        const canonicalPointMap = this.#buildCoincidentCanonicalPointMap(sketch.constraints);
+        const implied = this.#collectImpliedConstraintKeys(sketch.geometries, canonicalPointMap);
+        if (!implied.size) return 0;
+        const before = sketch.constraints.length;
+        sketch.constraints = sketch.constraints.filter((c) => {
+            if (!c || c.temporary) return true;
+            const key = this.#constraintSignature(c.type, c.points, canonicalPointMap);
+            if (!key) return true;
+            return !implied.has(key);
+        });
+        return before - sketch.constraints.length;
+    }
+
+    #collectImpliedConstraintKeys(geometries, canonicalPointMap = null) {
+        const set = new Set();
+        const add = (type, points) => {
+            const key = this.#constraintSignature(type, points, canonicalPointMap);
+            if (key) set.add(key);
+        };
+        for (const g of geometries || []) {
+            if (!g || !Array.isArray(g.points)) continue;
+            if (g.type === "arc" && g.points.length >= 3) {
+                add("⇌", [g.points[0], g.points[1], g.points[0], g.points[2]]);
+            } else if (g.type === "bezier" && g.points.length >= 4) {
+                const ids = g.points;
+                const segCount = Math.floor((ids.length - 1) / 3);
+                const lastAnchorIndex = segCount * 3;
+                for (let i = 3; i < lastAnchorIndex; i += 3) {
+                    const prevHandle = ids[i - 1];
+                    const anchor = ids[i];
+                    const nextHandle = ids[i + 1];
+                    if (prevHandle == null || anchor == null || nextHandle == null) continue;
+                    if (prevHandle === anchor || nextHandle === anchor || prevHandle === nextHandle) continue;
+                    add("⏛", [prevHandle, nextHandle, anchor]);
+                }
+            }
+        }
+        return set;
+    }
+
+    #constraintSignature(type, points, canonicalPointMap = null) {
+        if (!Array.isArray(points)) return null;
+        const canon = (id) => {
+            const pid = parseInt(id);
+            if (!Number.isFinite(pid)) return null;
+            if (!canonicalPointMap) return pid;
+            return canonicalPointMap.get(pid) ?? pid;
+        };
+        if (type === "⇌" && points.length >= 4) {
+            const p0 = canon(points[0]);
+            const p1 = canon(points[1]);
+            const p2 = canon(points[2]);
+            const p3 = canon(points[3]);
+            if (![p0, p1, p2, p3].every(Number.isFinite)) return null;
+            const a = this.#orderedPairKey(p0, p1);
+            const b = this.#orderedPairKey(p2, p3);
+            return (a <= b) ? `⇌:${a}|${b}` : `⇌:${b}|${a}`;
+        }
+        if (type === "⏛" && points.length >= 3) {
+            const p0 = canon(points[0]);
+            const p1 = canon(points[1]);
+            const p2 = canon(points[2]);
+            if (![p0, p1, p2].every(Number.isFinite)) return null;
+            return `⏛:${this.#orderedPairKey(p0, p1)}|${p2}`;
+        }
+        return null;
+    }
+
+    #buildCoincidentCanonicalPointMap(constraints) {
+        const parent = new Map();
+        const find = (x) => {
+            let p = parent.get(x);
+            if (p == null) {
+                parent.set(x, x);
+                return x;
+            }
+            if (p !== x) {
+                p = find(p);
+                parent.set(x, p);
+            }
+            return p;
+        };
+        const union = (a, b) => {
+            const ra = find(a);
+            const rb = find(b);
+            if (ra === rb) return;
+            // Keep the smaller ID as representative for deterministic signatures.
+            if (ra < rb) parent.set(rb, ra);
+            else parent.set(ra, rb);
+        };
+        for (const c of constraints || []) {
+            if (!c || c.temporary || c.type !== "≡" || !Array.isArray(c.points) || c.points.length < 2) continue;
+            const p0 = parseInt(c.points[0]);
+            const p1 = parseInt(c.points[1]);
+            if (!Number.isFinite(p0) || !Number.isFinite(p1)) continue;
+            union(p0, p1);
+        }
+        const out = new Map();
+        for (const id of parent.keys()) out.set(id, find(id));
+        return out;
+    }
+
+    #orderedPairKey(a, b) {
+        return a <= b ? `${a},${b}` : `${b},${a}`;
     }
 
     defaultLoops() { return 1500; }

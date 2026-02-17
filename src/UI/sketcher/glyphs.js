@@ -73,7 +73,11 @@ export function drawConstraintGlyphs(inst, constraints) {
       el.addEventListener('pointerup', (e) => {
         try { el.releasePointerCapture(e.pointerId); } catch { }
         try { if (inst.viewer?.controls) inst.viewer.controls.enabled = true; } catch { }
-        try { inst.toggleSelectConstraint?.(c.id); } catch { }
+        if (inst?._tool === 'trim') {
+          try { inst.deleteConstraintFromLabel?.(c.id, e); } catch { }
+        } else {
+          try { inst.toggleSelectConstraint?.(c.id); } catch { }
+        }
         e.preventDefault(); e.stopPropagation();
       });
       el.addEventListener('pointerenter', () => { try { inst.hoverConstraintFromLabel?.(c.id); } catch { } });

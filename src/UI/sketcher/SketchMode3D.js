@@ -636,13 +636,25 @@ export class SketchMode3D {
 
       if (this._tool === "trim") {
         const uv = this.#pointerToPlaneUV(e);
+        const chit = this.#hitTestGlyph(e);
         const phit = this.#hitTestPoint(e);
         console.log("[SketchTrim] click", {
           clientX: e?.clientX ?? null,
           clientY: e?.clientY ?? null,
           uv: uv ? { u: uv.u, v: uv.v } : null,
+          constraintHitId: chit?.cid ?? null,
           pointHitId: phit,
         });
+        if (chit?.cid != null) {
+          const deleted = this.#deleteConstraintById(chit.cid);
+          console.log("[SketchTrim] constraint glyph hit", {
+            constraintId: chit.cid,
+            deleted,
+          });
+          try { e.preventDefault(); e.stopImmediatePropagation?.(); e.stopPropagation(); } catch { }
+          consumed = true;
+          return;
+        }
         if (phit != null) {
           const deleted = this.#deletePointById(phit);
           console.log("[SketchTrim] point hit", {
@@ -3023,6 +3035,52 @@ export class SketchMode3D {
     return true;
   }
 
+  #deleteConstraintById(constraintId) {
+    const solver = this._solver;
+    const sketch = solver?.sketchObject;
+    const cid = parseInt(constraintId);
+    if (!solver || !sketch || !Number.isFinite(cid)) {
+      console.warn("[SketchTrim] delete constraint blocked", {
+        constraintId: constraintId ?? null,
+        reason: "invalid solver/sketch/constraint id",
+      });
+      return false;
+    }
+    const hasConstraint = Array.isArray(sketch.constraints)
+      && sketch.constraints.some((c) => parseInt(c?.id) === cid);
+    if (!hasConstraint) {
+      console.warn("[SketchTrim] delete constraint blocked", {
+        constraintId: cid,
+        reason: "constraint not found",
+      });
+      return false;
+    }
+    try { solver.removeConstraintById?.(cid); } catch {
+      console.error("[SketchTrim] delete constraint failed", {
+        constraintId: cid,
+        reason: "solver.removeConstraintById threw",
+      });
+      return false;
+    }
+    const removed = !(solver.sketchObject?.constraints || []).some((c) => parseInt(c?.id) === cid);
+    if (!removed) {
+      console.warn("[SketchTrim] delete constraint failed", {
+        constraintId: cid,
+        reason: "constraint still present after remove",
+      });
+      return false;
+    }
+    console.log("[SketchTrim] delete constraint succeeded", { constraintId: cid });
+    this._selection.clear();
+    const cleaned = this.#maybeAutoCleanupPoints();
+    if (!cleaned) {
+      try { solver.solveSketch("full"); } catch { }
+      this.#rebuildSketchGraphics();
+      this.#refreshContextBar();
+    }
+    return true;
+  }
+
   // Remove points not used by any geometry and with no constraints,
   // or with only a single coincident/point-on-line constraint.
   #cleanupUnusedPoints() {
@@ -3248,6 +3306,20 @@ export class SketchMode3D {
     this.#rebuildSketchGraphics();
   }
 
+  // Public: trim-mode label click handler used by dim/glyph label overlays.
+  deleteConstraintFromLabel(cid, event = null) {
+    if (this._tool !== "trim") return false;
+    const deleted = this.#deleteConstraintById(cid);
+    console.log("[SketchTrim] constraint label click", {
+      constraintId: cid ?? null,
+      deleted,
+    });
+    if (deleted && event) {
+      try { event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation?.(); } catch { }
+    }
+    return deleted;
+  }
+
   // Ensure the relevant accordion section is expanded and the row scrolled into view
   async revealListForItem(kind, id) {
     try {
@@ -3302,28 +3374,61 @@ export class SketchMode3D {
     const dropUV = dropEvent ? this.#pointerToPlaneUV(dropEvent) : null;
     const tx = Number.isFinite(dropUV?.u) ? dropUV.u : p.x;
     const ty = Number.isFinite(dropUV?.v) ? dropUV.v : p.y;
-    let bestId = null;
-    let bestD = Infinity;
+    const candidates = [];
     for (const q of s.points) {
-      if (q.id === pointId) continue;
+      if (!q || q.id === pointId) continue;
       const d = Math.hypot(tx - q.x, ty - q.y);
-      if (d < bestD) { bestD = d; bestId = q.id; }
+      if (d <= tol) candidates.push({ id: q.id, d });
     }
-    if (bestId == null || bestD > tol) return false;
-    const existing = (s.constraints || []).some((c) => {
-      if (c?.type !== "≡" || !Array.isArray(c.points) || c.points.length < 2) return false;
-      const a = c.points[0];
-      const b = c.points[1];
-      return (a === pointId && b === bestId) || (a === bestId && b === pointId);
-    });
-    if (existing) return true;
-    this._solver.createConstraint("≡", [
-      { type: "point", id: pointId },
-      { type: "point", id: bestId },
-    ]);
-    this.#refreshLists();
-    this.#refreshContextBar();
+    if (!candidates.length) return false;
+    candidates.sort((a, b) => a.d - b.d);
+
+    // Prefer adding a new coincident to a non-coincident point near the drop.
+    // If we only hit points already in the same coincident set, treat as handled.
+    for (const cand of candidates) {
+      if (this.#arePointsCoincident(pointId, cand.id)) continue;
+      this._solver.createConstraint("≡", [
+        { type: "point", id: pointId },
+        { type: "point", id: cand.id },
+      ]);
+      this.#refreshLists();
+      this.#refreshContextBar();
+      return true;
+    }
     return true;
+  }
+
+  #arePointsCoincident(aId, bId) {
+    const a = parseInt(aId);
+    const b = parseInt(bId);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+    if (a === b) return true;
+    const cons = this._solver?.sketchObject?.constraints || [];
+    const adj = new Map();
+    for (const c of cons) {
+      if (c?.type !== "≡" || !Array.isArray(c.points) || c.points.length < 2) continue;
+      const p0 = parseInt(c.points[0]);
+      const p1 = parseInt(c.points[1]);
+      if (!Number.isFinite(p0) || !Number.isFinite(p1)) continue;
+      if (!adj.has(p0)) adj.set(p0, new Set());
+      if (!adj.has(p1)) adj.set(p1, new Set());
+      adj.get(p0).add(p1);
+      adj.get(p1).add(p0);
+    }
+    const seen = new Set([a]);
+    const queue = [a];
+    while (queue.length) {
+      const cur = queue.shift();
+      const next = adj.get(cur);
+      if (!next) continue;
+      for (const nid of next) {
+        if (nid === b) return true;
+        if (seen.has(nid)) continue;
+        seen.add(nid);
+        queue.push(nid);
+      }
+    }
+    return false;
   }
 
   #maybeAddPointOnLineOnDrop(pointId, dropEvent = null) {
