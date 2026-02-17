@@ -28,7 +28,6 @@ const htmlEntries = {
   featureDialogs: resolve(root, 'feature-dialog-capture.html'),
   pmiDialogs: resolve(root, 'pmi-dialog-capture.html'),
   assemblyConstraintDialogs: resolve(root, 'assembly-constraint-capture.html'),
-  mouse: resolve(root, 'mouse.html'),
   test: resolve(root, 'test.html'),
   ...apiExampleEntries,
 };

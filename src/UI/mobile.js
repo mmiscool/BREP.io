@@ -16,7 +16,7 @@ function goFullscreen() {
     }
 }
 
-// Run check and trigger fullscreen (skip when embedded in iframe like mouse.html)
+// Run check and trigger fullscreen (skip when embedded in an iframe)
 window.addEventListener('load', () => {
     try {
         if (window.self !== window.top) return;
