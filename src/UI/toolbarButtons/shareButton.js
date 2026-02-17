@@ -638,7 +638,7 @@ export function createShareButton(viewer) {
   if (!viewer) return null;
   if (!viewer[PANEL_KEY]) viewer[PANEL_KEY] = new ShareModelPanel(viewer);
   return {
-    label: '⤴',
+    label: '⠪',
     title: 'Share current model',
     onClick: () => viewer[PANEL_KEY].toggle(),
   };
