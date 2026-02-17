@@ -18,9 +18,20 @@ function handleComponentSelection(ctx, record) {
     return;
   }
 
-  feature.inputParams.componentName = record.name || '';
+  const path = String(record.path || record.name || '').trim();
+  const repoFull = String(record.repoFull || '').trim();
+  const branch = String(record.branch || '').trim();
+  const source = String(record.source || '').trim().toLowerCase();
+  const displayName = String(record.displayName || '').trim() || (path.includes('/') ? path.split('/').pop() : path);
+  feature.inputParams.componentName = path;
   feature.persistentData.componentData = {
-    name: record.name || '',
+    source: source === 'github' ? 'github' : 'local',
+    name: path,
+    path,
+    displayName,
+    folder: String(record.folder || '').trim(),
+    repoFull,
+    branch,
     savedAt: record.savedAt || null,
     data3mf: record.data3mf,
     featureInfo: null,
@@ -114,8 +125,11 @@ export class AssemblyComponentFeature {
       return { added: [], removed: [] };
     }
 
-    //const componentName = this.inputParams.componentName || componentData.name ;
-    const componentName = `${this.inputParams.componentName || componentData.name}_${featureId}`;
+    const sourcePath = String(componentData.path || componentData.name || this.inputParams.componentName || '').trim();
+    const sourceDisplayName = String(componentData.displayName || '').trim()
+      || (sourcePath.includes('/') ? sourcePath.split('/').pop() : sourcePath)
+      || 'Component';
+    const componentName = `${sourceDisplayName}_${featureId}`;
     const component = new BREP.AssemblyComponent({
       name: componentName,
       fixed: !!this.inputParams.isFixed,
@@ -155,7 +169,13 @@ export class AssemblyComponentFeature {
 
     component.userData = component.userData || {};
     component.userData.componentSource = {
-      name: componentData.name || componentName,
+      source: String(componentData.source || '').trim().toLowerCase() === 'github' ? 'github' : 'local',
+      name: sourcePath || componentData.name || componentName,
+      displayName: sourceDisplayName,
+      path: sourcePath || componentData.name || '',
+      folder: String(componentData.folder || '').trim(),
+      repoFull: String(componentData.repoFull || '').trim(),
+      branch: String(componentData.branch || '').trim(),
       savedAt: componentData.savedAt || null,
     };
     if (componentData.featureInfo) {
@@ -164,7 +184,13 @@ export class AssemblyComponentFeature {
 
     // Persist canonical payload so reruns do not depend on local storage state.
     this.persistentData.componentData = {
-      name: componentData.name || componentName,
+      source: String(componentData.source || '').trim().toLowerCase() === 'github' ? 'github' : 'local',
+      name: sourcePath || componentData.name || componentName,
+      path: sourcePath || componentData.name || componentName,
+      displayName: sourceDisplayName,
+      folder: String(componentData.folder || '').trim(),
+      repoFull: String(componentData.repoFull || '').trim(),
+      branch: String(componentData.branch || '').trim(),
       savedAt: componentData.savedAt || null,
       data3mf: componentData.base64,
       featureInfo: componentData.featureInfo || null,
@@ -194,8 +220,18 @@ export class AssemblyComponentFeature {
           hasBrepExtras: !!featureInfo?.brepExtras,
         });
       } catch { }
+      const path = String(persisted.path || persisted.name || '').trim();
+      const displayName = String(persisted.displayName || '').trim()
+        || (path.includes('/') ? path.split('/').pop() : path);
+      const source = String(persisted.source || '').trim().toLowerCase() === 'github' ? 'github' : 'local';
       return {
-        name: persisted.name || '',
+        source,
+        name: persisted.name || path || '',
+        path,
+        folder: String(persisted.folder || '').trim(),
+        displayName,
+        repoFull: String(persisted.repoFull || '').trim(),
+        branch: String(persisted.branch || '').trim(),
         savedAt: persisted.savedAt || null,
         base64: persisted.data3mf,
         bytes,
@@ -203,18 +239,35 @@ export class AssemblyComponentFeature {
       };
     }
 
-    const selectedName = this.inputParams && this.inputParams.componentName;
-    if (!selectedName) return null;
-
-    const record = await getComponentRecord(selectedName);
+    const selectedPath = String(this.inputParams && this.inputParams.componentName || '').trim();
+    if (!selectedPath) return null;
+    const persistedSource = String(persisted?.source || '').trim().toLowerCase() === 'github' ? 'github' : 'local';
+    const persistedRepoFull = String(persisted?.repoFull || '').trim();
+    const persistedBranch = String(persisted?.branch || '').trim();
+    const record = await getComponentRecord(selectedPath, {
+      source: persistedSource,
+      path: selectedPath,
+      repoFull: persistedRepoFull,
+      branch: persistedBranch,
+    });
     if (!record || !record.data3mf) return null;
 
     const bytes = base64ToUint8Array(record.data3mf);
     const featureInfo = await this._extractFeatureInfo(bytes);
 
     this.persistentData = this.persistentData || {};
+    const recordPath = String(record.path || record.name || selectedPath).trim();
+    const recordDisplayName = String(record.displayName || '').trim()
+      || (recordPath.includes('/') ? recordPath.split('/').pop() : recordPath);
+    const recordSource = String(record.source || persistedSource || '').trim().toLowerCase() === 'github' ? 'github' : 'local';
     this.persistentData.componentData = {
-      name: record.name || selectedName,
+      source: recordSource,
+      name: recordPath || selectedPath,
+      path: recordPath || selectedPath,
+      folder: String(record.folder || '').trim(),
+      displayName: recordDisplayName,
+      repoFull: String(record.repoFull || persistedRepoFull || '').trim(),
+      branch: String(record.branch || persistedBranch || '').trim(),
       savedAt: record.savedAt || null,
       data3mf: record.data3mf,
       featureInfo,
@@ -222,7 +275,7 @@ export class AssemblyComponentFeature {
 
     try {
       console.log('[AssemblyComponentFeature] _resolveComponentData: loaded from library', {
-        name: record.name || selectedName,
+        name: record.name || selectedPath,
         savedAt: record.savedAt || null,
         bytes: bytes?.length || 0,
         hasFeatureInfo: !!featureInfo,
@@ -231,7 +284,13 @@ export class AssemblyComponentFeature {
     } catch { }
 
     return {
-      name: record.name || selectedName,
+      source: recordSource,
+      name: recordPath || selectedPath,
+      path: recordPath || selectedPath,
+      folder: String(record.folder || '').trim(),
+      displayName: recordDisplayName,
+      repoFull: String(record.repoFull || persistedRepoFull || '').trim(),
+      branch: String(record.branch || persistedBranch || '').trim(),
       savedAt: record.savedAt || null,
       base64: record.data3mf,
       bytes,
@@ -272,7 +331,11 @@ export class AssemblyComponentFeature {
 
   async _buildSolidsFromGroup(group, componentData) {
     const solids = [];
-    const componentName = this.inputParams.componentName || componentData.name || 'Component';
+    const componentName = componentData.displayName
+      || (componentData.path && String(componentData.path).includes('/') ? String(componentData.path).split('/').pop() : componentData.path)
+      || this.inputParams.componentName
+      || componentData.name
+      || 'Component';
     const facetInfo = componentData.featureInfo?.facets || null;
     const metadataMap = componentData.featureInfo?.metadata || null;
     const brepExtras = componentData?.featureInfo?.brepExtras || null;

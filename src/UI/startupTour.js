@@ -184,19 +184,8 @@ function getDefaultSteps() {
     {
       id: 'sidebar',
       title: 'Sidebar panels',
-      body: 'These panels hold File Manager, History, Scene Manager, and Display Settings. Click a header to expand or collapse.',
+      body: 'These panels hold History, Scene Manager, Display Settings, and other tools. Click a header to expand or collapse.',
       target: () => document.getElementById('sidebar'),
-      padding: 6,
-    },
-    {
-      id: 'file-manager',
-      title: 'File Manager',
-      body: 'Save and load models from browser storage. Use New to clear the scene.',
-      onEnter: (viewer) => viewer?.accordion?.expandSection?.('File Manager'),
-      target: () =>
-        document.querySelector('#accordion-content-File\\ Manager .fm-row.header') ||
-        document.querySelector('#accordion-content-File\\ Manager') ||
-        document.querySelector('[name="accordion-title-File Manager"]'),
       padding: 6,
     },
     {

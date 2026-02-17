@@ -556,12 +556,14 @@ export class Viewer {
         clearAlpha = 0,
         sidebar = null,
         partHistory = new PartHistory(),
+        autoLoadLastModel = false,
 
     }) {
         if (!container) throw new Error('Viewer requires { container }');
         this.BREP = BREP;
 
         this.partHistory = partHistory instanceof PartHistory ? partHistory : new PartHistory();
+        this._autoLoadLastModel = !!autoLoadLastModel;
         this._triangleDebugger = null;
         this._lastInspectorTarget = null;
         this._lastInspectorSolid = null;
@@ -824,7 +826,7 @@ export class Viewer {
         // Initial sizing + start
         this._resizeRendererToDisplaySize();
         this._loop();
-        this.setupAccordion();
+        this.ready = this.setupAccordion();
     }
 
     _createWebGLRenderer() {
@@ -1115,10 +1117,9 @@ export class Viewer {
             await loadSavedPlugins(this);
         } catch (e) { console.warn('Plugin auto-load failed:', e); }
 
-        const fm = new FileManagerWidget(this);
-        const fmSection = await this.accordion.addSection('File Manager');
-        fmSection.uiElement.appendChild(fm.uiElement);
-        // Expose for toolbar Save button
+        const fm = new FileManagerWidget(this, { autoLoadLast: this._autoLoadLastModel });
+        // Keep FileManagerWidget as a headless service for save/load/new actions,
+        // but do not mount it in the CAD sidebar accordion.
         this.fileManagerWidget = fm;
 
         // Setup historyWidget

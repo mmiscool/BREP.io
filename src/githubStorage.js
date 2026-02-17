@@ -229,6 +229,45 @@ export async function listGithubDir({ token, repoFull, branch, path }) {
   }
 }
 
+export async function listGithubRepoTree({ token, repoFull, branch }) {
+  const t = String(token || '').trim();
+  if (!t) return { files: [], dirs: [], truncated: false };
+  const { owner, repo } = parseRepo(repoFull);
+  let ref = String(branch || '').trim();
+  if (!ref) {
+    const meta = await ghFetch(`${GH.apiBase}/repos/${owner}/${repo}`, t);
+    ref = String(meta?.default_branch || '').trim() || 'main';
+  }
+  const url = new URL(`${GH.apiBase}/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}`);
+  url.searchParams.set('recursive', '1');
+  const data = await ghFetch(url.toString(), t);
+  const tree = Array.isArray(data?.tree) ? data.tree : [];
+  const files = [];
+  const dirs = [];
+  for (const item of tree) {
+    const itemPath = String(item?.path || '').replace(/^\/+/, '').replace(/\/+$/, '');
+    if (!itemPath) continue;
+    if (item?.type === 'tree') {
+      dirs.push({ path: itemPath, type: 'dir' });
+      continue;
+    }
+    if (item?.type === 'blob') {
+      files.push({
+        type: 'file',
+        path: itemPath,
+        sha: item?.sha || null,
+        size: Number.isFinite(item?.size) ? item.size : null,
+      });
+    }
+  }
+  return {
+    files,
+    dirs,
+    truncated: !!data?.truncated,
+    ref,
+  };
+}
+
 export async function readGithubFileBase64({ token, repoFull, branch, path }) {
   const t = String(token || '').trim();
   if (!t) return null;

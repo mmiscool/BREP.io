@@ -2,6 +2,8 @@ import { generate3MF } from '../../exporters/threeMF.js';
 import { localStorage as LS } from '../../idbStorage.js';
 import * as THREE from 'three';
 
+const THUMBNAIL_CAPTURE_SIZE = 240;
+
 function _uint8ToBase64(uint8) {
   let binary = '';
   const chunk = 0x8000;
@@ -15,7 +17,7 @@ function _uint8ToBase64(uint8) {
 
 
 export function createSaveButton(viewer) {
-  async function _captureThumbnail(size = 60) {
+  async function _captureThumbnail(size = THUMBNAIL_CAPTURE_SIZE) {
     try {
       const renderer = viewer?.renderer;
       const canvas = renderer?.domElement;
@@ -82,13 +84,12 @@ export function createSaveButton(viewer) {
         }
       } catch { }
 
-      const thumbnail = await _captureThumbnail(60);
+      const thumbnail = await _captureThumbnail(THUMBNAIL_CAPTURE_SIZE);
       const bytes = await generate3MF([], { unit: 'millimeter', precision: 6, scale: 1, additionalFiles, modelMetadata, thumbnail });
       const b64 = _uint8ToBase64(bytes);
       // Do not persist a separate thumbnail; it's embedded in the 3MF
       const payload = { savedAt: new Date().toISOString(), data3mf: b64 };
       LS.setItem('__BREP_DATA__:autosave', JSON.stringify(payload));
-      LS.setItem('__BREP_MODELS_LASTNAME__', 'autosave');
       alert('Saved as "autosave"');
     } catch {
       alert('Save failed.');

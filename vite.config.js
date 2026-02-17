@@ -23,6 +23,7 @@ const apiExampleEntries = collectHtmlEntriesFromDir(resolve(root, 'apiExamples')
 
 const htmlEntries = {
   main: resolve(root, 'index.html'),
+  cad: resolve(root, 'cad.html'),
   about: resolve(root, 'about.html'),
   featureDialogs: resolve(root, 'feature-dialog-capture.html'),
   pmiDialogs: resolve(root, 'pmi-dialog-capture.html'),

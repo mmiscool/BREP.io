@@ -45,7 +45,7 @@ export function renderComponentSelectorField({ ui, key, def, id, controlWrap }) 
     ui._stopActiveReferenceSelection();
     const record = await openComponentSelectorModal({ title: def.dialogTitle || 'Select Component' });
     if (!record || !record.data3mf) return;
-    applyValue(record.name || '', record);
+    applyValue(record.path || record.name || '', record);
   });
 
   clearBtn.addEventListener('click', () => {

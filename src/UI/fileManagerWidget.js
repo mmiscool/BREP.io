@@ -5,7 +5,11 @@ import * as THREE from 'three';
 import JSZip from 'jszip';
 import { generate3MF, computeTriangleMaterialIndices } from '../exporters/threeMF.js';
 import { CADmaterials } from './CADmaterials.js';
-import { localStorage as LS, STORAGE_BACKEND_EVENT } from '../idbStorage.js';
+import {
+  localStorage as LS,
+  STORAGE_BACKEND_EVENT,
+  getGithubStorageConfig,
+} from '../idbStorage.js';
 import {
   listComponentRecords,
   getComponentRecord,
@@ -16,24 +20,78 @@ import {
   base64ToUint8Array,
 } from '../services/componentLibrary.js';
 import { HISTORY_COLLECTION_REFRESH_EVENT } from './history/HistoryCollectionWidget.js';
+import { WorkspaceFileBrowserWidget } from './WorkspaceFileBrowserWidget.js';
+
+const LEGACY_LAST_MODEL_KEYS = [
+  '__BREP_MODELS_LASTNAME__',
+  '__BREP_MODELS_LASTREPO__',
+  '__BREP_MODELS_LASTSOURCE__',
+];
+const THUMBNAIL_CAPTURE_SIZE = 240;
+
+function normalizeRepoFullList(input) {
+  const values = Array.isArray(input)
+    ? input
+    : String(input || '').split(/[\n,;]/g);
+  const out = [];
+  const seen = new Set();
+  for (const value of values) {
+    const repo = String(value || '').trim();
+    if (!repo || seen.has(repo)) continue;
+    seen.add(repo);
+    out.push(repo);
+  }
+  return out;
+}
+
+function normalizeModelPath(input) {
+  const raw = String(input || '').replace(/\\/g, '/');
+  const out = [];
+  for (const part of raw.split('/')) {
+    const token = String(part || '').trim();
+    if (!token || token === '.') continue;
+    if (token === '..') continue;
+    out.push(token);
+  }
+  return out.join('/');
+}
+
+function stripModelFileExtension(input) {
+  const value = String(input || '').trim();
+  if (!value) return '';
+  return value.toLowerCase().endsWith('.3mf') ? value.slice(0, -4) : value;
+}
 
 export class FileManagerWidget {
-  constructor(viewer) {
+  constructor(viewer, options = {}) {
     this.viewer = viewer;
     this.uiElement = document.createElement('div');
     // Per-model storage prefix
     this._modelPrefix = MODEL_STORAGE_PREFIX;
-    this._lastKey = '__BREP_MODELS_LASTNAME__';
-    this.currentName = this._loadLastName() || '';
+    this.currentName = '';
+    this.currentRepoFull = '';
+    this.currentSource = '';
+    this.currentBranch = '';
     this._iconsOnly = this._loadIconsPref();
     this._loadSeq = 0; // guards async load races
+    this._refreshInFlight = false;
+    this._refreshQueued = false;
     this._thumbCache = new Map();
     this._pendingGithubMeta = new Map();
+    this._savedHistorySnapshot = null;
     this._saveOverlay = null;
     this._saveLogEl = null;
+    try {
+      for (const key of LEGACY_LAST_MODEL_KEYS) LS.removeItem(key);
+    } catch { /* ignore cleanup failures */ }
     this._ensureStyles();
     this._buildUI();
-    void this.refreshList();
+    // Defer heavy list hydration so URL-driven model loads are not blocked on startup.
+    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(() => { void this.refreshList(); }, { timeout: 1200 });
+    } else {
+      setTimeout(() => { void this.refreshList(); }, 80);
+    }
 
     // Refresh UI thumbnails/list when any model key changes via storage events (cross-tab and other code paths)
     try {
@@ -46,12 +104,17 @@ export class FileManagerWidget {
             try {
               const encName = key.slice(this._modelPrefix.length);
               const name = decodeURIComponent(encName);
-              if (name) this._thumbCache.delete(name);
+              if (name && this._thumbCache) {
+                const suffix = `::${name}`;
+                for (const cacheKey of Array.from(this._thumbCache.keys())) {
+                  if (cacheKey === name || String(cacheKey).endsWith(suffix)) {
+                    this._thumbCache.delete(cacheKey);
+                  }
+                }
+              }
             } catch { }
             void this.refreshList();
-          } else if (key === this._lastKey || key === '__BREP_FM_ICONSVIEW__') {
-            // Preferences updated elsewhere; re-sync
-            this.currentName = this._loadLastName() || this.currentName || '';
+          } else if (key === '__BREP_FM_ICONSVIEW__') {
             this._iconsOnly = this._loadIconsPref();
             void this.refreshList();
           }
@@ -65,7 +128,6 @@ export class FileManagerWidget {
       this._onBackendChange = () => {
         Promise.resolve(LS.ready()).then(() => {
           try {
-            this.currentName = this._loadLastName() || this.currentName || '';
             this._iconsOnly = this._loadIconsPref();
             void this.refreshList();
           } catch { /* ignore */ }
@@ -78,41 +140,44 @@ export class FileManagerWidget {
     try {
       Promise.resolve(LS.ready()).then(() => {
         try {
-          this.currentName = this._loadLastName() || this.currentName || '';
           this._iconsOnly = this._loadIconsPref();
-        void this.refreshList();
-          this.autoLoadLast();
+          void this.refreshList();
         } catch { alert('Failed to initialize File Manager storage.'); }
       });
     } catch { alert('Failed to initialize File Manager storage.'); }
   }
 
-
-  async autoLoadLast() {
-    if (await confirm('Load the last opened model?', 5)) {
-      try {
-        const last = this._loadLastName();
-        if (last) {
-          const exists = this._getModel(last);
-          if (exists) {
-            // Fire and forget; constructor cannot be async
-            this.loadModel(last);
-          }
-        }
-      } catch { /* ignore auto-load failures */ }
-    }
-
-  }
-
-
-
   // ----- Storage helpers -----
   // List all saved model records from per-model keys
   async _listModels() {
-    const records = await listComponentRecords();
-    return records.map(({ name, savedAt, record }) => ({
+    const cfg = getGithubStorageConfig();
+    const repoFulls = normalizeRepoFullList(cfg?.repoFulls || cfg?.repoFull || '');
+    const [localRecords, remoteRecords] = await Promise.all([
+      listComponentRecords({ source: 'local' }),
+      listComponentRecords({ source: 'github', repoFulls }),
+    ]);
+    const merged = [
+      ...(Array.isArray(localRecords) ? localRecords : []),
+      ...(Array.isArray(remoteRecords) ? remoteRecords : []),
+    ];
+    const unique = new Map();
+    for (const rec of merged) {
+      const source = this._normalizeSource(rec?.source);
+      const repoFull = String(rec?.repoFull || '').trim();
+      const path = String(rec?.path || rec?.name || '').trim();
+      if (!path) continue;
+      const key = this._recordScopeKey(path, source, repoFull);
+      if (!unique.has(key)) unique.set(key, rec);
+    }
+    return Array.from(unique.values()).map(({ source, name, path, folder, displayName, savedAt, record, repoFull, branch }) => ({
+      source: this._normalizeSource(source),
       name,
+      path: String(path || name || '').trim(),
+      folder: String(folder || '').trim(),
+      displayName: String(displayName || '').trim(),
       savedAt,
+      repoFull: String(repoFull || '').trim(),
+      branch: String(branch || '').trim(),
       data: record?.data,
       data3mf: record?.data3mf,
       thumbnail: record?.thumbnail,
@@ -123,24 +188,113 @@ export class FileManagerWidget {
     return await getComponentRecord(name, options);
   }
   // Persist one model record
-  async _setModel(name, dataObj) {
-    await setComponentRecord(name, dataObj);
+  async _setModel(name, dataObj, options) {
+    await setComponentRecord(name, dataObj, options);
   }
   // Remove one model record
-  async _removeModel(name) {
-    await removeComponentRecord(name);
+  async _removeModel(name, options) {
+    await removeComponentRecord(name, options);
   }
-  _saveLastName(name) {
-    if (name) LS.setItem(this._lastKey, name);
+  _normalizeSource(source) {
+    const normalized = String(source || '').trim().toLowerCase();
+    return normalized === 'github' ? 'github' : (normalized === 'local' ? 'local' : '');
   }
-  _loadLastName() {
-    return LS.getItem(this._lastKey) || '';
+  _buildScopeOptions(source, repoFull, branch) {
+    const out = {};
+    const src = this._normalizeSource(source);
+    const repo = String(repoFull || '').trim();
+    const br = String(branch || '').trim();
+    if (src) out.source = src;
+    if (repo) out.repoFull = repo;
+    if (br) out.branch = br;
+    return out;
+  }
+  _recordScopeKey(name, source = '', repoFull = '') {
+    const n = String(name || '').trim();
+    const src = this._normalizeSource(source);
+    const repo = String(repoFull || '').trim();
+    const scope = repo ? `${repo}::${n}` : n;
+    return src ? `${src}::${scope}` : scope;
+  }
+  _resolveLoadedModelPath(requestedName, options = {}, rec = null) {
+    const explicitPath = normalizeModelPath(options?.path || '');
+    if (explicitPath) return explicitPath;
+    const browserPath = normalizeModelPath(rec?.browserPath || '');
+    if (browserPath) return browserPath;
+    const recordPath = normalizeModelPath(rec?.path || rec?.name || '');
+    if (recordPath) return recordPath;
+    return normalizeModelPath(requestedName || '');
+  }
+  _applyLoadedModelState(requestedName, options = {}, rec = null, fallbackSource = 'local') {
+    const resolvedPath = this._resolveLoadedModelPath(requestedName, options, rec);
+    const finalName = resolvedPath || normalizeModelPath(requestedName || '') || String(requestedName || '').trim();
+    this.currentName = finalName;
+    this.currentSource = this._normalizeSource(options?.source || rec?.source) || this._normalizeSource(fallbackSource) || 'local';
+    this.currentRepoFull = String(options?.repoFull || rec?.repoFull || '').trim();
+    this.currentBranch = String(options?.branch || rec?.branch || '').trim();
+    this.nameInput.value = finalName;
   }
   _saveIconsPref(v) {
     try { LS.setItem('__BREP_FM_ICONSVIEW__', v ? '1' : '0'); } catch { }
   }
   _loadIconsPref() {
     try { return LS.getItem('__BREP_FM_ICONSVIEW__') === '1'; } catch { return false; }
+  }
+
+  async _captureCurrentHistorySnapshot() {
+    try {
+      if (!this.viewer?.partHistory?.toJSON) return null;
+      const snapshot = await this.viewer.partHistory.toJSON();
+      return typeof snapshot === 'string' ? snapshot : null;
+    } catch {
+      return null;
+    }
+  }
+
+  _markSavedHistorySnapshot(snapshot) {
+    this._savedHistorySnapshot = (typeof snapshot === 'string') ? snapshot : null;
+  }
+
+  async _refreshSavedHistorySnapshot() {
+    const snapshot = await this._captureCurrentHistorySnapshot();
+    if (snapshot !== null) this._markSavedHistorySnapshot(snapshot);
+    return snapshot;
+  }
+
+  async hasUnsavedChanges() {
+    const currentSnapshot = await this._captureCurrentHistorySnapshot();
+    if (currentSnapshot === null) return false;
+    if (typeof this._savedHistorySnapshot !== 'string') {
+      this._markSavedHistorySnapshot(currentSnapshot);
+      return false;
+    }
+    return currentSnapshot !== this._savedHistorySnapshot;
+  }
+
+  async confirmNavigateHome() {
+    const hasChanges = await this.hasUnsavedChanges();
+    if (!hasChanges) return true;
+
+    const saveBeforeLeave = await confirm(
+      'You have unsaved changes.\n\nSave before returning to Home?\n\nOK = Save and return\nCancel = Do not save',
+    );
+
+    if (saveBeforeLeave) {
+      try {
+        await this.saveCurrent();
+      } catch {
+        alert('Save failed. Staying in CAD.');
+        return false;
+      }
+      const stillDirty = await this.hasUnsavedChanges();
+      if (stillDirty) {
+        alert('Model is still unsaved. Staying in CAD.');
+        return false;
+      }
+      return true;
+    }
+
+    return await confirm('Discard unsaved changes and return to Home?');
   }
 
 
@@ -189,6 +343,83 @@ export class FileManagerWidget {
       .fm-save-title { font-weight: 700; font-size: 14px; letter-spacing: .01em; margin-bottom: 10px; }
       .fm-save-log { font-size: 12px; line-height: 1.4; max-height: 52vh; overflow: auto; white-space: pre-wrap; color: #cbd5f5; background: #0a0f1a; border: 1px solid #1f2937; border-radius: 8px; padding: 10px; }
       .fm-save-line { margin-bottom: 6px; }
+
+      /* Save target dialog */
+      .fm-save-target-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(2, 6, 23, 0.72);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10060;
+        padding: 16px;
+        box-sizing: border-box;
+      }
+      .fm-save-target-panel {
+        width: min(1100px, 96vw);
+        max-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        background: #0b0e14;
+        border: 1px solid #1f2937;
+        border-radius: 12px;
+        color: #e5e7eb;
+        padding: 14px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      }
+      .fm-save-target-title {
+        font-weight: 700;
+        font-size: 14px;
+      }
+      .fm-save-target-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .fm-save-target-field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 12px;
+        color: #9ca3af;
+      }
+      .fm-save-target-browser {
+        border: 1px solid #1f2937;
+        border-radius: 8px;
+        background: #0a0f1a;
+        min-height: min(64vh, 560px);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        padding: 8px;
+      }
+      .fm-save-target-browser-mount {
+        width: 100%;
+        height: 100%;
+        min-height: min(64vh, 540px);
+        overflow: hidden;
+      }
+      .fm-save-target-status {
+        min-height: 18px;
+        font-size: 12px;
+        color: #9ca3af;
+      }
+      .fm-save-target-status[data-tone="error"] {
+        color: #fca5a5;
+      }
+      .fm-save-target-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      @media (max-width: 760px) {
+        .fm-save-target-panel {
+          width: min(98vw, 1100px);
+          padding: 10px;
+        }
+      }
     `;
     document.head.appendChild(style);
   }
@@ -285,8 +516,219 @@ export class FileManagerWidget {
     this.viewer.partHistory.currentHistoryStepId = null;
     await this.viewer.partHistory.runHistory();
     this.currentName = '';
+    this.currentRepoFull = '';
+    this.currentSource = '';
+    this.currentBranch = '';
     this.nameInput.value = '';
+    await this._refreshSavedHistorySnapshot();
     this._refreshHistoryCollections('new-model');
+  }
+
+  async _openSaveTargetDialog(initialPath = '') {
+    const normalizedInitialPath = normalizeModelPath(initialPath);
+    const slashIdx = normalizedInitialPath.lastIndexOf('/');
+    const initialFolder = slashIdx >= 0 ? normalizedInitialPath.slice(0, slashIdx) : '';
+    const initialFileName = stripModelFileExtension(
+      slashIdx >= 0 ? normalizedInitialPath.slice(slashIdx + 1) : normalizedInitialPath,
+    );
+    const cfg = getGithubStorageConfig() || {};
+    const initialSource = this._normalizeSource(this.currentSource) || 'local';
+    const initialRepo = String(this.currentRepoFull || '').trim();
+    const initialBranch = String(this.currentBranch || cfg.branch || '').trim();
+
+    return await new Promise((resolve) => {
+      let closed = false;
+      let browser = null;
+      let selectedBranch = initialBranch;
+
+      const overlay = document.createElement('div');
+      overlay.className = 'fm-save-target-overlay';
+
+      const panel = document.createElement('section');
+      panel.className = 'fm-save-target-panel';
+      overlay.appendChild(panel);
+
+      const title = document.createElement('div');
+      title.className = 'fm-save-target-title';
+      title.textContent = 'Save Model';
+      panel.appendChild(title);
+
+      const controls = document.createElement('div');
+      controls.className = 'fm-save-target-controls';
+      panel.appendChild(controls);
+
+      const fileLabel = document.createElement('label');
+      fileLabel.className = 'fm-save-target-field';
+      fileLabel.textContent = 'File Name';
+      const fileInput = document.createElement('input');
+      fileInput.type = 'text';
+      fileInput.className = 'fm-input';
+      fileInput.placeholder = 'part name';
+      fileInput.value = initialFileName;
+      fileLabel.appendChild(fileInput);
+      controls.appendChild(fileLabel);
+
+      const browserWrap = document.createElement('div');
+      browserWrap.className = 'fm-save-target-browser';
+      panel.appendChild(browserWrap);
+
+      const browserMount = document.createElement('div');
+      browserMount.className = 'fm-save-target-browser-mount';
+      browserWrap.appendChild(browserMount);
+
+      const status = document.createElement('div');
+      status.className = 'fm-save-target-status';
+      panel.appendChild(status);
+
+      const actions = document.createElement('div');
+      actions.className = 'fm-save-target-actions';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'fm-btn';
+      cancelBtn.textContent = 'Cancel';
+      const saveBtn = document.createElement('button');
+      saveBtn.type = 'button';
+      saveBtn.className = 'fm-btn';
+      saveBtn.textContent = 'Save';
+      actions.appendChild(cancelBtn);
+      actions.appendChild(saveBtn);
+      panel.appendChild(actions);
+
+      const setStatus = (message = '', tone = '') => {
+        status.textContent = String(message || '');
+        status.dataset.tone = tone ? String(tone) : '';
+        status.hidden = !message;
+      };
+
+      const setBusy = (busy) => {
+        const disabled = !!busy;
+        fileInput.disabled = disabled;
+        saveBtn.disabled = disabled;
+        cancelBtn.disabled = disabled;
+      };
+
+      const close = (result) => {
+        if (closed) return;
+        closed = true;
+        try { document.removeEventListener('keydown', onKeyDown, true); } catch { /* ignore */ }
+        try { browser?.destroy?.(); } catch { /* ignore */ }
+        try { overlay.remove(); } catch { /* ignore */ }
+        resolve(result || null);
+      };
+
+      const onKeyDown = (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          close(null);
+          return;
+        }
+        if (event.key === 'Enter' && event.target === fileInput) {
+          event.preventDefault();
+          event.stopPropagation();
+          saveBtn.click();
+        }
+      };
+
+      cancelBtn.addEventListener('click', () => close(null));
+      overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) close(null);
+      });
+
+      saveBtn.addEventListener('click', () => {
+        const fileName = stripModelFileExtension(fileInput.value || '');
+        if (!fileName) {
+          setStatus('Enter a file name.', 'error');
+          try { fileInput.focus(); } catch { /* ignore */ }
+          return;
+        }
+        if (fileName.includes('/') || fileName.includes('\\')) {
+          setStatus('File name cannot include folder separators.', 'error');
+          try { fileInput.focus(); } catch { /* ignore */ }
+          return;
+        }
+
+        const location = browser?.getLocation?.() || {};
+        if (location.workspaceTop) {
+          setStatus('Select a local workspace folder or GitHub repo folder.', 'error');
+          return;
+        }
+
+        const source = this._normalizeSource(location.source || 'local') || 'local';
+        const repoFull = source === 'github' ? String(location.repoFull || '').trim() : '';
+        if (source === 'github' && !repoFull) {
+          setStatus('Choose a GitHub repository folder before saving.', 'error');
+          return;
+        }
+
+        const folderPath = normalizeModelPath(location.path || '');
+        const modelPath = normalizeModelPath(folderPath ? `${folderPath}/${fileName}` : fileName);
+        if (!modelPath) {
+          setStatus('Choose a valid destination folder.', 'error');
+          return;
+        }
+
+        close({
+          source,
+          repoFull,
+          branch: source === 'github' ? selectedBranch : '',
+          modelPath,
+        });
+      });
+
+      browser = new WorkspaceFileBrowserWidget({
+        container: browserMount,
+        onPickFile: async (entry) => {
+          const source = this._normalizeSource(entry?.source || 'local') || 'local';
+          const repoFull = String(entry?.repoFull || '').trim();
+          const pathValue = normalizeModelPath(entry?.path || entry?.name || '');
+          if (!pathValue) return;
+          const idx = pathValue.lastIndexOf('/');
+          const folderPath = idx >= 0 ? pathValue.slice(0, idx) : '';
+          const pickedFileName = stripModelFileExtension(idx >= 0 ? pathValue.slice(idx + 1) : pathValue);
+          if (pickedFileName) fileInput.value = pickedFileName;
+          selectedBranch = String(entry?.branch || selectedBranch || '').trim();
+          browser.setLocation({
+            workspaceTop: false,
+            source,
+            repoFull,
+            path: folderPath,
+          });
+          setStatus('Selected existing file. Save will overwrite it.', 'info');
+          try { fileInput.focus(); fileInput.select(); } catch { /* ignore */ }
+        },
+      });
+
+      document.body.appendChild(overlay);
+      document.addEventListener('keydown', onKeyDown, true);
+
+      const preferredLocation = (initialSource === 'github' && !initialRepo)
+        ? { workspaceTop: true }
+        : {
+            workspaceTop: false,
+            source: initialSource,
+            repoFull: initialSource === 'github' ? initialRepo : '',
+            path: initialFolder,
+          };
+
+      setBusy(true);
+      setStatus('Loading files...', 'info');
+      void browser.reload()
+        .then(() => {
+          browser.setLocation(preferredLocation);
+          setStatus('', '');
+        })
+        .catch((err) => {
+          const msg = err?.message || String(err || 'Unknown error');
+          setStatus(`Failed to load files: ${msg}`, 'error');
+        })
+        .finally(() => {
+          setBusy(false);
+          requestAnimationFrame(() => {
+            try { fileInput.focus(); } catch { /* ignore */ }
+          });
+        });
+    });
   }
 
   async _retryGithubOperation(action, op, progress) {
@@ -309,17 +751,58 @@ export class FileManagerWidget {
 
   async saveCurrent() {
     if (!this.viewer || !this.viewer.partHistory) return;
-    let name = (this.nameInput.value || '').trim();
-    if (!name) {
-      name = await prompt('Enter a name for this model:') || '';
-      name = name.trim();
-      if (!name) return;
-      this.nameInput.value = name;
+    const currentPath = normalizeModelPath(this.currentName || '');
+    const typedPath = normalizeModelPath(this.nameInput.value || '');
+    const currentSource = this._normalizeSource(this.currentSource) || 'local';
+    const currentRepo = String(this.currentRepoFull || '').trim();
+    const currentBranch = String(this.currentBranch || '').trim();
+
+    let target = null;
+    if (currentPath && typedPath && typedPath === currentPath) {
+      target = {
+        source: currentSource,
+        repoFull: currentSource === 'github' ? currentRepo : '',
+        branch: currentBranch,
+        modelPath: currentPath,
+      };
+    } else {
+      const initialPath = typedPath || currentPath || '';
+      target = await this._openSaveTargetDialog(initialPath);
     }
 
-    try { console.log('[FileManagerWidget] saveCurrent: begin', { name }); } catch { }
+    if (!target) return;
+    const modelPath = String(normalizeModelPath(target.modelPath || '') || '').trim();
+    if (!modelPath) return;
+    const targetSource = this._normalizeSource(target.source || currentSource || 'local') || 'local';
+    const targetRepo = String(target.repoFull || '').trim();
+    const targetBranch = String(target.branch || currentBranch || '').trim();
+    const targetOptions = {
+      ...this._buildScopeOptions(targetSource, targetRepo, targetBranch),
+      path: modelPath,
+    };
+    const sameTargetAsCurrent = !!(
+      currentPath
+      && currentPath === modelPath
+      && currentSource === targetSource
+      && currentRepo === targetRepo
+    );
+
+    if (!sameTargetAsCurrent) {
+      try {
+        const existing = await this._getModel(modelPath, targetOptions);
+        if (existing) {
+          const location = targetRepo ? ` in ${targetRepo}` : '';
+          const overwrite = window.confirm(`"${modelPath}" already exists${location}. Overwrite it?`);
+          if (!overwrite) return;
+        }
+      } catch {
+        // Ignore lookup failures and allow save attempt to proceed.
+      }
+    }
+
+    try { console.log('[FileManagerWidget] saveCurrent: begin', { name: modelPath }); } catch { }
     this._setSaveBusy(true);
-    this._startSaveProgress(`Saving "${name}"...`);
+    this._startSaveProgress(targetRepo ? `Saving "${modelPath}" to ${targetRepo}...` : `Saving "${modelPath}"...`);
     try {
       this._logSaveProgress('Preparing feature history...');
       // Get feature history JSON (now includes PMI views) and embed into a 3MF archive as Metadata/featureHistory.json
@@ -341,11 +824,11 @@ export class FileManagerWidget {
       } catch (err) {
         console.error('Failed to embed PMI view images:', err);
       }
-      // Capture a 60x60 thumbnail of the current view
+      // Capture a higher-resolution thumbnail of the current view
       let thumbnail = null;
       try {
         this._logSaveProgress('Capturing thumbnail...');
-        thumbnail = await this._captureThumbnail(60);
+        thumbnail = await this._captureThumbnail(THUMBNAIL_CAPTURE_SIZE);
       } catch { /* ignore thumbnail failures */ }
 
       // Collect solids for full 3MF export (so slicers can open it).
@@ -407,23 +890,6 @@ export class FileManagerWidget {
           includeFaceTags: false,
         });
         try { console.log('[FileManagerWidget] saveCurrent: 3MF exported', { bytes: threeMfBytes?.length || 0 }); } catch { }
-        try {
-          const zip = await JSZip.loadAsync(threeMfBytes);
-          const files = {};
-          Object.keys(zip.files || {}).forEach(p => { files[p.toLowerCase()] = p; });
-          const modelPath = files['3d/3dmodel.model'] || files['/3d/3dmodel.model'];
-          const modelFile = modelPath ? zip.file(modelPath) : null;
-          if (modelFile) {
-            const xml = await modelFile.async('string');
-            const triCount = (xml.match(/<triangle\b/gi) || []).length;
-            const objCount = (xml.match(/<object\b/gi) || []).length;
-            console.log('[FileManagerWidget] saveCurrent: 3MF model stats', { objects: objCount, triangles: triCount });
-          } else {
-            console.warn('[FileManagerWidget] saveCurrent: 3MF model file not found in zip');
-          }
-        } catch (err) {
-          try { console.warn('[FileManagerWidget] saveCurrent: 3MF model stats failed', err?.message || err); } catch { }
-        }
       } catch (e) {
         // Fallback: history only 3MF
         const metadataManager = this.viewer?.partHistory?.metadataManager || null;
@@ -450,36 +916,19 @@ export class FileManagerWidget {
         });
         console.warn('[FileManagerWidget] 3MF export failed for solids, saved history-only 3MF.', e);
         try { console.log('[FileManagerWidget] saveCurrent: 3MF exported (history only)', { bytes: threeMfBytes?.length || 0 }); } catch { }
-        try {
-          const zip = await JSZip.loadAsync(threeMfBytes);
-          const files = {};
-          Object.keys(zip.files || {}).forEach(p => { files[p.toLowerCase()] = p; });
-          const modelPath = files['3d/3dmodel.model'] || files['/3d/3dmodel.model'];
-          const modelFile = modelPath ? zip.file(modelPath) : null;
-          if (modelFile) {
-            const xml = await modelFile.async('string');
-            const triCount = (xml.match(/<triangle\b/gi) || []).length;
-            const objCount = (xml.match(/<object\b/gi) || []).length;
-            console.log('[FileManagerWidget] saveCurrent: 3MF model stats (history only)', { objects: objCount, triangles: triCount });
-          } else {
-            console.warn('[FileManagerWidget] saveCurrent: 3MF model file not found in zip (history only)');
-          }
-        } catch (err) {
-          try { console.warn('[FileManagerWidget] saveCurrent: 3MF model stats failed (history only)', err?.message || err); } catch { }
-        }
       }
       const threeMfB64 = uint8ArrayToBase64(threeMfBytes);
       const now = new Date().toISOString();
 
-      // Store only the 3MF (with embedded thumbnail) and timestamp
+      // Persist the model plus optional captured thumbnail sidecar metadata.
       const record = { savedAt: now, data3mf: threeMfB64 };
       if (thumbnail) record.thumbnail = thumbnail;
-      if (LS?.isGithub?.()) {
-        this._logSaveProgress('Saving to GitHub...');
-        try { console.log('[FileManagerWidget] saveCurrent: saving to GitHub', { name }); } catch { }
+      if (targetSource === 'github') {
+        this._logSaveProgress(`Saving to GitHub${targetRepo ? ` (${targetRepo})` : ''}...`);
+        try { console.log('[FileManagerWidget] saveCurrent: saving to GitHub', { name: modelPath, repo: targetRepo }); } catch { }
         const res = await this._retryGithubOperation(
-          `Save "${name}" to GitHub`,
-          () => this._setModel(name, record),
+          `Save "${modelPath}" to GitHub${targetRepo ? ` (${targetRepo})` : ''}`,
+          () => this._setModel(modelPath, record, targetOptions),
           (msg) => this._logSaveProgress(msg)
         );
         if (!res.ok) {
@@ -487,31 +936,38 @@ export class FileManagerWidget {
           return;
         }
         try {
-          this._pendingGithubMeta.set(name, {
+          const pendingKey = this._recordScopeKey(modelPath, targetSource, targetRepo);
+          this._pendingGithubMeta.set(pendingKey, {
             savedAt: record.savedAt || null,
             thumbnail: record.thumbnail || null,
           });
         } catch { /* ignore */ }
       } else {
         this._logSaveProgress('Saving to local storage...');
-        try { console.log('[FileManagerWidget] saveCurrent: saving locally', { name }); } catch { }
-        await this._setModel(name, record);
+        try { console.log('[FileManagerWidget] saveCurrent: saving locally', { name: modelPath }); } catch { }
+        await this._setModel(modelPath, record, targetOptions);
       }
       // Update in-memory thumbnail cache so UI reflects the new preview immediately
-      try { if (thumbnail) this._thumbCache.set(name, thumbnail); } catch { }
-      this.currentName = name;
-      this._saveLastName(name);
+      try {
+        if (thumbnail) this._thumbCache.set(this._recordScopeKey(modelPath, targetSource, targetRepo), thumbnail);
+      } catch { }
+      this.currentName = modelPath;
+      this.currentRepoFull = targetRepo;
+      this.currentSource = targetSource;
+      this.currentBranch = targetBranch;
+      this.nameInput.value = modelPath;
+      this._markSavedHistorySnapshot(jsonString || null);
       this._logSaveProgress('Refreshing list...');
       await this.refreshList();
       this._logSaveProgress('Save complete.');
-      try { console.log('[FileManagerWidget] saveCurrent: complete', { name }); } catch { }
+      try { console.log('[FileManagerWidget] saveCurrent: complete', { name: modelPath }); } catch { }
       if (skipped.length) {
         try { console.warn('[FileManagerWidget] Skipped non-manifold solids:', skipped); } catch {}
       }
     } catch (err) {
       const msg = (err && err.message) ? err.message : String(err || 'Unknown error');
       this._logSaveProgress(`Save failed: ${msg}`);
-      try { console.warn('[FileManagerWidget] saveCurrent: failed', { name, error: msg }); } catch { }
+      try { console.warn('[FileManagerWidget] saveCurrent: failed', { name: modelPath, error: msg }); } catch { }
       throw err;
     } finally {
       this._endSaveProgress();
@@ -728,16 +1184,18 @@ export class FileManagerWidget {
     return { version: 1, solids: solidsOut };
   }
 
-  async loadModel(name) {
+  async loadModel(name, options = {}) {
     if (!this.viewer || !this.viewer.partHistory) return;
     const seq = ++this._loadSeq; // only the last call should win
+    const source = this._normalizeSource(options?.source || (options?.repoFull ? 'github' : 'local')) || 'local';
     let rec = null;
-    if (LS?.isGithub?.()) {
-      const res = await this._retryGithubOperation(`Load "${name}" from GitHub`, () => this._getModel(name, { throwOnError: true }));
+    if (source === 'github') {
+      const scope = { ...options, source, throwOnError: true };
+      const res = await this._retryGithubOperation(`Load "${name}" from GitHub`, () => this._getModel(name, scope));
       if (!res.ok) return;
       rec = res.value;
     } else {
-      rec = await this._getModel(name);
+      rec = await this._getModel(name, { ...options, source: 'local' });
     }
     if (!rec) return alert('Model not found.');
     await this.viewer.partHistory.reset();
@@ -779,10 +1237,10 @@ export class FileManagerWidget {
             } catch { }
 
             if (seq !== this._loadSeq) return;
-            this.currentName = name;
-            this.nameInput.value = name;
-            this._saveLastName(name);
+            this._applyLoadedModelState(name, options, rec, source);
             await this.viewer.partHistory.runHistory();
+            if (seq !== this._loadSeq) return;
+            await this._refreshSavedHistorySnapshot();
             this._refreshHistoryCollections('load-model');
             return;
           }
@@ -796,11 +1254,10 @@ export class FileManagerWidget {
             feat.inputParams.centerMesh = true;
           }
           await this.viewer?.partHistory?.runHistory?.();
-          this._refreshHistoryCollections('load-model');
           if (seq !== this._loadSeq) return;
-          this.currentName = name;
-          this.nameInput.value = name;
-          this._saveLastName(name);
+          await this._refreshSavedHistorySnapshot();
+          this._refreshHistoryCollections('load-model');
+          this._applyLoadedModelState(name, options, rec, source);
           return;
         } catch { }
       } catch (e) {
@@ -819,21 +1276,34 @@ export class FileManagerWidget {
       return;
     }
     if (seq !== this._loadSeq) return;
-    this.currentName = name;
-    this.nameInput.value = name;
-    this._saveLastName(name);
+    this._applyLoadedModelState(name, options, rec, source);
     await this.viewer.partHistory.runHistory();
+    if (seq !== this._loadSeq) return;
+    await this._refreshSavedHistorySnapshot();
     this._refreshHistoryCollections('load-model');
   }
 
-  async deleteModel(name) {
-    const rec = await this._getModel(name);
+  async deleteModel(name, options = {}) {
+    const scope = {
+      ...options,
+      source: this._normalizeSource(options?.source || (options?.repoFull ? 'github' : 'local')) || 'local',
+    };
+    const rec = await this._getModel(name, scope);
     if (!rec) return;
     const proceed = confirm(`Delete model "${name}"? This cannot be undone.`);
     if (!proceed) return;
-    await this._removeModel(name);
-    if (this.currentName === name) {
+    await this._removeModel(name, scope);
+    const source = this._normalizeSource(scope.source || rec?.source);
+    const repo = String(options?.repoFull || rec?.repoFull || '').trim();
+    if (
+      this.currentName === name
+      && String(this.currentRepoFull || '').trim() === repo
+      && this._normalizeSource(this.currentSource) === source
+    ) {
       this.currentName = '';
+      this.currentRepoFull = '';
+      this.currentSource = '';
+      this.currentBranch = '';
       if (this.nameInput.value === name) this.nameInput.value = '';
     }
     await this.refreshList();
@@ -862,83 +1332,115 @@ export class FileManagerWidget {
   }
 
   async refreshList() {
-    const items = await this._listModels();
-    if (LS?.isGithub?.() && this._pendingGithubMeta && this._pendingGithubMeta.size) {
-      for (const it of items) {
-        const pending = this._pendingGithubMeta.get(it.name);
-        if (!pending) continue;
-        const itemTime = it.savedAt ? Date.parse(it.savedAt) : NaN;
-        const pendingTime = pending.savedAt ? Date.parse(pending.savedAt) : NaN;
-        if (!Number.isFinite(itemTime) || (Number.isFinite(pendingTime) && pendingTime > itemTime)) {
-          if (pending.savedAt) it.savedAt = pending.savedAt;
-          if (it.record && pending.savedAt) it.record.savedAt = pending.savedAt;
-          if (pending.thumbnail) {
-            it.thumbnail = pending.thumbnail;
-            if (it.record) it.record.thumbnail = pending.thumbnail;
-            try { this._thumbCache.set(it.name, pending.thumbnail); } catch { }
+    if (this._refreshInFlight) {
+      this._refreshQueued = true;
+      return;
+    }
+    this._refreshInFlight = true;
+    try {
+      const items = await this._listModels();
+      if (this._pendingGithubMeta && this._pendingGithubMeta.size) {
+        for (const it of items) {
+          if (this._normalizeSource(it?.source) !== 'github') continue;
+          const itemKey = this._recordScopeKey(it.path || it.name, it.source, it.repoFull);
+          const pending = this._pendingGithubMeta.get(itemKey);
+          if (!pending) continue;
+          const itemTime = it.savedAt ? Date.parse(it.savedAt) : NaN;
+          const pendingTime = pending.savedAt ? Date.parse(pending.savedAt) : NaN;
+          if (!Number.isFinite(itemTime) || (Number.isFinite(pendingTime) && pendingTime > itemTime)) {
+            if (pending.savedAt) it.savedAt = pending.savedAt;
+            if (it.record && pending.savedAt) it.record.savedAt = pending.savedAt;
+            if (pending.thumbnail) {
+              it.thumbnail = pending.thumbnail;
+              if (it.record) it.record.thumbnail = pending.thumbnail;
+              try { this._thumbCache.set(itemKey, pending.thumbnail); } catch { }
+            }
+          } else {
+            // Remote metadata caught up; drop the pending override.
+            this._pendingGithubMeta.delete(itemKey);
           }
-        } else {
-          // Remote metadata caught up; drop the pending override.
-          this._pendingGithubMeta.delete(it.name);
         }
       }
-    }
-    while (this.listEl.firstChild) this.listEl.removeChild(this.listEl.firstChild);
+      while (this.listEl.firstChild) this.listEl.removeChild(this.listEl.firstChild);
 
-    if (!items.length) {
-      const empty = document.createElement('div');
-      empty.className = 'fm-row';
-      empty.textContent = 'No saved models yet.';
-      this.listEl.appendChild(empty);
-      return;
-    }
+      if (!items.length) {
+        const empty = document.createElement('div');
+        empty.className = 'fm-row';
+        empty.textContent = 'No saved models yet.';
+        this.listEl.appendChild(empty);
+        return;
+      }
 
-    const sorted = items.slice().sort((a, b) => String(b.savedAt).localeCompare(String(a.savedAt)));
-    if (this._iconsOnly) {
-      this._renderIconsView(sorted);
-      return;
-    }
+      const sorted = items.slice().sort((a, b) => {
+        const aTime = a?.savedAt ? Date.parse(a.savedAt) : NaN;
+        const bTime = b?.savedAt ? Date.parse(b.savedAt) : NaN;
+        const av = Number.isFinite(aTime) ? aTime : 0;
+        const bv = Number.isFinite(bTime) ? bTime : 0;
+        return bv - av;
+      });
+      if (this._iconsOnly) {
+        this._renderIconsView(sorted);
+        return;
+      }
 
-    for (const it of sorted) {
-      const row = document.createElement('div');
-      row.className = 'fm-row';
+      for (const it of sorted) {
+        const row = document.createElement('div');
+        row.className = 'fm-row';
+        const pathValue = String(it.path || it.name || '').trim();
+        const displayName = String(it.displayName || '').trim() || (pathValue.includes('/') ? pathValue.split('/').pop() : pathValue);
+        const folder = String(it.folder || '').trim()
+          || (pathValue.includes('/') ? pathValue.slice(0, pathValue.lastIndexOf('/')) : '');
+        const locationParts = [];
+        if (this._normalizeSource(it?.source) === 'local') locationParts.push('Local Browser');
+        if (it.repoFull) locationParts.push(it.repoFull);
+        if (folder) locationParts.push(folder);
+        const locationLabel = locationParts.join(' / ');
 
-      const thumb = document.createElement('img');
-      thumb.className = 'fm-thumb';
-      thumb.alt = `${it.name} thumbnail`;
-      this._applyThumbnailToImg(it, thumb);
-      thumb.addEventListener('click', () => this.loadModel(it.name));
-      row.appendChild(thumb);
+        const thumb = document.createElement('img');
+        thumb.className = 'fm-thumb';
+        thumb.alt = `${displayName || pathValue} thumbnail`;
+        this._applyThumbnailToImg(it, thumb);
+        thumb.addEventListener('click', () => this.loadModel(pathValue, this._buildScopeOptions(it.source, it.repoFull, it.branch)));
+        row.appendChild(thumb);
 
-      const left = document.createElement('div');
-      left.className = 'fm-left fm-grow';
-      const nameDiv = document.createElement('div');
-      nameDiv.className = 'fm-name';
-      nameDiv.textContent = it.name;
-      nameDiv.addEventListener('click', () => this.loadModel(it.name));
-      left.appendChild(nameDiv);
-      const dt = new Date(it.savedAt);
-      const dateEl = document.createElement('div');
-      dateEl.className = 'fm-date';
-      dateEl.textContent = isNaN(dt) ? String(it.savedAt || '') : dt.toLocaleString();
-      left.appendChild(dateEl);
-      row.appendChild(left);
+        const left = document.createElement('div');
+        left.className = 'fm-left fm-grow';
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'fm-name';
+        nameDiv.textContent = displayName || pathValue;
+        nameDiv.title = pathValue || displayName;
+        nameDiv.addEventListener('click', () => this.loadModel(pathValue, this._buildScopeOptions(it.source, it.repoFull, it.branch)));
+        left.appendChild(nameDiv);
+        const dt = new Date(it.savedAt);
+        const dateEl = document.createElement('div');
+        dateEl.className = 'fm-date';
+        const dateText = isNaN(dt) ? String(it.savedAt || '') : dt.toLocaleString();
+        dateEl.textContent = locationLabel ? `${dateText} · ${locationLabel}` : dateText;
+        left.appendChild(dateEl);
+        row.appendChild(left);
 
-      const openBtn = document.createElement('button');
-      openBtn.type = 'button';
-      openBtn.className = 'fm-btn';
-      openBtn.textContent = '📂';
-      openBtn.addEventListener('click', () => this.loadModel(it.name));
-      row.appendChild(openBtn);
+        const openBtn = document.createElement('button');
+        openBtn.type = 'button';
+        openBtn.className = 'fm-btn';
+        openBtn.textContent = '📂';
+        openBtn.addEventListener('click', () => this.loadModel(pathValue, this._buildScopeOptions(it.source, it.repoFull, it.branch)));
+        row.appendChild(openBtn);
 
-      const delBtn = document.createElement('button');
-      delBtn.type = 'button';
-      delBtn.className = 'fm-btn danger';
-      delBtn.textContent = '✕';
-      delBtn.addEventListener('click', () => this.deleteModel(it.name));
-      row.appendChild(delBtn);
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'fm-btn danger';
+        delBtn.textContent = '✕';
+        delBtn.addEventListener('click', () => this.deleteModel(pathValue, this._buildScopeOptions(it.source, it.repoFull, it.branch)));
+        row.appendChild(delBtn);
 
-      this.listEl.appendChild(row);
+        this.listEl.appendChild(row);
+      }
+    } finally {
+      this._refreshInFlight = false;
+      if (this._refreshQueued) {
+        this._refreshQueued = false;
+        void this.refreshList();
+      }
     }
   }
 
@@ -965,15 +1467,25 @@ export class FileManagerWidget {
     this.listEl.appendChild(grid);
 
     for (const it of items) {
+      const pathValue = String(it.path || it.name || '').trim();
+      const displayName = String(it.displayName || '').trim() || (pathValue.includes('/') ? pathValue.split('/').pop() : pathValue);
+      const folder = String(it.folder || '').trim()
+        || (pathValue.includes('/') ? pathValue.slice(0, pathValue.lastIndexOf('/')) : '');
+      const locationParts = [];
+      if (this._normalizeSource(it?.source) === 'local') locationParts.push('Local Browser');
+      if (it.repoFull) locationParts.push(it.repoFull);
+      if (folder) locationParts.push(folder);
+      const locationLabel = locationParts.join(' / ');
       const cell = document.createElement('div');
       cell.className = 'fm-item';
       const dt = new Date(it.savedAt);
-      cell.title = `${it.name}\n${isNaN(dt) ? String(it.savedAt || '') : dt.toLocaleString()}`;
-      cell.addEventListener('click', () => this.loadModel(it.name));
+      const dateText = isNaN(dt) ? String(it.savedAt || '') : dt.toLocaleString();
+      cell.title = `${displayName || pathValue}\n${dateText}${locationLabel ? `\n${locationLabel}` : ''}${pathValue ? `\n${pathValue}` : ''}`;
+      cell.addEventListener('click', () => this.loadModel(pathValue, this._buildScopeOptions(it.source, it.repoFull, it.branch)));
 
       const img = document.createElement('img');
       img.className = 'fm-thumb';
-      img.alt = `${it.name} thumbnail`;
+      img.alt = `${displayName || pathValue} thumbnail`;
       this._applyThumbnailToImg(it, img);
       cell.appendChild(img);
 
@@ -981,10 +1493,10 @@ export class FileManagerWidget {
       del.type = 'button';
       del.className = 'fm-btn danger fm-del';
       del.textContent = '✕';
-      del.title = `Delete ${it.name}`;
+      del.title = `Delete ${displayName || pathValue}`;
       del.addEventListener('click', (ev) => {
         ev.stopPropagation();
-        this.deleteModel(it.name);
+        this.deleteModel(pathValue, this._buildScopeOptions(it.source, it.repoFull, it.branch));
       });
       cell.appendChild(del);
 
@@ -994,56 +1506,29 @@ export class FileManagerWidget {
   async _applyThumbnailToImg(rec, imgEl) {
     try {
       if (!imgEl) return;
-      if (!rec?.data3mf) {
-        try {
-          const full = await this._getModel(rec?.name);
-          if (full && full.data3mf) {
-            rec = { ...rec, data3mf: full.data3mf, thumbnail: full.thumbnail };
-          }
-        } catch { /* ignore */ }
-      }
-      if (!rec?.data3mf) {
-        imgEl.style.display = 'none';
-        return;
-      }
-      imgEl.style.display = '';
+      const key = this._recordScopeKey(rec?.path || rec?.name, rec?.source, rec?.repoFull);
       if (rec.thumbnail) {
+        imgEl.style.display = '';
         imgEl.src = rec.thumbnail;
-        if (this._thumbCache) this._thumbCache.set(rec.name, rec.thumbnail);
+        if (this._thumbCache) this._thumbCache.set(key, rec.thumbnail);
         return;
       }
-      if (this._thumbCache && this._thumbCache.has(rec.name)) {
-        const cached = this._thumbCache.get(rec.name);
-        if (cached) imgEl.src = cached;
-        return;
+      if (this._thumbCache && this._thumbCache.has(key)) {
+        const cached = this._thumbCache.get(key);
+        if (cached) {
+          imgEl.style.display = '';
+          imgEl.src = cached;
+          return;
+        }
       }
-      const src = await extractThumbnailFrom3MFBase64(rec.data3mf);
-      if (src) {
-        imgEl.src = src;
-        if (this._thumbCache) this._thumbCache.set(rec.name, src);
-        this._persistThumbnail(rec.name, src);
-      } else {
-        imgEl.style.display = 'none';
-      }
+      imgEl.style.display = 'none';
+      return;
     } catch {
       if (imgEl) imgEl.style.display = 'none';
     }
   }
 
-  async _persistThumbnail(name, thumbnail) {
-    if (!name || !thumbnail) return;
-    const existing = await getComponentRecord(name);
-    if (!existing) return;
-    const payload = {
-      savedAt: existing.savedAt || new Date().toISOString(),
-      data3mf: existing.data3mf,
-      data: existing.data,
-      thumbnail,
-    };
-    await setComponentRecord(name, payload);
-  }
-
-  async _captureThumbnail(size = 60) {
+  async _captureThumbnail(size = THUMBNAIL_CAPTURE_SIZE) {
     try {
       const renderer = this.viewer?.renderer;
       const canvas = renderer?.domElement;

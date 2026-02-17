@@ -63,11 +63,32 @@ function normalizeStorageMode(mode) {
   return '';
 }
 
+function normalizeRepoFullList(input) {
+  const values = Array.isArray(input)
+    ? input
+    : String(input || '').split(/[\n,;]/g);
+  const out = [];
+  const seen = new Set();
+  for (const value of values) {
+    const repo = String(value || '').trim();
+    if (!repo || seen.has(repo)) continue;
+    seen.add(repo);
+    out.push(repo);
+  }
+  return out;
+}
+
 function normalizeSettings(input) {
   const obj = (input && typeof input === 'object') ? input : {};
+  const repoFullRaw = String(obj.repoFull || obj.repo || '').trim();
+  let repoFulls = normalizeRepoFullList(obj.repoFulls || obj.repos || '');
+  const repoFull = repoFullRaw || repoFulls[0] || '';
+  if (repoFull && !repoFulls.includes(repoFull)) repoFulls.unshift(repoFull);
+  if (!repoFulls.length && repoFull) repoFulls = [repoFull];
   return {
     token: String(obj.token || '').trim(),
-    repoFull: String(obj.repoFull || obj.repo || '').trim(),
+    repoFull,
+    repoFulls,
     branch: String(obj.branch || '').trim(),
     mode: normalizeStorageMode(obj.mode || ''),
   };
@@ -121,6 +142,7 @@ function loadStorageSettings() {
     const merged = {
       token: settings.token || legacy.token,
       repoFull: settings.repoFull || legacy.repoFull,
+      repoFulls: settings.repoFulls?.length ? settings.repoFulls : (legacy.repoFull ? [legacy.repoFull] : []),
       branch: settings.branch || legacy.branch,
       mode: settings.mode || legacy.mode,
     };
@@ -143,18 +165,37 @@ function saveStorageMode(mode) {
 
 function loadGithubConfig() {
   const settings = loadStorageSettings();
+  let repoFulls = normalizeRepoFullList(settings.repoFulls || []);
+  const repoFull = String(settings.repoFull || '').trim() || repoFulls[0] || '';
+  if (repoFull && !repoFulls.includes(repoFull)) repoFulls.unshift(repoFull);
+  if (!repoFulls.length && repoFull) repoFulls = [repoFull];
   return {
     token: settings.token,
-    repoFull: settings.repoFull,
+    repoFull,
+    repoFulls,
     branch: settings.branch,
   };
 }
 
-function saveGithubConfig({ token, repoFull, branch }) {
+function saveGithubConfig({ token, repoFull, repoFulls, branch }) {
   const settings = loadStorageSettings();
+  const hasRepoFull = repoFull !== undefined;
+  const hasRepoFulls = repoFulls !== undefined;
   if (token !== undefined) settings.token = String(token || '').trim();
-  if (repoFull !== undefined) settings.repoFull = String(repoFull || '').trim();
+  if (hasRepoFulls) settings.repoFulls = normalizeRepoFullList(repoFulls);
+  if (hasRepoFull) settings.repoFull = String(repoFull || '').trim();
   if (branch !== undefined) settings.branch = String(branch || '').trim();
+  if (hasRepoFull && !settings.repoFull && !hasRepoFulls) {
+    settings.repoFulls = [];
+  }
+  if (!settings.repoFull && Array.isArray(settings.repoFulls) && settings.repoFulls.length && !hasRepoFull) {
+    settings.repoFull = String(settings.repoFulls[0] || '').trim();
+  }
+  settings.repoFulls = normalizeRepoFullList(settings.repoFulls || []);
+  if (settings.repoFull && !settings.repoFulls.includes(settings.repoFull)) {
+    settings.repoFulls.unshift(settings.repoFull);
+  }
+  if (!settings.repoFulls.length && settings.repoFull) settings.repoFulls = [settings.repoFull];
   saveStorageSettings(settings);
 }
 
@@ -635,6 +676,10 @@ const _localBackend = new VfsStorage();
 const _githubBackend = new GithubStorage();
 const localStorage = new StorageProxy(_localBackend, _githubBackend);
 
+function getLocalStorageBackend() {
+  return _localBackend;
+}
+
 const initialGh = loadGithubConfig();
 const initialMode = loadStorageMode();
 if (initialMode === 'local') {
@@ -654,7 +699,10 @@ function getGithubStorageConfig() {
     const info = localStorage.getBackendInfo?.();
     const branch = info?.github?.branch || cfg.branch || '';
     const repoFull = info?.github?.repoFull || cfg.repoFull || '';
-    return { ...cfg, branch, repoFull };
+    let repoFulls = normalizeRepoFullList(cfg.repoFulls || []);
+    if (repoFull && !repoFulls.includes(repoFull)) repoFulls.unshift(repoFull);
+    if (!repoFulls.length && repoFull) repoFulls = [repoFull];
+    return { ...cfg, branch, repoFull, repoFulls };
   }
   return cfg;
 }
@@ -691,11 +739,24 @@ async function setStorageMode(mode, { persist = true } = {}) {
   return await applyStorageMode(mode, cfg);
 }
 
-async function configureGithubStorage({ token, repoFull, branch, persist = true, mode } = {}) {
+async function configureGithubStorage({ token, repoFull, repoFulls, branch, persist = true, mode } = {}) {
   const prev = loadGithubConfig();
+  const hasRepoFull = repoFull !== undefined;
+  const hasRepoFulls = repoFulls !== undefined;
+  const explicitRepoFull = hasRepoFull ? String(repoFull || '').trim() : prev.repoFull;
+  let nextRepoFulls = repoFulls !== undefined
+    ? normalizeRepoFullList(repoFulls)
+    : normalizeRepoFullList(prev.repoFulls || []);
+  if (hasRepoFull && !explicitRepoFull && !hasRepoFulls) {
+    nextRepoFulls = [];
+  }
+  let nextRepoFull = hasRepoFull ? explicitRepoFull : (explicitRepoFull || nextRepoFulls[0] || '');
+  if (nextRepoFull && !nextRepoFulls.includes(nextRepoFull)) nextRepoFulls.unshift(nextRepoFull);
+  if (!nextRepoFulls.length && nextRepoFull) nextRepoFulls = [nextRepoFull];
   const next = {
     token: token !== undefined ? String(token || '') : prev.token,
-    repoFull: repoFull !== undefined ? String(repoFull || '') : prev.repoFull,
+    repoFull: nextRepoFull,
+    repoFulls: nextRepoFulls,
     branch: branch !== undefined ? String(branch || '') : prev.branch,
   };
   if (persist) saveGithubConfig(next);
@@ -705,13 +766,14 @@ async function configureGithubStorage({ token, repoFull, branch, persist = true,
 }
 
 async function clearGithubStorageConfig() {
-  saveGithubConfig({ token: '', repoFull: '', branch: '' });
+  saveGithubConfig({ token: '', repoFull: '', repoFulls: [], branch: '' });
   saveStorageMode('local');
   await localStorage.useLocal();
 }
 
 export {
   localStorage,
+  getLocalStorageBackend,
   STORAGE_BACKEND_EVENT,
   configureGithubStorage,
   getGithubStorageConfig,

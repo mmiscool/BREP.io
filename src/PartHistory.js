@@ -1031,8 +1031,17 @@ export class PartHistory {
 
       const componentName = feature?.inputParams?.componentName;
       if (!componentName) continue;
-
-      const record = await getComponentRecord(componentName);
+      const source = feature?.persistentData?.componentData || {};
+      const sourceStorage = String(source.source || '').trim().toLowerCase() === 'github' ? 'github' : 'local';
+      const repoFull = String(source.repoFull || '').trim();
+      const branch = String(source.branch || '').trim();
+      const path = String(source.path || componentName || '').trim();
+      const record = await getComponentRecord(path || componentName, {
+        source: sourceStorage,
+        path: path || componentName,
+        repoFull,
+        branch,
+      });
       if (!record || !record.data3mf) continue;
 
       const prevData = feature?.persistentData?.componentData?.data3mf || null;
@@ -1050,6 +1059,10 @@ export class PartHistory {
       updates.push({
         feature,
         componentName,
+        componentPath: path || componentName,
+        sourceStorage,
+        repoFull,
+        branch,
         record,
         nextSavedAt,
       });
@@ -1072,7 +1085,7 @@ export class PartHistory {
       return { updatedCount: 0, reran: false };
     }
 
-    for (const { feature, componentName, record, nextSavedAt } of updates) {
+    for (const { feature, componentName, componentPath, sourceStorage, repoFull, branch, record, nextSavedAt } of updates) {
       let featureInfo = feature?.persistentData?.componentData?.featureInfo || null;
       try {
         const tempFeature = new AssemblyComponentFeature();
@@ -1088,8 +1101,17 @@ export class PartHistory {
       }
 
       feature.persistentData = feature.persistentData || {};
+      const nextPath = String(record.path || componentPath || componentName || '').trim();
+      const nextDisplayName = String(record.displayName || '').trim()
+        || (nextPath.includes('/') ? nextPath.split('/').pop() : nextPath);
       feature.persistentData.componentData = {
-        name: record.name || componentName,
+        source: String(record.source || sourceStorage || '').trim().toLowerCase() === 'github' ? 'github' : 'local',
+        name: nextPath || componentName,
+        path: nextPath || componentName,
+        folder: String(record.folder || '').trim(),
+        displayName: nextDisplayName,
+        repoFull: String(record.repoFull || repoFull || '').trim(),
+        branch: String(record.branch || branch || '').trim(),
         savedAt: nextSavedAt,
         data3mf: record.data3mf,
         featureInfo: featureInfo || null,

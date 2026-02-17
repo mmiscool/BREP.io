@@ -14,11 +14,13 @@ import { createScriptRunnerButton } from './scriptRunnerButton.js';
 import { createSelectionStateButton } from './selectionStateButton.js';
 import { createSheetMetalFlatExportButton } from './sheetMetalFlatExportButton.js';
 import { createSheetMetalDebugButton } from './sheetMetalDebugButton.js';
+import { createHomeButton } from './homeButton.js';
 
 export function registerDefaultToolbarButtons(viewer) {
   if (!viewer || typeof viewer.addToolbarButton !== 'function') return;
 
   const creators = [
+    createHomeButton,
     createNewButton,
     createSaveButton,
     createZoomToFitButton,

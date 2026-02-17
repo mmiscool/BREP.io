@@ -111,7 +111,8 @@ export class ModelLibraryView {
       const dateLine = document.createElement('div');
       dateLine.className = 'fm-date';
       const dt = new Date(entry.savedAt);
-      dateLine.textContent = isNaN(dt) ? String(entry.savedAt || '') : dt.toLocaleString();
+      const timeLabel = isNaN(dt) ? String(entry.savedAt || '') : dt.toLocaleString();
+      dateLine.textContent = entry.locationLabel ? `${timeLabel} · ${entry.locationLabel}` : timeLabel;
       left.appendChild(dateLine);
       row.appendChild(left);
 
@@ -151,7 +152,9 @@ export class ModelLibraryView {
       if (this.selectedName && entry.name === this.selectedName) cell.classList.add('is-selected');
       const timestamp = new Date(entry.savedAt);
       const timeLabel = isNaN(timestamp) ? String(entry.savedAt || '') : timestamp.toLocaleString();
-      cell.title = `${entry.name}\n${timeLabel}`;
+      cell.title = entry.locationLabel
+        ? `${entry.name}\n${timeLabel}\n${entry.locationLabel}`
+        : `${entry.name}\n${timeLabel}`;
       cell.addEventListener('click', () => this.onOpen(entry.name, entry));
 
       const img = document.createElement('img');

@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 920 270"
+     role="img"
+     aria-label="BREP.io logo"
+     preserveAspectRatio="xMinYMin meet">
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#46B3FF"/>
+      <stop offset="1" stop-color="#0A6BFF"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#0B3B8F"/>
+      <stop offset="1" stop-color="#2A8CFF"/>
+    </linearGradient>
+    <linearGradient id="g3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#BFE8FF"/>
+      <stop offset="1" stop-color="#2E9CFF"/>
+    </linearGradient>
+
+    <!-- glow extends outside text bounds, so leave some filter room -->
+    <filter id="glow" x="-90%" y="-90%" width="280%" height="280%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="7" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <style>
+      .mainText{
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+        font-weight:800;
+        letter-spacing:0.02em;
+      }
+      .subText{
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+        font-weight:600;
+        letter-spacing:0.28em;
+      }
+      .wordMain{
+        fill:#ecf4ff;
+        stroke:#0c1b3d;
+        stroke-opacity:0.88;
+        stroke-width:4;
+        paint-order:stroke;
+      }
+      .wordIo{
+        fill:#3eb2ff;
+        stroke:#0a2d63;
+        stroke-opacity:0.55;
+        stroke-width:1.5;
+        paint-order:stroke;
+      }
+      .wordSub{
+        fill:#cfdef8;
+        fill-opacity:0.86;
+      }
+      @media (prefers-color-scheme: light) {
+        .wordMain{
+          fill:#17325f;
+          stroke:#f3f8ff;
+          stroke-opacity:0.90;
+        }
+        .wordIo{
+          fill:#0a6bff;
+          stroke:#d9ebff;
+          stroke-opacity:0.75;
+        }
+        .wordSub{
+          fill:#274676;
+          fill-opacity:0.82;
+        }
+      }
+    </style>
+  </defs>
+
+  <!-- ICON -->
+  <g transform="translate(12,8)">
+    <path d="M65 75 L190 25 L300 75 L176 130 Z" fill="url(#g3)"/>
+    <path d="M176 130 L300 75 L300 200 L176 255 Z" fill="url(#g2)"/>
+    <path d="M65 75 L176 130 L176 255 L65 205 Z" fill="url(#g1)"/>
+
+    <path d="M110 130 L176 165 L176 205 L110 175 Z"
+          fill="#1F2937" fill-opacity="0.18"/>
+
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path stroke="#1F2937" stroke-width="3" stroke-opacity="0.70"
+        d="M185 135 C235 105 285 110 315 145 C345 180 330 235 285 260 C240 285 195 255 185 220"/>
+      <path stroke="#1F2937" stroke-width="2" stroke-opacity="0.55"
+        d="M205 150 C250 130 285 145 300 165 C315 185 305 220 275 235 C245 250 215 230 205 210"/>
+    </g>
+  </g>
+
+  <!-- WORDMARK -->
+  <!-- moved slightly left + down for tighter crop -->
+  <g transform="translate(345,160)">
+    <text class="mainText wordMain"
+          font-size="130"
+          x="0" y="0">
+      BREP
+    </text>
+
+    <!-- .io moved closer: x reduced from ~400 -> 305 -->
+    <g filter="url(#glow)">
+      <text class="mainText wordIo"
+            x="305" y="0"
+            font-size="130">.io</text>
+    </g>
+
+    <text class="subText wordSub"
+          x="6" y="62"
+          font-size="22">
+      CAD MODELING &amp; DESIGN
+    </text>
+  </g>
+</svg>
