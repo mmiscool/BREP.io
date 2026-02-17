@@ -635,14 +635,39 @@ export class SketchMode3D {
       }
 
       if (this._tool === "trim") {
+        const uv = this.#pointerToPlaneUV(e);
+        const phit = this.#hitTestPoint(e);
+        console.log("[SketchTrim] click", {
+          clientX: e?.clientX ?? null,
+          clientY: e?.clientY ?? null,
+          uv: uv ? { u: uv.u, v: uv.v } : null,
+          pointHitId: phit,
+        });
+        if (phit != null) {
+          const deleted = this.#deletePointById(phit);
+          console.log("[SketchTrim] point hit", {
+            pointId: phit,
+            deleted,
+          });
+          try { e.preventDefault(); e.stopImmediatePropagation?.(); e.stopPropagation(); } catch { }
+          consumed = true;
+          return;
+        }
         const ghit = this.#hitTestGeometry(e);
+        console.log("[SketchTrim] no point hit; geometry hit", ghit || null);
         if (ghit) {
           const trimmed = this.#trimGeometry(ghit, e);
+          console.log("[SketchTrim] geometry trim result", {
+            geometry: ghit,
+            trimmed,
+          });
           if (trimmed) {
             this._selection.clear();
           }
           try { e.preventDefault(); e.stopImmediatePropagation?.(); e.stopPropagation(); } catch { }
           consumed = true;
+        } else {
+          console.log("[SketchTrim] nothing hit");
         }
         return;
       }
@@ -965,8 +990,9 @@ export class SketchMode3D {
           const h = this.#hitTestSceneEdge(e);
           try { this.viewer.renderer.domElement.style.cursor = h ? 'crosshair' : ''; } catch { }
         } else if (this._tool === 'trim') {
-          const h = this.#hitTestGeometry(e);
-          try { this.viewer.renderer.domElement.style.cursor = h ? 'crosshair' : ''; } catch { }
+          const hPoint = this.#hitTestPoint(e);
+          const hGeo = hPoint == null ? this.#hitTestGeometry(e) : null;
+          try { this.viewer.renderer.domElement.style.cursor = (hPoint != null || hGeo) ? 'crosshair' : ''; } catch { }
         }
         const pid = this.#hitTestPoint(e);
         if (pid != null) this.#setHover({ type: "point", id: pid });
@@ -1038,9 +1064,14 @@ export class SketchMode3D {
       this._dragGeo.pointsStart = null;
       try { if (this.viewer?.controls) this.viewer.controls.enabled = true; } catch { }
     }
-    // If a point drag ended atop another point, add coincident constraint
+    // If a point drag ended atop another point, add coincident constraint.
+    // Otherwise, if dropped on a line, add point-on-line for free.
     if (draggedPointId != null) {
-      try { this.#maybeAddCoincidentOnDrop(draggedPointId); } catch { }
+      let droppedOnPoint = false;
+      try { droppedOnPoint = this.#maybeAddCoincidentOnDrop(draggedPointId, e); } catch { }
+      if (!droppedOnPoint) {
+        try { this.#maybeAddPointOnLineOnDrop(draggedPointId, e); } catch { }
+      }
     }
     // Re-enable camera controls after any sketch drag
     try { if (this.viewer?.controls) this.viewer.controls.enabled = true; } catch { }
@@ -2925,6 +2956,73 @@ export class SketchMode3D {
     } catch { }
   }
 
+  #deletePointById(pointId) {
+    const solver = this._solver;
+    const sketch = solver?.sketchObject;
+    const pid = parseInt(pointId);
+    if (!solver || !sketch || !Number.isFinite(pid)) {
+      console.warn("[SketchTrim] delete point blocked", {
+        pointId: pointId ?? null,
+        reason: "invalid solver/sketch/point id",
+      });
+      return false;
+    }
+    const hasPoint = Array.isArray(sketch.points)
+      && sketch.points.some((p) => parseInt(p?.id) === pid);
+    if (!hasPoint) {
+      console.warn("[SketchTrim] delete point blocked", {
+        pointId: pid,
+        reason: "point not found",
+      });
+      return false;
+    }
+    try { solver.removePointById?.(pid); } catch {
+      console.error("[SketchTrim] delete point failed", {
+        pointId: pid,
+        reason: "solver.removePointById threw",
+      });
+      return false;
+    }
+    const removed = !(solver.sketchObject?.points || []).some((p) => parseInt(p?.id) === pid);
+    if (!removed) {
+      console.warn("[SketchTrim] delete point failed", {
+        pointId: pid,
+        reason: "point still present after remove",
+      });
+      return false;
+    }
+    console.log("[SketchTrim] delete point succeeded", { pointId: pid });
+    this._selection.clear();
+    const cleaned = this.#maybeAutoCleanupPoints();
+    if (!cleaned) {
+      try { solver.solveSketch("full"); } catch { }
+      this.#rebuildSketchGraphics();
+      this.#refreshContextBar();
+    }
+    return true;
+  }
+
+  #deleteGeometryById(geometryId) {
+    const solver = this._solver;
+    const sketch = solver?.sketchObject;
+    const gid = parseInt(geometryId);
+    if (!solver || !sketch || !Number.isFinite(gid)) return false;
+    const hasGeometry = Array.isArray(sketch.geometries)
+      && sketch.geometries.some((g) => parseInt(g?.id) === gid);
+    if (!hasGeometry) return false;
+    try { solver.removeGeometryById?.(gid); } catch { return false; }
+    const removed = !(solver.sketchObject?.geometries || []).some((g) => parseInt(g?.id) === gid);
+    if (!removed) return false;
+    this._selection.clear();
+    const cleaned = this.#maybeAutoCleanupPoints();
+    if (!cleaned) {
+      try { solver.solveSketch("full"); } catch { }
+      this.#rebuildSketchGraphics();
+      this.#refreshContextBar();
+    }
+    return true;
+  }
+
   // Remove points not used by any geometry and with no constraints,
   // or with only a single coincident/point-on-line constraint.
   #cleanupUnusedPoints() {
@@ -3188,40 +3286,86 @@ export class SketchMode3D {
     return (bestId != null && bestD <= tol) ? bestId : null;
   }
 
-  #maybeAddCoincidentOnDrop(pointId) {
-    if (!this._solver || pointId == null) return;
+  #maybeAddCoincidentOnDrop(pointId, dropEvent = null) {
+    if (!this._solver || pointId == null) return false;
     const s = this._solver.sketchObject;
-    if (!s || !Array.isArray(s.points)) return;
+    if (!s || !Array.isArray(s.points)) return false;
     const p = this._solver.getPointById?.(pointId) || s.points.find((pp) => pp.id === pointId);
-    if (!p) return;
+    if (!p) return false;
     const v = this.viewer;
-    if (!v?.renderer || !v?.camera) return;
+    if (!v?.renderer || !v?.camera) return false;
     const { width, height } = this.#canvasClientSize(v.renderer.domElement);
     const wpp = this.#worldPerPixel(v.camera, width, height);
     const handleR = this.#pointRadiusWorld(width, height);
     const pxTol = Number(this._solverSettings?.pointConstraintPx);
     const tol = Math.max(handleR * 1.2, wpp * (Number.isFinite(pxTol) ? pxTol : 12));
+    const dropUV = dropEvent ? this.#pointerToPlaneUV(dropEvent) : null;
+    const tx = Number.isFinite(dropUV?.u) ? dropUV.u : p.x;
+    const ty = Number.isFinite(dropUV?.v) ? dropUV.v : p.y;
     let bestId = null;
     let bestD = Infinity;
     for (const q of s.points) {
       if (q.id === pointId) continue;
-      const d = Math.hypot(p.x - q.x, p.y - q.y);
+      const d = Math.hypot(tx - q.x, ty - q.y);
       if (d < bestD) { bestD = d; bestId = q.id; }
     }
-    if (bestId == null || bestD > tol) return;
+    if (bestId == null || bestD > tol) return false;
     const existing = (s.constraints || []).some((c) => {
       if (c?.type !== "≡" || !Array.isArray(c.points) || c.points.length < 2) return false;
       const a = c.points[0];
       const b = c.points[1];
       return (a === pointId && b === bestId) || (a === bestId && b === pointId);
     });
-    if (existing) return;
+    if (existing) return true;
     this._solver.createConstraint("≡", [
       { type: "point", id: pointId },
       { type: "point", id: bestId },
     ]);
     this.#refreshLists();
     this.#refreshContextBar();
+    return true;
+  }
+
+  #maybeAddPointOnLineOnDrop(pointId, dropEvent = null) {
+    if (!this._solver || pointId == null) return false;
+    const s = this._solver.sketchObject;
+    if (!s || !Array.isArray(s.points) || !Array.isArray(s.geometries)) return false;
+    const p = this._solver.getPointById?.(pointId) || s.points.find((pp) => pp.id === pointId);
+    if (!p) return false;
+    const v = this.viewer;
+    if (!v?.renderer || !v?.camera) return false;
+
+    const { width, height } = this.#canvasClientSize(v.renderer.domElement);
+    const wpp = this.#worldPerPixel(v.camera, width, height);
+    const handleR = this.#pointRadiusWorld(width, height);
+    const pxTol = Number(this._solverSettings?.pointConstraintPx);
+    const tol = Math.max(handleR * 1.2, wpp * (Number.isFinite(pxTol) ? pxTol : 12));
+    const dropUV = dropEvent ? this.#pointerToPlaneUV(dropEvent) : null;
+    const tx = Number.isFinite(dropUV?.u) ? dropUV.u : p.x;
+    const ty = Number.isFinite(dropUV?.v) ? dropUV.v : p.y;
+
+    let bestLine = null;
+    let bestDist = Infinity;
+    for (const g of s.geometries) {
+      if (!g || g.type !== "line" || !Array.isArray(g.points) || g.points.length < 2) continue;
+      const a = s.points.find((pt) => pt.id === g.points[0]);
+      const b = s.points.find((pt) => pt.id === g.points[1]);
+      if (!a || !b) continue;
+      if (a.id === pointId || b.id === pointId) continue;
+      const d = this.#distancePointToSeg(a.x, a.y, b.x, b.y, tx, ty);
+      if (d < bestDist) {
+        bestDist = d;
+        bestLine = g;
+      }
+    }
+
+    if (!bestLine || bestDist > tol) return false;
+    const added = this.#ensurePointOnLineConstraint(bestLine, pointId, null);
+    if (!added) return false;
+    try { this._solver.solveSketch("full"); } catch { }
+    this.#rebuildSketchGraphics();
+    this.#refreshContextBar();
+    return true;
   }
 
   #hitTestGeometry(e) {
@@ -3337,11 +3481,8 @@ export class SketchMode3D {
     const click = this.#closestParamOnSamples(uv, target.samples);
     if (!click || !Number.isFinite(click.param)) return false;
 
-    const targetEndpoints = this.#getGeometryEndpoints(geo, pointById);
     const intersections = [];
     const cache = new Map();
-    let overlap = false;
-    let endpointTouch = false;
     for (const other of (s.geometries || [])) {
       if (!other || other.id === geo.id) continue;
       let sample = cache.get(other.id);
@@ -3351,26 +3492,11 @@ export class SketchMode3D {
       }
       if (!sample) continue;
       this.#collectIntersections(target, sample, intersections, other, pointById);
-      if (!overlap && this.#isTrimOverlap(geo, other, pointById)) overlap = true;
-      if (!endpointTouch && targetEndpoints.length) {
-        if (this.#endpointsTouchSample(targetEndpoints, sample)) endpointTouch = true;
-      }
     }
 
     const bounds = this.#selectTrimBounds(intersections, click.param, target);
     if (!bounds) {
-      if (overlap || endpointTouch) {
-        this._solver.removeGeometryById?.(geo.id);
-        this._selection.clear();
-        const cleaned = this.#maybeAutoCleanupPoints();
-        if (!cleaned) {
-          try { this._solver.solveSketch("full"); } catch { }
-          this.#rebuildSketchGraphics();
-          this.#refreshContextBar();
-        }
-        return true;
-      }
-      return false;
+      return this.#deleteGeometryById(geo.id);
     }
 
     let trimmed = false;
@@ -3390,8 +3516,9 @@ export class SketchMode3D {
         this.#rebuildSketchGraphics();
         this.#refreshContextBar();
       }
+      return true;
     }
-    return trimmed;
+    return this.#deleteGeometryById(geo.id);
   }
 
   #trimLineGeometry(geo, bounds) {

@@ -2,11 +2,14 @@ import { Viewer } from './UI/viewer.js';
 import {
   localStorage as LS,
 } from './idbStorage.js';
+import { uint8ArrayToBase64 } from './services/componentLibrary.js';
 import './styles/cad.css';
 
 const viewportEl = document.getElementById('viewport');
 const sidebarEl = document.getElementById('sidebar');
 const currentFileEl = document.querySelector('[data-role="current-file"]');
+const GITHUB_HOST = 'github.com';
+const GITHUB_RAW_HOST = 'raw.githubusercontent.com';
 
 if (!viewportEl || !sidebarEl) throw new Error('Missing CAD mount elements (#viewport, #sidebar).');
 
@@ -28,6 +31,17 @@ async function boot() {
   // Preserve legacy global for debugging/plugins.
   window.env = viewer;
   window.viewer = viewer;
+
+  const githubTargetParam = getRequestedGithubTargetParam();
+  if (githubTargetParam) {
+    const githubTarget = parseGithubTarget(githubTargetParam);
+    if (githubTarget?.modelPath) {
+      setCurrentFileLabel(githubTarget.modelPath);
+      await loadRequestedGithubTarget(viewer, githubTarget);
+      return;
+    }
+    console.error('[main-cad] Invalid githubTarget URL:', githubTargetParam);
+  }
 
   const requestedScope = parseRequestedModelScope();
   if (!requestedScope.modelPath) {
@@ -63,9 +77,90 @@ function getRequestedModelPathParam() {
   return normalizeModelPath(params.get('path') || '');
 }
 
+function getRequestedGithubTargetParam() {
+  const params = new URLSearchParams(window.location.search);
+  return String(params.get('githubTarget') || '').trim();
+}
+
 function getRequestedBranch() {
   const params = new URLSearchParams(window.location.search);
   return String(params.get('branch') || '').trim();
+}
+
+function decodePathPart(part) {
+  const token = String(part || '');
+  if (!token) return '';
+  try {
+    return decodeURIComponent(token);
+  } catch {
+    return token;
+  }
+}
+
+function encodePathPart(part) {
+  const token = String(part || '');
+  if (!token) return '';
+  try {
+    return encodeURIComponent(decodeURIComponent(token));
+  } catch {
+    return encodeURIComponent(token);
+  }
+}
+
+function parseGithubTarget(input) {
+  const rawTarget = String(input || '').trim();
+  if (!rawTarget) return null;
+
+  const withScheme = /^[a-z]+:\/\//i.test(rawTarget) ? rawTarget : `https://${rawTarget}`;
+  let parsed = null;
+  try {
+    parsed = new URL(withScheme);
+  } catch {
+    return null;
+  }
+
+  const host = String(parsed.hostname || '').trim().toLowerCase();
+  const parts = String(parsed.pathname || '').split('/').filter(Boolean);
+  let owner = '';
+  let repo = '';
+  let branch = '';
+  let fileSegments = [];
+
+  if (host === GITHUB_RAW_HOST) {
+    if (parts.length < 4) return null;
+    owner = String(parts[0] || '').trim();
+    repo = String(parts[1] || '').trim();
+    branch = String(parts[2] || '').trim();
+    fileSegments = parts.slice(3);
+  } else if (host === GITHUB_HOST || host === `www.${GITHUB_HOST}`) {
+    if (parts.length < 4) return null;
+    owner = String(parts[0] || '').trim();
+    repo = String(parts[1] || '').trim();
+    const mode = String(parts[2] || '').trim().toLowerCase();
+    if (mode === 'blob' || mode === 'raw') {
+      if (parts.length < 5) return null;
+      branch = String(parts[3] || '').trim();
+      fileSegments = parts.slice(4);
+    } else {
+      // Accept shorthand: github.com/owner/repo/branch/path/file.3mf
+      branch = String(parts[2] || '').trim();
+      fileSegments = parts.slice(3);
+    }
+  } else {
+    return null;
+  }
+
+  if (!owner || !repo || !branch || !fileSegments.length) return null;
+  const decodedFilePath = normalizeModelPath(fileSegments.map(decodePathPart).join('/'));
+  if (!decodedFilePath || !decodedFilePath.toLowerCase().endsWith('.3mf')) return null;
+  const modelPath = stripModelFileExtension(decodedFilePath);
+  if (!modelPath) return null;
+
+  const rawUrl = `https://${GITHUB_RAW_HOST}/${encodePathPart(owner)}/${encodePathPart(repo)}/${encodePathPart(branch)}/${fileSegments.map(encodePathPart).join('/')}`;
+  return {
+    rawUrl,
+    modelPath,
+  };
 }
 
 function parseRequestedModelScope() {
@@ -131,6 +226,44 @@ async function loadRequestedFile(viewer, requestedScope) {
   } catch (err) {
     console.error('Failed to load requested model:', err);
     setCurrentFileLabel(String(requestedScope?.modelPath || '').trim());
+  }
+}
+
+async function loadRequestedGithubTarget(viewer, githubTarget) {
+  try {
+    await viewer.ready;
+  } catch {
+    // Continue and let direct load attempt fail noisily if needed.
+  }
+
+  const fm = viewer?.fileManagerWidget;
+  if (!fm || typeof fm.loadModelRecord !== 'function') return;
+
+  try {
+    const modelPath = String(githubTarget?.modelPath || '').trim();
+    if (!modelPath) return;
+    const rawUrl = String(githubTarget?.rawUrl || '').trim();
+    if (!rawUrl) return;
+    const response = await fetch(rawUrl, { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText}\n${rawUrl}`);
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (!bytes.length) throw new Error('Downloaded 3MF is empty.');
+    await fm.loadModelRecord(modelPath, {
+      source: 'local',
+      path: modelPath,
+      savedAt: new Date().toISOString(),
+      data3mf: uint8ArrayToBase64(bytes),
+    }, {
+      source: 'local',
+      path: modelPath,
+    });
+    const loadedName = String(fm.currentName || '').trim();
+    setCurrentFileLabel(loadedName || modelPath);
+  } catch (err) {
+    console.error('Failed to load githubTarget model:', err);
+    setCurrentFileLabel(String(githubTarget?.modelPath || '').trim());
   }
 }
 

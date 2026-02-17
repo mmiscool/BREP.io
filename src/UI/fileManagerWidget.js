@@ -1190,19 +1190,7 @@ export class FileManagerWidget {
     return { version: 1, solids: solidsOut };
   }
 
-  async loadModel(name, options = {}) {
-    if (!this.viewer || !this.viewer.partHistory) return;
-    const seq = ++this._loadSeq; // only the last call should win
-    const source = this._normalizeSource(options?.source || (options?.repoFull ? 'github' : 'local')) || 'local';
-    let rec = null;
-    if (source === 'github') {
-      const scope = { ...options, source, throwOnError: true };
-      const res = await this._retryGithubOperation(`Load "${name}" from GitHub`, () => this._getModel(name, scope));
-      if (!res.ok) return;
-      rec = res.value;
-    } else {
-      rec = await this._getModel(name, { ...options, source: 'local' });
-    }
+  async _loadModelRecord(name, rec, options = {}, source = 'local', seq = this._loadSeq, refreshReason = 'load-model') {
     if (!rec) return alert('Model not found.');
     await this.viewer.partHistory.reset();
     // Prefer new 3MF-based storage
@@ -1247,7 +1235,7 @@ export class FileManagerWidget {
             await this.viewer.partHistory.runHistory();
             if (seq !== this._loadSeq) return;
             await this._refreshSavedHistorySnapshot();
-            this._refreshHistoryCollections('load-model');
+            this._refreshHistoryCollections(refreshReason);
             return;
           }
         }
@@ -1262,7 +1250,7 @@ export class FileManagerWidget {
           await this.viewer?.partHistory?.runHistory?.();
           if (seq !== this._loadSeq) return;
           await this._refreshSavedHistorySnapshot();
-          this._refreshHistoryCollections('load-model');
+          this._refreshHistoryCollections(refreshReason);
           this._applyLoadedModelState(name, options, rec, source);
           return;
         } catch { }
@@ -1286,7 +1274,30 @@ export class FileManagerWidget {
     await this.viewer.partHistory.runHistory();
     if (seq !== this._loadSeq) return;
     await this._refreshSavedHistorySnapshot();
-    this._refreshHistoryCollections('load-model');
+    this._refreshHistoryCollections(refreshReason);
+  }
+
+  async loadModelRecord(name, rec, options = {}) {
+    if (!this.viewer || !this.viewer.partHistory) return;
+    const seq = ++this._loadSeq; // only the last call should win
+    const source = this._normalizeSource(options?.source || rec?.source || (options?.repoFull ? 'github' : 'local')) || 'local';
+    await this._loadModelRecord(name, rec, options, source, seq, 'load-model-record');
+  }
+
+  async loadModel(name, options = {}) {
+    if (!this.viewer || !this.viewer.partHistory) return;
+    const seq = ++this._loadSeq; // only the last call should win
+    const source = this._normalizeSource(options?.source || (options?.repoFull ? 'github' : 'local')) || 'local';
+    let rec = null;
+    if (source === 'github') {
+      const scope = { ...options, source, throwOnError: true };
+      const res = await this._retryGithubOperation(`Load "${name}" from GitHub`, () => this._getModel(name, scope));
+      if (!res.ok) return;
+      rec = res.value;
+    } else {
+      rec = await this._getModel(name, { ...options, source: 'local' });
+    }
+    await this._loadModelRecord(name, rec, options, source, seq, 'load-model');
   }
 
   async deleteModel(name, options = {}) {
