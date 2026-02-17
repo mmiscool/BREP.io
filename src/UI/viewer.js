@@ -22,6 +22,7 @@ import { expressionsManager } from './expressionsManager.js';
 import { MainToolbar } from './MainToolbar.js';
 import { registerDefaultToolbarButtons } from './toolbarButtons/registerDefaultButtons.js';
 import { registerSelectionToolbarButtons } from './toolbarButtons/registerSelectionButtons.js';
+import { navigateHomeWithGuard } from './toolbarButtons/homeButton.js';
 import { FileManagerWidget } from './fileManagerWidget.js';
 import './mobile.js';
 import { SketchMode3D } from './sketcher/SketchMode3D.js';
@@ -588,6 +589,8 @@ export class Viewer {
         this._sidebarStoredPointerEvents = null;
         this._sidebarLastPointer = null;
         this._sidebarOffscreen = false;
+        this._sidebarHomeBanner = null;
+        this._sidebarHomeBannerRO = null;
         this._sketchSidebarPrev = null;
         this.scene = partHistory instanceof PartHistory ? partHistory.scene : new THREE.Scene();
         this._axisHelpers = new Set();
@@ -1104,8 +1107,69 @@ export class Viewer {
         this._updateSidebarDockUI();
     }
 
+    _syncSidebarHomeBannerHeight() {
+        const banner = this._sidebarHomeBanner;
+        if (!banner) return;
+        let targetHeight = 0;
+        try {
+            targetHeight = Math.round(this.mainToolbar?.root?.getBoundingClientRect?.().height || 0);
+        } catch { /* ignore */ }
+        if (!Number.isFinite(targetHeight) || targetHeight <= 0) return;
+        const px = `${targetHeight}px`;
+        banner.style.height = px;
+        banner.style.minHeight = px;
+    }
+
+    _bindSidebarHomeBannerHeightSync() {
+        try { this._sidebarHomeBannerRO?.disconnect?.(); } catch { /* ignore */ }
+        this._sidebarHomeBannerRO = null;
+        const toolbarRoot = this.mainToolbar?.root;
+        if (!toolbarRoot || typeof ResizeObserver === 'undefined') return;
+        try {
+            const ro = new ResizeObserver(() => this._syncSidebarHomeBannerHeight());
+            ro.observe(toolbarRoot);
+            this._sidebarHomeBannerRO = ro;
+        } catch { /* ignore */ }
+    }
+
+    _ensureSidebarHomeBanner() {
+        if (!this.sidebar || typeof document === 'undefined') return;
+        let banner = this._sidebarHomeBanner;
+        if (!banner || !banner.isConnected) {
+            try {
+                const existing = this.sidebar.querySelector('.cad-sidebar-home-banner');
+                if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+            } catch { /* ignore */ }
+
+            banner = document.createElement('button');
+            banner.type = 'button';
+            banner.className = 'cad-sidebar-home-banner';
+            banner.title = 'Back to workspace';
+            banner.setAttribute('aria-label', 'Back to workspace');
+            banner.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void navigateHomeWithGuard(this);
+            });
+
+            const img = document.createElement('img');
+            img.className = 'cad-sidebar-home-banner-img';
+            img.src = '/brep-home-banner.svg';
+            img.alt = 'BREP.io home';
+            img.draggable = false;
+            banner.appendChild(img);
+
+            this.sidebar.prepend(banner);
+            this._sidebarHomeBanner = banner;
+        } else if (banner.parentNode !== this.sidebar) {
+            this.sidebar.prepend(banner);
+        }
+        this._syncSidebarHomeBannerHeight();
+    }
+
 
     async setupAccordion() {
+        this._ensureSidebarHomeBanner();
         // Setup accordion
         this.accordion = await new AccordionWidget();
         await this.sidebar.appendChild(this.accordion.uiElement);
@@ -1215,6 +1279,8 @@ export class Viewer {
                 try { this.mainToolbar.addCustomButton(it); } catch { }
             }
         } catch { }
+        this._syncSidebarHomeBannerHeight();
+        this._bindSidebarHomeBannerHeightSync();
 
         // Ensure toolbar sits above the canvas and doesn't block controls when not hovered
         try { this.renderer.domElement.style.marginTop = '0px'; } catch { }
@@ -1341,6 +1407,14 @@ export class Viewer {
         try { this._stopComponentTransformSession(); } catch { }
         safe(() => this._sidebarDockController?.dispose());
         this._sidebarDockController = null;
+        safe(() => this._sidebarHomeBannerRO?.disconnect?.());
+        this._sidebarHomeBannerRO = null;
+        safe(() => {
+            if (this._sidebarHomeBanner && this._sidebarHomeBanner.parentNode) {
+                this._sidebarHomeBanner.parentNode.removeChild(this._sidebarHomeBanner);
+            }
+        });
+        this._sidebarHomeBanner = null;
         const el = this.renderer?.domElement;
         this._detachRendererEvents(el);
         window.removeEventListener('pointerup', this._onPointerUp, { capture: true });

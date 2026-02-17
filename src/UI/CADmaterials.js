@@ -1,13 +1,7 @@
 import * as THREE from 'three';
 import { LineMaterial } from 'three/examples/jsm/Addons.js';
 import { SelectionFilter } from './SelectionFilter.js';
-import {
-    localStorage as LS,
-    configureGithubStorage,
-    getGithubStorageConfig,
-    STORAGE_BACKEND_EVENT,
-} from '../idbStorage.js';
-import { fetchGithubUserRepos } from '../githubStorage.js';
+import { localStorage as LS } from '../idbStorage.js';
 
 // CADmaterials for each entity type
 
@@ -151,26 +145,6 @@ export const CADmaterials = {
             sizeAttenuation: false,
             transparent: true
         })
-    },
-    FLAT_PATTERN: {
-        OUTER_EDGE: new THREE.LineBasicMaterial({
-            color: '#ff5fa2',
-            linewidth: 2,
-            depthTest: true,
-            depthWrite: false,
-        }),
-        INNER_EDGE: new THREE.LineBasicMaterial({
-            color: '#00ffff',
-            linewidth: 2,
-            depthTest: true,
-            depthWrite: false,
-        }),
-        CENTERLINE: new THREE.LineBasicMaterial({
-            color: '#00ffff',
-            linewidth: 2,
-            depthTest: true,
-            depthWrite: false,
-        }),
     },
 
 };
@@ -323,8 +297,6 @@ export class CADmaterialWidget {
         resetRow.appendChild(resetButton);
         this.uiElement.appendChild(resetRow);
 
-        this._buildGithubStorageSection();
-
         // For each top-level group (e.g., EDGE, LOOP, FACE), render variants (e.g., BASE, SELECTED)
         for (const [groupName, groupVal] of Object.entries(CADmaterials)) {
             const groupContainer = document.createElement("div");
@@ -356,258 +328,6 @@ export class CADmaterialWidget {
         }
 
         // Normalize label widths via CSS classes
-    }
-
-    _buildGithubStorageSection() {
-        const group = document.createElement('div');
-        group.className = 'cmw-group cmw-group-github';
-        const header = document.createElement('div');
-        header.className = 'cmw-header';
-        header.textContent = 'GitHub Workspace';
-        group.appendChild(header);
-
-        const tokenRow = makeRightSpan();
-        const tokenLabel = document.createElement('label');
-        tokenLabel.className = 'cmw-label';
-        tokenLabel.textContent = 'GitHub Token';
-        tokenRow.appendChild(tokenLabel);
-        const tokenInput = document.createElement('input');
-        tokenInput.type = 'password';
-        tokenInput.className = 'cmw-input';
-        tokenInput.placeholder = 'ghp_...';
-        tokenInput.autocomplete = 'off';
-        tokenInput.autocorrect = 'off';
-        tokenInput.autocapitalize = 'off';
-        tokenInput.spellcheck = false;
-        tokenInput.style.flex = '1 1 auto';
-        tokenRow.appendChild(tokenInput);
-        const clearBtn = document.createElement('button');
-        clearBtn.type = 'button';
-        clearBtn.className = 'cmw-button';
-        clearBtn.textContent = 'Clear';
-        tokenRow.appendChild(clearBtn);
-        group.appendChild(tokenRow);
-
-        const tokenHelp = document.createElement('div');
-        tokenHelp.className = 'cmw-help';
-        tokenHelp.innerHTML = `
-            <div><a href="https://github.com/settings/personal-access-tokens" target="_blank" rel="noreferrer">Create a GitHub personal access token</a></div>
-            <div>Steps: Settings → Developer settings → Personal access tokens → Fine‑grained tokens → Generate.</div>
-            <div>Grant access to the target repo and enable Contents read/write.</div>
-        `;
-        group.appendChild(tokenHelp);
-
-        const repoBtnRow = makeRightSpan();
-        const repoBtnLabel = document.createElement('label');
-        repoBtnLabel.className = 'cmw-label';
-        repoBtnLabel.textContent = 'Repos';
-        repoBtnRow.appendChild(repoBtnLabel);
-        const reloadBtn = document.createElement('button');
-        reloadBtn.type = 'button';
-        reloadBtn.className = 'cmw-button';
-        reloadBtn.textContent = 'Load Repos';
-        repoBtnRow.appendChild(reloadBtn);
-        group.appendChild(repoBtnRow);
-
-        const repoRow = makeRightSpan();
-        const repoLabel = document.createElement('label');
-        repoLabel.className = 'cmw-label';
-        repoLabel.textContent = 'Repo';
-        repoRow.appendChild(repoLabel);
-        const repoWrap = document.createElement('div');
-        repoWrap.className = 'cmw-combo cmw-repo-combo';
-        const repoInput = document.createElement('input');
-        repoInput.type = 'text';
-        repoInput.className = 'cmw-input cmw-repo-input';
-        repoInput.placeholder = 'Load repos';
-        repoInput.disabled = true;
-        const repoList = document.createElement('div');
-        repoList.className = 'cmw-combo-list';
-        repoList.style.display = 'none';
-        repoWrap.appendChild(repoInput);
-        repoWrap.appendChild(repoList);
-        repoRow.appendChild(repoWrap);
-        group.appendChild(repoRow);
-
-        const statusRow = makeRightSpan();
-        const statusLabel = document.createElement('label');
-        statusLabel.className = 'cmw-label';
-        statusLabel.textContent = 'Storage';
-        statusRow.appendChild(statusLabel);
-        const statusValue = document.createElement('div');
-        statusValue.className = 'cmw-status';
-        statusValue.textContent = 'Per-file (Local Browser)';
-        statusRow.appendChild(statusValue);
-        group.appendChild(statusRow);
-
-        this.uiElement.appendChild(group);
-
-        const cfg = getGithubStorageConfig();
-        if (cfg?.token) tokenInput.value = cfg.token;
-        let repoCache = [];
-        let pendingRepo = cfg?.repoFull || '';
-
-        const updateStatus = (override) => {
-            if (override) {
-                statusValue.textContent = override;
-                return;
-            }
-            const token = tokenInput.value.trim();
-            const repo = repoInput.value.trim();
-            if (token && repo) {
-                statusValue.textContent = `Per-file (GitHub ready: ${repo})`;
-                return;
-            }
-            if (token) {
-                statusValue.textContent = 'Per-file (GitHub token set; choose a repo)';
-                return;
-            }
-            statusValue.textContent = 'Per-file (Local Browser)';
-        };
-
-        const renderRepoList = (filter = '') => {
-            const hasToken = !!tokenInput.value.trim();
-            if (!hasToken) {
-                repoInput.disabled = true;
-                repoInput.placeholder = 'Enter token first';
-                repoList.innerHTML = '<div class=\"cmw-combo-empty\">Enter token first</div>';
-                return;
-            }
-            repoInput.disabled = false;
-            repoInput.placeholder = 'Select a repo';
-
-            const repos = repoCache
-                .filter((r) => r && r.full_name)
-                .filter((r) => !r.permissions || r.permissions.push !== false)
-                .sort((a, b) => a.full_name.localeCompare(b.full_name));
-
-            const term = String(filter || '').trim().toLowerCase();
-            const filtered = term
-                ? repos.filter((r) => String(r.full_name || '').toLowerCase().includes(term))
-                : repos;
-
-            repoList.innerHTML = '';
-            if (!repoCache.length) {
-                repoList.innerHTML = '<div class=\"cmw-combo-empty\">Load repos</div>';
-                return;
-            }
-            if (!filtered.length) {
-                repoList.innerHTML = '<div class=\"cmw-combo-empty\">No matches</div>';
-                return;
-            }
-            for (const r of filtered) {
-                const item = document.createElement('button');
-                item.type = 'button';
-                item.className = 'cmw-combo-item';
-                const tag = r.private ? 'private' : 'public';
-                item.textContent = `${r.full_name} (${tag})`;
-                item.addEventListener('click', () => {
-                    repoInput.value = r.full_name;
-                    repoList.style.display = 'none';
-                    applyConfig();
-                });
-                repoList.appendChild(item);
-            }
-
-            if (pendingRepo) {
-                repoInput.value = pendingRepo;
-                pendingRepo = '';
-            }
-        };
-
-        const loadRepos = async () => {
-            const token = tokenInput.value.trim();
-            if (!token) {
-                updateStatus('Enter a token to load repos.');
-                return;
-            }
-            updateStatus('Loading repos...');
-            repoInput.disabled = true;
-            repoList.innerHTML = '<div class=\"cmw-combo-empty\">Loading...</div>';
-            try {
-                repoCache = await fetchGithubUserRepos(token);
-                renderRepoList(repoInput.value);
-                updateStatus();
-            } catch (e) {
-                updateStatus(`Repo load failed: ${e?.message || e}`);
-                repoInput.disabled = true;
-            }
-        };
-
-        const applyConfig = async () => {
-            const token = tokenInput.value.trim();
-            const repoFull = repoInput.value.trim();
-            try {
-                if (token && repoFull) updateStatus('Connecting...');
-                await configureGithubStorage({ token, repoFull, mode: 'local' });
-                updateStatus();
-            } catch (e) {
-                updateStatus(`GitHub error: ${e?.message || e}`);
-            }
-        };
-
-        reloadBtn.addEventListener('click', () => loadRepos());
-        repoInput.addEventListener('input', () => {
-            renderRepoList(repoInput.value);
-            repoList.style.display = 'block';
-        });
-        repoInput.addEventListener('focus', () => {
-            renderRepoList(repoInput.value);
-            repoList.style.display = 'block';
-        });
-        repoInput.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                repoList.style.display = 'none';
-                applyConfig();
-            }
-            if (event.key === 'Escape') {
-                repoList.style.display = 'none';
-            }
-        });
-        repoInput.addEventListener('blur', () => {
-            // allow clicks to register before closing
-            setTimeout(() => { repoList.style.display = 'none'; }, 120);
-        });
-        tokenInput.addEventListener('change', () => {
-            if (!tokenInput.value.trim()) {
-                repoCache = [];
-                repoInput.disabled = true;
-                repoInput.value = '';
-                repoList.innerHTML = '<div class=\"cmw-combo-empty\">Load repos</div>';
-            }
-            applyConfig();
-        });
-        clearBtn.addEventListener('click', async () => {
-            tokenInput.value = '';
-            repoCache = [];
-            repoInput.disabled = true;
-            repoInput.value = '';
-            repoList.innerHTML = '<div class=\"cmw-combo-empty\">Load repos</div>';
-            try {
-                await configureGithubStorage({ token: '', repoFull: '', repoFulls: [], mode: 'local' });
-            } catch { /* ignore */ }
-            updateStatus();
-        });
-
-        try {
-            window.addEventListener(STORAGE_BACKEND_EVENT, () => {
-                updateStatus();
-            });
-        } catch {}
-
-        if (cfg?.token) {
-            repoInput.disabled = false;
-            loadRepos();
-        } else {
-            updateStatus();
-        }
-
-        try {
-            document.addEventListener('click', (event) => {
-                if (!repoWrap.contains(event.target)) repoList.style.display = 'none';
-            });
-        } catch {}
     }
 
     // --- Persistence helpers (browser only) ---
@@ -1055,7 +775,6 @@ export class CADmaterialWidget {
                 border-radius: 10px;
                 overflow: hidden;
             }
-            .cmw-group-github { overflow: visible; }
             .cmw-header {
                 padding: 10px 12px;
                 font-weight: 700;
@@ -1096,16 +815,6 @@ export class CADmaterialWidget {
                 cursor: pointer;
             }
             .cmw-button:hover { border-color: #60a5fa; }
-            .cmw-status { font-size: 12px; color: #9ca3af; }
-            .cmw-help {
-                padding: 0 12px 10px 12px;
-                font-size: 12px;
-                color: #9ca3af;
-                display: flex;
-                flex-direction: column;
-                gap: 4px;
-            }
-            .cmw-help a { color: #93c5fd; text-decoration: underline; }
             .cmw-select-wrap {
                 white-space: normal;
                 height: auto;
@@ -1114,46 +823,6 @@ export class CADmaterialWidget {
                 overflow-wrap: anywhere;
             }
             .cmw-select-wrap option { white-space: normal; }
-            .cmw-combo {
-                position: relative;
-                flex: 1 1 auto;
-                max-width: 90%;
-            }
-            .cmw-repo-input {
-                width: 100%;
-                box-sizing: border-box;
-            }
-            .cmw-combo-list {
-                position: absolute;
-                top: calc(100% + 4px);
-                left: 0;
-                right: 0;
-                z-index: 10;
-                background: #0b0e14;
-                border: 1px solid #374151;
-                border-radius: 8px;
-                max-height: 220px;
-                overflow: auto;
-                box-shadow: 0 8px 24px rgba(0,0,0,.35);
-            }
-            .cmw-combo-item {
-                display: block;
-                width: 100%;
-                text-align: left;
-                background: transparent;
-                color: var(--cmw-text);
-                border: 0;
-                padding: 6px 8px;
-                cursor: pointer;
-                white-space: normal;
-                overflow-wrap: anywhere;
-            }
-            .cmw-combo-item:hover { background: #111827; }
-            .cmw-combo-empty {
-                padding: 6px 8px;
-                color: #9ca3af;
-                white-space: normal;
-            }
         `;
         document.head.appendChild(style);
     }

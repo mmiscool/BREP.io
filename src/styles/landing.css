@@ -403,7 +403,7 @@ body {
 .hub-recent-gallery {
   --hub-browser-tile-size: 132px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(calc(var(--hub-browser-tile-size) + 42px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--hub-browser-tile-size) + 42px)), 1fr));
   gap: 14px;
   overflow: visible;
   padding: 2px;
@@ -838,8 +838,12 @@ body {
   background: rgba(6, 12, 28, 0.72);
   padding: 12px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(calc(var(--hub-browser-tile-size) + 42px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--hub-browser-tile-size) + 42px)), 1fr));
   gap: 14px;
+}
+
+.hub-browser-grid > * {
+  min-width: 0;
 }
 
 .hub-browser-tile {
@@ -890,8 +894,9 @@ body {
 
 .hub-browser-tile-preview {
   position: relative;
-  width: var(--hub-browser-tile-size);
-  height: var(--hub-browser-tile-size);
+  width: min(100%, var(--hub-browser-tile-size));
+  aspect-ratio: 1 / 1;
+  height: auto;
   border-radius: 12px;
   border: 1px solid rgba(117, 146, 209, 0.36);
   background: linear-gradient(160deg, rgba(11, 18, 40, 0.85), rgba(8, 11, 26, 0.9));
@@ -1839,11 +1844,11 @@ body {
   }
 
   .hub-browser-grid {
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--hub-browser-tile-size) + 34px)), 1fr));
   }
 
   .hub-recent-gallery {
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--hub-browser-tile-size) + 34px)), 1fr));
   }
 
   .hub-browser-head-row {

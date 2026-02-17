@@ -32,3 +32,43 @@ body {
   padding: 5px;
   z-index: 6;
 }
+
+.cad-sidebar-home-banner {
+  width: 100%;
+  min-height: 36px;
+  height: 36px;
+  margin: 0 0 6px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  border: 1px solid #262b36;
+  border-radius: 8px;
+  background: rgba(20, 24, 30, 0.92);
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color .12s ease, filter .12s ease, transform .08s ease;
+}
+
+.cad-sidebar-home-banner:hover {
+  border-color: #6ea8fe;
+  filter: brightness(1.03);
+}
+
+.cad-sidebar-home-banner:active {
+  transform: translateY(1px);
+}
+
+.cad-sidebar-home-banner:focus-visible {
+  outline: 2px solid rgba(110, 168, 254, 0.72);
+  outline-offset: 1px;
+}
+
+.cad-sidebar-home-banner-img {
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
