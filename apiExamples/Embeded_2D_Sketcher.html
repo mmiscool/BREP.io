@@ -13,7 +13,7 @@
         <div>
           <h1>Embeded 2D Sketcher</h1>
           <p class="lead">
-            Mounts the iframe-based <code>Sketcher2DEmbed</code> API and exports SVG paths from the host page.
+            Mounts the iframe-based <code>Sketcher2DEmbed</code> API and exports SVG, DXF, and per-curve 3D polylines from the host page.
           </p>
         </div>
         <nav class="example-nav">
@@ -29,6 +29,9 @@
         <button id="btn-apply-css" disabled>Apply CSS</button>
         <button id="btn-apply-theme" disabled>Apply Theme</button>
         <button id="btn-export-svg" disabled>Export SVG Paths</button>
+        <button id="btn-export-dxf" disabled>Export DXF</button>
+        <button id="btn-download-dxf" disabled>Download DXF</button>
+        <button id="btn-export-polylines" disabled>Export 3D Polylines</button>
       </div>
 
       <div class="control-grid">
@@ -68,6 +71,10 @@
           <label for="grid-spacing">Grid Spacing</label>
           <input id="grid-spacing" type="number" value="1" min="0.0001" step="0.1" />
         </div>
+        <div>
+          <label for="curve-resolution">Curve Resolution</label>
+          <input id="curve-resolution" type="number" value="64" min="3" max="2048" step="1" />
+        </div>
       </div>
 
       <label for="css-input">Custom CSS injected into iframe:</label>
@@ -89,6 +96,8 @@
       <pre id="event-output">(No sketch events yet)</pre>
       <div id="svg-preview"></div>
       <pre id="path-output">(No SVG exported yet)</pre>
+      <pre id="dxf-output">(No DXF exported yet)</pre>
+      <pre id="polyline-output">(No 3D polylines exported yet)</pre>
     </main>
 
     <script type="module">
@@ -99,6 +108,9 @@
       const btnApplyCss = document.getElementById('btn-apply-css');
       const btnApplyTheme = document.getElementById('btn-apply-theme');
       const btnExportSvg = document.getElementById('btn-export-svg');
+      const btnExportDxf = document.getElementById('btn-export-dxf');
+      const btnDownloadDxf = document.getElementById('btn-download-dxf');
+      const btnExportPolylines = document.getElementById('btn-export-polylines');
       const geometryColorInput = document.getElementById('geometry-color');
       const pointColorInput = document.getElementById('point-color');
       const constraintColorInput = document.getElementById('constraint-color');
@@ -108,22 +120,44 @@
       const sidebarExpandedInput = document.getElementById('sidebar-expanded');
       const gridVisibleInput = document.getElementById('grid-visible');
       const gridSpacingInput = document.getElementById('grid-spacing');
+      const curveResolutionInput = document.getElementById('curve-resolution');
       const cssInput = document.getElementById('css-input');
       const sketchStatusEl = document.getElementById('sketch-status');
       const sketchHost = document.getElementById('sketch-host');
       const eventOutput = document.getElementById('event-output');
       const svgPreview = document.getElementById('svg-preview');
       const pathOutput = document.getElementById('path-output');
+      const dxfOutput = document.getElementById('dxf-output');
+      const polylineOutput = document.getElementById('polyline-output');
 
       let sketcher = null;
       let latestSketch = null;
       let changeCount = 0;
       let finishCount = 0;
       let cancelCount = 0;
+      let dxfDownloadUrl = null;
       const maxEventLines = 6;
 
       const setSketchStatus = (text) => {
         sketchStatusEl.textContent = text;
+      };
+
+      const revokeDxfDownload = () => {
+        if (dxfDownloadUrl) {
+          URL.revokeObjectURL(dxfDownloadUrl);
+          dxfDownloadUrl = null;
+        }
+      };
+
+      const setDxfDownload = (text) => {
+        revokeDxfDownload();
+        if (typeof text !== 'string' || !text.length) {
+          btnDownloadDxf.disabled = true;
+          return;
+        }
+        const blob = new Blob([text], { type: 'application/dxf' });
+        dxfDownloadUrl = URL.createObjectURL(blob);
+        btnDownloadDxf.disabled = false;
       };
 
       const setSketchButtons = (mounted) => {
@@ -132,6 +166,9 @@
         btnApplyCss.disabled = !mounted;
         btnApplyTheme.disabled = !mounted;
         btnExportSvg.disabled = !mounted;
+        btnExportDxf.disabled = !mounted;
+        btnExportPolylines.disabled = !mounted;
+        btnDownloadDxf.disabled = !mounted || !dxfDownloadUrl;
       };
 
       const pushEvent = (label, payload = null) => {
@@ -158,6 +195,12 @@
       const currentGridSpacing = () => {
         const parsed = Number(gridSpacingInput.value);
         return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+      };
+
+      const currentCurveResolution = () => {
+        const parsed = Number(curveResolutionInput.value);
+        if (!Number.isFinite(parsed)) return 64;
+        return Math.max(3, Math.min(2048, Math.floor(parsed)));
       };
 
       const attachSketcher = async () => {
@@ -197,7 +240,7 @@
         await sketcher.mount(sketchHost);
         latestSketch = await sketcher.getSketch();
         setSketchButtons(true);
-        setSketchStatus('Sketcher iframe mounted. Draw geometry and click Export SVG Paths.');
+        setSketchStatus('Sketcher iframe mounted. Draw geometry and run any export action.');
       };
 
       const detachSketcher = async () => {
@@ -213,6 +256,9 @@
         eventOutput.textContent = '(No sketch events yet)';
         svgPreview.innerHTML = '';
         pathOutput.textContent = '(No SVG exported yet)';
+        dxfOutput.textContent = '(No DXF exported yet)';
+        polylineOutput.textContent = '(No 3D polylines exported yet)';
+        revokeDxfDownload();
       };
 
       const applySketchCss = async () => {
@@ -250,6 +296,7 @@
           strokeWidth: 1.5,
           fill: 'none',
           padding: 12,
+          curveResolution: currentCurveResolution(),
         });
         latestSketch = await sketcher.getSketch({ preferCached: true });
         svgPreview.innerHTML = result.svg;
@@ -258,6 +305,31 @@
           : '(No sketch geometry to export)';
         setSketchStatus(`Exported ${result.paths.length} SVG paths.`);
         svgPreview.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      };
+
+      const exportDxf = async () => {
+        if (!sketcher) return;
+        const result = await sketcher.exportDXF({
+          units: 'mm',
+          curveResolution: currentCurveResolution(),
+          includeConstruction: false,
+        });
+        dxfOutput.textContent = result?.dxf || '(No DXF payload returned)';
+        setDxfDownload(result?.dxf || '');
+        setSketchStatus(`Exported DXF with ${result?.polylines?.length || 0} polylines.`);
+      };
+
+      const export3DPolylines = async () => {
+        if (!sketcher) return;
+        const result = await sketcher.export3DPolylines({
+          curveResolution: currentCurveResolution(),
+          includeConstruction: false,
+          origin: [0, 0, 0],
+          xAxis: [1, 0, 0],
+          yAxis: [0, 1, 0],
+        });
+        polylineOutput.textContent = JSON.stringify(result, null, 2);
+        setSketchStatus(`Exported ${result?.polylines?.length || 0} 3D polylines.`);
       };
 
       btnCreate.addEventListener('click', () => {
@@ -292,6 +364,28 @@
         exportSvg().catch((error) => {
           console.error(error);
           setSketchStatus(`Failed to export SVG: ${error?.message || String(error)}`);
+        });
+      });
+
+      btnExportDxf.addEventListener('click', () => {
+        exportDxf().catch((error) => {
+          console.error(error);
+          setSketchStatus(`Failed to export DXF: ${error?.message || String(error)}`);
+        });
+      });
+
+      btnDownloadDxf.addEventListener('click', () => {
+        if (!dxfDownloadUrl) return;
+        const link = document.createElement('a');
+        link.href = dxfDownloadUrl;
+        link.download = 'sketch-export.dxf';
+        link.click();
+      });
+
+      btnExportPolylines.addEventListener('click', () => {
+        export3DPolylines().catch((error) => {
+          console.error(error);
+          setSketchStatus(`Failed to export 3D polylines: ${error?.message || String(error)}`);
         });
       });
 
@@ -333,6 +427,7 @@
         if (sketcher) {
           sketcher.destroy().catch(() => {});
         }
+        revokeDxfDownload();
       });
 
       setSketchButtons(false);

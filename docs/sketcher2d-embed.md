@@ -77,6 +77,19 @@ const svg = await sketcher.exportSVG({
   strokeWidth: 1.5,
   fill: "none",
   padding: 12,
+  curveResolution: 64,
+});
+
+const dxf = await sketcher.exportDXF({
+  units: "mm",
+  curveResolution: 64,
+});
+
+const poly3d = await sketcher.export3DPolylines({
+  curveResolution: 64,
+  origin: [0, 0, 0],
+  xAxis: [1, 0, 0],
+  yAxis: [0, 1, 0],
 });
 
 await sketcher.destroy();
@@ -130,6 +143,8 @@ await sketcher.destroy();
 - `setGridVisible(boolean)`: toggles grid visibility.
 - `setGridSpacing(number)`: updates grid spacing (must be > 0).
 - `exportSVG(options?)`: exports current sketch as SVG data (see below).
+- `exportDXF(options?)`: exports current sketch as a DXF string plus sampled polyline metadata.
+- `export3DPolylines(options?)`: exports each sketch curve as a separate sampled 3D polyline.
 - `destroy()`: disposes iframe and message handlers.
 
 `getSketch({ preferCached: true })` returns the latest cached sketch from recent events or calls when available.
@@ -147,11 +162,49 @@ Options:
 - `flipY` (default `true`)
 - `includeConstruction` (default `false`)
 - `bezierSamples` (default `24`)
+- `curveResolution` or `resolution` (optional; controls circle/arc/bezier sampling density)
 
 Return shape:
 - `svg`: serialized `<svg ...>` string.
 - `paths`: array of `{ id, type, d, construction, closed }`.
 - `bounds`: `{ minX, minY, maxX, maxY, contentWidth, contentHeight, width, height, padding, flipY, transform }`.
+
+## `exportDXF()` Options and Return
+`exportDXF(options)` uses the same sampled-curve geometry pipeline and writes one DXF polyline per sketch curve.
+
+Options:
+- `units` (default `unitless`; supports `mm`, `cm`, `m`, `in`)
+- `includeConstruction` (default `false`)
+- `bezierSamples` (default `24`)
+- `curveResolution` or `resolution` (optional; controls circle/arc/bezier sampling density)
+- `layerName` or `layer` (default `SKETCH`)
+- `colorNumber` (optional DXF ACI color index)
+- `lineType` (optional DXF line type; defaults to `Continuous`)
+
+Return shape:
+- `dxf`: DXF file contents as a string.
+- `polylines`: array of `{ id, type, construction, closed, points }` where `points` are `[x,y]` pairs.
+- `units`: normalized units label (`unitless`, `mm`, `cm`, `m`, `in`).
+- `layerName`: DXF layer name used for output entities.
+- `curveResolution`: resolved curve resolution (`null` when not explicitly set).
+- `bezierSamples`: resolved bezier segment sampling count.
+
+## `export3DPolylines()` Options and Return
+`export3DPolylines(options)` returns sampled curve geometry where each sketch curve is a separate 3D polyline.
+
+Options:
+- `includeConstruction` (default `false`)
+- `bezierSamples` (default `24`)
+- `curveResolution` or `resolution` (optional; controls circle/arc/bezier sampling density)
+- `origin` (default `[0,0,0]`)
+- `xAxis` (default `[1,0,0]`)
+- `yAxis` (default `[0,1,0]`)
+
+Return shape:
+- `polylines`: array of `{ id, type, construction, closed, points }` where `points` are `[x,y,z]` points.
+- `basis`: `{ origin, xAxis, yAxis, zAxis }` basis used for the 2D->3D mapping.
+- `curveResolution`: resolved curve resolution (`null` when not explicitly set).
+- `bezierSamples`: resolved bezier segment sampling count.
 
 ## Lifecycle Notes
 - `mount()` is idempotent for an active instance: if already mounted, it returns the same iframe after readiness.

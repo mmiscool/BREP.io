@@ -1,5 +1,5 @@
 import { deepClone } from "../../utils/deepClone.js";
-import { sketchToSVG } from "./sketchToSVG.js";
+import { sketchToDXF, sketchToSVG, sketchTo3DPolylines } from "./sketchToSVG.js";
 export { bootSketcher2DFrame } from "./Sketcher2DFrameApp.js";
 
 const DEFAULT_CHANNEL = "brep:sketcher2d";
@@ -270,6 +270,16 @@ export class Sketcher2DEmbed {
   async exportSVG(options = {}) {
     const sketch = await this.getSketch();
     return sketchToSVG(sketch, options);
+  }
+
+  async exportDXF(options = {}) {
+    const sketch = await this.getSketch();
+    return sketchToDXF(sketch, options);
+  }
+
+  async export3DPolylines(options = {}) {
+    const sketch = await this.getSketch();
+    return sketchTo3DPolylines(sketch, options);
   }
 
   async destroy() {

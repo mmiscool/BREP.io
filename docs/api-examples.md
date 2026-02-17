@@ -25,3 +25,4 @@ Standalone browser demos for the BREP kernel and Sketcher2D APIs.
 ## Embeded 2D Sketcher
 - Demo: [https://BREP.io/apiExamples/Embeded_2D_Sketcher.html](https://BREP.io/apiExamples/Embeded_2D_Sketcher.html)
 - Source: [apiExamples/Embeded_2D_Sketcher.html](https://github.com/mmiscool/BREP/blob/master/apiExamples/Embeded_2D_Sketcher.html)
+- Includes host-side exports for SVG, DXF, and sampled per-curve 3D polylines.
