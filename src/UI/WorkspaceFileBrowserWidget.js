@@ -1215,7 +1215,7 @@ export class WorkspaceFileBrowserWidget {
       return;
     }
     const currentPath = normalizePath(this.path || '');
-    const entered = window.prompt(
+    const entered = await prompt(
       currentPath
         ? `Create folder inside "${currentPath}" (relative path):`
         : 'Create folder at workspace root (path):',
@@ -1328,7 +1328,7 @@ export class WorkspaceFileBrowserWidget {
       this._setStatus('Trash is already empty.', 'info');
       return;
     }
-    const ok = window.confirm(
+    const ok = await confirm(
       `Permanently delete ${files.length} file${files.length === 1 ? '' : 's'} from Trash? This cannot be undone.`,
     );
     if (!ok) return;

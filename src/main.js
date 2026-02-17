@@ -15,6 +15,7 @@ import {
   setComponentRecord,
 } from './services/componentLibrary.js';
 import { WorkspaceFileBrowserWidget } from './UI/WorkspaceFileBrowserWidget.js';
+import './UI/dialogs.js';
 import './styles/landing.css';
 
 const MODEL_FILE_EXTENSION = '.3mf';
@@ -52,8 +53,6 @@ const state = {
   explorerPath: '',
   explorerViewMode: 'list',
   explorerIconSize: EXPLORER_ICON_SIZE_DEFAULT,
-  explorerSortKey: '',
-  explorerSortDir: 'asc',
   explorerSizePopoverOpen: false,
   explorerSizePopoverClose: null,
   recentExpanded: true,
@@ -464,16 +463,6 @@ function clampExplorerIconSize(value) {
   return Math.max(EXPLORER_ICON_SIZE_MIN, Math.min(EXPLORER_ICON_SIZE_MAX, Math.round(parsed)));
 }
 
-function normalizeExplorerSortKey(value) {
-  const key = String(value || '').trim().toLowerCase();
-  if (key === 'name' || key === 'kind' || key === 'modified') return key;
-  return '';
-}
-
-function normalizeExplorerSortDir(value) {
-  return String(value || '').trim().toLowerCase() === 'desc' ? 'desc' : 'asc';
-}
-
 function makeRootKey(source, repoFull = '') {
   const src = normalizeStorageSource(source);
   const repo = String(repoFull || '').trim();
@@ -570,150 +559,6 @@ function closeExplorerSizePopover({ rerender = true } = {}) {
   else applyExplorerSizePopoverToDom(false);
 }
 
-function bindExplorerSizePopoverOutsideHandlers(popoverOwnerEl) {
-  clearExplorerSizePopoverOutsideHandlers();
-  if (!popoverOwnerEl || !state.explorerSizePopoverOpen) return;
-  const onPointerDown = (event) => {
-    if (popoverOwnerEl.contains(event?.target)) return;
-    closeExplorerSizePopover({ rerender: false });
-  };
-  const onKeyDown = (event) => {
-    if (event?.key !== 'Escape') return;
-    event.preventDefault();
-    closeExplorerSizePopover({ rerender: false });
-  };
-  window.addEventListener('pointerdown', onPointerDown, true);
-  window.addEventListener('keydown', onKeyDown, true);
-  state.explorerSizePopoverClose = () => {
-    window.removeEventListener('pointerdown', onPointerDown, true);
-    window.removeEventListener('keydown', onKeyDown, true);
-  };
-}
-
-function openExplorerSizePopover() {
-  if (state.explorerViewMode !== 'icons') {
-    setExplorerViewMode('icons', { openSizePopover: true });
-    return;
-  }
-  if (state.explorerSizePopoverOpen) return;
-  state.explorerSizePopoverOpen = true;
-  renderFilesList();
-}
-
-function setExplorerViewMode(mode, options = {}) {
-  const next = String(mode || '').trim().toLowerCase() === 'icons' ? 'icons' : 'list';
-  const openSizePopover = !!options?.openSizePopover;
-  if (state.explorerViewMode === next) {
-    if (next === 'icons' && openSizePopover && !state.explorerSizePopoverOpen) {
-      state.explorerSizePopoverOpen = true;
-      renderFilesList();
-    }
-    return;
-  }
-  state.explorerViewMode = next;
-  saveUiPreference(EXPLORER_VIEW_MODE_PREF_KEY, state.explorerViewMode);
-  if (next === 'icons') {
-    state.explorerSizePopoverOpen = openSizePopover;
-    clearExplorerSizePopoverOutsideHandlers();
-  } else {
-    closeExplorerSizePopover({ rerender: false });
-  }
-  closeActiveFileMenu();
-  renderFilesList();
-}
-
-function applyExplorerIconSizeToDom(size) {
-  if (!state.filesListEl || state.explorerViewMode !== 'icons') return;
-  const px = `${size}px`;
-  state.filesListEl.querySelectorAll('.hub-browser-grid').forEach((grid) => {
-    grid.style.setProperty('--hub-browser-tile-size', px);
-  });
-  const label = state.filesListEl.querySelector('.hub-explorer-size-label');
-  if (label) label.textContent = `Tile Size ${size}px`;
-  const slider = state.filesListEl.querySelector('.hub-explorer-size-input');
-  if (slider && slider.value !== String(size)) slider.value = String(size);
-}
-
-function setExplorerIconSize(value) {
-  const next = clampExplorerIconSize(value);
-  if (state.explorerIconSize === next) {
-    applyExplorerIconSizeToDom(next);
-    return;
-  }
-  state.explorerIconSize = next;
-  saveUiPreference(EXPLORER_ICON_SIZE_PREF_KEY, state.explorerIconSize);
-  applyExplorerIconSizeToDom(next);
-}
-
-function setExplorerSort(key) {
-  const nextKey = normalizeExplorerSortKey(key);
-  if (!nextKey) return;
-  if (state.explorerSortKey === nextKey) {
-    state.explorerSortDir = state.explorerSortDir === 'asc' ? 'desc' : 'asc';
-  } else {
-    state.explorerSortKey = nextKey;
-    state.explorerSortDir = nextKey === 'modified' ? 'desc' : 'asc';
-  }
-  renderFilesList();
-}
-
-function entryMatchesSearch(entry, termRaw = '') {
-  const query = (termRaw && typeof termRaw === 'object' && !Array.isArray(termRaw))
-    ? termRaw
-    : parseSearchQuery(termRaw);
-  if (!query?.hasAny) return true;
-  const source = normalizeStorageSource(entry?.source);
-  const name = String(entry?.name || '').toLowerCase();
-  const displayName = String(entry?.displayName || '').toLowerCase();
-  const folder = String(entry?.folder || '').toLowerCase();
-  const repoFull = String(entry?.repoFull || '').toLowerCase();
-  const browserPath = String(getEntryBrowserPath(entry) || '').toLowerCase();
-  const browserPathWithExt = String(getEntryBrowserPathWithExtension(entry) || '').toLowerCase();
-  const modelPathWithExt = String(getEntryModelPathWithExtension(entry) || '').toLowerCase();
-  const sourceLabel = source === 'local' ? 'local browser' : 'github';
-  const pathWithExt = browserPathWithExt || modelPathWithExt || `${browserPath}${MODEL_FILE_EXTENSION}`;
-
-  if (Array.isArray(query.source) && query.source.length) {
-    const sourceMatch = query.source.some((filter) =>
-      sourceLabel.includes(filter) || source.includes(filter));
-    if (!sourceMatch) return false;
-  }
-
-  if (Array.isArray(query.repo) && query.repo.length) {
-    if (!repoFull) return false;
-    const repoMatch = query.repo.some((filter) => repoFull.includes(filter));
-    if (!repoMatch) return false;
-  }
-
-  if (Array.isArray(query.ext) && query.ext.length) {
-    const extMatch = query.ext.some((ext) => pathWithExt.endsWith(ext));
-    if (!extMatch) return false;
-  }
-
-  if (Array.isArray(query.folder) && query.folder.length) {
-    const folderMatch = query.folder.some((filter) => {
-      const normalizedFilter = String(filter || '').replace(/\\/g, '/').toLowerCase();
-      return folder.includes(normalizedFilter) || browserPath.includes(normalizedFilter);
-    });
-    if (!folderMatch) return false;
-  }
-
-  const haystack = [
-    name,
-    displayName,
-    folder,
-    repoFull,
-    browserPath,
-    browserPathWithExt,
-    modelPathWithExt,
-    sourceLabel,
-  ].join('\n');
-  for (const term of Array.isArray(query.terms) ? query.terms : []) {
-    if (!term) continue;
-    if (!haystack.includes(term)) return false;
-  }
-  return true;
-}
 
 async function renderHome() {
   state.root.innerHTML = `
@@ -1532,22 +1377,6 @@ function renderFilesList() {
   state.filesListEl.appendChild(createFolderExplorer(roots, term));
 }
 
-function formatEntrySavedAt(savedAt) {
-  const dt = new Date(savedAt || '');
-  return isNaN(dt) ? 'Unknown time' : dt.toLocaleString();
-}
-
-function getEntryLocationLabel(entry) {
-  const source = normalizeStorageSource(entry?.source);
-  const repoFull = String(entry?.repoFull || '').trim();
-  const folder = String(entry?.folder || '').trim();
-  const locationParts = [];
-  if (source === 'local') locationParts.push('Local Browser');
-  if (repoFull) locationParts.push(repoFull);
-  if (folder) locationParts.push(folder);
-  return locationParts.join(' / ');
-}
-
 function ensureModelExtension(name) {
   const value = String(name || '').trim();
   if (!value) return '';
@@ -1726,256 +1555,6 @@ async function openEntryOnGithub(entry) {
   if (repoFull) window.open(`https://github.com/${repoFull}`, '_blank', 'noopener,noreferrer');
 }
 
-function createBrowserFolderRow(folderEntry, context = {}) {
-  const folderPath = normalizePath(folderEntry?.path || '');
-  if (!folderPath) return null;
-  const source = normalizeStorageSource(context?.source || state.explorerRootSource);
-  const repoFull = String(context?.repoFull || state.explorerRootRepoFull || '').trim();
-  const openFolder = (event) => {
-    event?.preventDefault?.();
-    event?.stopPropagation?.();
-    setExplorerPath(folderPath);
-  };
-
-  const row = document.createElement('div');
-  row.className = 'hub-browser-row is-folder';
-  row.title = folderPath;
-  row.tabIndex = 0;
-  row.addEventListener('click', () => setExplorerPath(folderPath));
-  row.addEventListener('keydown', (event) => {
-    if (event.defaultPrevented) return;
-    if (event.key === 'Enter' || event.key === ' ') {
-      openFolder(event);
-    }
-  });
-
-  const actionsCell = document.createElement('div');
-  actionsCell.className = 'hub-browser-cell hub-browser-actions';
-  const openBtn = createButton('Open', 'hub-ghost-btn hub-browser-open', openFolder);
-  actionsCell.appendChild(openBtn);
-  const actionsMenu = createFolderActionsMenu(folderEntry, { source, repoFull });
-  if (actionsMenu) actionsCell.appendChild(actionsMenu);
-  row.appendChild(actionsCell);
-
-  const nameCell = document.createElement('div');
-  nameCell.className = 'hub-browser-cell hub-browser-name';
-  const icon = document.createElement('span');
-  icon.className = 'hub-browser-icon';
-  icon.textContent = '📁';
-  icon.setAttribute('aria-hidden', 'true');
-  const text = document.createElement('span');
-  text.textContent = String(folderEntry?.name || '').trim() || 'Folder';
-  nameCell.appendChild(icon);
-  nameCell.appendChild(text);
-  row.appendChild(nameCell);
-
-  const kindCell = document.createElement('div');
-  kindCell.className = 'hub-browser-cell hub-browser-kind';
-  kindCell.textContent = 'Folder';
-  row.appendChild(kindCell);
-
-  const modCell = document.createElement('div');
-  modCell.className = 'hub-browser-cell hub-browser-modified';
-  const count = Number(folderEntry?.count || 0);
-  modCell.textContent = count > 0
-    ? `${count} item${count === 1 ? '' : 's'} · ${formatEntrySavedAt(folderEntry?.savedAt || '')}`
-    : `Empty · ${formatEntrySavedAt(folderEntry?.savedAt || '')}`;
-  row.appendChild(modCell);
-  bindDropTarget(row, createEntryDropTarget(source, repoFull, folderPath));
-
-  return row;
-}
-
-function createWorkspaceRootBrowserRow(root) {
-  const source = normalizeStorageSource(root?.source);
-  const repoFull = String(root?.repoFull || '').trim();
-  const label = String(root?.label || (source === 'local' ? 'Local Browser' : repoFull)).trim() || 'Workspace';
-  const row = document.createElement('button');
-  row.type = 'button';
-  row.className = 'hub-browser-row is-folder is-root';
-  row.title = label;
-  row.addEventListener('click', () => setExplorerRoot(source, repoFull));
-
-  const actionsCell = document.createElement('div');
-  actionsCell.className = 'hub-browser-cell hub-browser-actions';
-  const openBtn = createButton('Open', 'hub-primary-btn hub-browser-open', (event) => {
-    event?.stopPropagation?.();
-    setExplorerRoot(source, repoFull);
-  });
-  actionsCell.appendChild(openBtn);
-  row.appendChild(actionsCell);
-
-  const nameCell = document.createElement('div');
-  nameCell.className = 'hub-browser-cell hub-browser-name';
-  const icon = document.createElement('span');
-  icon.className = 'hub-browser-icon';
-  icon.textContent = source === 'local' ? '🖥️' : '🗂️';
-  icon.setAttribute('aria-hidden', 'true');
-  const text = document.createElement('span');
-  text.textContent = label;
-  nameCell.appendChild(icon);
-  nameCell.appendChild(text);
-  row.appendChild(nameCell);
-
-  const kindCell = document.createElement('div');
-  kindCell.className = 'hub-browser-cell hub-browser-kind';
-  kindCell.textContent = 'Workspace';
-  row.appendChild(kindCell);
-
-  const modCell = document.createElement('div');
-  modCell.className = 'hub-browser-cell hub-browser-modified';
-  if (source === 'local') modCell.textContent = 'Local Browser storage';
-  else modCell.textContent = repoFull || 'GitHub repository';
-  row.appendChild(modCell);
-  bindDropTarget(row, createEntryDropTarget(source, repoFull, ''));
-
-  return row;
-}
-
-function createBrowserFileRow(entry) {
-  const name = String(entry?.name || '').trim();
-  if (!name) return null;
-  const source = normalizeStorageSource(entry?.source);
-  const repoFull = String(entry?.repoFull || '').trim();
-  const branch = String(entry?.branch || '').trim();
-  const entryKey = getEntrySelectionKey(entry);
-  const isSelected = isEntrySelected(entry);
-  const displayName = getEntryModelDisplayName(entry);
-  const fullModelPath = getEntryFullPathTooltip(entry) || getEntryModelPathWithExtension(entry) || ensureModelExtension(name);
-  const cadModelPath = getEntryCadLaunchModelPath(entry) || name;
-  const openFile = (event) => {
-    event?.preventDefault?.();
-    event?.stopPropagation?.();
-    goCad({
-      source,
-      repoFull,
-      branch,
-      path: cadModelPath,
-    });
-  };
-  const row = document.createElement('div');
-  row.className = `hub-browser-row is-file hub-browser-file-entry${isSelected ? ' is-selected' : ''}`;
-  row.title = fullModelPath || name;
-  row.tabIndex = 0;
-  if (entryKey) row.dataset.entryKey = entryKey;
-
-  const actionsCell = document.createElement('div');
-  actionsCell.className = 'hub-browser-cell hub-browser-actions';
-  actionsCell.appendChild(createSelectionToggle(entry));
-  actionsCell.appendChild(createFileActionsMenu(entry));
-  row.appendChild(actionsCell);
-
-  const nameCell = document.createElement('div');
-  nameCell.className = 'hub-browser-cell hub-browser-name';
-  const preview = createModelPreview(entry);
-  preview.classList.add('hub-browser-open-target');
-  preview.title = `Open ${displayName || name}`;
-  preview.addEventListener('click', openFile);
-  const text = document.createElement('span');
-  text.className = 'hub-browser-open-target';
-  text.textContent = displayName || name;
-  text.title = fullModelPath || name;
-  text.addEventListener('click', openFile);
-  nameCell.appendChild(preview);
-  nameCell.appendChild(text);
-  row.appendChild(nameCell);
-
-  const kindCell = document.createElement('div');
-  kindCell.className = 'hub-browser-cell hub-browser-kind';
-  if (source === 'local') {
-    kindCell.textContent = 'Model · Local';
-  } else {
-    kindCell.textContent = getRepoReadOnlyStatus(repoFull) ? 'Model · GitHub (RO)' : 'Model · GitHub';
-  }
-  row.appendChild(kindCell);
-
-  const modCell = document.createElement('div');
-  modCell.className = 'hub-browser-cell hub-browser-modified';
-  const location = getEntryLocationLabel(entry);
-  modCell.textContent = location
-    ? `${formatEntrySavedAt(entry?.savedAt || '')} · ${location}`
-    : formatEntrySavedAt(entry?.savedAt || '');
-  row.appendChild(modCell);
-
-  bindExplorerFileKeyboard(row, entry, openFile);
-  bindDragSource(row, entry);
-
-  return row;
-}
-
-function createWorkspaceRootBrowserTile(root) {
-  const source = normalizeStorageSource(root?.source);
-  const repoFull = String(root?.repoFull || '').trim();
-  const label = String(root?.label || (source === 'local' ? 'Local Browser' : repoFull)).trim() || 'Workspace';
-  const tile = document.createElement('button');
-  tile.type = 'button';
-  tile.className = 'hub-browser-tile is-folder';
-  tile.title = label;
-  tile.addEventListener('click', () => setExplorerRoot(source, repoFull));
-
-  const preview = document.createElement('span');
-  preview.className = 'hub-browser-tile-preview';
-  const icon = document.createElement('span');
-  icon.className = 'hub-browser-tile-icon';
-  icon.textContent = source === 'local' ? '🖥️' : '🗂️';
-  icon.setAttribute('aria-hidden', 'true');
-  preview.appendChild(icon);
-  tile.appendChild(preview);
-
-  const name = document.createElement('div');
-  name.className = 'hub-browser-tile-name';
-  name.textContent = label;
-  name.title = label;
-  tile.appendChild(name);
-  bindDropTarget(tile, createEntryDropTarget(source, repoFull, ''));
-
-  return tile;
-}
-
-function createBrowserFolderTile(folderEntry, context = {}) {
-  const folderPath = normalizePath(folderEntry?.path || '');
-  if (!folderPath) return null;
-  const source = normalizeStorageSource(context?.source || state.explorerRootSource);
-  const repoFull = String(context?.repoFull || state.explorerRootRepoFull || '').trim();
-  const openFolder = (event) => {
-    event?.preventDefault?.();
-    event?.stopPropagation?.();
-    setExplorerPath(folderPath);
-  };
-
-  const tile = document.createElement('article');
-  tile.className = 'hub-browser-tile is-folder';
-  tile.title = folderPath;
-  tile.tabIndex = 0;
-  tile.addEventListener('click', () => setExplorerPath(folderPath));
-  tile.addEventListener('keydown', (event) => {
-    if (event.defaultPrevented) return;
-    if (event.key === 'Enter' || event.key === ' ') {
-      openFolder(event);
-    }
-  });
-  const actionsMenu = createFolderActionsMenu(folderEntry, { source, repoFull }, { extraClass: 'hub-browser-tile-menu' });
-  if (actionsMenu) tile.appendChild(actionsMenu);
-
-  const preview = document.createElement('span');
-  preview.className = 'hub-browser-tile-preview';
-  const icon = document.createElement('span');
-  icon.className = 'hub-browser-tile-icon';
-  icon.textContent = '📁';
-  icon.setAttribute('aria-hidden', 'true');
-  preview.appendChild(icon);
-  tile.appendChild(preview);
-
-  const name = document.createElement('div');
-  name.className = 'hub-browser-tile-name';
-  name.textContent = String(folderEntry?.name || '').trim() || 'Folder';
-  name.title = folderPath;
-  tile.appendChild(name);
-  bindDropTarget(tile, createEntryDropTarget(source, repoFull, folderPath));
-
-  return tile;
-}
-
 function createBrowserFileTile(entry) {
   const name = String(entry?.name || '').trim();
   if (!name) return null;
@@ -2079,260 +1658,8 @@ function getFoldersForRoot(source, repoFull = '') {
   });
 }
 
-function collectExplorerEntries(records, folderRecords, currentPath = '', term = '') {
-  const searchQuery = (term && typeof term === 'object' && !Array.isArray(term))
-    ? term
-    : parseSearchQuery(term);
-  if (searchQuery?.hasAny) {
-    const matchedFiles = Array.isArray(records)
-      ? records.filter((entry) => entryMatchesSearch(entry, searchQuery))
-      : [];
-    matchedFiles.sort((a, b) => {
-      const aTime = Date.parse(a?.savedAt || '') || 0;
-      const bTime = Date.parse(b?.savedAt || '') || 0;
-      return bTime - aTime;
-    });
-    return { folders: [], files: matchedFiles };
-  }
-
-  const path = normalizePath(currentPath);
-  const prefix = path ? `${path}/` : '';
-  const folderMap = new Map();
-  const files = [];
-
-  for (const rec of records) {
-    const fullPath = getEntryBrowserPath(rec);
-    if (!fullPath) continue;
-    if (path && !fullPath.startsWith(prefix)) continue;
-    const remainder = path ? fullPath.slice(prefix.length) : fullPath;
-    if (!remainder) continue;
-    const slashIdx = remainder.indexOf('/');
-    if (slashIdx >= 0) {
-      const segment = remainder.slice(0, slashIdx);
-      if (!segment) continue;
-      const folderPath = path ? `${path}/${segment}` : segment;
-      const recordTime = Date.parse(rec?.savedAt || '') || 0;
-      const existing = folderMap.get(folderPath);
-      if (!existing) {
-        folderMap.set(folderPath, {
-          name: segment,
-          path: folderPath,
-          savedAt: rec?.savedAt || null,
-          sortTime: recordTime,
-          count: 1,
-        });
-      } else {
-        existing.count += 1;
-        if (recordTime > existing.sortTime) {
-          existing.sortTime = recordTime;
-          existing.savedAt = rec?.savedAt || existing.savedAt;
-        }
-      }
-      continue;
-    }
-    files.push(rec);
-  }
-
-  for (const folder of Array.isArray(folderRecords) ? folderRecords : []) {
-    const fullPath = normalizePath(folder?.path || '');
-    if (!fullPath) continue;
-    if (path && !fullPath.startsWith(prefix) && fullPath !== path) continue;
-    const remainder = fullPath === path ? '' : (path ? fullPath.slice(prefix.length) : fullPath);
-    if (!remainder) continue;
-    const slashIdx = remainder.indexOf('/');
-    const segment = slashIdx >= 0 ? remainder.slice(0, slashIdx) : remainder;
-    if (!segment) continue;
-    const folderPath = path ? `${path}/${segment}` : segment;
-    const existing = folderMap.get(folderPath);
-    if (!existing) {
-      folderMap.set(folderPath, {
-        name: segment,
-        path: folderPath,
-        savedAt: folder?.savedAt || null,
-        sortTime: Date.parse(folder?.savedAt || '') || 0,
-        count: 0,
-      });
-    } else if (!existing.savedAt && folder?.savedAt) {
-      existing.savedAt = folder.savedAt;
-      existing.sortTime = Date.parse(folder.savedAt) || existing.sortTime;
-    }
-  }
-
-  const folders = Array.from(folderMap.values());
-  const directFiles = files.slice();
-
-  folders.sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || '')));
-  directFiles.sort((a, b) => {
-    const aTime = Date.parse(a?.savedAt || '') || 0;
-    const bTime = Date.parse(b?.savedAt || '') || 0;
-    return bTime - aTime;
-  });
-
-  return { folders, files: directFiles };
-}
-
-function compareExplorerSortText(a, b) {
-  return String(a || '').localeCompare(String(b || ''), undefined, {
-    numeric: true,
-    sensitivity: 'base',
-  });
-}
-
-function getExplorerSortEntryName(item) {
-  if (!item || typeof item !== 'object') return '';
-  if (item.type === 'file') {
-    return String(getEntryModelDisplayName(item.entry) || item?.entry?.name || '').trim();
-  }
-  if (item.type === 'folder') {
-    return String(item?.entry?.name || '').trim();
-  }
-  if (item.type === 'root') {
-    return String(item?.entry?.label || item?.entry?.repoFull || '').trim();
-  }
-  return '';
-}
-
-function getExplorerSortEntryKind(item) {
-  if (!item || typeof item !== 'object') return '';
-  if (item.type === 'file') return 'Model';
-  if (item.type === 'folder') return 'Folder';
-  if (item.type === 'root') return 'Workspace';
-  return '';
-}
-
-function getExplorerSortEntryModified(item) {
-  if (!item || typeof item !== 'object') return 0;
-  if (item.type !== 'file' && item.type !== 'folder') return 0;
-  return Date.parse(item?.entry?.savedAt || '') || 0;
-}
-
-function getExplorerSortEntryRank(item) {
-  if (!item || typeof item !== 'object') return 99;
-  if (item.type === 'folder') return 0;
-  if (item.type === 'file') return 1;
-  if (item.type === 'root') return 2;
-  return 99;
-}
-
-function sortExplorerItems(items = []) {
-  const list = Array.isArray(items) ? items.slice() : [];
-  const key = normalizeExplorerSortKey(state.explorerSortKey);
-  if (!key || list.length < 2) return list;
-  const dir = normalizeExplorerSortDir(state.explorerSortDir) === 'desc' ? -1 : 1;
-
-  list.sort((a, b) => {
-    let cmp = 0;
-    if (key === 'name') {
-      cmp = compareExplorerSortText(getExplorerSortEntryName(a), getExplorerSortEntryName(b));
-    } else if (key === 'kind') {
-      cmp = compareExplorerSortText(getExplorerSortEntryKind(a), getExplorerSortEntryKind(b));
-    } else if (key === 'modified') {
-      cmp = getExplorerSortEntryModified(a) - getExplorerSortEntryModified(b);
-    }
-
-    if (cmp === 0) {
-      cmp = compareExplorerSortText(getExplorerSortEntryName(a), getExplorerSortEntryName(b));
-    }
-    if (cmp === 0) {
-      cmp = compareExplorerSortText(getExplorerSortEntryKind(a), getExplorerSortEntryKind(b));
-    }
-    if (cmp === 0) {
-      cmp = getExplorerSortEntryRank(a) - getExplorerSortEntryRank(b);
-    }
-    return cmp * dir;
-  });
-
-  return list;
-}
-
-function createExplorerSelectionToolbar() {
-  const selectedEntries = getSelectedEntries();
-  const selectedCount = selectedEntries.length;
-  const visibleKeys = Array.isArray(state.visibleExplorerEntryKeys) ? state.visibleExplorerEntryKeys.filter(Boolean) : [];
-  if (!selectedCount && !visibleKeys.length) return null;
-
-  const visibleSet = new Set(visibleKeys);
-  let visibleSelectedCount = 0;
-  for (const key of state.selectedEntryKeys) {
-    if (visibleSet.has(key)) visibleSelectedCount += 1;
-  }
-
-  const bar = document.createElement('div');
-  bar.className = 'hub-selection-toolbar';
-
-  const info = document.createElement('div');
-  info.className = 'hub-selection-info';
-  if (selectedCount) {
-    info.textContent = `${selectedCount} selected`;
-  } else {
-    info.textContent = `${visibleKeys.length} visible`;
-  }
-  bar.appendChild(info);
-
-  const actions = document.createElement('div');
-  actions.className = 'hub-selection-actions';
-
-  if (visibleKeys.length && visibleSelectedCount < visibleKeys.length) {
-    const selectVisibleBtn = document.createElement('button');
-    selectVisibleBtn.type = 'button';
-    selectVisibleBtn.className = 'hub-ghost-btn hub-browser-small';
-    selectVisibleBtn.textContent = `Select Visible (${visibleKeys.length})`;
-    selectVisibleBtn.addEventListener('click', () => selectVisibleExplorerEntries(true));
-    actions.appendChild(selectVisibleBtn);
-  }
-
-  if (selectedCount) {
-    const openBtn = document.createElement('button');
-    openBtn.type = 'button';
-    openBtn.className = 'hub-ghost-btn hub-browser-small';
-    openBtn.textContent = selectedCount === 1 ? 'Open' : 'Open First';
-    openBtn.addEventListener('click', () => {
-      const first = selectedEntries[0];
-      if (!first) return;
-      goCad({
-        source: normalizeStorageSource(first?.source),
-        repoFull: String(first?.repoFull || '').trim(),
-        branch: String(first?.branch || '').trim(),
-        path: getEntryCadLaunchModelPath(first) || String(first?.name || '').trim(),
-      });
-    });
-    actions.appendChild(openBtn);
-
-    const trashBtn = document.createElement('button');
-    trashBtn.type = 'button';
-    trashBtn.className = 'hub-danger-btn hub-browser-small';
-    trashBtn.textContent = selectedCount === 1 ? 'Move to Trash' : `Move ${selectedCount} to Trash`;
-    const hasTrashOnlySelection = selectedEntries.every((entry) => isTrashPath(getEntryBrowserPath(entry)));
-    const hasReadOnlySelection = selectedEntries.some((entry) =>
-      normalizeStorageSource(entry?.source) === 'github' && getRepoReadOnlyStatus(entry?.repoFull));
-    if (hasReadOnlySelection || hasTrashOnlySelection) {
-      trashBtn.disabled = true;
-      trashBtn.title = hasReadOnlySelection
-        ? 'Selection includes files in read-only repositories'
-        : 'Selection is already in Trash';
-    }
-    trashBtn.addEventListener('click', () => {
-      if (hasReadOnlySelection || hasTrashOnlySelection) return;
-      void moveEntriesToTrash(selectedEntries, { confirm: true });
-    });
-    actions.appendChild(trashBtn);
-
-    const clearBtn = document.createElement('button');
-    clearBtn.type = 'button';
-    clearBtn.className = 'hub-ghost-btn hub-browser-small';
-    clearBtn.textContent = 'Clear';
-    clearBtn.addEventListener('click', () => clearSelectedEntries());
-    actions.appendChild(clearBtn);
-  }
-
-  if (!actions.children.length) return null;
-  bar.appendChild(actions);
-  return bar;
-}
-
 function createFolderExplorer(roots, term = '') {
   const listRoots = Array.isArray(roots) ? roots : [];
-  {
   const searchTerm = String(term || '').trim();
   const panel = document.createElement('section');
   panel.className = 'hub-explorer hub-browser';
@@ -2443,574 +1770,6 @@ function createFolderExplorer(roots, term = '') {
   }, { persist: false });
   renderWorkspaceFoldersList(widget.getRoots());
   return panel;
-  }
-
-  const searchQuery = parseSearchQuery(term);
-  const _unusedSearchTerm = String(searchQuery.raw || '').trim();
-  const hasSearch = !!searchQuery.hasAny;
-  const _unusedPanel = document.createElement('section');
-  _unusedPanel.className = 'hub-explorer hub-browser';
-  state.visibleExplorerEntryKeys = [];
-
-  const iconSize = clampExplorerIconSize(state.explorerIconSize);
-  if (iconSize !== state.explorerIconSize) state.explorerIconSize = iconSize;
-
-  const buildBrowserTableShell = () => {
-    const list = document.createElement('div');
-    list.className = 'hub-browser-table';
-    const headerRow = document.createElement('div');
-    headerRow.className = 'hub-browser-head-row';
-
-    const makeSortHeadCell = (label, key) => {
-      const cell = document.createElement('div');
-      cell.className = 'hub-browser-head-cell';
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'hub-browser-sort-btn';
-      btn.setAttribute('aria-label', `Sort by ${label}`);
-      const labelSpan = document.createElement('span');
-      labelSpan.className = 'hub-browser-sort-label';
-      labelSpan.textContent = label;
-      const glyph = document.createElement('span');
-      glyph.className = 'hub-browser-sort-glyph';
-      glyph.setAttribute('aria-hidden', 'true');
-      const active = state.explorerSortKey === key;
-      if (active) {
-        btn.classList.add('is-active');
-        glyph.textContent = state.explorerSortDir === 'desc' ? '▼' : '▲';
-      } else {
-        glyph.textContent = '↕';
-      }
-      btn.appendChild(labelSpan);
-      btn.appendChild(glyph);
-      btn.addEventListener('click', () => setExplorerSort(key));
-      cell.appendChild(btn);
-      return cell;
-    };
-
-    const actionsHead = document.createElement('div');
-    actionsHead.className = 'hub-browser-head-cell is-actions';
-    actionsHead.textContent = 'Actions';
-    headerRow.appendChild(actionsHead);
-    headerRow.appendChild(makeSortHeadCell('Name', 'name'));
-    headerRow.appendChild(makeSortHeadCell('Kind', 'kind'));
-    headerRow.appendChild(makeSortHeadCell('Modified', 'modified'));
-    list.appendChild(headerRow);
-    return list;
-  };
-
-  const buildBrowserGridShell = () => {
-    const grid = document.createElement('div');
-    grid.className = 'hub-browser-grid';
-    grid.style.setProperty('--hub-browser-tile-size', `${state.explorerIconSize}px`);
-    return grid;
-  };
-
-  const buildExplorerTools = () => {
-    const tools = document.createElement('div');
-    tools.className = 'hub-explorer-tools';
-
-    const modeGroup = document.createElement('div');
-    modeGroup.className = 'hub-explorer-view-toggle-wrap';
-    const modeToggle = document.createElement('div');
-    modeToggle.className = 'hub-explorer-view-toggle';
-    modeGroup.appendChild(modeToggle);
-
-    const listBtn = document.createElement('button');
-    listBtn.type = 'button';
-    listBtn.className = `hub-explorer-view-btn${state.explorerViewMode === 'list' ? ' is-active' : ''}`;
-    listBtn.textContent = 'List';
-    listBtn.addEventListener('click', () => setExplorerViewMode('list'));
-    modeToggle.appendChild(listBtn);
-
-    const iconsBtn = document.createElement('button');
-    iconsBtn.type = 'button';
-    iconsBtn.className = `hub-explorer-view-btn${state.explorerViewMode === 'icons' ? ' is-active' : ''}`;
-    iconsBtn.textContent = 'Icons';
-    iconsBtn.addEventListener('click', () => {
-      if (state.explorerViewMode !== 'icons') {
-        setExplorerViewMode('icons', { openSizePopover: true });
-        return;
-      }
-      openExplorerSizePopover();
-    });
-    modeToggle.appendChild(iconsBtn);
-
-    tools.appendChild(modeGroup);
-
-    if (state.explorerViewMode === 'icons') {
-      const sliderWrap = document.createElement('div');
-      sliderWrap.className = 'hub-explorer-size';
-      if (state.explorerSizePopoverOpen) sliderWrap.classList.add('is-open');
-      sliderWrap.hidden = !state.explorerSizePopoverOpen;
-      const sliderLabel = document.createElement('span');
-      sliderLabel.className = 'hub-explorer-size-label';
-      sliderLabel.textContent = `Tile Size ${state.explorerIconSize}px`;
-      sliderWrap.appendChild(sliderLabel);
-      const slider = document.createElement('input');
-      slider.type = 'range';
-      slider.className = 'hub-explorer-size-input';
-      slider.min = String(EXPLORER_ICON_SIZE_MIN);
-      slider.max = String(EXPLORER_ICON_SIZE_MAX);
-      slider.step = '2';
-      slider.setAttribute('orient', 'vertical');
-      slider.value = String(state.explorerIconSize);
-      slider.addEventListener('input', () => setExplorerIconSize(slider.value));
-      sliderWrap.appendChild(slider);
-      modeGroup.appendChild(sliderWrap);
-      if (state.explorerSizePopoverOpen) {
-        bindExplorerSizePopoverOutsideHandlers(modeGroup);
-      }
-    }
-
-    return tools;
-  };
-
-  if (hasSearch) {
-    let matchedFiles = state.allRecords
-      .filter((entry) => entryMatchesSearch(entry, searchQuery))
-      .sort((a, b) => {
-        const aTime = Date.parse(a?.savedAt || '') || 0;
-        const bTime = Date.parse(b?.savedAt || '') || 0;
-        return bTime - aTime;
-      });
-    state.visibleExplorerEntryKeys = matchedFiles.map((entry) => getEntrySelectionKey(entry)).filter(Boolean);
-    if (state.explorerSortKey) {
-      matchedFiles = sortExplorerItems(matchedFiles.map((entry) => ({ type: 'file', entry })))
-        .map((item) => item.entry);
-    }
-
-    const head = document.createElement('div');
-    head.className = 'hub-explorer-head';
-    const meta = document.createElement('div');
-    meta.className = 'hub-explorer-meta';
-    meta.textContent = `${matchedFiles.length} result${matchedFiles.length === 1 ? '' : 's'}`;
-    head.appendChild(meta);
-    panel.appendChild(head);
-
-    const nav = document.createElement('div');
-    nav.className = 'hub-explorer-nav';
-    const crumbs = document.createElement('div');
-    crumbs.className = 'hub-explorer-crumbs';
-
-    const workspaceBtn = document.createElement('button');
-    workspaceBtn.type = 'button';
-    workspaceBtn.className = 'hub-explorer-crumb';
-    workspaceBtn.textContent = 'Workspace';
-    workspaceBtn.addEventListener('click', () => setExplorerWorkspaceTop());
-    crumbs.appendChild(workspaceBtn);
-
-    const sep = document.createElement('span');
-    sep.className = 'hub-explorer-sep';
-    sep.textContent = '/';
-    crumbs.appendChild(sep);
-
-    const searchBtn = document.createElement('button');
-    searchBtn.type = 'button';
-    searchBtn.className = 'hub-explorer-crumb is-active';
-    searchBtn.textContent = 'Search Results';
-    searchBtn.disabled = true;
-    crumbs.appendChild(searchBtn);
-
-    nav.appendChild(crumbs);
-    panel.appendChild(nav);
-    panel.appendChild(buildExplorerTools());
-    const selectionBar = createExplorerSelectionToolbar();
-    if (selectionBar) panel.appendChild(selectionBar);
-
-    if (state.explorerViewMode === 'icons') {
-      const grid = buildBrowserGridShell();
-      if (!matchedFiles.length) {
-        const empty = document.createElement('div');
-        empty.className = 'hub-browser-empty';
-        empty.textContent = `No files match "${searchTerm}".`;
-        grid.appendChild(empty);
-      } else {
-        for (const fileEntry of matchedFiles) {
-          const tile = createBrowserFileTile(fileEntry);
-          if (tile) grid.appendChild(tile);
-        }
-      }
-      panel.appendChild(grid);
-      return panel;
-    }
-
-    const list = buildBrowserTableShell();
-    if (!matchedFiles.length) {
-      const empty = document.createElement('div');
-      empty.className = 'hub-browser-empty';
-        empty.textContent = `No files match "${searchTerm}".`;
-      list.appendChild(empty);
-    } else {
-      for (const fileEntry of matchedFiles) {
-        const row = createBrowserFileRow(fileEntry);
-        if (row) list.appendChild(row);
-      }
-    }
-    panel.appendChild(list);
-    return panel;
-  }
-
-  if (state.explorerWorkspaceTop) {
-    let filteredRoots = !hasSearch
-      ? listRoots
-      : listRoots.filter((root) => {
-          const label = String(root?.label || '').toLowerCase();
-          const repo = String(root?.repoFull || '').toLowerCase();
-          const source = normalizeStorageSource(root?.source) === 'github' ? 'github' : 'local';
-          if (searchQuery.source.length && !searchQuery.source.some((value) => source.includes(value))) return false;
-          if (searchQuery.repo.length && !searchQuery.repo.some((value) => repo.includes(value))) return false;
-          const haystack = `${label}\n${repo}\n${source}`;
-          for (const token of searchQuery.terms) {
-            if (!haystack.includes(token)) return false;
-          }
-          return true;
-        });
-    if (state.explorerSortKey) {
-      filteredRoots = sortExplorerItems(filteredRoots.map((entry) => ({ type: 'root', entry })))
-        .map((item) => item.entry);
-    }
-
-    const head = document.createElement('div');
-    head.className = 'hub-explorer-head';
-    const meta = document.createElement('div');
-    meta.className = 'hub-explorer-meta';
-    meta.textContent = `${filteredRoots.length} folder${filteredRoots.length === 1 ? '' : 's'}`;
-    head.appendChild(meta);
-    panel.appendChild(head);
-
-    const nav = document.createElement('div');
-    nav.className = 'hub-explorer-nav';
-    const crumbs = document.createElement('div');
-    crumbs.className = 'hub-explorer-crumbs';
-    const workspaceBtn = document.createElement('button');
-    workspaceBtn.type = 'button';
-    workspaceBtn.className = 'hub-explorer-crumb is-active';
-    workspaceBtn.textContent = 'Workspace';
-    workspaceBtn.disabled = true;
-    crumbs.appendChild(workspaceBtn);
-    nav.appendChild(crumbs);
-    panel.appendChild(nav);
-    panel.appendChild(buildExplorerTools());
-    const selectionBar = createExplorerSelectionToolbar();
-    if (selectionBar) panel.appendChild(selectionBar);
-
-    if (state.explorerViewMode === 'icons') {
-      const grid = buildBrowserGridShell();
-      if (!filteredRoots.length) {
-        const empty = document.createElement('div');
-        empty.className = 'hub-browser-empty';
-        empty.textContent = listRoots.length
-          ? 'No workspace folders match your search.'
-          : 'No workspace folders configured yet.';
-        grid.appendChild(empty);
-      } else {
-        for (const root of filteredRoots) {
-          const tile = createWorkspaceRootBrowserTile(root);
-          if (tile) grid.appendChild(tile);
-        }
-      }
-      panel.appendChild(grid);
-      return panel;
-    }
-
-    const list = buildBrowserTableShell();
-    if (!filteredRoots.length) {
-      const empty = document.createElement('div');
-      empty.className = 'hub-browser-empty';
-      empty.textContent = listRoots.length
-        ? 'No workspace folders match your search.'
-        : 'No workspace folders configured yet.';
-      list.appendChild(empty);
-    } else {
-      for (const root of filteredRoots) {
-        const row = createWorkspaceRootBrowserRow(root);
-        if (row) list.appendChild(row);
-      }
-    }
-    panel.appendChild(list);
-    return panel;
-  }
-
-  const rootSource = normalizeStorageSource(state.explorerRootSource);
-  const rootRepoFull = String(state.explorerRootRepoFull || '').trim();
-  const selectedRoot = listRoots.find((root) =>
-    normalizeStorageSource(root?.source) === rootSource
-    && String(root?.repoFull || '').trim() === rootRepoFull,
-  );
-
-  if (!selectedRoot) {
-    const empty = document.createElement('div');
-    empty.className = 'hub-empty';
-    empty.textContent = 'Select a workspace folder to browse.';
-    panel.appendChild(empty);
-    return panel;
-  }
-
-  const currentPath = normalizePath(state.explorerPath || '');
-  const scopedRecords = getRecordsForRoot(selectedRoot.source, selectedRoot.repoFull);
-  const scopedFolders = getFoldersForRoot(selectedRoot.source, selectedRoot.repoFull);
-  const { folders, files } = collectExplorerEntries(scopedRecords, scopedFolders, currentPath, searchQuery);
-  state.visibleExplorerEntryKeys = files.map((entry) => getEntrySelectionKey(entry)).filter(Boolean);
-
-  const head = document.createElement('div');
-  head.className = 'hub-explorer-head';
-  const meta = document.createElement('div');
-  meta.className = 'hub-explorer-meta';
-  meta.textContent = `${folders.length} folder${folders.length === 1 ? '' : 's'} · ${files.length} file${files.length === 1 ? '' : 's'}`;
-  head.appendChild(meta);
-  panel.appendChild(head);
-
-  const nav = document.createElement('div');
-  nav.className = 'hub-explorer-nav';
-  const crumbs = document.createElement('div');
-  crumbs.className = 'hub-explorer-crumbs';
-
-  const workspaceBtn = document.createElement('button');
-  workspaceBtn.type = 'button';
-  workspaceBtn.className = 'hub-explorer-crumb';
-  workspaceBtn.textContent = 'Workspace';
-  workspaceBtn.addEventListener('click', () => setExplorerWorkspaceTop());
-  crumbs.appendChild(workspaceBtn);
-
-  const rootSep = document.createElement('span');
-  rootSep.className = 'hub-explorer-sep';
-  rootSep.textContent = '/';
-  crumbs.appendChild(rootSep);
-
-  const rootBtn = document.createElement('button');
-  rootBtn.type = 'button';
-  rootBtn.className = `hub-explorer-crumb${!currentPath ? ' is-active' : ''}`;
-  rootBtn.textContent = selectedRoot.label;
-  rootBtn.addEventListener('click', () => setExplorerPath(''));
-  bindDropTarget(rootBtn, createEntryDropTarget(selectedRoot.source, selectedRoot.repoFull, ''));
-  crumbs.appendChild(rootBtn);
-
-  if (currentPath) {
-    const parts = currentPath.split('/').filter(Boolean);
-    let partial = '';
-    for (const part of parts) {
-      partial = partial ? `${partial}/${part}` : part;
-      const crumbPath = partial;
-      const sep = document.createElement('span');
-      sep.className = 'hub-explorer-sep';
-      sep.textContent = '/';
-      crumbs.appendChild(sep);
-      const partBtn = document.createElement('button');
-      partBtn.type = 'button';
-      partBtn.className = `hub-explorer-crumb${crumbPath === currentPath ? ' is-active' : ''}`;
-      partBtn.textContent = part;
-      partBtn.addEventListener('click', () => setExplorerPath(crumbPath));
-      bindDropTarget(partBtn, createEntryDropTarget(selectedRoot.source, selectedRoot.repoFull, crumbPath));
-      crumbs.appendChild(partBtn);
-    }
-  }
-  nav.appendChild(crumbs);
-  panel.appendChild(nav);
-
-  const controls = document.createElement('div');
-  controls.className = 'hub-explorer-controls';
-  controls.appendChild(buildExplorerTools());
-
-  const upBtn = document.createElement('button');
-  upBtn.type = 'button';
-  upBtn.className = 'hub-ghost-btn hub-explorer-up';
-  upBtn.textContent = 'Up';
-  upBtn.disabled = false;
-  upBtn.addEventListener('click', () => {
-    if (currentPath) {
-      const idx = currentPath.lastIndexOf('/');
-      setExplorerPath(idx >= 0 ? currentPath.slice(0, idx) : '');
-      return;
-    }
-    setExplorerWorkspaceTop();
-  });
-
-  const actions = document.createElement('div');
-  actions.className = 'hub-explorer-actions';
-
-  const newFolderBtn = document.createElement('button');
-  newFolderBtn.type = 'button';
-  newFolderBtn.className = 'hub-ghost-btn';
-  newFolderBtn.textContent = 'New Folder';
-  newFolderBtn.addEventListener('click', async () => {
-    if (isUiBusy()) return;
-    if (normalizeStorageSource(selectedRoot.source) === 'github' && !String(getGithubStorageConfig()?.token || '').trim()) {
-      setFilesStatus('Set a GitHub token in Settings before creating folders in repositories.', 'warn');
-      return;
-    }
-    const entered = window.prompt(
-      currentPath
-        ? `Create folder inside "${currentPath}" (relative path):`
-        : 'Create folder at workspace root (path):',
-      '',
-    );
-    if (entered == null) return;
-    const raw = String(entered || '').trim();
-    if (!raw) return;
-    const targetPath = raw.startsWith('/')
-      ? normalizePath(raw)
-      : normalizePath(currentPath ? `${currentPath}/${raw}` : raw);
-    if (!targetPath) {
-      setFilesStatus('Enter a valid folder path.', 'warn');
-      return;
-    }
-    try {
-      setFilesStatus(`Creating folder "${targetPath}"...`, 'info');
-      await runBusyUiTask(`Creating folder "${targetPath}"...`, async ({ setMessage }) => {
-        setMessage(`Creating folder "${targetPath}"...`, 'Writing folder metadata...');
-        await createWorkspaceFolder(targetPath, {
-          source: selectedRoot.source,
-          repoFull: selectedRoot.repoFull,
-        });
-        setExplorerPath(targetPath);
-        setMessage('Refreshing file index...', 'Updating folder and file listing...');
-        await loadFiles();
-        await waitForFilesIdle();
-      });
-      setFilesStatus(`Created folder "${targetPath}".`, 'ok');
-    } catch (err) {
-      setFilesStatus(`Create folder failed: ${errorMessage(err)}`, 'error');
-    }
-  });
-  actions.appendChild(newFolderBtn);
-
-  const deleteFolderBtn = document.createElement('button');
-  deleteFolderBtn.type = 'button';
-  deleteFolderBtn.className = 'hub-danger-btn';
-  deleteFolderBtn.textContent = 'Delete Folder';
-  deleteFolderBtn.disabled = !currentPath;
-  deleteFolderBtn.addEventListener('click', async () => {
-    if (isUiBusy()) return;
-    if (!currentPath) return;
-    if (normalizeStorageSource(selectedRoot.source) === 'github' && !String(getGithubStorageConfig()?.token || '').trim()) {
-      setFilesStatus('Set a GitHub token in Settings before deleting repository folders.', 'warn');
-      return;
-    }
-    const prefix = `${currentPath}/`;
-    const recordsInFolder = scopedRecords.filter((entry) => {
-      const pathValue = getEntryBrowserPath(entry);
-      return pathValue === currentPath || pathValue.startsWith(prefix);
-    });
-    const markerPaths = scopedFolders
-      .map((entry) => normalizePath(entry?.path || ''))
-      .filter((pathValue) => pathValue && (pathValue === currentPath || pathValue.startsWith(prefix)));
-    if (!markerPaths.includes(currentPath)) markerPaths.push(currentPath);
-    const markerSet = Array.from(new Set(markerPaths));
-    const totalFiles = recordsInFolder.length;
-    const totalMarkers = markerSet.length;
-    const proceed = window.confirm(
-      `Delete folder "${currentPath}"?\n\nThis will remove ${totalFiles} file${totalFiles === 1 ? '' : 's'} and ${totalMarkers} managed folder marker${totalMarkers === 1 ? '' : 's'}.`,
-    );
-    if (!proceed) return;
-
-    try {
-      setFilesStatus(`Deleting folder "${currentPath}"...`, 'info');
-      await runBusyUiTask(`Deleting folder "${currentPath}"...`, async ({ setMessage }) => {
-        for (let index = 0; index < recordsInFolder.length; index += 1) {
-          const rec = recordsInFolder[index];
-          const recPath = normalizePath(rec?.path || rec?.name || '');
-          setMessage(
-            `Deleting folder "${currentPath}"...`,
-            `Removing file ${index + 1}/${recordsInFolder.length}: ${recPath || 'Unknown file'}`,
-          );
-          await removeComponentRecord(rec.path || rec.name, buildEntryScope(rec));
-        }
-        markerSet.sort((a, b) => b.length - a.length);
-        for (let index = 0; index < markerSet.length; index += 1) {
-          const folderPath = markerSet[index];
-          setMessage(
-            `Deleting folder "${currentPath}"...`,
-            `Removing folder marker ${index + 1}/${markerSet.length}: ${folderPath}`,
-          );
-          await removeWorkspaceFolder(folderPath, {
-            source: selectedRoot.source,
-            repoFull: selectedRoot.repoFull,
-          });
-        }
-        const idx = currentPath.lastIndexOf('/');
-        setExplorerPath(idx >= 0 ? currentPath.slice(0, idx) : '');
-        setMessage('Refreshing file index...', 'Updating folder and file listing...');
-        await loadFiles();
-        await waitForFilesIdle();
-      });
-      setFilesStatus(`Deleted folder "${currentPath}".`, 'ok');
-    } catch (err) {
-      setFilesStatus(`Delete folder failed: ${errorMessage(err)}`, 'error');
-    }
-  });
-  actions.appendChild(deleteFolderBtn);
-
-  const toolbarRight = document.createElement('div');
-  toolbarRight.className = 'hub-explorer-toolbar-right';
-  toolbarRight.appendChild(actions);
-  toolbarRight.appendChild(upBtn);
-
-  controls.appendChild(toolbarRight);
-  panel.appendChild(controls);
-  const selectionBar = createExplorerSelectionToolbar();
-  if (selectionBar) panel.appendChild(selectionBar);
-
-  if (state.explorerViewMode === 'icons') {
-    const grid = buildBrowserGridShell();
-    if (!folders.length && !files.length) {
-      const empty = document.createElement('div');
-      empty.className = 'hub-browser-empty';
-      if (!scopedRecords.length && !scopedFolders.length) {
-        empty.textContent = `No files stored in ${selectedRoot.label} yet.`;
-      } else if (hasSearch) {
-        empty.textContent = 'No folders or files in this view match your search.';
-      } else {
-        empty.textContent = 'This folder is empty.';
-      }
-      grid.appendChild(empty);
-    } else {
-      for (const folder of folders) {
-        const tile = createBrowserFolderTile(folder, {
-          source: selectedRoot.source,
-          repoFull: selectedRoot.repoFull,
-        });
-        if (tile) grid.appendChild(tile);
-      }
-      for (const fileEntry of files) {
-        const tile = createBrowserFileTile(fileEntry);
-        if (tile) grid.appendChild(tile);
-      }
-    }
-    panel.appendChild(grid);
-    return panel;
-  }
-
-  const list = buildBrowserTableShell();
-  if (!folders.length && !files.length) {
-    const empty = document.createElement('div');
-    empty.className = 'hub-browser-empty';
-    if (!scopedRecords.length && !scopedFolders.length) {
-      empty.textContent = `No files stored in ${selectedRoot.label} yet.`;
-    } else if (hasSearch) {
-      empty.textContent = 'No folders or files in this view match your search.';
-    } else {
-      empty.textContent = 'This folder is empty.';
-    }
-    list.appendChild(empty);
-  } else {
-    const sortedItems = sortExplorerItems([
-      ...folders.map((entry) => ({ type: 'folder', entry })),
-      ...files.map((entry) => ({ type: 'file', entry })),
-    ]);
-    for (const item of sortedItems) {
-      const row = item.type === 'folder'
-        ? createBrowserFolderRow(item.entry, {
-          source: selectedRoot.source,
-          repoFull: selectedRoot.repoFull,
-        })
-        : createBrowserFileRow(item.entry);
-      if (row) list.appendChild(row);
-    }
-  }
-  panel.appendChild(list);
-
-  return panel;
 }
 
 function renderWorkspaceFoldersList(roots) {
@@ -3083,15 +1842,6 @@ function createFolderCard(root, { isSelected = false, onOpen = null } = {}) {
   card.appendChild(body);
 
   return card;
-}
-
-function createButton(label, className, onClick) {
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = className;
-  btn.textContent = label;
-  btn.addEventListener('click', onClick);
-  return btn;
 }
 
 function closeActiveFileMenu() {
@@ -3322,7 +2072,7 @@ async function deleteFolderPath(folderPathRaw, options = {}) {
     return;
   }
 
-  const proceed = window.confirm(
+  const proceed = await confirm(
     `Delete folder "${folderPath}"?\n\nThis will remove ${totalFiles} file${totalFiles === 1 ? '' : 's'} and ${totalMarkers} managed folder marker${totalMarkers === 1 ? '' : 's'}.`,
   );
   if (!proceed) return;
@@ -3400,7 +2150,7 @@ async function renameFolderPath(folderPathRaw, options = {}) {
     return;
   }
 
-  const entered = window.prompt('Rename folder path:', folderPath);
+  const entered = await prompt('Rename folder path:', folderPath);
   if (entered == null) return;
   const nextPath = normalizePath(String(entered || '').trim());
   if (!nextPath || nextPath === folderPath) return;
@@ -3682,8 +2432,8 @@ function getEntryModelPath(entryOrName) {
   if (typeof entryOrName === 'string') return normalizePath(String(entryOrName).trim());
   return normalizePath(
     getEntryCadLaunchModelPath(entryOrName)
-      || getEntryBrowserPath(entryOrName)
-      || String(entryOrName.path || entryOrName.name || '').trim(),
+    || getEntryBrowserPath(entryOrName)
+    || String(entryOrName.path || entryOrName.name || '').trim(),
   );
 }
 
@@ -3728,17 +2478,6 @@ function getSelectedEntries() {
 function clearSelectedEntries({ rerender = true } = {}) {
   if (!state.selectedEntryKeys.size) return;
   state.selectedEntryKeys = new Set();
-  if (rerender) renderFilesList();
-}
-
-function setEntrySelected(entryOrName, selected, { rerender = true } = {}) {
-  const key = getEntrySelectionKey(entryOrName);
-  if (!key) return;
-  const next = !!selected;
-  const had = state.selectedEntryKeys.has(key);
-  if (next === had) return;
-  if (next) state.selectedEntryKeys.add(key);
-  else state.selectedEntryKeys.delete(key);
   if (rerender) renderFilesList();
 }
 
@@ -3847,54 +2586,6 @@ function getRepoReadOnlyStatus(repoFull = '') {
     return false;
   }
   return false;
-}
-
-function parseSearchQuery(rawQuery = '') {
-  const raw = String(rawQuery || '').trim();
-  const out = {
-    raw,
-    terms: [],
-    repo: [],
-    source: [],
-    ext: [],
-    folder: [],
-    hasAny: false,
-  };
-  if (!raw) return out;
-
-  const tokens = raw.match(/"[^"]+"|[^\s]+/g) || [];
-  for (const tokenRaw of tokens) {
-    const token = String(tokenRaw || '').trim();
-    if (!token) continue;
-    const cleanToken = token.startsWith('"') && token.endsWith('"')
-      ? token.slice(1, -1)
-      : token;
-    const idx = cleanToken.indexOf(':');
-    if (idx > 0) {
-      const key = cleanToken.slice(0, idx).trim().toLowerCase();
-      const value = cleanToken.slice(idx + 1).trim().toLowerCase();
-      if (!value) continue;
-      if (key === 'repo') {
-        out.repo.push(value);
-        continue;
-      }
-      if (key === 'source') {
-        out.source.push(value);
-        continue;
-      }
-      if (key === 'ext' || key === 'type') {
-        out.ext.push(value.startsWith('.') ? value : `.${value}`);
-        continue;
-      }
-      if (key === 'folder' || key === 'path') {
-        out.folder.push(value.replace(/\\/g, '/'));
-        continue;
-      }
-    }
-    out.terms.push(cleanToken.toLowerCase());
-  }
-  out.hasAny = !!(out.terms.length || out.repo.length || out.source.length || out.ext.length || out.folder.length);
-  return out;
 }
 
 function createEntryDropTarget(source, repoFull = '', path = '') {
@@ -4068,7 +2759,7 @@ async function relocateEntries(entries, target, {
   }
 
   if (confirm) {
-    const ok = window.confirm(`${actionLabel} ${list.length} file${list.length === 1 ? '' : 's'} to "${targetLabel}"?`);
+    const ok = await confirm(`${actionLabel} ${list.length} file${list.length === 1 ? '' : 's'} to "${targetLabel}"?`);
     if (!ok) return;
   }
 
@@ -4132,7 +2823,7 @@ async function relocateEntries(entries, target, {
           };
           const existing = await getComponentRecord(nextPath, writeScope);
           if (existing) {
-            const overwrite = window.confirm(`"${nextPath}" already exists in ${targetLabel}. Overwrite it?`);
+            const overwrite = await confirm(`"${nextPath}" already exists in ${targetLabel}. Overwrite it?`);
             if (!overwrite) {
               skipped += 1;
               continue;
@@ -4191,7 +2882,7 @@ async function permanentlyDeleteEntries(entries, {
       ? `Delete ${fileList.length} files permanently`
       : 'Empty Trash permanently');
   if (confirm) {
-    const ok = window.confirm(`${actionLabel}?\n\nThis cannot be undone.`);
+    const ok = await confirm(`${actionLabel}?\n\nThis cannot be undone.`);
     if (!ok) return;
   }
 
@@ -4279,7 +2970,7 @@ async function restoreEntries(entries, { confirm = true } = {}) {
 
   const actionLabel = list.length === 1 ? 'Restore file' : `Restore ${list.length} files`;
   if (confirm) {
-    const ok = window.confirm(`${actionLabel} from Trash?`);
+    const ok = await confirm(`${actionLabel} from Trash?`);
     if (!ok) return;
   }
 
@@ -4329,7 +3020,7 @@ async function restoreEntries(entries, { confirm = true } = {}) {
 
           const existing = await getComponentRecord(restorePath, targetScope);
           if (existing) {
-            const overwrite = window.confirm(`"${restorePath}" already exists. Overwrite it?`);
+            const overwrite = await confirm(`"${restorePath}" already exists. Overwrite it?`);
             if (!overwrite) {
               skipped += 1;
               continue;
@@ -4389,7 +3080,7 @@ async function moveEntriesToTrash(entries, { confirm = true } = {}) {
   if (!list.length) return;
   const actionLabel = list.length === 1 ? 'Move file to Trash' : `Move ${list.length} files to Trash`;
   if (confirm) {
-    const ok = window.confirm(`${actionLabel}?`);
+    const ok = await confirm(`${actionLabel}?`);
     if (!ok) return;
   }
 
@@ -4442,7 +3133,7 @@ async function moveEntriesToTrash(entries, { confirm = true } = {}) {
           }
           const existing = await getComponentRecord(trashPath, writeScope);
           if (existing) {
-            const overwrite = window.confirm(`"${trashPath}" already exists in Trash. Overwrite it?`);
+            const overwrite = await confirm(`"${trashPath}" already exists in Trash. Overwrite it?`);
             if (!overwrite) {
               skipped += 1;
               continue;
@@ -4511,13 +3202,13 @@ async function renameFile(entryOrName) {
     return;
   }
 
-  let nextName = window.prompt('Rename file', name) || '';
+  let nextName = (await prompt('Rename file', name)) || '';
   nextName = nextName.trim();
   if (!nextName || nextName === name) return;
 
   const existing = await getComponentRecord(nextName, { ...scope, path: nextName });
   if (existing) {
-    const overwrite = window.confirm(`"${nextName}" already exists. Overwrite it?`);
+    const overwrite = await confirm(`"${nextName}" already exists. Overwrite it?`);
     if (!overwrite) return;
   }
 
@@ -4562,13 +3253,13 @@ async function duplicateFile(entryOrName) {
     return;
   }
 
-  let nextName = window.prompt('Duplicate as', `${name} copy`) || '';
+  let nextName = (await prompt('Duplicate as', `${name} copy`)) || '';
   nextName = nextName.trim();
   if (!nextName) return;
 
   const existing = await getComponentRecord(nextName, { ...scope, path: nextName });
   if (existing) {
-    const overwrite = window.confirm(`"${nextName}" already exists. Overwrite it?`);
+    const overwrite = await confirm(`"${nextName}" already exists. Overwrite it?`);
     if (!overwrite) return;
   }
 

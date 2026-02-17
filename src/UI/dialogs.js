@@ -1,3 +1,5 @@
+const dialogFontFamily = 'var(--hub-mono-font, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace)';
+const dialogFontSize = '14px';
 
 const overlayStyle = {
     position: 'fixed',
@@ -18,7 +20,8 @@ const dialogStyle = {
     boxShadow: '0 10px 40px rgba(0,0,0,.5)',
     borderRadius: '12px',
     border: '1px solid var(--border, #262b36)',
-    fontSize: '14px',
+    fontFamily: dialogFontFamily,
+    fontSize: dialogFontSize,
     lineHeight: '1.4',
     textAlign: 'left',
     width: 'min(480px, calc(100vw - 32px))',
@@ -35,6 +38,7 @@ const neutralButtonStyle = {
     padding: '8px 12px',
     fontWeight: '700',
     fontSize: '12px',
+    fontFamily: dialogFontFamily,
     cursor: 'pointer',
 };
 
@@ -285,7 +289,8 @@ window.prompt = async (message, defaultValue = '') => {
         inputField.style.border = '1px solid var(--border, #262b36)';
         inputField.style.borderRadius = '10px';
         inputField.style.marginBottom = '10px';
-        inputField.style.fontSize = '14px';
+        inputField.style.fontFamily = dialogFontFamily;
+        inputField.style.fontSize = dialogFontSize;
         inputField.style.background = 'var(--input-bg, #0b0e14)';
         inputField.style.color = 'var(--text, #e6e6e6)';
         inputField.style.outline = 'none';

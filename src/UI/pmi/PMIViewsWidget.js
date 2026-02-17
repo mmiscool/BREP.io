@@ -348,8 +348,8 @@ export class PMIViewsWidget {
       if (!cameraSnap) return;
       const fallbackIndex = Array.isArray(this.views) ? this.views.length : 0;
       const defaultName = `View ${fallbackIndex + 1}`;
-      const promptFn = (typeof window !== 'undefined' && typeof window.prompt === 'function')
-        ? window.prompt.bind(window)
+      const promptFn = (typeof window !== 'undefined' && typeof prompt === 'function')
+        ? prompt.bind(window)
         : (typeof prompt === 'function' ? prompt : null);
       const response = promptFn ? await promptFn('Enter a name for this view', defaultName) : defaultName;
       if (response === null) return; // user cancelled

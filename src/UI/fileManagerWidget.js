@@ -798,7 +798,7 @@ export class FileManagerWidget {
         const existing = await this._getModel(modelPath, targetOptions);
         if (existing) {
           const location = targetRepo ? ` in ${targetRepo}` : '';
-          const overwrite = window.confirm(`"${modelPath}" already exists${location}. Overwrite it?`);
+          const overwrite = await window.confirm(`"${modelPath}" already exists${location}. Overwrite it?`);
           if (!overwrite) return;
         }
       } catch {

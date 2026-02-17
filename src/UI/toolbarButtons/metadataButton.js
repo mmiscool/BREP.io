@@ -94,7 +94,7 @@ class MetadataPanelController {
         const btnClear = document.createElement('button');
         btnClear.className = 'fw-btn';
         btnClear.textContent = 'Clear';
-        btnClear.addEventListener('click', () => this._clearMetadataForCurrentTarget());
+        btnClear.addEventListener('click', () => { void this._clearMetadataForCurrentTarget(); });
 
         fw.addHeaderAction(btnClear);
 
@@ -128,13 +128,13 @@ class MetadataPanelController {
         this.content.appendChild(p);
     }
 
-    _clearMetadataForCurrentTarget() {
+    async _clearMetadataForCurrentTarget() {
         const target = this.currentTarget;
         const manager = this._getManager();
         if (!target || !target.name || !manager) return;
         let ok = true;
         try {
-            ok = window.confirm ? window.confirm(`Remove all metadata for "${target.name}"?`) : true;
+            ok = confirm ? await confirm(`Remove all metadata for "${target.name}"?`) : true;
         } catch { ok = true; }
         if (!ok) return;
         try { manager.clearMetadata(target.name); } catch {}
@@ -143,7 +143,7 @@ class MetadataPanelController {
         if (this.open) this._render();
     }
 
-    _bulkDeleteSelectedMetadata() {
+    async _bulkDeleteSelectedMetadata() {
         const target = this.currentTarget;
         const manager = this._getManager();
         if (!target || !target.name || !manager) return;
@@ -151,7 +151,7 @@ class MetadataPanelController {
         const count = this.selectedKeys.size;
         let ok = true;
         try {
-            ok = window.confirm ? window.confirm(`Delete ${count} selected metadata entr${count === 1 ? 'y' : 'ies'}?`) : true;
+            ok = confirm ? await confirm(`Delete ${count} selected metadata entr${count === 1 ? 'y' : 'ies'}?`) : true;
         } catch { ok = true; }
         if (!ok) return;
         for (const key of Array.from(this.selectedKeys)) {
@@ -685,7 +685,7 @@ class MetadataPanelController {
         bulkDeleteBtn.className = 'fw-btn danger';
         bulkDeleteBtn.textContent = 'Delete selected';
         bulkDeleteBtn.disabled = this.selectedKeys.size === 0;
-        bulkDeleteBtn.addEventListener('click', () => this._bulkDeleteSelectedMetadata());
+        bulkDeleteBtn.addEventListener('click', () => { void this._bulkDeleteSelectedMetadata(); });
 
         actionRow.appendChild(bulkDeleteBtn);
         this.content.appendChild(actionRow);
