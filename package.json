@@ -15,7 +15,7 @@
     "generateLicenses": "node ./generateLicenses.js",
     "generateLicenseBundle": "node ./scripts/generateLicenseBundle.js",
     "prepareFonts": "node ./scripts/prepareFontAssets.js",
-    "capture": "node ./scripts/capture.js & pnpm dev "
+    "capture": "node ./scripts/capture.js"
   },
   "type": "module",
   "main": "./dist-kernel/brep-kernel.js",
@@ -47,6 +47,7 @@
     "jszip": "^3.10.1",
     "manifold-3d": "^3.3.2",
     "monaco-editor": "^0.55.1",
+    "pngjs": "^7.0.0",
     "tess2": "^1.0.0",
     "three": "^0.182.0",
     "three-mesh-bvh": "^0.9.8"

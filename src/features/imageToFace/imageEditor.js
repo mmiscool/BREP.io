@@ -123,7 +123,24 @@ export class ImageEditorUI {
       overlay.className = 'img-editor-overlay';
       overlay.innerHTML = `
       <style>
-        .img-editor-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:100;color:var(--ie-fg);font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;}
+        .img-editor-overlay{
+          position:fixed;
+          inset:0;
+          background:rgba(7,10,16,0.72);
+          z-index:100;
+          color:var(--ie-fg);
+          font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+          color-scheme:dark;
+          --ie-bg-1:var(--bg,#0f1117);
+          --ie-bg-2:var(--bg-elev,#12141b);
+          --ie-bg-3:var(--input-bg,#0b0e14);
+          --ie-fg:var(--text,#e6e6e6);
+          --ie-muted:var(--muted,#9aa4b2);
+          --ie-border:var(--border,#262b36);
+          --ie-accent:var(--focus,#3b82f6);
+          --ie-accent-bg:rgba(59,130,246,.24);
+          --ie-accent-fg:#e8f2ff;
+        }
         .img-editor-toolbar{position:absolute;left:0;right:0;top:0;height:48px;background:var(--ie-bg-2);border-bottom:1px solid var(--ie-border);display:flex;align-items:center;gap:12px;padding:0 12px;}
         .img-editor-spacer{flex:1 1 auto;}
         .img-editor-btn{border:1px solid var(--ie-border);background:var(--ie-bg-3);color:var(--ie-fg);border-radius:6px;padding:6px 10px;cursor:pointer;line-height:1;}
@@ -142,11 +159,6 @@ export class ImageEditorUI {
         .img-editor-color{width:32px;height:28px;border:1px solid var(--ie-border);border-radius:4px;padding:0;background:var(--ie-bg-3)}
         .img-editor-range{width:120px}
         .img-editor-select{height:28px;border:1px solid var(--ie-border);border-radius:4px;background:var(--ie-bg-3);color:var(--ie-fg);}
-        /* Light defaults */
-        .img-editor-overlay{--ie-bg-1:#111;--ie-bg-2:#1a1a1a;--ie-bg-3:#2a2a2a;--ie-fg:#f3f3f3;--ie-muted:#c0c0c0;--ie-border:#3a3a3a;--ie-accent:#69f;--ie-accent-bg:#143a66;--ie-accent-fg:#e8f2ff}
-        @media (prefers-color-scheme: light){
-          .img-editor-overlay{--ie-bg-1:#f7f7f7;--ie-bg-2:#f4f4f4;--ie-bg-3:#ffffff;--ie-fg:#111;--ie-muted:#555;--ie-border:#ddd;--ie-accent:#69f;--ie-accent-bg:#e6f2ff;--ie-accent-fg:#113355}
-        }
       </style>
       <div class="img-editor-toolbar">
         <div class="img-editor-group">
