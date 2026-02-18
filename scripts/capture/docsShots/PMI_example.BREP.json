@@ -1,0 +1,271 @@
+{
+  "features": [
+    {
+      "type": "P.CU",
+      "inputParams": {
+        "id": "P.CU1",
+        "sizeX": 10,
+        "sizeY": 10,
+        "sizeZ": 10,
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotationEuler": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "boolean": {
+          "targets": [],
+          "operation": "NONE"
+        },
+        "__open": false
+      },
+      "persistentData": {},
+      "timestamp": 1771410031743
+    },
+    {
+      "type": "P.CY",
+      "inputParams": {
+        "id": "P.CY2",
+        "radius": "2",
+        "height": 10,
+        "resolution": 64,
+        "transform": {
+          "position": [
+            "5",
+            "0",
+            "5"
+          ],
+          "rotationEuler": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "boolean": {
+          "targets": [
+            "P.CU1"
+          ],
+          "operation": "SUBTRACT"
+        },
+        "__open": false
+      },
+      "persistentData": {
+        "__refPreviewSnapshots": {
+          "boolean": {}
+        }
+      },
+      "timestamp": 1771410087543
+    }
+  ],
+  "idCounter": 2,
+  "expressions": "//Examples:\nx = 10 + 6; \ny = x * 2;",
+  "pmiViews": [
+    {
+      "viewName": "PMI EXAMPLE",
+      "name": "PMI EXAMPLE",
+      "camera": {
+        "version": 2,
+        "type": "OrthographicCamera",
+        "worldMatrix": [
+          0.7071067811865475,
+          -2.7755575615628914e-17,
+          -0.7071067811865476,
+          0,
+          -0.40824829046386296,
+          0.8164965809277259,
+          -0.40824829046386296,
+          0,
+          0.5773502691896258,
+          0.5773502691896257,
+          0.5773502691896257,
+          0,
+          16.83659225779428,
+          20.41634174204199,
+          20.941080699070692,
+          1
+        ],
+        "projection": {
+          "kind": "orthographic",
+          "left": -16.68603909376251,
+          "right": 16.68603909376251,
+          "top": 10,
+          "bottom": -10,
+          "near": 0,
+          "far": 35.579372737966104,
+          "zoom": 1.0013239189536214,
+          "view": {
+            "enabled": false
+          }
+        },
+        "position": {
+          "x": 16.83659225779428,
+          "y": 20.41634174204199,
+          "z": 20.941080699070692
+        },
+        "quaternion": {
+          "x": -0.27984814233312133,
+          "y": 0.3647051996310009,
+          "z": 0.11591689595929514,
+          "w": 0.8804762392171493
+        },
+        "up": {
+          "x": 0,
+          "y": 1,
+          "z": 0
+        },
+        "zoom": 1.0013239189536214,
+        "near": 0,
+        "far": 35.579372737966104,
+        "layers": 1,
+        "target": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "controlsState": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "cameraMatrix": [
+            0.7071067811865475,
+            -2.7755575615628914e-17,
+            -0.7071067811865476,
+            0,
+            -0.40824829046386296,
+            0.8164965809277259,
+            -0.40824829046386296,
+            0,
+            0.5773502691896258,
+            0.5773502691896257,
+            0.5773502691896257,
+            0,
+            16.83659225779428,
+            20.41634174204199,
+            20.941080699070692,
+            1
+          ],
+          "cameraUp": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "cameraNear": 0,
+          "cameraFar": 35.579372737966104,
+          "cameraZoom": 1.0013239189536214,
+          "gizmoMatrix": [
+            0.9986778314903284,
+            0,
+            0,
+            0,
+            0,
+            0.9986778314903284,
+            0,
+            0,
+            0,
+            0,
+            0.9986778314903284,
+            0,
+            2.765344978323988,
+            6.345094462571698,
+            6.8698334196004,
+            1
+          ]
+        },
+        "userData": {
+          "preventRemove": true
+        }
+      },
+      "viewSettings": {
+        "wireframe": false
+      },
+      "annotations": [
+        {
+          "type": "linear",
+          "inputParams": {
+            "id": "DIM1",
+            "targets": [
+              "P.CU1_NX|P.CU1_PY[0]"
+            ],
+            "planeRefName": "P.CU1_NX",
+            "alignment": "view",
+            "offset": -2.0443987453573964,
+            "showExt": true,
+            "isReference": false,
+            "decimals": 3,
+            "value": "10.000",
+            "labelWorld": [
+              0,
+              12.044398745357396,
+              5.132474607655233
+            ],
+            "type": "linear"
+          },
+          "persistentData": {},
+          "enabled": true
+        },
+        {
+          "type": "linear",
+          "inputParams": {
+            "id": "DIM2",
+            "targets": [
+              "P.CU1_NZ|P.CU1_PY[0]"
+            ],
+            "planeRefName": "P.CU1_NZ",
+            "alignment": "view",
+            "offset": 2.0532459490872252,
+            "showExt": true,
+            "isReference": false,
+            "decimals": 3,
+            "value": "10.000",
+            "labelWorld": [
+              4.994837363930376,
+              12.053245949087225,
+              -1.7763568394002505e-15
+            ],
+            "type": "linear"
+          },
+          "persistentData": {},
+          "enabled": true
+        },
+        {
+          "type": "radial",
+          "inputParams": {
+            "id": "RAD3",
+            "cylindricalFaceRef": "P.CY2_S",
+            "planeRef": "P.CU1_PY",
+            "displayStyle": "radius",
+            "alignment": "view",
+            "offset": 1.2369650193053179,
+            "isReference": false,
+            "decimals": 3,
+            "value": "R2.000 (wu)",
+            "type": "radial"
+          },
+          "persistentData": {},
+          "enabled": true
+        }
+      ]
+    }
+  ],
+  "metadata": {},
+  "assemblyConstraints": [],
+  "assemblyConstraintIdCounter": 0
+}
