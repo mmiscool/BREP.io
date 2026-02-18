@@ -1,7 +1,11 @@
 import * as THREE from 'three';
 import { LineMaterial } from 'three/examples/jsm/Addons.js';
 import { SelectionFilter } from './SelectionFilter.js';
-import { localStorage as LS } from '../idbStorage.js';
+import {
+    readBrowserStorageValue,
+    writeBrowserStorageValue,
+    removeBrowserStorageValue,
+} from '../utils/browserStorage.js';
 
 // CADmaterials for each entity type
 
@@ -333,14 +337,16 @@ export class CADmaterialWidget {
     // --- Persistence helpers (browser only) ---
     _loadAllSettings() {
         try {
-            const raw = LS.getItem(this._storageKey);
+            const raw = readBrowserStorageValue(this._storageKey, {
+                fallback: '',
+            });
             const obj = raw ? JSON.parse(raw) : {};
             return (obj && typeof obj === 'object') ? obj : {};
         } catch { return {}; }
     }
     _saveAllSettings() {
         try {
-            LS.setItem(this._storageKey, JSON.stringify(this._settings, null, 2));
+            writeBrowserStorageValue(this._storageKey, JSON.stringify(this._settings, null, 2));
             console.log(JSON.stringify(this._settings, null, 2));
         } catch {/* ignore */ }
     }
@@ -570,7 +576,7 @@ export class CADmaterialWidget {
     }
     _resetToDefaults() {
         this._settings = {};
-        try { LS.removeItem(this._storageKey); } catch { /* ignore */ }
+        removeBrowserStorageValue(this._storageKey);
 
         const hoverColor = this._normalizeHexColor(this._defaultHoverColor);
         SelectionFilter.setHoverColor(hoverColor);

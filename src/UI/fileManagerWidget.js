@@ -11,6 +11,10 @@ import {
   getGithubStorageConfig,
 } from '../idbStorage.js';
 import {
+  readBrowserStorageValue,
+  writeBrowserStorageValue,
+} from '../utils/browserStorage.js';
+import {
   listComponentRecords,
   getComponentRecord,
   setComponentRecord,
@@ -22,11 +26,6 @@ import {
 import { HISTORY_COLLECTION_REFRESH_EVENT } from './history/HistoryCollectionWidget.js';
 import { WorkspaceFileBrowserWidget } from './WorkspaceFileBrowserWidget.js';
 
-const LEGACY_LAST_MODEL_KEYS = [
-  '__BREP_MODELS_LASTNAME__',
-  '__BREP_MODELS_LASTREPO__',
-  '__BREP_MODELS_LASTSOURCE__',
-];
 const THUMBNAIL_CAPTURE_SIZE = 240;
 
 function normalizeRepoFullList(input) {
@@ -72,6 +71,7 @@ export class FileManagerWidget {
     this.currentRepoFull = '';
     this.currentSource = '';
     this.currentBranch = '';
+    this._forceSaveTargetDialog = false;
     this._iconsOnly = this._loadIconsPref();
     this._loadSeq = 0; // guards async load races
     this._refreshInFlight = false;
@@ -81,9 +81,6 @@ export class FileManagerWidget {
     this._savedHistorySnapshot = null;
     this._saveOverlay = null;
     this._saveLogEl = null;
-    try {
-      for (const key of LEGACY_LAST_MODEL_KEYS) LS.removeItem(key);
-    } catch { /* ignore cleanup failures */ }
     this._ensureStyles();
     this._buildUI();
     // Defer heavy list hydration so URL-driven model loads are not blocked on startup.
@@ -232,13 +229,19 @@ export class FileManagerWidget {
     this.currentSource = this._normalizeSource(options?.source || rec?.source) || this._normalizeSource(fallbackSource) || 'local';
     this.currentRepoFull = String(options?.repoFull || rec?.repoFull || '').trim();
     this.currentBranch = String(options?.branch || rec?.branch || '').trim();
+    this._forceSaveTargetDialog = !!options?.forceSaveTargetDialog;
     this.nameInput.value = finalName;
   }
   _saveIconsPref(v) {
-    try { LS.setItem('__BREP_FM_ICONSVIEW__', v ? '1' : '0'); } catch { }
+    try { writeBrowserStorageValue('__BREP_FM_ICONSVIEW__', v ? '1' : '0'); } catch { }
   }
   _loadIconsPref() {
-    try { return LS.getItem('__BREP_FM_ICONSVIEW__') === '1'; } catch { return false; }
+    try {
+      const raw = readBrowserStorageValue('__BREP_FM_ICONSVIEW__', {
+        fallback: '',
+      });
+      return raw === '1';
+    } catch { return false; }
   }
 
   async _captureCurrentHistorySnapshot() {
@@ -521,6 +524,7 @@ export class FileManagerWidget {
     this.currentRepoFull = '';
     this.currentSource = '';
     this.currentBranch = '';
+    this._forceSaveTargetDialog = false;
     this.nameInput.value = '';
     await this._refreshSavedHistorySnapshot();
     this._refreshHistoryCollections('new-model');
@@ -764,7 +768,7 @@ export class FileManagerWidget {
     const currentBranch = String(this.currentBranch || '').trim();
 
     let target = null;
-    if (currentPath && typedPath && typedPath === currentPath) {
+    if (!this._forceSaveTargetDialog && currentPath && typedPath && typedPath === currentPath) {
       target = {
         source: currentSource,
         repoFull: currentSource === 'github' ? currentRepo : '',
@@ -961,6 +965,7 @@ export class FileManagerWidget {
       this.currentRepoFull = targetRepo;
       this.currentSource = targetSource;
       this.currentBranch = targetBranch;
+      this._forceSaveTargetDialog = false;
       this.nameInput.value = modelPath;
       this._markSavedHistorySnapshot(jsonString || null);
       this._logSaveProgress('Refreshing list...');
@@ -1321,6 +1326,7 @@ export class FileManagerWidget {
       this.currentRepoFull = '';
       this.currentSource = '';
       this.currentBranch = '';
+      this._forceSaveTargetDialog = false;
       if (this.nameInput.value === name) this.nameInput.value = '';
     }
     await this.refreshList();

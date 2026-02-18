@@ -8,7 +8,7 @@
 //  - https://github.com/USER/REPO/tree/REF
 //  - https://github.com/USER/REPO/tree/REF/sub/dir
 import { BREP } from "../BREP/BREP.js";
-import { localStorage as LS } from "../idbStorage.js";
+import { readBrowserStorageValue, writeBrowserStorageValue } from "../utils/browserStorage.js";
 
 
 
@@ -238,7 +238,9 @@ const STORAGE_ENABLED_KEY = '__BREP_PLUGIN_ENABLED__';
 
 export function getSavedPluginUrls() {
   try {
-    const raw = LS.getItem(STORAGE_KEY);
+    const raw = readBrowserStorageValue(STORAGE_KEY, {
+      fallback: '',
+    });
     if (!raw) return [];
     const arr = JSON.parse(raw);
     if (!Array.isArray(arr)) return [];
@@ -247,13 +249,15 @@ export function getSavedPluginUrls() {
 }
 
 export function savePluginUrls(urls) {
-  try { LS.setItem(STORAGE_KEY, JSON.stringify((urls || []).map(s => String(s || '').trim()).filter(Boolean))); } catch { }
+  try { writeBrowserStorageValue(STORAGE_KEY, JSON.stringify((urls || []).map(s => String(s || '').trim()).filter(Boolean))); } catch { }
 }
 
 // Enabled/disabled state per plugin URL. Defaults to enabled if missing.
 export function getPluginEnabledMap() {
   try {
-    const raw = LS.getItem(STORAGE_ENABLED_KEY);
+    const raw = readBrowserStorageValue(STORAGE_ENABLED_KEY, {
+      fallback: '',
+    });
     if (!raw) return {};
     const obj = JSON.parse(raw);
     return (obj && typeof obj === 'object') ? obj : {};
@@ -263,7 +267,7 @@ export function getPluginEnabledMap() {
 export function savePluginEnabledMap(map) {
   try {
     const obj = (map && typeof map === 'object') ? map : {};
-    LS.setItem(STORAGE_ENABLED_KEY, JSON.stringify(obj));
+    writeBrowserStorageValue(STORAGE_ENABLED_KEY, JSON.stringify(obj));
   } catch { }
 }
 

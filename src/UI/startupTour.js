@@ -1,4 +1,8 @@
-import { localStorage as LS } from '../idbStorage.js';
+import {
+  readBrowserStorageValue,
+  writeBrowserStorageValue,
+  removeBrowserStorageValue,
+} from '../utils/browserStorage.js';
 
 const TOUR_STORAGE_KEY = '__BREP_STARTUP_TOUR_DONE__';
 const TOUR_STORAGE_VALUE = '1';
@@ -243,18 +247,19 @@ export class StartupTour {
 
   static isDone() {
     try {
-      return LS.getItem(TOUR_STORAGE_KEY) === TOUR_STORAGE_VALUE;
+      return readBrowserStorageValue(TOUR_STORAGE_KEY, {
+        fallback: '',
+      }) === TOUR_STORAGE_VALUE;
     } catch {
       return false;
     }
   }
 
   static markDone() {
-    try { LS.setItem(TOUR_STORAGE_KEY, TOUR_STORAGE_VALUE); } catch { }
+    try { writeBrowserStorageValue(TOUR_STORAGE_KEY, TOUR_STORAGE_VALUE); } catch { }
   }
 
   async maybeStart() {
-    try { await LS.ready(); } catch { }
     if (StartupTour.isDone()) return false;
     await waitForDialogsToClose();
     this.start();
@@ -644,5 +649,5 @@ export async function maybeStartStartupTour(viewer, options = {}) {
 }
 
 export function resetStartupTourFlag() {
-  try { LS.setItem(TOUR_STORAGE_KEY, ''); } catch { }
+  try { removeBrowserStorageValue(TOUR_STORAGE_KEY); } catch { }
 }

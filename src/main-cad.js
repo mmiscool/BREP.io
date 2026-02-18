@@ -1,6 +1,7 @@
 import { Viewer } from './UI/viewer.js';
 import {
   localStorage as LS,
+  getGithubStorageConfig,
 } from './idbStorage.js';
 import { uint8ArrayToBase64 } from './services/componentLibrary.js';
 import './styles/cad.css';
@@ -11,6 +12,7 @@ const currentFileEl = document.querySelector('[data-role="current-file"]');
 const GITHUB_HOST = 'github.com';
 const GITHUB_RAW_HOST = 'raw.githubusercontent.com';
 const JSDELIVR_GH_HOST = 'cdn.jsdelivr.net';
+const GITHUB_API_BASE = 'https://api.github.com';
 
 if (!viewportEl || !sidebarEl) throw new Error('Missing CAD mount elements (#viewport, #sidebar).');
 
@@ -208,6 +210,31 @@ async function downloadGithubTargetBytes(githubTarget) {
   throw new Error(`Failed to download githubTarget model.\n${failures.join('\n')}`);
 }
 
+async function hasGithubRepoWriteAccess(owner, repo) {
+  const cfg = getGithubStorageConfig() || {};
+  const token = String(cfg?.token || '').trim();
+  if (!token) return false;
+  const cleanOwner = String(owner || '').trim();
+  const cleanRepo = String(repo || '').trim();
+  if (!cleanOwner || !cleanRepo) return false;
+  const url = `${GITHUB_API_BASE}/repos/${encodePathPart(cleanOwner)}/${encodePathPart(cleanRepo)}`;
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${token}`,
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+      cache: 'no-store',
+    });
+    if (!response.ok) return false;
+    const data = await response.json();
+    return !!data?.permissions && data.permissions.push === true;
+  } catch {
+    return false;
+  }
+}
+
 function parseRequestedModelScope() {
   const rawPath = getRequestedModelPathParam();
   if (!rawPath) {
@@ -288,15 +315,30 @@ async function loadRequestedGithubTarget(viewer, githubTarget) {
     const modelPath = String(githubTarget?.modelPath || '').trim();
     if (!modelPath) return;
     const bytes = await downloadGithubTargetBytes(githubTarget);
+    const owner = String(githubTarget?.owner || '').trim();
+    const repo = String(githubTarget?.repo || '').trim();
+    const branch = String(githubTarget?.branch || '').trim();
+    const repoFull = owner && repo ? `${owner}/${repo}` : '';
+    const canWriteSourceRepo = await hasGithubRepoWriteAccess(owner, repo);
+    const loadScope = canWriteSourceRepo && repoFull
+      ? {
+          source: 'github',
+          repoFull,
+          branch,
+          path: modelPath,
+          forceSaveTargetDialog: false,
+        }
+      : {
+          source: 'local',
+          path: modelPath,
+          forceSaveTargetDialog: true,
+        };
     await fm.loadModelRecord(modelPath, {
       source: 'local',
       path: modelPath,
       savedAt: new Date().toISOString(),
       data3mf: uint8ArrayToBase64(bytes),
-    }, {
-      source: 'local',
-      path: modelPath,
-    });
+    }, loadScope);
     const loadedName = String(fm.currentName || '').trim();
     setCurrentFileLabel(loadedName || modelPath);
   } catch (err) {

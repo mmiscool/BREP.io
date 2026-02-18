@@ -13,7 +13,7 @@ import { AnnotationHistory } from './AnnotationHistory.js';
 import { LabelOverlay } from './LabelOverlay.js';
 import { AnnotationCollectionWidget } from './AnnotationCollectionWidget.js';
 import { SelectionFilter } from '../SelectionFilter.js';
-import { localStorage as LS } from '../../idbStorage.js';
+import { readBrowserStorageValue, writeBrowserStorageValue } from '../../utils/browserStorage.js';
 
 const cssEscape = (value) => {
   if (window.CSS && typeof window.CSS.escape === 'function') {
@@ -814,7 +814,9 @@ export class PMIMode {
 
   #loadPMIStyle() {
     try {
-      const raw = LS.getItem(this._pmiStyleStorageKey);
+      const raw = readBrowserStorageValue(this._pmiStyleStorageKey, {
+        fallback: '',
+      });
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {
@@ -828,7 +830,7 @@ export class PMIMode {
   #savePMIStyle() {
     try {
       const style = sanitizePMIStyle(getPMIStyle());
-      LS.setItem(this._pmiStyleStorageKey, JSON.stringify(style));
+      writeBrowserStorageValue(this._pmiStyleStorageKey, JSON.stringify(style));
     } catch (e) {
       console.warn('[PMI] Failed to save PMI style settings:', e);
     }

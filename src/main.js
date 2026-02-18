@@ -6,6 +6,11 @@ import {
 } from './idbStorage.js';
 import { fetchGithubUserRepos } from './githubStorage.js';
 import {
+  readBrowserStorageValue,
+  writeBrowserStorageValue,
+  removeBrowserStorageValue,
+} from './utils/browserStorage.js';
+import {
   listComponentRecords,
   listWorkspaceFolders,
   createWorkspaceFolder,
@@ -222,7 +227,9 @@ function normalizeRepoFullList(input) {
 
 function loadManualWorkspaceRepos() {
   try {
-    const raw = String(LS.getItem(MANUAL_WORKSPACE_REPOS_KEY) || '').trim();
+    const raw = String(readBrowserStorageValue(MANUAL_WORKSPACE_REPOS_KEY, {
+      fallback: '',
+    }) || '').trim();
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return normalizeRepoFullList(parsed);
@@ -235,10 +242,10 @@ function saveManualWorkspaceRepos(repos) {
   const normalized = normalizeRepoFullList(repos);
   try {
     if (!normalized.length) {
-      LS.removeItem(MANUAL_WORKSPACE_REPOS_KEY);
+      removeBrowserStorageValue(MANUAL_WORKSPACE_REPOS_KEY);
       return;
     }
-    LS.setItem(MANUAL_WORKSPACE_REPOS_KEY, JSON.stringify(normalized));
+    writeBrowserStorageValue(MANUAL_WORKSPACE_REPOS_KEY, JSON.stringify(normalized));
   } catch {
     // Ignore persistence failures.
   }

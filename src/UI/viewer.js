@@ -31,7 +31,6 @@ import { FloatingWindow } from './FloatingWindow.js';
 import { TriangleDebuggerWindow } from './triangleDebuggerWindow.js';
 import { generateObjectUI } from './objectDump.js';
 import { PluginsWidget } from './PluginsWidget.js';
-import { localStorage as LS } from '../idbStorage.js';
 import { loadSavedPlugins } from '../plugins/pluginManager.js';
 import { PMIViewsWidget } from './pmi/PMIViewsWidget.js';
 import { PMIMode } from './pmi/PMIMode.js';
@@ -41,9 +40,11 @@ import './dialogs.js';
 import { maybeStartStartupTour } from './startupTour.js';
 import { BREP } from '../BREP/BREP.js';
 import { createAxisHelperGroup, DEFAULT_AXIS_HELPER_PX } from '../utils/axisHelpers.js';
+import { readBrowserStorageValue, writeBrowserStorageValue } from '../utils/browserStorage.js';
 
 const ASSEMBLY_CONSTRAINTS_TITLE = 'Assembly Constraints';
 const SIDEBAR_HOME_BANNER_HEIGHT_PX = 41;
+const CAD_MATERIAL_SETTINGS_KEY = '__CAD_MATERIAL_SETTINGS__';
 
 function ensureSelectionPickerStyles() {
     if (typeof document === 'undefined') return;
@@ -363,10 +364,12 @@ class SidebarDockController {
 
         const persistWidthFallback = (value) => {
             safe(() => {
-                const raw = LS.getItem('__CAD_MATERIAL_SETTINGS__');
+                const raw = readBrowserStorageValue(CAD_MATERIAL_SETTINGS_KEY, {
+                    fallback: '',
+                });
                 const settings = raw ? JSON.parse(raw) : {};
                 settings['__SIDEBAR_WIDTH__'] = value;
-                LS.setItem('__CAD_MATERIAL_SETTINGS__', JSON.stringify(settings, null, 2));
+                writeBrowserStorageValue(CAD_MATERIAL_SETTINGS_KEY, JSON.stringify(settings, null, 2));
             });
         };
 
@@ -612,7 +615,9 @@ export class Viewer {
         // Apply persisted sidebar width early (before building UI)
         try {
             if (this.sidebar) {
-                const raw = LS.getItem('__CAD_MATERIAL_SETTINGS__');
+                const raw = readBrowserStorageValue(CAD_MATERIAL_SETTINGS_KEY, {
+                    fallback: '',
+                });
                 if (raw) {
                     try {
                         const obj = JSON.parse(raw);
