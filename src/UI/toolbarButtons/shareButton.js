@@ -5,6 +5,70 @@ const PANEL_KEY = Symbol('ShareModelPanel');
 const GITHUB_HOST = 'github.com';
 const GITHUB_RAW_HOST = 'raw.githubusercontent.com';
 const GITHUB_API_BASE = 'https://api.github.com';
+const SHARE_MODE_CAD = 'cad';
+const SHARE_MODE_VIEWER = 'viewer';
+const SHARE_PAGE_CAD = 'cad.html';
+const SHARE_PAGE_VIEWER = 'viewer.html';
+
+function ensureSharePanelStyles() {
+  if (document.getElementById('share-model-panel-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'share-model-panel-styles';
+  style.textContent = `
+    .share-model-panel .share-btn {
+      appearance: none;
+      background: #1f2937;
+      color: #f9fafb;
+      border: 1px solid #374151;
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font: 700 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      line-height: 1.1;
+      transition: background .12s ease, border-color .12s ease, transform .05s ease, color .12s ease;
+    }
+    .share-model-panel .share-btn:hover {
+      background: #2b3545;
+      border-color: #4b5563;
+    }
+    .share-model-panel .share-btn:active {
+      transform: translateY(1px);
+    }
+    .share-model-panel .share-btn:disabled {
+      opacity: .45;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .share-model-panel .share-mode-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #0b1220;
+      border: 1px solid #303846;
+      border-radius: 10px;
+      padding: 3px;
+    }
+    .share-model-panel .share-mode-btn {
+      min-width: 78px;
+      padding: 6px 10px;
+      border: none;
+      border-radius: 7px;
+      background: transparent;
+      color: #aeb6c5;
+    }
+    .share-model-panel .share-mode-btn:hover {
+      background: rgba(255,255,255,.08);
+      border-color: transparent;
+      color: #f3f4f6;
+    }
+    .share-model-panel .share-mode-btn.is-active {
+      color: #e9f0ff;
+      background: linear-gradient(180deg, rgba(110,168,254,.3), rgba(110,168,254,.16));
+      box-shadow: 0 0 0 1px rgba(110,168,254,.3) inset;
+    }
+  `;
+  document.head.appendChild(style);
+}
 
 function normalizeModelPath(input) {
   const raw = String(input || '').replace(/\\/g, '/');
@@ -122,8 +186,56 @@ function buildGithubTargetValue({ owner, repo, branch, modelPath }) {
   ].join('/');
 }
 
-function buildShareUrl(githubTargetValue) {
+function parseBooleanParam(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return false;
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
+function normalizeShareMode(value) {
+  return String(value || '').trim().toLowerCase() === SHARE_MODE_VIEWER
+    ? SHARE_MODE_VIEWER
+    : SHARE_MODE_CAD;
+}
+
+function resolveSharePageForMode(mode) {
+  return normalizeShareMode(mode) === SHARE_MODE_VIEWER
+    ? SHARE_PAGE_VIEWER
+    : SHARE_PAGE_CAD;
+}
+
+function detectDefaultShareMode() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const mode = String(params.get('mode') || '').trim().toLowerCase();
+    if (mode === 'viewer' || mode === 'readonly') return SHARE_MODE_VIEWER;
+    if (
+      parseBooleanParam(params.get('viewerOnly'))
+      || parseBooleanParam(params.get('viewer'))
+      || parseBooleanParam(params.get('readonly'))
+    ) return SHARE_MODE_VIEWER;
+    const pathName = String(window.location.pathname || '').trim().toLowerCase();
+    return pathName.endsWith(`/${SHARE_PAGE_VIEWER}`) || pathName === `/${SHARE_PAGE_VIEWER}`
+      ? SHARE_MODE_VIEWER
+      : SHARE_MODE_CAD;
+  } catch {
+    return SHARE_MODE_CAD;
+  }
+}
+
+function buildShareUrl(githubTargetValue, { mode = SHARE_MODE_CAD } = {}) {
   const url = new URL(window.location.href);
+  const pageName = resolveSharePageForMode(mode);
+  const rawPath = String(url.pathname || '');
+  if (!rawPath || rawPath.endsWith('/')) {
+    url.pathname = `${rawPath}${pageName}`;
+  } else {
+    const segments = rawPath.split('/');
+    const last = String(segments[segments.length - 1] || '').trim();
+    if (!last || !last.includes('.')) segments.push(pageName);
+    else segments[segments.length - 1] = pageName;
+    url.pathname = segments.join('/');
+  }
   url.search = '';
   url.hash = '';
   url.searchParams.set('githubTarget', String(githubTargetValue || '').trim());
@@ -370,8 +482,12 @@ class ShareModelPanel {
     this.copyIframeBtn = null;
     this.openLinkBtn = null;
     this.refreshBtn = null;
+    this.modeCadBtn = null;
+    this.modeViewerBtn = null;
     this.shareUrl = '';
     this.iframeHtml = '';
+    this.shareMode = detectDefaultShareMode();
+    this._lastGithubTarget = '';
   }
 
   toggle() {
@@ -394,6 +510,7 @@ class ShareModelPanel {
   async refresh() {
     this._setBusy(true);
     this._setStatus('Checking current file shareability...', 'info');
+    this._lastGithubTarget = '';
     this._setValues('', '');
 
     try {
@@ -438,9 +555,8 @@ class ShareModelPanel {
         return;
       }
 
-      const shareUrl = buildShareUrl(githubTarget);
-      const iframeHtml = buildIframeMarkup(shareUrl);
-      this._setValues(shareUrl, iframeHtml);
+      this._lastGithubTarget = githubTarget;
+      this._rebuildShareOutputs();
       this._setStatus('Share link is ready.', 'ok');
     } catch (err) {
       this._setStatus(`Failed to build share link: ${err?.message || err || 'Unknown error.'}`, 'error');
@@ -467,6 +583,37 @@ class ShareModelPanel {
     if (this.copyLinkBtn) this.copyLinkBtn.disabled = busy || !this.shareUrl;
     if (this.copyIframeBtn) this.copyIframeBtn.disabled = busy || !this.iframeHtml;
     if (this.openLinkBtn) this.openLinkBtn.disabled = busy || !this.shareUrl;
+    if (this.modeCadBtn) this.modeCadBtn.disabled = busy;
+    if (this.modeViewerBtn) this.modeViewerBtn.disabled = busy;
+  }
+
+  _rebuildShareOutputs() {
+    const githubTarget = String(this._lastGithubTarget || '').trim();
+    if (!githubTarget) {
+      this._setValues('', '');
+      return;
+    }
+    const shareUrl = buildShareUrl(githubTarget, { mode: this.shareMode });
+    const iframeHtml = buildIframeMarkup(shareUrl);
+    this._setValues(shareUrl, iframeHtml);
+  }
+
+  _setShareMode(mode) {
+    const next = normalizeShareMode(mode);
+    if (this.shareMode === next) return;
+    this.shareMode = next;
+    this._syncShareModeUi();
+    this._rebuildShareOutputs();
+  }
+
+  _syncShareModeUi() {
+    const applyActive = (button, active) => {
+      if (!button) return;
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+      button.classList.toggle('is-active', !!active);
+    };
+    applyActive(this.modeCadBtn, this.shareMode === SHARE_MODE_CAD);
+    applyActive(this.modeViewerBtn, this.shareMode === SHARE_MODE_VIEWER);
   }
 
   _setStatus(message, tone = 'info') {
@@ -481,6 +628,7 @@ class ShareModelPanel {
 
   _ensureWindow() {
     if (this.root) return;
+    ensureSharePanelStyles();
     const fw = new FloatingWindow({
       title: 'Share Model',
       width: 760,
@@ -498,6 +646,7 @@ class ShareModelPanel {
     fw.addHeaderAction(refreshBtn);
 
     const content = document.createElement('div');
+    content.className = 'share-model-panel';
     content.style.display = 'flex';
     content.style.flexDirection = 'column';
     content.style.gap = '10px';
@@ -521,6 +670,33 @@ class ShareModelPanel {
     status.dataset.tone = 'info';
     content.appendChild(status);
 
+    const modeSection = document.createElement('section');
+    modeSection.style.display = 'flex';
+    modeSection.style.alignItems = 'center';
+    modeSection.style.gap = '10px';
+    const modeLabel = document.createElement('div');
+    modeLabel.textContent = 'Open In';
+    modeLabel.style.font = '600 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+    const modeButtons = document.createElement('div');
+    modeButtons.className = 'share-mode-toggle';
+    modeButtons.style.display = 'flex';
+    modeButtons.style.gap = '8px';
+    const modeCadBtn = document.createElement('button');
+    modeCadBtn.className = 'share-btn share-mode-btn';
+    modeCadBtn.type = 'button';
+    modeCadBtn.textContent = 'CAD';
+    modeCadBtn.title = 'Open the shared model in the full CAD editor';
+    const modeViewerBtn = document.createElement('button');
+    modeViewerBtn.className = 'share-btn share-mode-btn';
+    modeViewerBtn.type = 'button';
+    modeViewerBtn.textContent = 'Viewer';
+    modeViewerBtn.title = 'Open the shared model in the read-only viewer';
+    modeButtons.appendChild(modeCadBtn);
+    modeButtons.appendChild(modeViewerBtn);
+    modeSection.appendChild(modeLabel);
+    modeSection.appendChild(modeButtons);
+    content.appendChild(modeSection);
+
     const linkSection = document.createElement('section');
     linkSection.style.display = 'flex';
     linkSection.style.flexDirection = 'column';
@@ -537,10 +713,10 @@ class ShareModelPanel {
     linkActions.style.display = 'flex';
     linkActions.style.gap = '8px';
     const copyLinkBtn = document.createElement('button');
-    copyLinkBtn.className = 'fw-btn';
+    copyLinkBtn.className = 'share-btn';
     copyLinkBtn.textContent = 'Copy Link';
     const openLinkBtn = document.createElement('button');
-    openLinkBtn.className = 'fw-btn';
+    openLinkBtn.className = 'share-btn';
     openLinkBtn.textContent = 'Open';
     linkActions.appendChild(copyLinkBtn);
     linkActions.appendChild(openLinkBtn);
@@ -580,7 +756,7 @@ class ShareModelPanel {
     iframeLabel.textContent = 'Embed HTML (iframe)';
     iframeLabel.style.font = '600 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
     const copyIframeBtn = document.createElement('button');
-    copyIframeBtn.className = 'fw-btn';
+    copyIframeBtn.className = 'share-btn';
     copyIframeBtn.textContent = 'Copy Iframe';
     iframeHeader.appendChild(iframeLabel);
     iframeHeader.appendChild(copyIframeBtn);
@@ -618,6 +794,8 @@ class ShareModelPanel {
       if (!this.shareUrl) return;
       try { window.open(this.shareUrl, '_blank', 'noopener,noreferrer'); } catch {}
     });
+    modeCadBtn.addEventListener('click', () => this._setShareMode(SHARE_MODE_CAD));
+    modeViewerBtn.addEventListener('click', () => this._setShareMode(SHARE_MODE_VIEWER));
 
     this.window = fw;
     this.root = fw.root;
@@ -628,7 +806,10 @@ class ShareModelPanel {
     this.copyIframeBtn = copyIframeBtn;
     this.openLinkBtn = openLinkBtn;
     this.refreshBtn = refreshBtn;
+    this.modeCadBtn = modeCadBtn;
+    this.modeViewerBtn = modeViewerBtn;
     this._setValues('', '');
+    this._syncShareModeUi();
     try { this.root.style.display = 'none'; } catch {}
     this._setStatus('Checking current file...', 'info');
   }

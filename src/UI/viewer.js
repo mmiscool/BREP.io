@@ -562,6 +562,7 @@ export class Viewer {
         sidebar = null,
         partHistory = new PartHistory(),
         autoLoadLastModel = false,
+        viewerOnlyMode = false,
 
     }) {
         if (!container) throw new Error('Viewer requires { container }');
@@ -569,6 +570,7 @@ export class Viewer {
 
         this.partHistory = partHistory instanceof PartHistory ? partHistory : new PartHistory();
         this._autoLoadLastModel = !!autoLoadLastModel;
+        this._viewerOnlyMode = !!viewerOnlyMode;
         this._triangleDebugger = null;
         this._lastInspectorTarget = null;
         this._lastInspectorSolid = null;
@@ -764,6 +766,7 @@ export class Viewer {
         this._disposed = false;
         this._sketchMode = null;
         this._splineMode = null;
+        this._pmiPreviewMode = null;
         this._imageEditorActive = false;
         this._cameraMoving = false;
         this._sceneBoundsCache = null;
@@ -815,7 +818,14 @@ export class Viewer {
 
         SelectionFilter.viewer = this;
         try { SelectionFilter.startClickWatcher(this); } catch (_) { }
-        try { SelectionFilter._ensureSelectionFilterIndicator?.(this); } catch (_) { }
+        if (!this._viewerOnlyMode) {
+            try { SelectionFilter._ensureSelectionFilterIndicator?.(this); } catch (_) { }
+        } else {
+            try { SelectionFilter._selectionFilterIndicator?.remove?.(); } catch (_) { }
+            try { SelectionFilter._selectionFilterIndicator = null; } catch (_) { }
+            try { SelectionFilter._selectionActionBar?.remove?.(); } catch (_) { }
+            try { SelectionFilter._selectionActionBar = null; } catch (_) { }
+        }
         // Use capture on pointerup to ensure we end interactions even if pointerup fires off-element
         window.addEventListener('pointerup', this._onPointerUp, { passive: false, capture: true });
         window.addEventListener('resize', this._onResize);
@@ -1164,30 +1174,29 @@ export class Viewer {
 
 
     async setupAccordion() {
-        this._ensureSidebarHomeBanner();
+        if (!this._viewerOnlyMode) this._ensureSidebarHomeBanner();
         // Setup accordion
         this.accordion = await new AccordionWidget();
         await this.sidebar.appendChild(this.accordion.uiElement);
 
-
-        // Load saved plugins early (before File Manager autoloads last model)
-        // Defer rendering of plugin side panels until proper placement later.
-        try {
-            await loadSavedPlugins(this);
-        } catch (e) { console.warn('Plugin auto-load failed:', e); }
+        if (!this._viewerOnlyMode) {
+            // Load saved plugins early (before File Manager autoloads last model)
+            // Defer rendering of plugin side panels until proper placement later.
+            try {
+                await loadSavedPlugins(this);
+            } catch (e) { console.warn('Plugin auto-load failed:', e); }
+        }
 
         const fm = new FileManagerWidget(this, { autoLoadLast: this._autoLoadLastModel });
         // Keep FileManagerWidget as a headless service for save/load/new actions,
         // but do not mount it in the CAD sidebar accordion.
         this.fileManagerWidget = fm;
 
-        // Setup historyWidget
-        this.historyWidget = await new HistoryWidget(this);
         this.partHistory.callbacks.run = async (featureID) => {
-            //await this.historyWidget.renderHistory(featureID);
+            void featureID;
         };
         this.partHistory.callbacks.reset = async () => {
-            //await this.historyWidget.reset();
+            // no-op
         };
         this.partHistory.callbacks.afterRunHistory = () => {
             this._refreshAssemblyConstraintsPanelVisibility();
@@ -1199,6 +1208,37 @@ export class Viewer {
             this.applyMetadataColors();
             this._axisHelpersDirty = true;
         };
+
+        if (this._viewerOnlyMode) {
+            // Viewer-only layout: keep only read-only panels for embedding.
+            this.sceneManagerUi = await new SceneListing(this.scene, {
+                onSelection: (obj) => this._applySelectionTarget(obj, { triggerOnClick: false, allowDiagnostics: false }),
+            });
+            const sceneSection = await this.accordion.addSection("Scene Manager");
+            await sceneSection.uiElement.appendChild(this.sceneManagerUi.uiElement);
+
+            this.pmiViewsWidget = new PMIViewsWidget(this, { readOnly: true });
+            const pmiViewsSection = await this.accordion.addSection("PMI Views");
+            pmiViewsSection.uiElement.appendChild(this.pmiViewsWidget.uiElement);
+
+            this.cadMaterialsUi = await new CADmaterialWidget(this);
+            const displaySection = await this.accordion.addSection("Display Settings");
+            await displaySection.uiElement.appendChild(this.cadMaterialsUi.uiElement);
+
+            this._pluginUiReady = false;
+            await this.accordion.collapseAll();
+            await this.accordion.expandSection("Scene Manager");
+            await this.accordion.expandSection("PMI Views");
+
+            this._refreshAssemblyConstraintsPanelVisibility();
+            this._syncSidebarHomeBannerHeight();
+            this._bindSidebarHomeBannerHeightSync();
+            try { this.renderer.domElement.style.marginTop = '0px'; } catch { }
+            return;
+        }
+
+        // Setup historyWidget
+        this.historyWidget = await new HistoryWidget(this);
         const historySection = await this.accordion.addSection("History");
         await historySection.uiElement.appendChild(await this.historyWidget.uiElement);
 
@@ -1286,6 +1326,7 @@ export class Viewer {
 
     // Public: allow plugins to add toolbar buttons even before MainToolbar is constructed
     addToolbarButton(label, title, onClick) {
+        if (this._viewerOnlyMode) return null;
         const item = { label, title, onClick };
         if (this.mainToolbar && typeof this.mainToolbar.addCustomButton === 'function') {
             try { return this.mainToolbar.addCustomButton(item); } catch { return null; }
@@ -1311,6 +1352,7 @@ export class Viewer {
     }
 
     async _runFeatureHistoryUndoRedo(direction) {
+        if (this._viewerOnlyMode) return false;
         const ph = this.partHistory;
         if (!ph) return false;
         let changed = false;
@@ -1324,6 +1366,7 @@ export class Viewer {
 
     // Apply a single queued plugin side panel entry
     async _applyPluginSidePanel({ title, content }) {
+        if (this._viewerOnlyMode) return null;
         if (!this.accordion || typeof this.accordion.addSection !== 'function') return null;
         const t = String(title || 'Plugin');
         const sec = await this.accordion.addSection(t);
@@ -1357,6 +1400,7 @@ export class Viewer {
 
     // Public: allow plugins to register side panels; queued until core UI/toolbar are ready
     async addPluginSidePanel(title, content) {
+        if (this._viewerOnlyMode) return null;
         const item = { title, content };
         if (this._pluginUiReady) {
             try { return await this._applyPluginSidePanel(item); } catch { return null; }
@@ -1367,6 +1411,7 @@ export class Viewer {
     }
 
     _refreshAssemblyConstraintsPanelVisibility() {
+        if (this._viewerOnlyMode) return;
         if (!this.accordion || !this.accordion.uiElement) return;
         const shouldShow = !!this.partHistory?.hasAssemblyComponents?.();
         const prevVisible = this._assemblyConstraintsVisible;
@@ -1399,6 +1444,7 @@ export class Viewer {
         if (this._disposed) return;
         this._disposed = true;
         cancelAnimationFrame(this._raf);
+        try { this.endPMIPreviewMode(); } catch { }
         try { this._stopComponentTransformSession(); } catch { }
         safe(() => this._sidebarDockController?.dispose());
         this._sidebarDockController = null;
@@ -1429,6 +1475,7 @@ export class Viewer {
     // Sketch Mode API
     // ----------------------------------------
     startSketchMode(featureID) {
+        if (this._viewerOnlyMode) return;
         // Hide the sketch in the scene if it exists
         try {
             const ph = this.partHistory.getObjectByName(featureID);
@@ -1518,6 +1565,7 @@ export class Viewer {
     // Spline Mode API
     // ----------------------------------------
     startSplineMode(splineSession) {
+        if (this._viewerOnlyMode) return;
         debugLog('Starting Spline Mode for session:', splineSession);
         this._splineMode = splineSession;
     }
@@ -1536,7 +1584,32 @@ export class Viewer {
         try { this._pmiMode?.collapseExpandedDialogs?.(); } catch { }
     }
 
+    startPMIPreviewMode(viewEntry, viewIndex, widget = this.pmiViewsWidget) {
+        if (!this._viewerOnlyMode) return;
+        try { this.endPMIPreviewMode(); } catch { }
+        try {
+            this._pmiPreviewMode = new PMIMode(this, viewEntry, viewIndex, widget, { displayOnly: true });
+            this._pmiPreviewMode.open();
+        } catch {
+            this._pmiPreviewMode = null;
+        }
+    }
+
+    endPMIPreviewMode() {
+        const preview = this._pmiPreviewMode;
+        this._pmiPreviewMode = null;
+        if (!preview) return;
+        try {
+            const maybePromise = preview.dispose?.();
+            if (maybePromise && typeof maybePromise.then === 'function') {
+                maybePromise.catch(() => { });
+            }
+        } catch { }
+    }
+
     startPMIMode(viewEntry, viewIndex, widget = this.pmiViewsWidget) {
+        if (this._viewerOnlyMode) return;
+        try { this.endPMIPreviewMode(); } catch { }
         const alreadyActive = !!this._pmiMode;
         try { this._collapseExpandedDialogsForModeSwitch(); } catch { }
         if (!alreadyActive) {
@@ -3219,6 +3292,11 @@ export class Viewer {
         const isUndo = isMod && !event?.altKey && key === 'z' && !event?.shiftKey;
         const isRedo = isMod && !event?.altKey && (key === 'y' || (event?.shiftKey && key === 'z'));
         if ((isUndo || isRedo) && !isEditable) {
+            if (this._viewerOnlyMode) {
+                try { event.preventDefault(); } catch { }
+                try { event.stopImmediatePropagation(); } catch { }
+                return;
+            }
             if (this._imageEditorActive) return;
             try {
                 if (this._sketchMode && typeof this._sketchMode.undo === 'function' && typeof this._sketchMode.redo === 'function') {

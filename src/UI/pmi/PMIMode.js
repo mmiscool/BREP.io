@@ -30,8 +30,9 @@ export class PMIMode {
    * @param {number} viewIndex - index of the view in PMIViewsWidget.views
    * @param {PMIViewsWidget} pmiWidget - widget instance for persistence/refresh
    */
-  constructor(viewer, viewEntry, viewIndex, pmiWidget) {
+  constructor(viewer, viewEntry, viewIndex, pmiWidget, options = {}) {
     this.viewer = viewer;
+    this._displayOnly = !!options?.displayOnly;
     this._toolbarRightReserveKey = `pmi-mode-actions:${viewIndex ?? 'active'}`;
     this.viewEntry = (viewEntry && typeof viewEntry === 'object')
       ? viewEntry
@@ -94,16 +95,18 @@ export class PMIMode {
     // Clear any lingering reference-selection state before PMI interactions.
     this.#clearActiveReferenceSelection();
 
-    // Save and hide existing accordion sections instead of hiding the whole sidebar
-    this.#hideOriginalSidebarSections();
+    if (!this._displayOnly) {
+      // Save and hide existing accordion sections instead of hiding the whole sidebar
+      this.#hideOriginalSidebarSections();
 
-    // Build styles once
-    this.#ensureStyles();
+      // Build styles once
+      this.#ensureStyles();
 
-    // Mount overlay UI
-    this.#mountTopRightControls();
-    // Add PMI sections to existing accordion instead of creating a new sidebar
-    this.#mountPMISections();
+      // Mount overlay UI
+      this.#mountTopRightControls();
+      // Add PMI sections to existing accordion instead of creating a new sidebar
+      this.#mountPMISections();
+    }
 
     // Apply stored view settings for this PMI view (e.g., wireframe)
     try {
@@ -130,11 +133,16 @@ export class PMIMode {
     this.#applyViewTransforms();
     // Initialize label overlay manager
     try {
-      this._labelOverlay = new LabelOverlay(this.viewer,
-        (idx, ann, ev) => this.#startLabelDrag(idx, ann, ev),
-        (idx, ann, ev) => this.#focusAnnotationDialog(idx, ann, ev),
-        (idx, ann, ev) => this.#handleLabelClick(idx, ann, ev),
-        (idx, ann, ev) => this.#handleLabelDragEnd(idx, ann, ev));
+      if (this._displayOnly) {
+        const noop = () => {};
+        this._labelOverlay = new LabelOverlay(this.viewer, noop, noop, noop, noop);
+      } else {
+        this._labelOverlay = new LabelOverlay(this.viewer,
+          (idx, ann, ev) => this.#startLabelDrag(idx, ann, ev),
+          (idx, ann, ev) => this.#focusAnnotationDialog(idx, ann, ev),
+          (idx, ann, ev) => this.#handleLabelClick(idx, ann, ev),
+          (idx, ann, ev) => this.#handleLabelDragEnd(idx, ann, ev));
+      }
     } catch { }
 
     // Initial refresh of overlay positions
@@ -154,9 +162,11 @@ export class PMIMode {
       }, 1000);
     } catch { }
 
-    // Listen on canvas for tool inputs
-    // Use capture to preempt Viewer handlers and ArcballControls
-    try { v.renderer.domElement.addEventListener('pointerdown', this._onCanvasDown, { passive: false, capture: true }); } catch { }
+    if (!this._displayOnly) {
+      // Listen on canvas for tool inputs
+      // Use capture to preempt Viewer handlers and ArcballControls
+      try { v.renderer.domElement.addEventListener('pointerdown', this._onCanvasDown, { passive: false, capture: true }); } catch { }
+    }
     // Listen for camera/controls changes to update label positions
     try {
       if (v.controls && typeof this._onControlsChange === 'function') {
@@ -170,7 +180,9 @@ export class PMIMode {
 
     // Apply camera controls policy based on current tool
     try { this._controlsEnabledPrev = !!v.controls?.enabled; } catch { this._controlsEnabledPrev = true; }
-    try { if (v.controls) v.controls.enabled = true; } catch { }
+    if (!this._displayOnly) {
+      try { if (v.controls) v.controls.enabled = true; } catch { }
+    }
   }
 
   collapseExpandedDialogs() {
@@ -203,6 +215,10 @@ export class PMIMode {
   }
 
   async finish() {
+    if (this._displayOnly) {
+      await this.dispose();
+      return;
+    }
     // Persist annotations back into the view entry and refresh PMI widget
     try { this.#_persistView(true); } catch { }
     // Immediately return scene solids to modeling state before we notify the viewer
@@ -231,12 +247,14 @@ export class PMIMode {
     try { this._uiTopRight?.remove(); } catch { }
     try { this.viewer?.mainToolbar?.clearRightReserve?.(this._toolbarRightReserveKey); } catch { }
 
-    // IMPORTANT: Remove PMI-specific accordion sections FIRST, then restore original sections
-    // This prevents visual glitches where both sets of sections are visible simultaneously
-    await this.#removePMISections();
+    if (!this._displayOnly) {
+      // IMPORTANT: Remove PMI-specific accordion sections FIRST, then restore original sections
+      // This prevents visual glitches where both sets of sections are visible simultaneously
+      await this.#removePMISections();
 
-    // Now restore original sidebar sections after PMI sections are completely removed
-    this.#restoreOriginalSidebarSections();
+      // Now restore original sidebar sections after PMI sections are completely removed
+      this.#restoreOriginalSidebarSections();
+    }
 
     // Remove annotation group
     try { if (this._annGroup && this._annGroup.parent) this._annGroup.parent.remove(this._annGroup); } catch { }
@@ -253,7 +271,9 @@ export class PMIMode {
 
     // Note: Main toolbar is no longer hidden so no restoration needed
     // Restore camera controls enabled state
-    try { if (this.viewer?.controls) this.viewer.controls.enabled = !!this._controlsEnabledPrev; } catch { }
+    if (!this._displayOnly) {
+      try { if (this.viewer?.controls) this.viewer.controls.enabled = !!this._controlsEnabledPrev; } catch { }
+    }
   }
 
   // Persist the current in-memory annotations back onto the view entry and save via PMI widget

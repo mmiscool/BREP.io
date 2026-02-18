@@ -13,6 +13,7 @@ const GITHUB_HOST = 'github.com';
 const GITHUB_RAW_HOST = 'raw.githubusercontent.com';
 const JSDELIVR_GH_HOST = 'cdn.jsdelivr.net';
 const GITHUB_API_BASE = 'https://api.github.com';
+const isViewerOnlyMode = detectViewerOnlyRuntime();
 
 if (!viewportEl || !sidebarEl) throw new Error('Missing CAD mount elements (#viewport, #sidebar).');
 
@@ -29,6 +30,7 @@ async function boot() {
     container: viewportEl,
     sidebar: sidebarEl,
     autoLoadLastModel: false,
+    viewerOnlyMode: isViewerOnlyMode,
   });
 
   // Preserve legacy global for debugging/plugins.
@@ -88,6 +90,28 @@ function getRequestedGithubTargetParam() {
 function getRequestedBranch() {
   const params = new URLSearchParams(window.location.search);
   return String(params.get('branch') || '').trim();
+}
+
+function parseBooleanParam(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return false;
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
+function detectViewerOnlyRuntime() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const explicitFlag = parseBooleanParam(params.get('viewerOnly'))
+      || parseBooleanParam(params.get('readonly'))
+      || parseBooleanParam(params.get('viewer'));
+    if (explicitFlag) return true;
+    const mode = String(params.get('mode') || '').trim().toLowerCase();
+    if (mode === 'viewer' || mode === 'readonly') return true;
+    const pathName = String(window.location.pathname || '').trim().toLowerCase();
+    return pathName.endsWith('/viewer.html') || pathName === '/viewer.html';
+  } catch {
+    return false;
+  }
 }
 
 function decodePathPart(part) {
@@ -365,7 +389,8 @@ async function loadRequestedGithubTarget(viewer, githubTarget) {
 
 function setCurrentFileLabel(fileName) {
   const clean = String(fileName || '').trim();
-  document.title = clean ? `${clean} · BREP.io CAD` : 'BREP.io CAD';
+  const appTitle = isViewerOnlyMode ? 'BREP.io Viewer' : 'BREP.io CAD';
+  document.title = clean ? `${clean} · ${appTitle}` : appTitle;
   if (!currentFileEl) return;
   currentFileEl.textContent = clean ? `Model: ${clean}` : 'Model: New';
 }
