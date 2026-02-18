@@ -25,6 +25,7 @@ import {
 } from '../services/componentLibrary.js';
 import { HISTORY_COLLECTION_REFRESH_EVENT } from './history/HistoryCollectionWidget.js';
 import { WorkspaceFileBrowserWidget } from './WorkspaceFileBrowserWidget.js';
+import { listMountedDirectories } from '../services/mountedStorage.js';
 
 const THUMBNAIL_CAPTURE_SIZE = 240;
 
@@ -149,13 +150,24 @@ export class FileManagerWidget {
   async _listModels() {
     const cfg = getGithubStorageConfig();
     const repoFulls = normalizeRepoFullList(cfg?.repoFulls || cfg?.repoFull || '');
-    const [localRecords, remoteRecords] = await Promise.all([
+    let mountedIds = [];
+    try {
+      const mounted = await listMountedDirectories();
+      mountedIds = (Array.isArray(mounted) ? mounted : [])
+        .map((entry) => String(entry?.id || '').trim())
+        .filter(Boolean);
+    } catch {
+      mountedIds = [];
+    }
+    const [localRecords, remoteRecords, mountedRecords] = await Promise.all([
       listComponentRecords({ source: 'local' }),
       listComponentRecords({ source: 'github', repoFulls }),
+      listComponentRecords({ source: 'mounted', repoFulls: mountedIds }),
     ]);
     const merged = [
       ...(Array.isArray(localRecords) ? localRecords : []),
       ...(Array.isArray(remoteRecords) ? remoteRecords : []),
+      ...(Array.isArray(mountedRecords) ? mountedRecords : []),
     ];
     const unique = new Map();
     for (const rec of merged) {
@@ -166,7 +178,7 @@ export class FileManagerWidget {
       const key = this._recordScopeKey(path, source, repoFull);
       if (!unique.has(key)) unique.set(key, rec);
     }
-    return Array.from(unique.values()).map(({ source, name, path, folder, displayName, savedAt, record, repoFull, branch }) => ({
+    return Array.from(unique.values()).map(({ source, name, path, folder, displayName, savedAt, record, repoFull, repoLabel, branch }) => ({
       source: this._normalizeSource(source),
       name,
       path: String(path || name || '').trim(),
@@ -174,6 +186,7 @@ export class FileManagerWidget {
       displayName: String(displayName || '').trim(),
       savedAt,
       repoFull: String(repoFull || '').trim(),
+      repoLabel: String(repoLabel || '').trim(),
       branch: String(branch || '').trim(),
       data: record?.data,
       data3mf: record?.data3mf,
@@ -194,11 +207,20 @@ export class FileManagerWidget {
   }
   _normalizeSource(source) {
     const normalized = String(source || '').trim().toLowerCase();
-    return normalized === 'github' ? 'github' : (normalized === 'local' ? 'local' : '');
+    if (normalized === 'github') return 'github';
+    if (normalized === 'mounted') return 'mounted';
+    return normalized === 'local' ? 'local' : '';
+  }
+  _resolveSource(source, repoFull = '') {
+    const explicit = this._normalizeSource(source);
+    if (explicit) return explicit;
+    const repo = String(repoFull || '').trim();
+    if (!repo) return 'local';
+    return repo.includes('/') ? 'github' : 'mounted';
   }
   _buildScopeOptions(source, repoFull, branch) {
     const out = {};
-    const src = this._normalizeSource(source);
+    const src = this._resolveSource(source, repoFull);
     const repo = String(repoFull || '').trim();
     const br = String(branch || '').trim();
     if (src) out.source = src;
@@ -208,7 +230,7 @@ export class FileManagerWidget {
   }
   _recordScopeKey(name, source = '', repoFull = '') {
     const n = String(name || '').trim();
-    const src = this._normalizeSource(source);
+    const src = this._resolveSource(source, repoFull);
     const repo = String(repoFull || '').trim();
     const scope = repo ? `${repo}::${n}` : n;
     return src ? `${src}::${scope}` : scope;
@@ -656,14 +678,14 @@ export class FileManagerWidget {
 
         const location = browser?.getLocation?.() || {};
         if (location.workspaceTop) {
-          setStatus('Select a local workspace folder or GitHub repo folder.', 'error');
+          setStatus('Select a local, mounted, or GitHub destination folder.', 'error');
           return;
         }
 
         const source = this._normalizeSource(location.source || 'local') || 'local';
-        const repoFull = source === 'github' ? String(location.repoFull || '').trim() : '';
-        if (source === 'github' && !repoFull) {
-          setStatus('Choose a GitHub repository folder before saving.', 'error');
+        const repoFull = source === 'local' ? '' : String(location.repoFull || '').trim();
+        if (source !== 'local' && !repoFull) {
+          setStatus('Choose a valid destination root before saving.', 'error');
           return;
         }
 
@@ -686,7 +708,7 @@ export class FileManagerWidget {
         container: browserMount,
         onPickFile: async (entry) => {
           const source = this._normalizeSource(entry?.source || 'local') || 'local';
-          const repoFull = String(entry?.repoFull || '').trim();
+          const repoFull = source === 'local' ? '' : String(entry?.repoFull || '').trim();
           const pathValue = normalizeModelPath(entry?.browserPath || entry?.path || entry?.name || '');
           if (!pathValue) return;
           const idx = pathValue.lastIndexOf('/');
@@ -714,7 +736,7 @@ export class FileManagerWidget {
         : {
             workspaceTop: false,
             source: initialSource,
-            repoFull: initialSource === 'github' ? initialRepo : '',
+            repoFull: initialSource === 'local' ? '' : initialRepo,
             path: initialFolder,
           };
       const preferredLocation = browser?.hasStoredLocation?.()
@@ -771,8 +793,8 @@ export class FileManagerWidget {
     if (!this._forceSaveTargetDialog && currentPath && typedPath && typedPath === currentPath) {
       target = {
         source: currentSource,
-        repoFull: currentSource === 'github' ? currentRepo : '',
-        branch: currentBranch,
+        repoFull: currentSource === 'local' ? '' : currentRepo,
+        branch: currentSource === 'github' ? currentBranch : '',
         modelPath: currentPath,
       };
     } else {
@@ -953,8 +975,13 @@ export class FileManagerWidget {
           });
         } catch { /* ignore */ }
       } else {
-        this._logSaveProgress('Saving to local storage...');
-        try { console.log('[FileManagerWidget] saveCurrent: saving locally', { name: modelPath }); } catch { }
+        if (targetSource === 'mounted') {
+          this._logSaveProgress(`Saving to mounted folder${targetRepo ? ` (${targetRepo})` : ''}...`);
+          try { console.log('[FileManagerWidget] saveCurrent: saving to mounted folder', { name: modelPath, mountId: targetRepo }); } catch { }
+        } else {
+          this._logSaveProgress('Saving to local storage...');
+          try { console.log('[FileManagerWidget] saveCurrent: saving locally', { name: modelPath }); } catch { }
+        }
         await this._setModel(modelPath, record, targetOptions);
       }
       // Update in-memory thumbnail cache so UI reflects the new preview immediately
@@ -1285,14 +1312,14 @@ export class FileManagerWidget {
   async loadModelRecord(name, rec, options = {}) {
     if (!this.viewer || !this.viewer.partHistory) return;
     const seq = ++this._loadSeq; // only the last call should win
-    const source = this._normalizeSource(options?.source || rec?.source || (options?.repoFull ? 'github' : 'local')) || 'local';
+    const source = this._resolveSource(options?.source || rec?.source || '', options?.repoFull || rec?.repoFull || '');
     await this._loadModelRecord(name, rec, options, source, seq, 'load-model-record');
   }
 
   async loadModel(name, options = {}) {
     if (!this.viewer || !this.viewer.partHistory) return;
     const seq = ++this._loadSeq; // only the last call should win
-    const source = this._normalizeSource(options?.source || (options?.repoFull ? 'github' : 'local')) || 'local';
+    const source = this._resolveSource(options?.source || '', options?.repoFull || '');
     let rec = null;
     if (source === 'github') {
       const scope = { ...options, source, throwOnError: true };
@@ -1300,7 +1327,7 @@ export class FileManagerWidget {
       if (!res.ok) return;
       rec = res.value;
     } else {
-      rec = await this._getModel(name, { ...options, source: 'local' });
+      rec = await this._getModel(name, { ...options, source });
     }
     await this._loadModelRecord(name, rec, options, source, seq, 'load-model');
   }
@@ -1308,11 +1335,11 @@ export class FileManagerWidget {
   async deleteModel(name, options = {}) {
     const scope = {
       ...options,
-      source: this._normalizeSource(options?.source || (options?.repoFull ? 'github' : 'local')) || 'local',
+      source: this._resolveSource(options?.source || '', options?.repoFull || ''),
     };
     const rec = await this._getModel(name, scope);
     if (!rec) return;
-    const proceed = confirm(`Delete model "${name}"? This cannot be undone.`);
+    const proceed = await confirm(`Delete model "${name}"? This cannot be undone.`);
     if (!proceed) return;
     await this._removeModel(name, scope);
     const source = this._normalizeSource(scope.source || rec?.source);
@@ -1414,8 +1441,10 @@ export class FileManagerWidget {
         const folder = String(it.folder || '').trim()
           || (pathValue.includes('/') ? pathValue.slice(0, pathValue.lastIndexOf('/')) : '');
         const locationParts = [];
-        if (this._normalizeSource(it?.source) === 'local') locationParts.push('Local Browser');
-        if (it.repoFull) locationParts.push(it.repoFull);
+        const source = this._normalizeSource(it?.source);
+        if (source === 'local') locationParts.push('Local Browser');
+        else if (source === 'mounted') locationParts.push(String(it?.repoLabel || it?.repoFull || 'Mounted Folder').trim() || 'Mounted Folder');
+        else if (it.repoFull) locationParts.push(it.repoFull);
         if (folder) locationParts.push(folder);
         const locationLabel = locationParts.join(' / ');
 
@@ -1495,8 +1524,10 @@ export class FileManagerWidget {
       const folder = String(it.folder || '').trim()
         || (pathValue.includes('/') ? pathValue.slice(0, pathValue.lastIndexOf('/')) : '');
       const locationParts = [];
-      if (this._normalizeSource(it?.source) === 'local') locationParts.push('Local Browser');
-      if (it.repoFull) locationParts.push(it.repoFull);
+      const source = this._normalizeSource(it?.source);
+      if (source === 'local') locationParts.push('Local Browser');
+      else if (source === 'mounted') locationParts.push(String(it?.repoLabel || it?.repoFull || 'Mounted Folder').trim() || 'Mounted Folder');
+      else if (it.repoFull) locationParts.push(it.repoFull);
       if (folder) locationParts.push(folder);
       const locationLabel = locationParts.join(' / ');
       const cell = document.createElement('div');

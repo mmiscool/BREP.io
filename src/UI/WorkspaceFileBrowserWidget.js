@@ -6,6 +6,7 @@ import {
   removeWorkspaceFolder,
 } from '../services/componentLibrary.js';
 import { getGithubStorageConfig } from '../idbStorage.js';
+import { listMountedDirectories } from '../services/mountedStorage.js';
 
 const EXPLORER_VIEW_MODE_PREF_KEY = '__BREP_UI_EXPLORER_VIEW_MODE__';
 const EXPLORER_ICON_SIZE_PREF_KEY = '__BREP_UI_EXPLORER_ICON_SIZE__';
@@ -33,7 +34,18 @@ function normalizeRepoFullList(input) {
 
 function normalizeStorageSource(input) {
   const source = String(input || '').trim().toLowerCase();
-  return source === 'github' ? 'github' : 'local';
+  if (source === 'github') return 'github';
+  if (source === 'mounted') return 'mounted';
+  return 'local';
+}
+
+function getStorageRootLabel(source, repoFull = '', repoLabel = '') {
+  const normalizedSource = normalizeStorageSource(source);
+  const normalizedRepoFull = String(repoFull || '').trim();
+  const normalizedRepoLabel = String(repoLabel || '').trim();
+  if (normalizedSource === 'local') return 'Local Browser';
+  if (normalizedSource === 'mounted') return normalizedRepoLabel || normalizedRepoFull || 'Mounted Folder';
+  return normalizedRepoFull || 'GitHub';
 }
 
 function normalizePath(input) {
@@ -91,10 +103,10 @@ function getEntryDisplayName(entry) {
 function getEntryLocationLabel(entry) {
   const source = normalizeStorageSource(entry?.source);
   const repoFull = String(entry?.repoFull || '').trim();
+  const repoLabel = String(entry?.repoLabel || '').trim();
   const folder = String(entry?.folder || '').trim();
   const parts = [];
-  if (source === 'local') parts.push('Local Browser');
-  if (repoFull) parts.push(repoFull);
+  parts.push(getStorageRootLabel(source, repoFull, repoLabel));
   if (folder) parts.push(folder);
   return parts.join(' / ');
 }
@@ -102,10 +114,10 @@ function getEntryLocationLabel(entry) {
 function getEntryFullPathTooltip(entry) {
   const source = normalizeStorageSource(entry?.source);
   const repoFull = String(entry?.repoFull || '').trim();
+  const repoLabel = String(entry?.repoLabel || '').trim();
   const browserPath = getEntryModelPathWithExtension(entry);
   const parts = [];
-  if (source === 'local') parts.push('Local Browser');
-  if (repoFull) parts.push(repoFull);
+  parts.push(getStorageRootLabel(source, repoFull, repoLabel));
   if (browserPath) parts.push(browserPath);
   return parts.join(' / ');
 }
@@ -117,7 +129,9 @@ function formatSavedAt(savedAt) {
 
 function getEntryKindLabel(entry) {
   const source = normalizeStorageSource(entry?.source);
-  return source === 'local' ? 'Model · Local' : 'Model · GitHub';
+  if (source === 'local') return 'Model · Local';
+  if (source === 'mounted') return 'Model · Mounted';
+  return 'Model · GitHub';
 }
 
 function normalizeViewMode(value) {
@@ -157,9 +171,7 @@ function loadStoredExplorerLocation() {
     if (!parsed || typeof parsed !== 'object') return null;
     const workspaceTop = !!parsed.workspaceTop;
     const source = normalizeStorageSource(parsed.rootSource || parsed.source || 'local');
-    const repoFull = source === 'github'
-      ? String(parsed.rootRepoFull || parsed.repoFull || '').trim()
-      : '';
+    const repoFull = String(parsed.rootRepoFull || parsed.repoFull || '').trim();
     const path = normalizePath(parsed.path || '');
     return {
       workspaceTop,
@@ -351,16 +363,28 @@ export class WorkspaceFileBrowserWidget {
     try {
       const cfg = getGithubStorageConfig() || {};
       const repoFulls = normalizeRepoFullList(cfg?.repoFulls || cfg?.repoFull || '');
-      const [localRecords, remoteRecords, localFolders, remoteFolders] = await Promise.all([
+      let mountedDirectories = [];
+      try {
+        mountedDirectories = await listMountedDirectories();
+      } catch {
+        mountedDirectories = [];
+      }
+      const mountedIds = (Array.isArray(mountedDirectories) ? mountedDirectories : [])
+        .map((entry) => String(entry?.id || '').trim())
+        .filter(Boolean);
+      const [localRecords, remoteRecords, mountedRecords, localFolders, remoteFolders, mountedFolders] = await Promise.all([
         listComponentRecords({ source: 'local' }),
         listComponentRecords({ source: 'github', repoFulls }),
+        listComponentRecords({ source: 'mounted', repoFulls: mountedIds }),
         listWorkspaceFolders({ source: 'local' }),
         listWorkspaceFolders({ source: 'github', repoFulls }),
+        listWorkspaceFolders({ source: 'mounted', repoFulls: mountedIds }),
       ]);
 
       const mergedRecords = [
         ...(Array.isArray(localRecords) ? localRecords : []),
         ...(Array.isArray(remoteRecords) ? remoteRecords : []),
+        ...(Array.isArray(mountedRecords) ? mountedRecords : []),
       ];
       const uniqueRecords = new Map();
       for (const rec of mergedRecords) {
@@ -380,6 +404,7 @@ export class WorkspaceFileBrowserWidget {
       const mergedFolders = [
         ...(Array.isArray(localFolders) ? localFolders : []),
         ...(Array.isArray(remoteFolders) ? remoteFolders : []),
+        ...(Array.isArray(mountedFolders) ? mountedFolders : []),
       ];
       const uniqueFolders = new Map();
       for (const folder of mergedFolders) {
@@ -409,8 +434,40 @@ export class WorkspaceFileBrowserWidget {
         if (repo) repoSet.add(repo);
       }
       const repos = Array.from(repoSet).sort((a, b) => a.localeCompare(b));
+      const mountedMap = new Map();
+      const addMounted = (id, label = '') => {
+        const mountId = String(id || '').trim();
+        if (!mountId) return;
+        if (mountedMap.has(mountId)) return;
+        mountedMap.set(mountId, {
+          id: mountId,
+          label: String(label || '').trim() || mountId,
+        });
+      };
+      for (const mount of Array.isArray(mountedDirectories) ? mountedDirectories : []) {
+        addMounted(mount?.id, mount?.name);
+      }
+      for (const rec of this.records) {
+        if (normalizeStorageSource(rec?.source) !== 'mounted') continue;
+        addMounted(rec?.repoFull, rec?.repoLabel);
+      }
+      for (const folder of this.folderRecords) {
+        if (normalizeStorageSource(folder?.source) !== 'mounted') continue;
+        addMounted(folder?.repoFull, folder?.repoLabel);
+      }
+      const mountedRoots = Array.from(mountedMap.values())
+        .sort((a, b) => String(a.label || '').localeCompare(String(b.label || ''), undefined, {
+          numeric: true,
+          sensitivity: 'base',
+        }))
+        .map((entry) => ({
+          source: 'mounted',
+          repoFull: entry.id,
+          label: entry.label,
+        }));
       this.roots = [
         { source: 'local', repoFull: '', label: 'Local Browser' },
+        ...mountedRoots,
         ...repos.map((repoFull) => ({ source: 'github', repoFull, label: repoFull })),
       ];
       this._syncSpecialRoots();
@@ -493,16 +550,18 @@ export class WorkspaceFileBrowserWidget {
     }
 
     const source = normalizeStorageSource(location?.source || this.rootSource || 'local');
-    const repoFull = source === 'github'
+    const repoFull = source === 'local'
+      ? ''
+      : String(location?.repoFull || this.rootRepoFull || '').trim();
+    const repoForScope = source === 'local'
       ? String(location?.repoFull || this.rootRepoFull || '').trim()
-      : '';
-    const repoForLocal = source === 'github' ? repoFull : String(location?.repoFull || this.rootRepoFull || '').trim();
-    const isTrash = isTrashRoot(source, repoForLocal);
+      : repoFull;
+    const isTrash = isTrashRoot(source, repoForScope);
     const path = normalizePath(location?.path || '') || (isTrash ? TRASH_FOLDER_NAME : '');
 
     this.workspaceTop = false;
     this.rootSource = source;
-    this.rootRepoFull = source === 'github' ? repoFull : repoForLocal;
+    this.rootRepoFull = source === 'local' ? repoForScope : repoFull;
     this.path = path;
     this._ensureSelection();
     if (this.workspaceTop) this.path = '';
@@ -517,7 +576,7 @@ export class WorkspaceFileBrowserWidget {
     this._hasStoredLocation = true;
     this.workspaceTop = !!location.workspaceTop;
     this.rootSource = normalizeStorageSource(location.source || 'local');
-    this.rootRepoFull = this.rootSource === 'github' ? String(location.repoFull || '').trim() : '';
+    this.rootRepoFull = String(location.repoFull || '').trim();
     this.path = this.workspaceTop ? '' : normalizePath(location.path || '');
   }
 
@@ -1664,8 +1723,9 @@ export class WorkspaceFileBrowserWidget {
     if (type === 'root') {
       const source = normalizeStorageSource(entry?.source);
       const repoFull = String(entry?.repoFull || '').trim();
+      const repoLabel = String(entry?.label || entry?.repoLabel || '').trim();
       const trashRoot = isTrashRoot(source, repoFull) || !!entry?.isTrash;
-      const label = String(entry?.label || (source === 'local' ? 'Local Browser' : repoFull)).trim() || 'Workspace';
+      const label = String(entry?.label || getStorageRootLabel(source, repoFull, repoLabel)).trim() || 'Workspace';
       const tile = document.createElement('button');
       tile.type = 'button';
       tile.className = 'wfb-tile is-root is-folder';
@@ -1687,7 +1747,7 @@ export class WorkspaceFileBrowserWidget {
       preview.className = 'wfb-tile-preview';
       const icon = document.createElement('span');
       icon.className = 'wfb-tile-icon';
-      icon.textContent = trashRoot ? '🗑️' : (source === 'local' ? '🖥️' : '🗂️');
+      icon.textContent = trashRoot ? '🗑️' : (source === 'local' ? '🖥️' : (source === 'mounted' ? '📂' : '🗂️'));
       icon.setAttribute('aria-hidden', 'true');
       preview.appendChild(icon);
       tile.appendChild(preview);
@@ -1851,8 +1911,9 @@ export class WorkspaceFileBrowserWidget {
     if (type === 'root') {
       const source = normalizeStorageSource(entry?.source);
       const repoFull = String(entry?.repoFull || '').trim();
+      const repoLabel = String(entry?.label || entry?.repoLabel || '').trim();
       const trashRoot = isTrashRoot(source, repoFull) || !!entry?.isTrash;
-      const label = String(entry?.label || (source === 'local' ? 'Local Browser' : repoFull)).trim() || 'Workspace';
+      const label = String(entry?.label || getStorageRootLabel(source, repoFull, repoLabel)).trim() || 'Workspace';
       const openRoot = (event) => {
         event?.preventDefault?.();
         event?.stopPropagation?.();
@@ -1869,7 +1930,7 @@ export class WorkspaceFileBrowserWidget {
       });
       const icon = document.createElement('span');
       icon.className = 'wfb-preview-icon';
-      icon.textContent = trashRoot ? '🗑️' : (source === 'local' ? '🖥️' : '🗂️');
+      icon.textContent = trashRoot ? '🗑️' : (source === 'local' ? '🖥️' : (source === 'mounted' ? '📂' : '🗂️'));
       const preview = document.createElement('span');
       preview.className = 'wfb-preview';
       preview.appendChild(icon);
@@ -1881,7 +1942,11 @@ export class WorkspaceFileBrowserWidget {
       kindCell.textContent = 'Workspace';
       modifiedCell.textContent = trashRoot
         ? 'Internal recycle folder'
-        : (source === 'local' ? 'Local Browser storage' : (repoFull || 'GitHub repository'));
+        : (source === 'local'
+          ? 'Local Browser storage'
+          : (source === 'mounted'
+            ? (label || 'Mounted folder')
+            : (repoFull || 'GitHub repository')));
       if (!trashRoot) this._attachDropTarget(row, { source, repoFull, path: '' });
       return row;
     }

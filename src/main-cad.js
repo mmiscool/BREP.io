@@ -263,6 +263,21 @@ function parseRequestedModelScope() {
     };
   }
 
+  if (prefix === 'mounted') {
+    if (parts.length < 3) {
+      return {
+        source: 'mounted',
+        repoFull: '',
+        modelPath: '',
+      };
+    }
+    return {
+      source: 'mounted',
+      repoFull: decodePathPart(parts[1]),
+      modelPath: stripModelFileExtension(parts.slice(2).join('/')),
+    };
+  }
+
   return {
     source: 'local',
     repoFull: '',
@@ -281,16 +296,17 @@ async function loadRequestedFile(viewer, requestedScope) {
   if (!fm || typeof fm.loadModel !== 'function') return;
 
   try {
-    const storageMode = String(requestedScope?.source || '').trim().toLowerCase() === 'github'
+    const requestedSource = String(requestedScope?.source || '').trim().toLowerCase();
+    const storageMode = requestedSource === 'github'
       ? 'github'
-      : 'local';
+      : (requestedSource === 'mounted' ? 'mounted' : 'local');
     const repoFull = String(requestedScope?.repoFull || '').trim();
     const branch = getRequestedBranch();
     const modelPath = String(requestedScope?.modelPath || '').trim();
     if (!modelPath) return;
     const options = {};
     options.source = storageMode;
-    if (repoFull) options.repoFull = repoFull;
+    if (storageMode !== 'local' && repoFull) options.repoFull = repoFull;
     if (branch) options.branch = branch;
     await fm.loadModel(modelPath, options);
     const loadedName = String(fm.currentName || '').trim();

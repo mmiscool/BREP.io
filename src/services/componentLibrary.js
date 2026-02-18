@@ -4,6 +4,10 @@ import {
   getGithubStorageConfig,
 } from '../idbStorage.js';
 import {
+  listMountedDirectories,
+  getMountedDirectoryHandle,
+} from './mountedStorage.js';
+import {
   listGithubDir,
   listGithubRepoTree,
   readGithubFileBase64,
@@ -836,14 +840,417 @@ function decodeFolderKey(key) {
 
 function resolveStorageSource(options = {}) {
   const requested = String(options?.source || '').trim().toLowerCase();
-  if (requested === 'local' || requested === 'github') return requested;
+  if (requested === 'local' || requested === 'github' || requested === 'mounted') return requested;
+  const hasExplicitMountedScope = !!(
+    String(options?.mountId || '').trim()
+    || (Array.isArray(options?.mountIds) && options.mountIds.length)
+  );
   const hasExplicitGithubScope = !!(
     String(options?.repoFull || '').trim()
     || (Array.isArray(options?.repoFulls) && options.repoFulls.length)
     || String(options?.token || '').trim()
   );
+  if (hasExplicitMountedScope && !hasExplicitGithubScope) return 'mounted';
   if (hasExplicitGithubScope) return 'github';
   return LS?.isGithub?.() ? 'github' : 'local';
+}
+
+function resolveMountedScope(options = {}) {
+  const mountIdOption = String(options?.mountId || '').trim();
+  const repoFullOption = String(options?.repoFull || '').trim();
+  let repoFulls = options?.repoFulls !== undefined
+    ? normalizeRepoFullList(options.repoFulls)
+    : normalizeRepoFullList(options?.mountIds || []);
+  let repoFull = mountIdOption || repoFullOption || repoFulls[0] || '';
+  if (repoFull && !repoFulls.includes(repoFull)) repoFulls.unshift(repoFull);
+  if (!repoFulls.length && repoFull) repoFulls = [repoFull];
+  return { repoFull, repoFulls };
+}
+
+function splitParentName(path) {
+  const normalized = normalizeComponentPath(path);
+  if (!normalized) return { parent: '', name: '' };
+  const idx = normalized.lastIndexOf('/');
+  if (idx < 0) return { parent: '', name: normalized };
+  return {
+    parent: normalized.slice(0, idx),
+    name: normalized.slice(idx + 1),
+  };
+}
+
+function getMountedPrimaryModelPaths(pathOrName) {
+  const modelPath = stripKnownModelExtension(pathOrName);
+  if (!modelPath) return { modelPath: '', dataPath: '', metaPath: '', thumbnailPath: '' };
+  return {
+    modelPath,
+    dataPath: `${modelPath}${MODEL_FILE_EXT}`,
+    metaPath: `${modelPath}${MODEL_META_EXT}`,
+    thumbnailPath: `${modelPath}${MODEL_THUMB_EXT}`,
+  };
+}
+
+async function getMountedDirectoryByPath(rootHandle, path, { create = false } = {}) {
+  if (!rootHandle) return null;
+  const normalized = normalizeComponentPath(path);
+  if (!normalized) return rootHandle;
+  let dir = rootHandle;
+  for (const part of normalized.split('/').filter(Boolean)) {
+    try {
+      dir = await dir.getDirectoryHandle(part, { create: !!create });
+    } catch (err) {
+      if (!create && (err?.name === 'NotFoundError' || err?.name === 'TypeMismatchError')) return null;
+      throw err;
+    }
+  }
+  return dir;
+}
+
+async function getMountedFileHandleByPath(rootHandle, path) {
+  const normalized = normalizeComponentPath(path);
+  if (!normalized) return null;
+  const { parent, name } = splitParentName(normalized);
+  if (!name) return null;
+  const parentDir = await getMountedDirectoryByPath(rootHandle, parent, { create: false });
+  if (!parentDir) return null;
+  try {
+    return await parentDir.getFileHandle(name, { create: false });
+  } catch (err) {
+    if (err?.name === 'NotFoundError' || err?.name === 'TypeMismatchError') return null;
+    throw err;
+  }
+}
+
+async function readMountedFileHandleText(fileHandle) {
+  if (!fileHandle) return null;
+  try {
+    const file = await fileHandle.getFile();
+    return await file.text();
+  } catch {
+    return null;
+  }
+}
+
+async function readMountedFileHandleBase64(fileHandle) {
+  if (!fileHandle) return '';
+  try {
+    const file = await fileHandle.getFile();
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    return uint8ArrayToBase64(bytes);
+  } catch {
+    return '';
+  }
+}
+
+async function writeMountedFileBase64(rootHandle, path, base64) {
+  const normalized = normalizeComponentPath(path);
+  if (!normalized) return;
+  const { parent, name } = splitParentName(normalized);
+  if (!name) return;
+  const parentDir = await getMountedDirectoryByPath(rootHandle, parent, { create: true });
+  if (!parentDir) return;
+  const fileHandle = await parentDir.getFileHandle(name, { create: true });
+  const writable = await fileHandle.createWritable();
+  try {
+    await writable.write(base64ToUint8Array(base64));
+  } finally {
+    try { await writable.close(); } catch { /* ignore */ }
+  }
+}
+
+async function writeMountedFileText(rootHandle, path, text) {
+  const normalized = normalizeComponentPath(path);
+  if (!normalized) return;
+  const { parent, name } = splitParentName(normalized);
+  if (!name) return;
+  const parentDir = await getMountedDirectoryByPath(rootHandle, parent, { create: true });
+  if (!parentDir) return;
+  const fileHandle = await parentDir.getFileHandle(name, { create: true });
+  const writable = await fileHandle.createWritable();
+  try {
+    await writable.write(String(text || ''));
+  } finally {
+    try { await writable.close(); } catch { /* ignore */ }
+  }
+}
+
+async function removeMountedEntry(rootHandle, path, { recursive = false } = {}) {
+  const normalized = normalizeComponentPath(path);
+  if (!normalized) return;
+  const { parent, name } = splitParentName(normalized);
+  if (!name) return;
+  const parentDir = await getMountedDirectoryByPath(rootHandle, parent, { create: false });
+  if (!parentDir) return;
+  try {
+    await parentDir.removeEntry(name, { recursive: !!recursive });
+  } catch (err) {
+    if (err?.name === 'NotFoundError') return;
+    throw err;
+  }
+}
+
+async function walkMountedDirectoryTree(dirHandle, basePath, out) {
+  if (!dirHandle || !out) return;
+  for await (const [entryName, entryHandle] of dirHandle.entries()) {
+    const cleanName = normalizeComponentPath(entryName);
+    if (!cleanName) continue;
+    const path = basePath ? `${basePath}/${cleanName}` : cleanName;
+    if (entryHandle?.kind === 'directory') {
+      out.dirs.push(path);
+      await walkMountedDirectoryTree(entryHandle, path, out);
+    } else if (entryHandle?.kind === 'file') {
+      out.files.push({
+        path,
+        handle: entryHandle,
+      });
+    }
+  }
+}
+
+async function resolveMountedTargets(options = {}) {
+  const scope = resolveMountedScope(options);
+  const mounted = await listMountedDirectories();
+  const mountedMap = new Map();
+  for (const item of mounted) {
+    const id = String(item?.id || '').trim();
+    if (!id) continue;
+    mountedMap.set(id, {
+      id,
+      name: String(item?.name || id).trim() || id,
+    });
+  }
+
+  const targetIds = scope.repoFulls.length
+    ? scope.repoFulls
+    : (scope.repoFull ? [scope.repoFull] : Array.from(mountedMap.keys()));
+
+  const deduped = [];
+  const seen = new Set();
+  for (const idRaw of targetIds) {
+    const id = String(idRaw || '').trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const mapped = mountedMap.get(id);
+    deduped.push({
+      id,
+      name: mapped?.name || id,
+    });
+  }
+  return deduped;
+}
+
+async function listMountedComponentRecords(options = {}) {
+  const targets = await resolveMountedTargets(options);
+  const out = [];
+
+  for (const target of targets) {
+    const mount = await getMountedDirectoryHandle(target.id, { mode: 'read' });
+    if (!mount?.handle) continue;
+    const tree = { files: [], dirs: [] };
+    await walkMountedDirectoryTree(mount.handle, '', tree);
+    const fileMap = new Map();
+    for (const item of tree.files) {
+      const p = normalizeComponentPath(item?.path || '');
+      if (!p) continue;
+      if (!fileMap.has(p)) fileMap.set(p, item.handle || null);
+    }
+    for (const filePath of fileMap.keys()) {
+      if (!filePath.toLowerCase().endsWith(MODEL_FILE_EXT)) continue;
+      const modelPath = stripKnownModelExtension(filePath);
+      if (!modelPath) continue;
+      const pathParts = splitComponentPath(modelPath);
+      const metaPath = `${modelPath}${MODEL_META_EXT}`;
+      const metaHandle = fileMap.get(metaPath);
+      let savedAt = null;
+      let thumbnail = null;
+      if (metaHandle) {
+        const metaText = await readMountedFileHandleText(metaHandle);
+        const metaJson = metaText ? safeParse(metaText) : null;
+        savedAt = metaJson?.savedAt || null;
+        thumbnail = normalizeStoredThumbnail(metaJson?.thumbnail) || null;
+      }
+      out.push({
+        source: 'mounted',
+        repoFull: target.id,
+        repoLabel: target.name,
+        name: modelPath,
+        path: modelPath,
+        browserPath: modelPath,
+        folder: pathParts.folder,
+        displayName: pathParts.displayName || modelPath,
+        savedAt,
+        has3mf: true,
+        record: {
+          savedAt,
+          data3mf: null,
+          data: null,
+          thumbnail,
+        },
+      });
+    }
+  }
+
+  out.sort((a, b) => {
+    const aTime = a.savedAt ? Date.parse(a.savedAt) : 0;
+    const bTime = b.savedAt ? Date.parse(b.savedAt) : 0;
+    return bTime - aTime;
+  });
+  return out;
+}
+
+async function getMountedComponentRecord(name, options = {}) {
+  const scope = resolveMountedScope(options);
+  const repoFull = String(options?.repoFull || scope.repoFull || '').trim();
+  if (!repoFull) return null;
+  const mount = await getMountedDirectoryHandle(repoFull, { mode: 'read' });
+  if (!mount?.handle) return null;
+  const { modelPath, dataPath, metaPath, thumbnailPath } = getMountedPrimaryModelPaths(options?.path || name);
+  if (!modelPath) return null;
+
+  const dataHandle = await getMountedFileHandleByPath(mount.handle, dataPath);
+  if (!dataHandle) return null;
+  const data3mf = await readMountedFileHandleBase64(dataHandle);
+  if (!data3mf) return null;
+
+  let savedAt = null;
+  let thumbnail = null;
+  let resolvedThumbPath = thumbnailPath;
+  const metaHandle = await getMountedFileHandleByPath(mount.handle, metaPath);
+  if (metaHandle) {
+    const metaText = await readMountedFileHandleText(metaHandle);
+    const metaJson = metaText ? safeParse(metaText) : null;
+    savedAt = metaJson?.savedAt || null;
+    thumbnail = normalizeStoredThumbnail(metaJson?.thumbnail) || null;
+    if (metaJson?.thumbnailPath) {
+      const custom = normalizeComponentPath(metaJson.thumbnailPath);
+      if (custom) resolvedThumbPath = custom;
+    }
+  }
+  if (!thumbnail && resolvedThumbPath) {
+    const thumbHandle = await getMountedFileHandleByPath(mount.handle, resolvedThumbPath);
+    const thumbB64 = await readMountedFileHandleBase64(thumbHandle);
+    if (thumbB64) thumbnail = makeBase64DataUrl('image/png', thumbB64);
+  }
+
+  const pathParts = splitComponentPath(modelPath);
+  return {
+    source: 'mounted',
+    repoFull,
+    repoLabel: String(mount?.name || repoFull).trim() || repoFull,
+    name: modelPath,
+    path: modelPath,
+    browserPath: modelPath,
+    folder: pathParts.folder,
+    displayName: pathParts.displayName || modelPath,
+    savedAt,
+    data3mf,
+    data: null,
+    thumbnail,
+  };
+}
+
+async function setMountedComponentRecord(name, dataObj, options = {}) {
+  const scope = resolveMountedScope(options);
+  const repoFull = String(options?.repoFull || scope.repoFull || '').trim();
+  if (!repoFull) return;
+  const mount = await getMountedDirectoryHandle(repoFull, { mode: 'readwrite' });
+  if (!mount?.handle) return;
+  const { modelPath, dataPath, metaPath, thumbnailPath } = getMountedPrimaryModelPaths(options?.path || name);
+  if (!modelPath) return;
+  const data3mf = normalizeBase64Payload(dataObj?.data3mf || '');
+  if (!data3mf) return;
+
+  const hasThumbnailInput = Object.prototype.hasOwnProperty.call(dataObj || {}, 'thumbnail');
+  const thumbnailPngB64 = hasThumbnailInput
+    ? await normalizeThumbnailToPngBase64(dataObj?.thumbnail || '')
+    : '';
+  const thumbnailDataUrl = thumbnailPngB64 ? makeBase64DataUrl('image/png', thumbnailPngB64) : null;
+
+  await writeMountedFileBase64(mount.handle, dataPath, data3mf);
+  if (hasThumbnailInput) {
+    if (thumbnailPngB64 && thumbnailPath) {
+      await writeMountedFileBase64(mount.handle, thumbnailPath, thumbnailPngB64);
+    } else if (thumbnailPath) {
+      await removeMountedEntry(mount.handle, thumbnailPath, { recursive: false });
+    }
+  }
+
+  const meta = {
+    savedAt: dataObj?.savedAt || new Date().toISOString(),
+    thumbnail: hasThumbnailInput
+      ? (thumbnailDataUrl || normalizeStoredThumbnail(dataObj?.thumbnail) || null)
+      : null,
+    thumbnailPath: hasThumbnailInput
+      ? (thumbnailPngB64 && thumbnailPath ? thumbnailPath : null)
+      : (thumbnailPath || null),
+  };
+  await writeMountedFileText(mount.handle, metaPath, JSON.stringify(meta));
+}
+
+async function removeMountedComponentRecord(name, options = {}) {
+  const scope = resolveMountedScope(options);
+  const repoFull = String(options?.repoFull || scope.repoFull || '').trim();
+  if (!repoFull) return;
+  const mount = await getMountedDirectoryHandle(repoFull, { mode: 'readwrite' });
+  if (!mount?.handle) return;
+  const { modelPath, dataPath, metaPath, thumbnailPath } = getMountedPrimaryModelPaths(options?.path || name);
+  if (!modelPath) return;
+
+  let customThumbPath = '';
+  const metaHandle = await getMountedFileHandleByPath(mount.handle, metaPath);
+  if (metaHandle) {
+    const metaText = await readMountedFileHandleText(metaHandle);
+    const metaJson = metaText ? safeParse(metaText) : null;
+    customThumbPath = normalizeComponentPath(metaJson?.thumbnailPath || '');
+  }
+  const paths = new Set([dataPath, metaPath, thumbnailPath, customThumbPath].filter(Boolean));
+  for (const path of paths) {
+    await removeMountedEntry(mount.handle, path, { recursive: false });
+  }
+}
+
+async function listMountedWorkspaceFolders(options = {}) {
+  const targets = await resolveMountedTargets(options);
+  const out = [];
+
+  for (const target of targets) {
+    const mount = await getMountedDirectoryHandle(target.id, { mode: 'read' });
+    if (!mount?.handle) continue;
+    const tree = { files: [], dirs: [] };
+    await walkMountedDirectoryTree(mount.handle, '', tree);
+    const dirs = Array.from(new Set(tree.dirs.map((value) => normalizeComponentPath(value)).filter(Boolean)));
+    for (const dirPath of dirs) {
+      out.push({
+        source: 'mounted',
+        repoFull: target.id,
+        repoLabel: target.name,
+        path: dirPath,
+        savedAt: null,
+      });
+    }
+  }
+  return out;
+}
+
+async function createMountedWorkspaceFolder(path, options = {}) {
+  const scope = resolveMountedScope(options);
+  const repoFull = String(options?.repoFull || scope.repoFull || '').trim();
+  if (!repoFull) return;
+  const mount = await getMountedDirectoryHandle(repoFull, { mode: 'readwrite' });
+  if (!mount?.handle) return;
+  const folderPath = resolveFolderPath(path);
+  if (!folderPath) return;
+  await getMountedDirectoryByPath(mount.handle, folderPath, { create: true });
+}
+
+async function removeMountedWorkspaceFolder(path, options = {}) {
+  const scope = resolveMountedScope(options);
+  const repoFull = String(options?.repoFull || scope.repoFull || '').trim();
+  if (!repoFull) return;
+  const mount = await getMountedDirectoryHandle(repoFull, { mode: 'readwrite' });
+  if (!mount?.handle) return;
+  const folderPath = resolveFolderPath(path);
+  if (!folderPath) return;
+  await removeMountedEntry(mount.handle, folderPath, { recursive: false });
 }
 
 async function getLocalStore() {
@@ -1009,6 +1416,9 @@ export async function listComponentRecords(options = {}) {
   if (source === 'github') {
     return await listGithubComponentRecords(options);
   }
+  if (source === 'mounted') {
+    return await listMountedComponentRecords(options);
+  }
   return await listLocalComponentRecords();
 }
 
@@ -1016,6 +1426,9 @@ export async function listWorkspaceFolders(options = {}) {
   const source = resolveStorageSource(options);
   if (source === 'github') {
     return await listGithubWorkspaceFolders(options);
+  }
+  if (source === 'mounted') {
+    return await listMountedWorkspaceFolders(options);
   }
   return await listLocalWorkspaceFolders();
 }
@@ -1025,6 +1438,9 @@ export async function createWorkspaceFolder(path, options = {}) {
   if (source === 'github') {
     return await createGithubWorkspaceFolder(path, options);
   }
+  if (source === 'mounted') {
+    return await createMountedWorkspaceFolder(path, options);
+  }
   await createLocalWorkspaceFolder(path, options);
 }
 
@@ -1033,6 +1449,9 @@ export async function removeWorkspaceFolder(path, options = {}) {
   if (source === 'github') {
     return await removeGithubWorkspaceFolder(path, options);
   }
+  if (source === 'mounted') {
+    return await removeMountedWorkspaceFolder(path, options);
+  }
   await removeLocalWorkspaceFolder(path, options);
 }
 
@@ -1040,6 +1459,9 @@ export async function getComponentRecord(name, options = {}) {
   const source = resolveStorageSource(options);
   if (source === 'github') {
     return await getGithubComponentRecord(name, options);
+  }
+  if (source === 'mounted') {
+    return await getMountedComponentRecord(name, options);
   }
   return await getLocalComponentRecord(name, options);
 }
@@ -1076,6 +1498,9 @@ export async function setComponentRecord(name, dataObj, options = {}) {
   if (source === 'github') {
     return await setGithubComponentRecord(name, dataObj, options);
   }
+  if (source === 'mounted') {
+    return await setMountedComponentRecord(name, dataObj, options);
+  }
   await setLocalComponentRecord(name, dataObj, options);
 }
 
@@ -1083,6 +1508,9 @@ export async function removeComponentRecord(name, options = {}) {
   const source = resolveStorageSource(options);
   if (source === 'github') {
     return await removeGithubComponentRecord(name, options);
+  }
+  if (source === 'mounted') {
+    return await removeMountedComponentRecord(name, options);
   }
   await removeLocalComponentRecord(name, options);
 }
