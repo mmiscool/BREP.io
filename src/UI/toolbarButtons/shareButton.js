@@ -198,12 +198,6 @@ function normalizeShareMode(value) {
     : SHARE_MODE_CAD;
 }
 
-function resolveSharePageForMode(mode) {
-  return normalizeShareMode(mode) === SHARE_MODE_VIEWER
-    ? SHARE_PAGE_VIEWER
-    : SHARE_PAGE_CAD;
-}
-
 function detectDefaultShareMode() {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -225,7 +219,8 @@ function detectDefaultShareMode() {
 
 function buildShareUrl(githubTargetValue, { mode = SHARE_MODE_CAD } = {}) {
   const url = new URL(window.location.href);
-  const pageName = resolveSharePageForMode(mode);
+  const shareMode = normalizeShareMode(mode);
+  const pageName = SHARE_PAGE_CAD;
   const rawPath = String(url.pathname || '');
   if (!rawPath || rawPath.endsWith('/')) {
     url.pathname = `${rawPath}${pageName}`;
@@ -239,6 +234,11 @@ function buildShareUrl(githubTargetValue, { mode = SHARE_MODE_CAD } = {}) {
   url.search = '';
   url.hash = '';
   url.searchParams.set('githubTarget', String(githubTargetValue || '').trim());
+  if (shareMode === SHARE_MODE_VIEWER) {
+    // Use a mode flag so links remain valid across deployments that may not expose /viewer.html.
+    url.searchParams.set('viewerOnly', '1');
+    url.searchParams.set('mode', 'viewer');
+  }
   return url.toString();
 }
 
