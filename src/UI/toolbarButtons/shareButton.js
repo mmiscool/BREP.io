@@ -220,17 +220,7 @@ function detectDefaultShareMode() {
 function buildShareUrl(githubTargetValue, { mode = SHARE_MODE_CAD } = {}) {
   const url = new URL(window.location.href);
   const shareMode = normalizeShareMode(mode);
-  const pageName = SHARE_PAGE_CAD;
-  const rawPath = String(url.pathname || '');
-  if (!rawPath || rawPath.endsWith('/')) {
-    url.pathname = `${rawPath}${pageName}`;
-  } else {
-    const segments = rawPath.split('/');
-    const last = String(segments[segments.length - 1] || '').trim();
-    if (!last || !last.includes('.')) segments.push(pageName);
-    else segments[segments.length - 1] = pageName;
-    url.pathname = segments.join('/');
-  }
+  url.pathname = `/${SHARE_PAGE_CAD}`;
   url.search = '';
   url.hash = '';
   url.searchParams.set('githubTarget', String(githubTargetValue || '').trim());
