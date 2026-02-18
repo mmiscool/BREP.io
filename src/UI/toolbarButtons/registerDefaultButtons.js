@@ -17,8 +17,22 @@ import { createSheetMetalFlatExportButton } from './sheetMetalFlatExportButton.j
 import { createSheetMetalDebugButton } from './sheetMetalDebugButton.js';
 import { createHomeButton } from './homeButton.js';
 
+function isLocalhostRuntime() {
+  try {
+    if (typeof window === 'undefined' || !window.location) return false;
+    const host = String(window.location.hostname || '').toLowerCase();
+    return host === 'localhost'
+      || host.endsWith('.localhost')
+      || host === '127.0.0.1'
+      || host === '::1';
+  } catch {
+    return false;
+  }
+}
+
 export function registerDefaultToolbarButtons(viewer) {
   if (!viewer || typeof viewer.addToolbarButton !== 'function') return;
+  const isLocalhost = isLocalhostRuntime();
 
   const creators = [
     createHomeButton,
@@ -30,14 +44,14 @@ export function registerDefaultToolbarButtons(viewer) {
     createExportButton,
     createShareButton,
     createSheetMetalFlatExportButton,
-    createSheetMetalDebugButton,
-    createAboutButton,
-    createTestsButton,
-    createScriptRunnerButton,
-    createSelectionStateButton,
-    createUndoButton,
-    createRedoButton,
   ];
+
+  if (isLocalhost) creators.push(createSheetMetalDebugButton);
+  creators.push(createAboutButton);
+  if (isLocalhost) creators.push(createTestsButton);
+  creators.push(createScriptRunnerButton);
+  if (isLocalhost) creators.push(createSelectionStateButton);
+  creators.push(createUndoButton, createRedoButton);
 
   for (const make of creators) {
     try {
