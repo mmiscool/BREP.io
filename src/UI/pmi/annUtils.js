@@ -637,8 +637,22 @@ export function getElementDirection(viewer, obj) {
   try {
     if (!obj) return null;
     const userData = obj.userData || {};
-    const objType = userData.type || userData.brepType || obj.type;
-    if (objType === 'FACE') {
+    const runtimeType = String(obj.type || '').toUpperCase();
+    const metaType = String(userData.type || userData.brepType || '').toUpperCase();
+    const isRuntimeBrepType = runtimeType === 'FACE' || runtimeType === 'EDGE' || runtimeType === 'PLANE';
+    const isFaceLike = runtimeType === 'FACE'
+      || runtimeType === 'PLANE'
+      || (!isRuntimeBrepType && (metaType === 'FACE' || metaType === 'PLANE'));
+    const isEdgeLike = runtimeType === 'EDGE'
+      || (!isFaceLike && (
+        metaType === 'EDGE'
+        || obj.isLine
+        || obj.isLine2
+        || obj.isLineSegments
+        || obj.isLineLoop
+      ));
+
+    if (isFaceLike) {
       if (typeof obj.getAverageNormal === 'function') {
         const localNormal = obj.getAverageNormal();
         obj.updateMatrixWorld(true);
@@ -686,20 +700,92 @@ export function getElementDirection(viewer, obj) {
       obj.updateMatrixWorld(true);
       const normalMatrix = new THREE.Matrix3().getNormalMatrix(obj.matrixWorld);
       return worldZ.applyMatrix3(normalMatrix).normalize();
-    } else if (objType === 'EDGE') {
+    } else if (isEdgeLike) {
+      const EPS = 1e-12;
       const geometry = obj.geometry;
-      if (geometry && geometry.attributes && geometry.attributes.position) {
-        const positions = geometry.attributes.position.array;
-        if (positions.length >= 6) {
-          const p1 = new THREE.Vector3(positions[0], positions[1], positions[2]);
-          const p2 = new THREE.Vector3(positions[3], positions[4], positions[5]);
-          obj.updateMatrixWorld(true);
-          p1.applyMatrix4(obj.matrixWorld); p2.applyMatrix4(obj.matrixWorld);
-          return p2.clone().sub(p1).normalize();
+      obj.updateMatrixWorld(true);
+      const matrixWorld = obj.matrixWorld;
+      const parsePoint = (point, isLocal = false) => {
+        if (!point) return null;
+        let vec = null;
+        if (Array.isArray(point) && point.length >= 3) {
+          vec = new THREE.Vector3(point[0], point[1], point[2]);
+        } else if (typeof point === 'object') {
+          const x = Number(point.x);
+          const y = Number(point.y);
+          const z = Number(point.z);
+          if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+            vec = new THREE.Vector3(x, y, z);
+          }
+        }
+        if (!vec) return null;
+        if (isLocal && matrixWorld) vec.applyMatrix4(matrixWorld);
+        return vec;
+      };
+      const directionFromPointList = (points, isLocal = false) => {
+        if (!Array.isArray(points) || points.length < 2) return null;
+        let prev = parsePoint(points[0], isLocal);
+        for (let i = 1; i < points.length; i++) {
+          const next = parsePoint(points[i], isLocal);
+          if (!prev || !next) {
+            prev = next || prev;
+            continue;
+          }
+          const segment = next.clone().sub(prev);
+          if (segment.lengthSq() > EPS) return segment.normalize();
+          prev = next;
+        }
+        return null;
+      };
+
+      try {
+        if (typeof obj.points === 'function') {
+          const worldPoints = obj.points(true);
+          const dirFromPoints = directionFromPointList(worldPoints, false);
+          if (dirFromPoints) return dirFromPoints;
+        }
+      } catch { /* ignore edge point extraction issues */ }
+
+      const localPolyline = Array.isArray(obj?.userData?.polylineLocal)
+        ? obj.userData.polylineLocal
+        : null;
+      if (localPolyline) {
+        const dirFromPolyline = directionFromPointList(localPolyline, true);
+        if (dirFromPolyline) return dirFromPolyline;
+      }
+
+      const startAttr = geometry?.attributes?.instanceStart;
+      const endAttr = geometry?.attributes?.instanceEnd;
+      if (startAttr && endAttr) {
+        const count = Math.min(startAttr.count || 0, endAttr.count || 0);
+        for (let i = 0; i < count; i++) {
+          const p1 = new THREE.Vector3(startAttr.getX(i), startAttr.getY(i), startAttr.getZ(i));
+          const p2 = new THREE.Vector3(endAttr.getX(i), endAttr.getY(i), endAttr.getZ(i));
+          if (matrixWorld) {
+            p1.applyMatrix4(matrixWorld);
+            p2.applyMatrix4(matrixWorld);
+          }
+          const seg = p2.sub(p1);
+          if (seg.lengthSq() > EPS) return seg.normalize();
         }
       }
+
+      const pos = geometry?.getAttribute?.('position');
+      if (pos && pos.itemSize === 3 && pos.count >= 2) {
+        const p1 = new THREE.Vector3();
+        const p2 = new THREE.Vector3();
+        p1.set(pos.getX(0), pos.getY(0), pos.getZ(0));
+        if (matrixWorld) p1.applyMatrix4(matrixWorld);
+        for (let i = 1; i < pos.count; i++) {
+          p2.set(pos.getX(i), pos.getY(i), pos.getZ(i));
+          if (matrixWorld) p2.applyMatrix4(matrixWorld);
+          const seg = p2.clone().sub(p1);
+          if (seg.lengthSq() > EPS) return seg.normalize();
+          p1.copy(p2);
+        }
+      }
+
       const worldX = new THREE.Vector3(1, 0, 0);
-      obj.updateMatrixWorld(true);
       const normalMatrix = new THREE.Matrix3().getNormalMatrix(obj.matrixWorld);
       return worldX.applyMatrix3(normalMatrix).normalize();
     }

@@ -460,6 +460,13 @@ function computeAngleElementsWithGeometry(pmimode, ann, ctx) {
     const A_ray = orientation.start.clone();
     const B_ray = orientation.end.clone();
     let V2 = intersectLines2D(A_p, A_ray, B_p, B_ray);
+    if (V2) {
+      // Guard against numerically unstable/interpreted lines that intersect far
+      // away from the selected geometry. In that case, anchor between elements.
+      const base = Math.max(1e-6, A_p.distanceTo(B_p));
+      const maxDist = Math.max(V2.distanceTo(A_p), V2.distanceTo(B_p));
+      if (maxDist > base * 8) V2 = null;
+    }
     if (!V2) V2 = new THREE.Vector2().addVectors(A_p, B_p).multiplyScalar(0.5);
     return {
       ...elements,
@@ -535,9 +542,27 @@ function lineInPlaneForElement(pmimode, refName, planeNormal, planePoint) {
     const worldDir = elementDir ? elementDir.clone().normalize() : null;
 
     const userData = obj?.userData || {};
-    const objType = userData.type || userData.brepType || obj.type;
+    const runtimeType = String(obj?.type || '').toUpperCase();
+    const metaType = String(userData.type || userData.brepType || '').toUpperCase();
+    const isRuntimeBrepType = runtimeType === 'FACE' || runtimeType === 'EDGE' || runtimeType === 'PLANE';
+    const isFaceLike = runtimeType === 'FACE'
+      || runtimeType === 'PLANE'
+      || (!isRuntimeBrepType && (metaType === 'FACE' || metaType === 'PLANE'));
+    const isEdgeLike = runtimeType === 'EDGE'
+      || (!isFaceLike && (
+        metaType === 'EDGE'
+        || obj?.isLine
+        || obj?.isLine2
+        || obj?.isLineSegments
+        || obj?.isLineLoop
+      ));
 
-    if (objType === 'FACE' && worldDir && worldDir.lengthSq() > 1e-12) {
+    if (isEdgeLike) {
+      const edgeLine = edgeLineInPlane(obj, plane, planeAnchor);
+      if (edgeLine) return edgeLine;
+    }
+
+    if (isFaceLike && worldDir && worldDir.lengthSq() > 1e-12) {
       const faceNormal = worldDir.clone().normalize();
       const direction = new THREE.Vector3().crossVectors(faceNormal, N);
       const denom = direction.lengthSq();
@@ -572,6 +597,133 @@ function lineInPlaneForElement(pmimode, refName, planeNormal, planePoint) {
   } catch {
     return null;
   }
+}
+
+function edgeLineInPlane(edgeObj, plane, planeAnchor) {
+  const points = getEdgeWorldPoints(edgeObj);
+  if (!Array.isArray(points) || points.length < 2) return null;
+
+  const projected = [];
+  for (const p of points) {
+    if (!p) continue;
+    projected.push(plane.projectPoint(p, p.clone()));
+  }
+  if (projected.length < 2) return null;
+
+  let iBest = 0;
+  let jBest = 1;
+  let bestD2 = 0;
+  for (let i = 0; i < projected.length; i++) {
+    for (let j = i + 1; j < projected.length; j++) {
+      const d2 = projected[i].distanceToSquared(projected[j]);
+      if (d2 > bestD2) {
+        bestD2 = d2;
+        iBest = i;
+        jBest = j;
+      }
+    }
+  }
+  if (bestD2 <= 1e-12) return null;
+
+  const direction = projected[jBest].clone().sub(projected[iBest]).normalize();
+  let anchor = projected[iBest].clone();
+  if (planeAnchor) {
+    let bestAnchorD2 = anchor.distanceToSquared(planeAnchor);
+    for (let i = 0; i < projected.length; i++) {
+      const d2 = projected[i].distanceToSquared(planeAnchor);
+      if (d2 < bestAnchorD2) {
+        bestAnchorD2 = d2;
+        anchor = projected[i].clone();
+      }
+    }
+  }
+
+  return { p: anchor, d: direction };
+}
+
+function getEdgeWorldPoints(edgeObj) {
+  if (!edgeObj) return null;
+  try { edgeObj.updateMatrixWorld?.(true); } catch { /* ignore */ }
+  const matrixWorld = edgeObj.matrixWorld || null;
+
+  const unique = [];
+  const pushUnique = (point) => {
+    const v = pointFromAny(point);
+    if (!v) return;
+    const last = unique[unique.length - 1];
+    if (last && last.distanceToSquared(v) <= 1e-14) return;
+    unique.push(v);
+  };
+
+  try {
+    if (typeof edgeObj.points === 'function') {
+      const pts = edgeObj.points(true);
+      if (Array.isArray(pts)) {
+        for (const p of pts) pushUnique(p);
+      }
+      if (unique.length >= 2) return unique;
+      unique.length = 0;
+    }
+  } catch { /* ignore */ }
+
+  const poly = Array.isArray(edgeObj?.userData?.polylineLocal) ? edgeObj.userData.polylineLocal : null;
+  if (poly) {
+    for (const p of poly) {
+      const v = pointFromAny(p);
+      if (!v) continue;
+      if (matrixWorld) v.applyMatrix4(matrixWorld);
+      pushUnique(v);
+    }
+    if (unique.length >= 2) return unique;
+    unique.length = 0;
+  }
+
+  const startAttr = edgeObj?.geometry?.attributes?.instanceStart;
+  const endAttr = edgeObj?.geometry?.attributes?.instanceEnd;
+  if (startAttr && endAttr) {
+    const count = Math.min(startAttr.count || 0, endAttr.count || 0);
+    for (let i = 0; i < count; i++) {
+      const a = new THREE.Vector3(startAttr.getX(i), startAttr.getY(i), startAttr.getZ(i));
+      const b = new THREE.Vector3(endAttr.getX(i), endAttr.getY(i), endAttr.getZ(i));
+      if (matrixWorld) {
+        a.applyMatrix4(matrixWorld);
+        b.applyMatrix4(matrixWorld);
+      }
+      pushUnique(a);
+      pushUnique(b);
+    }
+    if (unique.length >= 2) return unique;
+    unique.length = 0;
+  }
+
+  const pos = edgeObj?.geometry?.getAttribute?.('position');
+  if (pos && pos.itemSize === 3 && pos.count >= 2) {
+    for (let i = 0; i < pos.count; i++) {
+      const v = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i));
+      if (matrixWorld) v.applyMatrix4(matrixWorld);
+      pushUnique(v);
+    }
+    if (unique.length >= 2) return unique;
+  }
+
+  return null;
+}
+
+function pointFromAny(value) {
+  if (!value) return null;
+  if (value instanceof THREE.Vector3) return value.clone();
+  if (Array.isArray(value) && value.length >= 3) {
+    return new THREE.Vector3(value[0] || 0, value[1] || 0, value[2] || 0);
+  }
+  if (typeof value === 'object') {
+    const x = Number(value.x);
+    const y = Number(value.y);
+    const z = Number(value.z);
+    if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+      return new THREE.Vector3(x, y, z);
+    }
+  }
+  return null;
 }
 
 function resolveLabelPosition(pmimode, ann, elements, radiusOverride, ctx) {
