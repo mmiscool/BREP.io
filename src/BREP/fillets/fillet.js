@@ -4,7 +4,6 @@ import {
     getScaleAdaptiveTolerance,
     getDistanceTolerance,
     getAngleTolerance,
-    trimFilletCaches,
     getCachedFaceDataForTris,
     averageFaceNormalObjectSpace,
     localFaceNormalAtPoint,

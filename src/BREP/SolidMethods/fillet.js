@@ -5,8 +5,6 @@ import { resolveEdgesFromInputs } from './edgeResolution.js';
 import { computeFaceAreaFromTriangles } from '../fillets/filletGeometry.js';
 import { createQuantizer, deriveTolerance } from '../../utils/geometryTolerance.js';
 
-const debugMode = false;
-
 // Threshold for collapsing tiny end caps into the round face.
 const END_CAP_AREA_RATIO_THRESHOLD = 0.05;
 
@@ -159,7 +157,7 @@ function mergeFaceIntoTarget(resultSolid, sourceFaceName, targetFaceName) {
   return replaced > 0;
 }
 
-function mergeTinyFacesIntoRoundFace(resultSolid, filletSolid, candidateNames, roundFaceName, featureID, boundaryCache, resultAreaCache) {
+function mergeTinyFacesIntoRoundFace(resultSolid, filletSolid, candidateNames, roundFaceName, boundaryCache, resultAreaCache) {
   if (!resultSolid || !filletSolid || !Array.isArray(candidateNames) || candidateNames.length === 0) return;
   const areaCacheResult = resultAreaCache || buildFaceAreaCache(resultSolid);
   const areaCacheFillet = buildFaceAreaCache(filletSolid);
@@ -176,15 +174,7 @@ function mergeTinyFacesIntoRoundFace(resultSolid, filletSolid, candidateNames, r
       if (neighborRound) targetFace = neighborRound;
       if (!targetFace) targetFace = findLargestRoundFace(resultSolid, areaCacheResult);
       if (!targetFace) continue;
-      const merged = mergeFaceIntoTarget(resultSolid, capName, targetFace);
-      if (merged) {
-        consoleLogReplacement('[Solid.fillet] Merged tiny fillet face into round face', {
-          featureID,
-          capName,
-          roundFaceName: targetFace,
-          ratio: finalArea / referenceArea,
-        });
-      }
+      mergeFaceIntoTarget(resultSolid, capName, targetFace);
     }
   }
 }
@@ -408,12 +398,6 @@ function mergeInsetEndCapsByNormal(resultSolid, featureID, direction, dotThresho
     if (prefix && !name.startsWith(prefix)) return false;
     return /_END_CAP_\d+$/.test(name);
   });
-  consoleLogReplacement('[Solid.fillet] Inset end cap scan', {
-    featureID,
-    direction,
-    endCapFaces,
-  });
-
   if (!endCapFaces.length) return;
 
   const adjacentMap = buildAdjacencyFromBoundaryPolylines(resultSolid);
@@ -427,10 +411,6 @@ function mergeInsetEndCapsByNormal(resultSolid, featureID, direction, dotThresho
     normalCache.set(name, n);
     return n;
   };
-  const fmtNormal = (n) => (Array.isArray(n) && n.length >= 3)
-    ? [Number(n[0].toFixed(6)), Number(n[1].toFixed(6)), Number(n[2].toFixed(6))]
-    : null;
-
   const tryMergeWithAdj = (capName, adj) => {
     if (!adj || adj.size === 0) return false;
     const nCap = getNormal(capName);
@@ -448,35 +428,15 @@ function mergeInsetEndCapsByNormal(resultSolid, featureID, direction, dotThresho
     return false;
   };
 
-  let mergedCount = 0;
   for (const capName of endCapFaces) {
     const adj = adjacentMap.get(capName);
-    const adjEdge = edgeAdjMap.get(capName);
-    const adjAll = new Set([
-      ...(adj ? Array.from(adj) : []),
-      ...(adjEdge ? Array.from(adjEdge) : []),
-    ]);
-    consoleLogReplacement('[Solid.fillet] Inset end cap normals', {
-      featureID,
-      capName,
-      capNormal: fmtNormal(getNormal(capName)),
-      adjacent: Array.from(adjAll).map((name) => ({
-        name,
-        normal: fmtNormal(getNormal(name)),
-      })),
-    });
     if (tryMergeWithAdj(capName, adj)) {
-      consoleLogReplacement('[Solid.fillet] Inset end cap merged', { featureID, capName });
-      mergedCount++;
       continue;
     }
     if (tryMergeWithAdj(capName, edgeAdjMap.get(capName))) {
-      consoleLogReplacement('[Solid.fillet] Inset end cap merged', { featureID, capName });
-      mergedCount++;
       continue;
     }
   }
-  consoleLogReplacement('[Solid.fillet] Inset end cap merge summary', { featureID, mergedCount });
 }
 /**
  * Apply fillets to this Solid and return a new Solid with the result.
@@ -517,20 +477,6 @@ export async function fillet(opts = {}) {
     ? cleanupTinyFaceIslandsAreaRaw
     : 0.001;
   const SolidCtor = this?.constructor;
-  consoleLogReplacement('[Solid.fillet] Begin', {
-    featureID,
-    solid: this?.name,
-    radius,
-    direction: dir,
-    inflate,
-    resolution,
-    debug,
-    showTangentOverlays,
-    combineEdges,
-    cleanupTinyFaceIslandsArea,
-    requestedEdgeNames: Array.isArray(opts.edgeNames) ? opts.edgeNames : [],
-    providedEdgeCount: Array.isArray(opts.edges) ? opts.edges.length : 0,
-  });
 
   // Resolve edges from names and/or provided objects
   const unique = resolveEdgesFromInputs(this, { edgeNames: opts.edgeNames, edges: opts.edges });
@@ -544,20 +490,14 @@ export async function fillet(opts = {}) {
 
   const combineCornerHulls = combineEdges && unique.length > 1;
   let filletEdges = unique;
-  if (combineCornerHulls) {
-    consoleLogReplacement('[Solid.fillet] combineEdges enabled: using corner hulls for shared endpoints.');
-  }
 
   // Build fillet solids per edge using existing core implementation
   const filletEntries = [];
   let idx = 0;
   const debugAdded = [];
-  const attachDebugSolids = (target, reason = '') => {
+  const attachDebugSolids = (target) => {
     if (!target || debugAdded.length === 0) return;
     try { target.__debugAddedSolids = debugAdded; } catch { }
-    const prefix = debug ? '🐛 Debug' : '⚠️ Failure Debug';
-    const suffix = reason ? ` (${reason})` : '';
-    consoleLogReplacement(`${prefix}: Added ${debugAdded.length} debug solids to result${suffix}`);
   };
   for (const e of filletEdges) {
     const name = `${featureID}_FILLET_${idx++}`;
@@ -605,11 +545,9 @@ export async function fillet(opts = {}) {
     console.error('[Solid.fillet] All edge fillets failed; returning clone.', { featureID, edgeCount: unique.length });
     const c = this.clone();
     try { c.name = this.name; } catch { }
-    attachDebugSolids(c, 'all fillets failed');
+    attachDebugSolids(c);
     return c;
   }
-  consoleLogReplacement('[Solid.fillet] Built fillet solids for edges', filletEntries.length);
-
   const cornerWedgeHulls = [];
   const cornerTubeHulls = [];
   let combinedFilletSolid = null;
@@ -722,7 +660,7 @@ export async function fillet(opts = {}) {
     console.error('[Solid.fillet] Fillet boolean failed; returning clone.', { featureID, error: err?.message || err });
     const fallback = this.clone();
     try { fallback.name = this.name; } catch { }
-    attachDebugSolids(fallback, 'boolean failure');
+    attachDebugSolids(fallback);
     return fallback;
   }
 
@@ -736,7 +674,7 @@ export async function fillet(opts = {}) {
       const candidateNames = (Array.isArray(entry.mergeCandidates) && entry.mergeCandidates.length)
         ? entry.mergeCandidates
         : getFilletMergeCandidateNames(mergeSolid);
-      mergeTinyFacesIntoRoundFace(result, mergeSolid, candidateNames, roundFaceName, featureID, boundaryCache, resultAreaCache);
+      mergeTinyFacesIntoRoundFace(result, mergeSolid, candidateNames, roundFaceName, boundaryCache, resultAreaCache);
       mergeSideFacesIntoRoundFace(result, filletName, roundFaceName);
     }
   } catch (err) {
@@ -792,15 +730,7 @@ export async function fillet(opts = {}) {
       direction: dir,
       inflate,
     });
-  } else {
-    consoleLogReplacement('[Solid.fillet] Completed', { featureID, triangles: finalTriCount, vertices: finalVertCount });
   }
 
   return result;
-}
-
-
-
-function consoleLogReplacement(args){
-  if (debugMode) console.log(...args);
 }
