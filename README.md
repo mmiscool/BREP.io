@@ -4,6 +4,7 @@
 A feature-based modeling playground experimenting with BREP-style workflows on top of triangle meshes. It combines robust manifold CSG (via the [Manifold](https://github.com/elalish/manifold/) library) with a simple face and edge representation, a history pipeline, and Three.js visualization. Import meshes (STL), repair and group them into faces, then perform boolean operations, fillets, chamfers, sweeps, lofts, and more.
 
 This project is actively evolving; expect rough edges while APIs settle.
+![Home Page](docs/HOME.png)
 [![Modeling Mode](docs/MODELING.png)](docs/modes/modeling.md)
 [![Sketch Mode](docs/SKETCH.png)](docs/modes/sketch.md)
 [![PMI Mode](docs/PMI.png)](docs/modes/pmi.md)

@@ -87,6 +87,13 @@ const DEFAULT_TARGETS = [
     kind: 'docs',
     shots: DOC_SHOTS,
   },
+  {
+    id: 'home',
+    label: 'Home page',
+    path: '/index.html',
+    kind: 'home',
+    relativePath: join('docs', 'HOME.png'),
+  },
 ];
 
 async function run() {
@@ -382,6 +389,9 @@ function isHistoryDialog(captureName = '', shortName = '') {
 }
 
 async function captureTarget(page, target) {
+  if (target.kind === 'home') {
+    return captureHomeForTarget(page, target);
+  }
   if (target.kind === 'docs') {
     return captureDocsForTarget(page, target);
   }
@@ -499,6 +509,25 @@ async function captureDocsForTarget(page, target) {
 
   console.log(`✅ Processed ${capturedCount} documentation screenshot(s) (${updatedCount} updated).`);
   return capturedCount;
+}
+
+async function captureHomeForTarget(page, target) {
+  console.log(`▶️  Capturing ${target.label} from ${target.targetUrl}`);
+  await page.setViewportSize(DOCS_CAPTURE_VIEWPORT);
+  await page.goto(target.targetUrl, { waitUntil: 'networkidle' });
+  await waitForFonts(page);
+  await page.locator('.hub-page').first().waitFor({ state: 'visible', timeout: 15000 });
+  await page.waitForTimeout(200);
+
+  const targetPath = resolve(process.cwd(), String(target.relativePath || join('docs', 'HOME.png')));
+  await mkdir(dirname(targetPath), { recursive: true });
+  const buffer = await page.screenshot({
+    scale: 'css',
+    animations: 'disabled',
+  });
+  const wroteFile = await writeScreenshotIfChanged(targetPath, buffer);
+  console.log(`  • ${target.label} → ${targetPath}${wroteFile ? ' (updated)' : ' (unchanged)'}`);
+  return 1;
 }
 
 function isFeatureDocShot(shotId) {
