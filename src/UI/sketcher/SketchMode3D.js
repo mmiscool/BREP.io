@@ -3134,6 +3134,84 @@ export class SketchMode3D {
     return toRemove.length;
   }
 
+  // Drop point-on-line constraints made redundant by coincident constraints.
+  #cleanupRedundantPointOnLineConstraints() {
+    const sketch = this._solver?.sketchObject;
+    if (!sketch || !Array.isArray(sketch.constraints)) return 0;
+
+    const constraints = sketch.constraints;
+    const parent = new Map();
+    const find = (x) => {
+      let p = parent.get(x);
+      if (p == null) {
+        parent.set(x, x);
+        return x;
+      }
+      if (p !== x) {
+        p = find(p);
+        parent.set(x, p);
+      }
+      return p;
+    };
+    const union = (a, b) => {
+      const ra = find(a);
+      const rb = find(b);
+      if (ra === rb) return;
+      if (ra < rb) parent.set(rb, ra);
+      else parent.set(ra, rb);
+    };
+    const canonical = (id) => {
+      const pid = parseInt(id);
+      if (!Number.isFinite(pid)) return null;
+      return parent.has(pid) ? find(pid) : pid;
+    };
+    const pairKey = (a, b) => (a <= b ? `${a},${b}` : `${b},${a}`);
+
+    for (const c of constraints) {
+      if (!c || c.temporary || c.type !== "≡" || !Array.isArray(c.points) || c.points.length < 2) continue;
+      const p0 = parseInt(c.points[0]);
+      const p1 = parseInt(c.points[1]);
+      if (!Number.isFinite(p0) || !Number.isFinite(p1)) continue;
+      union(p0, p1);
+    }
+
+    const seenPointOnLine = new Set();
+    const nextConstraints = [];
+    let removed = 0;
+    for (const c of constraints) {
+      if (!c || c.temporary || c.type !== "⏛" || !Array.isArray(c.points) || c.points.length < 3) {
+        nextConstraints.push(c);
+        continue;
+      }
+      const c0 = canonical(c.points[0]);
+      const c1 = canonical(c.points[1]);
+      const c2 = canonical(c.points[2]);
+      if (![c0, c1, c2].every(Number.isFinite)) {
+        nextConstraints.push(c);
+        continue;
+      }
+
+      // If the constrained point is coincident with either line endpoint, this is redundant.
+      if (c2 === c0 || c2 === c1) {
+        removed += 1;
+        continue;
+      }
+
+      // If another point in the same coincident set already has this point-on-line, keep only one.
+      const key = `${pairKey(c0, c1)}|${c2}`;
+      if (seenPointOnLine.has(key)) {
+        removed += 1;
+        continue;
+      }
+      seenPointOnLine.add(key);
+      nextConstraints.push(c);
+    }
+
+    if (!removed) return 0;
+    sketch.constraints = nextConstraints;
+    return removed;
+  }
+
   #maybeAutoCleanupPoints() {
     if (!this._solverSettings?.autoCleanupOrphans) return 0;
     return this.#cleanupUnusedPoints();
@@ -3246,13 +3324,33 @@ export class SketchMode3D {
       if (!newest) return;
       // Set display style for visualization only
       newest.displayStyle = mode === "diameter" ? "diameter" : "radius";
-      // Seed a default offset so text/leaders are visible outside the rim
-      const rect = this.viewer.renderer.domElement.getBoundingClientRect();
-      const base = Math.max(
-        0.1,
-        this.#worldPerPixel(this.viewer.camera, rect.width, rect.height) * 10,
-      );
-      this._dimOffsets.set(newest.id, { dr: base * 0.5, dp: base * 0.5 });
+      // Remember whether this radial dimension came from an arc or a full circle.
+      const srcGeoId = Array.isArray(items)
+        ? parseInt(items.find((it) => it?.type === "geometry")?.id)
+        : NaN;
+      const srcGeo = Number.isFinite(srcGeoId)
+        ? (s.geometries || []).find((g) => parseInt(g?.id) === srcGeoId)
+        : null;
+      if (srcGeo && (srcGeo.type === "arc" || srcGeo.type === "circle")) {
+        newest.radialGeometryType = srcGeo.type;
+      }
+      // Seed a default free-form label offset near the rim.
+      const pc = s.points.find((p) => p.id === newest.points?.[0]) || null;
+      const pr = s.points.find((p) => p.id === newest.points?.[1]) || null;
+      if (pc && pr) {
+        const vx = pr.x - pc.x;
+        const vy = pr.y - pc.y;
+        const L = Math.hypot(vx, vy);
+        const rx = L > 1e-9 ? (vx / L) : 1;
+        const ry = L > 1e-9 ? (vy / L) : 0;
+        const nx = -ry;
+        const ny = rx;
+        const base = Math.max(0.2, L * 0.35);
+        this._dimOffsets.set(newest.id, {
+          du: vx + rx * base + nx * base * 0.35,
+          dv: vy + ry * base + ny * base * 0.35,
+        });
+      }
       // Re-solve and redraw
       this._solver.solveSketch("full");
       this.#rebuildSketchGraphics();
@@ -3615,6 +3713,7 @@ export class SketchMode3D {
 
     if (trimmed) {
       this._selection.clear();
+      this.#cleanupRedundantPointOnLineConstraints();
       const cleaned = this.#maybeAutoCleanupPoints();
       if (!cleaned) {
         try { this._solver.solveSketch("full"); } catch { }
@@ -4493,6 +4592,59 @@ export class SketchMode3D {
       const nx = ax + vx * t, ny = ay + vy * t;
       return Math.hypot(px - nx, py - ny);
     };
+    const radialOffsetToPlane = (off, pc, pr) => {
+      const du = Number(off?.du);
+      const dv = Number(off?.dv);
+      if (Number.isFinite(du) || Number.isFinite(dv)) {
+        return {
+          du: Number.isFinite(du) ? du : 0,
+          dv: Number.isFinite(dv) ? dv : 0,
+        };
+      }
+      const vx = (pr?.x ?? 0) - (pc?.x ?? 0);
+      const vy = (pr?.y ?? 0) - (pc?.y ?? 0);
+      const L = Math.hypot(vx, vy);
+      const rx = L > 1e-9 ? (vx / L) : 1;
+      const ry = L > 1e-9 ? (vy / L) : 0;
+      const nx = -ry;
+      const ny = rx;
+      if (off && (off.dr !== undefined || off.dp !== undefined)) {
+        const dr = Number(off.dr) || 0;
+        const dp = Number(off.dp) || 0;
+        return {
+          du: vx + rx * dr + nx * dp,
+          dv: vy + ry * dr + ny * dp,
+        };
+      }
+      const base = Math.max(0.2, L * 0.35);
+      return {
+        du: vx + rx * base + nx * base * 0.35,
+        dv: vy + ry * base + ny * base * 0.35,
+      };
+    };
+    const resolveRadialGeometryType = (c) => {
+      const tagged = c?.radialGeometryType;
+      if (tagged === 'arc' || tagged === 'circle') return tagged;
+      if (!Array.isArray(s?.geometries) || !Array.isArray(c?.points) || c.points.length < 2) return null;
+      const centerId = parseInt(c.points[0]);
+      const rimId = parseInt(c.points[1]);
+      if (!Number.isFinite(centerId) || !Number.isFinite(rimId)) return null;
+      let matchedCircle = false;
+      for (const g of (s.geometries || [])) {
+        if (!g || !Array.isArray(g.points) || g.points.length < 2) continue;
+        if (g.type === 'arc' && g.points.length >= 3) {
+          const gc = parseInt(g.points[0]);
+          const gs = parseInt(g.points[1]);
+          const ge = parseInt(g.points[2]);
+          if (gc === centerId && (gs === rimId || ge === rimId)) return 'arc';
+        } else if (g.type === 'circle') {
+          const gc = parseInt(g.points[0]);
+          const gr = parseInt(g.points[1]);
+          if (gc === centerId && gr === rimId) matchedCircle = true;
+        }
+      }
+      return matchedCircle ? 'circle' : null;
+    };
     const intersect = (A, B, C, D) => {
       const den = (A.x - B.x) * (C.y - D.y) - (A.y - B.y) * (C.x - D.x);
       if (Math.abs(den) < 1e-9) return { x: B.x, y: B.y };
@@ -4507,10 +4659,39 @@ export class SketchMode3D {
 
     for (const c of (s.constraints || [])) {
       if (c.type === '⟺' && Array.isArray(c.points) && c.points.length >= 2) {
-        if (c.displayStyle === 'radius') {
+        if (c.displayStyle === 'radius' || c.displayStyle === 'diameter') {
           const pc = P(c.points[0]); const pr = P(c.points[1]); if (!pc || !pr) continue;
-          const rr = Math.hypot(pr.x - pc.x, pr.y - pc.y);
-          const d = Math.abs(Math.hypot(uv.u - pc.x, uv.v - pc.y) - rr);
+          const off = radialOffsetToPlane(this._dimOffsets.get(c.id) || {}, pc, pr);
+          const lu = pc.x + off.du;
+          const lv = pc.y + off.dv;
+          const rvx = pr.x - pc.x;
+          const rvy = pr.y - pc.y;
+          const r = Math.hypot(rvx, rvy);
+          if (!(r > 1e-9)) continue;
+          let ux = lu - pc.x;
+          let uy = lv - pc.y;
+          let uLen = Math.hypot(ux, uy);
+          if (!(uLen > 1e-9)) {
+            ux = rvx;
+            uy = rvy;
+            uLen = Math.hypot(ux, uy) || 1;
+          }
+          ux /= uLen;
+          uy /= uLen;
+          const nearX = pc.x + ux * r;
+          const nearY = pc.y + uy * r;
+          const farX = pc.x - ux * r;
+          const farY = pc.y - uy * r;
+
+          let d = distToSeg(nearX, nearY, lu, lv, uv.u, uv.v); // rim-to-label leader
+          if (c.displayStyle === 'diameter') {
+            d = Math.min(d, distToSeg(farX, farY, nearX, nearY, uv.u, uv.v)); // full diameter span
+            if (resolveRadialGeometryType(c) === 'arc') {
+              d = Math.min(d, Math.abs(Math.hypot(uv.u - pc.x, uv.v - pc.y) - r)); // faint circle guide
+            }
+          } else {
+            d = Math.min(d, distToSeg(pc.x, pc.y, nearX, nearY, uv.u, uv.v)); // radius span
+          }
           if (d < bestDist) { bestDist = d; bestCid = c.id; }
         } else {
           const p0 = P(c.points[0]); const p1 = P(c.points[1]); if (!p0 || !p1) continue;

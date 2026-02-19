@@ -400,7 +400,13 @@ export class SketchFeature {
                 for (const c of sketch.constraints) {
                     if (typeof c?.valueExpr === 'string') {
                         const n = runExpr(exprSrc, c.valueExpr);
-                        if (n != null && Number.isFinite(n)) c.value = Number(n);
+                        if (n != null && Number.isFinite(n)) {
+                            const diameterExpr =
+                                c?.type === '⟺' &&
+                                c?.displayStyle === 'diameter' &&
+                                c?.valueExprMode === 'diameter';
+                            c.value = diameterExpr ? Number(n) * 0.5 : Number(n);
+                        }
                     } else if (typeof c?.value === 'string') {
                         const n = runExpr(exprSrc, c.value);
                         if (n != null && Number.isFinite(n)) c.value = Number(n);

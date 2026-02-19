@@ -21,6 +21,75 @@ function getConstraintBaseColor(inst) {
   }
 }
 
+function isRadialDimensionConstraint(c) {
+  return c?.type === '⟺'
+    && Array.isArray(c.points)
+    && c.points.length >= 2
+    && (c.displayStyle === 'radius' || c.displayStyle === 'diameter');
+}
+
+function radialOffsetToPlane(rawOff, pc, pr, useDefault = true) {
+  const du = Number(rawOff?.du);
+  const dv = Number(rawOff?.dv);
+  if (Number.isFinite(du) || Number.isFinite(dv)) {
+    return {
+      du: Number.isFinite(du) ? du : 0,
+      dv: Number.isFinite(dv) ? dv : 0,
+    };
+  }
+
+  const vx = (pr?.x ?? 0) - (pc?.x ?? 0);
+  const vy = (pr?.y ?? 0) - (pc?.y ?? 0);
+  const L = Math.hypot(vx, vy);
+  const rx = L > 1e-9 ? (vx / L) : 1;
+  const ry = L > 1e-9 ? (vy / L) : 0;
+  const nx = -ry;
+  const ny = rx;
+
+  if (rawOff && (rawOff.dr !== undefined || rawOff.dp !== undefined)) {
+    const dr = Number(rawOff.dr) || 0;
+    const dp = Number(rawOff.dp) || 0;
+    return {
+      du: vx + rx * dr + nx * dp,
+      dv: vy + ry * dr + ny * dp,
+    };
+  }
+
+  if (!useDefault) return { du: 0, dv: 0 };
+  const base = Math.max(0.2, L * 0.35);
+  return {
+    du: vx + rx * base + nx * base * 0.35,
+    dv: vy + ry * base + ny * base * 0.35,
+  };
+}
+
+function resolveRadialGeometryType(sketch, constraint) {
+  const tagged = constraint?.radialGeometryType;
+  if (tagged === 'arc' || tagged === 'circle') return tagged;
+
+  if (!sketch || !Array.isArray(sketch.geometries)) return null;
+  if (!Array.isArray(constraint?.points) || constraint.points.length < 2) return null;
+  const centerId = parseInt(constraint.points[0]);
+  const rimId = parseInt(constraint.points[1]);
+  if (!Number.isFinite(centerId) || !Number.isFinite(rimId)) return null;
+
+  let matchedCircle = false;
+  for (const g of sketch.geometries) {
+    if (!g || !Array.isArray(g.points) || g.points.length < 2) continue;
+    if (g.type === 'arc' && g.points.length >= 3) {
+      const gc = parseInt(g.points[0]);
+      const gs = parseInt(g.points[1]);
+      const ge = parseInt(g.points[2]);
+      if (gc === centerId && (gs === rimId || ge === rimId)) return 'arc';
+    } else if (g.type === 'circle') {
+      const gc = parseInt(g.points[0]);
+      const gr = parseInt(g.points[1]);
+      if (gc === centerId && gr === rimId) matchedCircle = true;
+    }
+  }
+  return matchedCircle ? 'circle' : null;
+}
+
 function clearDims(inst) {
   if (!inst._dimRoot) return;
   const labels = Array.from(inst._dimRoot.querySelectorAll('.dim-label, .glyph-label'));
@@ -112,22 +181,22 @@ export function renderDimensions(inst) {
     const sel = Array.from(inst._selection || []).some(it => it.type === 'constraint' && it.id === c.id);
     const hov = inst._hover && inst._hover.type === 'constraint' && inst._hover.id === c.id;
     if (c.type === '⟺') {
-      if (c.displayStyle === 'radius' && c.points?.length >= 2) {
+      if (isRadialDimensionConstraint(c)) {
         const pc = P(c.points[0]), pr = P(c.points[1]); if (!pc || !pr) continue;
         const col = sel ? DIM_COLOR_SELECTED : (hov ? DIM_COLOR_HOVER : dimBaseColor);
-        dimRadius3D(inst, pc, pr, c.id, col);
-        const v = new THREE.Vector2(pr.x - pc.x, pr.y - pc.y); const L = v.length() || 1; const rx = v.x / L, ry = v.y / L; const nx = -ry, ny = rx;
+        const radialType = resolveRadialGeometryType(s, c);
+        dimRadius3D(inst, pc, pr, c.id, col, c.displayStyle, radialType);
         const offSaved = inst._dimOffsets.get(c.id) || {};
-        const dr = (offSaved.dr !== undefined || offSaved.dp !== undefined)
-          ? (Number(offSaved.dr) || 0)
-          : ((Number(offSaved.du) || 0) * rx + (Number(offSaved.dv) || 0) * ry);
-        const dp = (offSaved.dr !== undefined || offSaved.dp !== undefined)
-          ? (Number(offSaved.dp) || 0)
-          : ((Number(offSaved.du) || 0) * nx + (Number(offSaved.dv) || 0) * ny);
-        const label = to3(pr.x + rx * dr + nx * dp, pr.y + ry * dr + ny * dp);
-        const val = Number(c.value) ?? 0;
-        const txt = c.displayStyle === 'diameter' ? `⌀${(2 * val).toFixed(3)}     Diameter` : `R${val.toFixed(3)}     Radius`;
-        mk(c, txt, label, { du: 0, dv: 0 });
+        const radialOff = radialOffsetToPlane(offSaved, pc, pr, true);
+        if (!Number.isFinite(Number(offSaved?.du)) || !Number.isFinite(Number(offSaved?.dv))) {
+          try { inst._dimOffsets.set(c.id, { du: radialOff.du, dv: radialOff.dv }); } catch { }
+        }
+        const val = Number(c.value);
+        const safeVal = Number.isFinite(val) ? val : 0;
+        const txt = c.displayStyle === 'diameter'
+          ? `⌀${(2 * safeVal).toFixed(3)}`
+          : `R${safeVal.toFixed(3)}`;
+        mk(c, txt, to3(pc.x, pc.y), radialOff, true);
       } else if (c.points?.length >= 2) {
         const p0 = P(c.points[0]), p1 = P(c.points[1]); if (!p0 || !p1) continue;
         const basis = (() => { const dx = p1.x - p0.x, dy = p1.y - p0.y; const L = Math.hypot(dx, dy) || 1; const tx = dx / L, ty = dy / L; return { tx, ty, nx: -ty, ny: tx }; })();
@@ -196,9 +265,12 @@ function _redrawDim3D(inst, onlyCid = null) {
       const col = sel ? DIM_COLOR_SELECTED : (hov ? DIM_COLOR_HOVER : dimBaseColor);
       if (!c) continue;
       if (c.type === '⟺') {
-        if (c.displayStyle === 'radius' && Array.isArray(c.points) && c.points.length >= 2) {
+        if (isRadialDimensionConstraint(c)) {
           const pc = P(c.points[0]); const pr = P(c.points[1]);
-          if (pc && pr) dimRadius3D(inst, pc, pr, c.id, col);
+          if (pc && pr) {
+            const radialType = resolveRadialGeometryType(s, c);
+            dimRadius3D(inst, pc, pr, c.id, col, c.displayStyle, radialType);
+          }
         } else if (Array.isArray(c.points) && c.points.length >= 2) {
           const p0 = P(c.points[0]); const p1 = P(c.points[1]);
           if (p0 && p1) dimDistance3D(inst, p0, p1, c.id, col);
@@ -313,6 +385,7 @@ function attachDimLabelEvents(inst, el, c, world) {
   el.addEventListener('dblclick', async (e) => {
     e.preventDefault(); e.stopPropagation();
     dbg('dblclick-edit', { cid: c.id, type: c.type, value: c.value, expr: c.valueExpr });
+    const isDiameterDim = c?.type === '⟺' && c?.displayStyle === 'diameter';
     const solver = inst?._solver || null;
     const canPause = solver && typeof solver.pause === 'function' && typeof solver.resume === 'function' && typeof solver.isPaused === 'function';
     const pausedByPrompt = !!(canPause && !solver.isPaused());
@@ -326,9 +399,19 @@ function attachDimLabelEvents(inst, el, c, world) {
     if (pausedByPrompt) {
       try { solver.pause('dim-edit'); } catch { }
     }
-    const initial = (typeof c.valueExpr === 'string' && c.valueExpr.length)
-      ? c.valueExpr
-      : String(c.value ?? '');
+    const hasExpr = typeof c.valueExpr === 'string' && c.valueExpr.length;
+    const displayNumeric = isDiameterDim ? (Number(c.value) * 2) : Number(c.value);
+    const initial = hasExpr
+      ? (
+        isDiameterDim
+          ? (
+            c.valueExprMode === 'diameter'
+              ? c.valueExpr
+              : (Number.isFinite(displayNumeric) ? String(displayNumeric) : String(c.valueExpr))
+          )
+          : c.valueExpr
+      )
+      : (Number.isFinite(displayNumeric) ? String(displayNumeric) : String(c.value ?? ''));
     try {
       const v = await prompt('Enter value', initial);
       if (v == null) return;
@@ -355,12 +438,16 @@ function attachDimLabelEvents(inst, el, c, world) {
       if (plainNumberRe.test(input)) {
         numeric = parseFloat(input);
         c.valueExpr = undefined;
+        if ('valueExprMode' in c) delete c.valueExprMode;
       } else {
         numeric = runExpr(exprSrc, input);
         if (numeric == null || !Number.isFinite(numeric)) return;
         c.valueExpr = input;
+        if (isDiameterDim) c.valueExprMode = 'diameter';
+        else if ('valueExprMode' in c) delete c.valueExprMode;
       }
-      c.value = Number(numeric);
+      const solverValue = isDiameterDim ? (Number(numeric) * 0.5) : Number(numeric);
+      c.value = Number(solverValue);
       resumeSolver();
       try { solver?.solveSketch('full'); } catch { }
       try { solver?.hooks?.updateCanvas?.(); } catch { }
@@ -373,7 +460,6 @@ function attachDimLabelEvents(inst, el, c, world) {
   let dragging = false, moved = false, sx = 0, sy = 0, start = {};
   let sClientX = 0, sClientY = 0;
   let distNx = 0, distNy = 0, distTx = 0, distTy = 0, distStartD = 0, distStartT = 0;
-  let radRx = 0, radRy = 0, radNx = 0, radNy = 0, radStartDr = 0, radStartDp = 0;
   let angStartDU = 0, angStartDV = 0, angMidDX = 0, angMidDY = 0, angStartMag = 0;
   let pendingOff = null;
   let swallowPointerCycle = false;
@@ -393,14 +479,12 @@ function attachDimLabelEvents(inst, el, c, world) {
     start = { ...(inst._dimOffsets.get(c.id) || {}) };
     sClientX = e.clientX || 0; sClientY = e.clientY || 0;
     dbg('pointerdown', { cid: c.id, type: c.type, startUV: { u: sx, v: sy }, startOffset: start });
-    if (c.type === '⟺' && c.displayStyle === 'radius' && Array.isArray(c.points) && c.points.length >= 2) {
+    if (isRadialDimensionConstraint(c)) {
       const sObj = inst._solver.sketchObject;
       const pc = sObj.points.find((p) => p.id === c.points[0]);
       const pr = sObj.points.find((p) => p.id === c.points[1]);
       if (pc && pr) {
-        const vx = pr.x - pc.x, vy = pr.y - pc.y; const L = Math.hypot(vx, vy) || 1;
-        radRx = vx / L; radRy = vy / L; radNx = -radRy; radNy = radRx;
-        radStartDr = Number(start.dr) || 0; radStartDp = Number(start.dp) || 0;
+        start = radialOffsetToPlane(start, pc, pr, true);
       }
     } else if (c.type === '⟺' && Array.isArray(c.points) && c.points.length >= 2) {
       const sObj = inst._solver.sketchObject;
@@ -443,14 +527,14 @@ function attachDimLabelEvents(inst, el, c, world) {
     moved = true;
     dbg('pointermove', { cid: c.id, type: c.type, uv, pxDx, pxDy });
     const du = uv.u - sx; const dv = uv.v - sy;
-    if (c.type === '⟺' && c.displayStyle === 'radius' && Array.isArray(c.points) && c.points.length >= 2) {
-      const dr = (Number(radStartDr) || 0) + (du * radRx + dv * radRy);
-      const dp = (Number(radStartDp) || 0) + (du * radNx + dv * radNy);
-      pendingOff = { dr, dp };
-      // live label preview without committing
-      const toLabel = { du: radRx * dr + radNx * dp, dv: radRy * dr + radNy * dp };
+    if (isRadialDimensionConstraint(c)) {
+      const toLabel = {
+        du: (Number(start.du) || 0) + du,
+        dv: (Number(start.dv) || 0) + dv,
+      };
+      pendingOff = { ...toLabel };
       updateOneDimPosition(inst, el, world, toLabel, true);
-      dbg('preview-radius', { cid: c.id, dr, dp, toLabel });
+      dbg('preview-radial', { cid: c.id, toLabel });
       try { inst._dimOffsets.set(c.id, toLabel); _redrawDim3D(inst, c.id); } catch { }
     } else if (c.type === '⟺' && Array.isArray(c.points) && c.points.length >= 2) {
       const deltaN = du * distNx + dv * distNy;
@@ -486,11 +570,12 @@ function attachDimLabelEvents(inst, el, c, world) {
 
   const computePendingFromEvent = (e) => {
     const uv = pointerToPlaneUV(inst, e); if (!uv) return null;
-    if (c.type === '⟺' && c.displayStyle === 'radius' && Array.isArray(c.points) && c.points.length >= 2) {
+    if (isRadialDimensionConstraint(c)) {
       const du = uv.u - sx; const dv = uv.v - sy;
-      const dr = (Number(radStartDr) || 0) + (du * radRx + dv * radRy);
-      const dp = (Number(radStartDp) || 0) + (du * radNx + dv * radNy);
-      return { dr, dp };
+      return {
+        du: (Number(start.du) || 0) + du,
+        dv: (Number(start.dv) || 0) + dv,
+      };
     } else if (c.type === '⟺' && Array.isArray(c.points) && c.points.length >= 2) {
       const du = uv.u - sx; const dv = uv.v - sy;
       const deltaN = du * distNx + dv * distNy;
@@ -570,25 +655,102 @@ function dimDistance3D(inst, p0, p1, cid, color = 0x67e667) {
   arrow(u0, v0, +1); arrow(u1, v1, -1);
 }
 
-function dimRadius3D(inst, pc, pr, cid, color = 0x69a8ff) {
+function dimRadius3D(inst, pc, pr, cid, color = 0x69a8ff, displayStyle = 'radius', radialGeometryType = null) {
   const off = inst._dimOffsets.get(cid) || {};
   const X = inst._lock.basis.x, Y = inst._lock.basis.y, O = inst._lock.basis.origin;
+  const rect = inst.viewer.renderer.domElement.getBoundingClientRect();
+  const wpp = worldPerPixel(inst.viewer.camera, rect.width, rect.height);
   const P = (u, v) => new THREE.Vector3().copy(O).addScaledVector(X, u).addScaledVector(Y, v);
   const blue = new THREE.LineBasicMaterial({ color, depthTest: false, depthWrite: false, transparent: true });
-  const add = (uvs) => { const g = new THREE.BufferGeometry().setFromPoints(uvs.map(q => P(q.u, q.v))); const ln = new THREE.Line(g, blue); ln.userData = { kind: 'dim', cid }; ln.renderOrder = 10020; inst._dim3D.add(ln); };
-  const vx = pr.x - pc.x, vy = pr.y - pc.y; const L = Math.hypot(vx, vy) || 1; const rx = vx / L, ry = vy / L; const nx = -ry, ny = rx;
-  // Support both {dr,dp} and generic {du,dv}
-  let dr = 0, dp = 0;
-  if (off && (off.dr !== undefined || off.dp !== undefined)) {
-    dr = Number(off.dr) || 0; dp = Number(off.dp) || 0;
-  } else {
-    const du = Number(off.du) || 0; const dv = Number(off.dv) || 0;
-    dr = du * rx + dv * ry; dp = du * nx + dv * ny;
+  const faintDashed = new THREE.LineDashedMaterial({
+    color,
+    depthTest: false,
+    depthWrite: false,
+    transparent: true,
+    opacity: 0.32,
+    dashSize: Math.max(0.02, wpp * 6),
+    gapSize: Math.max(0.02, wpp * 4),
+  });
+  const add = (uvs, mat = blue, renderOrder = 10020) => {
+    const g = new THREE.BufferGeometry().setFromPoints(uvs.map(q => P(q.u, q.v)));
+    const ln = new THREE.Line(g, mat);
+    if (mat?.isLineDashedMaterial) ln.computeLineDistances();
+    ln.userData = { kind: 'dim', cid };
+    ln.renderOrder = renderOrder;
+    inst._dim3D.add(ln);
+  };
+  const labelOff = radialOffsetToPlane(off, pc, pr, true);
+  const label = { u: pc.x + labelOff.du, v: pc.y + labelOff.dv };
+
+  const rvx = pr.x - pc.x;
+  const rvy = pr.y - pc.y;
+  const radius = Math.hypot(rvx, rvy);
+  if (!(radius > 1e-9)) return;
+
+  let dx = label.u - pc.x;
+  let dy = label.v - pc.y;
+  let L = Math.hypot(dx, dy);
+  if (!(L > 1e-9)) {
+    dx = rvx;
+    dy = rvy;
+    L = Math.hypot(dx, dy) || 1;
   }
-  const elbow = { u: pr.x + rx * dr, v: pr.y + ry * dr }; const dogleg = { u: elbow.u + nx * dp, v: elbow.v + ny * dp };
-  add([{ u: pc.x, v: pc.y }, { u: pr.x, v: pr.y }]); add([{ u: pr.x, v: pr.y }, elbow]); add([elbow, dogleg]);
-  const ah = 0.06; const s = 0.6; const tip = { u: pr.x, v: pr.y }; const A = { u: tip.u - rx * ah + nx * ah * 0.6, v: tip.v - ry * ah + ny * ah * 0.6 }; const B = { u: tip.u - rx * ah - nx * ah * 0.6, v: tip.v - ry * ah - ny * ah * 0.6 };
-  add([tip, A]); add([tip, B]);
+  const ux = dx / L;
+  const uy = dy / L;
+  const nx = -uy;
+  const ny = ux;
+
+  const near = { u: pc.x + ux * radius, v: pc.y + uy * radius };
+  const far = { u: pc.x - ux * radius, v: pc.y - uy * radius };
+
+  const drawFaintFullCircle = displayStyle === 'diameter' && radialGeometryType === 'arc';
+  if (drawFaintFullCircle) {
+    // Draw a faint complete circle so both arrows have a visible target on arcs.
+    const circle = [];
+    const segs = 96;
+    for (let i = 0; i <= segs; i++) {
+      const t = (i / segs) * Math.PI * 2;
+      circle.push({
+        u: pc.x + Math.cos(t) * radius,
+        v: pc.y + Math.sin(t) * radius,
+      });
+    }
+    add(circle, faintDashed, 10019);
+  }
+
+  if (displayStyle === 'diameter') {
+    // Diameter span across the full circle + a leader from nearest rim point to label.
+    add([far, near]);
+    add([near, label]);
+  } else {
+    // Radius span from center to rim + a leader from rim point to label.
+    add([{ u: pc.x, v: pc.y }, near]);
+    add([near, label]);
+  }
+
+  const ah = Math.max(0.06, wpp * 6);
+  const s = 0.6;
+  const addArrow = (tip, dirX, dirY) => {
+    const len = Math.hypot(dirX, dirY);
+    if (!(len > 1e-9)) return;
+    const tx = dirX / len;
+    const ty = dirY / len;
+    const wx = -ty;
+    const wy = tx;
+    const A = { u: tip.u + tx * ah + wx * ah * s, v: tip.v + ty * ah + wy * ah * s };
+    const B = { u: tip.u + tx * ah - wx * ah * s, v: tip.v + ty * ah - wy * ah * s };
+    add([tip, A]);
+    add([tip, B]);
+  };
+
+  if (displayStyle === 'diameter') {
+    // Arrowheads point inward toward the center from both ends.
+    addArrow(near, -ux, -uy);
+    addArrow(far, ux, uy);
+  } else {
+    // Radius has a single inward arrow at the rim point.
+    addArrow(near, -ux, -uy);
+  }
 }
 
 function dimAngle3D(inst, p0, p1, p2, p3, cid, I, color = 0x69a8ff, valueDeg = null) {
