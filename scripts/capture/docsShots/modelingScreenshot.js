@@ -36,5 +36,6 @@ export async function prepareModelingScreenshot(page) {
     } catch { /* ignore */ }
     try { viewer.zoomToFit?.(1.15); } catch { /* ignore */ }
   });
+  await page.waitForLoadState('networkidle');
   await page.waitForTimeout(300);
 }

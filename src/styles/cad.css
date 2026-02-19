@@ -1,3 +1,7 @@
+:root {
+  color-scheme: dark;
+}
+
 html,
 body {
   margin: 0;
@@ -23,7 +27,7 @@ body {
 }
 
 .app-sidebar {
-  width: 500px;
+  width: 300px;
   max-height: 100%;
   overflow-y: auto;
   position: absolute;
@@ -66,10 +70,12 @@ body {
 }
 
 .cad-sidebar-home-banner-img {
+  display: block;
+  width: 100%;
   height: 100%;
-  width: auto;
   max-width: 100%;
   object-fit: contain;
+  object-position: left center;
   pointer-events: none;
   user-select: none;
 }

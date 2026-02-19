@@ -214,7 +214,7 @@ export class CADmaterialWidget {
         widthRow.appendChild(widthLabel);
 
         // Determine initial width
-        let initialWidth = 500;
+        let initialWidth = this._defaultSidebarWidth;
         try {
             const savedW = parseInt(this._settings['__SIDEBAR_WIDTH__']);
             if (Number.isFinite(savedW) && savedW > 0) initialWidth = savedW;
@@ -459,7 +459,7 @@ export class CADmaterialWidget {
         return this._normalizeHexColor(SelectionFilter.getHoverColor() || '#ffd54a');
     }
     _getDefaultSidebarWidth() {
-        const fallback = 500;
+        const fallback = 300;
         try {
             const sb = document.getElementById('sidebar');
             if (!sb) return fallback;

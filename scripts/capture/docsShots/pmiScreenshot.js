@@ -98,5 +98,6 @@ export async function preparePmiScreenshot(page, pmiFixtureJson = '') {
     try { mode?._refreshOverlays?.(); } catch { /* ignore */ }
   }, { pmiFixtureJsonValue: pmiFixtureJson || '' });
 
+  await page.waitForLoadState('networkidle');
   await page.waitForTimeout(450);
 }

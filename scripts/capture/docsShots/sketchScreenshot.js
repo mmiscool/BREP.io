@@ -29,5 +29,6 @@ export async function prepareSketchScreenshot(page, fixtureJson) {
     } catch { /* ignore */ }
   }, { fixtureJsonValue: fixtureJson || '' });
 
+  await page.waitForLoadState('networkidle');
   await page.waitForTimeout(450);
 }

@@ -12,9 +12,9 @@ import { preparePmiScreenshot } from './capture/docsShots/pmiScreenshot.js';
 const require = createRequire(import.meta.url);
 const DEFAULT_BASE_URL = process.env.CAPTURE_BASE_URL || 'http://localhost:5173';
 const LOCAL_CAPTURE_SERVER_URL = 'http://localhost:5173/';
-const DOCS_CAPTURE_VIEWPORT = { width: 1200, height: 760 };
+const DOCS_CAPTURE_VIEWPORT = { width: 1200, height: 800 };
 const DEFAULT_VIEWPORT = { ...DOCS_CAPTURE_VIEWPORT };
-const DEVICE_SCALE_FACTOR = 4;
+const DEVICE_SCALE_FACTOR = 1;
 const OUTPUT_SCALE_MODE = 4;
 const CAPTURE_HEADLESS = resolveHeadless(process.env.CAPTURE_HEADLESS);
 const CAPTURE_KEEP_OPEN = resolveKeepOpen(process.env.CAPTURE_KEEP_OPEN, CAPTURE_HEADLESS);
@@ -57,6 +57,7 @@ const DOC_SHOTS = [
     relativePath: join('docs', 'features', 'image-to-face-3D_dialog.png'),
   },
 ];
+const FEATURE_DOC_SHOT_IDS = new Set(['image-to-face-2d', 'image-to-face-3d']);
 const DEFAULT_TARGETS = [
   {
     id: 'features',
@@ -466,15 +467,21 @@ async function captureDocsForTarget(page, target) {
 
   let capturedCount = 0;
   let updatedCount = 0;
+  await page.setViewportSize(DOCS_CAPTURE_VIEWPORT);
   for (const shot of shots) {
-    await page.setViewportSize(DOCS_CAPTURE_VIEWPORT);
     await page.goto(target.targetUrl, { waitUntil: 'networkidle' });
     await waitForCadReady(page);
+    if (!isFeatureDocShot(shot?.id)) {
+      await page.waitForLoadState('networkidle');
+    }
     await prepareDocsShot(page, shot.id, {
       fixtureJson,
       pmiFixtureJson,
       imageToFaceDataUrl,
     });
+    if (!isFeatureDocShot(shot?.id)) {
+      await page.waitForLoadState('networkidle');
+    }
     await waitForFonts(page);
     await page.waitForTimeout(250);
 
@@ -492,6 +499,10 @@ async function captureDocsForTarget(page, target) {
 
   console.log(`✅ Processed ${capturedCount} documentation screenshot(s) (${updatedCount} updated).`);
   return capturedCount;
+}
+
+function isFeatureDocShot(shotId) {
+  return FEATURE_DOC_SHOT_IDS.has(String(shotId || '').trim().toLowerCase());
 }
 
 async function waitForCadReady(page) {
