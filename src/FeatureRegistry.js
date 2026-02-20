@@ -1,5 +1,6 @@
 import { BooleanFeature } from './features/boolean/BooleanFeature.js';
 import { ChamferFeature } from './features/chamfer/ChamferFeature.js';
+import { CollapseEdgeFeature } from './features/collapseEdge/CollapseEdgeFeature.js';
 import { DatiumFeature } from './features/datium/DatiumFeature.js';
 import { ExtrudeFeature } from './features/extrude/ExtrudeFeature.js';
 import { FilletFeature } from './features/fillet/FilletFeature.js';
@@ -87,6 +88,7 @@ export class FeatureRegistry {
     this.register(BooleanFeature);
     this.register(FilletFeature);
     this.register(ChamferFeature);
+    this.register(CollapseEdgeFeature);
     this.register(OffsetShellFeature);
     this.register(OffsetFaceFeature);
     this.register(SheetMetalTabFeature);
@@ -129,6 +131,9 @@ export class FeatureRegistry {
     // Text-to-Face variations
     this.aliases.set('TEXT TO FACE', TextToFaceFeature);
     this.aliases.set('TEXTTOFACE', TextToFaceFeature);
+    // Collapse Edge typo/spacing variations
+    this.aliases.set('COLAPSE EDGE', CollapseEdgeFeature);
+    this.aliases.set('COLLAPSEEDGE', CollapseEdgeFeature);
   }
 
   register(FeatureClass) {

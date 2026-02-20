@@ -6,6 +6,11 @@ import {
 } from "../edgeFeatureUtils.js";
 import { runSheetMetalCornerFillet } from "../sheetMetal/sheetMetalEngineBridge.js";
 
+const DEBUG_MODE_NONE = "NONE";
+const DEBUG_MODE_WEDGE_AND_TUBE = "WEDGE AND TUBE";
+const DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEN = "WEDGE AND TUBE AFTER BOOLEN";
+
+
 const inputParamsSchema = {
     id: {
         type: "string",
@@ -60,11 +65,29 @@ const inputParamsSchema = {
         hint: "Relabel tiny disconnected face islands below this area threshold (<= 0 disables).",
     },
     debug: {
-        type: "boolean",
-        default_value: false,
-        hint: "Draw diagnostic vectors for section frames (u,v, bisector, tangency)",
+        type: "options",
+        options: [DEBUG_MODE_NONE, DEBUG_MODE_WEDGE_AND_TUBE, DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEN],
+        default_value: DEBUG_MODE_NONE,
+        hint: "Controls which fillet debug solids are emitted.",
     },
 };
+
+function resolveDebugMode(rawValue) {
+    if (rawValue === true) return DEBUG_MODE_WEDGE_AND_TUBE;
+    if (rawValue === false || rawValue == null) return DEBUG_MODE_NONE;
+    const normalized = String(rawValue).trim().toUpperCase();
+    if (normalized === DEBUG_MODE_WEDGE_AND_TUBE) return DEBUG_MODE_WEDGE_AND_TUBE;
+    if (normalized === DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEN || normalized === "WEDGE AND TUBE AFTER BOOLEAN") {
+        return DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEN;
+    }
+    return DEBUG_MODE_NONE;
+}
+
+function debugModeToSolidsLevel(debugMode) {
+    if (debugMode === DEBUG_MODE_WEDGE_AND_TUBE) return 0;
+    if (debugMode === DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEN) return 1;
+    return 0;
+}
 
 function normalizeSelectionToken(token) {
     const raw = String(token || '').trim();
@@ -202,6 +225,9 @@ export class FilletFeature {
     }
 
     async run(partHistory) {
+        const debugMode = resolveDebugMode(this.inputParams?.debug);
+        const debugEnabled = debugMode !== DEBUG_MODE_NONE;
+        const configuredDebugLevel = debugModeToSolidsLevel(debugMode);
         console.log('[FilletFeature] Starting fillet run...', {
             featureID: this.inputParams?.featureID,
             direction: this.inputParams?.direction,
@@ -211,7 +237,9 @@ export class FilletFeature {
             showTangentOverlays: this.inputParams?.showTangentOverlays,
             patchFilletEndCaps: this.inputParams?.patchFilletEndCaps,
             cleanupTinyFaceIslandsArea: this.inputParams?.cleanupTinyFaceIslandsArea,
-            debug: this.inputParams?.debug,
+            debug: debugEnabled,
+            debugMode,
+            debugSolidsLevel: configuredDebugLevel,
         });
         try { clearFilletCaches(); } catch { }
         const added = [];
@@ -297,14 +325,15 @@ export class FilletFeature {
             featureID: fid,
             direction: dir,
             inflate: Number(this.inputParams.inflate) || 0,
-            debug: !!this.inputParams.debug,
+            debug: debugEnabled,
+            debugSolidsLevel: configuredDebugLevel,
             showTangentOverlays: !!this.inputParams.showTangentOverlays,
             patchFilletEndCaps: !!this.inputParams.patchFilletEndCaps,
             cleanupTinyFaceIslandsArea: this.inputParams?.cleanupTinyFaceIslandsArea,
         });
         const collectDebugSolids = (res) => {
             const out = [];
-            if (!this.inputParams.debug || !Array.isArray(res?.__debugAddedSolids)) return out;
+            if (!debugEnabled || !Array.isArray(res?.__debugAddedSolids)) return out;
             for (const dbg of res.__debugAddedSolids) {
                 if (!dbg) continue;
                 try { dbg.name = `${fid}_${dbg.name || 'DEBUG'}`; } catch { }

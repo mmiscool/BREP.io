@@ -1,5 +1,5 @@
 // Solid.fillet implementation: consolidates fillet logic so features call this API.
-// Usage: solid.fillet({ radius, edgeNames, featureID, direction, inflate, resolution, debug, showTangentOverlays, patchFilletEndCaps })
+// Usage: solid.fillet({ radius, edgeNames, featureID, direction, inflate, resolution, debug, debugSolidsLevel, showTangentOverlays, patchFilletEndCaps })
 import { Vertex } from '../Vertex.js';
 import { resolveEdgesFromInputs } from './edgeResolution.js';
 import { computeFaceAreaFromTriangles } from '../fillets/filletGeometry.js';
@@ -310,6 +310,204 @@ function buildAdjacencyFromFaceEdges(solid, faceNames, tol) {
     adj.set(faceName, set);
   }
   return adj;
+}
+
+function computeFacePlaneInfo(solid, faceName) {
+  if (!solid || typeof solid.getFace !== 'function' || !faceName) return null;
+  const tris = solid.getFace(faceName);
+  if (!Array.isArray(tris) || tris.length === 0) return null;
+
+  let nx = 0, ny = 0, nz = 0;
+  let cx = 0, cy = 0, cz = 0;
+  let wSum = 0;
+  let rawCx = 0, rawCy = 0, rawCz = 0;
+  let rawCount = 0;
+
+  const pushRaw = (p) => {
+    if (!Array.isArray(p) || p.length < 3) return;
+    const x = Number(p[0]) || 0;
+    const y = Number(p[1]) || 0;
+    const z = Number(p[2]) || 0;
+    rawCx += x;
+    rawCy += y;
+    rawCz += z;
+    rawCount += 1;
+  };
+
+  for (const tri of tris) {
+    const p1 = tri?.p1;
+    const p2 = tri?.p2;
+    const p3 = tri?.p3;
+    if (!Array.isArray(p1) || !Array.isArray(p2) || !Array.isArray(p3)) continue;
+    pushRaw(p1);
+    pushRaw(p2);
+    pushRaw(p3);
+
+    const ax = Number(p1[0]) || 0, ay = Number(p1[1]) || 0, az = Number(p1[2]) || 0;
+    const bx = Number(p2[0]) || 0, by = Number(p2[1]) || 0, bz = Number(p2[2]) || 0;
+    const cxTri = Number(p3[0]) || 0, cyTri = Number(p3[1]) || 0, czTri = Number(p3[2]) || 0;
+
+    const ux = bx - ax, uy = by - ay, uz = bz - az;
+    const vx = cxTri - ax, vy = cyTri - ay, vz = czTri - az;
+    const crossX = (uy * vz) - (uz * vy);
+    const crossY = (uz * vx) - (ux * vz);
+    const crossZ = (ux * vy) - (uy * vx);
+    const weight = Math.hypot(crossX, crossY, crossZ);
+    if (!(weight > 1e-18)) continue;
+
+    nx += crossX;
+    ny += crossY;
+    nz += crossZ;
+    const tx = (ax + bx + cxTri) / 3;
+    const ty = (ay + by + cyTri) / 3;
+    const tz = (az + bz + czTri) / 3;
+    cx += tx * weight;
+    cy += ty * weight;
+    cz += tz * weight;
+    wSum += weight;
+  }
+
+  const nLen = Math.hypot(nx, ny, nz);
+  if (!(nLen > 1e-12)) return null;
+  const n = [nx / nLen, ny / nLen, nz / nLen];
+  const center = (wSum > 1e-18)
+    ? [cx / wSum, cy / wSum, cz / wSum]
+    : (rawCount > 0 ? [rawCx / rawCount, rawCy / rawCount, rawCz / rawCount] : [0, 0, 0]);
+  const offset = (n[0] * center[0]) + (n[1] * center[1]) + (n[2] * center[2]);
+
+  return { normal: n, offset, tris };
+}
+
+function maxFaceDistanceToPlane(tris, normal, offset) {
+  if (!Array.isArray(tris) || !normal || !Number.isFinite(offset)) return Infinity;
+  let maxDist = 0;
+  const check = (p) => {
+    if (!Array.isArray(p) || p.length < 3) return;
+    const x = Number(p[0]) || 0;
+    const y = Number(p[1]) || 0;
+    const z = Number(p[2]) || 0;
+    const d = Math.abs((normal[0] * x) + (normal[1] * y) + (normal[2] * z) - offset);
+    if (d > maxDist) maxDist = d;
+  };
+  for (const tri of tris) {
+    check(tri?.p1);
+    check(tri?.p2);
+    check(tri?.p3);
+  }
+  return maxDist;
+}
+
+function areFacesCoplanar(solid, faceA, faceB, planeCache, dotThreshold, planeTol) {
+  if (!solid || !faceA || !faceB || faceA === faceB) return false;
+  const getPlane = (name) => {
+    if (planeCache.has(name)) return planeCache.get(name);
+    const info = computeFacePlaneInfo(solid, name);
+    planeCache.set(name, info);
+    return info;
+  };
+  const planeA = getPlane(faceA);
+  const planeB = getPlane(faceB);
+  if (!planeA || !planeB) return false;
+
+  const dot =
+    (planeA.normal[0] * planeB.normal[0]) +
+    (planeA.normal[1] * planeB.normal[1]) +
+    (planeA.normal[2] * planeB.normal[2]);
+  if (Math.abs(dot) < dotThreshold) return false;
+
+  const distAToB = maxFaceDistanceToPlane(planeA.tris, planeB.normal, planeB.offset);
+  if (!(distAToB <= planeTol)) return false;
+  const distBToA = maxFaceDistanceToPlane(planeB.tris, planeA.normal, planeA.offset);
+  if (!(distBToA <= planeTol)) return false;
+  return true;
+}
+
+function mergeOutsetEndCapsByCoplanarity(resultSolid, filletEntries, direction, featureID) {
+  if (!resultSolid || String(direction).toUpperCase() !== 'OUTSET') return 0;
+  if (typeof resultSolid.getFaceNames !== 'function') return 0;
+
+  const faceHasTris = (name) => {
+    if (!name || typeof resultSolid.getFace !== 'function') return false;
+    const tris = resultSolid.getFace(name);
+    return Array.isArray(tris) && tris.length > 0;
+  };
+
+  const endCapCandidates = new Set();
+  for (const entry of (Array.isArray(filletEntries) ? filletEntries : [])) {
+    const fallbackNames = getFilletMergeCandidateNames(entry?.filletSolid);
+    const names = (Array.isArray(entry?.mergeCandidates) && entry.mergeCandidates.length > 0)
+      ? entry.mergeCandidates
+      : fallbackNames;
+    for (const name of names) {
+      if (!name || typeof name !== 'string') continue;
+      if (isFilletEndCapFaceName(name)) {
+        endCapCandidates.add(name);
+        continue;
+      }
+      const meta = (typeof resultSolid.getFaceMetadata === 'function') ? resultSolid.getFaceMetadata(name) : {};
+      if (meta?.filletEndCap) endCapCandidates.add(name);
+    }
+  }
+
+  // Fallback for cases where mergeCandidates did not retain end-cap labels.
+  if (endCapCandidates.size === 0) {
+    const featurePrefix = featureID ? `${featureID}_FILLET_` : '';
+    for (const name of (resultSolid.getFaceNames() || [])) {
+      if (typeof name !== 'string') continue;
+      if (featurePrefix && !name.startsWith(featurePrefix)) continue;
+      if (isFilletEndCapFaceName(name)) endCapCandidates.add(name);
+    }
+  }
+  if (endCapCandidates.size === 0) return 0;
+
+  const endCapFaces = Array.from(endCapCandidates).filter(faceHasTris);
+  if (endCapFaces.length === 0) return 0;
+
+  const activeFaceNames = (resultSolid.getFaceNames() || []).filter(faceHasTris);
+  const boundaryAdj = buildAdjacencyFromBoundaryPolylines(resultSolid);
+  let edgeAdj = null;
+  let edgeAdjReady = false;
+  const areaCache = buildFaceAreaCache(resultSolid);
+  const planeCache = new Map();
+  const dotThreshold = 0.999;
+  const planeTol = Math.max(deriveSolidToleranceFromVerts(resultSolid, 1e-5) * 25, 1e-6);
+  let merged = 0;
+
+  const pickCoplanarNeighbor = (capName, neighbors) => {
+    if (!(neighbors instanceof Set) || neighbors.size === 0) return null;
+    let best = null;
+    let bestArea = -Infinity;
+    for (const neighbor of neighbors) {
+      if (!neighbor || neighbor === capName) continue;
+      if (!faceHasTris(neighbor)) continue;
+      if (endCapCandidates.has(neighbor) || isFilletEndCapFaceName(neighbor)) continue;
+      if (!areFacesCoplanar(resultSolid, capName, neighbor, planeCache, dotThreshold, planeTol)) continue;
+      const area = areaCache.get(neighbor);
+      if (area > bestArea) {
+        best = neighbor;
+        bestArea = area;
+      }
+    }
+    return best;
+  };
+
+  for (const capName of endCapFaces) {
+    if (!faceHasTris(capName)) continue;
+    let targetFace = pickCoplanarNeighbor(capName, boundaryAdj.get(capName));
+    if (!targetFace) {
+      if (!edgeAdjReady) {
+        const tol = deriveSolidToleranceFromVerts(resultSolid, 1e-5);
+        edgeAdj = buildAdjacencyFromFaceEdges(resultSolid, activeFaceNames, tol);
+        edgeAdjReady = true;
+      }
+      targetFace = pickCoplanarNeighbor(capName, edgeAdj?.get(capName));
+    }
+    if (targetFace && mergeFaceIntoTarget(resultSolid, capName, targetFace)) {
+      planeCache.delete(capName);
+      merged += 1;
+    }
+  }
+  return merged;
 }
 
 function mergeInsetEndCapsByNormal(resultSolid, featureID, direction, dotThreshold = 0.999) {
@@ -2283,6 +2481,7 @@ function removeSelectedEndCapTrianglesAndPatch(resultSolid, endCapFaceIDs, featu
  * @param {number} [opts.inflate=0.1] Inflation for cutting tube
  * @param {number} [opts.resolution=32] Tube resolution (segments around circumference)
  * @param {boolean} [opts.debug=false] Enable debug visuals in fillet builder
+ * @param {number} [opts.debugSolidsLevel=0] 0=tube+wedge, 1=edge fillet boolean result, 2=all intermediate solids
  * @param {boolean} [opts.showTangentOverlays=false] Show pre-inflate tangent overlays on the fillet tube
  * @param {boolean} [opts.patchFilletEndCaps=false] Enable three-face tip cleanup and end-cap triangle replacement patching
  * @param {string} [opts.featureID='FILLET'] For naming of intermediates and result
@@ -2298,6 +2497,10 @@ export async function fillet(opts = {}) {
   const dir = String(opts.direction || 'INSET').toUpperCase();
   const inflate = Number.isFinite(opts.inflate) ? Number(opts.inflate) : 0.1;
   const debug = !!opts.debug;
+  const debugSolidsLevelRaw = Number(opts.debugSolidsLevel);
+  const debugSolidsLevel = Number.isFinite(debugSolidsLevelRaw)
+    ? Math.max(0, Math.min(2, Math.floor(debugSolidsLevelRaw)))
+    : 0;
   const resolutionRaw = Number(opts.resolution);
   const resolution = (Number.isFinite(resolutionRaw) && resolutionRaw > 0)
     ? Math.max(8, Math.floor(resolutionRaw))
@@ -2328,6 +2531,15 @@ export async function fillet(opts = {}) {
     if (!target || debugAdded.length === 0) return;
     try { target.__debugAddedSolids = debugAdded; } catch { }
   };
+  const pushDebugSolid = (solid) => {
+    if (!debug || !solid) return;
+    debugAdded.push(solid);
+  };
+  const pushTubeAndWedgeDebug = (res) => {
+    if (!debug || !res) return;
+    try { if (res.tube) pushDebugSolid(res.tube); } catch { }
+    try { if (res.wedge) pushDebugSolid(res.wedge); } catch { }
+  };
   for (const e of unique) {
     const name = `${featureID}_FILLET_${idx++}`;
     const res = filletSolid({ edgeToFillet: e, radius, sideMode: dir, inflate, resolution, debug, name, showTangentOverlays }) || {};
@@ -2335,8 +2547,8 @@ export async function fillet(opts = {}) {
       console.warn(`Fillet failed for edge ${e?.name || idx}: ${res.error}`);
     }
     if (!res.finalSolid) {
-      try { if (res.tube) debugAdded.push(res.tube); } catch { }
-      try { if (res.wedge) debugAdded.push(res.wedge); } catch { }
+      // When finalSolid is missing, always keep tube/wedge to help diagnose failure.
+      pushTubeAndWedgeDebug(res);
       console.warn('[Solid.fillet] Fillet builder returned no finalSolid.', {
         featureID,
         edge: e?.name,
@@ -2358,8 +2570,14 @@ export async function fillet(opts = {}) {
       tubeSolid: res.tube || null,
     });
     if (debug) {
-      try { if (res.tube) debugAdded.push(res.tube); } catch { }
-      try { if (res.wedge) debugAdded.push(res.wedge); } catch { }
+      if (debugSolidsLevel === 0) {
+        pushTubeAndWedgeDebug(res);
+      } else if (debugSolidsLevel === 1) {
+        pushDebugSolid(res.finalSolid);
+      } else {
+        pushTubeAndWedgeDebug(res);
+        pushDebugSolid(res.finalSolid);
+      }
     }
   }
   if (filletEntries.length === 0) {
@@ -2374,12 +2592,22 @@ export async function fillet(opts = {}) {
   let result = this;
   const solidsToApply = filletEntries.map(entry => entry.filletSolid);
   try {
+    let applyStep = 0;
     for (const filletSolid of solidsToApply) {
       const operation = (dir === 'OUTSET') ? 'union' : 'subtract';
       result = (operation === 'union') ? result.union(filletSolid) : result.subtract(filletSolid);
 
       // Name the result for scene grouping/debugging
       try { result.name = this.name; } catch { }
+
+      if (debug && debugSolidsLevel >= 2 && result && typeof result.clone === 'function') {
+        try {
+          const stepSnapshot = result.clone();
+          try { stepSnapshot.name = `${featureID}_BOOLEAN_STEP_${applyStep}`; } catch { }
+          debugAdded.push(stepSnapshot);
+        } catch { }
+      }
+      applyStep += 1;
     }
     if (typeof result?.visualize === 'function') {
       result.visualize();
@@ -2390,6 +2618,18 @@ export async function fillet(opts = {}) {
     try { fallback.name = this.name; } catch { }
     attachDebugSolids(fallback);
     return fallback;
+  }
+
+  try {
+    const coplanarMerged = mergeOutsetEndCapsByCoplanarity(result, filletEntries, dir, featureID);
+    if (coplanarMerged > 0) {
+      console.log('[Solid.fillet] Merged coplanar end-cap faces after boolean.', {
+        featureID,
+        mergedFaces: coplanarMerged,
+      });
+    }
+  } catch (err) {
+    console.warn('[Solid.fillet] OUTSET coplanar end-cap merge failed', { featureID, error: err?.message || err });
   }
 
   try {
