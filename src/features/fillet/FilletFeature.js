@@ -53,6 +53,11 @@ const inputParamsSchema = {
         default_value: false,
         hint: "Show pre-inflate tangent overlays on the fillet tube",
     },
+    patchFilletEndCaps: {
+        type: "boolean",
+        default_value: false,
+        hint: "Move eligible three-face fillet tip points and replace selected end-cap triangles with a patched face.",
+    },
     cleanupTinyFaceIslandsArea: {
         type: "number",
         step: 0.001,
@@ -200,7 +205,7 @@ export class FilletFeature {
     uiFieldsTest(context) {
         const params = this.inputParams || context?.params || {};
         const dir = String(params?.direction || 'INSET').toUpperCase();
-        return dir === 'INSET' ? ['combineEdges'] : [];
+        return dir === 'INSET' ? ['combineEdges'] : ['patchFilletEndCaps'];
     }
 
     async run(partHistory) {
@@ -212,6 +217,7 @@ export class FilletFeature {
             resolution: this.inputParams?.resolution,
             inflate: this.inputParams?.inflate,
             showTangentOverlays: this.inputParams?.showTangentOverlays,
+            patchFilletEndCaps: this.inputParams?.patchFilletEndCaps,
             cleanupTinyFaceIslandsArea: this.inputParams?.cleanupTinyFaceIslandsArea,
             debug: this.inputParams?.debug,
         });
@@ -292,25 +298,19 @@ export class FilletFeature {
         }
 
         let result = null;
-        try {
-            result = await targetSolid.fillet({
-                radius: r,
-                combineEdges: this.inputParams?.combineEdges,
-                resolution: this.inputParams?.resolution,
-                edges: edgeObjs,
-                featureID: fid,
-                direction: dir,
-                inflate: Number(this.inputParams.inflate) || 0,
-                debug: !!this.inputParams.debug,
-                showTangentOverlays: !!this.inputParams.showTangentOverlays,
-                cleanupTinyFaceIslandsArea: this.inputParams?.cleanupTinyFaceIslandsArea,
-            });
-        } catch (err) {
-            console.error('[FilletFeature] Fillet threw an error; attempting to continue with debug solids.', {
-                featureID: fid,
-                error: err?.message || err,
-            });
-        }
+        result = await targetSolid.fillet({
+            radius: r,
+            combineEdges: this.inputParams?.combineEdges,
+            resolution: this.inputParams?.resolution,
+            edges: edgeObjs,
+            featureID: fid,
+            direction: dir,
+            inflate: Number(this.inputParams.inflate) || 0,
+            debug: !!this.inputParams.debug,
+            showTangentOverlays: !!this.inputParams.showTangentOverlays,
+            patchFilletEndCaps: !!this.inputParams.patchFilletEndCaps,
+            cleanupTinyFaceIslandsArea: this.inputParams?.cleanupTinyFaceIslandsArea,
+        });
         const collectDebugSolids = (res) => {
             const out = [];
             if (!this.inputParams.debug || !Array.isArray(res?.__debugAddedSolids)) return out;
@@ -325,33 +325,12 @@ export class FilletFeature {
         const debugSolids = collectDebugSolids(result);
         const { triCount, vertCount } = getSolidGeometryCounts(result);
         if (!result) {
-            console.error('[FilletFeature] Fillet returned no result; skipping scene replacement.', { featureID: fid });
-            if (debugSolids.length) {
-                console.warn('[FilletFeature] Returning fillet debug solids despite failure.', {
-                    featureID: fid,
-                    debugSolidCount: debugSolids.length,
-                });
-                added.push(...debugSolids);
-            }
-            return { added, removed };
+            throw new Error(`[FilletFeature] Fillet returned no result for feature ${fid || '(unknown)'}.`);
         }
         if (triCount === 0 || vertCount === 0) {
-            console.error('[FilletFeature] Fillet produced an empty solid; skipping scene replacement.', {
-                featureID: fid,
-                triangleCount: triCount,
-                vertexCount: vertCount,
-                direction: dir,
-                radius: r,
-                inflate: this.inputParams.inflate,
-            });
-            if (debugSolids.length) {
-                console.warn('[FilletFeature] Returning fillet debug solids despite empty result.', {
-                    featureID: fid,
-                    debugSolidCount: debugSolids.length,
-                });
-                added.push(...debugSolids);
-            }
-            return { added, removed };
+            throw new Error(`[FilletFeature] Fillet produced empty geometry for feature ${fid || '(unknown)'}. `
+                + `(triangles=${triCount}, vertices=${vertCount}, direction=${dir}, radius=${r}, `
+                + `inflate=${this.inputParams.inflate})`);
         }
         console.log('[FilletFeature] Fillet succeeded; replacing target solid.', {
             featureID: fid,

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>almostnode npm install fixed</title>
+
+<style>
+body {
+  margin: 0;
+  background: #0f1117;
+  color: #e6edf3;
+  font-family: monospace;
+  padding: 20px;
+}
+
+h1 {
+  margin: 0 0 20px 0;
+  color: #58a6ff;
+  font-size: 18px;
+}
+
+button {
+  background: #1f6feb;
+  border: none;
+  padding: 10px 14px;
+  color: white;
+  cursor: pointer;
+  border-radius: 6px;
+  font-size: 14px;
+  margin-right: 10px;
+}
+
+button:hover {
+  background: #388bfd;
+}
+
+pre {
+  margin-top: 20px;
+  padding: 15px;
+  background: #161b22;
+  border-radius: 8px;
+  overflow: auto;
+  min-height: 120px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>almostnode npm install (working)</h1>
+
+<button id="installBtn">Install lodash</button>
+<button id="runBtn">Run Code</button>
+
+<pre id="output">Ready...</pre>
+
+<script type="module">
+import { createContainer } from "https://esm.sh/almostnode";
+
+const output = document.getElementById("output");
+const installBtn = document.getElementById("installBtn");
+const runBtn = document.getElementById("runBtn");
+
+const container = await createContainer();
+
+let installed = false;
+
+installBtn.onclick = async () => {
+  output.textContent = "Installing lodash...\n";
+
+  try {
+    await container.npm.install("lodash");
+    installed = true;
+    output.textContent = "lodash installed successfully.";
+  } catch (err) {
+    output.textContent = "Install failed:\n" + err;
+  }
+};
+
+runBtn.onclick = async () => {
+  if (!installed) {
+    output.textContent = "Install lodash first.";
+    return;
+  }
+
+  output.textContent = "Running...\n";
+
+  try {
+    const result = await container.execute(`
+      const _ = require('lodash');
+
+      const arr = [1,2,3,4,5];
+      const shuffled = _.shuffle(arr);
+      const grouped = _.chunk(shuffled, 2);
+
+      module.exports = { shuffled, grouped };
+    `);
+
+    output.textContent = JSON.stringify(result.exports, null, 2);
+  } catch (err) {
+    output.textContent = "Execution failed:\n" + err;
+  }
+};
+</script>
+
+</body>
+</html>

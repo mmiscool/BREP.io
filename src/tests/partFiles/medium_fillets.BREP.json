@@ -1,0 +1,918 @@
+{
+  "features": [
+    {
+      "type": "S",
+      "inputParams": {
+        "id": "S1",
+        "sketchPlane": null,
+        "editSketch": null,
+        "dumpSketchDiagnostics": null,
+        "curveResolution": 32,
+        "__open": false
+      },
+      "persistentData": {
+        "basis": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            1,
+            0
+          ],
+          "z": [
+            0,
+            0,
+            1
+          ]
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0,
+              "y": 0,
+              "fixed": true
+            },
+            {
+              "id": 2,
+              "x": 0,
+              "y": 0,
+              "fixed": true
+            },
+            {
+              "id": 3,
+              "x": -10.722245,
+              "y": 0,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": -10.722245,
+              "y": 0,
+              "fixed": false
+            },
+            {
+              "id": 6,
+              "x": 0,
+              "y": 7.612868,
+              "fixed": false
+            },
+            {
+              "id": 7,
+              "x": 0,
+              "y": 7.612868,
+              "fixed": false
+            },
+            {
+              "id": 8,
+              "x": -9.196764,
+              "y": 6.319414,
+              "fixed": false
+            },
+            {
+              "id": 10,
+              "x": -7.671271,
+              "y": 7.612868,
+              "fixed": false
+            },
+            {
+              "id": 11,
+              "x": -10.722244,
+              "y": 5.02598,
+              "fixed": false
+            },
+            {
+              "id": 12,
+              "x": -10.722244,
+              "y": 5.02598,
+              "fixed": false
+            },
+            {
+              "id": 13,
+              "x": -7.671271,
+              "y": 7.612868,
+              "fixed": false
+            },
+            {
+              "id": 16,
+              "x": -2.2006,
+              "y": 7.612868,
+              "fixed": false
+            },
+            {
+              "id": 17,
+              "x": 0,
+              "y": 5.817495,
+              "fixed": false
+            }
+          ],
+          "geometries": [
+            {
+              "id": 1,
+              "type": "line",
+              "points": [
+                0,
+                3
+              ],
+              "construction": false
+            },
+            {
+              "id": 7,
+              "type": "line",
+              "points": [
+                4,
+                11
+              ],
+              "construction": false
+            },
+            {
+              "id": 8,
+              "type": "arc",
+              "points": [
+                8,
+                13,
+                12
+              ],
+              "construction": false
+            },
+            {
+              "id": 9,
+              "type": "line",
+              "points": [
+                13,
+                11
+              ],
+              "construction": true
+            },
+            {
+              "id": 12,
+              "type": "line",
+              "points": [
+                16,
+                17
+              ],
+              "construction": false
+            },
+            {
+              "id": 13,
+              "type": "line",
+              "points": [
+                17,
+                2
+              ],
+              "construction": false
+            },
+            {
+              "id": 14,
+              "type": "line",
+              "points": [
+                10,
+                16
+              ],
+              "construction": false
+            }
+          ],
+          "constraints": [
+            {
+              "id": 0,
+              "type": "⏚",
+              "points": [
+                0
+              ],
+              "status": "solved",
+              "previousPointValues": "[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true}]"
+            },
+            {
+              "id": 1,
+              "type": "≡",
+              "points": [
+                0,
+                2
+              ],
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":2,\"x\":0,\"y\":0,\"fixed\":true}]"
+            },
+            {
+              "id": 2,
+              "type": "≡",
+              "points": [
+                3,
+                4
+              ],
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":3,\"x\":-10.722245,\"y\":0,\"fixed\":false},{\"id\":4,\"x\":-10.722245,\"y\":0,\"fixed\":false}]"
+            },
+            {
+              "id": 4,
+              "type": "≡",
+              "points": [
+                6,
+                7
+              ],
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":6,\"x\":0,\"y\":7.612868,\"fixed\":false},{\"id\":7,\"x\":0,\"y\":7.612868,\"fixed\":false}]"
+            },
+            {
+              "id": 10,
+              "type": "≡",
+              "points": [
+                11,
+                12
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":11,\"x\":-10.722244,\"y\":5.02598,\"fixed\":false},{\"id\":12,\"x\":-10.722244,\"y\":5.02598,\"fixed\":false}]"
+            },
+            {
+              "id": 11,
+              "type": "≡",
+              "points": [
+                10,
+                13
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":10,\"x\":-7.671271,\"y\":7.612868,\"fixed\":false},{\"id\":13,\"x\":-7.671271,\"y\":7.612868,\"fixed\":false}]"
+            },
+            {
+              "id": 12,
+              "type": "│",
+              "points": [
+                4,
+                11
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":4,\"x\":-10.897392,\"y\":0,\"fixed\":false},{\"id\":11,\"x\":-10.897392,\"y\":4.723352,\"fixed\":false}]"
+            },
+            {
+              "id": 13,
+              "type": "━",
+              "points": [
+                10,
+                6
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":10,\"x\":-7.671271,\"y\":7.612868,\"fixed\":false},{\"id\":6,\"x\":0,\"y\":7.612868,\"fixed\":false}]"
+            },
+            {
+              "id": 14,
+              "type": "│",
+              "points": [
+                7,
+                2
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":7,\"x\":0,\"y\":7.612868,\"fixed\":false},{\"id\":2,\"x\":0,\"y\":0,\"fixed\":true}]"
+            },
+            {
+              "id": 15,
+              "type": "━",
+              "points": [
+                0,
+                3
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":3,\"x\":-10.722245,\"y\":0,\"fixed\":false}]"
+            },
+            {
+              "id": 16,
+              "type": "⏛",
+              "points": [
+                13,
+                11,
+                8
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":13,\"x\":-7.671271,\"y\":7.612868,\"fixed\":false},{\"id\":11,\"x\":-10.722244,\"y\":5.02598,\"fixed\":false},{\"id\":8,\"x\":-9.196764,\"y\":6.319414,\"fixed\":false}]"
+            },
+            {
+              "id": 18,
+              "type": "⟺",
+              "points": [
+                8,
+                13
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "diameter",
+              "value": 2,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":8,\"x\":-9.196764,\"y\":6.319414,\"fixed\":false},{\"id\":13,\"x\":-7.671271,\"y\":7.612868,\"fixed\":false}]",
+              "radialGeometryType": "arc"
+            },
+            {
+              "id": 19,
+              "type": "⏛",
+              "points": [
+                10,
+                6,
+                16
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":10,\"x\":-7.671271,\"y\":7.612868,\"fixed\":false},{\"id\":6,\"x\":0,\"y\":7.612868,\"fixed\":false},{\"id\":16,\"x\":-2.2006,\"y\":7.612868,\"fixed\":false}]"
+            },
+            {
+              "id": 20,
+              "type": "⏛",
+              "points": [
+                7,
+                2,
+                17
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":7,\"x\":0,\"y\":7.612868,\"fixed\":false},{\"id\":2,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":17,\"x\":0,\"y\":5.817495,\"fixed\":false}]"
+            }
+          ]
+        },
+        "lastSketchSignature": "{\"points\":[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":2,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":3,\"x\":-10.722245,\"y\":0,\"fixed\":false},{\"id\":4,\"x\":-10.722245,\"y\":0,\"fixed\":false},{\"id\":6,\"x\":0,\"y\":7.612868,\"fixed\":false},{\"id\":7,\"x\":0,\"y\":7.612868,\"fixed\":false},{\"id\":8,\"x\":-9.196764,\"y\":6.319414,\"fixed\":false},{\"id\":10,\"x\":-7.671271,\"y\":7.612868,\"fixed\":false},{\"id\":11,\"x\":-10.722244,\"y\":5.02598,\"fixed\":false},{\"id\":12,\"x\":-10.722244,\"y\":5.02598,\"fixed\":false},{\"id\":13,\"x\":-7.671271,\"y\":7.612868,\"fixed\":false},{\"id\":16,\"x\":-2.2006,\"y\":7.612868,\"fixed\":false},{\"id\":17,\"x\":0,\"y\":5.817495,\"fixed\":false}],\"geometries\":[{\"id\":1,\"type\":\"line\",\"points\":[0,3],\"construction\":false},{\"id\":7,\"type\":\"line\",\"points\":[4,11],\"construction\":false},{\"id\":8,\"type\":\"arc\",\"points\":[8,13,12],\"construction\":false},{\"id\":9,\"type\":\"line\",\"points\":[13,11],\"construction\":true},{\"id\":12,\"type\":\"line\",\"points\":[16,17],\"construction\":false},{\"id\":13,\"type\":\"line\",\"points\":[17,2],\"construction\":false},{\"id\":14,\"type\":\"line\",\"points\":[10,16],\"construction\":false}],\"constraints\":[{\"id\":0,\"type\":\"⏚\",\"points\":[0],\"status\":\"solved\",\"previousPointValues\":\"[{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true}]\"},{\"id\":1,\"type\":\"≡\",\"points\":[0,2],\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true},{\\\"id\\\":2,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true}]\"},{\"id\":2,\"type\":\"≡\",\"points\":[3,4],\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":3,\\\"x\\\":-10.722245,\\\"y\\\":0,\\\"fixed\\\":false},{\\\"id\\\":4,\\\"x\\\":-10.722245,\\\"y\\\":0,\\\"fixed\\\":false}]\"},{\"id\":4,\"type\":\"≡\",\"points\":[6,7],\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":6,\\\"x\\\":0,\\\"y\\\":7.612868,\\\"fixed\\\":false},{\\\"id\\\":7,\\\"x\\\":0,\\\"y\\\":7.612868,\\\"fixed\\\":false}]\"},{\"id\":10,\"type\":\"≡\",\"points\":[11,12],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":11,\\\"x\\\":-10.722244,\\\"y\\\":5.02598,\\\"fixed\\\":false},{\\\"id\\\":12,\\\"x\\\":-10.722244,\\\"y\\\":5.02598,\\\"fixed\\\":false}]\"},{\"id\":11,\"type\":\"≡\",\"points\":[10,13],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":10,\\\"x\\\":-7.671271,\\\"y\\\":7.612868,\\\"fixed\\\":false},{\\\"id\\\":13,\\\"x\\\":-7.671271,\\\"y\\\":7.612868,\\\"fixed\\\":false}]\"},{\"id\":12,\"type\":\"│\",\"points\":[4,11],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":4,\\\"x\\\":-10.897392,\\\"y\\\":0,\\\"fixed\\\":false},{\\\"id\\\":11,\\\"x\\\":-10.897392,\\\"y\\\":4.723352,\\\"fixed\\\":false}]\"},{\"id\":13,\"type\":\"━\",\"points\":[10,6],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":10,\\\"x\\\":-7.671271,\\\"y\\\":7.612868,\\\"fixed\\\":false},{\\\"id\\\":6,\\\"x\\\":0,\\\"y\\\":7.612868,\\\"fixed\\\":false}]\"},{\"id\":14,\"type\":\"│\",\"points\":[7,2],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":7,\\\"x\\\":0,\\\"y\\\":7.612868,\\\"fixed\\\":false},{\\\"id\\\":2,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true}]\"},{\"id\":15,\"type\":\"━\",\"points\":[0,3],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true},{\\\"id\\\":3,\\\"x\\\":-10.722245,\\\"y\\\":0,\\\"fixed\\\":false}]\"},{\"id\":16,\"type\":\"⏛\",\"points\":[13,11,8],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":13,\\\"x\\\":-7.671271,\\\"y\\\":7.612868,\\\"fixed\\\":false},{\\\"id\\\":11,\\\"x\\\":-10.722244,\\\"y\\\":5.02598,\\\"fixed\\\":false},{\\\"id\\\":8,\\\"x\\\":-9.196764,\\\"y\\\":6.319414,\\\"fixed\\\":false}]\"},{\"id\":18,\"type\":\"⟺\",\"points\":[8,13],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"diameter\",\"value\":2,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":8,\\\"x\\\":-9.196764,\\\"y\\\":6.319414,\\\"fixed\\\":false},{\\\"id\\\":13,\\\"x\\\":-7.671271,\\\"y\\\":7.612868,\\\"fixed\\\":false}]\",\"radialGeometryType\":\"arc\"},{\"id\":19,\"type\":\"⏛\",\"points\":[10,6,16],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":10,\\\"x\\\":-7.671271,\\\"y\\\":7.612868,\\\"fixed\\\":false},{\\\"id\\\":6,\\\"x\\\":0,\\\"y\\\":7.612868,\\\"fixed\\\":false},{\\\"id\\\":16,\\\"x\\\":-2.2006,\\\"y\\\":7.612868,\\\"fixed\\\":false}]\"},{\"id\":20,\"type\":\"⏛\",\"points\":[7,2,17],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":7,\\\"x\\\":0,\\\"y\\\":7.612868,\\\"fixed\\\":false},{\\\"id\\\":2,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true},{\\\"id\\\":17,\\\"x\\\":0,\\\"y\\\":5.817495,\\\"fixed\\\":false}]\"}]}",
+        "lastSketchChanged": false,
+        "sketchDimOffsets": {
+          "17": {
+            "du": 0.3358335420340919,
+            "dv": 4.986314215714522
+          },
+          "18": {
+            "du": 0.05645915350536246,
+            "dv": 4.364273969893283
+          }
+        },
+        "externalRefs": [],
+        "__refPreviewSnapshots": {
+          "sketchPlane": {}
+        }
+      },
+      "timestamp": 1771523067302
+    },
+    {
+      "type": "E",
+      "inputParams": {
+        "id": "E2",
+        "profile": "S1:PROFILE",
+        "consumeProfileSketch": true,
+        "distance": "6",
+        "distanceBack": 0,
+        "boolean": {
+          "targets": [],
+          "operation": "NONE"
+        },
+        "__open": false
+      },
+      "persistentData": {
+        "__refPreviewSnapshots": {
+          "profile": {
+            "S1:PROFILE": {
+              "type": "FACE",
+              "edgePositions": [
+                [
+                  0,
+                  0,
+                  0,
+                  -10.722245,
+                  0,
+                  0
+                ],
+                [
+                  -10.722245,
+                  0,
+                  0,
+                  -10.722244,
+                  5.02598,
+                  0
+                ],
+                [
+                  -7.671271,
+                  7.612868,
+                  0,
+                  -7.952922942480484,
+                  7.885623298527412,
+                  0,
+                  -8.282374895399004,
+                  8.098190182815586,
+                  0,
+                  -8.646966232469639,
+                  8.242399844457424,
+                  0,
+                  -9.032685943513691,
+                  8.312710399069811,
+                  0,
+                  -9.424711068553593,
+                  8.306419857339836,
+                  0,
+                  -9.80797633461448,
+                  8.223769960733213,
+                  0,
+                  -10.167753104458098,
+                  8.06793689152549,
+                  0,
+                  -10.490215388622275,
+                  7.84490921416362,
+                  0,
+                  -10.762971169287898,
+                  7.563257738592669,
+                  0,
+                  -10.975538617539584,
+                  7.233806149551768,
+                  0,
+                  -11.119748903297484,
+                  6.869215059343254,
+                  0,
+                  -11.190060118194102,
+                  6.483495468659077,
+                  0,
+                  -11.183770247542233,
+                  6.091470332851447,
+                  0,
+                  -11.101121007018486,
+                  5.70820492530903,
+                  0,
+                  -10.945288553685572,
+                  5.3484278887071195,
+                  0,
+                  -10.722244,
+                  5.02598,
+                  0
+                ],
+                [
+                  -7.671271,
+                  7.612868,
+                  0,
+                  -2.2006,
+                  7.612868,
+                  0
+                ],
+                [
+                  -2.2006,
+                  7.612868,
+                  0,
+                  0,
+                  5.817495,
+                  0
+                ],
+                [
+                  0,
+                  5.817495,
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "sourceUuid": "4b30b918-2530-459b-9b1a-c3d006f88d30",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1771523067302
+            }
+          }
+        }
+      },
+      "timestamp": 1771523067310
+    },
+    {
+      "type": "F",
+      "inputParams": {
+        "id": "F3",
+        "edges": [
+          "E2:S1:G4_SW|E2:S1:PROFILE_START[0]",
+          "E2:S1:G1_SW|E2:S1:PROFILE_START[0]",
+          "E2:S1:G7_SW|E2:S1:PROFILE_START[0]",
+          "E2:S1:G6_SW|E2:S1:PROFILE_START[0]",
+          "E2:S1:G8_SW|E2:S1:PROFILE_START[0]",
+          "E2:S1:G1_SW|E2:S1:G4_SW[0]",
+          "E2:S1:G13_SW",
+          "E2:S1:G12_SW|E2:S1:PROFILE_END[0]",
+          "E2:S1:G14_SW|E2:S1:PROFILE_END[0]",
+          "E2:S1:G8_SW|E2:S1:PROFILE_END[0]",
+          "E2:S1:G7_SW|E2:S1:PROFILE_END[0]",
+          "E2:S1:G1_SW|E2:S1:PROFILE_END[0]",
+          "E2:S1:G13_SW|E2:S1:PROFILE_END[0]"
+        ],
+        "radius": 1,
+        "resolution": 32,
+        "inflate": 0.1,
+        "direction": "INSET",
+        "combineEdges": false,
+        "showTangentOverlays": false,
+        "cleanupTinyFaceIslandsArea": 0.01,
+        "debug": false,
+        "__open": true,
+        "combineAdjacentEdges": true,
+        "patchFilletEndCaps": true
+      },
+      "persistentData": {
+        "__refPreviewSnapshots": {
+          "edges": {
+            "E2:S1:G4_SW|E2:S1:PROFILE_START[0]": {
+              "type": "EDGE",
+              "positions": [
+                0,
+                0,
+                0,
+                0,
+                7.612867832183838,
+                0
+              ],
+              "sourceUuid": "32af3dac-ef4c-4b11-9439-761fd32541e4",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1771522896355
+            },
+            "E2:S1:G1_SW|E2:S1:PROFILE_START[0]": {
+              "type": "EDGE",
+              "positions": [
+                -10.722245216369629,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "sourceUuid": "1066f452-2e8a-4146-9461-d99c8f149abe",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1771523067310
+            },
+            "E2:S1:G7_SW|E2:S1:PROFILE_START[0]": {
+              "type": "EDGE",
+              "positions": [
+                -10.722245216369629,
+                0,
+                0,
+                -10.722244262695312,
+                5.025979995727539,
+                0
+              ],
+              "sourceUuid": "10544b17-38b7-4d74-b8bd-bf61d0e23a45",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1771523067310
+            },
+            "E2:S1:G6_SW|E2:S1:PROFILE_START[0]": {
+              "type": "EDGE",
+              "positions": [
+                -7.671270847320557,
+                7.612867832183838,
+                0,
+                0,
+                7.612867832183838,
+                0
+              ],
+              "sourceUuid": "af4df8ff-6b8a-4373-a372-41210207c130",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1771522896355
+            },
+            "E2:S1:G8_SW|E2:S1:PROFILE_START[0]": {
+              "type": "EDGE",
+              "positions": [
+                -10.722244262695312,
+                5.025979995727539,
+                0,
+                -10.94528865814209,
+                5.348427772521973,
+                0,
+                -11.101120948791504,
+                5.708204746246338,
+                0,
+                -11.183770179748535,
+                6.091470241546631,
+                0,
+                -11.190059661865234,
+                6.483495235443115,
+                0,
+                -11.119749069213867,
+                6.86921501159668,
+                0,
+                -10.97553825378418,
+                7.233806133270264,
+                0,
+                -10.762970924377441,
+                7.563257694244385,
+                0,
+                -10.490215301513672,
+                7.844909191131592,
+                0,
+                -10.167753219604492,
+                8.067936897277832,
+                0,
+                -9.807976722717285,
+                8.223770141601562,
+                0,
+                -9.424711227416992,
+                8.30642032623291,
+                0,
+                -9.032686233520508,
+                8.312710762023926,
+                0,
+                -8.646965980529785,
+                8.242400169372559,
+                0,
+                -8.28237533569336,
+                8.098190307617188,
+                0,
+                -7.952922821044922,
+                7.885623455047607,
+                0,
+                -7.671270847320557,
+                7.612867832183838,
+                0
+              ],
+              "sourceUuid": "994c0a3c-0871-4984-9984-52e39a144c1c",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1771523067310
+            },
+            "E2:S1:G1_SW|E2:S1:G4_SW[0]": {
+              "type": "EDGE",
+              "positions": [
+                0,
+                0,
+                -6,
+                0,
+                0,
+                0
+              ],
+              "sourceUuid": "c47bd7ea-b049-4924-b45f-bea6be124962",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1771522896355
+            },
+            "E2:S1:G13_SW": {
+              "type": "FACE",
+              "edgePositions": [
+                [
+                  0,
+                  0,
+                  -6,
+                  0,
+                  5.817494869232178,
+                  -6
+                ],
+                [
+                  0,
+                  0,
+                  -6,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  5.817494869232178,
+                  -6,
+                  0,
+                  5.817494869232178,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0,
+                  0,
+                  5.817494869232178,
+                  0
+                ]
+              ],
+              "sourceUuid": "77ccc4f0-b184-427c-9fc7-04bc8da4d87f",
+              "sourceFeatureId": "F3",
+              "sourceTimestamp": 1771523067310
+            },
+            "E2:S1:G14_SW": {
+              "type": "FACE",
+              "edgePositions": [
+                [
+                  -7.671270847320557,
+                  7.612867832183838,
+                  -6,
+                  -2.2005999088287354,
+                  7.612867832183838,
+                  -6
+                ],
+                [
+                  -7.671270847320557,
+                  7.612867832183838,
+                  -6,
+                  -7.671270847320557,
+                  7.612867832183838,
+                  0
+                ],
+                [
+                  -2.2005999088287354,
+                  7.612867832183838,
+                  -6,
+                  -2.2005999088287354,
+                  7.612867832183838,
+                  0
+                ],
+                [
+                  -7.671270847320557,
+                  7.612867832183838,
+                  0,
+                  -2.2005999088287354,
+                  7.612867832183838,
+                  0
+                ]
+              ],
+              "sourceUuid": "29c1539e-a348-4171-af9a-dffae2f6161b",
+              "sourceFeatureId": "F3",
+              "sourceTimestamp": 1771523067310
+            },
+            "E2:S1:G12_SW|E2:S1:PROFILE_END[0]": {
+              "type": "EDGE",
+              "positions": [
+                0,
+                5.817494869232178,
+                -6,
+                -2.2005999088287354,
+                7.612867832183838,
+                -6
+              ],
+              "sourceUuid": "5c9e4054-7a42-4874-a2d8-1dae3ba0a49f",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1771523067310
+            },
+            "E2:S1:G14_SW|E2:S1:PROFILE_END[0]": {
+              "type": "EDGE",
+              "positions": [
+                -7.671270847320557,
+                7.612867832183838,
+                -6,
+                -2.2005999088287354,
+                7.612867832183838,
+                -6
+              ],
+              "sourceUuid": "fcfa2718-3044-4bd6-a8f5-5f93d9945710",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1771523067310
+            },
+            "E2:S1:G8_SW|E2:S1:PROFILE_END[0]": {
+              "type": "EDGE",
+              "positions": [
+                -10.722244262695312,
+                5.025979995727539,
+                -6,
+                -10.94528865814209,
+                5.348427772521973,
+                -6,
+                -11.101120948791504,
+                5.708204746246338,
+                -6,
+                -11.183770179748535,
+                6.091470241546631,
+                -6,
+                -11.190059661865234,
+                6.483495235443115,
+                -6,
+                -11.119749069213867,
+                6.86921501159668,
+                -6,
+                -10.97553825378418,
+                7.233806133270264,
+                -6,
+                -10.762970924377441,
+                7.563257694244385,
+                -6,
+                -10.490215301513672,
+                7.844909191131592,
+                -6,
+                -10.167753219604492,
+                8.067936897277832,
+                -6,
+                -9.807976722717285,
+                8.223770141601562,
+                -6,
+                -9.424711227416992,
+                8.30642032623291,
+                -6,
+                -9.032686233520508,
+                8.312710762023926,
+                -6,
+                -8.646965980529785,
+                8.242400169372559,
+                -6,
+                -8.28237533569336,
+                8.098190307617188,
+                -6,
+                -7.952922821044922,
+                7.885623455047607,
+                -6,
+                -7.671270847320557,
+                7.612867832183838,
+                -6
+              ],
+              "sourceUuid": "e85f9151-e93d-40f1-9d2f-d8f23c3895e0",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1771523067310
+            },
+            "E2:S1:G7_SW|E2:S1:PROFILE_END[0]": {
+              "type": "EDGE",
+              "positions": [
+                -10.722245216369629,
+                0,
+                -6,
+                -10.722244262695312,
+                5.025979995727539,
+                -6
+              ],
+              "sourceUuid": "5da1609c-a344-4f44-bf55-27889fcab493",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1771523067310
+            },
+            "E2:S1:G1_SW|E2:S1:PROFILE_END[0]": {
+              "type": "EDGE",
+              "positions": [
+                -10.722245216369629,
+                0,
+                -6,
+                0,
+                0,
+                -6
+              ],
+              "sourceUuid": "877a453f-e993-457c-86c6-eeff08b3c9fe",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1771523067310
+            },
+            "E2:S1:G13_SW|E2:S1:PROFILE_END[0]": {
+              "type": "EDGE",
+              "positions": [
+                0,
+                0,
+                -6,
+                0,
+                5.817494869232178,
+                -6
+              ],
+              "sourceUuid": "eb834347-172a-46ed-9fc4-ae35a881845e",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1771523067310
+            }
+          }
+        }
+      },
+      "timestamp": 1771523241977
+    }
+  ],
+  "idCounter": 3,
+  "expressions": "//Examples:\nx = 10 + 6; \ny = x * 2;",
+  "pmiViews": [],
+  "metadata": {},
+  "assemblyConstraints": [],
+  "assemblyConstraintIdCounter": 0
+}

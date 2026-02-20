@@ -23,7 +23,8 @@ export function generateEndcapFaces(solid, faceName, boundaryPoints, normal = nu
     const {
         minTriangleArea = 1e-12,
         ensureCounterClockwise = true,
-        triangulationMethod = 'fan'
+        triangulationMethod = 'fan',
+        earFallbackMode = 'fan'
     } = options;
     
     if (!solid || typeof solid.addTriangle !== 'function') {
@@ -86,7 +87,7 @@ export function generateEndcapFaces(solid, faceName, boundaryPoints, normal = nu
             triangleCount = triangulateCentroid(solid, faceName, cleanPoints, minTriangleArea);
             break;
         case 'earcut':
-            triangleCount = triangulateEarcut(solid, faceName, cleanPoints, capNormal, minTriangleArea);
+            triangleCount = triangulateEarcut(solid, faceName, cleanPoints, capNormal, minTriangleArea, earFallbackMode);
             break;
         case 'fan':
         default:
@@ -205,7 +206,7 @@ function triangulateCentroid(solid, faceName, points, minArea) {
 /**
  * Ear clipping triangulation (handles non-convex polygons)
  */
-function triangulateEarcut(solid, faceName, points, normal, minArea) {
+function triangulateEarcut(solid, faceName, points, normal, minArea, earFallbackMode = 'fan') {
     const n = points.length;
     if (n < 3) return 0;
     
@@ -234,7 +235,16 @@ function triangulateEarcut(solid, faceName, points, normal, minArea) {
         }
         
         if (!earFound) {
-            // Fallback to fan triangulation if ear clipping fails
+            // Configurable fallback so callers can avoid fan triangulation.
+            if (earFallbackMode === 'none') {
+                console.warn('generateEndcapFaces: ear clipping failed and fallback is disabled');
+                return count;
+            }
+            if (earFallbackMode === 'centroid') {
+                console.warn('generateEndcapFaces: ear clipping failed, falling back to centroid');
+                return count + triangulateCentroid(solid, faceName, vertices, minArea);
+            }
+            // Default legacy behavior
             console.warn('generateEndcapFaces: ear clipping failed, falling back to fan');
             return count + triangulateFan(solid, faceName, vertices, minArea);
         }

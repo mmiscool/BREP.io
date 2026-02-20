@@ -36,10 +36,15 @@ export function visualize(options = {}) {
 
 
     const Solid = this.constructor;
+    const preservedDebugChildren = [];
     // Clear existing children and dispose resources
     for (let i = this.children.length - 1; i >= 0; i--) {
         const child = this.children[i];
         this.remove(child);
+        if (child?.userData?.filletDebug === true) {
+            preservedDebugChildren.push(child);
+            continue;
+        }
         if (child.geometry && typeof child.geometry.dispose === 'function') child.geometry.dispose();
         const mat = child.material;
         if (mat) {
@@ -458,6 +463,14 @@ export function visualize(options = {}) {
             }
         }
     } catch { /* best-effort vertices */ }
+
+    if (preservedDebugChildren.length) {
+        for (let i = preservedDebugChildren.length - 1; i >= 0; i--) {
+            const child = preservedDebugChildren[i];
+            if (!child) continue;
+            this.add(child);
+        }
+    }
 
     return this;
 
