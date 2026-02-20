@@ -554,12 +554,10 @@
         "resolution": 32,
         "inflate": 0.1,
         "direction": "INSET",
-        "combineEdges": false,
         "showTangentOverlays": false,
         "cleanupTinyFaceIslandsArea": 0.01,
         "debug": false,
         "__open": true,
-        "combineAdjacentEdges": true,
         "patchFilletEndCaps": true
       },
       "persistentData": {

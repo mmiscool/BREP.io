@@ -1,10 +1,9 @@
 // Solid.fillet implementation: consolidates fillet logic so features call this API.
-// Usage: solid.fillet({ radius, edgeNames, featureID, direction, inflate, resolution, debug, showTangentOverlays, combineEdges, patchFilletEndCaps })
-import { Manifold } from '../SolidShared.js';
+// Usage: solid.fillet({ radius, edgeNames, featureID, direction, inflate, resolution, debug, showTangentOverlays, patchFilletEndCaps })
 import { Vertex } from '../Vertex.js';
 import { resolveEdgesFromInputs } from './edgeResolution.js';
 import { computeFaceAreaFromTriangles } from '../fillets/filletGeometry.js';
-import { createQuantizer, deriveTolerance } from '../../utils/geometryTolerance.js';
+import { createQuantizer } from '../../utils/geometryTolerance.js';
 
 // Threshold for collapsing tiny end caps into the round face.
 const END_CAP_AREA_RATIO_THRESHOLD = 0.05;
@@ -198,83 +197,6 @@ function mergeSideFacesIntoRoundFace(resultSolid, filletName, roundFaceName) {
   mergeFaceIntoTarget(resultSolid, sideB, roundFaceName);
   mergeFaceIntoTarget(resultSolid, surfaceCA, roundFaceName);
   mergeFaceIntoTarget(resultSolid, surfaceCB, roundFaceName);
-}
-
-function getEdgePolylineLocal(edgeObj) {
-  if (!edgeObj) return [];
-  const cached = edgeObj?.userData?.polylineLocal;
-  if (Array.isArray(cached) && cached.length >= 2) {
-    return cached.map(p => [Number(p[0]) || 0, Number(p[1]) || 0, Number(p[2]) || 0]);
-  }
-  if (typeof edgeObj.points === 'function') {
-    const pts = edgeObj.points(false);
-    if (Array.isArray(pts) && pts.length >= 2) {
-      return pts.map(p => [Number(p.x) || 0, Number(p.y) || 0, Number(p.z) || 0]);
-    }
-  }
-  const pos = edgeObj?.geometry?.getAttribute?.('position');
-  if (pos && pos.itemSize === 3 && pos.count >= 2) {
-    const out = [];
-    for (let i = 0; i < pos.count; i++) {
-      out.push([pos.getX(i), pos.getY(i), pos.getZ(i)]);
-    }
-    return out;
-  }
-  return [];
-}
-
-function dedupePoints(points, tol = 1e-5) {
-  const out = [];
-  const seen = new Set();
-  const { q, k } = createQuantizer(tol);
-  for (const p of points || []) {
-    if (!Array.isArray(p) || p.length < 3) continue;
-    const qp = q(p);
-    const key = k(qp);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(qp);
-  }
-  return out;
-}
-
-function collectFacePoints(solid, faceName, out) {
-  if (!solid || typeof solid.getFace !== 'function' || !faceName) return out;
-  const tris = solid.getFace(faceName);
-  if (!Array.isArray(tris) || tris.length === 0) return out;
-  const dst = Array.isArray(out) ? out : [];
-  for (const tri of tris) {
-    const p1 = tri?.p1;
-    const p2 = tri?.p2;
-    const p3 = tri?.p3;
-    if (Array.isArray(p1) && p1.length >= 3) dst.push([Number(p1[0]) || 0, Number(p1[1]) || 0, Number(p1[2]) || 0]);
-    if (Array.isArray(p2) && p2.length >= 3) dst.push([Number(p2[0]) || 0, Number(p2[1]) || 0, Number(p2[2]) || 0]);
-    if (Array.isArray(p3) && p3.length >= 3) dst.push([Number(p3[0]) || 0, Number(p3[1]) || 0, Number(p3[2]) || 0]);
-  }
-  return dst;
-}
-
-function buildHullSolidFromPoints(points, name, SolidCtor, tol = 1e-5) {
-  const unique = dedupePoints(points, tol);
-  if (unique.length < 4) return null;
-  let hull = null;
-  try {
-    hull = Manifold.hull(unique);
-  } catch {
-    return null;
-  }
-  try {
-    const solid = SolidCtor._fromManifold(hull, new Map([[0, name]]));
-    try { solid.name = name; } catch { }
-    const faceNames = (typeof solid.getFaceNames === 'function') ? solid.getFaceNames() : [];
-    for (const faceName of faceNames) {
-      if (!faceName || faceName === name) continue;
-      mergeFaceIntoTarget(solid, faceName, name);
-    }
-    return solid;
-  } catch {
-    return null;
-  }
 }
 
 function averageFaceNormalSimple(solid, faceName) {
@@ -2360,7 +2282,6 @@ function removeSelectedEndCapTrianglesAndPatch(resultSolid, endCapFaceIDs, featu
  * @param {'INSET'|'OUTSET'|string} [opts.direction='INSET'] Boolean behavior (subtract vs union)
  * @param {number} [opts.inflate=0.1] Inflation for cutting tube
  * @param {number} [opts.resolution=32] Tube resolution (segments around circumference)
- * @param {boolean} [opts.combineEdges=false] Combine connected edges that share face pairs into single paths
  * @param {boolean} [opts.debug=false] Enable debug visuals in fillet builder
  * @param {boolean} [opts.showTangentOverlays=false] Show pre-inflate tangent overlays on the fillet tube
  * @param {boolean} [opts.patchFilletEndCaps=false] Enable three-face tip cleanup and end-cap triangle replacement patching
@@ -2381,15 +2302,13 @@ export async function fillet(opts = {}) {
   const resolution = (Number.isFinite(resolutionRaw) && resolutionRaw > 0)
     ? Math.max(8, Math.floor(resolutionRaw))
     : 32;
-  const combineEdges = (dir !== 'INSET') && !!opts.combineEdges;
   const showTangentOverlays = !!opts.showTangentOverlays;
-  const patchFilletEndCaps = (dir === 'INSET') && !!opts.patchFilletEndCaps;
+  const patchFilletEndCaps = !!opts.patchFilletEndCaps;
   const featureID = opts.featureID || 'FILLET';
   const cleanupTinyFaceIslandsAreaRaw = Number(opts.cleanupTinyFaceIslandsArea);
   const cleanupTinyFaceIslandsArea = Number.isFinite(cleanupTinyFaceIslandsAreaRaw)
     ? cleanupTinyFaceIslandsAreaRaw
     : 0.001;
-  const SolidCtor = this?.constructor;
 
   // Resolve edges from names and/or provided objects
   const unique = resolveEdgesFromInputs(this, { edgeNames: opts.edgeNames, edges: opts.edges });
@@ -2401,8 +2320,6 @@ export async function fillet(opts = {}) {
     return c;
   }
 
-  const combineCornerHulls = combineEdges && unique.length > 1;
-
   // Build fillet solids per edge using existing core implementation
   const filletEntries = [];
   let idx = 0;
@@ -2410,10 +2327,6 @@ export async function fillet(opts = {}) {
   const attachDebugSolids = (target) => {
     if (!target || debugAdded.length === 0) return;
     try { target.__debugAddedSolids = debugAdded; } catch { }
-  };
-  const toPolyline = (points) => {
-    if (!Array.isArray(points) || points.length < 2) return [];
-    return points.map((p) => [Number(p?.x) || 0, Number(p?.y) || 0, Number(p?.z) || 0]);
   };
   for (const e of unique) {
     const name = `${featureID}_FILLET_${idx++}`;
@@ -2436,8 +2349,6 @@ export async function fillet(opts = {}) {
 
     const mergeCandidates = getFilletMergeCandidateNames(res.finalSolid);
     const roundFaceName = guessRoundFaceName(res.finalSolid, name);
-    let edgePolyline = getEdgePolylineLocal(e);
-    if (edgePolyline.length < 2) edgePolyline = toPolyline(res.edge);
     filletEntries.push({
       filletSolid: res.finalSolid,
       filletName: name,
@@ -2445,8 +2356,6 @@ export async function fillet(opts = {}) {
       roundFaceName,
       wedgeSolid: res.wedge || null,
       tubeSolid: res.tube || null,
-      edgeObj: e,
-      edgePolyline,
     });
     if (debug) {
       try { if (res.tube) debugAdded.push(res.tube); } catch { }
@@ -2460,101 +2369,10 @@ export async function fillet(opts = {}) {
     attachDebugSolids(c);
     return c;
   }
-  const cornerWedgeHulls = [];
-  const cornerTubeHulls = [];
-  let combinedFilletSolid = null;
-  if (combineCornerHulls && SolidCtor && filletEntries.length > 1) {
-    try {
-      const polylines = [];
-      for (const entry of filletEntries) {
-        const poly = Array.isArray(entry.edgePolyline) ? entry.edgePolyline : [];
-        if (poly.length >= 2) polylines.push(poly);
-      }
-      const cornerTol = deriveTolerance(polylines, 1e-5);
-      const { q, k } = createQuantizer(cornerTol);
-      const groups = new Map();
-
-      const addEndpoint = (pt, entry, cap) => {
-        if (!Array.isArray(pt) || pt.length < 3) return;
-        const qp = q(pt);
-        const key = k(qp);
-        if (!groups.has(key)) groups.set(key, { point: qp, items: [] });
-        groups.get(key).items.push({ entry, cap });
-      };
-
-      for (const entry of filletEntries) {
-        const poly = Array.isArray(entry.edgePolyline) ? entry.edgePolyline : [];
-        if (poly.length < 2) continue;
-        addEndpoint(poly[0], entry, 'start');
-        addEndpoint(poly[poly.length - 1], entry, 'end');
-      }
-
-      let cornerIdx = 0;
-      for (const group of groups.values()) {
-        if (!group || !Array.isArray(group.items) || group.items.length < 2) continue;
-        const wedgePoints = [];
-        const tubePoints = [];
-        for (const item of group.items) {
-          const entry = item.entry;
-          if (!entry) continue;
-          const filletName = entry.filletName;
-          const wedge = entry.wedgeSolid;
-          const tube = entry.tubeSolid;
-          const capSuffix = (item.cap === 'start') ? '_END_CAP_1' : '_END_CAP_2';
-          const tubeSuffix = (item.cap === 'start') ? '_TUBE_CapStart' : '_TUBE_CapEnd';
-          if (wedge) collectFacePoints(wedge, `${filletName}${capSuffix}`, wedgePoints);
-          if (tube) collectFacePoints(tube, `${filletName}${tubeSuffix}`, tubePoints);
-        }
-
-        const wedgeHull = buildHullSolidFromPoints(wedgePoints, `${featureID}_CORNER_${cornerIdx}_WEDGE_HULL`, SolidCtor, cornerTol);
-        const tubeHull = buildHullSolidFromPoints(tubePoints, `${featureID}_CORNER_${cornerIdx}_TUBE_HULL`, SolidCtor, cornerTol);
-        if (!wedgeHull || !tubeHull) {
-          cornerIdx++;
-          continue;
-        }
-        cornerWedgeHulls.push(wedgeHull);
-        cornerTubeHulls.push(tubeHull);
-        if (debug) {
-          debugAdded.push(wedgeHull);
-          debugAdded.push(tubeHull);
-        }
-        cornerIdx++;
-      }
-      const wedgeParts = [];
-      const tubeParts = [];
-      for (const entry of filletEntries) {
-        if (entry.wedgeSolid) wedgeParts.push(entry.wedgeSolid);
-        if (entry.tubeSolid) tubeParts.push(entry.tubeSolid);
-      }
-      if (cornerWedgeHulls.length) wedgeParts.push(...cornerWedgeHulls);
-      if (cornerTubeHulls.length) tubeParts.push(...cornerTubeHulls);
-
-      const unionAll = (parts) => {
-        let acc = null;
-        for (const solid of parts) {
-          acc = acc ? acc.union(solid) : solid;
-        }
-        return acc;
-      };
-
-      const combinedWedge = unionAll(wedgeParts);
-      const combinedTube = unionAll(tubeParts);
-      if (combinedWedge && combinedTube) {
-        combinedFilletSolid = combinedWedge.subtract(combinedTube);
-        try { combinedFilletSolid.name = `${featureID}_FILLET_COMBINED`; } catch { }
-        if (debug) {
-          debugAdded.push(combinedWedge);
-          debugAdded.push(combinedTube);
-        }
-      }
-    } catch (err) {
-      console.warn('[Solid.fillet] Corner hull build failed', { featureID, error: err?.message || err });
-    }
-  }
 
   // Apply to base solid (union for OUTSET, subtract for INSET)
   let result = this;
-  const solidsToApply = combinedFilletSolid ? [combinedFilletSolid] : filletEntries.map(entry => entry.filletSolid);
+  const solidsToApply = filletEntries.map(entry => entry.filletSolid);
   try {
     for (const filletSolid of solidsToApply) {
       const operation = (dir === 'OUTSET') ? 'union' : 'subtract';
@@ -2580,7 +2398,7 @@ export async function fillet(opts = {}) {
     const filletAreaCacheBySolid = new WeakMap();
     for (const entry of filletEntries) {
       const { filletSolid, filletName } = entry;
-      const mergeSolid = combinedFilletSolid || filletSolid;
+      const mergeSolid = filletSolid;
       const roundFaceName = entry.roundFaceName || guessRoundFaceName(mergeSolid, filletName);
       const candidateNames = (Array.isArray(entry.mergeCandidates) && entry.mergeCandidates.length)
         ? entry.mergeCandidates

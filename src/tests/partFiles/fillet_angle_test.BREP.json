@@ -310,7 +310,6 @@
         "resolution": 32,
         "inflate": 0.1,
         "direction": "INSET",
-        "combineEdges": false,
         "showTangentOverlays": true,
         "cleanupTinyFaceIslandsArea": 0.01,
         "debug": false,

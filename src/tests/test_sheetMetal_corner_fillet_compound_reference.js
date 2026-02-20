@@ -54,7 +54,6 @@ export async function test_sheetMetal_corner_fillet_compound_reference(partHisto
     resolution: 32,
     inflate: 0.1,
     direction: "INSET",
-    combineEdges: false,
     showTangentOverlays: false,
     cleanupTinyFaceIslandsArea: 0.01,
     debug: false,
