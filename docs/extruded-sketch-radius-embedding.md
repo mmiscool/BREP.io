@@ -2,6 +2,10 @@
 
 This document details how radius metadata is automatically embedded when extruding circular or arc-based sketch elements.
 
+## Live Demos
+- Examples hub: [https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
+- Embeded CAD: [https://BREP.io/apiExamples/Embeded_CAD.html](https://BREP.io/apiExamples/Embeded_CAD.html)
+
 ## How It Works
 
 ### Automatic Detection

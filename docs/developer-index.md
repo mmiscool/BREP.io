@@ -9,9 +9,20 @@ This page is a quick entry point for implementation and integration docs.
 - [BREP Kernel Reference](./brep-kernel.md)
 - [PartHistory Reference](./part-history.md)
 
+## Live API Example Pages
+- [Examples Index](https://BREP.io/apiExamples/index.html)
+- [BREP Booleans](https://BREP.io/apiExamples/BREP_Booleans.html)
+- [BREP Primitives](https://BREP.io/apiExamples/BREP_Primitives.html)
+- [BREP Transforms](https://BREP.io/apiExamples/BREP_Transforms.html)
+- [BREP Export](https://BREP.io/apiExamples/BREP_Export.html)
+- [Embeded 2D Sketcher](https://BREP.io/apiExamples/Embeded_2D_Sketcher.html)
+- [Embeded CAD](https://BREP.io/apiExamples/Embeded_CAD.html)
+- [Embeded CAD Integration Test](https://BREP.io/apiExamples/Embeded_CAD_Integration_Test.html)
+
 ## Sketch and Geometry APIs
 - [2D Sketch Solver (Standalone)](./sketch-solver-2d.md)
 - [Embeddable 2D Sketcher](./sketcher2d-embed.md)
+- [Embeddable CAD App](./cad-embed.md)
 - [Radius Metadata for Extruded Sketches](./extruded-sketch-radius-embedding.md)
 - [Cylindrical Face Radius Embedding](./cylindrical-face-radius-embedding.md)
 

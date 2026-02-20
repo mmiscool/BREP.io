@@ -563,6 +563,8 @@ export class Viewer {
         partHistory = new PartHistory(),
         autoLoadLastModel = false,
         viewerOnlyMode = false,
+        homeBannerUrl = '',
+        homeBannerOpenInNewTab = false,
 
     }) {
         if (!container) throw new Error('Viewer requires { container }');
@@ -571,6 +573,8 @@ export class Viewer {
         this.partHistory = partHistory instanceof PartHistory ? partHistory : new PartHistory();
         this._autoLoadLastModel = !!autoLoadLastModel;
         this._viewerOnlyMode = !!viewerOnlyMode;
+        this._homeBannerUrl = String(homeBannerUrl || '').trim();
+        this._homeBannerOpenInNewTab = !!homeBannerOpenInNewTab;
         this._triangleDebugger = null;
         this._lastInspectorTarget = null;
         this._lastInspectorSolid = null;
@@ -1139,6 +1143,7 @@ export class Viewer {
 
     _ensureSidebarHomeBanner() {
         if (!this.sidebar || typeof document === 'undefined') return;
+        const opensExternalHome = !!this._homeBannerUrl;
         let banner = this._sidebarHomeBanner;
         if (!banner || !banner.isConnected) {
             try {
@@ -1149,11 +1154,27 @@ export class Viewer {
             banner = document.createElement('button');
             banner.type = 'button';
             banner.className = 'cad-sidebar-home-banner';
-            banner.title = 'Back to workspace';
-            banner.setAttribute('aria-label', 'Back to workspace');
+            banner.title = opensExternalHome ? 'Open BREP.io' : 'Back to workspace';
+            banner.setAttribute('aria-label', opensExternalHome ? 'Open BREP.io' : 'Back to workspace');
             banner.addEventListener('click', (event) => {
                 event.preventDefault();
                 event.stopPropagation();
+                if (this._homeBannerUrl) {
+                    try {
+                        const target = this._homeBannerOpenInNewTab ? '_blank' : '_self';
+                        const opened = window.open(
+                            this._homeBannerUrl,
+                            target,
+                            this._homeBannerOpenInNewTab ? 'noopener,noreferrer' : 'noopener',
+                        );
+                        if (opened && this._homeBannerOpenInNewTab) {
+                            try { opened.opener = null; } catch { /* ignore */ }
+                        }
+                    } catch {
+                        try { window.location.href = this._homeBannerUrl; } catch { /* ignore */ }
+                    }
+                    return;
+                }
                 void navigateHomeWithGuard(this);
             });
 
@@ -1174,7 +1195,8 @@ export class Viewer {
 
 
     async setupAccordion() {
-        if (!this._viewerOnlyMode) this._ensureSidebarHomeBanner();
+        const shouldShowSidebarHomeBanner = !this._viewerOnlyMode || !!this._homeBannerUrl;
+        if (shouldShowSidebarHomeBanner) this._ensureSidebarHomeBanner();
         // Setup accordion
         this.accordion = await new AccordionWidget();
         await this.sidebar.appendChild(this.accordion.uiElement);

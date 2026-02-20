@@ -3,6 +3,10 @@
 This page documents the standalone 2D sketch solver that powers Sketch mode. The solver is exposed as
 an npm subpath so you can use it headlessly in Node or inside your own tooling.
 
+## Live Demos
+- Examples hub: [https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
+- Embeded 2D Sketcher: [https://BREP.io/apiExamples/Embeded_2D_Sketcher.html](https://BREP.io/apiExamples/Embeded_2D_Sketcher.html)
+
 ## Import
 ```js
 import { ConstraintSolver, ConstraintEngine, constraints } from 'brep-io-kernel/SketchSolver2D';

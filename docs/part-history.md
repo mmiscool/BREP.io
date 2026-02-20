@@ -2,6 +2,11 @@
 
 `PartHistory` lives in `src/PartHistory.js` and is the core modeling history manager. It owns the feature list, the shared Three.js scene, the expression scratchpad, PMI views, metadata, and the assembly constraint history. It can rebuild geometry deterministically by replaying feature entries, serialize and restore part state, and maintain undo/redo via JSON snapshots.
 
+## Live Demos
+- Examples hub: [https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
+- Embeded CAD: [https://BREP.io/apiExamples/Embeded_CAD.html](https://BREP.io/apiExamples/Embeded_CAD.html)
+- Embeded CAD Integration Test: [https://BREP.io/apiExamples/Embeded_CAD_Integration_Test.html](https://BREP.io/apiExamples/Embeded_CAD_Integration_Test.html)
+
 ## Responsibilities
 
 - Manage the ordered list of modeling features (`features`).

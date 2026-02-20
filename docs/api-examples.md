@@ -1,6 +1,7 @@
 # API Examples
 
 Standalone browser demos for the BREP kernel and Sketcher2D APIs.
+This page links every live `.html` demo under `/apiExamples/`, including the examples index page.
 
 ## Example Hub
 - Demo: [https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
@@ -26,3 +27,13 @@ Standalone browser demos for the BREP kernel and Sketcher2D APIs.
 - Demo: [https://BREP.io/apiExamples/Embeded_2D_Sketcher.html](https://BREP.io/apiExamples/Embeded_2D_Sketcher.html)
 - Source: [apiExamples/Embeded_2D_Sketcher.html](https://github.com/mmiscool/BREP/blob/master/apiExamples/Embeded_2D_Sketcher.html)
 - Includes host-side exports for SVG, DXF, and sampled per-curve 3D polylines.
+
+## Embeded CAD
+- Demo: [https://BREP.io/apiExamples/Embeded_CAD.html](https://BREP.io/apiExamples/Embeded_CAD.html)
+- Source: [apiExamples/Embeded_CAD.html](https://github.com/mmiscool/BREP/blob/master/apiExamples/Embeded_CAD.html)
+- Mounts the full CAD app with the iframe-based `CadEmbed` API and shows host-side history/model controls.
+
+## Embeded CAD Integration Test
+- Demo: [https://BREP.io/apiExamples/Embeded_CAD_Integration_Test.html](https://BREP.io/apiExamples/Embeded_CAD_Integration_Test.html)
+- Source: [apiExamples/Embeded_CAD_Integration_Test.html](https://github.com/mmiscool/BREP/blob/master/apiExamples/Embeded_CAD_Integration_Test.html)
+- Runs in-browser assertions across the `CadEmbed` lifecycle and runtime methods.

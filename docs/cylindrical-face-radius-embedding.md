@@ -2,6 +2,10 @@
 
 This feature adds automatic radius information embedding for cylindrical faces in BREP solids, making the radius values available for downstream operations like dimensioning.
 
+## Live Demos
+- Examples hub: [https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
+- Embeded CAD: [https://BREP.io/apiExamples/Embeded_CAD.html](https://BREP.io/apiExamples/Embeded_CAD.html)
+
 ## How It Works
 
 ### 1. Automatic Radius Embedding

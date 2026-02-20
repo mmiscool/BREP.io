@@ -4,6 +4,11 @@ For complete documentation on Sketch functionality, workflow, and technical deta
 
 **[→ Sketch Feature Documentation](../features/sketch.md)**
 
+## Live Demos
+- Examples hub: [https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
+- Embeded 2D Sketcher: [https://BREP.io/apiExamples/Embeded_2D_Sketcher.html](https://BREP.io/apiExamples/Embeded_2D_Sketcher.html)
+- Embeded CAD: [https://BREP.io/apiExamples/Embeded_CAD.html](https://BREP.io/apiExamples/Embeded_CAD.html)
+
 This page covers the complete Sketch feature including:
 - Overview and workflow
 - Input parameters and behavior  

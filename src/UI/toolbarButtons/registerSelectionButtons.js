@@ -2,6 +2,7 @@ import { SelectionFilter } from '../SelectionFilter.js';
 import { createOrientToFaceButton } from './orientToFaceButton.js';
 import { createInspectorToggleButton } from './inspectorToggleButton.js';
 import { createMetadataButton } from './metadataButton.js';
+import { createToggleSelectionVisibilityButton } from './toggleSelectionVisibilityButton.js';
 
 const hasSelection = (items) => Array.isArray(items) && items.length > 0;
 const hasType = (items, types) => {
@@ -49,6 +50,17 @@ export function registerSelectionToolbarButtons(viewer) {
       },
       shouldShow: (selection) => hasSelection(selection),
     });
+  } catch { }
+
+  try {
+    const toggleVisibilitySpec = createToggleSelectionVisibilityButton(viewer);
+    if (toggleVisibilitySpec) {
+      SelectionFilter.registerSelectionAction({
+        id: 'selection-action-toggle-visibility',
+        ...toggleVisibilitySpec,
+        shouldShow: (selection) => hasSelection(selection),
+      });
+    }
   } catch { }
 
 

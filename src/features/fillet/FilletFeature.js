@@ -9,6 +9,7 @@ import { runSheetMetalCornerFillet } from "../sheetMetal/sheetMetalEngineBridge.
 const DEBUG_MODE_NONE = "NONE";
 const DEBUG_MODE_WEDGE_AND_TUBE = "WEDGE AND TUBE";
 const DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEN = "WEDGE AND TUBE AFTER BOOLEN";
+const DEBUG_MODE_COMBINED_BEFORE_TARGET = "COMBINED FILLET BEFORE TARGET BOOLEAN";
 
 
 const inputParamsSchema = {
@@ -66,7 +67,12 @@ const inputParamsSchema = {
     },
     debug: {
         type: "options",
-        options: [DEBUG_MODE_NONE, DEBUG_MODE_WEDGE_AND_TUBE, DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEN],
+        options: [
+            DEBUG_MODE_NONE,
+            DEBUG_MODE_WEDGE_AND_TUBE,
+            DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEN,
+            DEBUG_MODE_COMBINED_BEFORE_TARGET,
+        ],
         default_value: DEBUG_MODE_NONE,
         hint: "Controls which fillet debug solids are emitted.",
     },
@@ -80,13 +86,27 @@ function resolveDebugMode(rawValue) {
     if (normalized === DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEN || normalized === "WEDGE AND TUBE AFTER BOOLEAN") {
         return DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEN;
     }
+    if (
+        normalized === DEBUG_MODE_COMBINED_BEFORE_TARGET
+        || normalized === "COMBINED FILLET SOLID"
+        || normalized === "COMBINED BEFORE TARGET BOOLEAN"
+    ) {
+        return DEBUG_MODE_COMBINED_BEFORE_TARGET;
+    }
     return DEBUG_MODE_NONE;
 }
 
-function debugModeToSolidsLevel(debugMode) {
-    if (debugMode === DEBUG_MODE_WEDGE_AND_TUBE) return 0;
-    if (debugMode === DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEN) return 1;
-    return 0;
+function getDebugConfig(debugMode) {
+    if (debugMode === DEBUG_MODE_WEDGE_AND_TUBE) {
+        return { enabled: true, solidsLevel: 0, showCombinedBeforeTarget: false };
+    }
+    if (debugMode === DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEN) {
+        return { enabled: true, solidsLevel: 1, showCombinedBeforeTarget: false };
+    }
+    if (debugMode === DEBUG_MODE_COMBINED_BEFORE_TARGET) {
+        return { enabled: true, solidsLevel: -1, showCombinedBeforeTarget: true };
+    }
+    return { enabled: false, solidsLevel: -1, showCombinedBeforeTarget: false };
 }
 
 function normalizeSelectionToken(token) {
@@ -226,8 +246,10 @@ export class FilletFeature {
 
     async run(partHistory) {
         const debugMode = resolveDebugMode(this.inputParams?.debug);
-        const debugEnabled = debugMode !== DEBUG_MODE_NONE;
-        const configuredDebugLevel = debugModeToSolidsLevel(debugMode);
+        const debugConfig = getDebugConfig(debugMode);
+        const debugEnabled = !!debugConfig.enabled;
+        const configuredDebugLevel = Number(debugConfig.solidsLevel);
+        const debugShowCombinedBeforeTarget = !!debugConfig.showCombinedBeforeTarget;
         console.log('[FilletFeature] Starting fillet run...', {
             featureID: this.inputParams?.featureID,
             direction: this.inputParams?.direction,
@@ -240,6 +262,7 @@ export class FilletFeature {
             debug: debugEnabled,
             debugMode,
             debugSolidsLevel: configuredDebugLevel,
+            debugShowCombinedBeforeTarget,
         });
         try { clearFilletCaches(); } catch { }
         const added = [];
@@ -327,6 +350,7 @@ export class FilletFeature {
             inflate: Number(this.inputParams.inflate) || 0,
             debug: debugEnabled,
             debugSolidsLevel: configuredDebugLevel,
+            debugShowCombinedBeforeTarget,
             showTangentOverlays: !!this.inputParams.showTangentOverlays,
             patchFilletEndCaps: !!this.inputParams.patchFilletEndCaps,
             cleanupTinyFaceIslandsArea: this.inputParams?.cleanupTinyFaceIslandsArea,

@@ -1,5 +1,9 @@
 # UI Overview (Browser)
 
+## Live Demos
+- Examples hub: [https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
+- Embeded CAD: [https://BREP.io/apiExamples/Embeded_CAD.html](https://BREP.io/apiExamples/Embeded_CAD.html)
+
 - **Top toolbar**
   - Save stores the current model in browser storage and integrates with the File Manager.
   - Zoom to Fit frames all visible geometry without changing orientation.

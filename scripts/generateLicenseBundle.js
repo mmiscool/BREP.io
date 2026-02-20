@@ -1,8 +1,6 @@
-import { execSync } from 'child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 'fs';
 import path from 'path';
-
-const run = (cmd) => execSync(cmd, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+import { collectDependencyLicenseData } from './collectDependencyLicenses.js';
 
 const rootDir = process.cwd();
 const packageJsonPath = path.join(rootDir, 'package.json');
@@ -15,15 +13,16 @@ const packageName = packageJson.name ?? 'package';
 const packageLicense = packageJson.license ?? 'UNKNOWN';
 const licenseText = readFileSync(licensePath, 'utf-8').trimEnd();
 
-let data;
+let dependencyLicenseData;
 try {
-  const raw = run('pnpm licenses list --prod --long --json');
-  data = JSON.parse(raw);
+  dependencyLicenseData = collectDependencyLicenseData({ cwd: rootDir, logger: console });
 } catch (error) {
-  console.error('Failed to generate license bundle. Is pnpm installed and did you run `pnpm install`?');
+  console.error('Failed to generate license bundle.');
   console.error(error?.message ?? error);
   process.exit(1);
 }
+const data = dependencyLicenseData.data;
+const dependencySourceLine = `Generated from: ${dependencyLicenseData.sourceLabel}`;
 
 const licenseKeys = Object.keys(data).sort((a, b) => a.localeCompare(b));
 const countPackages = licenseKeys.reduce(
@@ -178,7 +177,7 @@ lines.push(licenseText);
 lines.push('');
 lines.push('Third-party licenses (production dependencies)');
 lines.push(`${countPackages} packages • ${licenseKeys.length} license types`);
-lines.push('Generated from: pnpm licenses list --prod --long --json');
+lines.push(dependencySourceLine);
 lines.push('');
 
 for (const licenseName of licenseKeys) {

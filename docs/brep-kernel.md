@@ -2,6 +2,13 @@
 
 This page catalogs the core classes and helpers that make up the BREP kernel (everything under `src/BREP`). Use it alongside `docs/solid-methods.md` for `Solid` details and `docs/brep-api.md` for the export map.
 
+## Live Demos
+- Examples hub: [https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
+- BREP Booleans: [https://BREP.io/apiExamples/BREP_Booleans.html](https://BREP.io/apiExamples/BREP_Booleans.html)
+- BREP Primitives: [https://BREP.io/apiExamples/BREP_Primitives.html](https://BREP.io/apiExamples/BREP_Primitives.html)
+- BREP Transforms: [https://BREP.io/apiExamples/BREP_Transforms.html](https://BREP.io/apiExamples/BREP_Transforms.html)
+- BREP Export: [https://BREP.io/apiExamples/BREP_Export.html](https://BREP.io/apiExamples/BREP_Export.html)
+
 ## Core types
 - **Solid / Face / Edge / Vertex** – Geometry + selection primitives (`Solid` API in `docs/solid-methods.md`).
 - **AssemblyComponent** – Groups one or more solids for the assembly constraint solver. Options: `{ name='Component', fixed=false }`.

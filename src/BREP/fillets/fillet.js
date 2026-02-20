@@ -626,6 +626,28 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
         }
         if (winding?.tangentAReversed) tanA.reverse();
         if (winding?.tangentBReversed) tanB.reverse();
+        if (!isClosed && centers.length >= 2) {
+            const endpointCost = (poly, refA, refB) => {
+                if (!Array.isArray(poly) || poly.length < 2) return Infinity;
+                const a = poly[0];
+                const b = poly[poly.length - 1];
+                if (!a || !b || !refA || !refB) return Infinity;
+                const d1 = Math.hypot((a.x - refA.x), (a.y - refA.y), (a.z - refA.z));
+                const d2 = Math.hypot((b.x - refB.x), (b.y - refB.y), (b.z - refB.z));
+                return d1 + d2;
+            };
+            const alignPolylineToCenterlineEnds = (poly) => {
+                if (!Array.isArray(poly) || poly.length < 2) return;
+                const c0 = centers[0];
+                const cN = centers[centers.length - 1];
+                const forward = endpointCost(poly, c0, cN);
+                const reverse = endpointCost(poly, cN, c0);
+                if (reverse + 1e-9 < forward) poly.reverse();
+            };
+            alignPolylineToCenterlineEnds(tanA);
+            alignPolylineToCenterlineEnds(tanB);
+            alignPolylineToCenterlineEnds(edgePts);
+        }
 
         out.points = centers;
         out.tangentA = tanA;
@@ -1184,11 +1206,10 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
 
         if (wedgeInsetMagnitude) logDebug(`Applied wedge inset of ${wedgeInsetMagnitude} units (inside-aware) to ${edgeWedgeCopy.length} edge points`);
 
-
         // Do not reorder edge points. Centerline/tangent/edge points are produced in
         // lockstep elsewhere; reindexing the edge points breaks correspondence and
         // can create long crossing triangles. If orientation issues arise, reverse
-        // the entire polylines together rather than reordering indices.
+        // whole polylines, never reorder internal indices.
 
         // Visualize manipulated centerline after all processing
         if (debug && centerlineCopy.length >= 2) {

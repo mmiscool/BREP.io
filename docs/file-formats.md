@@ -1,5 +1,10 @@
 # File Formats: Import and Export
 
+## Live Demos
+- Examples hub: [https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
+- BREP Export: [https://BREP.io/apiExamples/BREP_Export.html](https://BREP.io/apiExamples/BREP_Export.html)
+- Embeded CAD: [https://BREP.io/apiExamples/Embeded_CAD.html](https://BREP.io/apiExamples/Embeded_CAD.html)
+
 ## 3MF (Feature Aware)
 - **Export**: Generates a 3MF container that includes triangulated geometry plus an embedded copy of the feature history at `Metadata/featureHistory.json`. PMI views (camera, view settings, and annotations) are part of that history, and when views exist the exporter also writes labeled PNG captures to `/views/<view-name>.png` with relationships from the package root. Multiple solids export as separate objects in a single file. Units are configurable (default millimeter). Non-manifold solids are skipped with a notification, but the export proceeds.
 - **Import**: Loads 3MF files and restores the embedded feature history when present. If no history is stored, the geometry imports as editable mesh only.

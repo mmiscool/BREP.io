@@ -2,6 +2,10 @@
 
 This app can store models and settings directly in a GitHub repository using a personal access token (PAT). When enabled, GitHub becomes the storage backend instead of the browser’s local IndexedDB/VFS storage.
 
+## Live Demos
+- Examples hub: [https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
+- Embeded CAD: [https://BREP.io/apiExamples/Embeded_CAD.html](https://BREP.io/apiExamples/Embeded_CAD.html)
+
 ## How It Works
 - You provide a GitHub token and select a repo in the **Display Settings** panel.
 - When both are set, the app switches to GitHub storage for models and settings.

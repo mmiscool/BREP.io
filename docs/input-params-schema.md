@@ -2,6 +2,11 @@
 
 Feature, PMI annotation, and assembly constraint dialogs are rendered from an `inputParamsSchema` object by `SchemaForm` (`src/UI/featureDialogs.js`). Each key in the schema corresponds to a param entry; the widget type and its options are driven by the definition object.
 
+## Live Demos
+- Examples hub: [https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
+- Embeded CAD: [https://BREP.io/apiExamples/Embeded_CAD.html](https://BREP.io/apiExamples/Embeded_CAD.html)
+- Embeded 2D Sketcher: [https://BREP.io/apiExamples/Embeded_2D_Sketcher.html](https://BREP.io/apiExamples/Embeded_2D_Sketcher.html)
+
 ```js
 const inputParamsSchema = {
   distance: {

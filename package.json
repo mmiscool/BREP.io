@@ -7,6 +7,7 @@
     "clean:kernel": "rm -rf dist-kernel",
     "prebuild:kernel": "pnpm clean:kernel && pnpm generateLicenseBundle",
     "build:kernel": "vite build --config vite.config.kernel.js",
+    "postbuild:kernel": "pnpm syncKernelAssets",
     "prepublishOnly": "pnpm build:kernel",
     "start": "pnpm dev",
     "liveTesting": "nodemon --watch src --watch tests --ext js --exec \"pnpm run test\"",
@@ -14,6 +15,7 @@
     "debug:boolean": "node ./src/tests/debugBoolean.js",
     "generateLicenses": "node ./generateLicenses.js",
     "generateLicenseBundle": "node ./scripts/generateLicenseBundle.js",
+    "syncKernelAssets": "node ./scripts/syncKernelAssets.js",
     "prepareFonts": "node ./scripts/prepareFontAssets.js",
     "capture": "node ./scripts/capture.js"
   },

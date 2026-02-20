@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>BREP API Example: Embeded CAD Integration Test</title>
+    <link rel="stylesheet" href="./example.css" />
+    <style>
+      #cad-host {
+        margin-top: 10px;
+        border: 1px solid #dde3f5;
+        border-radius: 10px;
+        min-height: 640px;
+        overflow: hidden;
+        background: #fff;
+      }
+
+      #run-status {
+        margin-top: 10px;
+        font-size: 13px;
+        color: #384359;
+      }
+
+      .control-grid input[type="text"],
+      .control-grid select {
+        width: 100%;
+        height: 36px;
+        border: 1px solid #ccd5ec;
+        border-radius: 8px;
+        padding: 0 8px;
+        background: #fff;
+      }
+
+      .results {
+        margin-top: 12px;
+        border: 1px solid #d6def4;
+        border-radius: 10px;
+        overflow: hidden;
+      }
+
+      .results-row {
+        display: grid;
+        grid-template-columns: 220px 120px 1fr;
+        gap: 10px;
+        align-items: center;
+        padding: 8px 10px;
+        border-bottom: 1px solid #e6ebfa;
+        font-size: 13px;
+      }
+
+      .results-row:last-child {
+        border-bottom: none;
+      }
+
+      .results-row.header {
+        background: #f5f7ff;
+        font-weight: 700;
+      }
+
+      .badge {
+        display: inline-block;
+        border-radius: 999px;
+        padding: 4px 9px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .badge.pass {
+        background: #daf8e6;
+        color: #0d6131;
+      }
+
+      .badge.fail {
+        background: #ffe1e1;
+        color: #790819;
+      }
+
+      .badge.skip {
+        background: #fff4cc;
+        color: #795d05;
+      }
+
+      .badge.run {
+        background: #dfe8ff;
+        color: #1f3f93;
+      }
+
+      @media (max-width: 760px) {
+        .results-row {
+          grid-template-columns: 1fr;
+          gap: 4px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header class="example-header">
+        <div>
+          <h1>Embeded CAD Integration Test</h1>
+          <p class="lead">
+            Programmatic integration checks for the iframe-based <code>CadEmbed</code> API.
+          </p>
+        </div>
+        <nav class="example-nav">
+          <a href="./index.html">All Examples</a>
+          <a href="./Embeded_CAD.html">CAD Embed Demo</a>
+          <a href="../index.html">BREP CAD App</a>
+          <a href="https://github.com/mmiscool/BREP/blob/master/apiExamples/Embeded_CAD_Integration_Test.html" target="_blank" rel="noopener noreferrer">Source on GitHub</a>
+        </nav>
+      </header>
+
+      <div class="row">
+        <button id="btn-run">Run Integration Tests</button>
+        <button id="btn-destroy" disabled>Destroy Iframe</button>
+      </div>
+
+      <div class="control-grid">
+        <label class="toggle" for="viewer-only">
+          <input id="viewer-only" type="checkbox" />
+          Viewer-only Mode
+        </label>
+        <label class="toggle" for="sidebar-expanded">
+          <input id="sidebar-expanded" type="checkbox" checked />
+          Start with Sidebar Expanded
+        </label>
+        <div>
+          <label for="model-path">Optional loadModel Path (for success-path test)</label>
+          <input id="model-path" type="text" placeholder="examples/part-name" />
+        </div>
+        <div>
+          <label for="model-source">Model Source</label>
+          <select id="model-source">
+            <option value="local" selected>local</option>
+            <option value="github">github</option>
+            <option value="mounted">mounted</option>
+          </select>
+        </div>
+        <div>
+          <label for="model-repo">Repo / Mount ID</label>
+          <input id="model-repo" type="text" placeholder="owner/repo or mount-id" />
+        </div>
+        <div>
+          <label for="model-branch">Branch</label>
+          <input id="model-branch" type="text" placeholder="main" />
+        </div>
+      </div>
+
+      <label for="css-input">CSS used for <code>setCss()</code> check:</label>
+      <textarea id="css-input">#main-toolbar {
+  background: rgba(8, 14, 24, 0.92) !important;
+}</textarea>
+
+      <div id="run-status">No test run yet.</div>
+      <div id="cad-host"></div>
+
+      <hr class="divider" />
+      <h2>Assertions</h2>
+      <div id="results" class="results">
+        <div class="results-row header">
+          <div>Test</div>
+          <div>Status</div>
+          <div>Details</div>
+        </div>
+      </div>
+
+      <hr class="divider" />
+      <h2>Raw Event Log</h2>
+      <pre id="log-output">(No logs yet)</pre>
+    </main>
+
+    <script type="module">
+      import { CadEmbed } from '../dist-kernel/brep-kernel.js';
+
+      const btnRun = document.getElementById('btn-run');
+      const btnDestroy = document.getElementById('btn-destroy');
+      const viewerOnlyInput = document.getElementById('viewer-only');
+      const sidebarExpandedInput = document.getElementById('sidebar-expanded');
+      const modelPathInput = document.getElementById('model-path');
+      const modelSourceInput = document.getElementById('model-source');
+      const modelRepoInput = document.getElementById('model-repo');
+      const modelBranchInput = document.getElementById('model-branch');
+      const cssInput = document.getElementById('css-input');
+      const runStatusEl = document.getElementById('run-status');
+      const hostEl = document.getElementById('cad-host');
+      const resultsEl = document.getElementById('results');
+      const logOutput = document.getElementById('log-output');
+
+      let cad = null;
+      let runInFlight = false;
+
+      const sampleCubeHistory = {
+        features: [
+          {
+            type: 'Primitive Cube',
+            inputParams: {
+              id: 'integration_sample_cube_1',
+              sizeX: 16,
+              sizeY: 12,
+              sizeZ: 10,
+              transform: {
+                position: [0, 0, 0],
+                rotationEuler: [0, 0, 0],
+                scale: [1, 1, 1],
+              },
+              boolean: {
+                targets: [],
+                operation: 'NONE',
+              },
+            },
+            persistentData: {},
+            timestamp: null,
+          },
+        ],
+        idCounter: 1,
+        expressions: '//Examples:\nx = 10 + 6;\ny = x * 2;',
+        pmiViews: [],
+        metadata: {},
+        assemblyConstraints: [],
+        assemblyConstraintIdCounter: 0,
+      };
+
+      function log(message) {
+        const ts = new Date().toLocaleTimeString();
+        const line = `[${ts}] ${message}`;
+        const existing = logOutput.textContent === '(No logs yet)'
+          ? []
+          : logOutput.textContent.split('\n').filter(Boolean);
+        existing.unshift(line);
+        logOutput.textContent = existing.slice(0, 120).join('\n');
+      }
+
+      function setRunStatus(text) {
+        runStatusEl.textContent = text;
+      }
+
+      function clearResults() {
+        const rows = Array.from(resultsEl.querySelectorAll('.results-row'));
+        for (const row of rows) {
+          if (row.classList.contains('header')) continue;
+          row.remove();
+        }
+      }
+
+      function addResultRow(testName, status, details = '') {
+        const row = document.createElement('div');
+        row.className = 'results-row';
+
+        const nameCell = document.createElement('div');
+        nameCell.textContent = testName;
+
+        const statusCell = document.createElement('div');
+        const badge = document.createElement('span');
+        badge.className = `badge ${String(status || '').toLowerCase()}`;
+        badge.textContent = String(status || '').toUpperCase();
+        statusCell.appendChild(badge);
+
+        const detailsCell = document.createElement('div');
+        detailsCell.textContent = details || '';
+
+        row.appendChild(nameCell);
+        row.appendChild(statusCell);
+        row.appendChild(detailsCell);
+        resultsEl.appendChild(row);
+      }
+
+      function sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+      }
+
+      async function waitFor(predicate, { timeoutMs = 2500, intervalMs = 25 } = {}) {
+        const started = Date.now();
+        while (Date.now() - started <= timeoutMs) {
+          try {
+            if (predicate()) return true;
+          } catch {
+            // continue polling
+          }
+          await sleep(intervalMs);
+        }
+        return false;
+      }
+
+      function assert(condition, message) {
+        if (!condition) {
+          throw new Error(message || 'Assertion failed');
+        }
+      }
+
+      async function expectReject(fn, messageIncludes = '') {
+        let rejected = false;
+        try {
+          await fn();
+        } catch (error) {
+          rejected = true;
+          if (messageIncludes) {
+            const text = String(error?.message || error || '');
+            assert(text.includes(messageIncludes), `Expected rejection containing "${messageIncludes}", got: ${text}`);
+          }
+        }
+        assert(rejected, 'Expected promise rejection');
+      }
+
+      function currentModelRequest() {
+        const modelPath = String(modelPathInput.value || '').trim();
+        if (!modelPath) return null;
+        const source = String(modelSourceInput.value || 'local').trim() || 'local';
+        const repoFull = String(modelRepoInput.value || '').trim();
+        const branch = String(modelBranchInput.value || '').trim();
+        const request = { modelPath, source };
+        if (repoFull) request.repoFull = repoFull;
+        if (branch) request.branch = branch;
+        return request;
+      }
+
+      async function destroyCad() {
+        if (!cad) return;
+        try {
+          await cad.destroy();
+          log('Destroyed CadEmbed instance');
+        } catch (error) {
+          log(`Destroy failed: ${error?.message || String(error)}`);
+        } finally {
+          cad = null;
+          btnDestroy.disabled = true;
+        }
+      }
+
+      async function runIntegrationSuite() {
+        if (runInFlight) return;
+        runInFlight = true;
+        btnRun.disabled = true;
+        btnDestroy.disabled = true;
+        clearResults();
+        setRunStatus('Running integration suite...');
+        logOutput.textContent = '(No logs yet)';
+
+        const counters = { pass: 0, fail: 0, skip: 0 };
+        const historyEvents = [];
+
+        const runTest = async (name, fn) => {
+          addResultRow(name, 'RUN', 'Running...');
+          const row = resultsEl.lastElementChild;
+          try {
+            const detail = await fn();
+            counters.pass += 1;
+            row.children[1].innerHTML = '<span class="badge pass">PASS</span>';
+            row.children[2].textContent = detail || '';
+            log(`PASS: ${name}${detail ? ` (${detail})` : ''}`);
+          } catch (error) {
+            counters.fail += 1;
+            const detail = error?.message || String(error || 'Unknown error');
+            row.children[1].innerHTML = '<span class="badge fail">FAIL</span>';
+            row.children[2].textContent = detail;
+            log(`FAIL: ${name} (${detail})`);
+          }
+        };
+
+        const skipTest = (name, detail) => {
+          counters.skip += 1;
+          addResultRow(name, 'SKIP', detail || 'Skipped');
+          log(`SKIP: ${name}${detail ? ` (${detail})` : ''}`);
+        };
+
+        await destroyCad();
+
+        const requestedViewerOnly = !!viewerOnlyInput.checked;
+        const requestedSidebarExpanded = !!sidebarExpandedInput.checked;
+
+        cad = new CadEmbed({
+          mountTo: hostEl,
+          height: '640px',
+          viewerOnlyMode: requestedViewerOnly,
+          sidebarExpanded: requestedSidebarExpanded,
+          cssText: cssInput.value,
+          onHistoryChanged: (payload) => {
+            historyEvents.push(payload || {});
+            log(`historyChanged: ${payload?.reason || 'update'}`);
+          },
+        });
+
+        await runTest('mount()', async () => {
+          const frame = await cad.mount();
+          assert(frame instanceof HTMLIFrameElement, 'mount() did not return an iframe');
+          assert(frame.isConnected, 'Mounted iframe is not connected');
+          btnDestroy.disabled = false;
+          return 'iframe mounted';
+        });
+
+        await runTest('waitUntilReady()', async () => {
+          await cad.waitUntilReady();
+          return 'ready acknowledged';
+        });
+
+        await runTest('mount() idempotent', async () => {
+          const first = cad.iframe;
+          const second = await cad.mount();
+          assert(first === second, 'Second mount() did not return the same iframe');
+          return 'same iframe returned';
+        });
+
+        await runTest('getState()', async () => {
+          const state = await cad.getState();
+          assert(typeof state === 'object' && state !== null, 'State is not an object');
+          assert(state.viewerOnlyMode === requestedViewerOnly, `viewerOnlyMode mismatch: ${state.viewerOnlyMode}`);
+          return `viewerOnlyMode=${state.viewerOnlyMode}, features=${state.featureCount}`;
+        });
+
+        await runTest('setCss()', async () => {
+          await cad.setCss(cssInput.value);
+          return 'setCss completed without error';
+        });
+
+        await runTest('setSidebarExpanded(false)', async () => {
+          await cad.setSidebarExpanded(false);
+          const state = await cad.getState();
+          assert(state.sidebarExpanded === false, `Expected sidebarExpanded=false, got ${state.sidebarExpanded}`);
+          return 'sidebar collapsed';
+        });
+
+        await runTest('setSidebarExpanded(true)', async () => {
+          await cad.setSidebarExpanded(true);
+          const state = await cad.getState();
+          assert(state.sidebarExpanded === true, `Expected sidebarExpanded=true, got ${state.sidebarExpanded}`);
+          return 'sidebar expanded';
+        });
+
+        await runTest('setPartHistoryJSON(string)', async () => {
+          const payload = JSON.stringify(sampleCubeHistory, null, 2);
+          const state = await cad.setPartHistoryJSON(payload);
+          assert(Number(state?.featureCount) === 1, `Expected featureCount=1, got ${state?.featureCount}`);
+          return 'featureCount=1 after setPartHistoryJSON';
+        });
+
+        await runTest('getPartHistoryJSON()', async () => {
+          const json = await cad.getPartHistoryJSON();
+          assert(typeof json === 'string' && json.length > 0, 'JSON payload is empty');
+          const parsed = JSON.parse(json);
+          assert(Array.isArray(parsed.features), 'Parsed JSON missing features array');
+          assert(parsed.features.length === 1, `Expected 1 feature, got ${parsed.features.length}`);
+          return `${json.length} chars`; 
+        });
+
+        await runTest('getPartHistoryJSON({ preferCached: true })', async () => {
+          const json = await cad.getPartHistoryJSON({ preferCached: true });
+          assert(typeof json === 'string' && json.length > 0, 'Cached JSON payload is empty');
+          return 'cached JSON returned';
+        });
+
+        await runTest('getPartHistory()', async () => {
+          const history = await cad.getPartHistory();
+          assert(history && Array.isArray(history.features), 'History object missing features');
+          assert(history.features.length === 1, `Expected 1 feature, got ${history.features.length}`);
+          return 'history object parsed';
+        });
+
+        await runTest('setPartHistory(object alias)', async () => {
+          const state = await cad.setPartHistory(sampleCubeHistory);
+          assert(Number(state?.featureCount) === 1, `Expected featureCount=1, got ${state?.featureCount}`);
+          return 'alias method succeeded';
+        });
+
+        await runTest('runHistory()', async () => {
+          const state = await cad.runHistory();
+          assert(Number(state?.featureCount) === 1, `Expected featureCount=1, got ${state?.featureCount}`);
+          return 'history rerun';
+        });
+
+        await runTest('loadModel(invalid args rejects)', async () => {
+          await expectReject(() => cad.loadModel(null), 'requires a model path string');
+          return 'rejection asserted';
+        });
+
+        const optionalModel = currentModelRequest();
+        if (!optionalModel) {
+          skipTest('loadModel(valid optional test)', 'No model path provided. Fill fields to run this check.');
+        } else {
+          await runTest('loadModel(valid optional test)', async () => {
+            const state = await cad.loadModel(optionalModel);
+            assert(typeof state === 'object' && state !== null, 'loadModel did not return state');
+            return `loaded=${state?.loaded?.name || state?.model?.name || '(unknown)'}`;
+          });
+        }
+
+        await runTest('reset()', async () => {
+          const state = await cad.reset();
+          assert(Number(state?.featureCount) === 0, `Expected featureCount=0, got ${state?.featureCount}`);
+          return 'model reset to empty history';
+        });
+
+        await runTest('onHistoryChanged callback', async () => {
+          const ok = await waitFor(() => historyEvents.length > 0, { timeoutMs: 3000 });
+          assert(ok, 'Did not receive any historyChanged events');
+          return `${historyEvents.length} event(s)`;
+        });
+
+        await runTest('destroy()', async () => {
+          const iframeRef = cad.iframe;
+          await cad.destroy();
+          assert(cad.iframe === null, 'cad.iframe should be null after destroy');
+          if (iframeRef) {
+            assert(!iframeRef.isConnected, 'Iframe still connected after destroy');
+          }
+          cad = null;
+          btnDestroy.disabled = true;
+          return 'iframe removed and instance disposed';
+        });
+
+        await runTest('destroy() idempotent', async () => {
+          if (!cad) {
+            // Create a minimal instance and destroy twice to verify idempotence.
+            cad = new CadEmbed({ mountTo: hostEl, height: '1px', viewerOnlyMode: true });
+            await cad.mount();
+          }
+          await cad.destroy();
+          await cad.destroy();
+          cad = null;
+          btnDestroy.disabled = true;
+          return 'second destroy() did not throw';
+        });
+
+        setRunStatus(`Done. PASS=${counters.pass} FAIL=${counters.fail} SKIP=${counters.skip}`);
+        btnRun.disabled = false;
+        btnDestroy.disabled = !cad;
+        runInFlight = false;
+      }
+
+      btnRun.addEventListener('click', () => {
+        runIntegrationSuite().catch((error) => {
+          log(`FATAL: ${error?.message || String(error)}`);
+          setRunStatus(`Run aborted: ${error?.message || String(error)}`);
+          btnRun.disabled = false;
+          runInFlight = false;
+        });
+      });
+
+      btnDestroy.addEventListener('click', () => {
+        destroyCad().catch((error) => {
+          log(`Destroy action failed: ${error?.message || String(error)}`);
+        });
+      });
+    </script>
+  </body>
+</html>

@@ -1,5 +1,5 @@
 // Solid.fillet implementation: consolidates fillet logic so features call this API.
-// Usage: solid.fillet({ radius, edgeNames, featureID, direction, inflate, resolution, debug, debugSolidsLevel, showTangentOverlays, patchFilletEndCaps })
+// Usage: solid.fillet({ radius, edgeNames, featureID, direction, inflate, resolution, debug, debugSolidsLevel, debugShowCombinedBeforeTarget, showTangentOverlays, patchFilletEndCaps })
 import { Vertex } from '../Vertex.js';
 import { resolveEdgesFromInputs } from './edgeResolution.js';
 import { computeFaceAreaFromTriangles } from '../fillets/filletGeometry.js';
@@ -2481,7 +2481,8 @@ function removeSelectedEndCapTrianglesAndPatch(resultSolid, endCapFaceIDs, featu
  * @param {number} [opts.inflate=0.1] Inflation for cutting tube
  * @param {number} [opts.resolution=32] Tube resolution (segments around circumference)
  * @param {boolean} [opts.debug=false] Enable debug visuals in fillet builder
- * @param {number} [opts.debugSolidsLevel=0] 0=tube+wedge, 1=edge fillet boolean result, 2=all intermediate solids
+ * @param {number} [opts.debugSolidsLevel=0] -1=none, 0=tube+wedge, 1=edge fillet boolean result, 2=all intermediate solids
+ * @param {boolean} [opts.debugShowCombinedBeforeTarget=false] Emit the combined fillet solid before target boolean
  * @param {boolean} [opts.showTangentOverlays=false] Show pre-inflate tangent overlays on the fillet tube
  * @param {boolean} [opts.patchFilletEndCaps=false] Enable three-face tip cleanup and end-cap triangle replacement patching
  * @param {string} [opts.featureID='FILLET'] For naming of intermediates and result
@@ -2499,8 +2500,9 @@ export async function fillet(opts = {}) {
   const debug = !!opts.debug;
   const debugSolidsLevelRaw = Number(opts.debugSolidsLevel);
   const debugSolidsLevel = Number.isFinite(debugSolidsLevelRaw)
-    ? Math.max(0, Math.min(2, Math.floor(debugSolidsLevelRaw)))
+    ? Math.max(-1, Math.min(2, Math.floor(debugSolidsLevelRaw)))
     : 0;
+  const debugShowCombinedBeforeTarget = !!opts.debugShowCombinedBeforeTarget;
   const resolutionRaw = Number(opts.resolution);
   const resolution = (Number.isFinite(resolutionRaw) && resolutionRaw > 0)
     ? Math.max(8, Math.floor(resolutionRaw))
@@ -2569,7 +2571,7 @@ export async function fillet(opts = {}) {
       wedgeSolid: res.wedge || null,
       tubeSolid: res.tube || null,
     });
-    if (debug) {
+    if (debug && debugSolidsLevel >= 0) {
       if (debugSolidsLevel === 0) {
         pushTubeAndWedgeDebug(res);
       } else if (debugSolidsLevel === 1) {
@@ -2588,26 +2590,63 @@ export async function fillet(opts = {}) {
     return c;
   }
 
-  // Apply to base solid (union for OUTSET, subtract for INSET)
-  let result = this;
-  const solidsToApply = filletEntries.map(entry => entry.filletSolid);
+  // Combine all per-edge fillet solids first, then apply the combined solid once.
+  let combinedFilletSolid = null;
+  const solidsToApply = filletEntries.map(entry => entry.filletSolid).filter(Boolean);
   try {
-    let applyStep = 0;
-    for (const filletSolid of solidsToApply) {
-      const operation = (dir === 'OUTSET') ? 'union' : 'subtract';
-      result = (operation === 'union') ? result.union(filletSolid) : result.subtract(filletSolid);
-
-      // Name the result for scene grouping/debugging
-      try { result.name = this.name; } catch { }
-
-      if (debug && debugSolidsLevel >= 2 && result && typeof result.clone === 'function') {
+    combinedFilletSolid = solidsToApply[0] || null;
+    for (let i = 1; i < solidsToApply.length; i++) {
+      combinedFilletSolid = combinedFilletSolid.union(solidsToApply[i]);
+      try { combinedFilletSolid.name = `${featureID}_COMBINED_FILLET`; } catch { }
+      if (debug && debugSolidsLevel >= 2 && combinedFilletSolid && typeof combinedFilletSolid.clone === 'function') {
         try {
-          const stepSnapshot = result.clone();
-          try { stepSnapshot.name = `${featureID}_BOOLEAN_STEP_${applyStep}`; } catch { }
+          const stepSnapshot = combinedFilletSolid.clone();
+          try { stepSnapshot.name = `${featureID}_COMBINED_STEP_${i - 1}`; } catch { }
           debugAdded.push(stepSnapshot);
         } catch { }
       }
-      applyStep += 1;
+    }
+    if (combinedFilletSolid) {
+      try { combinedFilletSolid.name = `${featureID}_COMBINED_FILLET`; } catch { }
+    }
+    if (debug && debugShowCombinedBeforeTarget && combinedFilletSolid) {
+      try {
+        const combinedSnapshot = (typeof combinedFilletSolid.clone === 'function')
+          ? combinedFilletSolid.clone()
+          : combinedFilletSolid;
+        try { combinedSnapshot.name = `${featureID}_COMBINED_FILLET_PRE_TARGET`; } catch { }
+        debugAdded.push(combinedSnapshot);
+      } catch { }
+    }
+  } catch (err) {
+    console.error('[Solid.fillet] Fillet combine failed; returning clone.', { featureID, error: err?.message || err });
+    const fallback = this.clone();
+    try { fallback.name = this.name; } catch { }
+    attachDebugSolids(fallback);
+    return fallback;
+  }
+  if (!combinedFilletSolid) {
+    console.error('[Solid.fillet] No combined fillet solid available; returning clone.', { featureID, edgeCount: unique.length });
+    const fallback = this.clone();
+    try { fallback.name = this.name; } catch { }
+    attachDebugSolids(fallback);
+    return fallback;
+  }
+
+  // Apply combined fillet once to base solid (union for OUTSET, subtract for INSET)
+  let result = this;
+  try {
+    const operation = (dir === 'OUTSET') ? 'union' : 'subtract';
+    result = (operation === 'union')
+      ? result.union(combinedFilletSolid)
+      : result.subtract(combinedFilletSolid);
+    try { result.name = this.name; } catch { }
+    if (debug && debugSolidsLevel >= 2 && result && typeof result.clone === 'function') {
+      try {
+        const stepSnapshot = result.clone();
+        try { stepSnapshot.name = `${featureID}_TARGET_BOOLEAN_RESULT`; } catch { }
+        debugAdded.push(stepSnapshot);
+      } catch { }
     }
     if (typeof result?.visualize === 'function') {
       result.visualize();

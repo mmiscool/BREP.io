@@ -18,6 +18,7 @@ This project is actively evolving; expect rough edges while APIs settle.
 - [What's New](docs/whats-new.md)
 - [Getting Started](docs/getting-started.md)
 - [Developer Docs Index](docs/developer-index.md)
+- [API Examples (Live Demos)](docs/api-examples.md)
 - [UI Overview (Browser)](docs/ui-overview.md)
 - [How It Works](docs/how-it-works.md)
 - [History Systems](docs/history-systems.md)
@@ -26,6 +27,7 @@ This project is actively evolving; expect rough edges while APIs settle.
 - [BREP API (BREP.js exports)](docs/brep-api.md)
 - [BREP Kernel (core classes & helpers)](docs/brep-kernel.md)
 - [2D Sketch Solver (standalone)](docs/sketch-solver-2d.md)
+- [Embeddable CAD App](docs/cad-embed.md)
 - [File Formats: Import and Export](docs/file-formats.md)
 - [Plugins and Examples](docs/plugins.md)
 - [Recent Inspector Improvements](docs/inspector-improvements.md)
@@ -140,9 +142,11 @@ configuration.
 - Import (ESM):
   - `import { BREP, PartHistory } from 'brep-io-kernel';`
   - `import { AssemblyConstraintHistory, AssemblyConstraintRegistry } from 'brep-io-kernel';`
+  - `import { CadEmbed, Sketcher2DEmbed } from 'brep-io-kernel';`
 - Subpath imports (BREP kernel bundle):
   - `import { BREP } from 'brep-io-kernel/BREP';`
   - `import { PartHistory } from 'brep-io-kernel/PartHistory';`
+  - `import { CadEmbed } from 'brep-io-kernel/CAD';`
 - Standalone 2D sketch solver:
   - `import { ConstraintSolver, ConstraintEngine, constraints } from 'brep-io-kernel/SketchSolver2D';`
 

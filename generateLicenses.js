@@ -1,9 +1,9 @@
 // generateLicenses.js (ES6, no deps, dark mode)
 // Usage: node generateLicenses.js
-// - Runs: pnpm licenses list --prod --long --json
+// - Builds dependency license data from installed node_modules
+//   (dependencies + optionalDependencies from package.json files)
 // - Produces: about.html (one <div> per license, with repo/homepage + author)
 
-import { execSync } from "child_process";
 import {
   writeFileSync,
   readFileSync,
@@ -14,8 +14,7 @@ import {
   existsSync,
 } from "fs";
 import path from "path";
-
-const run = (cmd) => execSync(cmd, { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+import { collectDependencyLicenseData } from "./scripts/collectDependencyLicenses.js";
 
 const escapeHTML = (s = "") =>
   String(s)
@@ -25,21 +24,19 @@ const escapeHTML = (s = "") =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 
-let raw;
+let dependencyLicenseData;
 try {
-  raw = run("pnpm licenses list --prod --long --json");
-} catch (e) {
-  console.error("Failed to run pnpm. Is pnpm installed and did you run `pnpm install`?", e.message);
+  dependencyLicenseData = collectDependencyLicenseData({ cwd: process.cwd(), logger: console });
+} catch (error) {
+  console.error("[generateLicenses] Failed to collect dependency licenses.");
+  console.error(error?.message ?? error);
   process.exit(1);
 }
 
-let data;
-try {
-  data = JSON.parse(raw);
-} catch (e) {
-  console.error("Could not parse pnpm JSON. Here is the first 200 chars for debugging:\n", raw.slice(0, 200));
-  process.exit(1);
-}
+const data = dependencyLicenseData.data;
+const dependencySourceHtml = `Generated from <code>${escapeHTML(
+  dependencyLicenseData.sourceLabel
+)}</code>.`;
 
 // data shape: { "<LICENSE>": [ { name, versions, paths, license, author?, homepage?, description? }, ... ], ... }
 const licenseKeys = Object.keys(data).sort((a, b) => a.localeCompare(b));
@@ -1055,7 +1052,7 @@ function generateDocsSite() {
   </section>
 `;
 
-    readmeBody += `<div class="footer">Generated from <code>pnpm licenses list --prod --long --json</code></div>
+    readmeBody += `<div class="footer">${dependencySourceHtml}</div>
     <div class="prose">`;
 
     const indexHtml = docTemplate(readmeTitle, readmeBody, { relativeRoot: ".", showTitle: false });
@@ -1162,7 +1159,7 @@ for (const lic of licenseKeys) {
 
 html += `
   ${fontLicenseHtml}
-  <div class="footer">Generated from <code>pnpm licenses list --prod --long --json</code></div>
+  <div class="footer">${dependencySourceHtml}</div>
 </main>
 </body>
 </html>`;

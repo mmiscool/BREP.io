@@ -4,6 +4,10 @@
 
 PMI (Product Manufacturing Information) Mode focuses on annotations, dimensions, and callouts. Activate it to place linear, radial, angular, and leader dimensions that communicate manufacturing intent without altering the underlying solid.
 
+## Live Demos
+- Examples hub: [https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
+- Embeded CAD: [https://BREP.io/apiExamples/Embeded_CAD.html](https://BREP.io/apiExamples/Embeded_CAD.html)
+
 Capabilities:
 - Place linear, radial, and angular dimensions with associative snapping to faces or edges
 - Add leader annotations that reference points, faces, or datums
