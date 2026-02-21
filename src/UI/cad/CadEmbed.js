@@ -63,6 +63,22 @@ function toFilePath(input) {
   return String(input || "").trim();
 }
 
+function normalizePathRequest(pathOrRequest, options = {}) {
+  if (typeof pathOrRequest === "string") {
+    const modelPath = toFilePath(pathOrRequest);
+    return {
+      ...(options && typeof options === "object" ? options : {}),
+      modelPath,
+    };
+  }
+  if (pathOrRequest && typeof pathOrRequest === "object") {
+    return deepClone(pathOrRequest);
+  }
+  return {
+    ...(options && typeof options === "object" ? options : {}),
+  };
+}
+
 function sanitizeInlineStyleText(cssText) {
   return String(cssText || "").replace(/<\/style/gi, "<\\/style");
 }
@@ -91,6 +107,9 @@ export class CadEmbed {
     this._onHistoryChanged = typeof this._options.onHistoryChanged === "function"
       ? this._options.onHistoryChanged
       : (typeof this._options.onChange === "function" ? this._options.onChange : null);
+    this._onFilesChanged = typeof this._options.onFilesChanged === "function"
+      ? this._options.onFilesChanged
+      : (typeof this._options.onFileChange === "function" ? this._options.onFileChange : null);
     this._onSave = typeof this._options.onSave === "function"
       ? this._options.onSave
       : (typeof this._options.onSaved === "function" ? this._options.onSaved : null);
@@ -247,6 +266,12 @@ export class CadEmbed {
     });
   }
 
+  async listFiles(options = {}) {
+    return this.#request("listFiles", {
+      ...(options && typeof options === "object" ? deepClone(options) : {}),
+    });
+  }
+
   async readFile(path, options = {}) {
     const modelPath = toFilePath(path);
     if (!modelPath) throw new Error("readFile requires a path");
@@ -276,8 +301,45 @@ export class CadEmbed {
     });
   }
 
-  async saveCurrent() {
-    return this.#request("saveCurrent", {});
+  async addFile(path, record, options = {}) {
+    return this.createFile(path, record, options);
+  }
+
+  async removeFile(pathOrRequest, options = {}) {
+    const payload = normalizePathRequest(pathOrRequest, options);
+    const modelPath = toFilePath(payload?.modelPath ?? payload?.path ?? payload?.name);
+    if (!modelPath) throw new Error("removeFile requires a path");
+    return this.#request("removeFile", {
+      ...payload,
+      modelPath,
+    });
+  }
+
+  async deleteFile(pathOrRequest, options = {}) {
+    return this.removeFile(pathOrRequest, options);
+  }
+
+  async setCurrentFile(pathOrRequest, options = {}) {
+    const payload = normalizePathRequest(pathOrRequest, options);
+    const modelPath = toFilePath(payload?.modelPath ?? payload?.path ?? payload?.name);
+    if (!modelPath) throw new Error("setCurrentFile requires a path");
+    return this.#request("setCurrentFile", {
+      ...payload,
+      modelPath,
+    });
+  }
+
+  async setCurrentFileName(name, options = {}) {
+    return this.setCurrentFile(name, options);
+  }
+
+  async saveCurrent(options = {}) {
+    const payload = (options && typeof options === "object") ? deepClone(options) : {};
+    return this.#request("saveCurrent", payload);
+  }
+
+  async saveModel(options = {}) {
+    return this.saveCurrent(options);
   }
 
   async setCss(cssText) {
@@ -467,6 +529,13 @@ ${frameCss}
       this._latestPartHistoryJSON = "";
       try {
         this._onHistoryChanged && this._onHistoryChanged(deepClone(msg.payload || {}));
+      } catch { }
+      return;
+    }
+
+    if (msg.type === "filesChanged") {
+      try {
+        this._onFilesChanged && this._onFilesChanged(deepClone(msg.payload || {}));
       } catch { }
       return;
     }

@@ -33,6 +33,7 @@ const cad = new CadEmbed({
   cssText: ".cad-sidebar-home-banner { display: none !important; }",
   onReady: (state) => console.log("cad ready", state),
   onHistoryChanged: (state) => console.log("history changed", state),
+  onFilesChanged: (state) => console.log("files changed", state),
 });
 
 const iframe = await cad.mount();
@@ -65,6 +66,16 @@ await cad.loadModel({
   branch: "main",               // optional
 });
 
+const files = await cad.listFiles({ source: "local" });
+const first = files.files[0]?.path;
+if (first) {
+  const file = await cad.readFile(first);
+  console.log(file.record);
+}
+
+await cad.setCurrentFileName("my/new/model-name");
+await cad.saveModel(); // alias of saveCurrent()
+
 await cad.runHistory();
 await cad.reset();
 await cad.destroy();
@@ -91,6 +102,10 @@ await cad.destroy();
 - `onReady(state)`: called after iframe init completes.
 - `onHistoryChanged(state)`: called when part history is rerun/reset/loaded.
 - `onChange`: alias for `onHistoryChanged`.
+- `onFilesChanged(state)`: called when embedded file records change.
+- `onFileChange`: alias for `onFilesChanged`.
+- `onSave(state)`: called after save operations persist changes.
+- `onSaved`: alias for `onSave`.
 - `channel`: postMessage channel id (advanced; default `brep:cad`).
 - `instanceId`: explicit iframe instance id.
 - `targetOrigin`: postMessage target origin (default `*`).
@@ -108,6 +123,18 @@ await cad.destroy();
 - `setCss(cssText)`: applies custom CSS inside the iframe.
 - `setSidebarExpanded(boolean)`: toggles sidebar visibility.
 - `loadModel(modelPathOrRequest, options?)`: loads a saved model through File Manager storage scopes.
+- `loadFile(path, options?)`: alias-style single-file model load request.
+- `listFiles(options?)`: lists saved file records (defaults to local browser storage).
+- `readFile(path, options?)`: reads one saved file record.
+- `writeFile(path, record, options?)`: creates or overwrites one file record.
+- `createFile(path, record, options?)`: creates one file record and fails if it exists.
+- `addFile(path, record, options?)`: alias of `createFile`.
+- `removeFile(pathOrRequest, options?)`: removes one file record.
+- `deleteFile(pathOrRequest, options?)`: alias of `removeFile`.
+- `setCurrentFile(pathOrRequest, options?)`: sets the active file path/scope used by save operations.
+- `setCurrentFileName(name, options?)`: alias of `setCurrentFile`.
+- `saveCurrent(options?)`: triggers save from the parent page.
+- `saveModel(options?)`: alias of `saveCurrent`.
 - `runHistory()`: reruns current feature history.
 - `reset()`: clears the model and reruns.
 - `destroy()`: disposes iframe and message handlers.

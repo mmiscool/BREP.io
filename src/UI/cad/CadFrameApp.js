@@ -1,8 +1,14 @@
 import { Viewer } from "../viewer.js";
-import { localStorage as LS } from "../../idbStorage.js";
 import {
+  localStorage as LS,
+  STORAGE_BACKEND_EVENT,
+} from "../../idbStorage.js";
+import {
+  listComponentRecords,
   getComponentRecord,
   setComponentRecord,
+  removeComponentRecord,
+  MODEL_STORAGE_PREFIX,
   uint8ArrayToBase64,
 } from "../../services/componentLibrary.js";
 import "../../styles/cad.css";
@@ -113,6 +119,10 @@ class CadFrameApp {
     this._sidebarExpanded = DEFAULT_SIDEBAR_EXPANDED;
     this._historyHooksInstalled = false;
     this._saveHookInstalled = false;
+    this._fileHooksInstalled = false;
+    this._saveInProgress = false;
+    this._boundStorageEvent = null;
+    this._boundStorageBackendEvent = null;
     this._customCssEl = null;
     this._root = null;
     this._ownsRoot = false;
@@ -139,6 +149,20 @@ class CadFrameApp {
     this._viewerBootPromise = null;
     this._historyHooksInstalled = false;
     this._saveHookInstalled = false;
+    this._fileHooksInstalled = false;
+    this._saveInProgress = false;
+    try {
+      if (this._boundStorageEvent) {
+        window.removeEventListener("storage", this._boundStorageEvent);
+      }
+    } catch { }
+    try {
+      if (this._boundStorageBackendEvent) {
+        window.removeEventListener(STORAGE_BACKEND_EVENT, this._boundStorageBackendEvent);
+      }
+    } catch { }
+    this._boundStorageEvent = null;
+    this._boundStorageBackendEvent = null;
     try {
       if (this._ownsRoot && this._root?.parentNode) this._root.parentNode.removeChild(this._root);
     } catch { }
@@ -268,6 +292,7 @@ class CadFrameApp {
 
         await viewer.ready;
         this.#attachHistoryHooks();
+        this.#attachFileHooks();
         this.#attachSaveHook();
         this.#setSidebarExpanded(this._sidebarExpanded);
       } catch (error) {
@@ -323,6 +348,14 @@ class CadFrameApp {
     });
   }
 
+  #emitFilesChanged(reason = "update", detail = null) {
+    this.#post("filesChanged", {
+      reason,
+      ...this.#collectState(),
+      detail: detail && typeof detail === "object" ? detail : null,
+    });
+  }
+
   #buildStorageOptions(sourceValue, repoFullValue = "", branchValue = "") {
     const source = resolveStorageSource(sourceValue, repoFullValue);
     const repoFull = String(repoFullValue || "").trim();
@@ -347,6 +380,82 @@ class CadFrameApp {
     }
   }
 
+  #attachFileHooks() {
+    if (this._fileHooksInstalled) return;
+    const fm = this._viewer?.fileManagerWidget;
+    if (!fm) return;
+
+    if (!fm.__cadEmbedPatchedSetModel && typeof fm._setModel === "function") {
+      const setModelBase = fm._setModel.bind(fm);
+      fm._setModel = async (...args) => {
+        const [name, _dataObj, options] = args;
+        const result = await setModelBase(...args);
+        if (!this._saveInProgress) {
+          try {
+            const modelPath = normalizeFilePath(name);
+            const source = resolveStorageSource(options?.source, options?.repoFull);
+            const repoFull = String(options?.repoFull || "").trim();
+            const branch = String(options?.branch || "").trim();
+            const storageOptions = this.#buildStorageOptions(source, repoFull, branch);
+            const persisted = await getComponentRecord(modelPath, storageOptions);
+            this.#emitFilesChanged("setModel", {
+              modelPath,
+              source,
+              repoFull,
+              branch,
+              savedAt: String(persisted?.savedAt || "").trim() || null,
+            });
+          } catch { }
+        }
+        return result;
+      };
+      fm.__cadEmbedPatchedSetModel = true;
+    }
+
+    if (!fm.__cadEmbedPatchedRemoveModel && typeof fm._removeModel === "function") {
+      const removeModelBase = fm._removeModel.bind(fm);
+      fm._removeModel = async (...args) => {
+        const [name, options] = args;
+        const modelPath = normalizeFilePath(name);
+        const source = resolveStorageSource(options?.source, options?.repoFull);
+        const repoFull = String(options?.repoFull || "").trim();
+        const branch = String(options?.branch || "").trim();
+        const storageOptions = this.#buildStorageOptions(source, repoFull, branch);
+        const existing = await getComponentRecord(modelPath, storageOptions);
+        const result = await removeModelBase(...args);
+        this.#emitFilesChanged("removeModel", {
+          modelPath,
+          source,
+          repoFull,
+          branch,
+          existed: !!existing,
+        });
+        return result;
+      };
+      fm.__cadEmbedPatchedRemoveModel = true;
+    }
+
+    if (!this._boundStorageEvent) {
+      this._boundStorageEvent = (event) => {
+        try {
+          const key = String(event?.key || event?.detail?.key || "").trim();
+          if (!key || !key.startsWith(MODEL_STORAGE_PREFIX)) return;
+          this.#emitFilesChanged("storageEvent", { key });
+        } catch { }
+      };
+    }
+
+    if (!this._boundStorageBackendEvent) {
+      this._boundStorageBackendEvent = () => {
+        this.#emitFilesChanged("storageBackendChanged", {});
+      };
+    }
+
+    window.addEventListener("storage", this._boundStorageEvent);
+    window.addEventListener(STORAGE_BACKEND_EVENT, this._boundStorageBackendEvent);
+    this._fileHooksInstalled = true;
+  }
+
   #attachSaveHook() {
     if (this._saveHookInstalled) return;
     const fm = this._viewer?.fileManagerWidget;
@@ -357,7 +466,13 @@ class CadFrameApp {
       const before = this.#collectModelState();
       const beforeRecord = await this.#readModelRecordFromState(before);
 
-      const result = await saveCurrentBase(...args);
+      this._saveInProgress = true;
+      let result;
+      try {
+        result = await saveCurrentBase(...args);
+      } finally {
+        this._saveInProgress = false;
+      }
 
       const after = this.#collectModelState();
       const afterRecord = await this.#readModelRecordFromState(after);
@@ -368,13 +483,17 @@ class CadFrameApp {
       const didPersist = !!afterRecord && (beforeKey !== afterKey || beforeSavedAt !== afterSavedAt);
 
       if (didPersist) {
-        this.#emitSaved("saveCurrent", {
+        const detail = {
           modelPath: String(after.name || "").trim(),
           source: String(after.source || "").trim() || "local",
           repoFull: String(after.repoFull || "").trim(),
           branch: String(after.branch || "").trim(),
           savedAt: afterSavedAt || null,
+        };
+        this.#emitSaved("saveCurrent", {
+          ...detail,
         });
+        this.#emitFilesChanged("saveCurrent", detail);
       }
 
       return result;
@@ -507,6 +626,142 @@ class CadFrameApp {
     };
   }
 
+  #normalizeListRequest(input = {}) {
+    const payload = (input && typeof input === "object") ? input : {};
+    const repoFull = String(payload.repoFull || "").trim();
+    const source = resolveStorageSource(payload.source, repoFull);
+    const branch = String(payload.branch || "").trim();
+    const folder = normalizeModelPath(payload.folder ?? payload.pathPrefix ?? payload.prefix ?? "");
+    const includeRecord = normalizeBoolean(payload.includeRecord, false);
+    return {
+      source,
+      repoFull,
+      branch,
+      folder,
+      includeRecord,
+      options: this.#buildStorageOptions(source, repoFull, branch),
+    };
+  }
+
+  async #listFiles(input = {}) {
+    const request = this.#normalizeListRequest(input);
+    const list = await listComponentRecords(request.options);
+    const items = Array.isArray(list) ? list : [];
+    const folderPrefix = request.folder ? `${request.folder}/` : "";
+
+    const filtered = request.folder
+      ? items.filter((entry) => {
+        const path = normalizeFilePath(entry?.path || entry?.name);
+        return path === request.folder || path.startsWith(folderPrefix);
+      })
+      : items;
+
+    const files = filtered.map((entry) => {
+      const path = normalizeFilePath(entry?.path || entry?.name);
+      const out = {
+        source: String(entry?.source || request.source || "local").trim() || "local",
+        repoFull: String(entry?.repoFull || request.repoFull || "").trim(),
+        branch: String(entry?.branch || request.branch || "").trim(),
+        path,
+        browserPath: String(entry?.browserPath || path).trim(),
+        folder: String(entry?.folder || "").trim(),
+        displayName: String(entry?.displayName || "").trim(),
+        savedAt: entry?.savedAt || null,
+        has3mf: !!entry?.has3mf,
+      };
+      if (request.includeRecord) {
+        out.record = entry?.record || null;
+      }
+      return out;
+    });
+
+    return {
+      source: request.source,
+      repoFull: request.repoFull,
+      branch: request.branch,
+      folder: request.folder,
+      files,
+    };
+  }
+
+  async #removeFile(input = {}) {
+    const request = this.#normalizeStorageRequest(input, "removeFile");
+    const existing = await getComponentRecord(request.modelPath, request.options);
+    await removeComponentRecord(request.modelPath, request.options);
+    const persisted = await getComponentRecord(request.modelPath, request.options);
+    if (persisted) {
+      throw new Error(`removeFile failed to remove "${request.modelPath}"`);
+    }
+
+    const fm = this._viewer?.fileManagerWidget;
+    if (fm) {
+      const currentPath = normalizeFilePath(fm.currentName || "");
+      const currentSource = resolveStorageSource(fm.currentSource, fm.currentRepoFull);
+      const currentRepo = String(fm.currentRepoFull || "").trim();
+      if (
+        currentPath === request.modelPath
+        && currentSource === request.source
+        && currentRepo === request.repoFull
+      ) {
+        fm.currentName = "";
+        fm.currentRepoFull = "";
+        fm.currentSource = "";
+        fm.currentBranch = "";
+        fm._forceSaveTargetDialog = false;
+        try { if (fm.nameInput) fm.nameInput.value = ""; } catch { }
+      }
+      try { await fm.refreshList?.(); } catch { }
+    }
+
+    this.#emitFilesChanged("removeFile", {
+      modelPath: request.modelPath,
+      source: request.source,
+      repoFull: request.repoFull,
+      branch: request.branch,
+      removed: !!existing,
+    });
+
+    return {
+      ok: true,
+      removed: !!existing,
+      modelPath: request.modelPath,
+      source: request.source,
+      repoFull: request.repoFull,
+      branch: request.branch,
+    };
+  }
+
+  async #setCurrentFile(input = {}) {
+    const fm = this._viewer?.fileManagerWidget;
+    if (!fm) {
+      throw new Error("CAD frame cannot set current file (FileManagerWidget unavailable)");
+    }
+
+    const payload = (input && typeof input === "object") ? input : {};
+    const rawPath = payload.modelPath ?? payload.path ?? payload.name;
+    const modelPath = normalizeFilePath(rawPath);
+    if (!modelPath) throw new Error("setCurrentFile requires modelPath/path/name");
+
+    const repoFull = String(payload.repoFull ?? fm.currentRepoFull ?? "").trim();
+    const source = resolveStorageSource(payload.source ?? fm.currentSource, repoFull);
+    const branch = String(payload.branch ?? fm.currentBranch ?? "").trim();
+
+    if (source === "mounted" && !repoFull) {
+      throw new Error("setCurrentFile requires repoFull for source \"mounted\"");
+    }
+
+    fm.currentName = modelPath;
+    fm.currentSource = source;
+    fm.currentRepoFull = source === "local" ? "" : repoFull;
+    fm.currentBranch = source === "github" ? branch : "";
+    fm._forceSaveTargetDialog = false;
+    try {
+      if (fm.nameInput) fm.nameInput.value = modelPath;
+    } catch { }
+
+    return this.#collectState();
+  }
+
   async #writeFile(input = {}, { create = false } = {}) {
     const operationName = create ? "createFile" : "writeFile";
     const request = this.#normalizeStorageRequest(input, operationName);
@@ -522,12 +777,26 @@ class CadFrameApp {
       throw new Error(`${operationName} failed to persist "${request.modelPath}"`);
     }
 
+    const fm = this._viewer?.fileManagerWidget;
+    if (fm) {
+      try { await fm.refreshList?.(); } catch { }
+    }
+
     this.#emitSaved(operationName, {
       modelPath: request.modelPath,
       source: request.source,
       repoFull: request.repoFull,
       branch: request.branch,
       savedAt: String(persisted?.savedAt || "").trim() || null,
+    });
+    this.#emitFilesChanged(operationName, {
+      modelPath: request.modelPath,
+      source: request.source,
+      repoFull: request.repoFull,
+      branch: request.branch,
+      savedAt: String(persisted?.savedAt || "").trim() || null,
+      created: !!create,
+      overwritten: !create && !!existing,
     });
 
     return {
@@ -542,10 +811,26 @@ class CadFrameApp {
     };
   }
 
-  async #saveCurrent() {
+  async #saveCurrent(input = {}) {
     const fm = this._viewer?.fileManagerWidget;
     if (!fm || typeof fm.saveCurrent !== "function") {
       throw new Error("CAD frame cannot save models (FileManagerWidget unavailable)");
+    }
+    const payload = (input && typeof input === "object") ? input : {};
+    const hasPath = payload?.modelPath != null || payload?.path != null || payload?.name != null;
+    const hasScope = payload?.source != null || payload?.repoFull != null || payload?.branch != null;
+
+    if (hasPath || hasScope) {
+      await this.#setCurrentFile({
+        modelPath: payload?.modelPath ?? payload?.path ?? payload?.name ?? fm.currentName,
+        source: payload?.source ?? fm.currentSource,
+        repoFull: payload?.repoFull ?? fm.currentRepoFull,
+        branch: payload?.branch ?? fm.currentBranch,
+      });
+    }
+
+    if (payload?.forceTargetDialog != null) {
+      fm._forceSaveTargetDialog = !!payload.forceTargetDialog;
     }
     await fm.saveCurrent();
     return this.#collectState();
@@ -652,6 +937,10 @@ class CadFrameApp {
       return this.#readFile(payload || {});
     }
 
+    if (type === "listFiles") {
+      return this.#listFiles(payload || {});
+    }
+
     if (type === "writeFile") {
       return this.#writeFile(payload || {}, { create: false });
     }
@@ -660,8 +949,16 @@ class CadFrameApp {
       return this.#writeFile(payload || {}, { create: true });
     }
 
+    if (type === "removeFile") {
+      return this.#removeFile(payload || {});
+    }
+
+    if (type === "setCurrentFile" || type === "setCurrentFileName") {
+      return this.#setCurrentFile(payload || {});
+    }
+
     if (type === "saveCurrent") {
-      return this.#saveCurrent();
+      return this.#saveCurrent(payload || {});
     }
 
     throw new Error(`Unknown request type: ${type}`);
