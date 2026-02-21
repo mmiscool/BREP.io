@@ -19,6 +19,9 @@ export default defineConfig({
   },
   esbuild: {
     keepNames: true,
+    supported: {
+      'class-static-blocks': false,
+    },
   },
   build: {
     lib: {
