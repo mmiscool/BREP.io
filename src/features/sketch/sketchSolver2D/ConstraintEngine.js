@@ -5,6 +5,7 @@ import { distance, calculateAngle } from "./mathHelpersMod.js";
 
 // === Constraint function table ===
 const constraintFunctions = constraints.constraintFunctions;
+let globalDistanceSolveCycleId = 0;
 
 // === Engine that performs numeric solving on a sketch snapshot ===
 class ConstraintEngine {
@@ -63,6 +64,17 @@ class ConstraintEngine {
 
     solve(iterations = 100) {
         const decimalsPlaces = 6;
+        this._distanceSolveCycleId = ++globalDistanceSolveCycleId;
+        const hasPendingDistanceTargetSlides = () => {
+            const slideTol = Number.isFinite(constraints?.tolerance) ? Number(constraints.tolerance) : 1e-8;
+            return this.constraints.some((c) => (
+                c?.type === "⟺" &&
+                c?._distanceThrottleActive === true &&
+                Number.isFinite(c?._distanceRequestedTarget) &&
+                Number.isFinite(c?._distanceAppliedTarget) &&
+                Math.abs(c._distanceRequestedTarget - c._distanceAppliedTarget) > slideTol
+            ));
+        };
 
         // Implied constraints for certain geometry types (e.g., arcs, bezier splines)
         let nextTempId =
@@ -101,6 +113,7 @@ class ConstraintEngine {
         this.tidyDecimalsOfPoints(decimalsPlaces, true);
 
         // Ground first, then everything
+        this._distanceSolvePassToken = `${this._distanceSolveCycleId}:pre`;
         this.processConstraintsOfType("⏚");
         this.processConstraintsOfType("all");
 
@@ -114,6 +127,7 @@ class ConstraintEngine {
         let converged = false;
 
         for (let i = 0; i < iterations; i++) {
+            this._distanceSolvePassToken = `${this._distanceSolveCycleId}:${i}`;
             for (const t of order) {
                 this.processConstraintsOfType(t);
                 this.processConstraintsOfType("≡"); // keep coincident snapping frequently
@@ -126,7 +140,7 @@ class ConstraintEngine {
             }
 
             const cur = JSON.stringify(this.points);
-            if (cur === prev) {
+            if (cur === prev && !hasPendingDistanceTargetSlides()) {
                 converged = true;
                 break;
             }

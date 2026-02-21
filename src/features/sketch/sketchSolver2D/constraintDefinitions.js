@@ -1,6 +1,9 @@
 "use strict";
 import { calculateAngle, rotatePoint, distance, roundToDecimals } from "./mathHelpersMod.js";
 let tolerance = 0.00001;
+let distanceSlideThresholdRatio = 0.10;
+let distanceSlideStepRatio = 0.10;
+let distanceSlideMinStep = 0.001;
 const constraintFunctions = [];
 
 const normalizeAngle = (angle) => ((angle % 360) + 360) % 360;
@@ -8,6 +11,88 @@ const shortestAngleDelta = (target, current) => {
     const delta = normalizeAngle(target - current);
     return (delta > 180) ? delta - 360 : delta;
 };
+
+function relativeDeltaRatio(a, b, floor = tolerance) {
+    const denom = Math.max(Math.abs(a), Math.abs(b), floor);
+    return Math.abs(a - b) / denom;
+}
+
+function resolveDistanceTargetForSolvePass(solverObject, constraint, requestedTarget) {
+    if (constraint?.type !== "⟺" || !Number.isFinite(requestedTarget)) {
+        return requestedTarget;
+    }
+
+    const previousRequested = Number.isFinite(constraint._distanceRequestedTarget)
+        ? constraint._distanceRequestedTarget
+        : null;
+
+    let appliedTarget = Number.isFinite(constraint._distanceAppliedTarget)
+        ? constraint._distanceAppliedTarget
+        : (previousRequested ?? requestedTarget);
+
+    const targetChanged = previousRequested !== null &&
+        Math.abs(requestedTarget - previousRequested) > tolerance;
+
+    if (previousRequested === null) {
+        constraint._distanceThrottleActive = false;
+        appliedTarget = requestedTarget;
+    } else if (targetChanged) {
+        const rel = relativeDeltaRatio(requestedTarget, previousRequested, tolerance);
+        if (rel > distanceSlideThresholdRatio) {
+            constraint._distanceThrottleActive = true;
+        } else {
+            constraint._distanceThrottleActive = false;
+            appliedTarget = requestedTarget;
+        }
+    }
+
+    constraint._distanceRequestedTarget = requestedTarget;
+
+    if (!constraint._distanceThrottleActive) {
+        constraint._distanceAppliedTarget = requestedTarget;
+        return requestedTarget;
+    }
+
+    const solvePassToken = (typeof solverObject?._distanceSolvePassToken === "string")
+        ? solverObject._distanceSolvePassToken
+        : null;
+    const lastAppliedPassToken = (typeof constraint._distanceLastAppliedPassToken === "string")
+        ? constraint._distanceLastAppliedPassToken
+        : null;
+
+    if (solvePassToken !== null && lastAppliedPassToken === solvePassToken) {
+        return Number.isFinite(constraint._distanceAppliedTarget)
+            ? constraint._distanceAppliedTarget
+            : appliedTarget;
+    }
+
+    const delta = requestedTarget - appliedTarget;
+    const absDelta = Math.abs(delta);
+    if (absDelta <= tolerance) {
+        constraint._distanceThrottleActive = false;
+        constraint._distanceAppliedTarget = requestedTarget;
+        if (solvePassToken !== null) constraint._distanceLastAppliedPassToken = solvePassToken;
+        return requestedTarget;
+    }
+
+    // Scale slide speed by the remaining gap so large drops (e.g. 1000 -> 1)
+    // can still settle within a single solve evaluation.
+    const maxStep = Math.max(
+        distanceSlideMinStep,
+        absDelta * distanceSlideStepRatio
+    );
+    const step = Math.min(absDelta, maxStep);
+    appliedTarget += Math.sign(delta) * step;
+
+    if (Math.abs(requestedTarget - appliedTarget) <= tolerance) {
+        appliedTarget = requestedTarget;
+        constraint._distanceThrottleActive = false;
+    }
+
+    constraint._distanceAppliedTarget = appliedTarget;
+    if (solvePassToken !== null) constraint._distanceLastAppliedPassToken = solvePassToken;
+    return appliedTarget;
+}
 
 
 (constraintFunctions["━"] = function (solverObject, constraint, points, constraintValue) {
@@ -74,8 +159,15 @@ const shortestAngleDelta = (target, current) => {
     if (isNaN(constraintValue) | constraintValue == undefined | constraintValue == null) {
         targetDistance = currentDistance;
         constraint.value = currentDistance;
+        if (constraint?.type === "⟺") {
+            constraint._distanceRequestedTarget = currentDistance;
+            constraint._distanceAppliedTarget = currentDistance;
+            constraint._distanceThrottleActive = false;
+            constraint._distanceLastAppliedPassToken = null;
+        }
     }
 
+    targetDistance = resolveDistanceTargetForSolvePass(solverObject, constraint, targetDistance);
 
 
     let diff = roundToDecimals(Math.abs(targetDistance) - currentDistance, 4);
@@ -691,6 +783,18 @@ const shortestAngleDelta = (target, current) => {
 export const constraints = {
     get tolerance() { return tolerance; },
     set tolerance(value) { tolerance = value; },
+    get distanceSlideThresholdRatio() { return distanceSlideThresholdRatio; },
+    set distanceSlideThresholdRatio(value) {
+        if (Number.isFinite(value) && value >= 0) distanceSlideThresholdRatio = Number(value);
+    },
+    get distanceSlideStepRatio() { return distanceSlideStepRatio; },
+    set distanceSlideStepRatio(value) {
+        if (Number.isFinite(value) && value >= 0) distanceSlideStepRatio = Number(value);
+    },
+    get distanceSlideMinStep() { return distanceSlideMinStep; },
+    set distanceSlideMinStep(value) {
+        if (Number.isFinite(value) && value >= 0) distanceSlideMinStep = Number(value);
+    },
     constraintFunctions,
 };
 

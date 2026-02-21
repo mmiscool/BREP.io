@@ -1,0 +1,43 @@
+{
+  "name": "rect_width_height_fixture",
+  "sketch": {
+    "points": [
+      { "id": 0, "x": 0, "y": 0, "fixed": true },
+      { "id": 1, "x": 40, "y": 0, "fixed": false },
+      { "id": 2, "x": 40, "y": 20, "fixed": false },
+      { "id": 3, "x": 0, "y": 20, "fixed": false }
+    ],
+    "geometries": [
+      { "id": 100, "type": "line", "points": [0, 1], "construction": false },
+      { "id": 101, "type": "line", "points": [1, 2], "construction": false },
+      { "id": 102, "type": "line", "points": [2, 3], "construction": false },
+      { "id": 103, "type": "line", "points": [3, 0], "construction": false }
+    ],
+    "constraints": [
+      { "id": 0, "type": "⏚", "points": [0] },
+      { "id": 1, "type": "━", "points": [0, 1] },
+      { "id": 2, "type": "━", "points": [2, 3] },
+      { "id": 3, "type": "│", "points": [1, 2] },
+      { "id": 4, "type": "│", "points": [3, 0] },
+      { "id": 5, "type": "⟺", "points": [0, 1], "value": 40 },
+      { "id": 6, "type": "⟺", "points": [1, 2], "value": 20 }
+    ]
+  },
+  "edits": [
+    { "constraintId": 5, "value": 110 },
+    { "constraintId": 6, "value": 45 }
+  ],
+  "expect": {
+    "topologyUnchanged": true,
+    "distances": [
+      { "a": 0, "b": 1, "value": 110, "tol": 0.08 },
+      { "a": 1, "b": 2, "value": 45, "tol": 0.08 }
+    ],
+    "anchors": [
+      { "pointId": 0, "x": 0, "y": 0, "tol": 0.02 }
+    ],
+    "orientationLoops": [
+      { "pointIds": [0, 1, 2, 3], "preserveSign": true, "minAbsArea": 1.0 }
+    ]
+  }
+}

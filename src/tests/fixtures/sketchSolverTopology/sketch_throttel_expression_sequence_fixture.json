@@ -1,0 +1,25 @@
+{
+  "name": "sketch_throttel_expression_sequence_fixture",
+  "sourcePartFile": "src/tests/partFiles/sketch_throttel_testing.BREP.json",
+  "sourceFeatureId": "S1",
+  "initialSolvePasses": 4,
+  "edits": [
+    { "expressionValues": { "x": 10, "y": 20, "z": 10 } },
+    { "expressionValues": { "x": 1200, "y": 2500, "z": 300 } }
+  ],
+  "expect": {
+    "topologyUnchanged": true,
+    "distances": [
+      { "a": 7, "b": 2, "value": 1200, "tol": 0.2 },
+      { "a": 5, "b": 6, "value": 2500, "tol": 0.2 }
+    ],
+    "anchors": [
+      { "pointId": 0, "x": 0, "y": 0, "tol": 0.02 }
+    ],
+    "coincidentPairs": [
+      { "a": 1, "b": 2, "tol": 0.02 },
+      { "a": 3, "b": 4, "tol": 0.02 },
+      { "a": 6, "b": 7, "tol": 0.02 }
+    ]
+  }
+}

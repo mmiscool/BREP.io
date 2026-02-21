@@ -1,0 +1,562 @@
+{
+  "features": [
+    {
+      "type": "S",
+      "inputParams": {
+        "id": "S1",
+        "sketchPlane": null,
+        "editSketch": null,
+        "dumpSketchDiagnostics": null,
+        "curveResolution": 32,
+        "__open": false
+      },
+      "persistentData": {
+        "basis": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            1,
+            0
+          ],
+          "z": [
+            0,
+            0,
+            1
+          ]
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0,
+              "y": 0,
+              "fixed": true
+            },
+            {
+              "id": 1,
+              "x": -1036.902284,
+              "y": 121.793877,
+              "fixed": false
+            },
+            {
+              "id": 2,
+              "x": -1036.902284,
+              "y": 121.793877,
+              "fixed": false
+            },
+            {
+              "id": 3,
+              "x": -52.094437,
+              "y": 295.442056,
+              "fixed": false
+            },
+            {
+              "id": 4,
+              "x": -52.094437,
+              "y": 295.442056,
+              "fixed": false
+            },
+            {
+              "id": 5,
+              "x": 0,
+              "y": 0,
+              "fixed": true
+            },
+            {
+              "id": 6,
+              "x": -984.807759,
+              "y": -173.648418,
+              "fixed": false
+            },
+            {
+              "id": 7,
+              "x": -984.807759,
+              "y": -173.648418,
+              "fixed": false
+            },
+            {
+              "id": 8,
+              "x": -544.498361,
+              "y": 208.617964,
+              "fixed": false
+            },
+            {
+              "id": 9,
+              "x": -492.40388,
+              "y": -86.824208,
+              "fixed": false
+            },
+            {
+              "id": 10,
+              "x": 0,
+              "y": 115.277922,
+              "fixed": false
+            }
+          ],
+          "geometries": [
+            {
+              "id": 1,
+              "type": "line",
+              "points": [
+                1,
+                3
+              ],
+              "construction": true
+            },
+            {
+              "id": 2,
+              "type": "line",
+              "points": [
+                4,
+                0
+              ],
+              "construction": false
+            },
+            {
+              "id": 3,
+              "type": "line",
+              "points": [
+                5,
+                6
+              ],
+              "construction": true
+            },
+            {
+              "id": 4,
+              "type": "line",
+              "points": [
+                7,
+                2
+              ],
+              "construction": false
+            },
+            {
+              "id": 5,
+              "type": "arc",
+              "points": [
+                8,
+                3,
+                1
+              ],
+              "construction": false
+            },
+            {
+              "id": 6,
+              "type": "arc",
+              "points": [
+                9,
+                6,
+                0
+              ],
+              "construction": false
+            },
+            {
+              "id": 7,
+              "type": "line",
+              "points": [
+                0,
+                10
+              ],
+              "construction": true
+            }
+          ],
+          "constraints": [
+            {
+              "id": 0,
+              "type": "⏚",
+              "points": [
+                0
+              ],
+              "status": "solved",
+              "previousPointValues": "[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true}]"
+            },
+            {
+              "id": 1,
+              "type": "≡",
+              "points": [
+                1,
+                2
+              ],
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":1,\"x\":-1036.902284,\"y\":121.793877,\"fixed\":false},{\"id\":2,\"x\":-1036.902284,\"y\":121.793877,\"fixed\":false}]"
+            },
+            {
+              "id": 2,
+              "type": "≡",
+              "points": [
+                3,
+                4
+              ],
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":3,\"x\":-52.094437,\"y\":295.442056,\"fixed\":false},{\"id\":4,\"x\":-52.094437,\"y\":295.442056,\"fixed\":false}]"
+            },
+            {
+              "id": 3,
+              "type": "≡",
+              "points": [
+                0,
+                5
+              ],
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":5,\"x\":0,\"y\":0,\"fixed\":true}]"
+            },
+            {
+              "id": 4,
+              "type": "≡",
+              "points": [
+                6,
+                7
+              ],
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":6,\"x\":-984.807759,\"y\":-173.648418,\"fixed\":false},{\"id\":7,\"x\":-984.807759,\"y\":-173.648418,\"fixed\":false}]"
+            },
+            {
+              "id": 5,
+              "type": "⟂",
+              "points": [
+                1,
+                3,
+                4,
+                0
+              ],
+              "status": "solved",
+              "value": 90,
+              "error": null,
+              "previousPointValues": "[{\"id\":1,\"x\":-1036.902284,\"y\":121.793877,\"fixed\":false},{\"id\":3,\"x\":-52.094437,\"y\":295.442056,\"fixed\":false},{\"id\":4,\"x\":-52.094437,\"y\":295.442056,\"fixed\":false},{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true}]"
+            },
+            {
+              "id": 6,
+              "type": "⟂",
+              "points": [
+                4,
+                0,
+                5,
+                6
+              ],
+              "status": "solved",
+              "value": 90,
+              "error": null,
+              "previousPointValues": "[{\"id\":4,\"x\":-52.094437,\"y\":295.442056,\"fixed\":false},{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":5,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":6,\"x\":-984.807759,\"y\":-173.648418,\"fixed\":false}]"
+            },
+            {
+              "id": 7,
+              "type": "⟂",
+              "points": [
+                5,
+                6,
+                7,
+                2
+              ],
+              "status": "solved",
+              "value": 90,
+              "error": null,
+              "previousPointValues": "[{\"id\":5,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":6,\"x\":-984.807759,\"y\":-173.648418,\"fixed\":false},{\"id\":7,\"x\":-984.807759,\"y\":-173.648418,\"fixed\":false},{\"id\":2,\"x\":-1036.902284,\"y\":121.793877,\"fixed\":false}]"
+            },
+            {
+              "id": 8,
+              "type": "⋯",
+              "points": [
+                3,
+                1,
+                8
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":3,\"x\":-52.094437,\"y\":295.442056,\"fixed\":false},{\"id\":1,\"x\":-1036.902284,\"y\":121.793877,\"fixed\":false},{\"id\":8,\"x\":-544.498361,\"y\":208.617964,\"fixed\":false}]"
+            },
+            {
+              "id": 10,
+              "type": "│",
+              "points": [
+                0,
+                10
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":10,\"x\":0,\"y\":115.277922,\"fixed\":false}]"
+            },
+            {
+              "id": 11,
+              "type": "∠",
+              "points": [
+                0,
+                4,
+                0,
+                10
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 10,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":4,\"x\":-52.094437,\"y\":295.442056,\"fixed\":false},{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":10,\"x\":0,\"y\":115.277922,\"fixed\":false}]"
+            },
+            {
+              "id": 12,
+              "type": "⟺",
+              "points": [
+                7,
+                2
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 300,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "_distanceRequestedTarget": 300,
+              "_distanceAppliedTarget": 300,
+              "_distanceThrottleActive": false,
+              "error": null,
+              "previousPointValues": "[{\"id\":7,\"x\":-984.807759,\"y\":-173.648418,\"fixed\":false},{\"id\":2,\"x\":-1036.902284,\"y\":121.793877,\"fixed\":false}]",
+              "valueExpr": "x",
+              "_distanceLastAppliedCycle": 104,
+              "_distanceLastAppliedPassToken": "1319:88"
+            },
+            {
+              "id": 13,
+              "type": "⟺",
+              "points": [
+                5,
+                6
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 1000,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "_distanceRequestedTarget": 1000,
+              "_distanceAppliedTarget": 1000,
+              "_distanceThrottleActive": false,
+              "error": null,
+              "previousPointValues": "[{\"id\":5,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":6,\"x\":-984.807759,\"y\":-173.648418,\"fixed\":false}]",
+              "valueExpr": "y",
+              "_distanceLastAppliedCycle": 286,
+              "_distanceLastAppliedPassToken": "1226:7"
+            },
+            {
+              "id": 14,
+              "type": "⋯",
+              "points": [
+                6,
+                5,
+                9
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":6,\"x\":-984.807759,\"y\":-173.648418,\"fixed\":false},{\"id\":5,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":9,\"x\":-492.40388,\"y\":-86.824208,\"fixed\":false}]"
+            }
+          ]
+        },
+        "lastSketchSignature": "{\"points\":[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":1,\"x\":-1036.902284,\"y\":121.793877,\"fixed\":false},{\"id\":2,\"x\":-1036.902284,\"y\":121.793877,\"fixed\":false},{\"id\":3,\"x\":-52.094437,\"y\":295.442056,\"fixed\":false},{\"id\":4,\"x\":-52.094437,\"y\":295.442056,\"fixed\":false},{\"id\":5,\"x\":0,\"y\":0,\"fixed\":true},{\"id\":6,\"x\":-984.807759,\"y\":-173.648418,\"fixed\":false},{\"id\":7,\"x\":-984.807759,\"y\":-173.648418,\"fixed\":false},{\"id\":8,\"x\":-544.498361,\"y\":208.617964,\"fixed\":false},{\"id\":9,\"x\":-492.40388,\"y\":-86.824208,\"fixed\":false},{\"id\":10,\"x\":0,\"y\":115.277922,\"fixed\":false}],\"geometries\":[{\"id\":1,\"type\":\"line\",\"points\":[1,3],\"construction\":true},{\"id\":2,\"type\":\"line\",\"points\":[4,0],\"construction\":false},{\"id\":3,\"type\":\"line\",\"points\":[5,6],\"construction\":true},{\"id\":4,\"type\":\"line\",\"points\":[7,2],\"construction\":false},{\"id\":5,\"type\":\"arc\",\"points\":[8,3,1],\"construction\":false},{\"id\":6,\"type\":\"arc\",\"points\":[9,6,0],\"construction\":false},{\"id\":7,\"type\":\"line\",\"points\":[0,10],\"construction\":true}],\"constraints\":[{\"id\":0,\"type\":\"⏚\",\"points\":[0],\"status\":\"solved\",\"previousPointValues\":\"[{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true}]\"},{\"id\":1,\"type\":\"≡\",\"points\":[1,2],\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":1,\\\"x\\\":-1036.902284,\\\"y\\\":121.793877,\\\"fixed\\\":false},{\\\"id\\\":2,\\\"x\\\":-1036.902284,\\\"y\\\":121.793877,\\\"fixed\\\":false}]\"},{\"id\":2,\"type\":\"≡\",\"points\":[3,4],\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":3,\\\"x\\\":-52.094437,\\\"y\\\":295.442056,\\\"fixed\\\":false},{\\\"id\\\":4,\\\"x\\\":-52.094437,\\\"y\\\":295.442056,\\\"fixed\\\":false}]\"},{\"id\":3,\"type\":\"≡\",\"points\":[0,5],\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true},{\\\"id\\\":5,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true}]\"},{\"id\":4,\"type\":\"≡\",\"points\":[6,7],\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":6,\\\"x\\\":-984.807759,\\\"y\\\":-173.648418,\\\"fixed\\\":false},{\\\"id\\\":7,\\\"x\\\":-984.807759,\\\"y\\\":-173.648418,\\\"fixed\\\":false}]\"},{\"id\":5,\"type\":\"⟂\",\"points\":[1,3,4,0],\"status\":\"solved\",\"value\":90,\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":1,\\\"x\\\":-1036.902284,\\\"y\\\":121.793877,\\\"fixed\\\":false},{\\\"id\\\":3,\\\"x\\\":-52.094437,\\\"y\\\":295.442056,\\\"fixed\\\":false},{\\\"id\\\":4,\\\"x\\\":-52.094437,\\\"y\\\":295.442056,\\\"fixed\\\":false},{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true}]\"},{\"id\":6,\"type\":\"⟂\",\"points\":[4,0,5,6],\"status\":\"solved\",\"value\":90,\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":4,\\\"x\\\":-52.094437,\\\"y\\\":295.442056,\\\"fixed\\\":false},{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true},{\\\"id\\\":5,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true},{\\\"id\\\":6,\\\"x\\\":-984.807759,\\\"y\\\":-173.648418,\\\"fixed\\\":false}]\"},{\"id\":7,\"type\":\"⟂\",\"points\":[5,6,7,2],\"status\":\"solved\",\"value\":90,\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":5,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true},{\\\"id\\\":6,\\\"x\\\":-984.807759,\\\"y\\\":-173.648418,\\\"fixed\\\":false},{\\\"id\\\":7,\\\"x\\\":-984.807759,\\\"y\\\":-173.648418,\\\"fixed\\\":false},{\\\"id\\\":2,\\\"x\\\":-1036.902284,\\\"y\\\":121.793877,\\\"fixed\\\":false}]\"},{\"id\":8,\"type\":\"⋯\",\"points\":[3,1,8],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":3,\\\"x\\\":-52.094437,\\\"y\\\":295.442056,\\\"fixed\\\":false},{\\\"id\\\":1,\\\"x\\\":-1036.902284,\\\"y\\\":121.793877,\\\"fixed\\\":false},{\\\"id\\\":8,\\\"x\\\":-544.498361,\\\"y\\\":208.617964,\\\"fixed\\\":false}]\"},{\"id\":10,\"type\":\"│\",\"points\":[0,10],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true},{\\\"id\\\":10,\\\"x\\\":0,\\\"y\\\":115.277922,\\\"fixed\\\":false}]\"},{\"id\":11,\"type\":\"∠\",\"points\":[0,4,0,10],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":10,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true},{\\\"id\\\":4,\\\"x\\\":-52.094437,\\\"y\\\":295.442056,\\\"fixed\\\":false},{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true},{\\\"id\\\":10,\\\"x\\\":0,\\\"y\\\":115.277922,\\\"fixed\\\":false}]\"},{\"id\":12,\"type\":\"⟺\",\"points\":[7,2],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":300,\"valueNeedsSetup\":true,\"status\":\"solved\",\"_distanceRequestedTarget\":300,\"_distanceAppliedTarget\":300,\"_distanceThrottleActive\":false,\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":7,\\\"x\\\":-984.807759,\\\"y\\\":-173.648418,\\\"fixed\\\":false},{\\\"id\\\":2,\\\"x\\\":-1036.902284,\\\"y\\\":121.793877,\\\"fixed\\\":false}]\",\"valueExpr\":\"x\",\"_distanceLastAppliedCycle\":104,\"_distanceLastAppliedPassToken\":\"1319:88\"},{\"id\":13,\"type\":\"⟺\",\"points\":[5,6],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":1000,\"valueNeedsSetup\":true,\"status\":\"solved\",\"_distanceRequestedTarget\":1000,\"_distanceAppliedTarget\":1000,\"_distanceThrottleActive\":false,\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":5,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true},{\\\"id\\\":6,\\\"x\\\":-984.807759,\\\"y\\\":-173.648418,\\\"fixed\\\":false}]\",\"valueExpr\":\"y\",\"_distanceLastAppliedCycle\":286,\"_distanceLastAppliedPassToken\":\"1226:7\"},{\"id\":14,\"type\":\"⋯\",\"points\":[6,5,9],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":6,\\\"x\\\":-984.807759,\\\"y\\\":-173.648418,\\\"fixed\\\":false},{\\\"id\\\":5,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true},{\\\"id\\\":9,\\\"x\\\":-492.40388,\\\"y\\\":-86.824208,\\\"fixed\\\":false}]\"}]}",
+        "lastSketchChanged": false,
+        "sketchDimOffsets": {
+          "11": {
+            "du": -14.353134822893393,
+            "dv": 76.02826727622022
+          },
+          "12": {
+            "d": 79.4150386128091
+          },
+          "13": {
+            "d": 764.1395111898743
+          }
+        },
+        "__refPreviewSnapshots": {
+          "sketchPlane": {}
+        },
+        "externalRefs": []
+      },
+      "timestamp": 1771708810595
+    },
+    {
+      "type": "E",
+      "inputParams": {
+        "id": "E2",
+        "profile": "S1:PROFILE",
+        "consumeProfileSketch": true,
+        "distance": "z",
+        "distanceBack": 0,
+        "boolean": {
+          "targets": [],
+          "operation": "NONE"
+        },
+        "__open": false
+      },
+      "persistentData": {
+        "__refPreviewSnapshots": {
+          "profile": {
+            "S1:PROFILE": {
+              "type": "FACE",
+              "edgePositions": [
+                [
+                  -52.094437,
+                  295.442056,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  -984.807759,
+                  -173.648418,
+                  0,
+                  -958.4077934975074,
+                  -268.04334634189354,
+                  0,
+                  -914.0995589860238,
+                  -355.4741248451149,
+                  0,
+                  -853.5857960648494,
+                  -432.58083773267015,
+                  0,
+                  -779.1920147002102,
+                  -496.4003172782938,
+                  0,
+                  -693.7771261816595,
+                  -544.4800166800949,
+                  0,
+                  -600.623576764815,
+                  -574.972260058494,
+                  0,
+                  -503.3112051029164,
+                  -586.7052476038941,
+                  0,
+                  -405.5796710553513,
+                  -579.2280871860871,
+                  0,
+                  -311.1847426568757,
+                  -552.8281218859079,
+                  0,
+                  -223.7539640586901,
+                  -508.5198875618113,
+                  0,
+                  -146.64725104143764,
+                  -448.0061248058969,
+                  0,
+                  -82.8277713363687,
+                  -373.61234357803966,
+                  0,
+                  -34.74807175150113,
+                  -288.1974551625364,
+                  0,
+                  -4.255828173449288,
+                  -195.04390581104485,
+                  0,
+                  7.477159580516911,
+                  -97.73153417429302,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  -984.807759,
+                  -173.648418,
+                  0,
+                  -1036.902284,
+                  121.793877,
+                  0
+                ],
+                [
+                  -52.094437,
+                  295.442056,
+                  0,
+                  -78.4943802874393,
+                  389.8369952364284,
+                  0,
+                  -122.80259510765126,
+                  477.2677887732309,
+                  0,
+                  -183.31634162369397,
+                  554.3745202667988,
+                  0,
+                  -257.7101105074762,
+                  618.194021285652,
+                  0,
+                  -343.1249909585367,
+                  666.2737442108111,
+                  0,
+                  -436.27853704214783,
+                  696.7660122648207,
+                  0,
+                  -533.5909102450092,
+                  708.4990246936911,
+                  0,
+                  -631.3224506608892,
+                  701.0218884124483,
+                  0,
+                  -725.7173900227276,
+                  674.6219455734218,
+                  0,
+                  -813.1481837700114,
+                  630.3137311685402,
+                  0,
+                  -890.254915551043,
+                  569.7999850187847,
+                  0,
+                  -954.074416923296,
+                  495.40621643816996,
+                  0,
+                  -1002.1541402542091,
+                  409.99133621550675,
+                  0,
+                  -1032.6464087507343,
+                  316.837790276746,
+                  0,
+                  -1044.3794216418764,
+                  219.52541712962093,
+                  0,
+                  -1036.902284,
+                  121.793877,
+                  0
+                ]
+              ],
+              "sourceUuid": "de83365c-e699-4723-933f-20b523071088",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1771708810595
+            }
+          }
+        }
+      },
+      "timestamp": 1771708810598
+    }
+  ],
+  "idCounter": 2,
+  "expressions": "//Examples:\nx = 300; \ny = 1000;\nz = 300",
+  "pmiViews": [],
+  "metadata": {},
+  "assemblyConstraints": [],
+  "assemblyConstraintIdCounter": 0
+}

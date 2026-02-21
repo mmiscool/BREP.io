@@ -23,6 +23,15 @@ import { test_tube_closedLoop } from './test_tube_closedLoop.js';
 import { test_offsetShellGrouping } from './test_offsetShellGrouping.js';
 import { test_pushFace, afterRun_pushFace } from './test_pushFace.js';
 import { test_sketch_openLoop, afterRun_sketch_openLoop } from './test_sketch_openLoop.js';
+import {
+    test_sketch_solver_topology_rect_shared_points,
+    test_sketch_solver_topology_coincident_chain,
+    test_sketch_solver_topology_coincident_loop_no_flip,
+    test_sketch_solver_topology_rect_round_trip_sequence,
+    test_sketch_solver_topology_coincident_chain_multi_step,
+    test_sketch_solver_distance_slide_large_drop_settles_single_solve,
+} from './test_sketch_solver_topology_stability.js';
+import { registerSketchSolverTopologyFixtureTests } from './sketchSolverTopologyFixtureLoader.js';
 import { test_Fillet_NonClosed, afterRun_Fillet_NonClosed } from './test_fillet_nonClosed.js';
 import { test_history_features_basic, afterRun_history_features_basic } from './test_history_features_basic.js';
 import { test_textToFace, afterRun_textToFace } from './test_textToFace.js';
@@ -63,6 +72,12 @@ export const testFunctions = [
     { test: test_tube, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_tube_closedLoop, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_sketch_openLoop, afterRun: afterRun_sketch_openLoop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sketch_solver_topology_rect_shared_points, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sketch_solver_topology_coincident_chain, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sketch_solver_topology_coincident_loop_no_flip, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sketch_solver_topology_rect_round_trip_sequence, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sketch_solver_topology_coincident_chain_multi_step, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sketch_solver_distance_slide_large_drop_settles_single_solve, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_offsetShellGrouping, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_ExtrudeFace, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_Fillet, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
@@ -177,6 +192,8 @@ export async function runTests(partHistory = new PartHistory(), callbackToRunBet
 
     // Discover and register part-file import tests (Node only)
     await registerPartFileTests();
+    // Discover and register sketch solver topology fixtures (Node only)
+    await registerSketchSolverTopologyFixtureTests(testFunctions);
 
     for (const testFunction of testFunctions) {
         const isLastTest = testFunction === testFunctions[testFunctions.length - 1];

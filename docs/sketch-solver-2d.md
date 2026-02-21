@@ -149,6 +149,9 @@ const solved = engine.solve(250);
 ## Tuning and control
 ```js
 constraints.tolerance = 1e-5;
+constraints.distanceSlideThresholdRatio = 0.10; // only slide distance target updates above 10%
+constraints.distanceSlideStepRatio = 0.10;      // when sliding, move 10% of remaining gap per solve pass
+constraints.distanceSlideMinStep = 0.001;       // absolute minimum step while sliding
 solver.defaultLoops = () => 1500;
 solver.fullSolve = () => 2000;
 ```

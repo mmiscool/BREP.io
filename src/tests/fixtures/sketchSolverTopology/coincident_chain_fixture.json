@@ -1,0 +1,48 @@
+{
+  "name": "coincident_chain_fixture",
+  "sketch": {
+    "points": [
+      { "id": 0, "x": 0, "y": 0, "fixed": true },
+      { "id": 1, "x": 40, "y": 0, "fixed": false },
+      { "id": 2, "x": 40, "y": 0, "fixed": false },
+      { "id": 3, "x": 40, "y": 30, "fixed": false },
+      { "id": 4, "x": 40, "y": 30, "fixed": false },
+      { "id": 5, "x": 80, "y": 30, "fixed": false }
+    ],
+    "geometries": [
+      { "id": 200, "type": "line", "points": [0, 1], "construction": false },
+      { "id": 201, "type": "line", "points": [2, 3], "construction": false },
+      { "id": 202, "type": "line", "points": [4, 5], "construction": false }
+    ],
+    "constraints": [
+      { "id": 0, "type": "⏚", "points": [0] },
+      { "id": 10, "type": "≡", "points": [1, 2] },
+      { "id": 11, "type": "≡", "points": [3, 4] },
+      { "id": 12, "type": "━", "points": [0, 1] },
+      { "id": 13, "type": "│", "points": [2, 3] },
+      { "id": 14, "type": "━", "points": [4, 5] },
+      { "id": 15, "type": "⟺", "points": [0, 1], "value": 40 },
+      { "id": 16, "type": "⟺", "points": [2, 3], "value": 30 },
+      { "id": 17, "type": "⟺", "points": [4, 5], "value": 40 }
+    ]
+  },
+  "edits": [
+    { "constraintId": 16, "value": 75 },
+    { "constraintId": 15, "value": 60 }
+  ],
+  "expect": {
+    "topologyUnchanged": true,
+    "distances": [
+      { "a": 0, "b": 1, "value": 60, "tol": 0.1 },
+      { "a": 2, "b": 3, "value": 75, "tol": 0.1 },
+      { "a": 4, "b": 5, "value": 40, "tol": 0.1 }
+    ],
+    "anchors": [
+      { "pointId": 0, "x": 0, "y": 0, "tol": 0.02 }
+    ],
+    "coincidentPairs": [
+      { "a": 1, "b": 2, "tol": 0.02 },
+      { "a": 3, "b": 4, "tol": 0.02 }
+    ]
+  }
+}

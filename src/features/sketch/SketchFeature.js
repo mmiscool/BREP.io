@@ -369,10 +369,33 @@ export class SketchFeature {
         let sketch = this.persistentData?.sketch || { points: [{ id:0, x:0, y:0, fixed:true }], geometries: [], constraints: [{ id:0, type:"⏚", points:[0]}] };
         this.persistentData = this.persistentData || {};
         this.persistentData.lastProfileDiagnostics = null;
+        const solveSketchForFeature = (inputSketch, {
+            iterations = 500,
+            maxPasses = 1,
+            stopWhenConstraintsClear = false,
+        } = {}) => {
+            let solved = inputSketch;
+            let prevSig = null;
+            const passCount = Math.max(1, Number(maxPasses) || 1);
+            const iters = Math.max(1, Number(iterations) || 500);
+            for (let pass = 0; pass < passCount; pass++) {
+                const engine = new ConstraintEngine(JSON.stringify(solved));
+                solved = engine.solve(iters);
+                const pointSig = JSON.stringify(solved?.points || []);
+                const hasConstraintErrors = Array.isArray(solved?.constraints)
+                    ? solved.constraints.some((c) => typeof c?.error === 'string' && c.error.length > 0)
+                    : false;
+                if (stopWhenConstraintsClear && !hasConstraintErrors) break;
+                if (pointSig === prevSig) break;
+                prevSig = pointSig;
+            }
+            return solved;
+        };
 
         // Evaluate any expression-backed values on points/constraints using global expressions
         try {
             const exprSrc = partHistory?.expressions || '';
+            let expressionDrivenValueChanged = false;
             const runExpr = (expressions, equation) => {
                 try {
                     const fn = `${expressions}; return ${equation} ;`;
@@ -388,11 +411,19 @@ export class SketchFeature {
                 for (const p of sketch.points) {
                     if (typeof p.x === 'string') {
                         const n = runExpr(exprSrc, p.x);
-                        if (n != null && Number.isFinite(n)) p.x = Number(n);
+                        if (n != null && Number.isFinite(n)) {
+                            const next = Number(n);
+                            if (Number.isFinite(next) && Number(p.x) !== next) expressionDrivenValueChanged = true;
+                            p.x = next;
+                        }
                     }
                     if (typeof p.y === 'string') {
                         const n = runExpr(exprSrc, p.y);
-                        if (n != null && Number.isFinite(n)) p.y = Number(n);
+                        if (n != null && Number.isFinite(n)) {
+                            const next = Number(n);
+                            if (Number.isFinite(next) && Number(p.y) !== next) expressionDrivenValueChanged = true;
+                            p.y = next;
+                        }
                     }
                 }
             }
@@ -405,18 +436,27 @@ export class SketchFeature {
                                 c?.type === '⟺' &&
                                 c?.displayStyle === 'diameter' &&
                                 c?.valueExprMode === 'diameter';
-                            c.value = diameterExpr ? Number(n) * 0.5 : Number(n);
+                            const next = diameterExpr ? Number(n) * 0.5 : Number(n);
+                            if (Number.isFinite(next) && Number(c.value) !== next) expressionDrivenValueChanged = true;
+                            c.value = next;
                         }
                     } else if (typeof c?.value === 'string') {
                         const n = runExpr(exprSrc, c.value);
-                        if (n != null && Number.isFinite(n)) c.value = Number(n);
+                        if (n != null && Number.isFinite(n)) {
+                            const next = Number(n);
+                            if (Number.isFinite(next) && Number(c.value) !== next) expressionDrivenValueChanged = true;
+                            c.value = next;
+                        }
                     }
                 }
             }
             // Re-solve sketch with evaluated values to reflect latest expressions
             try {
-                const engine = new ConstraintEngine(JSON.stringify(sketch));
-                const solved = engine.solve(500);
+                const solved = solveSketchForFeature(sketch, {
+                    iterations: expressionDrivenValueChanged ? 2000 : 500,
+                    maxPasses: expressionDrivenValueChanged ? 8 : 1,
+                    stopWhenConstraintsClear: expressionDrivenValueChanged,
+                });
                 sketch = solved;
                 this.persistentData.sketch = solved;
             } catch {}
@@ -498,8 +538,11 @@ export class SketchFeature {
                 }
                 if (changed) {
                     try {
-                        const engine = new ConstraintEngine(JSON.stringify(sketch));
-                        const solved = engine.solve(500);
+                        const solved = solveSketchForFeature(sketch, {
+                            iterations: 2000,
+                            maxPasses: 8,
+                            stopWhenConstraintsClear: true,
+                        });
                         sketch = solved;
                         this.persistentData.sketch = solved;
                     } catch {}
