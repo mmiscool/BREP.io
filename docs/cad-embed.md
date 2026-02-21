@@ -26,8 +26,6 @@ import { CadEmbed } from "/src/CAD.js";
 ```js
 const cad = new CadEmbed({
   mountTo: "#cad-host",
-  width: "100%",
-  height: "760px",
   sidebarExpanded: true,
   viewerOnlyMode: false,
   cssText: ".cad-sidebar-home-banner { display: none !important; }",
@@ -44,6 +42,8 @@ Or pass a host element directly:
 const host = document.getElementById("cad-host");
 await cad.mount(host);
 ```
+
+`CadEmbed` iframes always render at `width: 100%` and `height: 100%`, so size the host container (for example with `height` on `#cad-host`).
 
 ## Runtime API
 ```js
@@ -87,7 +87,6 @@ await cad.destroy();
 
 ## Constructor Options
 - `mountTo` or `container`: host selector or DOM element for iframe insertion.
-- `width`, `height`: iframe size (defaults: `100%`, `760px`).
 - `title`: iframe title attribute (default: `BREP CAD`).
 - `iframeClassName`: class applied to iframe element.
 - `iframeStyle`: inline style object merged into iframe styles.

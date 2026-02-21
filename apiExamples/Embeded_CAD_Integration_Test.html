@@ -11,7 +11,7 @@
         margin-top: 10px;
         border: 1px solid #dde3f5;
         border-radius: 10px;
-        min-height: 640px;
+        height: 640px;
         overflow: hidden;
         background: #fff;
       }
@@ -370,7 +370,6 @@
 
         cad = new CadEmbed({
           mountTo: hostEl,
-          height: '640px',
           viewerOnlyMode: requestedViewerOnly,
           sidebarExpanded: requestedSidebarExpanded,
           cssText: cssInput.value,
@@ -510,7 +509,7 @@
         await runTest('destroy() idempotent', async () => {
           if (!cad) {
             // Create a minimal instance and destroy twice to verify idempotence.
-            cad = new CadEmbed({ mountTo: hostEl, height: '1px', viewerOnlyMode: true });
+            cad = new CadEmbed({ mountTo: hostEl, viewerOnlyMode: true });
             await cad.mount();
           }
           await cad.destroy();

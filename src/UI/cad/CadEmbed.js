@@ -151,8 +151,8 @@ export class CadEmbed {
     const iframe = document.createElement("iframe");
     iframe.title = this._options.title || "BREP CAD";
     iframe.className = this._options.iframeClassName || "";
-    iframe.style.width = this._options.width || "100%";
-    iframe.style.height = this._options.height || "760px";
+    iframe.style.width = "100%";
+    iframe.style.height = "100%";
     iframe.style.border = "0";
     iframe.style.display = "block";
     iframe.style.background = String(this._options.backgroundColor || "#0b0f16");
