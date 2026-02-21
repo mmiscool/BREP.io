@@ -7,6 +7,9 @@ This document covers the iframe-based `CadEmbed` API for embedding the full BREP
 - Hosted demo: [https://BREP.io/apiExamples/Embeded_CAD.html](https://BREP.io/apiExamples/Embeded_CAD.html)
 - Repo demo page: [apiExamples/Embeded_CAD.html](../apiExamples/Embeded_CAD.html)
 - Source on GitHub: [apiExamples/Embeded_CAD.html](https://github.com/mmiscool/BREP/blob/master/apiExamples/Embeded_CAD.html)
+- Hosted CDN demo: [https://BREP.io/apiExamples/Embeded_CAD_CDN.html](https://BREP.io/apiExamples/Embeded_CAD_CDN.html)
+- Repo CDN demo page: [apiExamples/Embeded_CAD_CDN.html](../apiExamples/Embeded_CAD_CDN.html)
+- CDN source on GitHub: [apiExamples/Embeded_CAD_CDN.html](https://github.com/mmiscool/BREP/blob/master/apiExamples/Embeded_CAD_CDN.html)
 - Hosted integration test: [https://BREP.io/apiExamples/Embeded_CAD_Integration_Test.html](https://BREP.io/apiExamples/Embeded_CAD_Integration_Test.html)
 - Integration test page: [apiExamples/Embeded_CAD_Integration_Test.html](../apiExamples/Embeded_CAD_Integration_Test.html)
 
@@ -20,6 +23,14 @@ import { CadEmbed } from "brep-io-kernel";
 Local repo/dev usage:
 ```js
 import { CadEmbed } from "/src/CAD.js";
+```
+
+CDN usage (direct in browser):
+```js
+import {
+  BREP,
+  CadEmbed
+} from "https://cdn.jsdelivr.net/npm/brep-io-kernel@latest/dist-kernel/brep-kernel.js";
 ```
 
 ## Create and Mount
