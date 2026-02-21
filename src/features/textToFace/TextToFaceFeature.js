@@ -36,9 +36,12 @@ const resolveFontUrl = async (entry) => {
   if (entry.url) return entry.url;
   if (!entry.path) return null;
   const key = normalizeFontKey(entry.path);
-  const loader = FONT_URL_LOADERS && FONT_URL_LOADERS[key];
-  if (loader) {
-    return loader();
+  const source = FONT_URL_LOADERS && FONT_URL_LOADERS[key];
+  if (typeof source === 'function') {
+    return source();
+  }
+  if (typeof source === 'string') {
+    return source;
   }
   if (FONT_URL_LOADERS) {
     console.warn('Unknown font asset; falling back to public path:', entry.path);
@@ -58,87 +61,25 @@ const dedupeFonts = (fonts) => {
   });
 };
 
+const sortFontsByName = (fonts) => (
+  [...fonts].sort((a, b) => String(a?.id || '').localeCompare(String(b?.id || ''), undefined, { sensitivity: 'base' }))
+);
+
 const BASE_FONT_CATALOG = [
-  { id: 'Noto Sans', path: "noto/NotoSans-Regular.ttf" },
-  { id: 'Noto Sans Bold', path: "noto/NotoSans-Bold.ttf" },
-  { id: 'Noto Sans Italic', path: "noto/NotoSans-Italic.ttf" },
-  { id: 'Noto Sans Bold Italic', path: "noto/NotoSans-BoldItalic.ttf" },
-  { id: 'Noto Serif', path: "noto/NotoSerif-Regular.ttf" },
-  { id: 'Noto Serif Bold', path: "noto/NotoSerif-Bold.ttf" },
-  { id: 'Noto Serif Italic', path: "noto/NotoSerif-Italic.ttf" },
-  { id: 'Noto Serif Bold Italic', path: "noto/NotoSerif-BoldItalic.ttf" },
-  { id: 'Noto Sans Mono', path: "noto/NotoSansMono-Regular.ttf" },
-  { id: 'Noto Sans Mono Bold', path: "noto/NotoSansMono-Bold.ttf" },
-  { id: 'Noto Sans Display', path: "noto/NotoSansDisplay-Regular.ttf" },
-  { id: 'Noto Serif Display', path: "noto/NotoSerifDisplay-Regular.ttf" },
-  { id: 'DejaVu Sans', path: "dejavu/DejaVuSans.ttf" },
-  { id: 'DejaVu Sans Bold', path: "dejavu/DejaVuSans-Bold.ttf" },
-  { id: 'DejaVu Serif', path: "dejavu/DejaVuSerif.ttf" },
-  { id: 'DejaVu Serif Bold', path: "dejavu/DejaVuSerif-Bold.ttf" },
-  { id: 'DejaVu Sans Mono', path: "dejavu/DejaVuSansMono.ttf" },
-  { id: 'DejaVu Sans Mono Bold', path: "dejavu/DejaVuSansMono-Bold.ttf" },
-  { id: 'DejaVu Sans Mono Oblique', path: "dejavu/DejaVuSansMono-Oblique.ttf" },
-  { id: 'DejaVu Sans Mono Bold Oblique', path: "dejavu/DejaVuSansMono-BoldOblique.ttf" },
-  { id: 'Liberation Sans', path: "liberation/LiberationSans-Regular.ttf" },
-  { id: 'Liberation Sans Bold', path: "liberation/LiberationSans-Bold.ttf" },
-  { id: 'Liberation Sans Italic', path: "liberation/LiberationSans-Italic.ttf" },
-  { id: 'Liberation Sans Bold Italic', path: "liberation/LiberationSans-BoldItalic.ttf" },
   { id: 'Liberation Sans Narrow', path: "liberation/LiberationSansNarrow-Regular.ttf" },
   { id: 'Liberation Sans Narrow Bold', path: "liberation/LiberationSansNarrow-Bold.ttf" },
-  { id: 'Liberation Serif', path: "liberation/LiberationSerif-Regular.ttf" },
-  { id: 'Liberation Serif Bold', path: "liberation/LiberationSerif-Bold.ttf" },
-  { id: 'Liberation Serif Italic', path: "liberation/LiberationSerif-Italic.ttf" },
-  { id: 'Liberation Serif Bold Italic', path: "liberation/LiberationSerif-BoldItalic.ttf" },
-  { id: 'Liberation Mono', path: "liberation/LiberationMono-Regular.ttf" },
-  { id: 'Liberation Mono Bold', path: "liberation/LiberationMono-Bold.ttf" },
-  { id: 'Liberation Mono Italic', path: "liberation/LiberationMono-Italic.ttf" },
-  { id: 'Liberation Mono Bold Italic', path: "liberation/LiberationMono-BoldItalic.ttf" },
-  { id: 'IBM Plex Sans', path: "ibm-plex/IBMPlexSans-Regular.ttf" },
-  { id: 'IBM Plex Sans Bold', path: "ibm-plex/IBMPlexSans-Bold.ttf" },
-  { id: 'IBM Plex Sans Italic', path: "ibm-plex/IBMPlexSans-Italic.ttf" },
-  { id: 'IBM Plex Sans Bold Italic', path: "ibm-plex/IBMPlexSans-BoldItalic.ttf" },
-  { id: 'IBM Plex Sans Condensed', path: "ibm-plex/IBMPlexSansCondensed-Regular.ttf" },
-  { id: 'IBM Plex Sans Condensed Bold', path: "ibm-plex/IBMPlexSansCondensed-Bold.ttf" },
-  { id: 'IBM Plex Serif', path: "ibm-plex/IBMPlexSerif-Regular.ttf" },
-  { id: 'IBM Plex Serif Bold', path: "ibm-plex/IBMPlexSerif-Bold.ttf" },
-  { id: 'IBM Plex Serif Italic', path: "ibm-plex/IBMPlexSerif-Italic.ttf" },
-  { id: 'IBM Plex Serif Bold Italic', path: "ibm-plex/IBMPlexSerif-BoldItalic.ttf" },
-  { id: 'IBM Plex Mono', path: "ibm-plex/IBMPlexMono-Regular.ttf" },
-  { id: 'IBM Plex Mono Bold', path: "ibm-plex/IBMPlexMono-Bold.ttf" },
-  { id: 'IBM Plex Mono Italic', path: "ibm-plex/IBMPlexMono-Italic.ttf" },
-  { id: 'IBM Plex Mono Bold Italic', path: "ibm-plex/IBMPlexMono-BoldItalic.ttf" },
-  { id: 'Hack', path: "hack/Hack-Regular.ttf" },
-  { id: 'Hack Bold', path: "hack/Hack-Bold.ttf" },
-  { id: 'Hack Italic', path: "hack/Hack-Italic.ttf" },
-  { id: 'Hack Bold Italic', path: "hack/Hack-BoldItalic.ttf" },
-  { id: 'Ubuntu', path: "ubuntu/Ubuntu-R.ttf" },
-  { id: 'Ubuntu Italic', path: "ubuntu/Ubuntu-RI.ttf" },
-  { id: 'Ubuntu Bold', path: "ubuntu/Ubuntu-B.ttf" },
-  { id: 'Ubuntu Bold Italic', path: "ubuntu/Ubuntu-BI.ttf" },
-  { id: 'Ubuntu Light', path: "ubuntu/Ubuntu-L.ttf" },
-  { id: 'Ubuntu Light Italic', path: "ubuntu/Ubuntu-LI.ttf" },
-  { id: 'Ubuntu Medium', path: "ubuntu/Ubuntu-M.ttf" },
-  { id: 'Ubuntu Medium Italic', path: "ubuntu/Ubuntu-MI.ttf" },
-  { id: 'Ubuntu Thin', path: "ubuntu/Ubuntu-Th.ttf" },
-  { id: 'Ubuntu Condensed', path: "ubuntu/Ubuntu-C.ttf" },
-  { id: 'Ubuntu Mono', path: "ubuntu/UbuntuMono-R.ttf" },
-  { id: 'Ubuntu Mono Italic', path: "ubuntu/UbuntuMono-RI.ttf" },
-  { id: 'Ubuntu Mono Bold', path: "ubuntu/UbuntuMono-B.ttf" },
-  { id: 'Ubuntu Mono Bold Italic', path: "ubuntu/UbuntuMono-BI.ttf" },
   { id: 'Libre Barcode 39', path: "libre-barcode/LibreBarcode39-Regular.ttf" },
   { id: 'Libre Barcode 39 Text', path: "libre-barcode/LibreBarcode39Text-Regular.ttf" },
   { id: 'Libre Barcode 39 Extended', path: "libre-barcode/LibreBarcode39Extended-Regular.ttf" },
   { id: 'Libre Barcode 39 Extended Text', path: "libre-barcode/LibreBarcode39ExtendedText-Regular.ttf" },
   { id: 'Libre Barcode 128', path: "libre-barcode/LibreBarcode128-Regular.ttf" },
   { id: 'Libre Barcode 128 Text', path: "libre-barcode/LibreBarcode128Text-Regular.ttf" },
-  { id: 'Libre Barcode EAN13 Text', path: "libre-barcode/LibreBarcodeEAN13Text-Regular.ttf" },
   { id: 'Braille Grid HC', path: "braille-hc/BrailleGridHC-Regular.otf" },
-  { id: 'Braille Latin HC', path: "braille-hc/BrailleLatinHC-Regular.otf" },
-  { id: 'Braille Pinboard HC', path: "braille-hc/BraillePinboardHC-Regular.otf" },
   { id: 'Braille Pixel HC', path: "braille-hc/BraillePixelHC-Regular.otf" },
 ];
 
-const FONT_CATALOG = dedupeFonts([...BASE_FONT_CATALOG, ...GOOGLE_OFL_FONTS]);
+const FONT_CATALOG = sortFontsByName(dedupeFonts([...BASE_FONT_CATALOG, ...GOOGLE_OFL_FONTS]));
+const DEFAULT_FONT_ID = FONT_CATALOG.find((font) => font.id === 'Noto Sans')?.id || FONT_CATALOG[0]?.id || 'Noto Sans';
 
 const DEFAULT_TRANSFORM = {
   position: [0, 0, 0],
@@ -186,7 +127,7 @@ const inputParamsSchema = {
   font: {
     type: "options",
     options: FONT_CATALOG.map((f) => f.id),
-    default_value: FONT_CATALOG[0]?.id || "Noto Sans",
+    default_value: DEFAULT_FONT_ID,
     hint: "Select a built-in font",
   },
   fontFile: {
@@ -816,7 +757,11 @@ async function resolveFont(params, selectedEntry = null) {
 
 function getSelectedFontEntry(params) {
   const fontId = (params && typeof params.font === 'string') ? params.font : null;
-  return FONT_CATALOG.find((f) => f.id === fontId) || FONT_CATALOG[0];
+  if (fontId) {
+    const match = FONT_CATALOG.find((font) => font.id === fontId);
+    if (match) return match;
+  }
+  return FONT_CATALOG.find((font) => font.id === DEFAULT_FONT_ID) || FONT_CATALOG[0];
 }
 
 async function loadFontFromSource(source, { type }) {

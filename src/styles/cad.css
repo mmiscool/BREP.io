@@ -74,8 +74,13 @@ body {
   width: 100%;
   height: 100%;
   max-width: 100%;
-  object-fit: contain;
-  object-position: left center;
   pointer-events: none;
   user-select: none;
+}
+
+.cad-sidebar-home-banner-img > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
 }

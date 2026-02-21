@@ -357,6 +357,64 @@ const escape = (s = "") => String(s)
   .replaceAll('"', "&quot;")
   .replaceAll("'", "&#39;");
 
+const stripAssetDecorators = (value = "") => String(value).split(/[?#]/)[0].trim();
+
+const resolveMarkdownAssetPath = (src = "", assetBasePath = rootDir) => {
+  const cleanSrc = stripAssetDecorators(src);
+  if (!cleanSrc) return null;
+  if (/^[a-z]+:/i.test(cleanSrc) || cleanSrc.startsWith("//")) return null;
+  if (cleanSrc.startsWith("#")) return null;
+  if (cleanSrc.startsWith("/")) {
+    const relPath = cleanSrc.replace(/^\/+/, "");
+    const publicPath = path.join(rootDir, "public", relPath);
+    if (existsSync(publicPath)) return publicPath;
+    const rootPath = path.join(rootDir, relPath);
+    if (existsSync(rootPath)) return rootPath;
+    return null;
+  }
+  const resolved = path.resolve(assetBasePath || rootDir, cleanSrc);
+  if (!existsSync(resolved)) return null;
+  return resolved;
+};
+
+const injectInlineSvgAttributes = (svgMarkup = "", { alt = "", title = "" } = {}) =>
+  svgMarkup.replace(/<svg\b([^>]*)>/i, (match, attrs = "") => {
+    const hasRole = /\brole\s*=/.test(attrs);
+    const hasAriaLabel = /\baria-label\s*=/.test(attrs);
+    const hasAriaLabelledBy = /\baria-labelledby\s*=/.test(attrs);
+    const hasAriaHidden = /\baria-hidden\s*=/.test(attrs);
+    const hasTitleAttr = /\btitle\s*=/.test(attrs);
+    const trimmedAlt = String(alt || "").trim();
+    const trimmedTitle = String(title || "").trim();
+    const additions = [];
+
+    if (!hasRole) additions.push(' role="img"');
+    if (trimmedAlt) {
+      if (!hasAriaLabel && !hasAriaLabelledBy) additions.push(` aria-label="${trimmedAlt}"`);
+    } else if (!hasAriaLabel && !hasAriaLabelledBy && !hasAriaHidden) {
+      additions.push(' aria-hidden="true"');
+    }
+    if (trimmedTitle && !hasTitleAttr) additions.push(` title="${trimmedTitle}"`);
+
+    return `<svg${attrs}${additions.join("")}>`;
+  });
+
+const tryInlineMarkdownSvg = ({ src = "", alt = "", title = "", assetBasePath = rootDir } = {}) => {
+  const cleanedSrc = stripAssetDecorators(src);
+  if (!cleanedSrc || !cleanedSrc.toLowerCase().endsWith(".svg")) return null;
+  const svgPath = resolveMarkdownAssetPath(cleanedSrc, assetBasePath);
+  if (!svgPath) return null;
+  let raw = "";
+  try {
+    raw = readFileSync(svgPath, "utf-8");
+  } catch {
+    return null;
+  }
+  const svgMatch = raw.match(/<svg\b[\s\S]*<\/svg>/i);
+  if (!svgMatch) return null;
+  return injectInlineSvgAttributes(svgMatch[0], { alt, title });
+};
+
 // Helper function to parse markdown tables
 function parseTable(tableLines) {
   if (tableLines.length < 2) return null;
@@ -399,7 +457,7 @@ function parseTable(tableLines) {
   return { headers, alignments, dataRows };
 }
 
-function renderMarkdown(md) {
+function renderMarkdown(md, { assetBasePath = rootDir } = {}) {
   // Extract fenced code blocks first and replace with placeholders
   const codeBlocks = [];
   let tmp = md;
@@ -488,7 +546,15 @@ function renderMarkdown(md) {
     out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]+)")?\)/g, (_m, alt = "", src = "", title = "") => {
       const altAttr = alt.trim();
       const srcAttr = src.trim();
-      const titleAttr = title ? ` title="${title.trim()}"` : "";
+      const titleValue = title.trim();
+      const inlineSvg = tryInlineMarkdownSvg({
+        src: srcAttr,
+        alt: altAttr,
+        title: titleValue,
+        assetBasePath,
+      });
+      if (inlineSvg) return inlineSvg;
+      const titleAttr = titleValue ? ` title="${titleValue}"` : "";
       const normalizedSrc = srcAttr.split(/[?#]/)[0];
       const isDialogScreenshot = normalizedSrc.toLowerCase().endsWith('_dialog.png');
       const widthAttr = isDialogScreenshot ? ' width="280"' : '';
@@ -975,7 +1041,7 @@ function generateDocsSite() {
         const destPath = path.join(docsOutputDir, flatName);
         const md = readFileSync(srcPath, "utf-8");
         const pageTitle = extractTitle(md, baseName);
-        let body = renderMarkdown(md);
+        let body = renderMarkdown(md, { assetBasePath: path.dirname(srcPath) });
         const baseDir = path.posix ? path.posix.dirname(relFromDocs) : path.dirname(relFromDocs);
         body = convertMarkdownLinks(body);
         body = flattenDocResources(body, baseDir);
@@ -1003,7 +1069,7 @@ function generateDocsSite() {
       const destPath = path.join(docsOutputDir, `${baseName}.html`);
       const md = readFileSync(srcPath, "utf-8");
       const pageTitle = extractTitle(md, baseName);
-      let body = renderMarkdown(md);
+      let body = renderMarkdown(md, { assetBasePath: path.dirname(srcPath) });
       const baseDir = ".";
       body = convertMarkdownLinks(body);
       body = flattenDocResources(body, baseDir);
@@ -1024,7 +1090,7 @@ function generateDocsSite() {
   if (existsSync(readmePath)) {
     const readmeMd = readFileSync(readmePath, "utf-8");
     const readmeTitle = extractTitle(readmeMd, "BREP");
-    let readmeBody = renderMarkdown(readmeMd);
+    let readmeBody = renderMarkdown(readmeMd, { assetBasePath: path.dirname(readmePath) });
     const baseDir = ".";
     readmeBody = convertReadmeLinks(readmeBody);
     readmeBody = flattenDocResources(readmeBody, baseDir);
@@ -1124,7 +1190,10 @@ function generateDocsSite() {
   console.log(`✔ Generated ${sortedPages.length + 2} documentation page${sortedPages.length === -1 ? "" : "s"} in public/help`);
 }
 
-const readmeHTML = flattenDocResources(convertMarkdownLinks(renderMarkdown(readmeText)), ".");
+const readmeHTML = flattenDocResources(
+  convertMarkdownLinks(renderMarkdown(readmeText, { assetBasePath: rootDir })),
+  ".",
+);
 
 mkdirSync(docsSourceDir, { recursive: true });
 const fontLicenseDocPath = path.join(docsSourceDir, "fonts-licenses.md");

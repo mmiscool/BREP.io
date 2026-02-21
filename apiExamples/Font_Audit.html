@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>BREP API Example: Font Audit</title>
+    <link rel="stylesheet" href="./example.css" />
+    <style>
+      .font-audit-toolbar {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(120px, auto));
+        gap: 8px;
+        align-items: center;
+      }
+
+      .font-audit-toolbar .status {
+        grid-column: span 2;
+        font-size: 13px;
+        color: #384359;
+      }
+
+      .font-audit-toolbar input[type="search"] {
+        height: 36px;
+        border: 1px solid #ccd5ec;
+        border-radius: 8px;
+        padding: 0 10px;
+        min-width: 200px;
+      }
+
+      .font-audit-toolbar select {
+        height: 36px;
+        border: 1px solid #ccd5ec;
+        border-radius: 8px;
+        padding: 0 10px;
+        background: #fff;
+      }
+
+      .font-audit-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+      }
+
+      #font-selection-output {
+        margin-top: 10px;
+        min-height: 160px;
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid #ccd5ec;
+        border-radius: 8px;
+        padding: 10px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      .font-list {
+        margin-top: 14px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .font-row {
+        border: 1px solid #dde3f5;
+        border-radius: 10px;
+        background: #fff;
+        padding: 10px 12px;
+      }
+
+      .font-row.hidden {
+        display: none;
+      }
+
+      .font-row-head {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .font-row-name {
+        font-weight: 700;
+        color: #19243b;
+      }
+
+      .font-row-meta {
+        margin-top: 4px;
+        font-size: 12px;
+        color: #4a5a78;
+        word-break: break-all;
+      }
+
+      .font-row-size {
+        font-size: 12px;
+        color: #243352;
+        background: #eef3ff;
+        border: 1px solid #d6e1fb;
+        border-radius: 999px;
+        padding: 2px 8px;
+        white-space: nowrap;
+      }
+
+      .font-sample {
+        margin-top: 10px;
+        line-height: 1.35;
+        color: #0f172a;
+      }
+
+      .font-sample-fox {
+        font-size: 24px;
+      }
+
+      .font-sample-digits {
+        margin-top: 6px;
+        font-size: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header class="example-header">
+        <div>
+          <h1>Font Audit</h1>
+          <p class="lead">
+            Compare all bundled font files using a standard pangram and digits, then export selected
+            font paths for cleanup.
+          </p>
+        </div>
+        <nav class="example-nav">
+          <a href="./index.html">All Examples</a>
+          <a href="../index.html">BREP CAD App</a>
+          <a href="https://github.com/mmiscool/BREP/blob/master/apiExamples/Font_Audit.html" target="_blank" rel="noopener noreferrer">Source on GitHub</a>
+        </nav>
+      </header>
+
+      <section>
+        <div class="font-audit-toolbar">
+          <button id="btn-select-all" type="button">Select All</button>
+          <button id="btn-clear-all" type="button">Clear All</button>
+          <button id="btn-generate-list" type="button">Generate Selected List</button>
+          <button id="btn-copy-list" type="button">Copy List</button>
+          <input id="font-filter" type="search" placeholder="Filter fonts..." />
+          <select id="font-sort" aria-label="Sort fonts">
+            <option value="name-asc">Sort: Name (A-Z)</option>
+            <option value="name-desc">Sort: Name (Z-A)</option>
+            <option value="size-desc">Sort: Size (Largest)</option>
+            <option value="size-asc">Sort: Size (Smallest)</option>
+          </select>
+          <label class="font-audit-toggle" for="show-selected-only">
+            <input id="show-selected-only" type="checkbox" />
+            Show selected only
+          </label>
+          <div id="font-audit-status" class="status">Loading fonts...</div>
+        </div>
+        <textarea id="font-selection-output" readonly>(Generate selected list to fill this box)</textarea>
+      </section>
+
+      <section id="font-list" class="font-list"></section>
+    </main>
+
+    <script type="module" src="../src/tools/fontAuditPage.js"></script>
+  </body>
+</html>

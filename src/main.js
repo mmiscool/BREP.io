@@ -28,6 +28,7 @@ import {
 import { WorkspaceFileBrowserWidget } from './UI/WorkspaceFileBrowserWidget.js';
 import './UI/dialogs.js';
 import './styles/landing.css';
+import brepHomeBannerSvg from './assets/brand/brep-home-banner.svg?raw';
 
 const MODEL_FILE_EXTENSION = '.3mf';
 const MANUAL_WORKSPACE_REPOS_KEY = '__BREP_WORKSPACE_MANUAL_REPOS__';
@@ -649,7 +650,7 @@ async function renderHome() {
       <div class="hub-bg hub-bg-two"></div>
       <header class="hub-header">
         <div class="hub-brand-wrap">
-          <img class="hub-brand-banner" src="./brep-home-banner.svg" alt="BREP.io logo" />
+          <div class="hub-brand-banner" aria-label="BREP.io logo">${brepHomeBannerSvg}</div>
         </div>
         <div class="hub-header-actions">
           <a class="hub-link-btn" href="./help/developer-index.html" target="_blank" rel="noreferrer">Docs</a>

@@ -41,6 +41,7 @@ import { maybeStartStartupTour } from './startupTour.js';
 import { BREP } from '../BREP/BREP.js';
 import { createAxisHelperGroup, DEFAULT_AXIS_HELPER_PX } from '../utils/axisHelpers.js';
 import { readBrowserStorageValue, writeBrowserStorageValue } from '../utils/browserStorage.js';
+import brepHomeBannerSvg from '../assets/brand/brep-home-banner.svg?raw';
 
 const ASSEMBLY_CONSTRAINTS_TITLE = 'Assembly Constraints';
 const SIDEBAR_HOME_BANNER_HEIGHT_PX = 41;
@@ -1178,12 +1179,15 @@ export class Viewer {
                 void navigateHomeWithGuard(this);
             });
 
-            const img = document.createElement('img');
-            img.className = 'cad-sidebar-home-banner-img';
-            img.src = '/brep-home-banner.svg';
-            img.alt = 'BREP.io home';
-            img.draggable = false;
-            banner.appendChild(img);
+            const logo = document.createElement('span');
+            logo.className = 'cad-sidebar-home-banner-img';
+            logo.setAttribute('aria-hidden', 'true');
+            logo.innerHTML = brepHomeBannerSvg;
+            const svg = logo.querySelector('svg');
+            if (svg) {
+                svg.setAttribute('focusable', 'false');
+            }
+            banner.appendChild(logo);
 
             this.sidebar.prepend(banner);
             this._sidebarHomeBanner = banner;
