@@ -53,7 +53,7 @@ const formatPackageLine = (pkg) => {
 };
 
 const FONT_EXTS = new Set(['.ttf', '.otf', '.woff', '.woff2', '.ttc']);
-const FONT_LICENSE_RE = /^(?:OFL|LICENSE|NOTICE)(?:\\.[^.]+)?$/i;
+const FONT_LICENSE_RE = /(?:^|[-_.])(OFL|LICENSE|LICENCE|NOTICE|COPYING|COPYRIGHT|UNLICENSE)(?:[-_.]|$)/i;
 const FONT_FAMILY_NAMES = {
   'ibm-plex': 'IBM Plex',
   liberation: 'Liberation',
@@ -63,6 +63,12 @@ const FONT_FAMILY_NAMES = {
   ubuntu: 'Ubuntu',
   'libre-barcode': 'Libre Barcode',
 };
+const FONT_METADATA_LICENSE_MAP = {
+  OFL: 'OFL-1.1',
+  APACHE2: 'Apache-2.0',
+  APACHE: 'Apache-2.0',
+  UFL: 'Ubuntu Font Licence 1.0',
+};
 
 const toTitleCase = (value = '') =>
   value
@@ -70,17 +76,40 @@ const toTitleCase = (value = '') =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
 
+const normalizeFontMetadataLicenseId = (raw = '') => {
+  const key = String(raw).trim().toUpperCase();
+  if (!key) return '';
+  return FONT_METADATA_LICENSE_MAP[key] || String(raw).trim();
+};
+
+const normalizeDetectedLicenseIds = (ids = []) => {
+  const unique = Array.from(new Set(ids.filter(Boolean)));
+  if (unique.length > 1) {
+    return unique.filter((id) => id !== 'UNKNOWN');
+  }
+  return unique;
+};
+
 const detectFontLicenseId = (text = '', filename = '') => {
   const lower = String(text).toLowerCase();
+  const lowerFilename = String(filename).toLowerCase();
   if (lower.includes('sil open font license') || lower.includes('open font license')) return 'OFL-1.1';
   if (lower.includes('ubuntu font licence') || lower.includes('ubuntu font license')) return 'Ubuntu Font Licence 1.0';
   if (lower.includes('bitstream vera')) return 'Bitstream Vera';
+  if (
+    lower.includes('cc0 1.0 universal') ||
+    lower.includes('creativecommons.org/publicdomain/zero') ||
+    lower.includes('creative commons zero')
+  ) {
+    return 'CC0-1.0';
+  }
   if (lower.includes('expat') || lower.includes('mit license') || lower.includes('permission is hereby granted')) return 'MIT';
   if (lower.includes('apache license')) return 'Apache-2.0';
   if (lower.includes('creative commons')) return 'CC';
   if (lower.includes('affero general public license')) return 'AGPL';
   if (lower.includes('gnu general public license')) return 'GPL';
-  if (String(filename).toLowerCase().includes('ofl')) return 'OFL-1.1';
+  if (lowerFilename.includes('cc0')) return 'CC0-1.0';
+  if (lowerFilename.includes('ofl')) return 'OFL-1.1';
   return 'UNKNOWN';
 };
 
@@ -129,12 +158,17 @@ const loadFontLicenses = () => {
   for (const entry of entries) {
     const familyDir = entry.dirPath;
     let metadataName = '';
+    let metadataLicenseId = '';
     const metadataPath = path.join(familyDir, 'METADATA.pb');
     if (existsSync(metadataPath)) {
       const metadataText = readFileSync(metadataPath, 'utf-8');
-      const match = metadataText.match(/^name:\s+"([^"]+)"/m);
-      if (match) {
-        metadataName = match[1].trim();
+      const nameMatch = metadataText.match(/^name:\s+"([^"]+)"/m);
+      if (nameMatch) {
+        metadataName = nameMatch[1].trim();
+      }
+      const licenseMatch = metadataText.match(/^license:\s+"([^"]+)"/m);
+      if (licenseMatch) {
+        metadataLicenseId = normalizeFontMetadataLicenseId(licenseMatch[1]);
       }
     }
     const files = readdirSync(familyDir, { withFileTypes: true }).filter((f) => f.isFile());
@@ -150,8 +184,9 @@ const loadFontLicenses = () => {
       const text = readFileSync(path.join(familyDir, file), 'utf-8').trimEnd();
       return { file, text };
     });
-    const licenseIds = Array.from(
-      new Set(licenseTexts.map((lic) => detectFontLicenseId(lic.text, lic.file)).filter(Boolean))
+    const inferredByPath = entry.id.startsWith('google-ofl/') ? 'OFL-1.1' : '';
+    const licenseIds = normalizeDetectedLicenseIds(
+      licenseTexts.map((lic) => detectFontLicenseId(lic.text, lic.file)).concat(metadataLicenseId, inferredByPath)
     );
     families.push({
       id: entry.id,
