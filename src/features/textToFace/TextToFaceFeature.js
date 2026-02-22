@@ -8,9 +8,21 @@ import { GOOGLE_OFL_FONTS } from '../../assets/fonts/google-ofl/catalog.js';
 import { SelectionState } from '../../UI/SelectionState.js';
 import { FONT_URL_LOADERS } from '#textToFace/fontUrlLoaders';
 
+const IS_NODE_RUNTIME = typeof process !== 'undefined' && process.versions && process.versions.node && typeof window === 'undefined';
+
 const normalizeFontKey = (relPath) => (
   `../../assets/fonts/${relPath}`.replace(/\\/g, "/")
 );
+
+const buildNodeFontFileUrl = (relPath) => {
+  if (!IS_NODE_RUNTIME || typeof relPath !== 'string' || relPath.length === 0) return null;
+  try {
+    const normalized = relPath.replace(/^\/+/, '').replace(/\\/g, '/');
+    return new URL(`../../assets/fonts/${normalized}`, import.meta.url).href;
+  } catch {
+    return null;
+  }
+};
 
 const getFontBaseUrl = () => {
   if (typeof globalThis !== 'undefined') {
@@ -43,7 +55,11 @@ const resolveFontUrl = async (entry) => {
   if (typeof source === 'string') {
     return source;
   }
-  if (FONT_URL_LOADERS) {
+  const nodeFileUrl = buildNodeFontFileUrl(entry.path);
+  if (nodeFileUrl) {
+    return nodeFileUrl;
+  }
+  if (FONT_URL_LOADERS && Object.keys(FONT_URL_LOADERS).length > 0) {
     console.warn('Unknown font asset; falling back to public path:', entry.path);
   }
   return buildPublicFontUrl(entry.path);
@@ -774,9 +790,7 @@ async function loadFontFromSource(source, { type }) {
     if (type === 'data') {
       buffer = dataUrlToArrayBuffer(source);
     } else {
-      const res = await fetch(source);
-      if (!res.ok) throw new Error(`HTTP ${res.status} loading font`);
-      buffer = await res.arrayBuffer();
+      buffer = await loadUrlToArrayBuffer(source);
     }
     if (!buffer) throw new Error('Font buffer unavailable');
     const json = ttfLoader.parse(buffer);
@@ -790,6 +804,35 @@ async function loadFontFromSource(source, { type }) {
     fontCache.delete(key);
     throw e;
   }
+}
+
+async function loadUrlToArrayBuffer(source) {
+  if (typeof source !== 'string' || source.length === 0) return null;
+
+  if (source.startsWith('data:')) {
+    return dataUrlToArrayBuffer(source);
+  }
+
+  if (IS_NODE_RUNTIME && source.startsWith('file://')) {
+    const [{ fileURLToPath }, fsPromises] = await Promise.all([
+      import('node:url'),
+      import('node:fs/promises'),
+    ]);
+    const filePath = fileURLToPath(source);
+    const buf = await fsPromises.readFile(filePath);
+    return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  }
+
+  if (IS_NODE_RUNTIME && source.startsWith('/fonts/')) {
+    const nodeFileUrl = buildNodeFontFileUrl(source.replace(/^\/fonts\//, ''));
+    if (nodeFileUrl) {
+      return loadUrlToArrayBuffer(nodeFileUrl);
+    }
+  }
+
+  const res = await fetch(source);
+  if (!res.ok) throw new Error(`HTTP ${res.status} loading font`);
+  return res.arrayBuffer();
 }
 
 function dataUrlToArrayBuffer(dataUrl) {
