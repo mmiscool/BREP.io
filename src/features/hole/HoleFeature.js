@@ -229,6 +229,153 @@ function unionSolids(solids) {
   return current;
 }
 
+function triangleArea(tri) {
+  const p0 = tri?.p1;
+  const p1 = tri?.p2;
+  const p2 = tri?.p3;
+  if (!Array.isArray(p0) || !Array.isArray(p1) || !Array.isArray(p2)) return 0;
+  const ux = p1[0] - p0[0];
+  const uy = p1[1] - p0[1];
+  const uz = p1[2] - p0[2];
+  const vx = p2[0] - p0[0];
+  const vy = p2[1] - p0[1];
+  const vz = p2[2] - p0[2];
+  const cx = uy * vz - uz * vy;
+  const cy = uz * vx - ux * vz;
+  const cz = ux * vy - uy * vx;
+  return 0.5 * Math.hypot(cx, cy, cz);
+}
+
+function faceComponentStats(solid, faceName) {
+  let tris = [];
+  try {
+    tris = typeof solid?.getFace === 'function' ? solid.getFace(faceName) : [];
+  } catch {
+    tris = [];
+  }
+  if (!Array.isArray(tris) || tris.length === 0) {
+    return { componentCount: 0, componentAreas: [], totalArea: 0 };
+  }
+
+  const edgeToTri = new Map();
+  const triAdj = Array.from({ length: tris.length }, () => []);
+  const areas = new Float64Array(tris.length);
+  const edgeKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+
+  for (let t = 0; t < tris.length; t++) {
+    const tri = tris[t];
+    areas[t] = triangleArea(tri);
+    const idx = Array.isArray(tri?.indices) && tri.indices.length === 3 ? tri.indices : null;
+    if (!idx) continue;
+    const i0 = Number(idx[0]);
+    const i1 = Number(idx[1]);
+    const i2 = Number(idx[2]);
+    if (!Number.isFinite(i0) || !Number.isFinite(i1) || !Number.isFinite(i2)) continue;
+    const edges = [[i0, i1], [i1, i2], [i2, i0]];
+    for (const [a, b] of edges) {
+      const key = edgeKey(a, b);
+      let arr = edgeToTri.get(key);
+      if (!arr) {
+        arr = [];
+        edgeToTri.set(key, arr);
+      }
+      arr.push(t);
+    }
+  }
+
+  for (const triList of edgeToTri.values()) {
+    if (!Array.isArray(triList) || triList.length !== 2) continue;
+    const a = triList[0];
+    const b = triList[1];
+    triAdj[a].push(b);
+    triAdj[b].push(a);
+  }
+
+  const seen = new Uint8Array(tris.length);
+  const componentAreas = [];
+  for (let i = 0; i < tris.length; i++) {
+    if (seen[i]) continue;
+    const stack = [i];
+    seen[i] = 1;
+    let area = 0;
+    while (stack.length) {
+      const t = stack.pop();
+      area += areas[t] || 0;
+      const nbrs = triAdj[t];
+      for (let j = 0; j < nbrs.length; j++) {
+        const u = nbrs[j];
+        if (seen[u]) continue;
+        seen[u] = 1;
+        stack.push(u);
+      }
+    }
+    componentAreas.push(area);
+  }
+
+  componentAreas.sort((a, b) => b - a);
+  const totalArea = componentAreas.reduce((sum, a) => sum + a, 0);
+  return { componentCount: componentAreas.length, componentAreas, totalArea };
+}
+
+function cleanupModeledThreadFaceIslands(tool, faceNames, pitch) {
+  if (!tool || typeof tool.cleanupTinyFaceIslands !== 'function') return null;
+  const names = Array.isArray(faceNames) ? faceNames.filter(Boolean) : [];
+  if (!names.length) return null;
+
+  const collectStats = () => names.map((name) => {
+    const s = faceComponentStats(tool, name);
+    return {
+      name,
+      components: s.componentCount,
+      totalArea: s.totalArea,
+      largestComponentArea: s.componentAreas[0] || 0,
+      smallestIslandArea: s.componentAreas.length > 1 ? s.componentAreas[s.componentAreas.length - 1] : 0,
+    };
+  });
+
+  const p = Math.max(1e-4, Math.abs(Number(pitch) || 0));
+  let areaThreshold = Math.max(1e-9, p * p * 1e-4);
+  const maxThreshold = Math.max(areaThreshold, p * p * 0.05);
+  const before = collectStats();
+  let passes = 0;
+  let totalReassigned = 0;
+
+  for (let pass = 0; pass < 6; pass++) {
+    passes = pass + 1;
+    const stats = names.map((name) => ({ name, ...faceComponentStats(tool, name) }));
+    const worstComponents = stats.reduce((m, s) => Math.max(m, s.componentCount), 0);
+    if (worstComponents <= 1) break;
+
+    const smallAreas = [];
+    for (const s of stats) {
+      if (s.componentAreas.length <= 1) continue;
+      for (let i = 1; i < s.componentAreas.length; i++) {
+        const a = Number(s.componentAreas[i]);
+        if (Number.isFinite(a) && a > 0) smallAreas.push(a);
+      }
+    }
+    smallAreas.sort((a, b) => a - b);
+    const suggested = smallAreas.length ? Math.max(areaThreshold, smallAreas[0] * 1.5) : areaThreshold;
+    const useThreshold = Math.min(maxThreshold, suggested);
+    const reassigned = Number(tool.cleanupTinyFaceIslands(useThreshold) || 0);
+    totalReassigned += reassigned > 0 ? reassigned : 0;
+    if (reassigned <= 0) {
+      areaThreshold = Math.min(maxThreshold, areaThreshold * 4);
+      if (areaThreshold >= maxThreshold) break;
+    } else {
+      areaThreshold = Math.min(maxThreshold, Math.max(areaThreshold * 1.25, useThreshold));
+    }
+  }
+  const after = collectStats();
+  return {
+    before,
+    after,
+    passes,
+    totalReassigned,
+    finalAreaThreshold: areaThreshold,
+  };
+}
+
 function getWorldPosition(obj) {
   if (!obj) return null;
   if (obj.isVector3) return obj.clone();
@@ -336,10 +483,8 @@ function collectSketchVertices(sketch) {
     if (!sketch || !Array.isArray(sketch.children)) return verts;
     for (const child of sketch.children) {
       if (!child) continue;
-      const sid = child?.userData?.sketchPointId;
-      const name = child?.name || '';
-      const isCenter = sid === 0 || sid === '0' || name === 'P0' || name.endsWith(':P0');
-      if (isCenter) continue;
+      const isConstructionPoint = child?.userData?.isConstructionPoint === true;
+      if (isConstructionPoint) continue;
       const isVertexLike = child.type === 'Vertex' || child.isVertex || child.userData?.isVertex || child.userData?.type === 'VERTEX';
       if (isVertexLike) verts.push(child);
     }
@@ -357,14 +502,52 @@ function collectSketchVerticesByName(scene, sketchName) {
     const nm = obj.name || '';
     const m = nm.match(re);
     if (m) {
-      const id = Number(m[1]);
-      if (id !== 0) verts.push(obj);
+      const isConstructionPoint = obj?.userData?.isConstructionPoint === true;
+      if (!isConstructionPoint) verts.push(obj);
     }
     const children = Array.isArray(obj.children) ? obj.children : [];
     for (const c of children) walk(c);
   };
   walk(scene);
   return verts;
+}
+
+function dedupePlacementsByPosition(placements, tolerance = 1e-7) {
+  const out = [];
+  if (!Array.isArray(placements) || placements.length === 0) return out;
+
+  const tol = Math.max(1e-12, Number(tolerance) || 1e-7);
+  const invTol = 1 / tol;
+  const buckets = new Map();
+  const keyOf = (p) => `${Math.round(p.x * invTol)},${Math.round(p.y * invTol)},${Math.round(p.z * invTol)}`;
+
+  for (const item of placements) {
+    const p = item?.position;
+    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
+    const key = keyOf(p);
+    const bucket = buckets.get(key);
+    let duplicate = false;
+    if (bucket) {
+      for (let i = 0; i < bucket.length; i++) {
+        const existing = out[bucket[i]]?.position;
+        if (!existing) continue;
+        if (
+          Math.abs(existing.x - p.x) <= tol &&
+          Math.abs(existing.y - p.y) <= tol &&
+          Math.abs(existing.z - p.z) <= tol
+        ) {
+          duplicate = true;
+          break;
+        }
+      }
+    }
+    if (duplicate) continue;
+    const outIndex = out.length;
+    out.push(item);
+    if (bucket) bucket.push(outIndex);
+    else buckets.set(key, [outIndex]);
+  }
+  return out;
 }
 
 function escapeRegExp(str) {
@@ -634,23 +817,32 @@ export class HoleFeature {
 
     const pointObjs = [];
     const sceneSolids = collectSceneSolids(partHistory?.scene);
-    let pointPositions = [];
+    let pointPlacements = [];
 
-    // Use sketch-defined points (excluding the sketch origin) as hole centers.
+    // Use sketch-defined points as hole centers (construction points are excluded).
     const extraPts = collectSketchVertices(sketch);
     if (extraPts.length) {
       pointObjs.push(...extraPts);
-      pointPositions = pointObjs.map((o) => getWorldPosition(o)).filter(Boolean);
+      pointPlacements = pointObjs
+        .map((o) => ({ pointObj: o, position: getWorldPosition(o) }))
+        .filter((entry) => !!entry.position);
     }
-    if (!pointPositions.length && partHistory?.scene && sketch?.name) {
+    if (!pointPlacements.length && partHistory?.scene && sketch?.name) {
       const fallbackPts = collectSketchVerticesByName(partHistory.scene, sketch.name);
       if (fallbackPts.length) {
         pointObjs.push(...fallbackPts);
-        pointPositions = pointObjs.map((o) => getWorldPosition(o)).filter(Boolean);
+        pointPlacements = pointObjs
+          .map((o) => ({ pointObj: o, position: getWorldPosition(o) }))
+          .filter((entry) => !!entry.position);
       }
     }
+    const uniquePointPlacements = dedupePlacementsByPosition(pointPlacements);
+    if (pointPlacements.length > uniquePointPlacements.length) {
+      const skipped = pointPlacements.length - uniquePointPlacements.length;
+      console.log('[HoleFeature] Skipping duplicate coincident hole points:', skipped);
+    }
 
-    const hasPoints = pointPositions.length > 0;
+    const hasPoints = uniquePointPlacements.length > 0;
     const normal = normalFromSketch(sketch); // keep hole axis perpendicular to the sketch plane
     const center = centerFromObject(sketch);
 
@@ -747,14 +939,16 @@ export class HoleFeature {
 
     const res = 48;
     const backOffset = 1e-5; // small pullback to avoid coincident faces in booleans
-    const centers = hasPoints ? pointPositions : [center];
-    const sourceNames = hasPoints ? pointObjs.map((o) => o?.name || o?.uuid || null) : [null];
+    const centers = hasPoints ? uniquePointPlacements.map((entry) => entry.position) : [center];
+    const sourceNames = hasPoints ? uniquePointPlacements.map((entry) => entry?.pointObj?.name || entry?.pointObj?.uuid || null) : [null];
     const tools = [];
     const holeRecords = [];
     const debugVisualizationObjects = []; // Store debug viz objects separately
     centers.forEach((c, idx) => {
       const pointName = sourceNames[idx] || null;
       const holeFacePrefix = pointName || (featureID ? `${featureID}_${idx}` : `HOLE_${idx}`);
+      let modeledThreadFaceNames = null;
+      let modeledThreadPitch = null;
       const { solids: toolSolids, descriptors } = makeHoleTool({
         holeType,
         radius,
@@ -834,6 +1028,7 @@ export class HoleFeature {
             const threadLengthEffective = threadMode === 'MODELED'
               ? Math.max(0, threadLength + extraThreadLength * 2)
               : threadLength;
+            const threadCutFaceName = `${holeFacePrefix}_THREAD_FACE`;
 
             const threadSolid = threadGeomScaled.toSolid({
               length: threadLengthEffective,
@@ -844,11 +1039,36 @@ export class HoleFeature {
               resolution: res,
               segmentsPerTurn: threadSegmentsPerTurn,
               name: `${holeFacePrefix}_THREAD`,
-              faceName: `${holeFacePrefix}_THREAD_FACE`,
+              faceName: threadCutFaceName,
               axis: [0, 1, 0],
               origin: [0, threadStartEffective, 0],
               xDirection: [1, 0, 0],
             });
+            const canonicalCoreFaceName = `${holeFacePrefix}_THREAD_CORE`;
+            if (threadMode === 'MODELED') {
+              try {
+                modeledThreadPitch = Number(threadGeomScaled?.pitch || threadGeom?.pitch || 0);
+                modeledThreadFaceNames = [
+                  `${threadCutFaceName}:FLANK_A`,
+                  `${threadCutFaceName}:ROOT`,
+                  `${threadCutFaceName}:FLANK_B`,
+                  canonicalCoreFaceName,
+                ];
+                const mergeIntoCore = [
+                  `${threadCutFaceName}:CREST`,
+                  `${threadCutFaceName}:CAP_START`,
+                  `${threadCutFaceName}:CAP_END`,
+                ];
+                for (const fromName of mergeIntoCore) {
+                  threadSolid.renameFace(fromName, canonicalCoreFaceName);
+                }
+                if (descriptor) {
+                  threadSolid.setFaceMetadata(canonicalCoreFaceName, { hole: { ...descriptor } });
+                }
+              } catch {
+                /* best-effort */
+              }
+            }
             console.log('[HoleFeature] Thread solid created:', {
               type: threadSolid?.constructor?.name,
               hasGeometry: !!threadSolid?.geometry,
@@ -873,6 +1093,9 @@ export class HoleFeature {
             const coreR0 = minorRadiusAt(0);
             const coreR1 = minorRadiusAt(threadLengthEffective);
             const coreName = `${holeFacePrefix}_THREAD_CORE`;
+            const coreResolution = threadMode === 'MODELED'
+              ? Math.max(8, Math.min(res, threadSegmentsPerTurn * 2))
+              : res;
             const coreHeight = threadLengthEffective;
             if (coreHeight > 0) {
               const coreSolid = threadGeomScaled.isTapered && Math.abs(coreR0 - coreR1) > 1e-6
@@ -880,13 +1103,13 @@ export class HoleFeature {
                   r1: coreR0,
                   r2: coreR1,
                   h: coreHeight,
-                  resolution: res,
+                  resolution: coreResolution,
                   name: coreName,
                 })
                 : new BREP.Cylinder({
                   radius: coreR0,
                   height: coreHeight,
-                  resolution: res,
+                  resolution: coreResolution,
                   name: coreName,
                 });
               coreSolid.bakeTRS({
@@ -896,6 +1119,20 @@ export class HoleFeature {
               });
               if (descriptor) {
                 try { coreSolid.setFaceMetadata(`${coreName}_S`, { hole: { ...descriptor } }); } catch { /* best-effort */ }
+              }
+              if (threadMode === 'MODELED') {
+                try {
+                  const coreFaces = typeof coreSolid.getFaceNames === 'function' ? coreSolid.getFaceNames() : [];
+                  for (const coreFaceName of coreFaces) {
+                    if (!coreFaceName || coreFaceName === canonicalCoreFaceName) continue;
+                    coreSolid.renameFace(coreFaceName, canonicalCoreFaceName);
+                  }
+                  if (descriptor) {
+                    coreSolid.setFaceMetadata(canonicalCoreFaceName, { hole: { ...descriptor } });
+                  }
+                } catch {
+                  /* best-effort */
+                }
               }
               toolSolids.push(coreSolid);
             }
@@ -1011,6 +1248,16 @@ export class HoleFeature {
       console.log('[HoleFeature] Unioning', toolSolids.length, 'solids for hole tool');
       const tool = unionSolids(toolSolids);
       if (!tool) return;
+      if (threadMode === 'MODELED' && modeledThreadFaceNames?.length) {
+        try {
+          const cleanupSummary = cleanupModeledThreadFaceIslands(tool, modeledThreadFaceNames, modeledThreadPitch);
+          if (cleanupSummary) {
+            console.log('[HoleFeature] Modeled thread face cleanup summary:', cleanupSummary);
+          }
+        } catch (cleanupErr) {
+          console.warn('[HoleFeature] Modeled thread face island cleanup failed:', cleanupErr);
+        }
+      }
       if (debugShowSolid) {
         try {
           tool.visualize();

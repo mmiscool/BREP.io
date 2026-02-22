@@ -11,7 +11,14 @@ let globalDistanceSolveCycleId = 0;
 class ConstraintEngine {
     constructor(sketchJSON) {
         const sketch = JSON.parse(sketchJSON);
-        this.points = sketch.points.map(p => new Point(p.id, p.x, p.y, p.fixed));
+        this.points = sketch.points.map(p => new Point(
+            p.id,
+            p.x,
+            p.y,
+            p.fixed,
+            p.construction,
+            p.externalReference
+        ));
         this.geometries = sketch.geometries || [];
         this.constraints = sketch.constraints || [];
     }
@@ -164,7 +171,14 @@ class ConstraintEngine {
 
         // Return a new sketch object mirroring input structure
         const updatedSketch = {
-            points: this.points.map(p => ({ id: p.id, x: p.x, y: p.y, fixed: p.fixed })),
+            points: this.points.map(p => ({
+                id: p.id,
+                x: p.x,
+                y: p.y,
+                fixed: p.fixed,
+                construction: p.construction === true,
+                externalReference: p.externalReference === true
+            })),
             geometries: this.geometries,
             constraints: this.constraints.filter(c => !c.temporary) // drop temporaries
         };
@@ -174,11 +188,13 @@ class ConstraintEngine {
 }
 
 class Point {
-    constructor(id, x, y, fixed = false) {
+    constructor(id, x, y, fixed = false, construction = false, externalReference = false) {
         this.id = id;
         this.x = x;
         this.y = y;
         this.fixed = fixed;
+        this.construction = construction === true;
+        this.externalReference = externalReference === true;
     }
 }
 
@@ -202,7 +218,7 @@ export class ConstraintSolver {
         this.appState = opts.appState || { mode: "", type: "", requiredSelections: 0 };
 
         this.sketchObject = opts.sketch ? sanitizeSketch(opts.sketch) : {
-            points: [{ id: 0, x: 0, y: 0, fixed: true }],
+            points: [{ id: 0, x: 0, y: 0, fixed: true, construction: true, externalReference: false }],
             geometries: [],
             constraints: [{ id: 0, type: "⏚", points: [0] }]
         };
@@ -906,14 +922,19 @@ export class ConstraintSolver {
 function sanitizeSketch(sketch) {
     const s = {
         points: Array.isArray(sketch.points) ? sketch.points.map(p => ({
-            id: +p.id, x: +p.x, y: +p.y, fixed: !!p.fixed
+            id: +p.id,
+            x: +p.x,
+            y: +p.y,
+            fixed: !!p.fixed,
+            construction: (typeof p?.construction === "boolean") ? p.construction : (+p?.id === 0),
+            externalReference: !!p?.externalReference
         })) : [],
         geometries: Array.isArray(sketch.geometries) ? sketch.geometries.slice() : [],
         constraints: Array.isArray(sketch.constraints) ? sketch.constraints.slice() : []
     };
 
     // Ensure at least an origin and ground if empty
-    if (s.points.length === 0) s.points.push({ id: 0, x: 0, y: 0, fixed: true });
+    if (s.points.length === 0) s.points.push({ id: 0, x: 0, y: 0, fixed: true, construction: true, externalReference: false });
     if (!s.constraints.some(c => c.type === "⏚")) {
         s.constraints.push({ id: 0, type: "⏚", points: [0] });
     }

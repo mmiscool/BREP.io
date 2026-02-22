@@ -54,6 +54,7 @@ export class SketchMode3D {
       sy: 0,
       start: { dx: 0, dy: 0 },
     };
+    this._externalRefPointIds = new Set();
     // Track SKETCH groups we hide while editing so we can restore visibility
     this._hiddenSketches = [];
     // No clipping plane; orientation must do the work
@@ -206,6 +207,8 @@ export class SketchMode3D {
         } catch { }
       },
     });
+    this._solver.sketchObject = this.#normalizeSketchInput(this._solver.sketchObject);
+    this.#refreshExternalRefPointIdsCache();
 
     // Initialize solver settings
     this._solverSettings = {
@@ -501,6 +504,7 @@ export class SketchMode3D {
     if (!this._solver) return false;
     const normalized = this.#normalizeSketchInput(sketch);
     this._solver.sketchObject = normalized;
+    this.#refreshExternalRefPointIdsCache();
     try { this._solver.solveSketch("full"); } catch { }
     this._selection.clear();
     this.#rebuildSketchGraphics();
@@ -816,8 +820,7 @@ export class SketchMode3D {
       }
       // Prevent dragging of external reference points; allow selection only
       try {
-        const f = this.#getSketchFeature();
-        const isExternal = (f?.persistentData?.externalRefs || []).some((r) => r.p0 === hit || r.p1 === hit);
+        const isExternal = this.#isExternalRefPointId(hit);
         if (isExternal) {
           if (e.button === 0) {
             this.#toggleSelection({ type: "point", id: hit });
@@ -859,12 +862,9 @@ export class SketchMode3D {
           const idsRaw = Array.isArray(geo?.points) ? geo.points.slice() : [];
           const ids = Array.from(new Set(idsRaw.map(x => parseInt(x))));
           // Filter out external reference or fixed points (not draggable)
-          const f = this.#getSketchFeature();
-          const ext = (f?.persistentData?.externalRefs || []);
-          const isExternal = (pid) => ext.some(r => r.p0 === pid || r.p1 === pid);
           const movable = ids.filter(pid => {
             const p = this._solver?.getPointById?.(pid);
-            return p && !p.fixed && !isExternal(pid);
+            return p && !p.fixed && !this.#isExternalRefPointId(pid);
           });
           const uv = this.#pointerToPlaneUV(e);
           this._pendingGeo = { ids: movable, x: e.clientX, y: e.clientY, startUV: uv, started: false, geometryId: ghit.id };
@@ -1558,7 +1558,14 @@ export class SketchMode3D {
     if (!s) return null;
     const pts = Array.isArray(s.points) ? s.points : (s.points = []);
     const nextId = Math.max(0, ...pts.map((p) => +p.id || 0)) + 1;
-    pts.push({ id: nextId, x: u, y: v, fixed: !!fixed });
+    pts.push({
+      id: nextId,
+      x: u,
+      y: v,
+      fixed: !!fixed,
+      construction: false,
+      externalReference: false,
+    });
     return nextId;
   }
 
@@ -2135,11 +2142,15 @@ export class SketchMode3D {
     next.constraints = Array.isArray(next.constraints) ? next.constraints : [];
 
     if (!next.points.length) {
-      next.points.push({ id: 0, x: 0, y: 0, fixed: true });
+      next.points.push({ id: 0, x: 0, y: 0, fixed: true, construction: true, externalReference: false });
     }
     for (const pt of next.points) {
-      if (pt && pt.fixed === true) continue;
-      if (pt) pt.fixed = false;
+      if (!pt) continue;
+      pt.fixed = pt.fixed === true;
+      if (typeof pt.construction !== "boolean") {
+        pt.construction = Number(pt.id) === 0;
+      }
+      pt.externalReference = pt.externalReference === true;
     }
     const originId = Number(next.points[0]?.id);
     const hasGround = Number.isFinite(originId) && next.constraints.some((c) =>
@@ -2190,7 +2201,7 @@ export class SketchMode3D {
     if (!snapshot || !this._solver) return;
     this._undoApplying = true;
     try {
-      this._solver.sketchObject = deepClone(snapshot.sketch || {});
+      this._solver.sketchObject = this.#normalizeSketchInput(deepClone(snapshot.sketch || {}));
       this._dimOffsets = snapshot.dimOffsets instanceof Map
         ? deepClone(snapshot.dimOffsets)
         : new Map(snapshot.dimOffsets || []);
@@ -2199,6 +2210,7 @@ export class SketchMode3D {
         feature.persistentData = feature.persistentData || {};
         feature.persistentData.externalRefs = deepClone(snapshot.externalRefs || []);
       }
+      this.#refreshExternalRefPointIdsCache();
       this._selection.clear();
       this.#rebuildSketchGraphics();
       this.#renderDimensions();
@@ -2275,6 +2287,49 @@ export class SketchMode3D {
     return { u: d.dot(bx), v: d.dot(by) };
   }
 
+  #markLinkedEdgePoint(point, { forceConstruction = false } = {}) {
+    if (!point) return;
+    point.fixed = true;
+    point.externalReference = true;
+    if (forceConstruction || typeof point.construction !== "boolean") {
+      point.construction = true;
+    }
+  }
+
+  #refreshExternalRefPointIdsCache() {
+    const ids = new Set();
+    try {
+      const refs = this.#getSketchFeature()?.persistentData?.externalRefs || [];
+      for (const ref of refs) {
+        const p0 = Number(ref?.p0);
+        const p1 = Number(ref?.p1);
+        if (Number.isFinite(p0)) ids.add(p0);
+        if (Number.isFinite(p1)) ids.add(p1);
+      }
+    } catch { }
+    this._externalRefPointIds = ids;
+
+    // Keep sketch-point metadata aligned with current external-ref table.
+    const points = this._solver?.sketchObject?.points;
+    if (Array.isArray(points)) {
+      for (const point of points) {
+        const pid = Number(point?.id);
+        const isExternal = Number.isFinite(pid) && ids.has(pid);
+        if (!point) continue;
+        if (isExternal) this.#markLinkedEdgePoint(point, { forceConstruction: false });
+        else point.externalReference = false;
+      }
+    }
+    return ids;
+  }
+
+  #isExternalRefPointId(pointId) {
+    const pid = Number(pointId);
+    if (!Number.isFinite(pid)) return false;
+    if (!(this._externalRefPointIds instanceof Set)) this.#refreshExternalRefPointIdsCache();
+    return (this._externalRefPointIds instanceof Set) && this._externalRefPointIds.has(pid);
+  }
+
   // Ensure external refs exist for currently selected edges
   #addExternalReferencesFromSelection() {
     try {
@@ -2284,6 +2339,7 @@ export class SketchMode3D {
       scene.traverse((obj) => { if (obj?.type === 'EDGE' && obj.selected) edges.push(obj); });
       if (!edges.length) return;
       for (const e of edges) this.#ensureExternalRefForEdge(e);
+      this.#refreshExternalRefPointIdsCache();
       this.#persistExternalRefs();
       this._solver.solveSketch("full");
       this.#rebuildSketchGraphics();
@@ -2315,8 +2371,8 @@ export class SketchMode3D {
       // Note: calling nextPointId() twice without pushing in between would return the same value.
       const id0 = nextPointId();
       const id1 = id0 + 1;
-      const p0 = { id: id0, x: uvA.u, y: uvA.v, fixed: true };
-      const p1 = { id: id1, x: uvB.u, y: uvB.v, fixed: true };
+      const p0 = { id: id0, x: uvA.u, y: uvA.v, fixed: true, construction: true, externalReference: true };
+      const p1 = { id: id1, x: uvB.u, y: uvB.v, fixed: true, construction: true, externalReference: true };
       s.points.push(p0, p1);
       const pushGround = (pid) => {
         const exists = s.constraints.some((c) => c.type === '⏚' && Array.isArray(c.points) && c.points[0] === pid);
@@ -2335,21 +2391,21 @@ export class SketchMode3D {
       let pt1 = s.points.find((p) => p.id === ref.p1);
       if (!pt0) {
         const nid = nextPointId();
-        pt0 = { id: nid, x: uvA.u, y: uvA.v, fixed: true };
+        pt0 = { id: nid, x: uvA.u, y: uvA.v, fixed: true, construction: true, externalReference: true };
         s.points.push(pt0);
         ref.p0 = nid;
       }
       if (!pt1 || ref.p1 === ref.p0) {
         const nid = Math.max(nextPointId(), pt0.id + 1);
-        pt1 = { id: nid, x: uvB.u, y: uvB.v, fixed: true };
+        pt1 = { id: nid, x: uvB.u, y: uvB.v, fixed: true, construction: true, externalReference: true };
         s.points.push(pt1);
         ref.p1 = nid;
       }
       // Ensure stored name metadata stays fresh
       try { ref.edgeName = edge.name || ref.edgeName || null; } catch { }
       try { ref.solidName = edge.parent?.name || ref.solidName || null; } catch { }
-      if (pt0) { pt0.x = uvA.u; pt0.y = uvA.v; pt0.fixed = true; }
-      if (pt1) { pt1.x = uvB.u; pt1.y = uvB.v; pt1.fixed = true; }
+      if (pt0) { pt0.x = uvA.u; pt0.y = uvA.v; this.#markLinkedEdgePoint(pt0, { forceConstruction: false }); }
+      if (pt1) { pt1.x = uvB.u; pt1.y = uvB.v; this.#markLinkedEdgePoint(pt1, { forceConstruction: false }); }
       const ensureGround = (pid) => {
         const exists = s.constraints.some((c) => c.type === '⏚' && Array.isArray(c.points) && c.points[0] === pid);
         if (!exists) {
@@ -2404,7 +2460,7 @@ export class SketchMode3D {
         // Repair legacy refs with missing/duplicate endpoint IDs
         if (!pt0) {
           const nid = Math.max(0, ...s.points.map((p) => +p.id || 0)) + 1;
-          pt0 = { id: nid, x: uvA.u, y: uvA.v, fixed: true };
+          pt0 = { id: nid, x: uvA.u, y: uvA.v, fixed: true, construction: true, externalReference: true };
           s.points.push(pt0);
           ref.p0 = nid;
           changed = true;
@@ -2413,13 +2469,15 @@ export class SketchMode3D {
           const nid = Math.max(0, ...s.points.map((p) => +p.id || 0)) + 1;
           // Ensure pt1 ID is distinct from pt0
           const id1 = (nid === pt0.id) ? nid + 1 : nid;
-          pt1 = { id: id1, x: uvB.u, y: uvB.v, fixed: true };
+          pt1 = { id: id1, x: uvB.u, y: uvB.v, fixed: true, construction: true, externalReference: true };
           s.points.push(pt1);
           ref.p1 = id1;
           changed = true;
         }
-        if (pt0 && (pt0.x !== uvA.u || pt0.y !== uvA.v)) { pt0.x = uvA.u; pt0.y = uvA.v; pt0.fixed = true; changed = true; }
-        if (pt1 && (pt1.x !== uvB.u || pt1.y !== uvB.v)) { pt1.x = uvB.u; pt1.y = uvB.v; pt1.fixed = true; changed = true; }
+        if (pt0 && (pt0.x !== uvA.u || pt0.y !== uvA.v)) { pt0.x = uvA.u; pt0.y = uvA.v; changed = true; }
+        if (pt1 && (pt1.x !== uvB.u || pt1.y !== uvB.v)) { pt1.x = uvB.u; pt1.y = uvB.v; changed = true; }
+        if (pt0) this.#markLinkedEdgePoint(pt0, { forceConstruction: false });
+        if (pt1) this.#markLinkedEdgePoint(pt1, { forceConstruction: false });
         const ensureGround = (pid) => {
           const exists = s.constraints.some((c) => c.type === '⏚' && Array.isArray(c.points) && c.points[0] === pid);
           if (!exists) {
@@ -2433,6 +2491,7 @@ export class SketchMode3D {
       } catch { }
     }
     if (changed || runSolve) {
+      this.#refreshExternalRefPointIdsCache();
       try { this._solver.solveSketch("full"); } catch { }
       this.#rebuildSketchGraphics();
       this.#refreshContextBar();
@@ -2490,8 +2549,13 @@ export class SketchMode3D {
             const sObj = this._solver?.sketchObject;
             if (sObj) {
               sObj.constraints = sObj.constraints.filter((c) => !(c.type === '⏚' && Array.isArray(c.points) && (c.points[0] === r.p0 || c.points[0] === r.p1)));
+              const p0 = sObj.points?.find((p) => p?.id === r.p0);
+              const p1 = sObj.points?.find((p) => p?.id === r.p1);
+              if (p0) p0.externalReference = false;
+              if (p1) p1.externalReference = false;
             }
           } catch { }
+          this.#refreshExternalRefPointIdsCache();
           this.#persistExternalRefs();
           this._solver?.solveSketch("full");
           this.#rebuildSketchGraphics();
@@ -2655,21 +2719,31 @@ export class SketchMode3D {
     if (this._secCurves)
       this._secCurves.uiElement.innerHTML = (s.geometries || [])
         .map((g) =>
-          row(
-            `${g.type}:${g.id} [${g.points?.join(",")}]`,
-            `g:${g.id}`,
-            `g:${g.id}`,
-          ),
+          {
+            const constructionMarker = g?.construction ? " ◐" : "";
+            return row(
+              `${g.type}:${g.id}${constructionMarker} [${g.points?.join(",")}]`,
+              `g:${g.id}`,
+              `g:${g.id}`,
+            );
+          }
         )
         .join("");
     if (this._secPoints)
       this._secPoints.uiElement.innerHTML = (s.points || [])
         .map((p) =>
-          row(
-            `P${p.id} (${p.x.toFixed(2)}, ${p.y.toFixed(2)})${p.fixed ? " ⏚" : ""}`,
-            `p:${p.id}`,
-            `p:${p.id}`,
-          ),
+          {
+            const linked = this.#isExternalRefPointId(p?.id);
+            const isOrigin = Number(p?.id) === 0;
+            const linkMarker = linked ? " 🔗" : "";
+            const fixedMarker = p?.fixed && !linked && !isOrigin ? " ⏚" : "";
+            const constructionMarker = p?.construction ? " ◐" : "";
+            return row(
+              `P${p.id} (${p.x.toFixed(2)}, ${p.y.toFixed(2)})${linkMarker}${constructionMarker}${fixedMarker}`,
+              `p:${p.id}`,
+              `p:${p.id}`,
+            );
+          }
         )
         .join("");
     // Delegate clicks for selection
@@ -2816,6 +2890,18 @@ export class SketchMode3D {
         label: allFixed ? "Unfix" : "Fix",
         tooltip: allFixed ? "Remove ground constraint" : "Add ground constraint",
         onClick: () => this.#toggleGroundConstraints(selectedPointIds, allFixed),
+      });
+
+      const selPoints = selectedPointIds
+        .map((pid) => s.points?.find((p) => Number(p?.id) === Number(pid)))
+        .filter(Boolean);
+      const allConstruction = selPoints.length > 0 && selPoints.every((p) => p.construction === true);
+      appendButton({
+        label: "◐",
+        tooltip: allConstruction
+          ? "Include selected points in 3D result"
+          : "Exclude selected points from 3D result (construction points)",
+        onClick: () => this.#togglePointConstruction(selectedPointIds, allConstruction),
       });
     }
 
@@ -3253,6 +3339,32 @@ export class SketchMode3D {
         if (p) p.fixed = true;
       }
     }
+
+    try { solver.solveSketch("full"); } catch { }
+    this.#rebuildSketchGraphics();
+    this.#refreshContextBar();
+  }
+
+  #togglePointConstruction(pointIds, removeConstruction) {
+    const solver = this._solver;
+    const sketch = solver?.sketchObject;
+    if (!solver || !sketch || !Array.isArray(pointIds) || !pointIds.length) return;
+
+    const ids = pointIds
+      .map((id) => parseInt(id))
+      .filter((id) => Number.isFinite(id));
+    if (!ids.length) return;
+
+    const nextConstruction = !removeConstruction;
+    let changed = false;
+    for (const pid of ids) {
+      const point = sketch.points?.find((pt) => parseInt(pt?.id) === pid);
+      if (!point) continue;
+      if (point.construction === nextConstruction) continue;
+      point.construction = nextConstruction;
+      changed = true;
+    }
+    if (!changed) return;
 
     try { solver.solveSketch("full"); } catch { }
     this.#rebuildSketchGraphics();
@@ -4770,6 +4882,7 @@ export class SketchMode3D {
     const s = this._solver.sketchObject;
     const b = this._lock?.basis;
     if (!b) return;
+    this.#refreshExternalRefPointIdsCache();
     const constrainedPoints = new Set();
     try {
       for (const c of s.constraints || []) {
@@ -4782,6 +4895,7 @@ export class SketchMode3D {
       Y = b.y;
     const geometryColor = this.#themeColor("geometryColor", 0xffff88);
     const pointColor = this.#themeColor("pointColor", 0x9ec9ff);
+    const constructionPointColor = this.#themeColor("constructionPointColor", 0xffa86a);
     const curveThicknessPx = this.#themeNumber("curveThicknessPx", 1, 0.5, 48);
     const useFatLines = this._useFatCurveLines === true || curveThicknessPx > 1;
     const to3 = (u, v) =>
@@ -4933,8 +5047,12 @@ export class SketchMode3D {
       const selected = Array.from(this._selection).some(
         (it) => it.type === "point" && it.id === p.id,
       );
+      const isConstructionPoint = p?.construction === true;
       const underConstrained = !selected && !p.fixed && !constrainedPoints.has(p.id);
-      const baseColor = (this._uniformPointColor ? pointColor : (underConstrained ? 0xffb347 : pointColor));
+      const defaultPointColor = isConstructionPoint ? constructionPointColor : pointColor;
+      const baseColor = (this._uniformPointColor || isConstructionPoint)
+        ? defaultPointColor
+        : (underConstrained ? 0xffb347 : defaultPointColor);
       const mat = new THREE.MeshBasicMaterial({
         color: selected ? 0x6fe26f : baseColor,
         depthTest: false,
@@ -4945,7 +5063,13 @@ export class SketchMode3D {
       m.renderOrder = 10001;
 
       m.position.copy(to3(p.x, p.y));
-      m.userData = { kind: "point", id: p.id, underConstrained };
+      m.userData = {
+        kind: "point",
+        id: p.id,
+        underConstrained,
+        isConstructionPoint,
+        isExternalReference: this.#isExternalRefPointId(p.id),
+      };
       // Enlarge selected points 2x for better visibility
       m.scale.setScalar(selected ? r * 2 : r);
       grp.add(m);

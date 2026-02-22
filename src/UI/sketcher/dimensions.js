@@ -21,6 +21,57 @@ function getConstraintBaseColor(inst) {
   }
 }
 
+function isLinkedEdgePoint(inst, pointId) {
+  const pid = Number(pointId);
+  if (!Number.isFinite(pid)) return false;
+  const cache = inst?._externalRefPointIds;
+  if (cache instanceof Set && cache.has(pid)) return true;
+  try {
+    const featureID = inst?.featureID;
+    const features = Array.isArray(inst?.viewer?.partHistory?.features)
+      ? inst.viewer.partHistory.features
+      : [];
+    const feature = features.find((f) => f?.inputParams?.featureID === featureID) || null;
+    const refs = Array.isArray(feature?.persistentData?.externalRefs) ? feature.persistentData.externalRefs : [];
+    for (const ref of refs) {
+      if (Number(ref?.p0) === pid || Number(ref?.p1) === pid) return true;
+    }
+  } catch { }
+  return false;
+}
+
+function isSketchOriginPoint(pointId) {
+  return Number(pointId) === 0;
+}
+
+function forwardWheelToCanvas(inst, e) {
+  const canvas = inst?.viewer?.renderer?.domElement;
+  if (!canvas || !e) return;
+  let canceled = false;
+  try {
+    const forwarded = new WheelEvent(e.type, {
+      bubbles: true,
+      cancelable: true,
+      deltaX: e.deltaX,
+      deltaY: e.deltaY,
+      deltaZ: e.deltaZ,
+      deltaMode: e.deltaMode,
+      clientX: e.clientX,
+      clientY: e.clientY,
+      screenX: e.screenX,
+      screenY: e.screenY,
+      ctrlKey: e.ctrlKey,
+      shiftKey: e.shiftKey,
+      altKey: e.altKey,
+      metaKey: e.metaKey,
+    });
+    canceled = !canvas.dispatchEvent(forwarded);
+  } catch { /* ignore */ }
+  if (canceled) {
+    try { e.preventDefault(); } catch { /* ignore */ }
+  }
+}
+
 function isRadialDimensionConstraint(c) {
   return c?.type === '⟺'
     && Array.isArray(c.points)
@@ -178,6 +229,10 @@ export function renderDimensions(inst) {
 
   const glyphConstraints = [];
   for (const c of s.constraints || []) {
+    if (c?.type === '⏚' && Array.isArray(c?.points) && c.points.length > 0) {
+      const pointId = Number(c.points[0]);
+      if (isLinkedEdgePoint(inst, pointId) || isSketchOriginPoint(pointId)) continue;
+    }
     const sel = Array.from(inst._selection || []).some(it => it.type === 'constraint' && it.id === c.id);
     const hov = inst._hover && inst._hover.type === 'constraint' && inst._hover.id === c.id;
     if (c.type === '⟺') {
@@ -363,6 +418,10 @@ function pointerToPlaneUV(inst, e) {
 
 // Centralized event wiring for dimension labels (drag, click, hover, edit)
 function attachDimLabelEvents(inst, el, c, world) {
+  el.addEventListener('wheel', (e) => {
+    forwardWheelToCanvas(inst, e);
+  }, { passive: false });
+
   // Click: toggle constraint selection (dblclick handled separately)
   el.addEventListener('click', (e) => {
     if (e.detail > 1) return;

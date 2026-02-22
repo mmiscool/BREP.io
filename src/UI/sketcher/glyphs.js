@@ -14,6 +14,34 @@ function themedConstraintColor(inst) {
   }
 }
 
+function forwardWheelToCanvas(inst, e) {
+  const canvas = inst?.viewer?.renderer?.domElement;
+  if (!canvas || !e) return;
+  let canceled = false;
+  try {
+    const forwarded = new WheelEvent(e.type, {
+      bubbles: true,
+      cancelable: true,
+      deltaX: e.deltaX,
+      deltaY: e.deltaY,
+      deltaZ: e.deltaZ,
+      deltaMode: e.deltaMode,
+      clientX: e.clientX,
+      clientY: e.clientY,
+      screenX: e.screenX,
+      screenY: e.screenY,
+      ctrlKey: e.ctrlKey,
+      shiftKey: e.shiftKey,
+      altKey: e.altKey,
+      metaKey: e.metaKey,
+    });
+    canceled = !canvas.dispatchEvent(forwarded);
+  } catch { /* ignore */ }
+  if (canceled) {
+    try { e.preventDefault(); } catch { /* ignore */ }
+  }
+}
+
 // Grouped glyph renderer: draws small glyphs for non-dimension constraints,
 // grouping those that act on the same set of points at a single location.
 // Also records per-constraint centers for hit-testing.
@@ -65,6 +93,9 @@ export function drawConstraintGlyphs(inst, constraints) {
       }
 
       // Interactions: click to toggle selection; hover to reflect
+      el.addEventListener('wheel', (e) => {
+        forwardWheelToCanvas(inst, e);
+      }, { passive: false });
       el.addEventListener('pointerdown', (e) => {
         try { if (inst.viewer?.controls) inst.viewer.controls.enabled = false; } catch { }
         try { el.setPointerCapture(e.pointerId); } catch { }

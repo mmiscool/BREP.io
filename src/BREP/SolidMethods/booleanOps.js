@@ -13,7 +13,7 @@ export function _combineIdMaps(other) {
 }
 
 function _collapseFaceIdsByName(solid) {
-    if (!solid || !solid._faceNameToID || !solid._idToFaceName || !Array.isArray(solid._triIDs)) return;
+    if (!solid || !solid._faceNameToID || !solid._idToFaceName || !Array.isArray(solid._triIDs)) return false;
     const nameToId = solid._faceNameToID;
     let changed = false;
 
@@ -28,7 +28,7 @@ function _collapseFaceIdsByName(solid) {
         }
     }
 
-    if (!changed) return;
+    if (!changed) return false;
 
     solid._idToFaceName = new Map(
         [...solid._faceNameToID.entries()].map(([name, id]) => [id, name]),
@@ -37,6 +37,7 @@ function _collapseFaceIdsByName(solid) {
     solid._dirty = true;
     try { if (solid._manifold && typeof solid._manifold.delete === 'function') solid._manifold.delete(); } catch { }
     solid._manifold = null;
+    return true;
 }
 
 function baseSolidCtor(obj) {
@@ -111,6 +112,7 @@ export function setTolerance(tolerance) {
     try { out._auxEdges = Array.isArray(this._auxEdges) ? this._auxEdges.slice() : []; } catch { }
     try { out._faceMetadata = new Map(this._faceMetadata); } catch { }
     try { out._edgeMetadata = new Map(this._edgeMetadata); } catch { }
+    _collapseFaceIdsByName(out);
     return out;
 }
 export function simplify(tolerance = undefined, updateInPlace = false) {
@@ -171,10 +173,23 @@ export function simplify(tolerance = undefined, updateInPlace = false) {
         try { if (meshOut && typeof meshOut.delete === 'function') meshOut.delete(); } catch { }
     }
 
-    const returnObject = updateInPlace ? this : Solid._fromManifold(outM, this._idToFaceName);
+    if (updateInPlace) {
+        _collapseFaceIdsByName(this);
+        this._manifoldize();
+        return this;
+    }
 
+    const mapForReturn = new Map(this._idToFaceName);
+
+    // Detach this solid from `outM` before rebuilding a second solid from it.
+    // This avoids sharing/deleting one manifold object between two Solid instances.
+    this._manifold = null;
+    this._dirty = true;
+    this._faceIndex = null;
+    _collapseFaceIdsByName(this);
+
+    const returnObject = Solid._fromManifold(outM, mapForReturn);
     this._manifoldize();
-    // Return the mutated Solid (chainable)
     return returnObject;
 }
 
@@ -226,5 +241,6 @@ export function _fromManifold(manifoldObj, idToFaceName) {
 
     solid._manifold = manifoldObj;
     solid._dirty = false;
+    _collapseFaceIdsByName(solid);
     try { return solid; } finally { try { if (mesh && typeof mesh.delete === 'function') mesh.delete(); } catch { } }
 }

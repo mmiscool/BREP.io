@@ -79,6 +79,39 @@ const inputParamsSchema = {
     },
 };
 
+function normalizeSketchPointAttributes(sketch, externalRefPointIds = null) {
+    if (!sketch || typeof sketch !== 'object') return;
+    sketch.points = Array.isArray(sketch.points) ? sketch.points : [];
+    sketch.geometries = Array.isArray(sketch.geometries) ? sketch.geometries : [];
+    sketch.constraints = Array.isArray(sketch.constraints) ? sketch.constraints : [];
+    if (sketch.points.length === 0) {
+        sketch.points.push({ id: 0, x: 0, y: 0, fixed: true, construction: true, externalReference: false });
+    }
+
+    const extIds = externalRefPointIds instanceof Set ? externalRefPointIds : new Set();
+    if (!(externalRefPointIds instanceof Set)) {
+        try {
+            for (const p of sketch.points) {
+                if (p?.externalReference === true && Number.isFinite(Number(p?.id))) {
+                    extIds.add(Number(p.id));
+                }
+            }
+        } catch { /* ignore */ }
+    }
+
+    for (const p of sketch.points) {
+        if (!p) continue;
+        p.fixed = p.fixed === true;
+        const pid = Number(p.id);
+        const isOrigin = Number.isFinite(pid) && pid === 0;
+        const isExternalRef = Number.isFinite(pid) && extIds.has(pid);
+        p.externalReference = isExternalRef;
+        if (typeof p.construction !== 'boolean') {
+            p.construction = isOrigin || isExternalRef;
+        }
+    }
+}
+
 export class SketchFeature {
     static shortName = "S";
     static longName = "Sketch";
@@ -342,6 +375,18 @@ export class SketchFeature {
             y: Array.isArray(basis.y) ? basis.y.slice() : [0, 1, 0],
             z: Array.isArray(basis.z) ? basis.z.slice() : null,
         };
+        sceneGroup.userData.sketchFeatureId = featureId;
+        const externalRefPointIds = new Set();
+        try {
+            const refs = Array.isArray(this.persistentData?.externalRefs) ? this.persistentData.externalRefs : [];
+            for (const ref of refs) {
+                const p0 = Number(ref?.p0);
+                const p1 = Number(ref?.p1);
+                if (Number.isFinite(p0)) externalRefPointIds.add(p0);
+                if (Number.isFinite(p1)) externalRefPointIds.add(p1);
+            }
+        } catch { /* ignore */ }
+        sceneGroup.userData.externalRefPointIds = Array.from(externalRefPointIds);
         const bO = new THREE.Vector3().fromArray(basis.origin);
         const bX = new THREE.Vector3().fromArray(basis.x);
         const bY = new THREE.Vector3().fromArray(basis.y);
@@ -366,7 +411,8 @@ export class SketchFeature {
         };
 
         // Start from persisted sketch
-        let sketch = this.persistentData?.sketch || { points: [{ id:0, x:0, y:0, fixed:true }], geometries: [], constraints: [{ id:0, type:"⏚", points:[0]}] };
+        let sketch = this.persistentData?.sketch || { points: [{ id:0, x:0, y:0, fixed:true, construction:true, externalReference:false }], geometries: [], constraints: [{ id:0, type:"⏚", points:[0]}] };
+        normalizeSketchPointAttributes(sketch, externalRefPointIds);
         this.persistentData = this.persistentData || {};
         this.persistentData.lastProfileDiagnostics = null;
         const solveSketchForFeature = (inputSketch, {
@@ -458,6 +504,7 @@ export class SketchFeature {
                     stopWhenConstraintsClear: expressionDrivenValueChanged,
                 });
                 sketch = solved;
+                normalizeSketchPointAttributes(sketch, externalRefPointIds);
                 this.persistentData.sketch = solved;
             } catch {}
         } catch {}
@@ -523,7 +570,16 @@ export class SketchFeature {
                         const p1 = ptById.get(r.p1);
                         if (p0 && (p0.x !== uvA.u || p0.y !== uvA.v)) { p0.x = uvA.u; p0.y = uvA.v; changed = true; }
                         if (p1 && (p1.x !== uvB.u || p1.y !== uvB.v)) { p1.x = uvB.u; p1.y = uvB.v; changed = true; }
-                        if (p0) p0.fixed = true; if (p1) p1.fixed = true;
+                        if (p0) {
+                            p0.fixed = true;
+                            p0.externalReference = true;
+                            if (typeof p0.construction !== 'boolean') p0.construction = true;
+                        }
+                        if (p1) {
+                            p1.fixed = true;
+                            p1.externalReference = true;
+                            if (typeof p1.construction !== 'boolean') p1.construction = true;
+                        }
                         // Ensure ground constraints exist for these points so solver treats them fixed
                         const ensureGround = (pid)=>{
                             if (!sketch.constraints.some(c=>c.type==='⏚' && Array.isArray(c.points) && c.points[0]===pid)){
@@ -544,6 +600,7 @@ export class SketchFeature {
                             stopWhenConstraintsClear: true,
                         });
                         sketch = solved;
+                        normalizeSketchPointAttributes(sketch, externalRefPointIds);
                         this.persistentData.sketch = solved;
                     } catch {}
                 }
@@ -554,7 +611,7 @@ export class SketchFeature {
         // Helper: 2D → 3D
         const to3D = (u, v) => new THREE.Vector3().copy(bO).addScaledVector(bX, u).addScaledVector(bY, v);
 
-        // Add vertex visuals in 3D for every sketch point (including isolated points)
+        // Add vertex visuals in 3D for non-construction sketch points (including isolated points)
         try {
             if (Array.isArray(sketch?.points)) {
                 let autoId = 0;
@@ -562,6 +619,7 @@ export class SketchFeature {
                     if (p == null) continue;
                     const u = Number(p.x); const v = Number(p.y);
                     if (!Number.isFinite(u) || !Number.isFinite(v)) continue;
+                    if (p.construction === true) continue;
                     const w = to3D(u, v);
                     const hasExplicitId = p.id !== undefined && p.id !== null && `${p.id}` !== '';
                     const pointLabel = hasExplicitId ? p.id : autoId++;
@@ -569,8 +627,12 @@ export class SketchFeature {
                     try {
                         const vertex = new BREP.Vertex([w.x, w.y, w.z], { name: vertexName });
                         vertex.userData = vertex.userData || {};
-                        vertex.userData.sketchPointId = hasExplicitId ? p.id : pointLabel;
+                        const pointId = hasExplicitId ? p.id : pointLabel;
+                        const pointIdNum = Number(pointId);
+                        vertex.userData.sketchPointId = pointId;
                         vertex.userData.sketchFeatureId = featureId;
+                        vertex.userData.isConstructionPoint = p.construction === true;
+                        vertex.userData.isExternalReference = Number.isFinite(pointIdNum) && externalRefPointIds.has(pointIdNum);
                         sceneGroup.add(vertex);
                     } catch {}
                 }
