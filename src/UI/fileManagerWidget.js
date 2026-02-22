@@ -23,6 +23,7 @@ import {
   uint8ArrayToBase64,
   base64ToUint8Array,
 } from '../services/componentLibrary.js';
+import { readDroppedWorkspaceFileRecord } from '../services/droppedWorkspaceFiles.js';
 import { HISTORY_COLLECTION_REFRESH_EVENT } from './history/HistoryCollectionWidget.js';
 import { WorkspaceFileBrowserWidget } from './WorkspaceFileBrowserWidget.js';
 import { listMountedDirectories } from '../services/mountedStorage.js';
@@ -234,6 +235,81 @@ export class FileManagerWidget {
     const repo = String(repoFull || '').trim();
     const scope = repo ? `${repo}::${n}` : n;
     return src ? `${src}::${scope}` : scope;
+  }
+  async _importDroppedFilesIntoWorkspace(files = [], target = {}, { branch = '' } = {}) {
+    const list = Array.isArray(files) ? files.filter(Boolean) : [];
+    if (!list.length) {
+      return {
+        imported: 0,
+        skipped: 0,
+        failed: 0,
+        source: 'local',
+        repoFull: '',
+        path: '',
+      };
+    }
+
+    const source = this._normalizeSource(target?.source || 'local') || 'local';
+    const repoFull = source === 'local' ? '' : String(target?.repoFull || '').trim();
+    const folderPath = normalizeModelPath(target?.path || '');
+    if (source !== 'local' && !repoFull) {
+      throw new Error('Select a valid destination root before dropping files.');
+    }
+    if (source === 'github' && !String(getGithubStorageConfig()?.token || '').trim()) {
+      throw new Error('Set a GitHub token in Settings before importing files into repositories.');
+    }
+
+    const supportsJson = source === 'local';
+    const writeBranch = source === 'github'
+      ? String(branch || this.currentBranch || getGithubStorageConfig()?.branch || '').trim()
+      : '';
+    let imported = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const file of list) {
+      try {
+        const parsed = await readDroppedWorkspaceFileRecord(file, { allowJson: supportsJson });
+        const baseName = normalizeModelPath(parsed?.baseName || '');
+        if (!parsed?.record || !baseName) {
+          skipped += 1;
+          continue;
+        }
+        const modelPath = normalizeModelPath(folderPath ? `${folderPath}/${baseName}` : baseName);
+        if (!modelPath) {
+          skipped += 1;
+          continue;
+        }
+
+        const scope = {
+          ...this._buildScopeOptions(source, repoFull, writeBranch),
+          path: modelPath,
+        };
+        const existing = await this._getModel(modelPath, scope);
+        if (existing) {
+          const location = repoFull ? ` in ${repoFull}` : '';
+          const overwrite = await window.confirm(`"${modelPath}" already exists${location}. Overwrite it?`);
+          if (!overwrite) {
+            skipped += 1;
+            continue;
+          }
+        }
+
+        await this._setModel(modelPath, parsed.record, scope);
+        imported += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+
+    return {
+      imported,
+      skipped,
+      failed,
+      source,
+      repoFull,
+      path: folderPath,
+    };
   }
   _resolveLoadedModelPath(requestedName, options = {}, rec = null) {
     const explicitPath = normalizeModelPath(options?.path || '');
@@ -724,6 +800,39 @@ export class FileManagerWidget {
           });
           setStatus('Selected existing file. Save will overwrite it.', 'info');
           try { fileInput.focus(); fileInput.select(); } catch { /* ignore */ }
+        },
+        onDropFiles: async ({ files, target }) => {
+          const count = Array.isArray(files) ? files.length : 0;
+          if (!count) return;
+          setBusy(true);
+          setStatus(`Importing ${count} dropped file${count === 1 ? '' : 's'}...`, 'info');
+          try {
+            const summary = await this._importDroppedFilesIntoWorkspace(files, target, {
+              branch: selectedBranch,
+            });
+            await browser.reload();
+            browser.setLocation({
+              workspaceTop: false,
+              source: summary.source,
+              repoFull: summary.repoFull,
+              path: summary.path,
+            });
+            if (!summary.imported && !summary.failed) {
+              setStatus('No supported files were imported. Drop .3mf files (or .json for Local Browser).', 'info');
+              return;
+            }
+            if (summary.failed) {
+              setStatus(`Import complete: ${summary.imported} imported, ${summary.failed} failed, ${summary.skipped} skipped.`, 'error');
+            } else {
+              setStatus(`Imported ${summary.imported} file${summary.imported === 1 ? '' : 's'}.${summary.skipped ? ` (${summary.skipped} skipped)` : ''}`, 'info');
+            }
+          } catch (err) {
+            const msg = err?.message || String(err || 'Unknown error');
+            setStatus(`File import failed: ${msg}`, 'error');
+            throw err;
+          } finally {
+            setBusy(false);
+          }
         },
         scrollBody: true,
       });

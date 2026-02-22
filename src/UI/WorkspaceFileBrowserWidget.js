@@ -292,6 +292,7 @@ export class WorkspaceFileBrowserWidget {
     createFolderActionsMenu = null,
     bindFileDragSource = null,
     bindDropTarget = null,
+    onDropFiles = null,
     showSearchInput = true,
     showViewToggle = true,
     showCreateFolderButton = false,
@@ -317,6 +318,7 @@ export class WorkspaceFileBrowserWidget {
     this.createFolderActionsMenu = typeof createFolderActionsMenu === 'function' ? createFolderActionsMenu : null;
     this.bindFileDragSource = typeof bindFileDragSource === 'function' ? bindFileDragSource : null;
     this.bindDropTarget = typeof bindDropTarget === 'function' ? bindDropTarget : null;
+    this.onDropFiles = typeof onDropFiles === 'function' ? onDropFiles : null;
     this.showSearchInput = showSearchInput !== false;
     this.showViewToggle = showViewToggle !== false;
     this.showCreateFolderButton = showCreateFolderButton === true;
@@ -961,6 +963,11 @@ export class WorkspaceFileBrowserWidget {
         font-size: 14px;
         text-align: center;
       }
+      .wfb-drop-target.is-drop-active {
+        outline: 2px solid rgba(122, 162, 247, 0.75);
+        outline-offset: 1px;
+        background: rgba(21, 47, 102, 0.35);
+      }
       .wfb-tile {
         appearance: none;
         width: 100%;
@@ -1441,12 +1448,28 @@ export class WorkspaceFileBrowserWidget {
   }
 
   _attachDropTarget(el, target) {
-    if (!el || !this.bindDropTarget) return;
-    try {
-      this.bindDropTarget(el, target);
-    } catch {
-      // Ignore host drop-target binding failures.
+    if (!el) return;
+    if (this.bindDropTarget) {
+      try {
+        this.bindDropTarget(el, target);
+      } catch {
+        // Ignore host drop-target binding failures.
+      }
     }
+    this._attachExternalFileDropTarget(el, target);
+  }
+
+  _attachCurrentFolderDropTarget(el) {
+    if (!el) return;
+    if (this.workspaceTop) return;
+    if (this.searchTerm) return;
+    if (this._isTrashRootSelected()) return;
+    const { source, repoFull } = this._getCurrentRootScope();
+    this._attachDropTarget(el, {
+      source,
+      repoFull,
+      path: normalizePath(this.path || ''),
+    });
   }
 
   _attachFileDragSource(el, entry) {
@@ -1476,6 +1499,78 @@ export class WorkspaceFileBrowserWidget {
       // Ignore host menu builder failures.
     }
     return null;
+  }
+
+  _isFileDragEvent(event) {
+    const dt = event?.dataTransfer;
+    if (!dt) return false;
+    const types = Array.from(dt.types || []);
+    if (types.includes('Files')) return true;
+    if (dt.items && dt.items.length) {
+      return Array.from(dt.items).some((item) => item?.kind === 'file');
+    }
+    return !!(dt.files && dt.files.length);
+  }
+
+  _extractDroppedFiles(event) {
+    const dt = event?.dataTransfer;
+    if (!dt || !dt.files || !dt.files.length) return [];
+    return Array.from(dt.files).filter(Boolean);
+  }
+
+  _attachExternalFileDropTarget(el, target) {
+    if (!el || !this.onDropFiles) return;
+    let depth = 0;
+    el.classList.add('wfb-drop-target');
+
+    const markActive = () => el.classList.add('is-drop-active');
+    const clearActive = () => {
+      depth = 0;
+      el.classList.remove('is-drop-active');
+    };
+
+    el.addEventListener('dragenter', (event) => {
+      if (this.loading || this.actionBusy) return;
+      if (!this._isFileDragEvent(event)) return;
+      event.preventDefault();
+      depth += 1;
+      markActive();
+    });
+    el.addEventListener('dragover', (event) => {
+      if (this.loading || this.actionBusy) return;
+      if (!this._isFileDragEvent(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      markActive();
+    });
+    el.addEventListener('dragleave', () => {
+      depth = Math.max(0, depth - 1);
+      if (!depth) clearActive();
+    });
+    el.addEventListener('drop', (event) => {
+      if (!this._isFileDragEvent(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const files = this._extractDroppedFiles(event);
+      clearActive();
+      if (!files.length) return;
+      void this._handleDropFiles(files, target);
+    });
+  }
+
+  async _handleDropFiles(files, target) {
+    if (!this.onDropFiles) return;
+    await this._runToolbarAction(async () => {
+      await this.onDropFiles({
+        files: Array.isArray(files) ? files.slice() : [],
+        target: {
+          source: normalizeStorageSource(target?.source || this.rootSource || 'local'),
+          repoFull: String(target?.repoFull || this.rootRepoFull || '').trim(),
+          path: normalizePath(target?.path || ''),
+        },
+        location: this.getLocation(),
+      });
+    }, 'File drop failed');
   }
 
   _recordsForRoot(source, repoFull = '') {
@@ -1674,6 +1769,7 @@ export class WorkspaceFileBrowserWidget {
       const empty = document.createElement('div');
       empty.className = 'wfb-empty';
       empty.textContent = 'No entries.';
+      this._attachCurrentFolderDropTarget(empty);
       this.bodyEl.appendChild(empty);
       return;
     }
@@ -1683,6 +1779,7 @@ export class WorkspaceFileBrowserWidget {
         const empty = document.createElement('div');
         empty.className = 'wfb-empty';
         empty.textContent = String(item.text || 'No entries.');
+        this._attachCurrentFolderDropTarget(empty);
         this.bodyEl.appendChild(empty);
         continue;
       }
@@ -1699,6 +1796,7 @@ export class WorkspaceFileBrowserWidget {
       const empty = document.createElement('div');
       empty.className = 'wfb-empty wfb-tile-empty';
       empty.textContent = 'No entries.';
+      this._attachCurrentFolderDropTarget(empty);
       this.bodyEl.appendChild(empty);
       return;
     }
@@ -1707,6 +1805,7 @@ export class WorkspaceFileBrowserWidget {
         const empty = document.createElement('div');
         empty.className = 'wfb-empty wfb-tile-empty';
         empty.textContent = String(item.text || 'No entries.');
+        this._attachCurrentFolderDropTarget(empty);
         this.bodyEl.appendChild(empty);
         continue;
       }
@@ -1874,6 +1973,7 @@ export class WorkspaceFileBrowserWidget {
       label.addEventListener('click', pickFile);
       tile.appendChild(label);
       this._attachFileDragSource(tile, entry);
+      this._attachCurrentFolderDropTarget(tile);
       return tile;
     }
 
@@ -2058,6 +2158,7 @@ export class WorkspaceFileBrowserWidget {
         : formatSavedAt(entry?.savedAt || '');
       void this._hydrateThumbnail(entry, thumb);
       this._attachFileDragSource(row, entry);
+      this._attachCurrentFolderDropTarget(row);
       return row;
     }
 

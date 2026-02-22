@@ -456,6 +456,20 @@ export class PartHistory {
 
 
       feature.persistentData = instance.persistentData;
+      try {
+        if (feature?.persistentData?.consumeFileInput && feature?.inputParams && typeof feature.inputParams === 'object') {
+          if (Object.prototype.hasOwnProperty.call(feature.inputParams, 'fileToImport')) {
+            feature.inputParams.fileToImport = '';
+          }
+          const exprMap = feature.inputParams.__expr;
+          if (exprMap && typeof exprMap === 'object' && !Array.isArray(exprMap)) {
+            delete exprMap.fileToImport;
+            if (Object.keys(exprMap).length === 0) delete feature.inputParams.__expr;
+          }
+          delete feature.persistentData.consumeFileInput;
+          feature.lastRunInputParams = JSON.stringify(feature.inputParams);
+        }
+      } catch { /* ignore */ }
     }
 
     try {

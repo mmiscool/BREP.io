@@ -25,6 +25,7 @@ import {
   removeComponentRecord,
   setComponentRecord,
 } from './services/componentLibrary.js';
+import { readDroppedWorkspaceFileRecord } from './services/droppedWorkspaceFiles.js';
 import { WorkspaceFileBrowserWidget } from './UI/WorkspaceFileBrowserWidget.js';
 import './UI/dialogs.js';
 import './styles/landing.css';
@@ -1989,6 +1990,9 @@ function createFolderExplorer(roots, term = '') {
       target?.repoFull,
       target?.path,
     )),
+    onDropFiles: async ({ files, target }) => {
+      await importDesktopFilesToFolder(files, target, { refresh: true });
+    },
     showSearchInput: false,
     showCreateFolderButton: true,
     showDeleteFolderButton: true,
@@ -2870,6 +2874,36 @@ async function openTransferBrowserDialog({
           path: normalizePath(targetPath),
         }, { persist: false });
       },
+      onDropFiles: async ({ files, target }) => {
+        setDialogStatus('', 'warn');
+        await importDesktopFilesToFolder(files, target, { refresh: true });
+        const currentLocation = widget?.getLocation?.() || {
+          workspaceTop: false,
+          source: normalizeStorageSource(target?.source || 'local'),
+          repoFull: String(target?.repoFull || '').trim(),
+          path: normalizePath(target?.path || ''),
+        };
+        const nextLocation = currentLocation.workspaceTop
+          ? {
+              workspaceTop: false,
+              source: normalizeStorageSource(target?.source || 'local'),
+              repoFull: String(target?.repoFull || '').trim(),
+              path: normalizePath(target?.path || ''),
+            }
+          : currentLocation;
+        widget.setData({
+          records: state.allRecords,
+          folders: state.folderRecords,
+          roots: makeWorkspaceRoots(),
+        }, { render: false });
+        widget.setLocation({
+          workspaceTop: !!nextLocation.workspaceTop,
+          source: normalizeStorageSource(nextLocation.source || 'local'),
+          repoFull: String(nextLocation.repoFull || '').trim(),
+          path: normalizePath(nextLocation.path || ''),
+        }, { persist: false });
+        updateDestinationMeta();
+      },
       showSearchInput: true,
       showViewToggle: true,
       showCreateFolderButton: true,
@@ -3570,6 +3604,105 @@ function getDropTargetLabel(target) {
   const parts = [getStorageRootLabel(source, repoFull)];
   if (path) parts.push(path);
   return parts.join(' / ');
+}
+
+async function importDesktopFilesToFolder(files, target, { refresh = true } = {}) {
+  if (isUiBusy()) return { imported: 0, skipped: 0, failed: 0 };
+  const list = Array.isArray(files) ? files.filter(Boolean) : [];
+  if (!list.length) return { imported: 0, skipped: 0, failed: 0 };
+
+  const targetScope = getTargetScopeForWrite(target, null);
+  const targetPath = normalizePath(target?.path || '');
+  const targetLabel = getDropTargetLabel(target);
+  const source = normalizeStorageSource(targetScope.source || 'local');
+  const repoFull = String(targetScope.repoFull || '').trim();
+  const supportsJson = source === 'local';
+
+  if (isTrashRoot(source, repoFull) || isTrashPath(targetPath)) {
+    setFilesStatus('Cannot import files into Trash.', 'warn');
+    return { imported: 0, skipped: list.length, failed: 0 };
+  }
+  if (source !== 'local' && !repoFull) {
+    setFilesStatus('Select a valid destination folder before dropping files.', 'warn');
+    return { imported: 0, skipped: list.length, failed: 0 };
+  }
+  if (source === 'github' && !String(getGithubStorageConfig()?.token || '').trim()) {
+    setFilesStatus('Set a GitHub token in Settings before importing files into repositories.', 'warn');
+    return { imported: 0, skipped: list.length, failed: 0 };
+  }
+  if (source === 'github' && getRepoReadOnlyStatus(repoFull)) {
+    setFilesStatus(`Repository "${repoFull}" is read-only.`, 'warn');
+    return { imported: 0, skipped: list.length, failed: 0 };
+  }
+
+  let imported = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  setFilesStatus(`Importing ${list.length} file${list.length === 1 ? '' : 's'}...`, 'info');
+  try {
+    await runBusyUiTask('Importing desktop files...', async ({ setMessage }) => {
+      for (let index = 0; index < list.length; index += 1) {
+        const file = list[index];
+        const fileName = String(file?.name || '').trim() || `file-${index + 1}`;
+        setMessage('Importing desktop files...', `${index + 1}/${list.length} - ${fileName}`);
+        try {
+          const parsed = await readDroppedWorkspaceFileRecord(file, { allowJson: supportsJson });
+          const baseName = normalizePath(parsed?.baseName || '');
+          if (!parsed?.record || !baseName) {
+            skipped += 1;
+            continue;
+          }
+          const nextPath = normalizePath(targetPath ? `${targetPath}/${baseName}` : baseName);
+          if (!nextPath) {
+            skipped += 1;
+            continue;
+          }
+
+          const writeScope = {
+            ...targetScope,
+            source,
+            repoFull,
+            path: nextPath,
+          };
+          const existing = await getComponentRecord(nextPath, writeScope);
+          if (existing) {
+            const overwrite = await confirm(`"${nextPath}" already exists in ${targetLabel}. Overwrite it?`);
+            if (!overwrite) {
+              skipped += 1;
+              continue;
+            }
+          }
+
+          await setComponentRecord(nextPath, parsed.record, writeScope);
+          imported += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+
+      if (!refresh) return;
+      setMessage('Refreshing file index...', 'Updating folder and file listing...');
+      await loadFiles();
+      await waitForFilesIdle();
+    }, {
+      detail: `Target: ${targetLabel}`,
+    });
+  } catch (err) {
+    setFilesStatus(`Desktop import failed: ${errorMessage(err)}`, 'error');
+    return { imported, skipped, failed: failed + 1 };
+  }
+
+  if (!imported && !failed) {
+    setFilesStatus(`No supported files were imported. Drop ${supportsJson ? '.3mf or .json' : '.3mf'} files.`, 'warn');
+    return { imported, skipped, failed };
+  }
+  if (failed) {
+    setFilesStatus(`Import complete: ${imported} imported, ${failed} failed, ${skipped} skipped.`, 'warn');
+  } else {
+    setFilesStatus(`Imported ${imported} file${imported === 1 ? '' : 's'} to "${targetLabel}".${skipped ? ` (${skipped} skipped)` : ''}`, 'ok');
+  }
+  return { imported, skipped, failed };
 }
 
 function getActiveDragEntries() {
