@@ -122,7 +122,8 @@ const inputParamsSchema = {
   text: {
     type: "string",
     default_value: "TEXT",
-    hint: "Text string to convert into a face",
+    allowExpression: true,
+    hint: "Text string or expression value to convert into a face",
   },
   font: {
     type: "options",

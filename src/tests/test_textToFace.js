@@ -31,11 +31,13 @@ function expectApprox(value, expected, label) {
 }
 
 export async function test_textToFace(partHistory) {
+  partHistory.expressions = 'textLabel = "BREP";';
+
   const plane = await partHistory.newFeature('P');
   plane.inputParams.orientation = 'XY';
 
   const text = await partHistory.newFeature('TEXT');
-  text.inputParams.text = 'BREP';
+  text.inputParams.text = 'textLabel';
   text.inputParams.textHeight = 10;
   text.inputParams.curveResolution = 12;
   text.inputParams.placementPlane = plane.inputParams.featureID;
@@ -45,6 +47,14 @@ export async function test_textToFace(partHistory) {
 }
 
 export async function afterRun_textToFace(partHistory) {
+  const textFeature = (Array.isArray(partHistory.features)
+    ? partHistory.features.find((f) => f && f.type === 'TEXT')
+    : null);
+  expectTruthy(textFeature, '[text_to_face] No TEXT feature found');
+  if (String(textFeature?.previouseExpressions?.text ?? '') !== 'BREP') {
+    throw new Error('[text_to_face] Text expression did not resolve to BREP');
+  }
+
   const sketchGroup = findSketchGroup(partHistory.scene);
   expectTruthy(sketchGroup, '[text_to_face] No SKETCH group found');
 
