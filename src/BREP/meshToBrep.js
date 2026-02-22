@@ -24,8 +24,13 @@ export class MeshToBrep extends Solid {
      * @param {THREE.BufferGeometry|THREE.Mesh} geometryOrMesh
      * @param {number} faceDeflectionAngle Degrees; neighbors within this angle join a face
      * @param {number} weldTolerance Vertex welding tolerance (units). Default 1e-5.
+     * @param {object} [options]
+     * @param {boolean} [options.extractPlanarFaces=false] Extract large planar regions before angle grouping
+     * @param {number} [options.planarMinAreaPercent=5] Minimum planar region area as % of total mesh area
+     * @param {number} [options.planarNormalToleranceDeg=1] Normal tolerance for planar extraction
+     * @param {number} [options.planarDistanceTolerance] Absolute distance tolerance for planarity checks
      */
-    constructor(geometryOrMesh, faceDeflectionAngle = 30, weldTolerance = 1e-5) {
+    constructor(geometryOrMesh, faceDeflectionAngle = 30, weldTolerance = 1e-5, options = {}) {
         super();
         const geom = (geometryOrMesh && geometryOrMesh.isMesh)
             ? geometryOrMesh.geometry
@@ -34,8 +39,24 @@ export class MeshToBrep extends Solid {
             throw new Error("MeshToBrep requires a THREE.BufferGeometry or THREE.Mesh");
         }
 
+        const isOptionsObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+        const opts = isOptionsObject(options)
+            ? options
+            : (isOptionsObject(weldTolerance) ? weldTolerance : {});
         this.faceDeflectionAngle = Number(faceDeflectionAngle) || 0;
-        this.weldTolerance = Number(weldTolerance) || 0;
+        this.weldTolerance = isOptionsObject(weldTolerance)
+            ? 1e-5
+            : (Number(weldTolerance) || 0);
+        this.extractPlanarFaces = !!opts.extractPlanarFaces;
+        this.planarMinAreaPercent = Number.isFinite(Number(opts.planarMinAreaPercent))
+            ? Number(opts.planarMinAreaPercent)
+            : 5;
+        this.planarNormalToleranceDeg = Number.isFinite(Number(opts.planarNormalToleranceDeg))
+            ? Number(opts.planarNormalToleranceDeg)
+            : 1;
+        this.planarDistanceTolerance = Number.isFinite(Number(opts.planarDistanceTolerance))
+            ? Number(opts.planarDistanceTolerance)
+            : null;
 
         // Build internal mesh arrays and face labels
         this._buildFromGeometry(geom);
@@ -151,6 +172,32 @@ export class MeshToBrep extends Solid {
             triNormals[t] = getTriNormal(t);
         }
 
+        // Geometric triangle normals/areas from welded vertices
+        const triGeoNormals = new Array(triCount);
+        const triAreas = new Array(triCount);
+        let totalArea = 0;
+        for (let t = 0; t < triCount; t++) {
+            const [a, b, c] = triVerts[t];
+            const pa = indexToPos[a];
+            const pb = indexToPos[b];
+            const pc = indexToPos[c];
+            const abx = pb[0] - pa[0];
+            const aby = pb[1] - pa[1];
+            const abz = pb[2] - pa[2];
+            const acx = pc[0] - pa[0];
+            const acy = pc[1] - pa[1];
+            const acz = pc[2] - pa[2];
+            const nx = (aby * acz) - (abz * acy);
+            const ny = (abz * acx) - (abx * acz);
+            const nz = (abx * acy) - (aby * acx);
+            const len = Math.hypot(nx, ny, nz);
+            const area = 0.5 * len;
+            triAreas[t] = Number.isFinite(area) ? area : 0;
+            totalArea += triAreas[t];
+            if (len > 1e-12) triGeoNormals[t] = new THREE.Vector3(nx / len, ny / len, nz / len);
+            else triGeoNormals[t] = triNormals[t] ? triNormals[t].clone() : new THREE.Vector3(0, 0, 1);
+        }
+
         // Build adjacency via undirected edge -> list of triangle indices
         const ek = (u, v) => (u < v ? `${u},${v}` : `${v},${u}`);
         const edgeToTris = new Map();
@@ -180,12 +227,22 @@ export class MeshToBrep extends Solid {
             }
         }
 
-        // Region grow faces by deflection angle between neighboring triangle normals
-        const maxAngleRad = Math.max(0, this.faceDeflectionAngle) * Math.PI / 180.0;
-        const cosThresh = Math.cos(maxAngleRad);
-        const visited = new Uint8Array(triCount);
-        let faceCounter = 0;
+        let minX = Infinity, minY = Infinity, minZ = Infinity;
+        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+        for (let i = 0; i < indexToPos.length; i++) {
+            const p = indexToPos[i];
+            if (!p) continue;
+            if (p[0] < minX) minX = p[0];
+            if (p[1] < minY) minY = p[1];
+            if (p[2] < minZ) minZ = p[2];
+            if (p[0] > maxX) maxX = p[0];
+            if (p[1] > maxY) maxY = p[1];
+            if (p[2] > maxZ) maxZ = p[2];
+        }
+        const diag = Math.hypot(maxX - minX, maxY - minY, maxZ - minZ);
+
         const triFaceName = new Array(triCount);
+        let faceCounter = 0;
 
         const dot = (a, b) => {
             const d = a.x * b.x + a.y * b.y + a.z * b.z;
@@ -195,15 +252,84 @@ export class MeshToBrep extends Solid {
             return d / (la * lb);
         };
 
+        // Optional planar pre-pass: lock in large planar connected regions as faces first.
+        if (this.extractPlanarFaces && totalArea > 0) {
+            const pct = Math.max(0, Math.min(100, Number(this.planarMinAreaPercent) || 0));
+            const minPlanarArea = totalArea * (pct / 100);
+            if (minPlanarArea > 0) {
+                const normalTolDeg = Math.max(0, Number(this.planarNormalToleranceDeg) || 0);
+                const planarCos = Math.cos(normalTolDeg * Math.PI / 180.0);
+                const distTol = Number.isFinite(this.planarDistanceTolerance)
+                    ? Math.max(0, Number(this.planarDistanceTolerance))
+                    : Math.max(this.weldTolerance * 4, diag * 1e-6, 1e-9);
+                const planarVisited = new Uint8Array(triCount);
+
+                const triIsCoplanar = (triIndex, planeNormal, planeD) => {
+                    const n = triGeoNormals[triIndex];
+                    if (Math.abs(dot(planeNormal, n)) < planarCos) return false;
+                    const [ia, ib, ic] = triVerts[triIndex];
+                    const pa = indexToPos[ia];
+                    const pb = indexToPos[ib];
+                    const pc = indexToPos[ic];
+                    const da = Math.abs((planeNormal.x * pa[0]) + (planeNormal.y * pa[1]) + (planeNormal.z * pa[2]) + planeD);
+                    const db = Math.abs((planeNormal.x * pb[0]) + (planeNormal.y * pb[1]) + (planeNormal.z * pb[2]) + planeD);
+                    const dc = Math.abs((planeNormal.x * pc[0]) + (planeNormal.y * pc[1]) + (planeNormal.z * pc[2]) + planeD);
+                    return da <= distTol && db <= distTol && dc <= distTol;
+                };
+
+                for (let seed = 0; seed < triCount; seed++) {
+                    if (planarVisited[seed]) continue;
+                    planarVisited[seed] = 1;
+                    if (triAreas[seed] <= 0) continue;
+
+                    const seedNormal = triGeoNormals[seed];
+                    const [seedA] = triVerts[seed];
+                    const p0 = indexToPos[seedA];
+                    const planeD = -((seedNormal.x * p0[0]) + (seedNormal.y * p0[1]) + (seedNormal.z * p0[2]));
+                    const queue = [seed];
+                    const component = [seed];
+                    let areaSum = triAreas[seed];
+                    let qHead = 0;
+
+                    while (qHead < queue.length) {
+                        const t = queue[qHead++];
+                        for (const nb of neighbors[t]) {
+                            if (planarVisited[nb]) continue;
+                            if (!triIsCoplanar(nb, seedNormal, planeD)) continue;
+                            planarVisited[nb] = 1;
+                            component.push(nb);
+                            areaSum += triAreas[nb];
+                            queue.push(nb);
+                        }
+                    }
+
+                    if (areaSum >= minPlanarArea) {
+                        const faceName = `STL_FACE_${++faceCounter}`;
+                        for (let i = 0; i < component.length; i++) {
+                            triFaceName[component[i]] = faceName;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Region grow remaining faces by deflection angle between neighboring triangle normals
+        const maxAngleRad = Math.max(0, this.faceDeflectionAngle) * Math.PI / 180.0;
+        const cosThresh = Math.cos(maxAngleRad);
+        const visited = new Uint8Array(triCount);
+        for (let t = 0; t < triCount; t++) {
+            if (triFaceName[t]) visited[t] = 1;
+        }
         for (let seed = 0; seed < triCount; seed++) {
             if (visited[seed]) continue;
             const faceName = `STL_FACE_${++faceCounter}`;
             // BFS using pairwise deflection with the parent triangle
             const queue = [seed];
+            let qHead = 0;
             visited[seed] = 1;
             triFaceName[seed] = faceName;
-            while (queue.length) {
-                const t = queue.shift();
+            while (qHead < queue.length) {
+                const t = queue[qHead++];
                 const nrmT = triNormals[t];
                 for (const nb of neighbors[t]) {
                     if (visited[nb]) continue;

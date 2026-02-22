@@ -4,6 +4,9 @@ import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUti
 import { BREP } from '../../BREP/BREP.js';
 
 const IMPORT3D_CACHE_VERSION = 1;
+const DEFAULT_DEFLECTION_ANGLE = 8;
+const DEFAULT_EXTRACT_PLANAR_FACES = true;
+const DEFAULT_PLANAR_MIN_AREA_PERCENT = 1;
 
 function normalizeBoolean(value, fallback = false) {
     if (value === undefined || value === null) return !!fallback;
@@ -19,6 +22,12 @@ function normalizeRepairLevel(value) {
     const raw = String(value || '').trim().toUpperCase();
     if (raw === 'BASIC' || raw === 'AGGRESSIVE') return raw;
     return 'NONE';
+}
+
+function normalizePercent(value, fallback = 5, min = 1, max = 100) {
+    const num = Number(value);
+    const safe = Number.isFinite(num) ? num : fallback;
+    return Math.min(max, Math.max(min, safe));
 }
 
 function cleanString(value, fallback = '') {
@@ -230,6 +239,37 @@ function restoreSolidFromSnapshot(snapshot) {
     return solid;
 }
 
+function geometryFromSolidSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return null;
+    const numProp = Math.max(3, Number(snapshot.numProp) || 3);
+    const vertProperties = Array.isArray(snapshot.vertProperties) ? snapshot.vertProperties : [];
+    const triVerts = Array.isArray(snapshot.triVerts) ? snapshot.triVerts : [];
+    if (!vertProperties.length || !triVerts.length || triVerts.length % 3 !== 0) return null;
+
+    const vertCount = Math.floor(vertProperties.length / numProp);
+    if (vertCount <= 0) return null;
+
+    const position = new Float32Array(vertCount * 3);
+    for (let i = 0; i < vertCount; i += 1) {
+        const base = i * numProp;
+        position[(i * 3) + 0] = Number(vertProperties[base + 0]) || 0;
+        position[(i * 3) + 1] = Number(vertProperties[base + 1]) || 0;
+        position[(i * 3) + 2] = Number(vertProperties[base + 2]) || 0;
+    }
+
+    const index = new Uint32Array(triVerts.length);
+    for (let i = 0; i < triVerts.length; i += 1) {
+        const idx = Number(triVerts[i]) | 0;
+        if (idx < 0 || idx >= vertCount) return null;
+        index[i] = idx >>> 0;
+    }
+
+    const geometry = new BREP.THREE.BufferGeometry();
+    geometry.setAttribute('position', new BREP.THREE.Float32BufferAttribute(position, 3));
+    geometry.setIndex(new BREP.THREE.Uint32BufferAttribute(index, 1));
+    return geometry;
+}
+
 function parseDataUrlBase64(input) {
     const raw = String(input || '');
     if (!raw.startsWith('data:') || !raw.includes(';base64,')) return null;
@@ -270,10 +310,13 @@ function buildSourceSignature(raw) {
 }
 
 function buildParameterSignature(params = {}) {
-    const deflection = normalizeNumber(params.deflectionAngle, 15);
+    const deflection = normalizeNumber(params.deflectionAngle, DEFAULT_DEFLECTION_ANGLE);
     const repair = normalizeRepairLevel(params.meshRepairLevel);
     const center = normalizeBoolean(params.centerMesh, true) ? 1 : 0;
-    return `v${IMPORT3D_CACHE_VERSION}|deflection=${deflection}|repair=${repair}|center=${center}`;
+    const extractPlanarFaces = normalizeBoolean(params.extractPlanarFaces, DEFAULT_EXTRACT_PLANAR_FACES) ? 1 : 0;
+    const planarFaceMinAreaPercent = normalizePercent(params.planarFaceMinAreaPercent, DEFAULT_PLANAR_MIN_AREA_PERCENT, 1, 100);
+    const planarThreshold = extractPlanarFaces ? planarFaceMinAreaPercent : 0;
+    return `v${IMPORT3D_CACHE_VERSION}|deflection=${deflection}|repair=${repair}|center=${center}|planar=${extractPlanarFaces}|planarPct=${planarThreshold}`;
 }
 
 function buildInputSignature(raw, params = {}) {
@@ -296,7 +339,7 @@ const inputParamsSchema = {
     },
     deflectionAngle: {
         type: 'number',
-        default_value: 15,
+        default_value: DEFAULT_DEFLECTION_ANGLE,
         hint: 'The angle (in degrees) between face normals at which to split faces when constructing the BREP solid',
     },
     meshRepairLevel: {
@@ -309,6 +352,19 @@ const inputParamsSchema = {
         type: 'boolean',
         default_value: true,
         hint: 'Center the mesh by its bounding box',
+    },
+    extractPlanarFaces: {
+        type: 'boolean',
+        default_value: DEFAULT_EXTRACT_PLANAR_FACES,
+        hint: 'Extract large planar regions into faces before angle-based grouping',
+    },
+    planarFaceMinAreaPercent: {
+        type: 'number',
+        default_value: DEFAULT_PLANAR_MIN_AREA_PERCENT,
+        min: 1,
+        max: 100,
+        step: 1,
+        hint: 'Minimum planar region area as a percentage of total imported mesh area (used when planar extraction is enabled)',
     },
 };
 
@@ -341,17 +397,52 @@ export class Import3dModelFeature {
         const cache = (this.persistentData.importCache && typeof this.persistentData.importCache === 'object')
             ? this.persistentData.importCache
             : null;
+        const extractPlanarFaces = normalizeBoolean(this.inputParams.extractPlanarFaces, DEFAULT_EXTRACT_PLANAR_FACES);
+        const planarFaceMinAreaPercent = normalizePercent(this.inputParams.planarFaceMinAreaPercent, DEFAULT_PLANAR_MIN_AREA_PERCENT, 1, 100);
+        const deflectionAngle = normalizeNumber(this.inputParams.deflectionAngle, DEFAULT_DEFLECTION_ANGLE);
 
         if (!hasRaw || !supportedRaw) {
             if (cache && cache.snapshot) {
-                const cachedSolid = restoreSolidFromSnapshot(cache.snapshot);
-                if (cachedSolid) {
-                    if (cache.paramSignature && cache.paramSignature !== paramSignature) {
-                        console.warn('[Import3D] Parameters changed but source file is unavailable; reusing cached geometry');
+                const cacheParamsMatch = !!(cache.paramSignature && cache.paramSignature === paramSignature);
+                if (cacheParamsMatch) {
+                    const cachedSolid = restoreSolidFromSnapshot(cache.snapshot);
+                    if (cachedSolid) {
+                        cachedSolid.name = featureName;
+                        cachedSolid.visualize();
+                        this.persistentData.consumeFileInput = true;
+                        return { added: [cachedSolid], removed: [] };
                     }
-                    cachedSolid.name = featureName;
-                    cachedSolid.visualize();
-                    return { added: [cachedSolid], removed: [] };
+                }
+
+                // No source file payload is available, so re-group from cached mesh triangles.
+                const cachedGeometry = geometryFromSolidSnapshot(cache.snapshot);
+                if (cachedGeometry) {
+                    const regroupedSolid = new BREP.MeshToBrep(
+                        cachedGeometry,
+                        deflectionAngle,
+                        1e-5,
+                        {
+                            extractPlanarFaces,
+                            planarMinAreaPercent: planarFaceMinAreaPercent,
+                        },
+                    );
+                    regroupedSolid.name = featureName;
+                    regroupedSolid.visualize();
+
+                    const regroupedSnapshot = serializeSolidSnapshot(regroupedSolid);
+                    if (regroupedSnapshot) {
+                        const sourceSignature = cleanString(cache.sourceSignature || '', '') || 'cached-snapshot';
+                        this.persistentData.importCache = {
+                            version: IMPORT3D_CACHE_VERSION,
+                            signature: `${paramSignature}|src=${sourceSignature}`,
+                            sourceSignature,
+                            paramSignature,
+                            snapshot: regroupedSnapshot,
+                            updatedAt: new Date().toISOString(),
+                        };
+                    }
+                    this.persistentData.consumeFileInput = true;
+                    return { added: [regroupedSolid], removed: [] };
                 }
             }
 
@@ -450,7 +541,12 @@ export class Import3dModelFeature {
         // Build a BREP solid by grouping triangles into faces via deflection angle
         const solid = new BREP.MeshToBrep(
             repairedGeometry,
-            normalizeNumber(this.inputParams.deflectionAngle, 15),
+            deflectionAngle,
+            1e-5,
+            {
+                extractPlanarFaces,
+                planarMinAreaPercent: planarFaceMinAreaPercent,
+            },
         );
         solid.name = featureName;
         solid.visualize();
