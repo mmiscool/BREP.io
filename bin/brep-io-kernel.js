@@ -59,9 +59,7 @@ function printHelp() {
   console.log(`  --host HOST     Bind host (default: ${defaults.host}).`);
   console.log(`  -p, --port N    Bind port (default: ${defaults.port}).`);
   console.log("");
-  console.log(
-    "No arguments starts a local static server for bundled docs/assets."
-  );
+  console.log("No arguments starts the full CAD app server.");
 }
 
 function printExample() {
@@ -136,8 +134,8 @@ function parseArgs(argv) {
 
 function findLandingPath(rootDir) {
   const candidates = [
-    "/help/index.html",
-    "/node.html",
+    "/cad.html",
+    "/index.html",
   ];
   for (const candidate of candidates) {
     const absolute = resolve(rootDir, `.${candidate}`);
@@ -180,9 +178,9 @@ function startStaticServer({ host, port }) {
     fail("Invalid port. Use an integer between 1 and 65535.");
   }
 
-  const rootDir = resolve(packageRoot, "dist-kernel");
+  const rootDir = resolve(packageRoot, "dist");
   if (!existsSync(rootDir)) {
-    fail(`Missing dist-kernel at: ${rootDir}`);
+    fail(`Missing app build at: ${rootDir}. Run 'pnpm build' before packing/publishing.`);
   }
 
   const landingPath = findLandingPath(rootDir);

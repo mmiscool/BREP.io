@@ -35,6 +35,7 @@
   "files": [
     "bin/**",
     "src/**",
+    "dist/**",
     "dist-kernel/**",
     "README.md",
     "LICENSE.md"

@@ -125,7 +125,7 @@ configuration.
 - Install:
   - `pnpm add brep-io-kernel`
 - CLI helper (no install):
-  - `npx brep-io-kernel` (starts a local server for bundled docs/assets)
+  - `npx brep-io-kernel` (starts a local server for the full CAD app)
   - `npx brep-io-kernel --port 8080`
 - Import (ESM):
   - `import { BREP, PartHistory } from 'brep-io-kernel';`
