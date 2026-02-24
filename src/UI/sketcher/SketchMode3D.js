@@ -39,6 +39,7 @@ export class SketchMode3D {
     this._selection = new Set();
     this._hover = null; // current hovered item {type,id}
     this._tool = "select";
+    this._lineCreateState = { seedPointId: null, previousEndPointId: null };
     this._ctxBar = null;
     // Handle sizing helpers
     this._handleGeom = new THREE.SphereGeometry(1, 12, 8); // unit sphere scaled per-frame
@@ -332,10 +333,18 @@ export class SketchMode3D {
       }
       const k = ev.key || ev.code || '';
       if (k === 'Escape' || k === 'Esc') {
+        let handled = false;
+        if (this._tool !== "select") {
+          this.#setTool("select");
+          handled = true;
+        }
         if (this._selection.size) {
           this._selection.clear();
           try { this.#refreshContextBar(); } catch { }
           try { this.#rebuildSketchGraphics(); } catch { }
+          handled = true;
+        }
+        if (handled) {
           try { ev.preventDefault(); ev.stopPropagation(); } catch { }
         }
         return;
@@ -702,6 +711,12 @@ export class SketchMode3D {
         consumed = true;
         return;
       }
+      if (this._tool === "line") {
+        try { this.#handleLineToolClick(e); } catch { }
+        try { e.preventDefault(); e.stopImmediatePropagation?.(); e.stopPropagation(); } catch { }
+        consumed = true;
+        return;
+      }
 
       const hit = this.#hitTestPoint(e);
       if (this._tool === "bezier" && hit == null) {
@@ -718,19 +733,7 @@ export class SketchMode3D {
       }
       if (pid != null) {
         // Geometry creation flows
-        if (this._tool === "line") {
-          this.#toggleSelection({ type: "point", id: pid });
-          if (
-            Array.from(this._selection).filter((i) => i.type === "point")
-              .length === 2
-          ) {
-            this._solver.geometryCreateLine();
-            this._selection.clear();
-            this.#rebuildSketchGraphics();
-            this.#refreshLists();
-            this.#refreshContextBar();
-          }
-        } else if (this._tool === "circle") {
+        if (this._tool === "circle") {
           this.#toggleSelection({ type: "point", id: pid });
           if (
             Array.from(this._selection).filter((i) => i.type === "point")
@@ -1580,6 +1583,129 @@ export class SketchMode3D {
     try { this._solver.solveSketch("full"); } catch { }
     this.#rebuildSketchGraphics();
     return nextId;
+  }
+
+  #resetLineCreateState() {
+    this._lineCreateState = { seedPointId: null, previousEndPointId: null };
+  }
+
+  #handleLineToolClick(e) {
+    if (!this._solver) return false;
+    const s = this._solver?.sketchObject;
+    if (!s) return false;
+    const state = this._lineCreateState || { seedPointId: null, previousEndPointId: null };
+
+    if (state.previousEndPointId != null) {
+      const prevEnd = this._solver?.getPointById?.(state.previousEndPointId)
+        || (s.points || []).find((p) => parseInt(p?.id) === parseInt(state.previousEndPointId));
+      if (!prevEnd) {
+        this.#resetLineCreateState();
+        return false;
+      }
+
+      const uv = this.#pointerToPlaneUV(e);
+      if (!uv) return false;
+      const prevEndId = parseInt(state.previousEndPointId);
+      let targetPointId = this.#hitTestPoint(e);
+      const clickedPrevEndPoint = targetPointId != null && parseInt(targetPointId) === prevEndId;
+      let clickedNearPrevEnd = false;
+      try {
+        const v = this.viewer;
+        const { width, height } = this.#canvasClientSize(v.renderer.domElement);
+        const handleR = this.#pointRadiusWorld(width, height);
+        const wpp = this.#worldPerPixel(v.camera, width, height);
+        const tol = Math.max(handleR * 1.2, wpp * 6);
+        const d = Math.hypot(uv.u - prevEnd.x, uv.v - prevEnd.y);
+        clickedNearPrevEnd = d <= tol;
+      } catch { }
+
+      if (clickedPrevEndPoint || clickedNearPrevEnd) {
+        this.#resetLineCreateState();
+        this._selection.clear();
+        this.#rebuildSketchGraphics();
+        this.#refreshContextBar();
+        return true;
+      }
+
+      const startId = this.#createPointAtUV(prevEnd.x, prevEnd.y, false);
+      if (startId == null) return false;
+      let endU = uv.u;
+      let endV = uv.v;
+      if (targetPointId != null) {
+        const targetPoint = this._solver?.getPointById?.(targetPointId)
+          || (s.points || []).find((p) => parseInt(p?.id) === parseInt(targetPointId));
+        if (targetPoint) {
+          endU = targetPoint.x;
+          endV = targetPoint.y;
+        } else {
+          targetPointId = null;
+        }
+      }
+
+      const endId = this.#createPointAtUV(endU, endV, false);
+      if (endId == null) {
+        try { this._solver.removePointById(startId); } catch { }
+        return false;
+      }
+
+      this.#addGeometry("line", [startId, endId]);
+      this.#addConstraintIfMissing("≡", [parseInt(state.previousEndPointId), startId]);
+      if (targetPointId != null) {
+        this.#addConstraintIfMissing("≡", [parseInt(targetPointId), endId]);
+      }
+      try { this._solver.solveSketch("full"); } catch { }
+      state.seedPointId = null;
+      state.previousEndPointId = endId;
+      this._selection.clear();
+      this._selection.add({ type: "point", id: endId });
+      this.#rebuildSketchGraphics();
+      this.#refreshLists();
+      this.#refreshContextBar();
+      return true;
+    }
+
+    if (state.seedPointId == null) {
+      const hitPointId = this.#hitTestPoint(e);
+      let seedPointId = hitPointId;
+      if (seedPointId == null) {
+        const uv = this.#pointerToPlaneUV(e);
+        if (!uv) return false;
+        seedPointId = this.#createPointAtUV(uv.u, uv.v, false);
+      }
+      if (seedPointId == null) return false;
+      state.seedPointId = seedPointId;
+      this._selection.clear();
+      this._selection.add({ type: "point", id: seedPointId });
+      this.#rebuildSketchGraphics();
+      this.#refreshLists();
+      this.#refreshContextBar();
+      return true;
+    }
+
+    const secondHitPointId = this.#hitTestPoint(e);
+    let secondPointId = secondHitPointId;
+    if (secondPointId == null) {
+      const uv = this.#pointerToPlaneUV(e);
+      if (!uv) return false;
+      secondPointId = this.#createPointAtUV(uv.u, uv.v, false);
+    }
+    if (secondPointId == null) return false;
+
+    const firstPointId = parseInt(state.seedPointId);
+    const secondPointInt = parseInt(secondPointId);
+    if (!Number.isFinite(firstPointId) || !Number.isFinite(secondPointInt)) return false;
+    if (firstPointId === secondPointInt) return true;
+
+    this.#addGeometry("line", [firstPointId, secondPointInt]);
+    try { this._solver.solveSketch("full"); } catch { }
+    state.seedPointId = null;
+    state.previousEndPointId = secondPointInt;
+    this._selection.clear();
+    this._selection.add({ type: "point", id: secondPointInt });
+    this.#rebuildSketchGraphics();
+    this.#refreshLists();
+    this.#refreshContextBar();
+    return true;
   }
 
   #createConstructionLine(aId, bId) {
@@ -2656,6 +2782,7 @@ export class SketchMode3D {
     // Clear any pending creation state when switching tools
     try { this._arcSel = null; } catch { }
     try { this._bezierSel = null; } catch { }
+    try { this.#resetLineCreateState(); } catch { }
     if (tool !== "handdraw") {
       try { this.#cancelHandDraw(); } catch { }
     }
