@@ -15,6 +15,7 @@ import { deepClone } from './utils/deepClone.js';
 
 
 const debug = false;
+const UI_ONLY_INPUT_PARAM_KEYS = new Set(['__open']);
 
 function resolveFeatureEntryId(entry, fallback = null) {
   if (!entry) return fallback;
@@ -22,6 +23,28 @@ function resolveFeatureEntryId(entry, fallback = null) {
   const rawId = params.id ?? params.featureID ?? entry.id ?? fallback;
   if (rawId == null) return fallback;
   return String(rawId);
+}
+
+function stringifyInputParamsForDirtyCheck(inputParams) {
+  const source = (inputParams && typeof inputParams === 'object') ? inputParams : {};
+  try {
+    const serialized = JSON.stringify(source, (key, value) => {
+      if (key && UI_ONLY_INPUT_PARAM_KEYS.has(key)) return undefined;
+      return value;
+    });
+    return serialized == null ? '' : serialized;
+  } catch {
+    try {
+      const fallback = {};
+      for (const [key, value] of Object.entries(source)) {
+        if (UI_ONLY_INPUT_PARAM_KEYS.has(key)) continue;
+        fallback[key] = value;
+      }
+      return JSON.stringify(fallback) || '';
+    } catch {
+      return '';
+    }
+  }
 }
 
 
@@ -338,7 +361,9 @@ export class PartHistory {
         feature.dirty = true;
       }
       // if the inputParams have changed since last run, mark dirty
-      if (JSON.stringify(feature.inputParams) !== feature.lastRunInputParams) feature.dirty = true;
+      // (ignore UI-only keys such as panel expansion state).
+      const inputParamsSignature = stringifyInputParamsForDirtyCheck(feature.inputParams);
+      if (inputParamsSignature !== feature.lastRunInputParams) feature.dirty = true;
 
       instance.inputParams = await this.sanitizeInputParams(FeatureClass.inputParamsSchema, feature.inputParams);
       try { this._captureReferencePreviewSnapshots(feature, FeatureClass.inputParamsSchema, instance.inputParams, instance.persistentData); } catch { }
@@ -418,7 +443,7 @@ export class PartHistory {
         if (nextFeature) nextFeature.dirty = true;
 
         // Record the current input params as lastRunInputParams
-        feature.lastRunInputParams = JSON.stringify(feature.inputParams);
+        feature.lastRunInputParams = inputParamsSignature;
 
 
         const t0 = nowMs();
@@ -467,7 +492,7 @@ export class PartHistory {
             if (Object.keys(exprMap).length === 0) delete feature.inputParams.__expr;
           }
           delete feature.persistentData.consumeFileInput;
-          feature.lastRunInputParams = JSON.stringify(feature.inputParams);
+          feature.lastRunInputParams = stringifyInputParamsForDirtyCheck(feature.inputParams);
         }
       } catch { /* ignore */ }
     }

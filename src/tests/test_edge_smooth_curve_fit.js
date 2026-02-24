@@ -1,5 +1,6 @@
 import {
   fitAndSnapOpenEdgePolyline,
+  fitAndSnapClosedEdgePolyline,
   hasLocalBacktrackingAgainstSource,
 } from "../features/edgeSmooth/edgeCurveFit.js";
 import { EdgeSmoothFeature } from "../features/edgeSmooth/EdgeSmoothFeature.js";
@@ -47,6 +48,61 @@ export async function test_edge_smooth_curve_fit() {
   }
 
   const unchanged = fitAndSnapOpenEdgePolyline(source, { fitStrength: 0 });
+  for (let i = 0; i < source.length; i++) {
+    assertPointNear(unchanged[i], source[i], 1e-12);
+  }
+}
+
+function hasLocalBacktrackingAgainstSourceClosed(sourcePoints, candidatePoints) {
+  const source = Array.isArray(sourcePoints) ? sourcePoints : [];
+  const candidate = Array.isArray(candidatePoints) ? candidatePoints : [];
+  const count = source.length;
+  if (count !== candidate.length || count < 3) return true;
+  for (let i = 0; i < count; i++) {
+    const next = (i + 1) % count;
+    const s0 = source[i];
+    const s1 = source[next];
+    const c0 = candidate[i];
+    const c1 = candidate[next];
+    const srcSeg = [s1[0] - s0[0], s1[1] - s0[1], s1[2] - s0[2]];
+    const candSeg = [c1[0] - c0[0], c1[1] - c0[1], c1[2] - c0[2]];
+    const srcLen = Math.hypot(srcSeg[0], srcSeg[1], srcSeg[2]);
+    const candLen = Math.hypot(candSeg[0], candSeg[1], candSeg[2]);
+    if (!(srcLen > 1e-12) || !(candLen > 1e-12)) continue;
+    const cos = ((srcSeg[0] * candSeg[0]) + (srcSeg[1] * candSeg[1]) + (srcSeg[2] * candSeg[2])) / (srcLen * candLen);
+    if (cos < -1e-6) return true;
+  }
+  return false;
+}
+
+export async function test_edge_smooth_curve_fit_closed_loop() {
+  const source = [
+    [1.0, 0.0, 0.0],
+    [0.45, 0.95, 0.02],
+    [-0.55, 0.8, -0.03],
+    [-1.0, 0.0, 0.0],
+    [-0.45, -0.85, 0.03],
+    [0.55, -0.75, -0.02],
+  ];
+
+  const fitted = fitAndSnapClosedEdgePolyline(source, { fitStrength: 1 });
+  if (!Array.isArray(fitted) || fitted.length !== source.length) {
+    throw new Error("Closed-loop curve fit should return one output point per input point.");
+  }
+
+  if (hasLocalBacktrackingAgainstSourceClosed(source, fitted)) {
+    throw new Error("Closed-loop fitted polyline should not locally reverse direction.");
+  }
+
+  let movedCount = 0;
+  for (let i = 0; i < source.length; i++) {
+    if (pointDistanceSq(source[i], fitted[i]) > 1e-12) movedCount++;
+  }
+  if (movedCount <= 0) {
+    throw new Error("Closed-loop fit should move at least one loop point.");
+  }
+
+  const unchanged = fitAndSnapClosedEdgePolyline(source, { fitStrength: 0 });
   for (let i = 0; i < source.length; i++) {
     assertPointNear(unchanged[i], source[i], 1e-12);
   }

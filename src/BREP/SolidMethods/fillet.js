@@ -5,7 +5,7 @@ import { resolveEdgesFromInputs } from './edgeResolution.js';
 import { computeFaceAreaFromTriangles } from '../fillets/filletGeometry.js';
 import { getCachedFaceDataForTris, localFaceNormalAtPoint, averageFaceNormalObjectSpace } from '../fillets/inset.js';
 import { createQuantizer } from '../../utils/geometryTolerance.js';
-import { fitAndSnapOpenEdgePolyline } from '../../features/edgeSmooth/edgeCurveFit.js';
+import { fitAndSnapOpenEdgePolyline, fitAndSnapClosedEdgePolyline } from '../../features/edgeSmooth/edgeCurveFit.js';
 
 // Threshold for collapsing tiny end caps into the round face.
 const END_CAP_AREA_RATIO_THRESHOLD = 0.05;
@@ -1015,6 +1015,14 @@ function isFinitePoint3Array(point) {
     && Number.isFinite(point[2]);
 }
 
+function pointsMatchWithinTolerance(a, b, eps = 1e-9) {
+  if (!isFinitePoint3Array(a) || !isFinitePoint3Array(b)) return false;
+  const dx = a[0] - b[0];
+  const dy = a[1] - b[1];
+  const dz = a[2] - b[2];
+  return ((dx * dx) + (dy * dy) + (dz * dz)) <= (eps * eps);
+}
+
 function collectFilletGeneratedEdgeSmoothTargets(resultSolid, filletEntries, featureID, fitStrength = 1) {
   const targetMap = new Map();
   const lockedEndpointIndices = new Set();
@@ -1051,15 +1059,12 @@ function collectFilletGeneratedEdgeSmoothTargets(resultSolid, filletEntries, fea
   for (const boundary of boundaries) {
     const faceA = boundary?.faceA;
     const faceB = boundary?.faceB;
+    const isClosedLoop = !!boundary?.closedLoop;
     const involvesFilletFace = isFilletFaceName(faceA, filletNamePrefixes, featureID)
       || isFilletFaceName(faceB, filletNamePrefixes, featureID);
     if (!involvesFilletFace) continue;
 
     consideredEdges++;
-    if (boundary?.closedLoop) {
-      skippedClosedLoops++;
-      continue;
-    }
 
     const indices = Array.isArray(boundary?.indices) ? boundary.indices : [];
     const positions = Array.isArray(boundary?.positions) ? boundary.positions : [];
@@ -1077,14 +1082,34 @@ function collectFilletGeneratedEdgeSmoothTargets(resultSolid, filletEntries, fea
     }
     if (cleanedIndices.length < 3) continue;
 
+    if (isClosedLoop && cleanedIndices.length >= 3) {
+      const last = cleanedIndices.length - 1;
+      const repeatsStart = cleanedIndices[0] === cleanedIndices[last]
+        || pointsMatchWithinTolerance(cleanedPositions[0], cleanedPositions[last]);
+      if (repeatsStart) {
+        cleanedIndices.pop();
+        cleanedPositions.pop();
+      }
+      if (cleanedIndices.length < 3) {
+        skippedClosedLoops++;
+        continue;
+      }
+    }
+
     eligibleEdges++;
-    const snapped = fitAndSnapOpenEdgePolyline(cleanedPositions, { fitStrength: clampedStrength });
+    const snapped = isClosedLoop
+      ? fitAndSnapClosedEdgePolyline(cleanedPositions, { fitStrength: clampedStrength })
+      : fitAndSnapOpenEdgePolyline(cleanedPositions, { fitStrength: clampedStrength });
     if (!Array.isArray(snapped) || snapped.length !== cleanedPositions.length) continue;
     smoothedEdges++;
 
-    lockedEndpointIndices.add(cleanedIndices[0]);
-    lockedEndpointIndices.add(cleanedIndices[cleanedIndices.length - 1]);
-    for (let i = 1; i < cleanedIndices.length - 1; i++) {
+    if (!isClosedLoop) {
+      lockedEndpointIndices.add(cleanedIndices[0]);
+      lockedEndpointIndices.add(cleanedIndices[cleanedIndices.length - 1]);
+    }
+    const start = isClosedLoop ? 0 : 1;
+    const endExclusive = isClosedLoop ? cleanedIndices.length : (cleanedIndices.length - 1);
+    for (let i = start; i < endExclusive; i++) {
       const idx = cleanedIndices[i];
       const pt = snapped[i];
       if (!Number.isInteger(idx) || idx < 0 || !isFinitePoint3Array(pt)) continue;

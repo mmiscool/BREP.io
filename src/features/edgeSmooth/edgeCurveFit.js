@@ -164,6 +164,14 @@ function dot(a, b) {
     return (a[0] * b[0]) + (a[1] * b[1]) + (a[2] * b[2]);
 }
 
+function pointsNearlyEqual(a, b, eps = 1e-9) {
+    if (!isPoint3(a) || !isPoint3(b)) return false;
+    const dx = a[0] - b[0];
+    const dy = a[1] - b[1];
+    const dz = a[2] - b[2];
+    return ((dx * dx) + (dy * dy) + (dz * dz)) <= (eps * eps);
+}
+
 export function hasLocalBacktrackingAgainstSource(sourcePoints, candidatePoints) {
     const source = Array.isArray(sourcePoints) ? sourcePoints : [];
     const candidate = Array.isArray(candidatePoints) ? candidatePoints : [];
@@ -241,3 +249,90 @@ export function fitAndSnapOpenEdgePolyline(points, options = {}) {
     return enforceNoBacktracking(source, blended);
 }
 
+function hasLocalBacktrackingAgainstSourceClosed(sourcePoints, candidatePoints) {
+    const source = Array.isArray(sourcePoints) ? sourcePoints : [];
+    const candidate = Array.isArray(candidatePoints) ? candidatePoints : [];
+    const count = source.length;
+    if (count !== candidate.length || count < 3) return true;
+    for (let i = 0; i < count; i++) {
+        const next = (i + 1) % count;
+        const s0 = source[i];
+        const s1 = source[next];
+        const c0 = candidate[i];
+        const c1 = candidate[next];
+        if (!isPoint3(s0) || !isPoint3(s1) || !isPoint3(c0) || !isPoint3(c1)) return true;
+
+        const srcSeg = segmentDirection(s0, s1);
+        const candSeg = segmentDirection(c0, c1);
+        const srcLen = vectorLength(srcSeg);
+        const candLen = vectorLength(candSeg);
+        if (!(srcLen > MIN_SEGMENT_LENGTH) || !(candLen > MIN_SEGMENT_LENGTH)) continue;
+        const cos = dot(srcSeg, candSeg) / (srcLen * candLen);
+        if (cos < BACKTRACK_COS_TOL) return true;
+    }
+    return false;
+}
+
+function enforceNoBacktrackingClosed(sourcePoints, fittedPoints) {
+    const source = Array.isArray(sourcePoints) ? sourcePoints : [];
+    const fitted = Array.isArray(fittedPoints) ? fittedPoints : [];
+    if (!hasLocalBacktrackingAgainstSourceClosed(source, fitted)) return fitted;
+
+    let lo = 0;
+    let hi = 1;
+    let safe = source.map((p) => clonePoint3(p));
+    for (let i = 0; i < BACKTRACK_SEARCH_STEPS; i++) {
+        const alpha = (lo + hi) * 0.5;
+        const blended = new Array(source.length);
+        for (let j = 0; j < source.length; j++) {
+            blended[j] = lerpPoint3(source[j], fitted[j], alpha);
+        }
+        if (hasLocalBacktrackingAgainstSourceClosed(source, blended)) hi = alpha;
+        else {
+            lo = alpha;
+            safe = blended;
+        }
+    }
+    return safe;
+}
+
+export function fitAndSnapClosedEdgePolyline(points, options = {}) {
+    const sourceIn = Array.isArray(points) ? points : [];
+    if (sourceIn.length < 3) return sourceIn.map((p) => (isPoint3(p) ? clonePoint3(p) : [0, 0, 0]));
+    if (!sourceIn.every((p) => isPoint3(p))) return sourceIn.map((p) => (isPoint3(p) ? clonePoint3(p) : [0, 0, 0]));
+
+    const source = sourceIn.map((p) => clonePoint3(p));
+    if (source.length >= 4 && pointsNearlyEqual(source[0], source[source.length - 1])) {
+        source.pop();
+    }
+    const count = source.length;
+    if (count < 3) return source;
+
+    const rawStrength = Number(options?.fitStrength);
+    const fitStrength = Number.isFinite(rawStrength)
+        ? Math.max(0, Math.min(1, rawStrength))
+        : 1;
+    if (fitStrength <= 0) return source.map((p) => clonePoint3(p));
+
+    const rawAnchor = Number(options?.anchorIndex);
+    const anchorIndex = Number.isInteger(rawAnchor) && rawAnchor >= 0
+        ? (rawAnchor % count)
+        : 0;
+
+    const rotated = new Array(count + 1);
+    for (let i = 0; i < count; i++) {
+        rotated[i] = clonePoint3(source[(anchorIndex + i) % count]);
+    }
+    rotated[count] = clonePoint3(rotated[0]);
+
+    const fittedRotated = fitAndSnapOpenEdgePolyline(rotated, { fitStrength });
+    if (!Array.isArray(fittedRotated) || fittedRotated.length !== rotated.length) {
+        return source.map((p) => clonePoint3(p));
+    }
+
+    const remapped = source.map((p) => clonePoint3(p));
+    for (let i = 0; i < count; i++) {
+        remapped[(anchorIndex + i) % count] = clonePoint3(fittedRotated[i]);
+    }
+    return enforceNoBacktrackingClosed(source, remapped);
+}
