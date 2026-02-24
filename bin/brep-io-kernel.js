@@ -221,7 +221,7 @@ function startStaticServer({ host, port }) {
     const displayHost = host.includes(":") ? `[${host}]` : host;
     const baseUrl = `http://${displayHost}:${port}`;
     console.log(`${packageJson.name} ${packageJson.version}`);
-    console.log(`Serving: ${rootDir}`);
+    console.log("");
     console.log(`Open: ${baseUrl}${landingPath}`);
   });
 
