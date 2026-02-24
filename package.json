@@ -2,24 +2,20 @@
   "name": "brep-io-kernel",
   "version": "1.0.0",
   "scripts": {
-    "dev": "pnpm prepareFonts && pnpm generateLicenses && pnpm build:kernel && vite --host 0.0.0.0",
-    "build": "pnpm prepareFonts && pnpm generateLicenses && pnpm build:kernel && vite build",
-    "clean:kernel": "rm -rf dist-kernel",
-    "prebuild:kernel": "pnpm clean:kernel && pnpm generateLicenseBundle",
-    "build:kernel": "vite build --config vite.config.kernel.js",
-    "postbuild:kernel": "pnpm syncKernelAssets",
-    "prepublishOnly": "pnpm build:kernel",
     "start": "pnpm dev",
-    "liveTesting": "nodemon --watch src --watch tests --ext js --exec \"pnpm run test\"",
+    "dev": "node ./scripts/prepareFontAssets.js && pnpm prepareFonts && pnpm build:kernel && vite --host 0.0.0.0",
+    "build": "pnpm prepareFonts && pnpm build:kernel && vite build",
+    "build:kernel": "pnpm generateLicenses && vite build --config vite.config.kernel.js && node ./scripts/syncKernelAssets.js",
+    "liveTesting": "nodemon --watch src --watch tests --ext js --exec \"pnpm test\"",
     "test": "node ./src/tests/tests.js",
-    "debug:boolean": "node ./src/tests/debugBoolean.js",
-    "generateLicenses": "node ./generateLicenses.js",
-    "generateLicenseBundle": "node ./scripts/generateLicenseBundle.js",
-    "syncKernelAssets": "node ./scripts/syncKernelAssets.js",
+    "generateLicenses": "node ./generateLicenses.js && node ./scripts/generateLicenseBundle.js",
     "prepareFonts": "node ./scripts/prepareFontAssets.js",
     "capture": "node ./scripts/capture.js"
   },
   "type": "module",
+  "bin": {
+    "brep-io-kernel": "./bin/brep-io-kernel.js"
+  },
   "main": "./dist-kernel/brep-kernel.js",
   "module": "./dist-kernel/brep-kernel.js",
   "exports": {
@@ -37,6 +33,7 @@
     "#textToFace/fontUrlLoaders": "./src/features/textToFace/fontUrlLoaders.kernel.js"
   },
   "files": [
+    "bin/**",
     "src/**",
     "dist-kernel/**",
     "README.md",
@@ -52,7 +49,7 @@
     "monaco-editor": "^0.55.1",
     "pngjs": "^7.0.0",
     "tess2": "^1.0.0",
-    "three": "^0.182.0",
+    "three": "^0.183.1",
     "three-mesh-bvh": "^0.9.8"
   },
   "description": "",
@@ -64,7 +61,7 @@
     "access": "public"
   },
   "devDependencies": {
-    "nodemon": "^3.1.11",
+    "nodemon": "^3.1.14",
     "playwright": "^1.58.2",
     "vite": "^7.3.1",
     "vite-plugin-wasm": "^3.5.0"

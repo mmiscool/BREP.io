@@ -4,12 +4,13 @@
 A feature-based modeling playground experimenting with BREP-style workflows on top of triangle meshes. It combines robust manifold CSG (via the [Manifold](https://github.com/elalish/manifold/) library) with a simple face and edge representation, a history pipeline, and Three.js visualization. Import meshes (STL), repair and group them into faces, then perform boolean operations, fillets, chamfers, sweeps, lofts, and more.
 
 This project is actively evolving; expect rough edges while APIs settle.
-![Home Page](docs/HOME.png)
-[![Modeling Mode](docs/MODELING.png)](docs/modes/modeling.md)
-[![Sketch Mode](docs/SKETCH.png)](docs/modes/sketch.md)
-[![PMI Mode](docs/PMI.png)](docs/modes/pmi.md)
-[![Image to Face 2D Trace](docs/features/image-to-face-2D_dialog.png)](docs/features/image-to-face.md)
-[![Image to Face 3D Result](docs/features/image-to-face-3D_dialog.png)](docs/features/image-to-face.md)
+## Screnshots 
+![Home Page @280](docs/HOME.png)
+[![Modeling Mode @280](docs/MODELING.png)](docs/modes/modeling.md)
+[![Sketch Mode @280](docs/SKETCH.png)](docs/modes/sketch.md)
+[![PMI Mode @280](docs/PMI.png)](docs/modes/pmi.md)
+[![Image to Face 2D Trace @280](docs/features/image-to-face-2D_dialog.png)](docs/features/image-to-face.md)
+[![Image to Face 3D Result @280](docs/features/image-to-face-3D_dialog.png)](docs/features/image-to-face.md)
 
 
 ## Documentation Map
@@ -18,26 +19,10 @@ This project is actively evolving; expect rough edges while APIs settle.
 - [What's New](docs/whats-new.md)
 - [Getting Started](docs/getting-started.md)
 - [Developer Docs Index](docs/developer-index.md)
-- [API Examples (Live Demos)](docs/api-examples.md)
-- [UI Overview (Browser)](docs/ui-overview.md)
-- [How It Works](docs/how-it-works.md)
-- [History Systems](docs/history-systems.md)
-- [Input Params Schema](docs/input-params-schema.md)
-- [BREP Model and Classes](docs/brep-model.md)
-- [BREP API (BREP.js exports)](docs/brep-api.md)
-- [BREP Kernel (core classes & helpers)](docs/brep-kernel.md)
-- [2D Sketch Solver (standalone)](docs/sketch-solver-2d.md)
-- [Embeddable CAD App](docs/cad-embed.md)
 - [File Formats: Import and Export](docs/file-formats.md)
 - [Plugins and Examples](docs/plugins.md)
 - [Recent Inspector Improvements](docs/inspector-improvements.md)
 - [Inspector](docs/inspector.md)
-
-
-
-## Dialog Screenshots
-
-See [Dialog Screenshots](docs/dialog-screenshots.md) for the capture helpers, output locations, and configuration options.
 
 
 ## Run Local Dev Environment
@@ -139,6 +124,9 @@ configuration.
 
 - Install:
   - `pnpm add brep-io-kernel`
+- CLI helper (no install):
+  - `npx brep-io-kernel` (starts a local server for bundled docs/assets)
+  - `npx brep-io-kernel --port 8080`
 - Import (ESM):
   - `import { BREP, PartHistory } from 'brep-io-kernel';`
   - `import { AssemblyConstraintHistory, AssemblyConstraintRegistry } from 'brep-io-kernel';`
