@@ -5,6 +5,8 @@ import { distance, calculateAngle } from "./mathHelpersMod.js";
 
 // === Constraint function table ===
 const constraintFunctions = constraints.constraintFunctions;
+const POINT_LINE_DISTANCE_TYPE = "↥";
+const distanceConstraintTypes = new Set(["⟺", POINT_LINE_DISTANCE_TYPE]);
 let globalDistanceSolveCycleId = 0;
 
 // === Engine that performs numeric solving on a sketch snapshot ===
@@ -75,7 +77,7 @@ class ConstraintEngine {
         const hasPendingDistanceTargetSlides = () => {
             const slideTol = Number.isFinite(constraints?.tolerance) ? Number(constraints.tolerance) : 1e-8;
             return this.constraints.some((c) => (
-                c?.type === "⟺" &&
+                distanceConstraintTypes.has(c?.type) &&
                 c?._distanceThrottleActive === true &&
                 Number.isFinite(c?._distanceRequestedTarget) &&
                 Number.isFinite(c?._distanceAppliedTarget) &&
@@ -126,8 +128,8 @@ class ConstraintEngine {
 
         const order = [
             "⏛", "━", "│", "⋯",
-            "⟺", "⇌", "∠", "⟂", "∥",
-            "⇌", "⟺", "⇌", "⟺", "⏛", "━", "│", // repeated passes for convergence
+            "⟺", POINT_LINE_DISTANCE_TYPE, "⇌", "∠", "⟂", "∥",
+            "⇌", "⟺", POINT_LINE_DISTANCE_TYPE, "⇌", "⟺", POINT_LINE_DISTANCE_TYPE, "⏛", "━", "│", // repeated passes for convergence
         ];
 
         let prev = JSON.stringify(this.points);
@@ -639,6 +641,32 @@ export class ConstraintSolver {
                 const hasGeometry = items.some(i => i.type === "geometry");
                 if (hasGeometry && items[0]?.type === "point") {
                     newConstraint.points = selectedPointIds.slice().reverse();
+                }
+                return this.createAndPushNewConstraint(newConstraint);
+            }
+            if (type === POINT_LINE_DISTANCE_TYPE) {
+                const geometries = items.filter(i => i.type === "geometry");
+                const pointsOnly = items.filter(i => i.type === "point");
+                if (geometries.length === 1 && pointsOnly.length === 1) {
+                    const lineGeo = this.sketchObject.geometries.find(gg => gg.id === parseInt(geometries[0].id));
+                    const pointId = parseInt(pointsOnly[0].id);
+                    if (lineGeo?.type === "line" &&
+                        Array.isArray(lineGeo.points) &&
+                        lineGeo.points.length >= 2 &&
+                        Number.isFinite(pointId)) {
+                        newConstraint.points = [
+                            parseInt(lineGeo.points[0]),
+                            parseInt(lineGeo.points[1]),
+                            pointId
+                        ];
+                        return this.createAndPushNewConstraint(newConstraint);
+                    }
+                    this.hooks.updateCanvas();
+                    this.hooks.notifyUser(
+                        `Invalid selection for constraint type ${type}\nwith ${selected.length} points.`,
+                        "warning"
+                    );
+                    return;
                 }
                 return this.createAndPushNewConstraint(newConstraint);
             }

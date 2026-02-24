@@ -9,6 +9,8 @@ import { vectorizeImageData } from "./handDrawToVectors/fuzzydraw.js";
 import { AccordionWidget } from "../AccordionWidget.js";
 import { deepClone } from "../../utils/deepClone.js";
 
+const POINT_LINE_DISTANCE_TYPE = "↥";
+
 export class SketchMode3D {
   constructor(viewer, featureID, opts = {}) {
     this.viewer = viewer;
@@ -3013,6 +3015,7 @@ export class SketchMode3D {
     if (pointCount === 3) {
       addConstraintButton({ label: "⋯", type: "⋯", tooltip: "Midpoint" });
       addConstraintButton({ label: "⏛", type: "⏛", tooltip: "Point on line" });
+      addConstraintButton({ label: "↥", type: POINT_LINE_DISTANCE_TYPE, tooltip: "Line to point distance" });
       addConstraintButton({ label: "∠", type: "∠", tooltip: "Angle" });
     }
 
@@ -4765,13 +4768,41 @@ export class SketchMode3D {
       return { x, y };
     };
     const normAng = (a) => { const t = Math.PI * 2; a = a % t; return a < 0 ? a + t : a; };
+    const linearDistanceEndpoints = (constraint) => {
+      if (!constraint || !Array.isArray(constraint.points)) return null;
+      if (constraint.type === '⟺' && constraint.points.length >= 2 &&
+        constraint.displayStyle !== 'radius' &&
+        constraint.displayStyle !== 'diameter') {
+        const p0 = P(constraint.points[0]);
+        const p1 = P(constraint.points[1]);
+        if (!p0 || !p1) return null;
+        return { a: p0, b: p1 };
+      }
+      if (constraint.type === POINT_LINE_DISTANCE_TYPE && constraint.points.length >= 3) {
+        const pointA = P(constraint.points[0]);
+        const pointB = P(constraint.points[1]);
+        const pointC = P(constraint.points[2]);
+        if (!pointA || !pointB || !pointC) return null;
+        const dx = pointB.x - pointA.x;
+        const dy = pointB.y - pointA.y;
+        const lenSq = dx * dx + dy * dy;
+        if (!(lenSq > 1e-12)) return { a: pointA, b: pointC };
+        let t = ((pointC.x - pointA.x) * dx + (pointC.y - pointA.y) * dy) / lenSq;
+        if (!Number.isFinite(t)) t = 0;
+        return {
+          a: { x: pointA.x + t * dx, y: pointA.y + t * dy },
+          b: { x: pointC.x, y: pointC.y },
+        };
+      }
+      return null;
+    };
 
     let bestCid = null;
     let bestDist = Infinity;
 
     for (const c of (s.constraints || [])) {
-      if (c.type === '⟺' && Array.isArray(c.points) && c.points.length >= 2) {
-        if (c.displayStyle === 'radius' || c.displayStyle === 'diameter') {
+      if ((c.type === '⟺' || c.type === POINT_LINE_DISTANCE_TYPE) && Array.isArray(c.points)) {
+        if (c.type === '⟺' && (c.displayStyle === 'radius' || c.displayStyle === 'diameter')) {
           const pc = P(c.points[0]); const pr = P(c.points[1]); if (!pc || !pr) continue;
           const off = radialOffsetToPlane(this._dimOffsets.get(c.id) || {}, pc, pr);
           const lu = pc.x + off.du;
@@ -4806,8 +4837,9 @@ export class SketchMode3D {
           }
           if (d < bestDist) { bestDist = d; bestCid = c.id; }
         } else {
-          const p0 = P(c.points[0]); const p1 = P(c.points[1]); if (!p0 || !p1) continue;
-          const d = distToSeg(p0.x, p0.y, p1.x, p1.y, uv.u, uv.v);
+          const ends = linearDistanceEndpoints(c);
+          if (!ends) continue;
+          const d = distToSeg(ends.a.x, ends.a.y, ends.b.x, ends.b.y, uv.u, uv.v);
           if (d < bestDist) { bestDist = d; bestCid = c.id; }
         }
       } else if (c.type === '∠' && Array.isArray(c.points) && c.points.length >= 4) {
@@ -5184,9 +5216,12 @@ export class SketchMode3D {
         dr: Number(off.dr) || 0,
         dp: Number(off.dp) || 0,
       };
-    } else {
+    } else if (c && (c.type === "⟺" || c.type === POINT_LINE_DISTANCE_TYPE) && (c.points || []).length >= 2) {
       this._dragDim.mode = "distance";
       this._dragDim.start = { d: typeof off.d === "number" ? off.d : 0 };
+    } else {
+      this._dragDim.mode = "distance";
+      this._dragDim.start = { d: 0 };
     }
     try {
       e.target.setPointerCapture?.(e.pointerId);
@@ -5224,9 +5259,30 @@ export class SketchMode3D {
       const dr = this._dragDim.start.dr + (du * ux + dv * uy);
       const dp = this._dragDim.start.dp + (du * nx + dv * ny);
       this._dimOffsets.set(this._dragDim.cid, { dr, dp });
-    } else if (c.type === "⟺" && (c.points || []).length >= 2) {
-      const p0 = s.points.find((p) => p.id === c.points[0]);
-      const p1 = s.points.find((p) => p.id === c.points[1]);
+    } else if ((c.type === "⟺" || c.type === POINT_LINE_DISTANCE_TYPE) && (c.points || []).length >= 2) {
+      let p0 = null;
+      let p1 = null;
+      if (c.type === POINT_LINE_DISTANCE_TYPE && (c.points || []).length >= 3) {
+        const pointA = s.points.find((p) => p.id === c.points[0]);
+        const pointB = s.points.find((p) => p.id === c.points[1]);
+        const pointC = s.points.find((p) => p.id === c.points[2]);
+        if (!pointA || !pointB || !pointC) return;
+        const dxAB = pointB.x - pointA.x;
+        const dyAB = pointB.y - pointA.y;
+        const lenSq = dxAB * dxAB + dyAB * dyAB;
+        if (!(lenSq > 1e-12)) {
+          p0 = pointA;
+          p1 = pointC;
+        } else {
+          let t = ((pointC.x - pointA.x) * dxAB + (pointC.y - pointA.y) * dyAB) / lenSq;
+          if (!Number.isFinite(t)) t = 0;
+          p0 = { x: pointA.x + t * dxAB, y: pointA.y + t * dyAB };
+          p1 = { x: pointC.x, y: pointC.y };
+        }
+      } else {
+        p0 = s.points.find((p) => p.id === c.points[0]);
+        p1 = s.points.find((p) => p.id === c.points[1]);
+      }
       if (!p0 || !p1) return;
       const dx = p1.x - p0.x,
         dy = p1.y - p0.y;

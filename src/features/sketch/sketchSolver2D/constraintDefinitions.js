@@ -5,6 +5,8 @@ let distanceSlideThresholdRatio = 0.10;
 let distanceSlideStepRatio = 0.10;
 let distanceSlideMinStep = 0.001;
 const constraintFunctions = [];
+const POINT_LINE_DISTANCE_TYPE = "↥";
+const distanceConstraintTypes = new Set(["⟺", POINT_LINE_DISTANCE_TYPE]);
 
 const normalizeAngle = (angle) => ((angle % 360) + 360) % 360;
 const shortestAngleDelta = (target, current) => {
@@ -18,7 +20,7 @@ function relativeDeltaRatio(a, b, floor = tolerance) {
 }
 
 function resolveDistanceTargetForSolvePass(solverObject, constraint, requestedTarget) {
-    if (constraint?.type !== "⟺" || !Number.isFinite(requestedTarget)) {
+    if (!distanceConstraintTypes.has(constraint?.type) || !Number.isFinite(requestedTarget)) {
         return requestedTarget;
     }
 
@@ -159,7 +161,7 @@ function resolveDistanceTargetForSolvePass(solverObject, constraint, requestedTa
     if (isNaN(constraintValue) | constraintValue == undefined | constraintValue == null) {
         targetDistance = currentDistance;
         constraint.value = currentDistance;
-        if (constraint?.type === "⟺") {
+        if (distanceConstraintTypes.has(constraint?.type)) {
             constraint._distanceRequestedTarget = currentDistance;
             constraint._distanceAppliedTarget = currentDistance;
             constraint._distanceThrottleActive = false;
@@ -221,6 +223,90 @@ function resolveDistanceTargetForSolvePass(solverObject, constraint, requestedTa
 }).hints = {
     commandTooltip: "Distance Constraint",
     pointsRequired: 2,
+};
+
+
+(constraintFunctions[POINT_LINE_DISTANCE_TYPE] = function (solverObject, constraint, points, constraintValue) {
+    const [pointA, pointB, pointC] = points;
+    if (!pointA || !pointB || !pointC) {
+        constraint.error = "Line to Point Distance requires 3 points";
+        return;
+    }
+
+    const dx = pointB.x - pointA.x;
+    const dy = pointB.y - pointA.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq < tolerance * tolerance) {
+        // Degenerate line: fallback to point-point distance from A to C.
+        return constraintFunctions["⟺"](solverObject, constraint, [pointA, pointC], constraintValue);
+    }
+
+    const len = Math.sqrt(lenSq);
+    const nx = -dy / len;
+    const ny = dx / len;
+    const t = ((pointC.x - pointA.x) * dx + (pointC.y - pointA.y) * dy) / lenSq;
+    const signedDistance = (pointC.x - pointA.x) * nx + (pointC.y - pointA.y) * ny;
+
+    let targetDistance = Number.isFinite(constraintValue) ? Number(constraintValue) : Number.NaN;
+    if (!Number.isFinite(targetDistance)) {
+        targetDistance = Math.abs(signedDistance);
+        constraint.value = targetDistance;
+        constraint._distanceRequestedTarget = targetDistance;
+        constraint._distanceAppliedTarget = targetDistance;
+        constraint._distanceThrottleActive = false;
+        constraint._distanceLastAppliedPassToken = null;
+        const initSign = Math.sign(signedDistance);
+        constraint._linePointDistanceSign = initSign === 0 ? 1 : initSign;
+    }
+
+    targetDistance = resolveDistanceTargetForSolvePass(solverObject, constraint, targetDistance);
+
+    let side = Number(constraint?._linePointDistanceSign);
+    if (!Number.isFinite(side) || side === 0) {
+        side = Math.sign(signedDistance);
+        if (!Number.isFinite(side) || side === 0) side = 1;
+    }
+    if (targetDistance < 0) side = -1;
+    constraint._linePointDistanceSign = side;
+
+    const targetSignedDistance = Math.abs(targetDistance) * side;
+    const err = signedDistance - targetSignedDistance;
+    if (Math.abs(err) <= tolerance) {
+        constraint.error = null;
+        return;
+    }
+
+    constraint.error = `Line to Point Distance not satisfied
+        ${targetDistance} != ${Math.abs(signedDistance)}`;
+
+    let denom = 0;
+    if (!pointC.fixed) denom += 1;
+    if (!pointA.fixed) denom += (1 - t) * (1 - t);
+    if (!pointB.fixed) denom += t * t;
+    if (denom <= 0) {
+        constraint.error = `points ${pointA.id}, ${pointB.id}, and ${pointC.id} are all fixed`;
+        return;
+    }
+
+    const factor = 1 / denom;
+    const corrX = err * nx;
+    const corrY = err * ny;
+
+    if (!pointC.fixed) {
+        pointC.x -= corrX * factor;
+        pointC.y -= corrY * factor;
+    }
+    if (!pointA.fixed) {
+        pointA.x += corrX * (1 - t) * factor;
+        pointA.y += corrY * (1 - t) * factor;
+    }
+    if (!pointB.fixed) {
+        pointB.x += corrX * t * factor;
+        pointB.y += corrY * t * factor;
+    }
+}).hints = {
+    commandTooltip: "Line to Point Distance Constraint",
+    pointsRequired: 3,
 };
 
 

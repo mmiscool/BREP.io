@@ -40,6 +40,7 @@ const CONSTRAINTS = {
   HORIZONTAL: "━",      // 2 points
   VERTICAL: "│",        // 2 points
   DISTANCE: "⟺",        // 2 points, value
+  LINE_TO_POINT_DISTANCE: "↥", // 3 points (line A,B and point C), value
   EQUAL_DISTANCE: "⇌",  // 4 points
   PARALLEL: "∥",        // 4 points
   PERPENDICULAR: "⟂",   // 4 points
@@ -50,6 +51,9 @@ const CONSTRAINTS = {
   FIXED: "⏚",           // 1 point
 };
 ```
+
+`LINE_TO_POINT_DISTANCE` constrains the perpendicular distance from point `C` to the infinite line through `A-B`. In the UI this same symbol `↥` is used for the toolbar button and glyph.
+Use `↥` as the canonical persisted symbol for this constraint type.
 
 ## ConstraintSolver API
 `ConstraintSolver` is the main class you use in headless workflows.
@@ -76,6 +80,10 @@ solver.createGeometry("line", [pointA, pointB]);
 solver.createConstraint(CONSTRAINTS.DISTANCE, [
   { type: "point", id: pointA.id },
   { type: "point", id: pointB.id },
+]);
+solver.createConstraint(CONSTRAINTS.LINE_TO_POINT_DISTANCE, [
+  { type: "geometry", id: lineId }, // line contributes A and B
+  { type: "point", id: pointC.id },
 ]);
 solver.removePointById(id);
 solver.removeGeometryById(id);

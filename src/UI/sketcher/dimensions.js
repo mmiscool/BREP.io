@@ -10,6 +10,7 @@ const dbg = (...args) => { try { if (DIM_DEBUG || window.__SKETCH_DIM_DEBUG) con
 const DIM_COLOR_DEFAULT = 0x69a8ff;   // blue
 const DIM_COLOR_HOVER = 0xffd54a;   // yellow
 const DIM_COLOR_SELECTED = 0x6fe26f;   // green
+const POINT_LINE_DISTANCE_TYPE = '↥';
 
 function getConstraintBaseColor(inst) {
   const value = inst?._theme?.constraintColor;
@@ -77,6 +78,38 @@ function isRadialDimensionConstraint(c) {
     && Array.isArray(c.points)
     && c.points.length >= 2
     && (c.displayStyle === 'radius' || c.displayStyle === 'diameter');
+}
+
+function resolveLinearDistanceEndpoints(sketch, constraint) {
+  if (!constraint || !Array.isArray(constraint.points)) return null;
+  const P = (id) => (sketch?.points || []).find((p) => p.id === id);
+  if (constraint.type === '⟺' && constraint.points.length >= 2 && !isRadialDimensionConstraint(constraint)) {
+    const p0 = P(constraint.points[0]);
+    const p1 = P(constraint.points[1]);
+    if (!p0 || !p1) return null;
+    return { a: p0, b: p1 };
+  }
+  if (constraint.type === POINT_LINE_DISTANCE_TYPE && constraint.points.length >= 3) {
+    const pointA = P(constraint.points[0]);
+    const pointB = P(constraint.points[1]);
+    const pointC = P(constraint.points[2]);
+    if (!pointA || !pointB || !pointC) return null;
+    const dx = pointB.x - pointA.x;
+    const dy = pointB.y - pointA.y;
+    const lenSq = dx * dx + dy * dy;
+    if (!(lenSq > 1e-12)) return { a: pointA, b: pointC, anchorA: pointA };
+    let tRaw = ((pointC.x - pointA.x) * dx + (pointC.y - pointA.y) * dy) / lenSq;
+    if (!Number.isFinite(tRaw)) tRaw = 0;
+    const tSeg = Math.max(0, Math.min(1, tRaw));
+    return {
+      // Keep true perpendicular orientation from the infinite line projection.
+      a: { x: pointA.x + tRaw * dx, y: pointA.y + tRaw * dy },
+      b: { x: pointC.x, y: pointC.y },
+      // But extend from the nearest point on the finite segment to remove visual gaps.
+      anchorA: { x: pointA.x + tSeg * dx, y: pointA.y + tSeg * dy },
+    };
+  }
+  return null;
 }
 
 function radialOffsetToPlane(rawOff, pc, pr, useDefault = true) {
@@ -235,8 +268,8 @@ export function renderDimensions(inst) {
     }
     const sel = Array.from(inst._selection || []).some(it => it.type === 'constraint' && it.id === c.id);
     const hov = inst._hover && inst._hover.type === 'constraint' && inst._hover.id === c.id;
-    if (c.type === '⟺') {
-      if (isRadialDimensionConstraint(c)) {
+    if (c.type === '⟺' || c.type === POINT_LINE_DISTANCE_TYPE) {
+      if (c.type === '⟺' && isRadialDimensionConstraint(c)) {
         const pc = P(c.points[0]), pr = P(c.points[1]); if (!pc || !pr) continue;
         const col = sel ? DIM_COLOR_SELECTED : (hov ? DIM_COLOR_HOVER : dimBaseColor);
         const radialType = resolveRadialGeometryType(s, c);
@@ -252,8 +285,11 @@ export function renderDimensions(inst) {
           ? `⌀${(2 * safeVal).toFixed(3)}`
           : `R${safeVal.toFixed(3)}`;
         mk(c, txt, to3(pc.x, pc.y), radialOff, true);
-      } else if (c.points?.length >= 2) {
-        const p0 = P(c.points[0]), p1 = P(c.points[1]); if (!p0 || !p1) continue;
+      } else {
+        const ends = resolveLinearDistanceEndpoints(s, c);
+        if (!ends) continue;
+        const p0 = ends.a;
+        const p1 = ends.b;
         const basis = (() => { const dx = p1.x - p0.x, dy = p1.y - p0.y; const L = Math.hypot(dx, dy) || 1; const tx = dx / L, ty = dy / L; return { tx, ty, nx: -ty, ny: tx }; })();
         const rect = inst.viewer.renderer.domElement.getBoundingClientRect();
         const base = Math.max(0.1, worldPerPixel(inst.viewer.camera, rect.width, rect.height) * 20);
@@ -262,7 +298,7 @@ export function renderDimensions(inst) {
         // Constrain label to center of the dimension line: lock tangential offset to 0
         const t = 0;
         const col = sel ? DIM_COLOR_SELECTED : (hov ? DIM_COLOR_HOVER : dimBaseColor);
-        dimDistance3D(inst, p0, p1, c.id, col);
+        dimDistance3D(inst, p0, p1, c.id, col, { anchor0: ends.anchorA });
         mk(c, String((Number(c.value) ?? 0).toFixed(3)), to3((p0.x + p1.x) / 2, (p0.y + p1.y) / 2), { du: basis.tx * t + basis.nx * (base + d), dv: basis.ty * t + basis.ny * (base + d) }, true);
       }
     }
@@ -319,16 +355,16 @@ function _redrawDim3D(inst, onlyCid = null) {
       const hov = (hovId === c?.id);
       const col = sel ? DIM_COLOR_SELECTED : (hov ? DIM_COLOR_HOVER : dimBaseColor);
       if (!c) continue;
-      if (c.type === '⟺') {
-        if (isRadialDimensionConstraint(c)) {
+      if (c.type === '⟺' || c.type === POINT_LINE_DISTANCE_TYPE) {
+        if (c.type === '⟺' && isRadialDimensionConstraint(c)) {
           const pc = P(c.points[0]); const pr = P(c.points[1]);
           if (pc && pr) {
             const radialType = resolveRadialGeometryType(s, c);
             dimRadius3D(inst, pc, pr, c.id, col, c.displayStyle, radialType);
           }
-        } else if (Array.isArray(c.points) && c.points.length >= 2) {
-          const p0 = P(c.points[0]); const p1 = P(c.points[1]);
-          if (p0 && p1) dimDistance3D(inst, p0, p1, c.id, col);
+        } else {
+          const ends = resolveLinearDistanceEndpoints(s, c);
+          if (ends) dimDistance3D(inst, ends.a, ends.b, c.id, col, { anchor0: ends.anchorA });
         }
       } else if (c.type === '∠' && Array.isArray(c.points) && c.points.length >= 4) {
         const p0 = P(c.points[0]), p1 = P(c.points[1]), p2 = P(c.points[2]), p3 = P(c.points[3]);
@@ -545,11 +581,12 @@ function attachDimLabelEvents(inst, el, c, world) {
       if (pc && pr) {
         start = radialOffsetToPlane(start, pc, pr, true);
       }
-    } else if (c.type === '⟺' && Array.isArray(c.points) && c.points.length >= 2) {
+    } else {
       const sObj = inst._solver.sketchObject;
-      const p0 = sObj.points.find((p) => p.id === c.points[0]);
-      const p1 = sObj.points.find((p) => p.id === c.points[1]);
-      if (p0 && p1) {
+      const ends = resolveLinearDistanceEndpoints(sObj, c);
+      if (ends) {
+        const p0 = ends.a;
+        const p1 = ends.b;
         const dx = p1.x - p0.x, dy = p1.y - p0.y; const L = Math.hypot(dx, dy) || 1;
         const tx = dx / L, ty = dy / L; distTx = tx; distTy = ty;
         distNx = -ty; distNy = tx;
@@ -557,20 +594,20 @@ function attachDimLabelEvents(inst, el, c, world) {
         distStartD = (typeof start.d === 'number') ? Number(start.d) : (du0 * distNx + dv0 * distNy);
         // Constrain label to center: lock initial tangential offset to 0
         distStartT = 0;
+      } else if (c.type === '∠') {
+        angStartDU = Number(start.du) || 0; angStartDV = Number(start.dv) || 0;
+        angStartMag = Math.hypot(angStartDU, angStartDV);
+        // Use current arc midpoint direction if available; fallback to start offset direction
+        try {
+          const gd = inst._dimAngleGeom && (inst._dimAngleGeom.get ? inst._dimAngleGeom.get(c.id) : inst._dimAngleGeom[c.id]);
+          if (gd && Number.isFinite(gd.midU) && Number.isFinite(gd.midV) && Number.isFinite(gd.cx) && Number.isFinite(gd.cy)) {
+            const vx = gd.midU - gd.cx, vy = gd.midV - gd.cy; const L = Math.hypot(vx, vy) || 1;
+            angMidDX = vx / L; angMidDY = vy / L;
+          } else {
+            const L = Math.hypot(angStartDU, angStartDV) || 1; angMidDX = (angStartDU / L); angMidDY = (angStartDV / L);
+          }
+        } catch { const L = Math.hypot(angStartDU, angStartDV) || 1; angMidDX = (angStartDU / L); angMidDY = (angStartDV / L); }
       }
-    } else if (c.type === '∠') {
-      angStartDU = Number(start.du) || 0; angStartDV = Number(start.dv) || 0;
-      angStartMag = Math.hypot(angStartDU, angStartDV);
-      // Use current arc midpoint direction if available; fallback to start offset direction
-      try {
-        const gd = inst._dimAngleGeom && (inst._dimAngleGeom.get ? inst._dimAngleGeom.get(c.id) : inst._dimAngleGeom[c.id]);
-        if (gd && Number.isFinite(gd.midU) && Number.isFinite(gd.midV) && Number.isFinite(gd.cx) && Number.isFinite(gd.cy)) {
-          const vx = gd.midU - gd.cx, vy = gd.midV - gd.cy; const L = Math.hypot(vx, vy) || 1;
-          angMidDX = vx / L; angMidDY = vy / L;
-        } else {
-          const L = Math.hypot(angStartDU, angStartDV) || 1; angMidDX = (angStartDU / L); angMidDY = (angStartDV / L);
-        }
-      } catch { const L = Math.hypot(angStartDU, angStartDV) || 1; angMidDX = (angStartDU / L); angMidDY = (angStartDV / L); }
     }
     try { if (inst.viewer?.controls) inst.viewer.controls.enabled = false; } catch { }
     try { el.setPointerCapture(e.pointerId); } catch { }
@@ -595,34 +632,37 @@ function attachDimLabelEvents(inst, el, c, world) {
       updateOneDimPosition(inst, el, world, toLabel, true);
       dbg('preview-radial', { cid: c.id, toLabel });
       try { inst._dimOffsets.set(c.id, toLabel); _redrawDim3D(inst, c.id); } catch { }
-    } else if (c.type === '⟺' && Array.isArray(c.points) && c.points.length >= 2) {
-      const deltaN = du * distNx + dv * distNy;
-      const newD = distStartD + deltaN; const newT = 0;
-      pendingOff = { d: newD, t: newT };
-      const rect = inst.viewer.renderer.domElement.getBoundingClientRect();
-      const base = Math.max(0.1, worldPerPixel(inst.viewer.camera, rect.width, rect.height) * 20);
-      const toLabel = { du: distNx * (base + newD), dv: distNy * (base + newD) };
-      updateOneDimPosition(inst, el, world, toLabel, true);
-      dbg('preview-distance', { cid: c.id, d: newD, t: newT, toLabel });
-      try { inst._dimOffsets.set(c.id, { du: toLabel.du, dv: toLabel.dv }); _redrawDim3D(inst, c.id); } catch { }
-    } else if (c.type === '∠') {
-      // Constrain angle label to arc midpoint: allow only radial changes along midpoint direction
-      const deltaRadial = du * angMidDX + dv * angMidDY;
-      const m = Math.max(0, angStartMag + deltaRadial);
-      const toGeom = { du: angMidDX * m, dv: angMidDY * m };
-      pendingOff = { ...toGeom };
-      try { inst._dimOffsets.set(c.id, toGeom); _redrawDim3D(inst, c.id); } catch { }
-      // Reposition label exactly at new arc midpoint
-      try {
-        const gd = inst._dimAngleGeom && (inst._dimAngleGeom.get ? inst._dimAngleGeom.get(c.id) : inst._dimAngleGeom[c.id]);
-        if (gd) {
-          const labelWorld = new THREE.Vector3().copy(inst._lock.basis.origin)
-            .addScaledVector(inst._lock.basis.x, gd.midU)
-            .addScaledVector(inst._lock.basis.y, gd.midV);
-          updateOneDimPosition(inst, el, labelWorld, { du: 0, dv: 0 }, true);
-        }
-      } catch {}
-      dbg('preview-angle', { cid: c.id, toGeom });
+    } else {
+      const ends = resolveLinearDistanceEndpoints(inst._solver.sketchObject, c);
+      if (ends) {
+        const deltaN = du * distNx + dv * distNy;
+        const newD = distStartD + deltaN; const newT = 0;
+        pendingOff = { d: newD, t: newT };
+        const rect = inst.viewer.renderer.domElement.getBoundingClientRect();
+        const base = Math.max(0.1, worldPerPixel(inst.viewer.camera, rect.width, rect.height) * 20);
+        const toLabel = { du: distNx * (base + newD), dv: distNy * (base + newD) };
+        updateOneDimPosition(inst, el, world, toLabel, true);
+        dbg('preview-distance', { cid: c.id, d: newD, t: newT, toLabel });
+        try { inst._dimOffsets.set(c.id, { du: toLabel.du, dv: toLabel.dv }); _redrawDim3D(inst, c.id); } catch { }
+      } else if (c.type === '∠') {
+        // Constrain angle label to arc midpoint: allow only radial changes along midpoint direction
+        const deltaRadial = du * angMidDX + dv * angMidDY;
+        const m = Math.max(0, angStartMag + deltaRadial);
+        const toGeom = { du: angMidDX * m, dv: angMidDY * m };
+        pendingOff = { ...toGeom };
+        try { inst._dimOffsets.set(c.id, toGeom); _redrawDim3D(inst, c.id); } catch { }
+        // Reposition label exactly at new arc midpoint
+        try {
+          const gd = inst._dimAngleGeom && (inst._dimAngleGeom.get ? inst._dimAngleGeom.get(c.id) : inst._dimAngleGeom[c.id]);
+          if (gd) {
+            const labelWorld = new THREE.Vector3().copy(inst._lock.basis.origin)
+              .addScaledVector(inst._lock.basis.x, gd.midU)
+              .addScaledVector(inst._lock.basis.y, gd.midV);
+            updateOneDimPosition(inst, el, labelWorld, { du: 0, dv: 0 }, true);
+          }
+        } catch {}
+        dbg('preview-angle', { cid: c.id, toGeom });
+      }
     }
     e.preventDefault(); e.stopPropagation(); try { e.stopImmediatePropagation(); } catch { }
   });
@@ -635,16 +675,19 @@ function attachDimLabelEvents(inst, el, c, world) {
         du: (Number(start.du) || 0) + du,
         dv: (Number(start.dv) || 0) + dv,
       };
-    } else if (c.type === '⟺' && Array.isArray(c.points) && c.points.length >= 2) {
-      const du = uv.u - sx; const dv = uv.v - sy;
-      const deltaN = du * distNx + dv * distNy;
-      const newD = distStartD + deltaN; const newT = 0;
-      return { d: newD, t: newT };
-    } else if (c.type === '∠') {
-      const du = uv.u - sx; const dv = uv.v - sy;
-      const deltaRadial = du * angMidDX + dv * angMidDY;
-      const m = Math.max(0, angStartMag + deltaRadial);
-      return { du: angMidDX * m, dv: angMidDY * m };
+    } else {
+      const ends = resolveLinearDistanceEndpoints(inst._solver.sketchObject, c);
+      if (ends) {
+        const du = uv.u - sx; const dv = uv.v - sy;
+        const deltaN = du * distNx + dv * distNy;
+        const newD = distStartD + deltaN; const newT = 0;
+        return { d: newD, t: newT };
+      } else if (c.type === '∠') {
+        const du = uv.u - sx; const dv = uv.v - sy;
+        const deltaRadial = du * angMidDX + dv * angMidDY;
+        const m = Math.max(0, angStartMag + deltaRadial);
+        return { du: angMidDX * m, dv: angMidDY * m };
+      }
     }
     return null;
   };
@@ -694,7 +737,7 @@ function attachDimLabelEvents(inst, el, c, world) {
   });
 }
 
-function dimDistance3D(inst, p0, p1, cid, color = 0x67e667) {
+function dimDistance3D(inst, p0, p1, cid, color = 0x67e667, opts = null) {
   const off = inst._dimOffsets.get(cid) || { du: 0, dv: 0 };
   const X = inst._lock.basis.x, Y = inst._lock.basis.y, O = inst._lock.basis.origin;
   const u0 = p0.x, v0 = p0.y, u1 = p1.x, v1 = p1.y; const dx = u1 - u0, dy = v1 - v0; const L = Math.hypot(dx, dy) || 1; const tx = dx / L, ty = dy / L; const nx = -ty, ny = tx;
@@ -702,12 +745,14 @@ function dimDistance3D(inst, p0, p1, cid, color = 0x67e667) {
   const base = Math.max(0.1, worldPerPixel(inst.viewer.camera, rect.width, rect.height) * 20);
   const d = typeof off.d === 'number' ? off.d : (off.du || 0) * nx + (off.dv || 0) * ny;
   const ou = nx * (base + d), ov = ny * (base + d);
+  const anchor0 = opts?.anchor0 || p0;
+  const anchor1 = opts?.anchor1 || p1;
   const P = (u, v) => new THREE.Vector3().copy(O).addScaledVector(X, u).addScaledVector(Y, v);
   const addLine = (pts, mat) => { const g = new THREE.BufferGeometry().setFromPoints(pts.map(p => P(p.u, p.v))); const ln = new THREE.Line(g, mat); ln.userData = { kind: 'dim', cid }; ln.renderOrder = 10020; inst._dim3D.add(ln); };
   const green = new THREE.LineBasicMaterial({ color, depthTest: false, depthWrite: false, transparent: true });
   addLine([{ u: u0 + ou, v: v0 + ov }, { u: u1 + ou, v: v1 + ov }], green);
-  addLine([{ u: u0, v: v0 }, { u: u0 + ou, v: v0 + ov }], green.clone());
-  addLine([{ u: u1, v: v1 }, { u: u1 + ou, v: v1 + ov }], green.clone());
+  addLine([{ u: anchor0.x, v: anchor0.y }, { u: u0 + ou, v: v0 + ov }], green.clone());
+  addLine([{ u: anchor1.x, v: anchor1.y }, { u: u1 + ou, v: v1 + ov }], green.clone());
   const ah = Math.max(0.06, worldPerPixel(inst.viewer.camera, rect.width, rect.height) * 6);
   const s = 0.6; const arrow = (ux, vy, dir) => { const tip = { u: ux + ou, v: vy + ov }; const ax = dir * tx, ay = dir * ty; const wx = -ay, wy = ax; const A = { u: tip.u + ax * ah + wx * ah * s, v: tip.v + ay * ah + wy * ah * s }; const B = { u: tip.u + ax * ah - wx * ah * s, v: tip.v + ay * ah - wy * ah * s }; addLine([{ u: tip.u, v: tip.v }, A], green.clone()); addLine([{ u: tip.u, v: tip.v }, B], green.clone()); };
   // Opposed arrows pointing towards the measurement span

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 const COLOR_DEFAULT = 0x69a8ff;
 const COLOR_HOVER = 0xffd54a;
 const COLOR_SELECTED = 0x6fe26f;
+const POINT_LINE_DISTANCE_TYPE = '↥';
 
 function themedConstraintColor(inst) {
   const value = inst?._theme?.constraintColor;
@@ -175,7 +176,7 @@ export function drawConstraintGlyphs(inst, constraints) {
   // Build groups by sorted unique point set
   const groups = new Map();
   for (const c of (constraints || [])) {
-    if (!c || c.type === '⟺' || c.type === '∠') continue;
+    if (!c || c.type === '⟺' || c.type === POINT_LINE_DISTANCE_TYPE || c.type === '∠') continue;
     const ids = Array.from(new Set((c.points || []).map(Number))).sort((a, b) => a - b);
     if (!ids.length) continue;
     const key = ids.join(',');

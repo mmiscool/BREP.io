@@ -58,6 +58,7 @@ Sketch constraints show up as glyphs that use Unicode icons so you can tell them
 | │ | Vertical | Forces two selected points to share the same `x` value. |
 | ≡ | Coincident | Merges two points so they occupy the same coordinates; downstream coincident groups stay merged. |
 | ⟺ | Distance | Adds a numeric dimension. On lines it fixes the segment length, on arcs/circles it becomes a radius or diameter dimension. |
+| ↥ | Line to Point Distance | Adds a perpendicular distance dimension from a point to a selected line. Uses points `[A, B, C]` where `AB` is the line and `C` is the measured point. |
 | ⇌ | Equal Distance | Makes two segments (or two radii) match length. Works for line pairs or circular features that need equal radii. |
 | ∥ | Parallel | Keeps two lines travelling in the same direction, reusing existing horizontal/vertical locks when possible. |
 | ⟂ | Perpendicular / Tangent | For line pairs it enforces a 90° angle. When applied between a line and a circle/arc it constrains the line to stay tangent by keeping the radius perpendicular at the contact point. |
@@ -70,7 +71,8 @@ Grouped constraints that touch the same points share a single anchor and render 
 ## Context Toolbar
 A floating context toolbar follows the sketch viewport and updates itself based on the active selection. It offers only the constraints and actions that apply to the selected entities, making it quick to add intent without digging through menus.
 
-- **Adaptive constraints** – Select two line segments and the toolbar lights up `Parallel ∥`, `Perpendicular ⟂`, `Angle ∠`, and `Equal Distance ⇌`. Pick a line and an arc and it switches to the tangent option. Single, double, or triple point selections surface the matching point-based constraints (`H ━`, `V │`, `Coincident ≡`, `Distance ⟺`, `Colinear ⏛`, etc.).
+- **Adaptive constraints** – Select two line segments and the toolbar lights up `Parallel ∥`, `Perpendicular ⟂`, `Angle ∠`, and `Equal Distance ⇌`. Pick a line and an arc and it switches to the tangent option. Single, double, or triple point selections surface the matching point-based constraints (`H ━`, `V │`, `Coincident ≡`, `Distance ⟺`, `Line to Point Distance ↥`, `Colinear ⏛`, etc.).
+- **Line-to-point dimensions** – With one line and one point selected, the toolbar shows `↥`. The dimension stays perpendicular to the line and extends to the closest point on the selected line segment so the extension does not visually gap from the segment.
 - **Radial dimensions** – Selecting a single circle or arc reveals `Radius` and `Diameter` dimension buttons so you can drop the right measurement without changing tools.
 - **Construction toggle** – Any time geometry is highlighted the toolbar shows a toggle that flips the selection between regular sketch curves and construction geometry. Construction curves remain in the sketch for constraints but are ignored when profiles are consumed by downstream features.
 - **Fix / Unfix** – When one or more points are selected the toolbar offers a fast fix toggle, adding or removing `⏚` constraints without opening the constraint picker.

@@ -150,6 +150,43 @@ await sketcher.destroy();
 
 `getSketch({ preferCached: true })` returns the latest cached sketch from recent events or calls when available.
 
+## Sketch JSON Constraint Symbols
+When you call `setSketch(sketch)` or read `getSketch()`, each constraint uses a Unicode `type` symbol.
+
+Common symbols:
+- `⏚` ground (1 point)
+- `━` horizontal (2 points)
+- `│` vertical (2 points)
+- `≡` coincident (2 points)
+- `⟺` distance (2 points)
+- `↥` line-to-point distance (3 points: line `A,B` and point `C`)
+- `∠` angle (4 points)
+- `⟂` perpendicular/tangent (4 points)
+- `∥` parallel (4 points)
+- `⇌` equal distance (4 points)
+- `⏛` point on line (3 points)
+- `⋯` midpoint (3 points)
+
+For line-to-point distance, use `↥` everywhere in payloads and internal tooling.
+
+Example:
+```js
+await sketcher.setSketch({
+  points: [
+    { id: 0, x: 0, y: 0, fixed: true },
+    { id: 1, x: 100, y: 0, fixed: false },
+    { id: 2, x: 30, y: 25, fixed: false },
+  ],
+  geometries: [
+    { id: 0, type: "line", points: [0, 1], construction: false },
+  ],
+  constraints: [
+    { id: 0, type: "⏚", points: [0] },
+    { id: 1, type: "↥", points: [0, 1, 2], value: 25 },
+  ],
+});
+```
+
 ## `exportSVG()` Options and Return
 `exportSVG(options)` uses the same conversion pipeline as `sketchToSVG()`.
 

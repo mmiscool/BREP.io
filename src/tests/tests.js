@@ -30,6 +30,7 @@ import {
     test_sketch_solver_topology_rect_round_trip_sequence,
     test_sketch_solver_topology_coincident_chain_multi_step,
     test_sketch_solver_distance_slide_large_drop_settles_single_solve,
+    test_sketch_solver_line_to_point_distance_constraint,
 } from './test_sketch_solver_topology_stability.js';
 import { registerSketchSolverTopologyFixtureTests } from './sketchSolverTopologyFixtureLoader.js';
 import { test_Fillet_NonClosed, afterRun_Fillet_NonClosed } from './test_fillet_nonClosed.js';
@@ -83,6 +84,7 @@ export const testFunctions = [
     { test: test_sketch_solver_topology_rect_round_trip_sequence, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_solver_topology_coincident_chain_multi_step, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_solver_distance_slide_large_drop_settles_single_solve, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sketch_solver_line_to_point_distance_constraint, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_offsetShellGrouping, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_ExtrudeFace, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_Fillet, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },

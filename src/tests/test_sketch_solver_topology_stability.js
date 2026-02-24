@@ -30,6 +30,17 @@ function dist(sketch, a, b) {
     return Math.hypot(p1.x - p0.x, p1.y - p0.y);
 }
 
+function pointToLineDistance(sketch, lineStartId, lineEndId, pointId) {
+    const a = getPoint(sketch, lineStartId);
+    const b = getPoint(sketch, lineEndId);
+    const p = getPoint(sketch, pointId);
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lenSq = dx * dx + dy * dy;
+    if (!(lenSq > 1e-12)) return Math.hypot(p.x - a.x, p.y - a.y);
+    return Math.abs(((p.x - a.x) * (-dy) + (p.y - a.y) * dx) / Math.sqrt(lenSq));
+}
+
 function signedArea(sketch, pointIds) {
     const pts = pointIds.map((id) => getPoint(sketch, id));
     let area2 = 0;
@@ -345,4 +356,35 @@ export async function test_sketch_solver_distance_slide_large_drop_settles_singl
     solver.solveSketch("full");
     const after = solver.sketchObject;
     assertNear(dist(after, 0, 1), 1, 1e-2, "distance slide large-drop did not settle in one solve");
+}
+
+export async function test_sketch_solver_line_to_point_distance_constraint() {
+    const sketch = {
+        points: [
+            { id: 0, x: 0, y: 0, fixed: true },
+            { id: 1, x: 120, y: 0, fixed: false },
+            { id: 2, x: 30, y: 30, fixed: false },
+        ],
+        geometries: [
+            { id: 500, type: "line", points: [0, 1], construction: false },
+        ],
+        constraints: [
+            { id: 0, type: "⏚", points: [0] },
+            { id: 1, type: "━", points: [0, 1] },
+            { id: 2, type: "↥", points: [0, 1, 2], value: 30 },
+        ],
+    };
+
+    const solver = solveSketch(sketch);
+    const before = JSON.parse(JSON.stringify(solver.sketchObject));
+    const c = getConstraint(solver.sketchObject, 2);
+    c.value = 80;
+    solver.solveSketch("full");
+    const after = solver.sketchObject;
+
+    assertTopologyUnchanged(before, after, "line-to-point distance edit");
+    assertNear(pointToLineDistance(after, 0, 1, 2), 80, 8e-2, "line-to-point distance mismatch");
+    const p0 = getPoint(after, 0);
+    assertNear(p0.x, 0, EPS, "line-to-point distance anchor x moved");
+    assertNear(p0.y, 0, EPS, "line-to-point distance anchor y moved");
 }
