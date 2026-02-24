@@ -1093,6 +1093,10 @@ export class SelectionFilter {
                     flex-direction: column;
                     gap: 6px;
                     align-items: stretch;
+                    max-height: calc(100vh - 116px);
+                    overflow-y: auto;
+                    overflow-x: hidden;
+                    overscroll-behavior: contain;
                     background: rgba(20,24,30,.85);
                     border: 1px solid #262b36;
                     border-radius: 8px;
@@ -1104,7 +1108,7 @@ export class SelectionFilter {
                     user-select: none;
                   }
                   .selection-action-bar .sab-btn {
-                    background: transparent;
+                    background: rgba(28,34,44,.88);
                     border-radius: 6px;
                     padding: 4px 8px;
                     width: 100%;
@@ -1358,7 +1362,7 @@ export class SelectionFilter {
                     box-shadow: 0 6px 18px rgba(0,0,0,.35);
                   }
                   .selection-filter-indicator .sfi-toggle {
-                    background: transparent;
+                    background: rgba(28,34,44,.88);
                     border-radius: 8px;
                     padding: 6px 10px;
                     flex: 1;
@@ -1408,7 +1412,7 @@ export class SelectionFilter {
                   }
                   .selection-filter-indicator .sfi-btn {
                     flex: 1;
-                    background: rgba(255,255,255,.04);
+                    background: rgba(28,34,44,.88);
                     border: 1px solid #364053;
                     border-radius: 8px;
                     color: #e2e8f0;

@@ -62,7 +62,7 @@ export class MainToolbar {
       .mtb-spacer { flex: 1; }
 
       .mtb-btn {
-        background: transparent;
+        background: rgba(28,34,44,.88);
         color: #ddd;
         border: 1px solid #364053;
         padding: 4px 8px;
