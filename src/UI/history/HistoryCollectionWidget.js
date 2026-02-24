@@ -301,6 +301,8 @@ export class HistoryCollectionWidget {
     }
     if (elements.item) {
       elements.item.classList.toggle('has-error', Boolean(info.hasError));
+      elements.item.classList.toggle('is-running', Boolean(info.isRunning));
+      elements.item.setAttribute('aria-busy', info.isRunning ? 'true' : 'false');
     }
     return info;
   }

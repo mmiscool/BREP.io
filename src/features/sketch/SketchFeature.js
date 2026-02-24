@@ -5,6 +5,71 @@ const THREE = BREP.THREE;
 import { LineGeometry } from 'three/examples/jsm/Addons.js';
 import { deepClone } from '../../utils/deepClone.js';
 import { SelectionState } from '../../UI/SelectionState.js';
+import { renderButtonField } from '../../UI/featureDialogWidgets/buttonField.js';
+
+function hasReferenceValue(value) {
+    if (value == null) return false;
+    if (Array.isArray(value)) return value.some((item) => hasReferenceValue(item));
+    if (typeof value === 'string') return value.trim().length > 0;
+    if (typeof value === 'object') {
+        const name = typeof value?.name === 'string' ? value.name.trim() : '';
+        if (name) return true;
+        const id = typeof value?.id === 'string' ? value.id.trim() : '';
+        if (id) return true;
+        if (Array.isArray(value?.path) && value.path.length > 0) return true;
+        return Object.keys(value).length > 0;
+    }
+    return String(value).trim().length > 0;
+}
+
+function invokeButtonAction(ui, key, def) {
+    const fid = (ui?.params && Object.prototype.hasOwnProperty.call(ui.params, 'featureID'))
+        ? ui.params.featureID
+        : (ui?.params?.id ?? null);
+    let handled = false;
+    try {
+        if (def && typeof def.actionFunction === 'function') {
+            const ctx = {
+                featureID: fid,
+                key,
+                viewer: ui?.options?.viewer || null,
+                partHistory: ui?.options?.partHistory || null,
+                feature: ui?.options?.featureRef || null,
+                params: ui?.params || null,
+                schemaDef: def,
+            };
+            def.actionFunction(ctx);
+            handled = true;
+        }
+    } catch { /* ignore */ }
+    if (!handled) {
+        try { if (typeof ui?.options?.onAction === 'function') ui.options.onAction(fid, key); } catch { /* ignore */ }
+    }
+}
+
+function renderEditSketchButtonField(args = {}) {
+    const widget = renderButtonField(args);
+    const { ui = null, key = 'editSketch', def = null } = args;
+    const autoLaunch = () => {
+        const viewer = ui?.options?.viewer || null;
+        if (!viewer || typeof viewer.startSketchMode !== 'function') return;
+        const params = ui?.params || null;
+        if (!hasReferenceValue(params?.sketchPlane)) return;
+        const fid = (params && Object.prototype.hasOwnProperty.call(params, 'featureID'))
+            ? params.featureID
+            : (params?.id ?? null);
+        if (fid == null) return;
+        const activeSketchId = viewer?._sketchMode?.featureID ?? null;
+        if (activeSketchId != null && String(activeSketchId) === String(fid)) return;
+        invokeButtonAction(ui, key, def);
+    };
+    if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => { autoLaunch(); });
+    } else {
+        setTimeout(autoLaunch, 0);
+    }
+    return widget;
+}
 
 const inputParamsSchema = {
     id: {
@@ -24,6 +89,7 @@ const inputParamsSchema = {
         label: "Edit Sketch",
         default_value: null,
         hint: "Launch the 2D sketch editor",
+        renderWidget: renderEditSketchButtonField,
         actionFunction: (ctx) => {
             try {
                 if (ctx && ctx.viewer && typeof ctx.viewer.startSketchMode === 'function') {

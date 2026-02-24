@@ -39,6 +39,16 @@ export const HISTORY_COLLECTION_WIDGET_CSS = `
   .hc-item:hover {
     border-color: white;
   }
+  .hc-item.is-running {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px rgba(110,168,254,.35), 0 0 0 1px rgba(110,168,254,.2);
+  }
+  .hc-item.is-running .hc-header-row {
+    background: linear-gradient(90deg, rgba(110,168,254,.2), rgba(110,168,254,.06));
+  }
+  .hc-item.is-running .hc-title {
+    color: #eaf2ff;
+  }
   .hc-header-row {
     display: flex;
     align-items: stretch;

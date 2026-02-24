@@ -58,6 +58,7 @@ export class PartHistory {
     this.assemblyConstraintHistory = new AssemblyConstraintHistory(this, this.assemblyConstraintRegistry);
     this.callbacks = {};
     this.currentHistoryStepId = null;
+    this.runningFeatureId = null;
     this.expressions = "//Examples:\nx = 10 + 6; \ny = x * 2;";
     this.pmiViewsManager = new PMIViewsManager(this);
     this.metadataManager = new MetadataManager
@@ -300,218 +301,228 @@ export class PartHistory {
     // console.log("PartHistory reset complete.");
   }
 
+  #setFeatureRunningState(featureId = null) {
+    this.runningFeatureId = featureId != null ? String(featureId) : null;
+  }
+
   async runHistory() {
     const whatStepToStopAt = this.currentHistoryStepId;
 
-    this.#disposeSceneObjects((obj) => !obj?.isLight && !obj?.isCamera && !obj?.isTransformGizmo);
-    await this.scene.clear();
-  
+    this.#setFeatureRunningState(null);
+    try {
+      this.#disposeSceneObjects((obj) => !obj?.isLight && !obj?.isCamera && !obj?.isTransformGizmo);
+      await this.scene.clear();
 
 
-    let skipAllFeatures = false;
-    const features = Array.isArray(this.features) ? this.features : [];
-    let previousFeatureTimestamp = features.length ? (features[0]?.timestamp ?? null) : null;
-    const nowMs = () => (typeof performance !== 'undefined' && performance?.now ? performance.now() : Date.now());
-    for (let i = 0; i < features.length; i++) {
-      const feature = features[i];
-      this.#linkFeatureParams(feature);
-      const featureId = resolveFeatureEntryId(feature);
-      if (skipAllFeatures) {
-        continue;
-      }
+      let skipAllFeatures = false;
+      const features = Array.isArray(this.features) ? this.features : [];
+      let previousFeatureTimestamp = features.length ? (features[0]?.timestamp ?? null) : null;
+      const nowMs = () => (typeof performance !== 'undefined' && performance?.now ? performance.now() : Date.now());
+      for (let i = 0; i < features.length; i++) {
+        const feature = features[i];
+        this.#linkFeatureParams(feature);
+        const featureId = resolveFeatureEntryId(feature);
+        if (skipAllFeatures) {
+          continue;
+        }
 
-      const nextFeature = features[i + 1];
+        const nextFeature = features[i + 1];
 
-      if (whatStepToStopAt && featureId === whatStepToStopAt) {
-        skipAllFeatures = true; // stop after this feature
-      }
+        if (whatStepToStopAt && featureId === whatStepToStopAt) {
+          skipAllFeatures = true; // stop after this feature
+        }
 
-      // Do NOT mutate currentHistoryStepId while running.
-      // It is used by the UI to indicate which panel the user wants open
-      // (and to determine the stop-at step). Updating it here caused the
-      // HistoryWidget to constantly switch the open panel to whatever
-      // feature happened to be executing, which made it impossible to
-      // expand items after PNG imports and similar long-running steps.
+        this.#setFeatureRunningState(featureId);
 
-      if (this.callbacks.run) {
-        await this.callbacks.run(featureId);
-      }
-      const FeatureClass = this.featureRegistry.getSafe(feature.type);
-      if (!FeatureClass) {
-        // Record an error on the feature but do not abort the whole run.
-        const t1 = nowMs();
-        const msg = `Feature type \"${feature.type}\" is not installed`;
-        try { feature.lastRun = { ok: false, startedAt: t1, endedAt: t1, durationMs: 0, error: { name: 'MissingFeature', message: msg, stack: null } }; } catch { }
-        // Skip visualization/add/remove steps for this feature
-        continue;
-      }
-      const instance = new FeatureClass(this);
+        // Do NOT mutate currentHistoryStepId while running.
+        // It is used by the UI to indicate which panel the user wants open
+        // (and to determine the stop-at step). Updating it here caused the
+        // HistoryWidget to constantly switch the open panel to whatever
+        // feature happened to be executing, which made it impossible to
+        // expand items after PNG imports and similar long-running steps.
 
-      //await Object.assign(instance.inputParams, feature.inputParams);
-      await Object.assign(instance.persistentData, feature.persistentData);
+        if (this.callbacks.run) {
+          await this.callbacks.run(featureId);
+        }
+        const FeatureClass = this.featureRegistry.getSafe(feature.type);
+        if (!FeatureClass) {
+          // Record an error on the feature but do not abort the whole run.
+          const t1 = nowMs();
+          const msg = `Feature type \"${feature.type}\" is not installed`;
+          try { feature.lastRun = { ok: false, startedAt: t1, endedAt: t1, durationMs: 0, error: { name: 'MissingFeature', message: msg, stack: null } }; } catch { }
+          // Skip visualization/add/remove steps for this feature
+          continue;
+        }
+        const instance = new FeatureClass(this);
 
-      // Remove any existing scene children owned by this feature (rerun case)
-      const toRemoveOwned = this.scene.children.slice().filter(ch => ch?.owningFeatureID === featureId);
-      if (toRemoveOwned.length) {
-        for (const ch of toRemoveOwned) this.scene.remove(ch);
-      }
+        //await Object.assign(instance.inputParams, feature.inputParams);
+        await Object.assign(instance.persistentData, feature.persistentData);
 
-      // if the previous feature had a timestamp later than this feature, we mark this feature as dirty to ensure it gets re-run
-      if (previousFeatureTimestamp != null && Number.isFinite(feature.timestamp) && previousFeatureTimestamp > feature.timestamp) {
-        feature.dirty = true;
-      }
-      // if the inputParams have changed since last run, mark dirty
-      // (ignore UI-only keys such as panel expansion state).
-      const inputParamsSignature = stringifyInputParamsForDirtyCheck(feature.inputParams);
-      if (inputParamsSignature !== feature.lastRunInputParams) feature.dirty = true;
+        // Remove any existing scene children owned by this feature (rerun case)
+        const toRemoveOwned = this.scene.children.slice().filter(ch => ch?.owningFeatureID === featureId);
+        if (toRemoveOwned.length) {
+          for (const ch of toRemoveOwned) this.scene.remove(ch);
+        }
 
-      instance.inputParams = await this.sanitizeInputParams(FeatureClass.inputParamsSchema, feature.inputParams);
-      try { this._captureReferencePreviewSnapshots(feature, FeatureClass.inputParamsSchema, instance.inputParams, instance.persistentData); } catch { }
-      // check the timestamps of any objects referenced by reference_selection inputs; if any are newer than the feature timestamp, mark dirty
-      for (const key in FeatureClass.inputParamsSchema) {
-        if (Object.prototype.hasOwnProperty.call(FeatureClass.inputParamsSchema, key)) {
-          const paramDef = FeatureClass.inputParamsSchema[key];
-          if (paramDef.type === 'reference_selection') {
-            const selected = Array.isArray(instance.inputParams[key]) ? instance.inputParams[key] : [];
-            for (const obj of selected) {
-              if (obj && typeof obj === 'object') {
-                const objTime = Number(obj.timestamp);
-                if (Number.isFinite(objTime) && (!Number.isFinite(feature.timestamp) || objTime > feature.timestamp)) {
-                  feature.dirty = true;
-                  break;
+        // if the previous feature had a timestamp later than this feature, we mark this feature as dirty to ensure it gets re-run
+        if (previousFeatureTimestamp != null && Number.isFinite(feature.timestamp) && previousFeatureTimestamp > feature.timestamp) {
+          feature.dirty = true;
+        }
+        // if the inputParams have changed since last run, mark dirty
+        // (ignore UI-only keys such as panel expansion state).
+        const inputParamsSignature = stringifyInputParamsForDirtyCheck(feature.inputParams);
+        if (inputParamsSignature !== feature.lastRunInputParams) feature.dirty = true;
+
+        instance.inputParams = await this.sanitizeInputParams(FeatureClass.inputParamsSchema, feature.inputParams);
+        try { this._captureReferencePreviewSnapshots(feature, FeatureClass.inputParamsSchema, instance.inputParams, instance.persistentData); } catch { }
+        // check the timestamps of any objects referenced by reference_selection inputs; if any are newer than the feature timestamp, mark dirty
+        for (const key in FeatureClass.inputParamsSchema) {
+          if (Object.prototype.hasOwnProperty.call(FeatureClass.inputParamsSchema, key)) {
+            const paramDef = FeatureClass.inputParamsSchema[key];
+            if (paramDef.type === 'reference_selection') {
+              const selected = Array.isArray(instance.inputParams[key]) ? instance.inputParams[key] : [];
+              for (const obj of selected) {
+                if (obj && typeof obj === 'object') {
+                  const objTime = Number(obj.timestamp);
+                  if (Number.isFinite(objTime) && (!Number.isFinite(feature.timestamp) || objTime > feature.timestamp)) {
+                    feature.dirty = true;
+                    break;
+                  }
                 }
               }
             }
           }
         }
-      }
 
-      // compare any numeric inputParams as evaluated by the sanitizeInputParams method and catch changes due to expressions
-      // the instance.inputParams have already been sanitized
+        // compare any numeric inputParams as evaluated by the sanitizeInputParams method and catch changes due to expressions
+        // the instance.inputParams have already been sanitized
 
-      for (const key in FeatureClass.inputParamsSchema) {
-        if (Object.prototype.hasOwnProperty.call(FeatureClass.inputParamsSchema, key)) {
-          const paramDef = FeatureClass.inputParamsSchema[key];
-          if (feature.previouseExpressions === undefined) feature.previouseExpressions = {};
-          const exprMap = feature?.inputParams && typeof feature.inputParams === 'object'
-            ? feature.inputParams.__expr
-            : null;
-          const hasExpr = !!(exprMap && Object.prototype.hasOwnProperty.call(exprMap, key));
-          const trackExpr = paramDef.type === 'number'
-            || hasExpr
-            || (paramDef.type === 'string' && paramDef.allowExpression);
-          if (trackExpr) {
-            try {
-              const makeSig = (value) => {
-                if (value == null) return 'null';
-                if (typeof value === 'object') {
-                  try { return JSON.stringify(value); } catch { return String(value); }
-                }
-                return String(value);
-              };
-              const nextSig = makeSig(instance.inputParams[key]);
-              if (feature.previouseExpressions[key] === undefined) feature.dirty = true;
-              else if (String(feature.previouseExpressions[key]) !== nextSig) feature.dirty = true;
-              feature.previouseExpressions[key] = nextSig;
-            } catch {
-              feature.dirty = true;
-              feature.previouseExpressions[key] = instance.inputParams[key];
+        for (const key in FeatureClass.inputParamsSchema) {
+          if (Object.prototype.hasOwnProperty.call(FeatureClass.inputParamsSchema, key)) {
+            const paramDef = FeatureClass.inputParamsSchema[key];
+            if (feature.previouseExpressions === undefined) feature.previouseExpressions = {};
+            const exprMap = feature?.inputParams && typeof feature.inputParams === 'object'
+              ? feature.inputParams.__expr
+              : null;
+            const hasExpr = !!(exprMap && Object.prototype.hasOwnProperty.call(exprMap, key));
+            const trackExpr = paramDef.type === 'number'
+              || hasExpr
+              || (paramDef.type === 'string' && paramDef.allowExpression);
+            if (trackExpr) {
+              try {
+                const makeSig = (value) => {
+                  if (value == null) return 'null';
+                  if (typeof value === 'object') {
+                    try { return JSON.stringify(value); } catch { return String(value); }
+                  }
+                  return String(value);
+                };
+                const nextSig = makeSig(instance.inputParams[key]);
+                if (feature.previouseExpressions[key] === undefined) feature.dirty = true;
+                else if (String(feature.previouseExpressions[key]) !== nextSig) feature.dirty = true;
+                feature.previouseExpressions[key] = nextSig;
+              } catch {
+                feature.dirty = true;
+                feature.previouseExpressions[key] = instance.inputParams[key];
+              }
             }
           }
         }
-      }
 
 
-      // manually run the sketch feature and then test if the geometry has changed
-      // if so, mark dirty
-      const featureName = FeatureClass?.longName || FeatureClass?.shortName || FeatureClass?.name || '';
-      if (featureName === 'Sketch') {
-        try {
-          instance.run(this);
-          const sketchChanged = await instance.hasSketchChanged(feature);
-          if (sketchChanged) feature.dirty = true;
-        } catch (error) {
-          console.warn('[PartHistory] Sketch change detection failed:', error);
-          feature.dirty = true;
-        }
-      }
-
-      if (feature.dirty) {
-        if (debug) console.log("feature dirty");
-        if (debug) console.log(`Running feature ${i + 1}/${features.length} (${featureId}) of type ${feature.type}...`, feature);
-        // if this one is dirty, next one should be too (conservative)
-        if (nextFeature) nextFeature.dirty = true;
-
-        // Record the current input params as lastRunInputParams
-        feature.lastRunInputParams = inputParamsSignature;
-
-
-        const t0 = nowMs();
-
-        try {
-          instance.resultArtifacts = await instance.run(this);
-          feature.effects = {
-            added: instance.resultArtifacts.added || [],
-            removed: instance.resultArtifacts.removed || []
+        // manually run the sketch feature and then test if the geometry has changed
+        // if so, mark dirty
+        const featureName = FeatureClass?.longName || FeatureClass?.shortName || FeatureClass?.name || '';
+        if (featureName === 'Sketch') {
+          try {
+            instance.run(this);
+            const sketchChanged = await instance.hasSketchChanged(feature);
+            if (sketchChanged) feature.dirty = true;
+          } catch (error) {
+            console.warn('[PartHistory] Sketch change detection failed:', error);
+            feature.dirty = true;
           }
-
-
-          feature.timestamp = Date.now();
-          previousFeatureTimestamp = feature.timestamp;
-
-          const t1 = nowMs();
-          const dur = Math.max(0, Math.round(t1 - t0));
-
-          feature.lastRun = { ok: true, startedAt: t0, endedAt: t1, durationMs: dur, error: null };
-          feature.dirty = false;
-        } catch (e) {
-          const t1 = nowMs();
-          const dur = Math.max(0, Math.round(t1 - t0));
-          feature.lastRun = { ok: false, startedAt: t0, endedAt: t1, durationMs: dur, error: { message: e?.message || String(e), name: e?.name || 'Error', stack: e?.stack || null } };
-          feature.timestamp = Date.now();
-
-          previousFeatureTimestamp = feature.timestamp;
-          instance.errorString = `Error occurred while running feature ${featureId}: ${e.message}`;
-          console.error(e);
-          return;
         }
+
+        if (feature.dirty) {
+          if (debug) console.log("feature dirty");
+          if (debug) console.log(`Running feature ${i + 1}/${features.length} (${featureId}) of type ${feature.type}...`, feature);
+          // if this one is dirty, next one should be too (conservative)
+          if (nextFeature) nextFeature.dirty = true;
+
+          // Record the current input params as lastRunInputParams
+          feature.lastRunInputParams = inputParamsSignature;
+
+
+          const t0 = nowMs();
+
+          try {
+            instance.resultArtifacts = await instance.run(this);
+            feature.effects = {
+              added: instance.resultArtifacts.added || [],
+              removed: instance.resultArtifacts.removed || []
+            }
+
+
+            feature.timestamp = Date.now();
+            previousFeatureTimestamp = feature.timestamp;
+
+            const t1 = nowMs();
+            const dur = Math.max(0, Math.round(t1 - t0));
+
+            feature.lastRun = { ok: true, startedAt: t0, endedAt: t1, durationMs: dur, error: null };
+            feature.dirty = false;
+          } catch (e) {
+            const t1 = nowMs();
+            const dur = Math.max(0, Math.round(t1 - t0));
+            feature.lastRun = { ok: false, startedAt: t0, endedAt: t1, durationMs: dur, error: { message: e?.message || String(e), name: e?.name || 'Error', stack: e?.stack || null } };
+            feature.timestamp = Date.now();
+
+            previousFeatureTimestamp = feature.timestamp;
+            instance.errorString = `Error occurred while running feature ${featureId}: ${e.message}`;
+            console.error(e);
+            return;
+          }
+        }
+
+        await this.applyFeatureEffects(feature.effects, featureId, feature);
+
+
+        feature.persistentData = instance.persistentData;
+        try {
+          if (feature?.persistentData?.consumeFileInput && feature?.inputParams && typeof feature.inputParams === 'object') {
+            if (Object.prototype.hasOwnProperty.call(feature.inputParams, 'fileToImport')) {
+              feature.inputParams.fileToImport = '';
+            }
+            const exprMap = feature.inputParams.__expr;
+            if (exprMap && typeof exprMap === 'object' && !Array.isArray(exprMap)) {
+              delete exprMap.fileToImport;
+              if (Object.keys(exprMap).length === 0) delete feature.inputParams.__expr;
+            }
+            delete feature.persistentData.consumeFileInput;
+            feature.lastRunInputParams = stringifyInputParamsForDirtyCheck(feature.inputParams);
+          }
+        } catch { /* ignore */ }
       }
 
-      await this.applyFeatureEffects(feature.effects, featureId, feature);
-
-
-      feature.persistentData = instance.persistentData;
       try {
-        if (feature?.persistentData?.consumeFileInput && feature?.inputParams && typeof feature.inputParams === 'object') {
-          if (Object.prototype.hasOwnProperty.call(feature.inputParams, 'fileToImport')) {
-            feature.inputParams.fileToImport = '';
-          }
-          const exprMap = feature.inputParams.__expr;
-          if (exprMap && typeof exprMap === 'object' && !Array.isArray(exprMap)) {
-            delete exprMap.fileToImport;
-            if (Object.keys(exprMap).length === 0) delete feature.inputParams.__expr;
-          }
-          delete feature.persistentData.consumeFileInput;
-          feature.lastRunInputParams = stringifyInputParamsForDirtyCheck(feature.inputParams);
-        }
-      } catch { /* ignore */ }
+        await this.runAssemblyConstraints();
+      } catch (error) {
+        console.warn('[PartHistory] Assembly constraints run failed:', error);
+      }
+
+      // Do not clear currentHistoryStepId here. Keeping it preserves the UX of
+      // "stop at the currently expanded feature" across subsequent runs. The
+      // UI will explicitly clear it when no section is expanded.
+
+      if (this.callbacks.afterRunHistory) {
+        try { await this.callbacks.afterRunHistory(); } catch { /* ignore */ }
+      }
+
+      return this;
+    } finally {
+      this.#setFeatureRunningState(null);
     }
-
-    try {
-      await this.runAssemblyConstraints();
-    } catch (error) {
-      console.warn('[PartHistory] Assembly constraints run failed:', error);
-    }
-
-    // Do not clear currentHistoryStepId here. Keeping it preserves the UX of
-    // "stop at the currently expanded feature" across subsequent runs. The
-    // UI will explicitly clear it when no section is expanded.
-
-    if (this.callbacks.afterRunHistory) {
-      try { await this.callbacks.afterRunHistory(); } catch { /* ignore */ }
-    }
-
-    return this;
   }
 
   _captureReferencePreviewSnapshots(feature, schema, resolvedParams, persistentTarget = null) {

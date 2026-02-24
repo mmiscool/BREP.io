@@ -59,7 +59,17 @@ function resolveEntityClass(entry, history = null) {
   return { entityClass: entry?.constraintClass || entry?.constructor || null, foundInRegistry };
 }
 
-function resolveStatus(entry) {
+function resolveStatus(entry, { isRunning = false } = {}) {
+  if (isRunning) {
+    return {
+      label: 'Running...',
+      title: 'Currently executing',
+      color: '#6ea8fe',
+      error: false,
+      running: true,
+    };
+  }
+
   if (entry?.lastRun) {
     const duration = entry.lastRun.durationMs;
     const parts = [];
@@ -69,6 +79,7 @@ function resolveStatus(entry) {
     return {
       label: parts.join(' ').trim(),
       error: entry.lastRun.ok === false,
+      running: false,
     };
   }
 
@@ -80,13 +91,14 @@ function resolveStatus(entry) {
         title: info.title || '',
         color: info.color || '',
         error: Boolean(info.error),
+        running: false,
       };
     } catch {
-      return { label: '', title: '' };
+      return { label: '', title: '', running: false };
     }
   }
 
-  return { label: '' };
+  return { label: '', running: false };
 }
 
 export function resolveHistoryDisplayInfo(entry, {
@@ -119,7 +131,9 @@ export function resolveHistoryDisplayInfo(entry, {
     ''
   );
   const id = resolveEntryId(entry, index);
-  const status = resolveStatus(entry);
+  const runningFeatureId = history?.runningFeatureId != null ? String(history.runningFeatureId) : null;
+  const isRunning = runningFeatureId != null && String(id) === runningFeatureId;
+  const status = resolveStatus(entry, { isRunning });
 
   return {
     name: longName || shortName || `Item ${index + 1}`,
@@ -128,6 +142,7 @@ export function resolveHistoryDisplayInfo(entry, {
     statusTitle: status.title || '',
     statusColor: status.color || '',
     badge: '',
+    isRunning: Boolean(status.running || isRunning),
     hasError: Boolean(status.error || (!foundInRegistry && !!resolvedType)),
   };
 }
