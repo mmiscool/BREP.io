@@ -21,6 +21,25 @@ import { computeFaceAreaFromTriangles } from "./filletGeometry.js";
 export { clearFilletCaches, trimFilletCaches } from './inset.js';
 export { fixTJunctionsAndPatchHoles } from './outset.js';
 
+function normalizeFilletSideMode(sideMode = 'INSET') {
+    return String(sideMode || 'INSET').toUpperCase() === 'OUTSET' ? 'OUTSET' : 'INSET';
+}
+
+function createFilletSidePolicy(sideMode = 'INSET') {
+    const mode = normalizeFilletSideMode(sideMode);
+    const isOutset = mode === 'OUTSET';
+    return {
+        mode,
+        isOutset,
+        isInset: !isOutset,
+        preferOutsetCenter: isOutset,
+        bisectorFlipForOutset: isOutset,
+        defaultWedgeOffsetSign: isOutset ? 1 : -1, // +1 => toward centerline, -1 => away
+        useInsideCheckForWedge: isOutset,
+        applyOpenEndCapPush: !isOutset,
+    };
+}
+
 function buildPointInsideTester(solid) {
     if (!solid) return null;
     const tv = solid._triVerts;
@@ -143,6 +162,7 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
     const out = { points: [], tangentA: [], tangentB: [], edge: [], closedLoop: false };
     try {
         if (!edgeObj || !Number.isFinite(radius) || radius <= 0) return out;
+        const sidePolicy = createFilletSidePolicy(sideMode);
         const solid = edgeObj.parentSolid || edgeObj.parent;
         if (!solid) return out;
         const faceA = edgeObj.faces?.[0] || null;
@@ -292,7 +312,7 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
         const avgNormalScratch = new THREE.Vector3();
 
         const rEff = Math.max(eps, radius);
-        const preferOutset = String(sideMode).toUpperCase() === 'OUTSET';
+        const preferOutset = sidePolicy.preferOutsetCenter;
         let maxAllowedRadius = Infinity;
         let maxAllowedSamples = 0;
         let centers = [];
@@ -571,7 +591,7 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
                 })();
                 if (!Number.isFinite(pToC) || pToC > hardCap || pToC > factor * expectDistSafe) {
                     let dir2 = new THREE.Vector2(bis2.x, bis2.y);
-                    if (String(sideMode).toUpperCase() === 'OUTSET') dir2.multiplyScalar(-1);
+                    if (sidePolicy.bisectorFlipForOutset) dir2.multiplyScalar(-1);
                     if (dir2.lengthSq() > 1e-16) {
                         dir2.normalize();
                         const dir3 = bisector3.set(0, 0, 0).addScaledVector(u, dir2.x).addScaledVector(v, dir2.y).normalize();
@@ -944,7 +964,8 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
             throw new Error(`filletSolid: radius must be a positive number, got ${radius}`);
         }
 
-        const side = String(sideMode).toUpperCase();
+        const sidePolicy = createFilletSidePolicy(sideMode);
+        const side = sidePolicy.mode;
         const requestedRadius = radius;
         let radiusUsed = radius;
         const tubeResolution = (Number.isFinite(Number(resolution)) && Number(resolution) > 0)
@@ -1081,8 +1102,10 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
         // Use a small radius-scaled inward nudge for OUTSET, capped to avoid
         // large displacements on big models.
         const outsetInsetMagnitude = Math.max(1e-4, Math.min(0.05, Math.abs(radiusUsed) * 0.05));
-        const wedgeInsetMagnitude = closedLoop ? 0 : ((side === 'INSET') ? Math.abs(inflate) : outsetInsetMagnitude);
-        const useInsideCheck = wedgeInsetMagnitude && side === 'OUTSET';
+        const wedgeInsetMagnitude = closedLoop
+            ? 0
+            : (sidePolicy.isInset ? Math.abs(inflate) : outsetInsetMagnitude);
+        const useInsideCheck = wedgeInsetMagnitude && sidePolicy.useInsideCheckForWedge;
         const pointInsideTarget = useInsideCheck
             ? buildPointInsideTester(edgeToFillet?.parentSolid || edgeToFillet?.parent || null)
             : null;
@@ -1176,7 +1199,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                                 // Fallback to previous sign-based behavior.
                                 const dirSign = (preferredDirSign !== null)
                                     ? preferredDirSign
-                                    : ((side === 'INSET') ? -1 : 1);
+                                    : sidePolicy.defaultWedgeOffsetSign;
                                 const step = dirSign * wedgeInsetMagnitude;
                                 chosen = {
                                     x: origWedgeEdge.x + normalizedInward.x * step,
@@ -1366,6 +1389,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                 radius: inflatedTubeRadius,
                 innerRadius: 0,
                 resolution: tubeResolution,
+                selfUnion: false,
                 name: `${name}_TUBE`,
             });
 
@@ -1670,19 +1694,21 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
         logDebug('Wedge solid creation completed');
         const triangleCount = wedgeSolid._triVerts ? wedgeSolid._triVerts.length / 3 : 0;
         logDebug('Wedge solid created with', triangleCount, 'triangles (raw count)');
-        try { wedgeSolid.visualize(); } catch { }
+        if (debug) {
+            try { wedgeSolid.visualize(); } catch { }
+        }
 
         wedgeSolid.pushFace(`${name}_FACE_A`, 0.0001);
         wedgeSolid.pushFace(`${name}_FACE_B`, 0.0001);
 
         // Apply end cap offset for INSET fillets using pushFace method
-        if (side === 'INSET' && !closedLoop) {
+        if (sidePolicy.applyOpenEndCapPush && !closedLoop) {
             logDebug('Applying end cap offset to INSET fillet using pushFace...');
             try {
                 // Push both end caps outward by 0.001
                 wedgeSolid.pushFace(`${name}_END_CAP_1`, 0.0001);
                 wedgeSolid.pushFace(`${name}_END_CAP_2`, 0.0001);
-                wedgeSolid.visualize();
+                if (debug) wedgeSolid.visualize();
                 logDebug('End cap offset applied successfully');
             } catch (pushError) {
                 console.warn('Failed to apply end cap offset:', pushError?.message || pushError);
@@ -1712,7 +1738,9 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
         try {
             const finalSolid = wedgeSolid.subtract(filletTube);
             finalSolid.name = `${name}_FINAL_FILLET`;
-            try { finalSolid.visualize(); } catch { }
+            if (debug) {
+                try { finalSolid.visualize(); } catch { }
+            }
             logDebug('Final fillet solid created by subtracting tube from wedge', finalSolid);
 
             return {

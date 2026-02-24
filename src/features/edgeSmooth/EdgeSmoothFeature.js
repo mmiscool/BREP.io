@@ -1,11 +1,9 @@
 import {
-    collectEdgesFromSelection,
     getSolidGeometryCounts,
 } from "../edgeFeatureUtils.js";
+import { fitAndSnapOpenEdgePolyline } from "./edgeCurveFit.js";
 
-const DEFAULT_ANGLE_THRESHOLD_DEG = 80;
-const DEFAULT_MAX_RELATIVE_SEGMENT_LENGTH = 0.8;
-const MIN_VECTOR_LENGTH = 1e-12;
+const DEFAULT_FIT_STRENGTH = 1;
 const POINT_MATCH_EPSILON = 1e-9;
 
 const inputParamsSchema = {
@@ -16,22 +14,16 @@ const inputParamsSchema = {
     },
     edges: {
         type: "reference_selection",
-        selectionFilter: ["EDGE"],
+        selectionFilter: ["EDGE", "FACE", "SOLID"],
         multiple: true,
         default_value: null,
-        hint: "Select one or more edges to smooth abrupt short kinks",
+        hint: "Select edges, faces, or solids to curve-fit associated edges",
     },
-    angleThresholdDeg: {
-        type: "number",
-        step: 1,
-        default_value: DEFAULT_ANGLE_THRESHOLD_DEG,
-        hint: "Minimum turn angle (degrees) considered abrupt",
-    },
-    maxRelativeSegmentLength: {
+    fitStrength: {
         type: "number",
         step: 0.05,
-        default_value: DEFAULT_MAX_RELATIVE_SEGMENT_LENGTH,
-        hint: "Short-segment limit relative to neighboring segments",
+        default_value: DEFAULT_FIT_STRENGTH,
+        hint: "Blend amount toward the fitted curve (0 to 1)",
     },
 };
 
@@ -50,6 +42,65 @@ function collectCurrentSolidEdges(solid) {
         if (owner === solid || obj.parentSolid === solid) out.push(obj);
     });
     return out;
+}
+
+function resolveSelectionObject(entry, partHistory) {
+    if (entry && typeof entry === "object") return entry;
+    if ((typeof entry === "string" || typeof entry === "number")
+        && partHistory?.scene
+        && typeof partHistory.scene.getObjectByName === "function") {
+        try {
+            return partHistory.scene.getObjectByName(String(entry)) || null;
+        } catch {
+            return null;
+        }
+    }
+    return null;
+}
+
+function collectEdgeObjectsFromTargets(rawTargets, partHistory) {
+    const out = [];
+    const seen = new Set();
+    const seenSolid = new Set();
+    const seenFace = new Set();
+    const pushEdge = (edge) => {
+        if (!isRenderableEdge(edge)) return;
+        if (seen.has(edge)) return;
+        seen.add(edge);
+        out.push(edge);
+    };
+
+    const targets = Array.isArray(rawTargets)
+        ? rawTargets
+        : (rawTargets != null ? [rawTargets] : []);
+    for (const rawEntry of targets) {
+        const entry = resolveSelectionObject(rawEntry, partHistory);
+        if (!entry) continue;
+        const type = String(entry?.type || "").toUpperCase();
+        if (type === "EDGE") {
+            pushEdge(entry);
+            continue;
+        }
+        if (type === "FACE") {
+            if (seenFace.has(entry)) continue;
+            seenFace.add(entry);
+            const faceEdges = Array.isArray(entry.edges) ? entry.edges : [];
+            for (const edge of faceEdges) pushEdge(edge);
+            continue;
+        }
+        if (type === "SOLID") {
+            if (seenSolid.has(entry)) continue;
+            seenSolid.add(entry);
+            const solidEdges = collectCurrentSolidEdges(entry);
+            for (const edge of solidEdges) pushEdge(edge);
+        }
+    }
+
+    return {
+        edgeObjects: out,
+        selectedSolidCount: seenSolid.size,
+        selectedFaceCount: seenFace.size,
+    };
 }
 
 function getDescriptorFromEdge(edge) {
@@ -72,10 +123,6 @@ function pointDistanceSq(a, b) {
     const dy = a[1] - b[1];
     const dz = a[2] - b[2];
     return dx * dx + dy * dy + dz * dz;
-}
-
-function pointDistance(a, b) {
-    return Math.sqrt(pointDistanceSq(a, b));
 }
 
 function isPoint3(p) {
@@ -301,170 +348,93 @@ function resolveEdgePolylineWithIndices(edgeObj, solid) {
     );
 }
 
-function angleDegBetweenVectors(ax, ay, az, bx, by, bz) {
-    const lenA = Math.hypot(ax, ay, az);
-    const lenB = Math.hypot(bx, by, bz);
-    if (lenA <= MIN_VECTOR_LENGTH || lenB <= MIN_VECTOR_LENGTH) return 0;
-    const dot = (ax * bx) + (ay * by) + (az * bz);
-    const cosTheta = Math.max(-1, Math.min(1, dot / (lenA * lenB)));
-    return Math.acos(cosTheta) * (180 / Math.PI);
-}
-
-function turnAngleDeg(prev, current, next) {
-    if (!isPoint3(prev) || !isPoint3(current) || !isPoint3(next)) return 0;
-    const ax = current[0] - prev[0];
-    const ay = current[1] - prev[1];
-    const az = current[2] - prev[2];
-    const bx = next[0] - current[0];
-    const by = next[1] - current[1];
-    const bz = next[2] - current[2];
-    return angleDegBetweenVectors(ax, ay, az, bx, by, bz);
-}
-
-function isShortSegmentAgainstNeighbors(segLength, neighborLengths, maxRelativeLength) {
-    if (!Number.isFinite(segLength) || segLength <= MIN_VECTOR_LENGTH) return false;
-    if (!Array.isArray(neighborLengths) || neighborLengths.length === 0) return false;
-    let minNeighbor = Infinity;
-    for (const len of neighborLengths) {
-        if (!Number.isFinite(len) || len <= MIN_VECTOR_LENGTH) continue;
-        if (len < minNeighbor) minNeighbor = len;
-    }
-    if (!Number.isFinite(minNeighbor)) return false;
-    return segLength <= (minNeighbor * maxRelativeLength);
-}
-
-function findAbruptShortSegments(polyline, angleThresholdDeg, maxRelativeSegmentLength) {
-    const points = Array.isArray(polyline?.positions) ? polyline.positions : [];
-    const closedLoop = !!polyline?.closedLoop;
-    if (closedLoop) {
-        if (points.length < 3) return [];
-    } else if (points.length < 3) {
-        return [];
-    }
-
-    const segmentCount = closedLoop ? points.length : (points.length - 1);
-    if (closedLoop) {
-        if (segmentCount < 3) return [];
-    } else if (segmentCount < 2) {
-        return [];
-    }
-
-    const segmentLengths = new Array(segmentCount);
-    for (let i = 0; i < segmentCount; i++) {
-        const a = points[i];
-        const b = closedLoop ? points[(i + 1) % points.length] : points[i + 1];
-        segmentLengths[i] = pointDistance(a, b);
-    }
-
-    const threshold = Number.isFinite(angleThresholdDeg)
-        ? Math.max(0, angleThresholdDeg)
-        : DEFAULT_ANGLE_THRESHOLD_DEG;
-    const relativeLimit = Number.isFinite(maxRelativeSegmentLength) && maxRelativeSegmentLength > 0
-        ? maxRelativeSegmentLength
-        : DEFAULT_MAX_RELATIVE_SEGMENT_LENGTH;
-
-    const out = [];
-    if (closedLoop) {
-        for (let i = 0; i < segmentCount; i++) {
-            const prevSeg = (i - 1 + segmentCount) % segmentCount;
-            const nextSeg = (i + 1) % segmentCount;
-
-            const pPrev = points[(i - 1 + points.length) % points.length];
-            const pStart = points[i];
-            const pEnd = points[(i + 1) % points.length];
-            const pNext = points[(i + 2) % points.length];
-
-            const startTurn = turnAngleDeg(pPrev, pStart, pEnd);
-            const endTurn = turnAngleDeg(pStart, pEnd, pNext);
-            if (!(startTurn > threshold && endTurn > threshold)) continue;
-
-            const segLength = segmentLengths[i];
-            const prevLength = segmentLengths[prevSeg];
-            const nextLength = segmentLengths[nextSeg];
-            if (!isShortSegmentAgainstNeighbors(segLength, [prevLength, nextLength], relativeLimit)) continue;
-            out.push(i);
-        }
-        return out;
-    }
-
-    for (let i = 0; i < segmentCount; i++) {
-        const isStartSegment = i === 0;
-        const isEndSegment = i === (segmentCount - 1);
-
-        let passesTurnThreshold = false;
-        const neighborLengths = [];
-
-        // Turn at the segment start vertex: ... -> points[i] -> points[i+1]
-        if (!isStartSegment) {
-            const startTurn = turnAngleDeg(points[i - 1], points[i], points[i + 1]);
-            neighborLengths.push(segmentLengths[i - 1]);
-            if (startTurn > threshold) passesTurnThreshold = true;
-            if (!isEndSegment && !(startTurn > threshold)) continue;
-        }
-
-        // Turn at the segment end vertex: points[i] -> points[i+1] -> ...
-        if (!isEndSegment) {
-            const endTurn = turnAngleDeg(points[i], points[i + 1], points[i + 2]);
-            neighborLengths.push(segmentLengths[i + 1]);
-            if (endTurn > threshold) passesTurnThreshold = true;
-            if (!isStartSegment && !(endTurn > threshold)) continue;
-        }
-
-        // Endpoint segments have only one available turn; interior segments require both.
-        if (!passesTurnThreshold) continue;
-
-        const segLength = segmentLengths[i];
-        if (!isShortSegmentAgainstNeighbors(segLength, neighborLengths, relativeLimit)) continue;
-        out.push(i);
-    }
-    return out;
-}
-
-function collectCollapsePairsForEdge(edgeObj, solid, options) {
+function collectCurveTargetsForEdge(edgeObj, solid, options) {
     const polyline = resolveEdgePolylineWithIndices(edgeObj, solid);
-    if (!polyline || !Array.isArray(polyline.indices) || polyline.indices.length < 2) return [];
-
-    const segmentIndices = findAbruptShortSegments(
-        polyline,
-        options?.angleThresholdDeg,
-        options?.maxRelativeSegmentLength,
-    );
-    if (!segmentIndices.length) return [];
-
-    const indices = polyline.indices;
-    const out = [];
-    for (const rawSegmentIndex of segmentIndices) {
-        const segIndex = Number(rawSegmentIndex);
-        if (!Number.isInteger(segIndex) || segIndex < 0) continue;
-        let a = null;
-        let b = null;
-        let preferredTarget = null;
-
-        if (polyline.closedLoop) {
-            if (segIndex >= indices.length) continue;
-            a = indices[segIndex];
-            b = indices[(segIndex + 1) % indices.length];
-        } else {
-            if (segIndex + 1 >= indices.length) continue;
-            a = indices[segIndex];
-            b = indices[segIndex + 1];
-            const lastSegIndex = indices.length - 2;
-            if (segIndex === 0) preferredTarget = indices[0];
-            else if (segIndex === lastSegIndex) preferredTarget = indices[indices.length - 1];
-        }
-
-        if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a === b) continue;
-        if (preferredTarget !== a && preferredTarget !== b) preferredTarget = null;
-        out.push({ a, b, preferredTarget });
+    if (!polyline) {
+        return {
+            eligible: false,
+            closedLoop: false,
+            endpointIndices: [],
+            targets: [],
+        };
     }
-    return out;
+
+    if (polyline.closedLoop) {
+        return {
+            eligible: false,
+            closedLoop: true,
+            endpointIndices: [],
+            targets: [],
+        };
+    }
+
+    const indices = Array.isArray(polyline.indices) ? polyline.indices : [];
+    const positions = Array.isArray(polyline.positions) ? polyline.positions : [];
+    const count = Math.min(indices.length, positions.length);
+    if (count < 3) {
+        return {
+            eligible: false,
+            closedLoop: false,
+            endpointIndices: [],
+            targets: [],
+        };
+    }
+
+    const cleanedIndices = [];
+    const cleanedPositions = [];
+    for (let i = 0; i < count; i++) {
+        const idx = Number(indices[i]);
+        const p = positions[i];
+        if (!Number.isInteger(idx) || idx < 0 || !isPoint3(p)) continue;
+        cleanedIndices.push(idx);
+        cleanedPositions.push([p[0], p[1], p[2]]);
+    }
+    if (cleanedIndices.length < 3) {
+        return {
+            eligible: false,
+            closedLoop: false,
+            endpointIndices: [],
+            targets: [],
+        };
+    }
+
+    const snapped = fitAndSnapOpenEdgePolyline(cleanedPositions, {
+        fitStrength: options?.fitStrength,
+    });
+    if (!Array.isArray(snapped) || snapped.length !== cleanedPositions.length) {
+        return {
+            eligible: true,
+            closedLoop: false,
+            endpointIndices: [cleanedIndices[0], cleanedIndices[cleanedIndices.length - 1]],
+            targets: [],
+        };
+    }
+
+    const targets = [];
+    for (let i = 1; i < cleanedIndices.length - 1; i++) {
+        const idx = cleanedIndices[i];
+        const point = snapped[i];
+        if (!Number.isInteger(idx) || idx < 0 || !isPoint3(point)) continue;
+        targets.push({ index: idx, point: [point[0], point[1], point[2]] });
+    }
+
+    return {
+        eligible: true,
+        closedLoop: false,
+        endpointIndices: [cleanedIndices[0], cleanedIndices[cleanedIndices.length - 1]],
+        targets,
+    };
 }
 
-function collectPairsForDescriptors(outSolid, descriptors, options) {
+function collectTargetsForDescriptors(outSolid, descriptors, options) {
     const liveEdges = collectCurrentSolidEdges(outSolid);
-    const pairsByKey = new Map();
+    const targetMap = new Map();
+    const lockedEndpointIndices = new Set();
     let matchedEdges = 0;
-    let detectedSegments = 0;
+    let eligibleEdges = 0;
+    let fittedEdges = 0;
+    let skippedClosedLoops = 0;
+    let targetAssignments = 0;
 
     for (const descriptor of descriptors) {
         const liveEdge = findMatchingEdge(liveEdges, descriptor);
@@ -477,46 +447,49 @@ function collectPairsForDescriptors(outSolid, descriptors, options) {
         }
 
         matchedEdges++;
-        const pairs = collectCollapsePairsForEdge(liveEdge, outSolid, options);
-        if (!pairs.length) continue;
-        detectedSegments += pairs.length;
+        const fitInfo = collectCurveTargetsForEdge(liveEdge, outSolid, options);
+        if (fitInfo.closedLoop) {
+            skippedClosedLoops++;
+            continue;
+        }
+        if (!fitInfo.eligible) continue;
 
-        for (const pair of pairs) {
-            const rawA = Number(pair?.a ?? pair?.[0]);
-            const rawB = Number(pair?.b ?? pair?.[1]);
-            if (!Number.isInteger(rawA) || !Number.isInteger(rawB) || rawA < 0 || rawB < 0 || rawA === rawB) continue;
-
-            const a = Math.min(rawA, rawB);
-            const b = Math.max(rawA, rawB);
-            const key = `${a},${b}`;
-
-            const rawPreferredTarget = Number(pair?.preferredTarget);
-            const preferredTarget = (Number.isInteger(rawPreferredTarget) && (rawPreferredTarget === a || rawPreferredTarget === b))
-                ? rawPreferredTarget
-                : null;
-
-            if (!pairsByKey.has(key)) {
-                pairsByKey.set(key, { a, b, preferredTarget });
-                continue;
+        eligibleEdges++;
+        for (const rawEndpointIndex of fitInfo.endpointIndices || []) {
+            const endpointIndex = Number(rawEndpointIndex);
+            if (Number.isInteger(endpointIndex) && endpointIndex >= 0) {
+                lockedEndpointIndices.add(endpointIndex);
             }
+        }
 
-            const existing = pairsByKey.get(key);
-            if (existing && existing.preferredTarget == null && preferredTarget != null) {
-                existing.preferredTarget = preferredTarget;
-            }
+        if (!Array.isArray(fitInfo.targets) || fitInfo.targets.length === 0) continue;
+        fittedEdges++;
+        for (const target of fitInfo.targets) {
+            const index = Number(target?.index);
+            const point = target?.point;
+            if (!Number.isInteger(index) || index < 0 || !isPoint3(point)) continue;
+            targetAssignments++;
+            const existing = targetMap.get(index) || { x: 0, y: 0, z: 0, count: 0 };
+            existing.x += point[0];
+            existing.y += point[1];
+            existing.z += point[2];
+            existing.count += 1;
+            targetMap.set(index, existing);
         }
     }
 
+    for (const endpointIndex of lockedEndpointIndices) {
+        targetMap.delete(endpointIndex);
+    }
+
     return {
-        pairs: Array.from(pairsByKey.values()).map((entry) => ({
-            a: entry.a,
-            b: entry.b,
-            preferredTarget: (entry.preferredTarget === entry.a || entry.preferredTarget === entry.b)
-                ? entry.preferredTarget
-                : null,
-        })),
+        targetMap,
         matchedEdges,
-        detectedSegments,
+        eligibleEdges,
+        fittedEdges,
+        skippedClosedLoops,
+        targetAssignments,
+        lockedEndpointCount: lockedEndpointIndices.size,
     };
 }
 
@@ -531,65 +504,41 @@ function rebuildSolidVertexKeyMap(solid) {
     }
 }
 
-function applyVertexPairCollapses(solid, pairs) {
+function applyVertexTargets(solid, targetMap) {
     const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : null;
-    if (!vp || vp.length < 3 || !Array.isArray(pairs) || pairs.length === 0) return 0;
+    if (!vp || vp.length < 3 || !(targetMap instanceof Map) || targetMap.size === 0) return 0;
 
     const maxIndex = ((vp.length / 3) | 0) - 1;
-    let movedPairs = 0;
+    let movedVertices = 0;
+    for (const [rawIndex, aggregate] of targetMap.entries()) {
+        const index = Number(rawIndex);
+        if (!Number.isInteger(index) || index < 0 || index > maxIndex) continue;
 
-    for (const pair of pairs) {
-        const a = Number(pair?.a ?? pair?.[0]);
-        const b = Number(pair?.b ?? pair?.[1]);
-        if (!Number.isInteger(a) || !Number.isInteger(b)) continue;
-        if (a < 0 || b < 0 || a > maxIndex || b > maxIndex || a === b) continue;
+        const count = Number(aggregate?.count);
+        if (!(count > 0)) continue;
+        const tx = Number(aggregate?.x) / count;
+        const ty = Number(aggregate?.y) / count;
+        const tz = Number(aggregate?.z) / count;
+        if (!Number.isFinite(tx) || !Number.isFinite(ty) || !Number.isFinite(tz)) continue;
 
-        const aBase = a * 3;
-        const bBase = b * 3;
-        const ax = vp[aBase + 0];
-        const ay = vp[aBase + 1];
-        const az = vp[aBase + 2];
-        const bx = vp[bBase + 0];
-        const by = vp[bBase + 1];
-        const bz = vp[bBase + 2];
-        if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(az)) continue;
-        if (!Number.isFinite(bx) || !Number.isFinite(by) || !Number.isFinite(bz)) continue;
+        const base = index * 3;
+        const ox = vp[base + 0];
+        const oy = vp[base + 1];
+        const oz = vp[base + 2];
+        if (!Number.isFinite(ox) || !Number.isFinite(oy) || !Number.isFinite(oz)) continue;
 
-        const dx = ax - bx;
-        const dy = ay - by;
-        const dz = az - bz;
+        const dx = tx - ox;
+        const dy = ty - oy;
+        const dz = tz - oz;
         const distSq = (dx * dx) + (dy * dy) + (dz * dz);
+        if (distSq > 1e-30) movedVertices++;
 
-        const rawPreferredTarget = Number(pair?.preferredTarget);
-        const preferredTarget = (Number.isInteger(rawPreferredTarget) && (rawPreferredTarget === a || rawPreferredTarget === b))
-            ? rawPreferredTarget
-            : null;
-
-        let cx = 0;
-        let cy = 0;
-        let cz = 0;
-        if (preferredTarget != null) {
-            const targetBase = preferredTarget * 3;
-            cx = vp[targetBase + 0];
-            cy = vp[targetBase + 1];
-            cz = vp[targetBase + 2];
-        } else {
-            cx = (ax + bx) * 0.5;
-            cy = (ay + by) * 0.5;
-            cz = (az + bz) * 0.5;
-        }
-
-        vp[aBase + 0] = cx;
-        vp[aBase + 1] = cy;
-        vp[aBase + 2] = cz;
-        vp[bBase + 0] = cx;
-        vp[bBase + 1] = cy;
-        vp[bBase + 2] = cz;
-
-        if (distSq > 1e-30) movedPairs++;
+        vp[base + 0] = tx;
+        vp[base + 1] = ty;
+        vp[base + 2] = tz;
     }
 
-    if (movedPairs <= 0) return 0;
+    if (movedVertices <= 0) return 0;
 
     rebuildSolidVertexKeyMap(solid);
     solid._dirty = true;
@@ -618,7 +567,8 @@ function applyVertexPairCollapses(solid, pairs) {
             message: error?.message || String(error || "Unknown error"),
         });
     }
-    return movedPairs;
+
+    return movedVertices;
 }
 
 function groupDescriptorsBySolid(descriptors) {
@@ -642,11 +592,11 @@ function smoothEdgesOnClone(sourceSolid, descriptors, options, featureID) {
     try { if (featureID) outSolid.owningFeatureID = featureID; } catch { }
     try { outSolid.visualize(); } catch { }
 
-    const pairInfo = collectPairsForDescriptors(outSolid, descriptors, options);
-    if (!pairInfo.pairs.length) return null;
+    const targetInfo = collectTargetsForDescriptors(outSolid, descriptors, options);
+    if (targetInfo.targetMap.size === 0) return null;
 
-    const movedPairs = applyVertexPairCollapses(outSolid, pairInfo.pairs);
-    if (movedPairs <= 0) return null;
+    const movedVertices = applyVertexTargets(outSolid, targetInfo.targetMap);
+    if (movedVertices <= 0) return null;
 
     const { triCount, vertCount } = getSolidGeometryCounts(outSolid);
     if (triCount <= 0 || vertCount <= 0) {
@@ -660,9 +610,13 @@ function smoothEdgesOnClone(sourceSolid, descriptors, options, featureID) {
 
     return {
         solid: outSolid,
-        movedPairs,
-        detectedSegments: pairInfo.detectedSegments,
-        matchedEdges: pairInfo.matchedEdges,
+        movedVertices,
+        matchedEdges: targetInfo.matchedEdges,
+        eligibleEdges: targetInfo.eligibleEdges,
+        fittedEdges: targetInfo.fittedEdges,
+        skippedClosedLoops: targetInfo.skippedClosedLoops,
+        targetAssignments: targetInfo.targetAssignments,
+        lockedEndpointCount: targetInfo.lockedEndpointCount,
     };
 }
 
@@ -672,12 +626,15 @@ export class EdgeSmoothFeature {
     static inputParamsSchema = inputParamsSchema;
     static showContexButton(selectedItems) {
         const items = Array.isArray(selectedItems) ? selectedItems : [];
-        const edges = items
-            .filter((it) => String(it?.type || "").toUpperCase() === "EDGE")
-            .map((it) => it?.name || it?.userData?.edgeName || null)
+        const targets = items
+            .filter((it) => {
+                const type = String(it?.type || "").toUpperCase();
+                return type === "EDGE" || type === "FACE" || type === "SOLID";
+            })
+            .map((it) => it?.name || it?.userData?.edgeName || it?.userData?.faceName || null)
             .filter((name) => !!name);
-        if (!edges.length) return false;
-        return { params: { edges } };
+        if (!targets.length) return false;
+        return { params: { edges: targets } };
     }
 
     constructor() {
@@ -685,11 +642,15 @@ export class EdgeSmoothFeature {
         this.persistentData = {};
     }
 
-    async run() {
-        const inputObjects = Array.isArray(this.inputParams.edges) ? this.inputParams.edges.filter(Boolean) : [];
-        const edgeObjects = collectEdgesFromSelection(inputObjects).filter((edge) => isRenderableEdge(edge));
+    async run(partHistory) {
+        const selections = Array.isArray(this.inputParams.edges) ? this.inputParams.edges : [];
+        const {
+            edgeObjects,
+            selectedSolidCount,
+            selectedFaceCount,
+        } = collectEdgeObjectsFromTargets(selections, partHistory);
         if (edgeObjects.length === 0) {
-            console.warn("[EdgeSmoothFeature] No edges selected for smoothing.");
+            console.warn("[EdgeSmoothFeature] No edges found from selected EDGE/FACE/SOLID targets.");
             return { added: [], removed: [] };
         }
 
@@ -697,45 +658,48 @@ export class EdgeSmoothFeature {
             .map((edge) => getDescriptorFromEdge(edge))
             .filter((descriptor) => !!descriptor);
         if (!descriptors.length) {
-            console.warn("[EdgeSmoothFeature] Selected edges have no owning solids.");
+            console.warn("[EdgeSmoothFeature] Selected targets have no owning solids.");
             return { added: [], removed: [] };
         }
 
-        const rawAngle = Number(this.inputParams?.angleThresholdDeg);
-        const angleThresholdDeg = Number.isFinite(rawAngle)
-            ? Math.max(0, rawAngle)
-            : DEFAULT_ANGLE_THRESHOLD_DEG;
-
-        const rawRelative = Number(this.inputParams?.maxRelativeSegmentLength);
-        const maxRelativeSegmentLength = Number.isFinite(rawRelative) && rawRelative > 0
-            ? rawRelative
-            : DEFAULT_MAX_RELATIVE_SEGMENT_LENGTH;
+        const rawStrength = Number(this.inputParams?.fitStrength);
+        const fitStrength = Number.isFinite(rawStrength)
+            ? Math.max(0, Math.min(1, rawStrength))
+            : DEFAULT_FIT_STRENGTH;
 
         const grouped = groupDescriptorsBySolid(descriptors);
         const added = [];
         const removed = [];
-        let totalMovedPairs = 0;
-        let totalDetectedSegments = 0;
+        let totalMovedVertices = 0;
         let totalMatchedEdges = 0;
+        let totalEligibleEdges = 0;
+        let totalFittedEdges = 0;
+        let totalSkippedClosedLoops = 0;
+        let totalTargetAssignments = 0;
+        let totalLockedEndpoints = 0;
         const featureID = this.inputParams?.featureID || this.inputParams?.id || null;
 
         for (const [sourceSolid, edgeDescriptors] of grouped.entries()) {
             const result = smoothEdgesOnClone(
                 sourceSolid,
                 edgeDescriptors,
-                { angleThresholdDeg, maxRelativeSegmentLength },
+                { fitStrength },
                 featureID,
             );
             if (!result?.solid) continue;
             added.push(result.solid);
             removed.push(sourceSolid);
-            totalMovedPairs += Number(result.movedPairs) || 0;
-            totalDetectedSegments += Number(result.detectedSegments) || 0;
+            totalMovedVertices += Number(result.movedVertices) || 0;
             totalMatchedEdges += Number(result.matchedEdges) || 0;
+            totalEligibleEdges += Number(result.eligibleEdges) || 0;
+            totalFittedEdges += Number(result.fittedEdges) || 0;
+            totalSkippedClosedLoops += Number(result.skippedClosedLoops) || 0;
+            totalTargetAssignments += Number(result.targetAssignments) || 0;
+            totalLockedEndpoints += Number(result.lockedEndpointCount) || 0;
         }
 
         if (!added.length) {
-            console.warn("[EdgeSmoothFeature] No abrupt short segments matched the smoothing criteria.");
+            console.warn("[EdgeSmoothFeature] No open-edge polylines produced curve-fit updates.");
             return { added: [], removed: [] };
         }
 
@@ -748,12 +712,18 @@ export class EdgeSmoothFeature {
 
         this.persistentData = {
             ...(this.persistentData || {}),
-            totalCollapsedPairs: totalMovedPairs,
-            totalDetectedSegments,
+            selectedEdgeCount: edgeObjects.length,
+            selectedSolidCount,
+            selectedFaceCount,
+            totalMovedVertices,
             totalMatchedEdges,
+            totalEligibleEdges,
+            totalFittedEdges,
+            totalSkippedClosedLoops,
+            totalTargetAssignments,
+            totalLockedEndpoints,
             targetSolidCount: added.length,
-            angleThresholdDeg,
-            maxRelativeSegmentLength,
+            fitStrength,
         };
         return { added, removed };
     }

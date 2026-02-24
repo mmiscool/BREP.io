@@ -34,6 +34,11 @@ import {
 import { registerSketchSolverTopologyFixtureTests } from './sketchSolverTopologyFixtureLoader.js';
 import { test_Fillet_NonClosed, afterRun_Fillet_NonClosed } from './test_fillet_nonClosed.js';
 import { test_history_features_basic, afterRun_history_features_basic } from './test_history_features_basic.js';
+import {
+    test_edge_smooth_curve_fit,
+    test_edge_smooth_whole_solid_selection,
+    test_edge_smooth_face_selection,
+} from './test_edge_smooth_curve_fit.js';
 import { test_textToFace, afterRun_textToFace } from './test_textToFace.js';
 import { test_sheetMetal_nonManifold_sm_f18 } from './test_sheetMetal_nonManifold_sm_f18.js';
 import { test_sheetMetal_cutoutEdge_flange_controls } from './test_sheetMetal_cutoutEdge_flange_controls.js';
@@ -85,6 +90,9 @@ export const testFunctions = [
     { test: test_Fillet_NonClosed, afterRun: afterRun_Fillet_NonClosed, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_fillets_more_dificult, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_Chamfer, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_edge_smooth_curve_fit, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_edge_smooth_whole_solid_selection, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_edge_smooth_face_selection, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_hole_through, afterRun: afterRun_hole_through, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_countersink, afterRun: afterRun_hole_countersink, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_counterbore, afterRun: afterRun_hole_counterbore, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },

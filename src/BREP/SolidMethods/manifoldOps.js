@@ -4,112 +4,6 @@ import { Manifold, ManifoldMesh, debugMode } from "../SolidShared.js";
  * Manifold lifecycle helpers: rebuild, welding, orientation fixes.
  */
 
-function sanitizeTrianglesForManifold(solid) {
-    const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : [];
-    const tvRaw = Array.isArray(solid?._triVerts) ? solid._triVerts : [];
-    const idsRaw = Array.isArray(solid?._triIDs) ? solid._triIDs : [];
-
-    const vertCount = (vp.length / 3) | 0;
-    const triCount = (tvRaw.length / 3) | 0;
-    if (triCount <= 0) {
-        if (!Array.isArray(solid?._triIDs) || solid._triIDs.length !== 0) {
-            solid._triIDs = [];
-            solid._dirty = true;
-            solid._faceIndex = null;
-        }
-        return { removedDegenerateTriangles: 0, normalized: false };
-    }
-
-    const hasPerTriIDs = idsRaw.length === triCount;
-    const hasPerCornerIDs = idsRaw.length === (triCount * 3);
-    const triIDAt = (triIndex, triBase) => {
-        if (hasPerTriIDs) return idsRaw[triIndex] ?? 0;
-        if (hasPerCornerIDs) return idsRaw[triBase] ?? 0;
-        if (idsRaw.length > 0) {
-            const idx = Math.min(Math.max(triIndex, 0), idsRaw.length - 1);
-            return idsRaw[idx] ?? 0;
-        }
-        return 0;
-    };
-
-    const newTriVerts = [];
-    const newTriIDs = [];
-    let removedDegenerateTriangles = 0;
-    const edgeLenSqEps = 1e-24;
-    const area2Eps = 1e-30;
-
-    for (let t = 0; t < triCount; t++) {
-        const base = t * 3;
-        const i0 = Number(tvRaw[base + 0]);
-        const i1 = Number(tvRaw[base + 1]);
-        const i2 = Number(tvRaw[base + 2]);
-        if (!Number.isInteger(i0) || !Number.isInteger(i1) || !Number.isInteger(i2)) {
-            removedDegenerateTriangles++;
-            continue;
-        }
-        if (i0 < 0 || i1 < 0 || i2 < 0 || i0 >= vertCount || i1 >= vertCount || i2 >= vertCount) {
-            removedDegenerateTriangles++;
-            continue;
-        }
-
-        const aBase = i0 * 3;
-        const bBase = i1 * 3;
-        const cBase = i2 * 3;
-        const ax = vp[aBase + 0], ay = vp[aBase + 1], az = vp[aBase + 2];
-        const bx = vp[bBase + 0], by = vp[bBase + 1], bz = vp[bBase + 2];
-        const cx = vp[cBase + 0], cy = vp[cBase + 1], cz = vp[cBase + 2];
-        if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(az)
-            || !Number.isFinite(bx) || !Number.isFinite(by) || !Number.isFinite(bz)
-            || !Number.isFinite(cx) || !Number.isFinite(cy) || !Number.isFinite(cz)) {
-            removedDegenerateTriangles++;
-            continue;
-        }
-
-        const abx = bx - ax, aby = by - ay, abz = bz - az;
-        const bcx = cx - bx, bcy = cy - by, bcz = cz - bz;
-        const cax = ax - cx, cay = ay - cy, caz = az - cz;
-        const ab2 = (abx * abx) + (aby * aby) + (abz * abz);
-        const bc2 = (bcx * bcx) + (bcy * bcy) + (bcz * bcz);
-        const ca2 = (cax * cax) + (cay * cay) + (caz * caz);
-        if (ab2 <= edgeLenSqEps || bc2 <= edgeLenSqEps || ca2 <= edgeLenSqEps) {
-            removedDegenerateTriangles++;
-            continue;
-        }
-
-        const acx = cx - ax, acy = cy - ay, acz = cz - az;
-        const nx = (aby * acz) - (abz * acy);
-        const ny = (abz * acx) - (abx * acz);
-        const nz = (abx * acy) - (aby * acx);
-        const area2 = (nx * nx) + (ny * ny) + (nz * nz);
-        if (area2 <= area2Eps) {
-            removedDegenerateTriangles++;
-            continue;
-        }
-
-        newTriVerts.push(i0, i1, i2);
-        newTriIDs.push(triIDAt(t, base));
-    }
-
-    const needsNormalize = removedDegenerateTriangles > 0
-        || idsRaw.length !== triCount
-        || tvRaw.length !== (triCount * 3);
-    if (needsNormalize) {
-        solid._triVerts = newTriVerts;
-        solid._triIDs = newTriIDs;
-        solid._dirty = true;
-        solid._faceIndex = null;
-    } else if (!Array.isArray(solid?._triIDs) || solid._triIDs.length !== triCount) {
-        solid._triIDs = newTriIDs;
-        solid._dirty = true;
-        solid._faceIndex = null;
-    }
-
-    return {
-        removedDegenerateTriangles,
-        normalized: needsNormalize,
-    };
-}
-
 /**
  * Build (or rebuild) the Manifold from our MeshGL arrays.
  * Uses faceID per triangle so face names survive CSG operations.
@@ -141,13 +35,6 @@ export function _manifoldize() {
         } catch { }
     };
     try {
-        const sanitizeStats = sanitizeTrianglesForManifold(this);
-        try {
-            if (debugMode && sanitizeStats.removedDegenerateTriangles > 0) {
-                console.log(`[Solid] _manifoldize: removed ${sanitizeStats.removedDegenerateTriangles} degenerate triangles before rebuild`);
-            }
-        } catch { }
-
         // Ensure consistent orientation before building a Manifold
         this.fixTriangleWindingsByAdjacency();
         // Ensure outward orientation (positive signed volume). If negative, flip all tris.
@@ -485,3 +372,4 @@ export function invertNormals() {
     this._manifoldize();
     return this;
 }
+

@@ -682,12 +682,13 @@ export class Solid extends THREE.Group {
      * Apply constant-radius fillets to named edges and return the booleaned result (async).
      * @param {object} [options]
      * @param {number} options.radius fillet radius (required, > 0)
-     * @param {string[]} [options.edgeNames] edge labels to fillet
      * @param {any[]} [options.edges] pre-resolved Edge objects on this solid
-     * @param {'INSET'|'OUTSET'|string} [options.direction='INSET'] subtract vs union behavior
+     * @param {'AUTO'|'INSET'|'OUTSET'|string} [options.direction='AUTO'] per-edge auto classification (or forced side)
      * @param {number} [options.inflate=0.1] tube inflation for cutting/union
      * @param {number} [options.resolution=32] tube resolution (segments around circumference)
      * @param {boolean} [options.showTangentOverlays=false] overlay tangency polylines on the helper tube for debugging/PMI
+     * @param {boolean} [options.patchFilletEndCaps=false] enable three-face tip cleanup and end-cap patching
+     * @param {boolean} [options.smoothGeneratedEdges=false] apply endpoint-constrained smoothing on generated fillet edges
      * @param {boolean} [options.debug=false] enable builder debug aids
      * @param {string} [options.featureID='FILLET'] name prefix for generated solids
      * @param {number} [options.cleanupTinyFaceIslandsArea=0.001] area threshold for face-island relabeling (<= 0 disables)

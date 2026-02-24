@@ -466,17 +466,21 @@ const chamfered = await solid.chamfer({
 ```
 
 ### fillet(options)
-Applies constant-radius fillets to edges on this Solid (union for OUTSET, subtract for INSET). Accepts edge names or resolved edge objects; OUTSET can optionally hull shared corners into a single tool to avoid gaps. Throws if `radius` is not > 0; returns an unchanged clone when no edges resolve.
+Applies constant-radius fillets to edges on this Solid. Accepts resolved edge objects. `direction: 'AUTO'` (default) classifies each edge and runs a unified boolean pass that subtracts `INSET` tools and unions `OUTSET` tools. Throws if `radius` is not > 0; returns an unchanged clone when no edges resolve.
 ```js
 const filleted = await solid.fillet({
   radius: 2,                  // required
-  edgeNames: ['EDGE_0'],      // or edges: [edgeObj]
-  direction: 'OUTSET',        // or 'INSET'
+  edges: [edgeObj],
+  direction: 'AUTO',          // default; or force 'INSET' / 'OUTSET'
   resolution: 48,             // segments around the tube
   inflate: 0.05,              // tangency/cap offset; closed loops skip the wedge inset
-  combineEdges: true,         // OUTSET only; hulls fillets that share endpoints
-  showTangentOverlays: false, // add tangency overlays on the helper tube (debug-friendly)
+  patchFilletEndCaps: true,   // UI default is true (kernel default remains false when omitted)
+  smoothGeneratedEdges: false,// optional endpoint-constrained edge smoothing
+  showTangentOverlays: false, // add tangency overlays on the helper tube
   debug: false,
+  debugSolidsLevel: -1,       // -1 none, 0 tube+wedge, 1 final per-edge, 2 all intermediates
+  debugShowCombinedBeforeTarget: false,
+  cleanupTinyFaceIslandsArea: 0.001,
   featureID: 'FILLET'         // name prefix
 });
 ```

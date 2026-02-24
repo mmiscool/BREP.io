@@ -552,6 +552,8 @@ export class Tube extends Solid {
    * @param {number} [opts.innerRadius=0] Optional inner radius (0 for solid tube)
    * @param {number} [opts.resolution=32] Sphere segment count (controls smoothness)
    * @param {boolean} [opts.closed=false] Whether the path is closed (auto-detected if endpoints match)
+   * @param {boolean} [opts.selfUnion=true] Run a post-build self-union pass to resolve self-intersections
+   * @param {boolean} [opts.autoVisualize=false] Build visualization primitives immediately after generation
    * @param {string} [opts.name='Tube'] Name for the solid
    */
   constructor(opts = {}) {
@@ -565,8 +567,10 @@ export class Tube extends Solid {
       name = 'Tube',
       debugSpheres = false,
       preferFast = true,
+      selfUnion = true,
+      autoVisualize = false,
     } = opts;
-    this.params = { points, radius, innerRadius, resolution, closed, name, debugSpheres, preferFast };
+    this.params = { points, radius, innerRadius, resolution, closed, name, debugSpheres, preferFast, selfUnion };
     this.name = name;
 
     if (Array.isArray(points) && points.length >= 2) {
@@ -582,7 +586,7 @@ export class Tube extends Solid {
       const validRadius = Number(radius) > 0;
       if (hasPath && validRadius) {
         this.generate();
-        this.visualize();
+        if (autoVisualize) this.visualize();
       }
     } catch {
       // Fail-quietly to keep boolean reconstruction safe
@@ -733,38 +737,42 @@ export class Tube extends Solid {
     } catch (_) { /* ignore auxiliary path errors */ }
 
     const preTriCount = (this._triVerts?.length || 0) / 3 | 0;
+    const runSelfUnion = this.params?.selfUnion !== false;
     let postTriCount = preTriCount;
     let unionSucceeded = false;
-    const auxEdgesSnapshot = Array.isArray(this._auxEdges)
-      ? this._auxEdges.map(e => ({
-          name: e?.name,
-          closedLoop: !!e?.closedLoop,
-          polylineWorld: !!e?.polylineWorld,
-          materialKey: e?.materialKey,
-          centerline: !!e?.centerline,
-          points: Array.isArray(e?.points)
-            ? e.points.map(p => (Array.isArray(p) ? [p[0], p[1], p[2]] : p))
-            : [],
-        }))
-      : [];
-    let inputManifold = null;
-    try { inputManifold = this._manifoldize(); } catch { }
-    try {
-      const booleaned = this.union(this);
-      postTriCount = (booleaned?._triVerts?.length || 0) / 3 | 0;
-      copySolidState(this, booleaned, { auxEdges: auxEdgesSnapshot });
-      if (inputManifold && inputManifold !== this._manifold) {
-        try { if (typeof inputManifold.delete === 'function') inputManifold.delete(); } catch { }
+    if (runSelfUnion) {
+      const auxEdgesSnapshot = Array.isArray(this._auxEdges)
+        ? this._auxEdges.map(e => ({
+            name: e?.name,
+            closedLoop: !!e?.closedLoop,
+            polylineWorld: !!e?.polylineWorld,
+            materialKey: e?.materialKey,
+            centerline: !!e?.centerline,
+            points: Array.isArray(e?.points)
+              ? e.points.map(p => (Array.isArray(p) ? [p[0], p[1], p[2]] : p))
+              : [],
+          }))
+        : [];
+      let inputManifold = null;
+      try { inputManifold = this._manifoldize(); } catch { }
+      try {
+        const booleaned = this.union(this);
+        postTriCount = (booleaned?._triVerts?.length || 0) / 3 | 0;
+        copySolidState(this, booleaned, { auxEdges: auxEdgesSnapshot });
+        if (inputManifold && inputManifold !== this._manifold) {
+          try { if (typeof inputManifold.delete === 'function') inputManifold.delete(); } catch { }
+        }
+        unionSucceeded = true;
+      } catch (error) {
+        console.warn('Self-union failed; returning raw tube geometry.', error);
       }
-      unionSucceeded = true;
-    } catch (error) {
-      console.warn('Self-union failed; returning raw tube geometry.', error);
     }
     this._selfUnionStats = {
       preTriangles: preTriCount,
       postTriangles: postTriCount,
-      selfIntersectionLikely: postTriCount > preTriCount,
+      selfIntersectionLikely: runSelfUnion ? (postTriCount > preTriCount) : false,
       unionSucceeded,
+      selfUnionSkipped: !runSelfUnion,
     };
     this.name = name;
     return this;

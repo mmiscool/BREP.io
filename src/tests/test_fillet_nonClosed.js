@@ -13,6 +13,7 @@ export async function test_Fillet_NonClosed(partHistory) {
   fillet.inputParams.radius = 0.5;
   fillet.inputParams.inflate = 0.1;
   fillet.inputParams.direction = "INSET";
+  fillet.inputParams.smoothGeneratedEdges = true;
 
   return partHistory;
 }
@@ -22,6 +23,14 @@ export async function afterRun_Fillet_NonClosed(partHistory) {
   const filletFeature = partHistory.features.find((f) => f?.type === "F");
   if (!filletFeature) {
     throw new Error("Fillet feature missing from history");
+  }
+
+  const smoothing = filletFeature?.persistentData?.edgeSmoothing;
+  if (!smoothing || !Number.isFinite(Number(smoothing.consideredEdges))) {
+    throw new Error("Fillet feature should record edge-smoothing statistics.");
+  }
+  if ((Number(smoothing.consideredEdges) || 0) <= 0) {
+    throw new Error("Fillet edge smoothing should consider at least one generated edge.");
   }
   
   // Verify that the fillet solid exists in the scene

@@ -1,30 +1,57 @@
 // Solid.fillet implementation: consolidates fillet logic so features call this API.
-// Usage: solid.fillet({ radius, edgeNames, featureID, direction, inflate, resolution, debug, debugSolidsLevel, debugShowCombinedBeforeTarget, showTangentOverlays, patchFilletEndCaps })
+// Usage: solid.fillet({ radius, edges, featureID, direction, inflate, resolution, debug, debugSolidsLevel, debugShowCombinedBeforeTarget, showTangentOverlays, patchFilletEndCaps })
 import { Vertex } from '../Vertex.js';
 import { resolveEdgesFromInputs } from './edgeResolution.js';
 import { computeFaceAreaFromTriangles } from '../fillets/filletGeometry.js';
+import { getCachedFaceDataForTris, localFaceNormalAtPoint, averageFaceNormalObjectSpace } from '../fillets/inset.js';
 import { createQuantizer } from '../../utils/geometryTolerance.js';
+import { fitAndSnapOpenEdgePolyline } from '../../features/edgeSmooth/edgeCurveFit.js';
 
 // Threshold for collapsing tiny end caps into the round face.
 const END_CAP_AREA_RATIO_THRESHOLD = 0.05;
 
-function computeFaceAreaByName(solid, faceName) {
+function createFaceTrianglesAccessor(solid) {
+  const cache = new Map();
+  let lastFaceIndexRef = solid?._faceIndex || null;
+  return (faceName) => {
+    if (!solid || typeof solid.getFace !== 'function' || !faceName) return [];
+    const currentFaceIndexRef = solid?._faceIndex || null;
+    if (currentFaceIndexRef !== lastFaceIndexRef) {
+      cache.clear();
+      lastFaceIndexRef = currentFaceIndexRef;
+    }
+    if (cache.has(faceName)) return cache.get(faceName);
+    const tris = solid.getFace(faceName);
+    const out = Array.isArray(tris) ? tris : [];
+    const refreshedFaceIndexRef = solid?._faceIndex || null;
+    if (refreshedFaceIndexRef !== lastFaceIndexRef) {
+      cache.clear();
+      lastFaceIndexRef = refreshedFaceIndexRef;
+    }
+    cache.set(faceName, out);
+    return out;
+  };
+}
+
+function computeFaceAreaByName(solid, faceName, getFaceTris = null) {
   if (!solid || typeof solid.getFace !== 'function' || !faceName) return 0;
   try {
-    const tris = solid.getFace(faceName);
+    const tris = (typeof getFaceTris === 'function')
+      ? getFaceTris(faceName)
+      : solid.getFace(faceName);
     return computeFaceAreaFromTriangles(tris);
   } catch {
     return 0;
   }
 }
 
-function buildFaceAreaCache(solid) {
+function buildFaceAreaCache(solid, getFaceTris = null) {
   const cache = new Map();
   return {
     get(name) {
       if (!name) return 0;
       if (cache.has(name)) return cache.get(name);
-      const area = computeFaceAreaByName(solid, name);
+      const area = computeFaceAreaByName(solid, name, getFaceTris);
       cache.set(name, area);
       return area;
     }
@@ -199,9 +226,11 @@ function mergeSideFacesIntoRoundFace(resultSolid, filletName, roundFaceName) {
   mergeFaceIntoTarget(resultSolid, surfaceCB, roundFaceName);
 }
 
-function averageFaceNormalSimple(solid, faceName) {
+function averageFaceNormalSimple(solid, faceName, getFaceTris = null) {
   if (!solid || typeof solid.getFace !== 'function' || !faceName) return null;
-  const tris = solid.getFace(faceName);
+  const tris = (typeof getFaceTris === 'function')
+    ? getFaceTris(faceName)
+    : solid.getFace(faceName);
   if (!Array.isArray(tris) || tris.length === 0) return null;
   let nx = 0, ny = 0, nz = 0;
   for (const tri of tris) {
@@ -246,6 +275,372 @@ function deriveSolidToleranceFromVerts(solid, baseTol = 1e-5) {
   return Math.max(baseTol, diag * 1e-6);
 }
 
+function normalizeFilletDirectionMode(rawDirection) {
+  const dir = String(rawDirection || 'AUTO').toUpperCase();
+  if (dir === 'INSET' || dir === 'OUTSET' || dir === 'AUTO') return dir;
+  return 'AUTO';
+}
+
+function buildPointInsideTester(solid) {
+  if (!solid) return null;
+  const tv = solid._triVerts;
+  const vp = solid._vertProperties;
+  if (!tv || !vp || typeof tv.length !== 'number' || typeof vp.length !== 'number') return null;
+  const triCount = (tv.length / 3) | 0;
+  if (triCount === 0 || vp.length < 9) return null;
+
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < vp.length; i += 3) {
+    const x = vp[i];
+    const y = vp[i + 1];
+    const z = vp[i + 2];
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+  }
+  const diag = Math.hypot(maxX - minX, maxY - minY, maxZ - minZ) || 1;
+  const jitter = 1e-6 * diag;
+
+  const rayTri = (ox, oy, oz, dx, dy, dz, ax, ay, az, bx, by, bz, cx, cy, cz) => {
+    const EPS = 1e-12;
+    const e1x = bx - ax, e1y = by - ay, e1z = bz - az;
+    const e2x = cx - ax, e2y = cy - ay, e2z = cz - az;
+    const px = dy * e2z - dz * e2y;
+    const py = dz * e2x - dx * e2z;
+    const pz = dx * e2y - dy * e2x;
+    const det = e1x * px + e1y * py + e1z * pz;
+    if (Math.abs(det) < EPS) return null;
+    const invDet = 1.0 / det;
+    const tvecx = ox - ax, tvecy = oy - ay, tvecz = oz - az;
+    const u = (tvecx * px + tvecy * py + tvecz * pz) * invDet;
+    if (u < -1e-12 || u > 1 + 1e-12) return null;
+    const qx = tvecy * e1z - tvecz * e1y;
+    const qy = tvecz * e1x - tvecx * e1z;
+    const qz = tvecx * e1y - tvecy * e1x;
+    const v = (dx * qx + dy * qy + dz * qz) * invDet;
+    if (v < -1e-12 || u + v > 1 + 1e-12) return null;
+    const tHit = (e2x * qx + e2y * qy + e2z * qz) * invDet;
+    return tHit > 1e-10 ? tHit : null;
+  };
+
+  const dirs = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ];
+
+  return (pt) => {
+    if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y) || !Number.isFinite(pt.z)) return false;
+    const px = pt.x, py = pt.y, pz = pt.z;
+    let votes = 0;
+    for (let k = 0; k < dirs.length; k++) {
+      const dir = dirs[k];
+      const ox = px + (k + 1) * jitter;
+      const oy = py + (k + 2) * jitter;
+      const oz = pz + (k + 3) * jitter;
+      let hits = 0;
+      for (let t = 0; t < triCount; t++) {
+        const b = t * 3;
+        const ia = (tv[b + 0] >>> 0) * 3;
+        const ib = (tv[b + 1] >>> 0) * 3;
+        const ic = (tv[b + 2] >>> 0) * 3;
+        const hit = rayTri(
+          ox, oy, oz,
+          dir[0], dir[1], dir[2],
+          vp[ia + 0], vp[ia + 1], vp[ia + 2],
+          vp[ib + 0], vp[ib + 1], vp[ib + 2],
+          vp[ic + 0], vp[ic + 1], vp[ic + 2]
+        );
+        if (hit !== null) hits++;
+      }
+      if ((hits % 2) === 1) votes++;
+    }
+    return votes >= 2;
+  };
+}
+
+function getEdgeFaceNames(edgeObj) {
+  const faceAName = edgeObj?.faces?.[0]?.name || edgeObj?.userData?.faceA || null;
+  const faceBName = edgeObj?.faces?.[1]?.name || edgeObj?.userData?.faceB || null;
+  return { faceAName, faceBName };
+}
+
+function getEdgePolylineLocal(edgeObj) {
+  const poly = edgeObj?.userData?.polylineLocal;
+  if (!Array.isArray(poly) || poly.length < 2) return null;
+  return poly;
+}
+
+function samplePolylineAt(polylineLocal, tNorm) {
+  if (!Array.isArray(polylineLocal) || polylineLocal.length < 2) return null;
+  const clamped = Math.max(0, Math.min(1, Number(tNorm)));
+  const segCount = polylineLocal.length - 1;
+  const f = clamped * segCount;
+  const i = Math.min(segCount - 1, Math.floor(f));
+  const t = f - i;
+  const a = polylineLocal[i];
+  const b = polylineLocal[i + 1];
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length < 3 || b.length < 3) return null;
+  return [
+    a[0] + (b[0] - a[0]) * t,
+    a[1] + (b[1] - a[1]) * t,
+    a[2] + (b[2] - a[2]) * t,
+  ];
+}
+
+function findBoundaryPolylineForEdge(baseSolid, edgeObj, faceAName, faceBName, boundaryPolylines = null) {
+  if (!baseSolid || typeof baseSolid.getBoundaryEdgePolylines !== 'function') return null;
+  const boundaries = Array.isArray(boundaryPolylines)
+    ? boundaryPolylines
+    : (baseSolid.getBoundaryEdgePolylines() || []);
+  const edgeName = edgeObj?.name;
+  if (edgeName) {
+    const named = boundaries.find((b) => b?.name === edgeName);
+    if (named) return named;
+  }
+  if (!faceAName || !faceBName) return null;
+  return boundaries.find((b) => {
+    const a = b?.faceA;
+    const c = b?.faceB;
+    return (a === faceAName && c === faceBName) || (a === faceBName && c === faceAName);
+  }) || null;
+}
+
+function findDirectedEdgeOrientationInFace(baseSolid, faceName, ia, ib) {
+  if (!baseSolid || !faceName || !Number.isInteger(ia) || !Number.isInteger(ib)) return 0;
+  const faceID = baseSolid?._faceNameToID instanceof Map ? baseSolid._faceNameToID.get(faceName) : undefined;
+  if (faceID === undefined) return 0;
+  const triVerts = Array.isArray(baseSolid?._triVerts) ? baseSolid._triVerts : null;
+  const triIDs = Array.isArray(baseSolid?._triIDs) ? baseSolid._triIDs : null;
+  if (!triVerts || !triIDs || triVerts.length !== triIDs.length * 3) return 0;
+  for (let t = 0; t < triIDs.length; t++) {
+    if ((triIDs[t] >>> 0) !== (faceID >>> 0)) continue;
+    const base = t * 3;
+    const a = triVerts[base + 0];
+    const b = triVerts[base + 1];
+    const c = triVerts[base + 2];
+    if ((a === ia && b === ib) || (b === ia && c === ib) || (c === ia && a === ib)) return 1;
+    if ((a === ib && b === ia) || (b === ib && c === ia) || (c === ib && a === ia)) return -1;
+  }
+  return 0;
+}
+
+function resolveOrientedEdgeTangent(baseSolid, faceAName, boundaryPolyline) {
+  const ids = Array.isArray(boundaryPolyline?.indices) ? boundaryPolyline.indices : null;
+  const vp = Array.isArray(baseSolid?._vertProperties) ? baseSolid._vertProperties : null;
+  if (!ids || ids.length < 2 || !vp) return null;
+
+  const segmentOrder = [];
+  const center = (ids.length - 1) / 2;
+  for (let i = 0; i < ids.length - 1; i++) segmentOrder.push(i);
+  segmentOrder.sort((a, b) => Math.abs(a - center) - Math.abs(b - center));
+
+  for (const segIdx of segmentOrder) {
+    const ia = Number(ids[segIdx]);
+    const ib = Number(ids[segIdx + 1]);
+    if (!Number.isInteger(ia) || !Number.isInteger(ib) || ia === ib) continue;
+    const orient = findDirectedEdgeOrientationInFace(baseSolid, faceAName, ia, ib);
+    if (!orient) continue;
+
+    const iaBase = ia * 3;
+    const ibBase = ib * 3;
+    if (iaBase + 2 >= vp.length || ibBase + 2 >= vp.length) continue;
+
+    let tx = vp[ibBase + 0] - vp[iaBase + 0];
+    let ty = vp[ibBase + 1] - vp[iaBase + 1];
+    let tz = vp[ibBase + 2] - vp[iaBase + 2];
+    if (orient < 0) {
+      tx = -tx;
+      ty = -ty;
+      tz = -tz;
+    }
+    const len = Math.hypot(tx, ty, tz);
+    if (!(len > 1e-12)) continue;
+    tx /= len; ty /= len; tz /= len;
+    return {
+      tangent: [tx, ty, tz],
+      midpoint: [
+        (vp[iaBase + 0] + vp[ibBase + 0]) * 0.5,
+        (vp[iaBase + 1] + vp[ibBase + 1]) * 0.5,
+        (vp[iaBase + 2] + vp[ibBase + 2]) * 0.5,
+      ],
+      segmentIndex: segIdx,
+    };
+  }
+  return null;
+}
+
+function classifyEdgeFilletDirectionBySignedDihedral(
+  baseSolid,
+  edgeObj,
+  fallbackDirection = 'INSET',
+  threshold = 0.2,
+  boundaryPolylines = null,
+  getFaceTris = null,
+) {
+  const fallback = (String(fallbackDirection || 'INSET').toUpperCase() === 'OUTSET') ? 'OUTSET' : 'INSET';
+  if (!baseSolid || !edgeObj) return { direction: fallback, reason: 'missing_context' };
+
+  const { faceAName, faceBName } = getEdgeFaceNames(edgeObj);
+  if (!faceAName || !faceBName) return { direction: fallback, reason: 'missing_faces' };
+
+  const boundary = findBoundaryPolylineForEdge(baseSolid, edgeObj, faceAName, faceBName, boundaryPolylines);
+  if (!boundary) return { direction: fallback, reason: 'missing_boundary_polyline' };
+
+  const tangentInfo = resolveOrientedEdgeTangent(baseSolid, faceAName, boundary);
+  if (!tangentInfo) return { direction: fallback, reason: 'missing_oriented_tangent' };
+
+  const trisA = (typeof getFaceTris === 'function')
+    ? getFaceTris(faceAName)
+    : ((typeof baseSolid.getFace === 'function') ? baseSolid.getFace(faceAName) : null);
+  const trisB = (typeof getFaceTris === 'function')
+    ? getFaceTris(faceBName)
+    : ((typeof baseSolid.getFace === 'function') ? baseSolid.getFace(faceBName) : null);
+  if (!Array.isArray(trisA) || !trisA.length || !Array.isArray(trisB) || !trisB.length) {
+    return { direction: fallback, reason: 'missing_face_geometry' };
+  }
+
+  const solidId = baseSolid?.uuid || baseSolid?.name || 'SOLID';
+  const faceKeyA = `${solidId}:${faceAName}:AUTO_SIGNED`;
+  const faceKeyB = `${solidId}:${faceBName}:AUTO_SIGNED`;
+  const faceDataA = getCachedFaceDataForTris(trisA, faceKeyA);
+  const faceDataB = getCachedFaceDataForTris(trisB, faceKeyB);
+  const fallbackNormalA = averageFaceNormalObjectSpace(baseSolid, faceAName);
+  const fallbackNormalB = averageFaceNormalObjectSpace(baseSolid, faceBName);
+  const samplePoint = { x: tangentInfo.midpoint[0], y: tangentInfo.midpoint[1], z: tangentInfo.midpoint[2] };
+  const nA = localFaceNormalAtPoint(baseSolid, faceAName, samplePoint, faceDataA, faceKeyA) || fallbackNormalA;
+  const nB = localFaceNormalAtPoint(baseSolid, faceBName, samplePoint, faceDataB, faceKeyB) || fallbackNormalB;
+  if (!nA || !nB) return { direction: fallback, reason: 'missing_normals' };
+
+  const cx = (Number(nA.y) * Number(nB.z)) - (Number(nA.z) * Number(nB.y));
+  const cy = (Number(nA.z) * Number(nB.x)) - (Number(nA.x) * Number(nB.z));
+  const cz = (Number(nA.x) * Number(nB.y)) - (Number(nA.y) * Number(nB.x));
+  const tx = tangentInfo.tangent[0];
+  const ty = tangentInfo.tangent[1];
+  const tz = tangentInfo.tangent[2];
+  const signedDihedral = (cx * tx) + (cy * ty) + (cz * tz);
+  if (!Number.isFinite(signedDihedral)) return { direction: fallback, reason: 'invalid_signed_dihedral' };
+
+  if (signedDihedral > threshold) {
+    return { direction: 'INSET', reason: 'signed_dihedral', signedDihedral };
+  }
+  if (signedDihedral < -threshold) {
+    return { direction: 'OUTSET', reason: 'signed_dihedral', signedDihedral };
+  }
+  return { direction: fallback, reason: 'signed_dihedral_ambiguous', signedDihedral };
+}
+
+function classifyEdgeFilletDirectionByInsideOutside(
+  baseSolid,
+  edgeObj,
+  insideTester,
+  radius = 1,
+  fallbackDirection = 'INSET',
+  boundaryPolylines = null,
+  getFaceTris = null,
+) {
+  const fallback = (String(fallbackDirection || 'INSET').toUpperCase() === 'OUTSET') ? 'OUTSET' : 'INSET';
+  if (!baseSolid || !edgeObj) {
+    return { direction: fallback, reason: 'missing_context' };
+  }
+
+  const signed = classifyEdgeFilletDirectionBySignedDihedral(
+    baseSolid,
+    edgeObj,
+    fallbackDirection,
+    0.2,
+    boundaryPolylines,
+    getFaceTris,
+  );
+  if (signed?.reason === 'signed_dihedral') return signed;
+  if (typeof insideTester !== 'function') {
+    return { direction: fallback, reason: 'missing_inside_tester', signedDihedral: signed?.signedDihedral };
+  }
+
+  const { faceAName, faceBName } = getEdgeFaceNames(edgeObj);
+  if (!faceAName || !faceBName) {
+    return { direction: fallback, reason: 'missing_faces' };
+  }
+
+  const polylineLocal = getEdgePolylineLocal(edgeObj);
+  if (!polylineLocal) {
+    return { direction: fallback, reason: 'missing_polyline' };
+  }
+
+  const trisA = (typeof getFaceTris === 'function')
+    ? getFaceTris(faceAName)
+    : ((typeof baseSolid.getFace === 'function') ? baseSolid.getFace(faceAName) : null);
+  const trisB = (typeof getFaceTris === 'function')
+    ? getFaceTris(faceBName)
+    : ((typeof baseSolid.getFace === 'function') ? baseSolid.getFace(faceBName) : null);
+  if (!Array.isArray(trisA) || trisA.length === 0 || !Array.isArray(trisB) || trisB.length === 0) {
+    return { direction: fallback, reason: 'missing_face_geometry' };
+  }
+
+  const solidId = baseSolid?.uuid || baseSolid?.name || 'SOLID';
+  const faceKeyA = `${solidId}:${faceAName}:AUTO_DIR`;
+  const faceKeyB = `${solidId}:${faceBName}:AUTO_DIR`;
+  const faceDataA = getCachedFaceDataForTris(trisA, faceKeyA);
+  const faceDataB = getCachedFaceDataForTris(trisB, faceKeyB);
+  const fallbackNormalA = averageFaceNormalObjectSpace(baseSolid, faceAName);
+  const fallbackNormalB = averageFaceNormalObjectSpace(baseSolid, faceBName);
+
+  const probeDistance = Math.max(
+    deriveSolidToleranceFromVerts(baseSolid, 1e-6) * 8,
+    Math.abs(Number(radius) || 0) * 1e-4,
+    1e-6,
+  );
+
+  const sampleTs = [0.2, 0.5, 0.8];
+  let insetVotes = 0;
+  let outsetVotes = 0;
+  let ambiguousSamples = 0;
+  let usedSamples = 0;
+
+  for (const t of sampleTs) {
+    const pointArray = samplePolylineAt(polylineLocal, t);
+    if (!pointArray) continue;
+    const point = { x: pointArray[0], y: pointArray[1], z: pointArray[2] };
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) continue;
+
+    const nA = localFaceNormalAtPoint(baseSolid, faceAName, point, faceDataA, faceKeyA) || fallbackNormalA;
+    const nB = localFaceNormalAtPoint(baseSolid, faceBName, point, faceDataB, faceKeyB) || fallbackNormalB;
+    if (!nA || !nB) {
+      ambiguousSamples++;
+      continue;
+    }
+
+    let sx = Number(nA.x) + Number(nB.x);
+    let sy = Number(nA.y) + Number(nB.y);
+    let sz = Number(nA.z) + Number(nB.z);
+    const len = Math.hypot(sx, sy, sz);
+    if (!(len > 1e-12)) {
+      ambiguousSamples++;
+      continue;
+    }
+    sx /= len; sy /= len; sz /= len;
+
+    const plus = { x: point.x + sx * probeDistance, y: point.y + sy * probeDistance, z: point.z + sz * probeDistance };
+    const minus = { x: point.x - sx * probeDistance, y: point.y - sy * probeDistance, z: point.z - sz * probeDistance };
+    const plusInside = !!insideTester(plus);
+    const minusInside = !!insideTester(minus);
+    usedSamples++;
+
+    if (minusInside && !plusInside) insetVotes++;
+    else if (plusInside && !minusInside) outsetVotes++;
+    else ambiguousSamples++;
+  }
+
+  if (insetVotes > outsetVotes) {
+    return { direction: 'INSET', reason: 'classified', insetVotes, outsetVotes, ambiguousSamples, usedSamples };
+  }
+  if (outsetVotes > insetVotes) {
+    return { direction: 'OUTSET', reason: 'classified', insetVotes, outsetVotes, ambiguousSamples, usedSamples };
+  }
+  return { direction: fallback, reason: 'ambiguous', insetVotes, outsetVotes, ambiguousSamples, usedSamples };
+}
+
 function buildAdjacencyFromBoundaryPolylines(solid) {
   const map = new Map();
   if (!solid || typeof solid.getBoundaryEdgePolylines !== 'function') return map;
@@ -262,13 +657,15 @@ function buildAdjacencyFromBoundaryPolylines(solid) {
   return map;
 }
 
-function buildAdjacencyFromFaceEdges(solid, faceNames, tol) {
+function buildAdjacencyFromFaceEdges(solid, faceNames, tol, getFaceTris = null) {
   const { q, k } = createQuantizer(tol);
   const edgeKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
   const edgeToFaces = new Map();
   const faceToEdges = new Map();
   for (const faceName of faceNames) {
-    const tris = solid.getFace(faceName);
+    const tris = (typeof getFaceTris === 'function')
+      ? getFaceTris(faceName)
+      : solid.getFace(faceName);
     if (!Array.isArray(tris) || tris.length === 0) continue;
     const counts = new Map();
     for (const tri of tris) {
@@ -312,9 +709,11 @@ function buildAdjacencyFromFaceEdges(solid, faceNames, tol) {
   return adj;
 }
 
-function computeFacePlaneInfo(solid, faceName) {
+function computeFacePlaneInfo(solid, faceName, getFaceTris = null) {
   if (!solid || typeof solid.getFace !== 'function' || !faceName) return null;
-  const tris = solid.getFace(faceName);
+  const tris = (typeof getFaceTris === 'function')
+    ? getFaceTris(faceName)
+    : solid.getFace(faceName);
   if (!Array.isArray(tris) || tris.length === 0) return null;
 
   let nx = 0, ny = 0, nz = 0;
@@ -397,11 +796,11 @@ function maxFaceDistanceToPlane(tris, normal, offset) {
   return maxDist;
 }
 
-function areFacesCoplanar(solid, faceA, faceB, planeCache, dotThreshold, planeTol) {
+function areFacesCoplanar(solid, faceA, faceB, planeCache, dotThreshold, planeTol, getFaceTris = null) {
   if (!solid || !faceA || !faceB || faceA === faceB) return false;
   const getPlane = (name) => {
     if (planeCache.has(name)) return planeCache.get(name);
-    const info = computeFacePlaneInfo(solid, name);
+    const info = computeFacePlaneInfo(solid, name, getFaceTris);
     planeCache.set(name, info);
     return info;
   };
@@ -422,16 +821,46 @@ function areFacesCoplanar(solid, faceA, faceB, planeCache, dotThreshold, planeTo
   return true;
 }
 
-function mergeOutsetEndCapsByCoplanarity(resultSolid, filletEntries, direction, featureID) {
-  if (!resultSolid || String(direction).toUpperCase() !== 'OUTSET') return 0;
-  if (typeof resultSolid.getFaceNames !== 'function') return 0;
-
-  const faceHasTris = (name) => {
-    if (!name || typeof resultSolid.getFace !== 'function') return false;
-    const tris = resultSolid.getFace(name);
+function createFaceHasTrianglesPredicate(resultSolid, getFaceTris = null) {
+  return (name) => {
+    if (!name || typeof resultSolid?.getFace !== 'function') return false;
+    const tris = (typeof getFaceTris === 'function')
+      ? getFaceTris(name)
+      : resultSolid.getFace(name);
     return Array.isArray(tris) && tris.length > 0;
   };
+}
 
+function mergeFilletEndCapsByAdjacencyStrategy(resultSolid, endCapFaces, pickNeighbor, getFaceTris = null) {
+  if (!resultSolid || typeof resultSolid.getFaceNames !== 'function') return 0;
+  const faceHasTris = createFaceHasTrianglesPredicate(resultSolid, getFaceTris);
+  const caps = (Array.isArray(endCapFaces) ? endCapFaces : []).filter(faceHasTris);
+  if (caps.length === 0 || typeof pickNeighbor !== 'function') return 0;
+
+  const activeFaceNames = (resultSolid.getFaceNames() || []).filter(faceHasTris);
+  const boundaryAdj = buildAdjacencyFromBoundaryPolylines(resultSolid);
+  let edgeAdj = null;
+  let edgeAdjReady = false;
+  let merged = 0;
+
+  for (const capName of caps) {
+    let targetFace = pickNeighbor(capName, boundaryAdj.get(capName), 'boundary');
+    if (!targetFace) {
+      if (!edgeAdjReady) {
+        const tol = deriveSolidToleranceFromVerts(resultSolid, 1e-5);
+        edgeAdj = buildAdjacencyFromFaceEdges(resultSolid, activeFaceNames, tol, getFaceTris);
+        edgeAdjReady = true;
+      }
+      targetFace = pickNeighbor(capName, edgeAdj?.get(capName), 'edge');
+    }
+    if (targetFace && mergeFaceIntoTarget(resultSolid, capName, targetFace)) {
+      merged += 1;
+    }
+  }
+  return merged;
+}
+
+function collectOutsetEndCapCandidates(resultSolid, filletEntries, featureID) {
   const endCapCandidates = new Set();
   for (const entry of (Array.isArray(filletEntries) ? filletEntries : [])) {
     const fallbackNames = getFilletMergeCandidateNames(entry?.filletSolid);
@@ -444,13 +873,13 @@ function mergeOutsetEndCapsByCoplanarity(resultSolid, filletEntries, direction, 
         endCapCandidates.add(name);
         continue;
       }
-      const meta = (typeof resultSolid.getFaceMetadata === 'function') ? resultSolid.getFaceMetadata(name) : {};
+      const meta = (typeof resultSolid?.getFaceMetadata === 'function') ? resultSolid.getFaceMetadata(name) : {};
       if (meta?.filletEndCap) endCapCandidates.add(name);
     }
   }
 
   // Fallback for cases where mergeCandidates did not retain end-cap labels.
-  if (endCapCandidates.size === 0) {
+  if (endCapCandidates.size === 0 && typeof resultSolid?.getFaceNames === 'function') {
     const featurePrefix = featureID ? `${featureID}_FILLET_` : '';
     for (const name of (resultSolid.getFaceNames() || [])) {
       if (typeof name !== 'string') continue;
@@ -458,20 +887,21 @@ function mergeOutsetEndCapsByCoplanarity(resultSolid, filletEntries, direction, 
       if (isFilletEndCapFaceName(name)) endCapCandidates.add(name);
     }
   }
+  return endCapCandidates;
+}
+
+function mergeOutsetEndCapsByCoplanarity(resultSolid, filletEntries, direction, featureID, getFaceTris = null) {
+  if (!resultSolid || String(direction).toUpperCase() !== 'OUTSET') return 0;
+  if (typeof resultSolid.getFaceNames !== 'function') return 0;
+
+  const faceHasTris = createFaceHasTrianglesPredicate(resultSolid, getFaceTris);
+  const endCapCandidates = collectOutsetEndCapCandidates(resultSolid, filletEntries, featureID);
   if (endCapCandidates.size === 0) return 0;
 
-  const endCapFaces = Array.from(endCapCandidates).filter(faceHasTris);
-  if (endCapFaces.length === 0) return 0;
-
-  const activeFaceNames = (resultSolid.getFaceNames() || []).filter(faceHasTris);
-  const boundaryAdj = buildAdjacencyFromBoundaryPolylines(resultSolid);
-  let edgeAdj = null;
-  let edgeAdjReady = false;
-  const areaCache = buildFaceAreaCache(resultSolid);
+  const areaCache = buildFaceAreaCache(resultSolid, getFaceTris);
   const planeCache = new Map();
   const dotThreshold = 0.999;
   const planeTol = Math.max(deriveSolidToleranceFromVerts(resultSolid, 1e-5) * 25, 1e-6);
-  let merged = 0;
 
   const pickCoplanarNeighbor = (capName, neighbors) => {
     if (!(neighbors instanceof Set) || neighbors.size === 0) return null;
@@ -481,7 +911,7 @@ function mergeOutsetEndCapsByCoplanarity(resultSolid, filletEntries, direction, 
       if (!neighbor || neighbor === capName) continue;
       if (!faceHasTris(neighbor)) continue;
       if (endCapCandidates.has(neighbor) || isFilletEndCapFaceName(neighbor)) continue;
-      if (!areFacesCoplanar(resultSolid, capName, neighbor, planeCache, dotThreshold, planeTol)) continue;
+      if (!areFacesCoplanar(resultSolid, capName, neighbor, planeCache, dotThreshold, planeTol, getFaceTris)) continue;
       const area = areaCache.get(neighbor);
       if (area > bestArea) {
         best = neighbor;
@@ -491,86 +921,71 @@ function mergeOutsetEndCapsByCoplanarity(resultSolid, filletEntries, direction, 
     return best;
   };
 
-  for (const capName of endCapFaces) {
-    if (!faceHasTris(capName)) continue;
-    let targetFace = pickCoplanarNeighbor(capName, boundaryAdj.get(capName));
-    if (!targetFace) {
-      if (!edgeAdjReady) {
-        const tol = deriveSolidToleranceFromVerts(resultSolid, 1e-5);
-        edgeAdj = buildAdjacencyFromFaceEdges(resultSolid, activeFaceNames, tol);
-        edgeAdjReady = true;
-      }
-      targetFace = pickCoplanarNeighbor(capName, edgeAdj?.get(capName));
-    }
-    if (targetFace && mergeFaceIntoTarget(resultSolid, capName, targetFace)) {
-      planeCache.delete(capName);
-      merged += 1;
-    }
-  }
+  const merged = mergeFilletEndCapsByAdjacencyStrategy(
+    resultSolid,
+    Array.from(endCapCandidates),
+    pickCoplanarNeighbor,
+    getFaceTris,
+  );
+  for (const capName of endCapCandidates) planeCache.delete(capName);
   return merged;
 }
 
-function mergeInsetEndCapsByNormal(resultSolid, featureID, direction, dotThreshold = 0.999) {
-  if (!resultSolid || String(direction).toUpperCase() !== 'INSET') return;
-  if (typeof resultSolid.getFaceNames !== 'function') return;
+function mergeInsetEndCapsByNormal(
+  resultSolid,
+  featureID,
+  direction,
+  allowedFilletPrefixes = null,
+  dotThreshold = 0.999,
+  getFaceTris = null,
+) {
+  if (!resultSolid || String(direction).toUpperCase() !== 'INSET') return 0;
+  if (typeof resultSolid.getFaceNames !== 'function') return 0;
   const faceNames = resultSolid.getFaceNames() || [];
-  if (!Array.isArray(faceNames) || faceNames.length === 0) return;
-  const faceHasTris = (name) => {
-    if (!name || typeof resultSolid.getFace !== 'function') return false;
-    const tris = resultSolid.getFace(name);
-    return Array.isArray(tris) && tris.length > 0;
-  };
+  if (!Array.isArray(faceNames) || faceNames.length === 0) return 0;
+
+  const allowedPrefixes = Array.isArray(allowedFilletPrefixes)
+    ? allowedFilletPrefixes.filter((p) => typeof p === 'string' && p.length > 0)
+    : [];
+  const hasPrefixFilter = allowedPrefixes.length > 0;
+  const faceHasTris = createFaceHasTrianglesPredicate(resultSolid, getFaceTris);
   const activeFaceNames = faceNames.filter(faceHasTris);
   const prefix = featureID ? `${featureID}_FILLET_` : '';
   const endCapFaces = activeFaceNames.filter((name) => {
     if (typeof name !== 'string') return false;
     if (prefix && !name.startsWith(prefix)) return false;
+    if (hasPrefixFilter && !allowedPrefixes.some((edgePrefix) => name.startsWith(`${edgePrefix}_`))) return false;
     return /_END_CAP_\d+$/.test(name);
   });
-  if (!endCapFaces.length) return;
-
-  const adjacentMap = buildAdjacencyFromBoundaryPolylines(resultSolid);
-  let edgeAdjMap = null;
-  let edgeAdjReady = false;
+  if (!endCapFaces.length) return 0;
 
   const normalCache = new Map();
   const getNormal = (name) => {
     if (normalCache.has(name)) return normalCache.get(name);
-    const n = averageFaceNormalSimple(resultSolid, name);
+    const n = averageFaceNormalSimple(resultSolid, name, getFaceTris);
     normalCache.set(name, n);
     return n;
   };
-  const tryMergeWithAdj = (capName, adj) => {
-    if (!adj || adj.size === 0) return false;
+  const pickNormalAlignedNeighbor = (capName, neighbors) => {
+    if (!(neighbors instanceof Set) || neighbors.size === 0) return null;
     const nCap = getNormal(capName);
-    if (!nCap) return false;
-    for (const neighbor of adj) {
-      if (neighbor === capName) continue;
+    if (!nCap) return null;
+    for (const neighbor of neighbors) {
+      if (!neighbor || neighbor === capName) continue;
       const nAdj = getNormal(neighbor);
       if (!nAdj) continue;
       const dot = (nCap[0] * nAdj[0]) + (nCap[1] * nAdj[1]) + (nCap[2] * nAdj[2]);
-      if (dot >= dotThreshold) {
-        mergeFaceIntoTarget(resultSolid, capName, neighbor);
-        return true;
-      }
+      if (dot >= dotThreshold) return neighbor;
     }
-    return false;
+    return null;
   };
 
-  for (const capName of endCapFaces) {
-    const adj = adjacentMap.get(capName);
-    if (tryMergeWithAdj(capName, adj)) {
-      continue;
-    }
-    if (!edgeAdjReady) {
-      const tol = deriveSolidToleranceFromVerts(resultSolid, 1e-5);
-      edgeAdjMap = buildAdjacencyFromFaceEdges(resultSolid, activeFaceNames, tol);
-      edgeAdjReady = true;
-    }
-    if (tryMergeWithAdj(capName, edgeAdjMap?.get(capName))) {
-      continue;
-    }
-  }
+  return mergeFilletEndCapsByAdjacencyStrategy(
+    resultSolid,
+    endCapFaces,
+    pickNormalAlignedNeighbor,
+    getFaceTris,
+  );
 }
 
 function isFilletFaceName(faceName, filletNamePrefixes, featureID) {
@@ -590,6 +1005,195 @@ function isFilletEndCapFaceName(faceName) {
   if (/_TUBE_CapStart$/.test(faceName)) return true;
   if (/_TUBE_CapEnd$/.test(faceName)) return true;
   return false;
+}
+
+function isFinitePoint3Array(point) {
+  return Array.isArray(point)
+    && point.length >= 3
+    && Number.isFinite(point[0])
+    && Number.isFinite(point[1])
+    && Number.isFinite(point[2]);
+}
+
+function collectFilletGeneratedEdgeSmoothTargets(resultSolid, filletEntries, featureID, fitStrength = 1) {
+  const targetMap = new Map();
+  const lockedEndpointIndices = new Set();
+  const filletNamePrefixes = [];
+  for (const entry of (Array.isArray(filletEntries) ? filletEntries : [])) {
+    const filletName = entry?.filletName;
+    if (typeof filletName === 'string' && filletName.length > 0) {
+      filletNamePrefixes.push(filletName);
+    }
+  }
+
+  let consideredEdges = 0;
+  let eligibleEdges = 0;
+  let smoothedEdges = 0;
+  let skippedClosedLoops = 0;
+  let targetAssignments = 0;
+
+  if (!resultSolid || typeof resultSolid.getBoundaryEdgePolylines !== 'function') {
+    return {
+      targetMap,
+      consideredEdges,
+      eligibleEdges,
+      smoothedEdges,
+      skippedClosedLoops,
+      targetAssignments,
+      lockedEndpointCount: 0,
+    };
+  }
+
+  const clampedStrength = Number.isFinite(Number(fitStrength))
+    ? Math.max(0, Math.min(1, Number(fitStrength)))
+    : 1;
+  const boundaries = resultSolid.getBoundaryEdgePolylines() || [];
+  for (const boundary of boundaries) {
+    const faceA = boundary?.faceA;
+    const faceB = boundary?.faceB;
+    const involvesFilletFace = isFilletFaceName(faceA, filletNamePrefixes, featureID)
+      || isFilletFaceName(faceB, filletNamePrefixes, featureID);
+    if (!involvesFilletFace) continue;
+
+    consideredEdges++;
+    if (boundary?.closedLoop) {
+      skippedClosedLoops++;
+      continue;
+    }
+
+    const indices = Array.isArray(boundary?.indices) ? boundary.indices : [];
+    const positions = Array.isArray(boundary?.positions) ? boundary.positions : [];
+    const count = Math.min(indices.length, positions.length);
+    if (count < 3) continue;
+
+    const cleanedIndices = [];
+    const cleanedPositions = [];
+    for (let i = 0; i < count; i++) {
+      const idx = Number(indices[i]);
+      const p = positions[i];
+      if (!Number.isInteger(idx) || idx < 0 || !isFinitePoint3Array(p)) continue;
+      cleanedIndices.push(idx);
+      cleanedPositions.push([p[0], p[1], p[2]]);
+    }
+    if (cleanedIndices.length < 3) continue;
+
+    eligibleEdges++;
+    const snapped = fitAndSnapOpenEdgePolyline(cleanedPositions, { fitStrength: clampedStrength });
+    if (!Array.isArray(snapped) || snapped.length !== cleanedPositions.length) continue;
+    smoothedEdges++;
+
+    lockedEndpointIndices.add(cleanedIndices[0]);
+    lockedEndpointIndices.add(cleanedIndices[cleanedIndices.length - 1]);
+    for (let i = 1; i < cleanedIndices.length - 1; i++) {
+      const idx = cleanedIndices[i];
+      const pt = snapped[i];
+      if (!Number.isInteger(idx) || idx < 0 || !isFinitePoint3Array(pt)) continue;
+      targetAssignments++;
+      const aggregate = targetMap.get(idx) || { x: 0, y: 0, z: 0, count: 0 };
+      aggregate.x += pt[0];
+      aggregate.y += pt[1];
+      aggregate.z += pt[2];
+      aggregate.count += 1;
+      targetMap.set(idx, aggregate);
+    }
+  }
+
+  for (const endpointIndex of lockedEndpointIndices) {
+    targetMap.delete(endpointIndex);
+  }
+
+  return {
+    targetMap,
+    consideredEdges,
+    eligibleEdges,
+    smoothedEdges,
+    skippedClosedLoops,
+    targetAssignments,
+    lockedEndpointCount: lockedEndpointIndices.size,
+  };
+}
+
+function applyFilletEdgeSmoothTargets(resultSolid, targetMap) {
+  const vp = Array.isArray(resultSolid?._vertProperties) ? resultSolid._vertProperties : null;
+  if (!vp || vp.length < 3 || !(targetMap instanceof Map) || targetMap.size === 0) return 0;
+
+  const maxIndex = ((vp.length / 3) | 0) - 1;
+  let movedVertices = 0;
+  for (const [rawIndex, aggregate] of targetMap.entries()) {
+    const index = Number(rawIndex);
+    if (!Number.isInteger(index) || index < 0 || index > maxIndex) continue;
+    const count = Number(aggregate?.count);
+    if (!(count > 0)) continue;
+
+    const tx = Number(aggregate?.x) / count;
+    const ty = Number(aggregate?.y) / count;
+    const tz = Number(aggregate?.z) / count;
+    if (!Number.isFinite(tx) || !Number.isFinite(ty) || !Number.isFinite(tz)) continue;
+
+    const base = index * 3;
+    const ox = vp[base + 0];
+    const oy = vp[base + 1];
+    const oz = vp[base + 2];
+    if (!Number.isFinite(ox) || !Number.isFinite(oy) || !Number.isFinite(oz)) continue;
+
+    const dx = tx - ox;
+    const dy = ty - oy;
+    const dz = tz - oz;
+    const distSq = (dx * dx) + (dy * dy) + (dz * dz);
+    if (distSq <= 1e-30) continue;
+
+    vp[base + 0] = tx;
+    vp[base + 1] = ty;
+    vp[base + 2] = tz;
+    movedVertices++;
+  }
+
+  if (movedVertices <= 0) return 0;
+
+  resultSolid._vertProperties = vp;
+  resultSolid._dirty = true;
+  resultSolid._faceIndex = null;
+  const keyToIndex = new Map();
+  for (let i = 0; i < vp.length; i += 3) {
+    const key = `${vp[i + 0]},${vp[i + 1]},${vp[i + 2]}`;
+    keyToIndex.set(key, (i / 3) | 0);
+  }
+  resultSolid._vertKeyToIndex = keyToIndex;
+
+  try {
+    if (resultSolid._manifold && typeof resultSolid._manifold.delete === 'function') {
+      resultSolid._manifold.delete();
+    }
+  } catch { }
+  resultSolid._manifold = null;
+  try {
+    if (typeof resultSolid._manifoldize === 'function') {
+      resultSolid._manifoldize();
+    }
+  } catch { }
+  return movedVertices;
+}
+
+function smoothFilletGeneratedEdges(resultSolid, filletEntries, featureID, fitStrength = 1) {
+  const targetInfo = collectFilletGeneratedEdgeSmoothTargets(
+    resultSolid,
+    filletEntries,
+    featureID,
+    fitStrength,
+  );
+  const movedVertices = applyFilletEdgeSmoothTargets(resultSolid, targetInfo.targetMap);
+  return {
+    consideredEdges: targetInfo.consideredEdges,
+    eligibleEdges: targetInfo.eligibleEdges,
+    smoothedEdges: targetInfo.smoothedEdges,
+    skippedClosedLoops: targetInfo.skippedClosedLoops,
+    targetAssignments: targetInfo.targetAssignments,
+    lockedEndpointCount: targetInfo.lockedEndpointCount,
+    movedVertices,
+    fitStrength: Number.isFinite(Number(fitStrength))
+      ? Math.max(0, Math.min(1, Number(fitStrength)))
+      : 1,
+  };
 }
 
 function closeThreeFaceFilletPointGaps(resultSolid, filletEntries, featureID, captureOriginalPositions = false) {
@@ -2471,13 +3075,12 @@ function removeSelectedEndCapTrianglesAndPatch(resultSolid, endCapFaceIDs, featu
 }
 /**
  * Apply fillets to this Solid and return a new Solid with the result.
- * Accepts either `edgeNames` (preferred) or explicit `edges` objects.
+ * Accepts explicit `edges` objects.
  *
  * @param {Object} opts
  * @param {number} opts.radius Required fillet radius (> 0)
- * @param {string[]} [opts.edgeNames] Optional edge names to fillet (resolved from this Solid's children)
  * @param {any[]} [opts.edges] Optional pre-resolved Edge objects (must belong to this Solid)
- * @param {'INSET'|'OUTSET'|string} [opts.direction='INSET'] Boolean behavior (subtract vs union)
+ * @param {'AUTO'|'INSET'|'OUTSET'|string} [opts.direction='AUTO'] Choose boolean side per edge automatically (AUTO) or force INSET/OUTSET
  * @param {number} [opts.inflate=0.1] Inflation for cutting tube
  * @param {number} [opts.resolution=32] Tube resolution (segments around circumference)
  * @param {boolean} [opts.debug=false] Enable debug visuals in fillet builder
@@ -2485,6 +3088,7 @@ function removeSelectedEndCapTrianglesAndPatch(resultSolid, endCapFaceIDs, featu
  * @param {boolean} [opts.debugShowCombinedBeforeTarget=false] Emit the combined fillet solid before target boolean
  * @param {boolean} [opts.showTangentOverlays=false] Show pre-inflate tangent overlays on the fillet tube
  * @param {boolean} [opts.patchFilletEndCaps=false] Enable three-face tip cleanup and end-cap triangle replacement patching
+ * @param {boolean} [opts.smoothGeneratedEdges=false] Apply curve-fit smoothing to fillet-generated boundary edges
  * @param {string} [opts.featureID='FILLET'] For naming of intermediates and result
  * @param {number} [opts.cleanupTinyFaceIslandsArea=0.001] area threshold for face-island relabeling (<= 0 disables)
  * @returns {import('../BetterSolid.js').Solid}
@@ -2495,7 +3099,9 @@ export async function fillet(opts = {}) {
   if (!Number.isFinite(radius) || radius <= 0) {
     throw new Error(`Solid.fillet: radius must be > 0, got ${opts.radius}`);
   }
-  const dir = String(opts.direction || 'INSET').toUpperCase();
+  const directionMode = normalizeFilletDirectionMode(opts.direction);
+  const fallbackDirection = (directionMode === 'OUTSET') ? 'OUTSET' : 'INSET';
+  const autoDirection = directionMode === 'AUTO';
   const inflate = Number.isFinite(opts.inflate) ? Number(opts.inflate) : 0.1;
   const debug = !!opts.debug;
   const debugSolidsLevelRaw = Number(opts.debugSolidsLevel);
@@ -2509,14 +3115,15 @@ export async function fillet(opts = {}) {
     : 32;
   const showTangentOverlays = !!opts.showTangentOverlays;
   const patchFilletEndCaps = !!opts.patchFilletEndCaps;
+  const smoothGeneratedEdges = !!opts.smoothGeneratedEdges;
   const featureID = opts.featureID || 'FILLET';
   const cleanupTinyFaceIslandsAreaRaw = Number(opts.cleanupTinyFaceIslandsArea);
   const cleanupTinyFaceIslandsArea = Number.isFinite(cleanupTinyFaceIslandsAreaRaw)
     ? cleanupTinyFaceIslandsAreaRaw
     : 0.001;
 
-  // Resolve edges from names and/or provided objects
-  const unique = resolveEdgesFromInputs(this, { edgeNames: opts.edgeNames, edges: opts.edges });
+  // Resolve pre-selected edge objects.
+  const unique = resolveEdgesFromInputs(this, { edges: opts.edges });
   if (unique.length === 0) {
     console.warn('[Solid.fillet] No edges resolved on target solid; returning clone.', { featureID, solid: this?.name });
     // Nothing to do - return an unchanged clone so caller can replace scene node safely
@@ -2524,6 +3131,12 @@ export async function fillet(opts = {}) {
     try { c.name = this.name; } catch { }
     return c;
   }
+  const baseBoundaryPolylines = autoDirection && typeof this.getBoundaryEdgePolylines === 'function'
+    ? (() => {
+      try { return this.getBoundaryEdgePolylines() || []; } catch { return null; }
+    })()
+    : null;
+  const getBaseFaceTris = autoDirection ? createFaceTrianglesAccessor(this) : null;
 
   // Build fillet solids per edge using existing core implementation
   const filletEntries = [];
@@ -2533,18 +3146,117 @@ export async function fillet(opts = {}) {
     if (!target || debugAdded.length === 0) return;
     try { target.__debugAddedSolids = debugAdded; } catch { }
   };
+  const buildFallbackResult = () => {
+    const fallback = this.clone();
+    try { fallback.name = this.name; } catch { }
+    attachDebugSolids(fallback);
+    return fallback;
+  };
   const pushDebugSolid = (solid) => {
     if (!debug || !solid) return;
     debugAdded.push(solid);
+  };
+  const pushNamedDebugSnapshot = (solid, snapshotName, requireClone = false) => {
+    if (!debug || !solid) return;
+    if (requireClone && typeof solid.clone !== 'function') return;
+    try {
+      const snapshot = (typeof solid.clone === 'function') ? solid.clone() : solid;
+      try { snapshot.name = snapshotName; } catch { }
+      debugAdded.push(snapshot);
+    } catch { }
   };
   const pushTubeAndWedgeDebug = (res) => {
     if (!debug || !res) return;
     try { if (res.tube) pushDebugSolid(res.tube); } catch { }
     try { if (res.wedge) pushDebugSolid(res.wedge); } catch { }
   };
+  const combineFilletEntrySolids = (entries, groupLabel) => {
+    const solids = (Array.isArray(entries) ? entries : []).map((entry) => entry?.filletSolid).filter(Boolean);
+    if (solids.length === 0) return null;
+    let combined = solids[0];
+    for (let i = 1; i < solids.length; i++) {
+      combined = combined.union(solids[i]);
+      try { combined.name = `${featureID}_COMBINED_FILLET_${groupLabel}`; } catch { }
+      if (debug && debugSolidsLevel >= 2 && combined && typeof combined.clone === 'function') {
+        pushNamedDebugSnapshot(combined, `${featureID}_COMBINED_${groupLabel}_STEP_${i - 1}`, true);
+      }
+    }
+    try { combined.name = `${featureID}_COMBINED_FILLET_${groupLabel}`; } catch { }
+    return combined;
+  };
+  const booleanGroups = [
+    {
+      mode: 'INSET',
+      operation: 'subtract',
+      stepIndex: 0,
+      stepLabel: 'SUBTRACT',
+      entries: [],
+      combinedSolid: null,
+    },
+    {
+      mode: 'OUTSET',
+      operation: 'union',
+      stepIndex: 1,
+      stepLabel: 'UNION',
+      entries: [],
+      combinedSolid: null,
+    },
+  ];
+  const getBooleanGroupForDirection = (direction) => (
+    String(direction || 'INSET').toUpperCase() === 'OUTSET'
+      ? booleanGroups[1]
+      : booleanGroups[0]
+  );
+
+  const insideTester = autoDirection ? buildPointInsideTester(this) : null;
+  const directionDecision = {
+    mode: directionMode,
+    autoEnabled: autoDirection,
+    fallbackDirection,
+    totalEdges: unique.length,
+    insetEdges: 0,
+    outsetEdges: 0,
+    fallbackEdges: 0,
+    ambiguousEdges: 0,
+  };
+
   for (const e of unique) {
     const name = `${featureID}_FILLET_${idx++}`;
-    const res = filletSolid({ edgeToFillet: e, radius, sideMode: dir, inflate, resolution, debug, name, showTangentOverlays }) || {};
+    let edgeDirection = fallbackDirection;
+    let directionReason = autoDirection ? 'fallback' : 'explicit';
+    let directionDetail = null;
+    if (autoDirection) {
+      const classified = classifyEdgeFilletDirectionByInsideOutside(
+        this,
+        e,
+        insideTester,
+        radius,
+        fallbackDirection,
+        baseBoundaryPolylines,
+        getBaseFaceTris,
+      );
+      edgeDirection = classified?.direction || fallbackDirection;
+      directionReason = classified?.reason || 'fallback';
+      directionDetail = classified || null;
+      const isClassified = directionReason === 'classified' || directionReason === 'signed_dihedral';
+      if (!isClassified) {
+        directionDecision.fallbackEdges += 1;
+        if (String(directionReason || '').includes('ambiguous')) directionDecision.ambiguousEdges += 1;
+      }
+    }
+    if (edgeDirection === 'OUTSET') directionDecision.outsetEdges += 1;
+    else directionDecision.insetEdges += 1;
+
+    const res = filletSolid({
+      edgeToFillet: e,
+      radius,
+      sideMode: edgeDirection,
+      inflate,
+      resolution,
+      debug,
+      name,
+      showTangentOverlays,
+    }) || {};
     if (res.error) {
       console.warn(`Fillet failed for edge ${e?.name || idx}: ${res.error}`);
     }
@@ -2570,6 +3282,9 @@ export async function fillet(opts = {}) {
       roundFaceName,
       wedgeSolid: res.wedge || null,
       tubeSolid: res.tube || null,
+      edgeDirection,
+      directionReason,
+      directionDetail,
     });
     if (debug && debugSolidsLevel >= 0) {
       if (debugSolidsLevel === 0) {
@@ -2582,85 +3297,83 @@ export async function fillet(opts = {}) {
       }
     }
   }
+  if (autoDirection) {
+    console.log('[Solid.fillet] AUTO direction classification complete.', {
+      featureID,
+      insetEdges: directionDecision.insetEdges,
+      outsetEdges: directionDecision.outsetEdges,
+      fallbackEdges: directionDecision.fallbackEdges,
+      ambiguousEdges: directionDecision.ambiguousEdges,
+    });
+  }
   if (filletEntries.length === 0) {
     console.error('[Solid.fillet] All edge fillets failed; returning clone.', { featureID, edgeCount: unique.length });
-    const c = this.clone();
-    try { c.name = this.name; } catch { }
-    attachDebugSolids(c);
-    return c;
+    return buildFallbackResult();
   }
-
-  // Combine all per-edge fillet solids first, then apply the combined solid once.
-  let combinedFilletSolid = null;
-  const solidsToApply = filletEntries.map(entry => entry.filletSolid).filter(Boolean);
+  for (const entry of filletEntries) {
+    getBooleanGroupForDirection(entry?.edgeDirection).entries.push(entry);
+  }
+  const insetEntries = booleanGroups[0].entries;
+  const outsetEntries = booleanGroups[1].entries;
   try {
-    combinedFilletSolid = solidsToApply[0] || null;
-    for (let i = 1; i < solidsToApply.length; i++) {
-      combinedFilletSolid = combinedFilletSolid.union(solidsToApply[i]);
-      try { combinedFilletSolid.name = `${featureID}_COMBINED_FILLET`; } catch { }
-      if (debug && debugSolidsLevel >= 2 && combinedFilletSolid && typeof combinedFilletSolid.clone === 'function') {
-        try {
-          const stepSnapshot = combinedFilletSolid.clone();
-          try { stepSnapshot.name = `${featureID}_COMBINED_STEP_${i - 1}`; } catch { }
-          debugAdded.push(stepSnapshot);
-        } catch { }
+    for (const group of booleanGroups) {
+      group.combinedSolid = combineFilletEntrySolids(group.entries, group.mode);
+    }
+
+    if (debug && debugShowCombinedBeforeTarget) {
+      for (const group of booleanGroups) {
+        if (!group.combinedSolid) continue;
+        pushNamedDebugSnapshot(
+          group.combinedSolid,
+          `${featureID}_COMBINED_FILLET_${group.mode}_PRE_TARGET`,
+          false,
+        );
       }
-    }
-    if (combinedFilletSolid) {
-      try { combinedFilletSolid.name = `${featureID}_COMBINED_FILLET`; } catch { }
-    }
-    if (debug && debugShowCombinedBeforeTarget && combinedFilletSolid) {
-      try {
-        const combinedSnapshot = (typeof combinedFilletSolid.clone === 'function')
-          ? combinedFilletSolid.clone()
-          : combinedFilletSolid;
-        try { combinedSnapshot.name = `${featureID}_COMBINED_FILLET_PRE_TARGET`; } catch { }
-        debugAdded.push(combinedSnapshot);
-      } catch { }
     }
   } catch (err) {
     console.error('[Solid.fillet] Fillet combine failed; returning clone.', { featureID, error: err?.message || err });
-    const fallback = this.clone();
-    try { fallback.name = this.name; } catch { }
-    attachDebugSolids(fallback);
-    return fallback;
+    return buildFallbackResult();
   }
-  if (!combinedFilletSolid) {
-    console.error('[Solid.fillet] No combined fillet solid available; returning clone.', { featureID, edgeCount: unique.length });
-    const fallback = this.clone();
-    try { fallback.name = this.name; } catch { }
-    attachDebugSolids(fallback);
-    return fallback;
+  if (!booleanGroups.some((group) => !!group.combinedSolid)) {
+    console.error('[Solid.fillet] No combined fillet solids available; returning clone.', { featureID, edgeCount: unique.length });
+    return buildFallbackResult();
   }
 
-  // Apply combined fillet once to base solid (union for OUTSET, subtract for INSET)
+  // Apply booleans in one unified path: subtract INSET tools, union OUTSET tools.
   let result = this;
   try {
-    const operation = (dir === 'OUTSET') ? 'union' : 'subtract';
-    result = (operation === 'union')
-      ? result.union(combinedFilletSolid)
-      : result.subtract(combinedFilletSolid);
-    try { result.name = this.name; } catch { }
-    if (debug && debugSolidsLevel >= 2 && result && typeof result.clone === 'function') {
-      try {
-        const stepSnapshot = result.clone();
-        try { stepSnapshot.name = `${featureID}_TARGET_BOOLEAN_RESULT`; } catch { }
-        debugAdded.push(stepSnapshot);
-      } catch { }
+    for (const group of booleanGroups) {
+      if (!group.combinedSolid) continue;
+      result = (group.operation === 'subtract')
+        ? result.subtract(group.combinedSolid)
+        : result.union(group.combinedSolid);
+      if (debug && debugSolidsLevel >= 2 && result && typeof result.clone === 'function') {
+        pushNamedDebugSnapshot(
+          result,
+          `${featureID}_TARGET_BOOLEAN_STEP_${group.stepIndex}_${group.stepLabel}`,
+          true,
+        );
+      }
     }
-    if (typeof result?.visualize === 'function') {
+    try { result.name = this.name; } catch { }
+    if (debug && typeof result?.visualize === 'function') {
       result.visualize();
     }
   } catch (err) {
     console.error('[Solid.fillet] Fillet boolean failed; returning clone.', { featureID, error: err?.message || err });
-    const fallback = this.clone();
-    try { fallback.name = this.name; } catch { }
-    attachDebugSolids(fallback);
-    return fallback;
+    return buildFallbackResult();
   }
 
+  const getResultFaceTris = createFaceTrianglesAccessor(result);
+
   try {
-    const coplanarMerged = mergeOutsetEndCapsByCoplanarity(result, filletEntries, dir, featureID);
+    const coplanarMerged = mergeOutsetEndCapsByCoplanarity(
+      result,
+      outsetEntries,
+      'OUTSET',
+      featureID,
+      getResultFaceTris,
+    );
     if (coplanarMerged > 0) {
       console.log('[Solid.fillet] Merged coplanar end-cap faces after boolean.', {
         featureID,
@@ -2673,8 +3386,9 @@ export async function fillet(opts = {}) {
 
   try {
     const boundaryCache = { current: null };
-    const resultAreaCache = buildFaceAreaCache(result);
+    const resultAreaCache = buildFaceAreaCache(result, getResultFaceTris);
     const filletAreaCacheBySolid = new WeakMap();
+    const filletFaceAccessorBySolid = new WeakMap();
     for (const entry of filletEntries) {
       const { filletSolid, filletName } = entry;
       const mergeSolid = filletSolid;
@@ -2684,7 +3398,12 @@ export async function fillet(opts = {}) {
         : getFilletMergeCandidateNames(mergeSolid);
       let filletAreaCache = filletAreaCacheBySolid.get(mergeSolid);
       if (!filletAreaCache) {
-        filletAreaCache = buildFaceAreaCache(mergeSolid);
+        let getMergeSolidFaceTris = filletFaceAccessorBySolid.get(mergeSolid);
+        if (!getMergeSolidFaceTris) {
+          getMergeSolidFaceTris = createFaceTrianglesAccessor(mergeSolid);
+          filletFaceAccessorBySolid.set(mergeSolid, getMergeSolidFaceTris);
+        }
+        filletAreaCache = buildFaceAreaCache(mergeSolid, getMergeSolidFaceTris);
         filletAreaCacheBySolid.set(mergeSolid, filletAreaCache);
       }
       mergeTinyFacesIntoRoundFace(
@@ -2719,7 +3438,12 @@ export async function fillet(opts = {}) {
   }
 
   try {
-    await mergeInsetEndCapsByNormal(result, featureID, dir);
+    if (insetEntries.length > 0) {
+      const insetPrefixes = insetEntries
+        .map((entry) => entry?.filletName)
+        .filter((name) => typeof name === 'string' && name.length > 0);
+      await mergeInsetEndCapsByNormal(result, featureID, 'INSET', insetPrefixes, 0.999, getResultFaceTris);
+    }
   } catch (err) {
     console.warn('[Solid.fillet] Inset end cap merge failed', { featureID, error: err?.message || err });
   }
@@ -2777,12 +3501,44 @@ export async function fillet(opts = {}) {
 
   // Attach debug artifacts for callers that want to add them to the scene
   attachDebugSolids(result);
+  try {
+    result.__filletDirectionDecision = {
+      ...directionDecision,
+      insetEntries: insetEntries.length,
+      outsetEntries: outsetEntries.length,
+    };
+  } catch { }
 
   // Simplify the final result in place to clean up artifacts from booleans.
   try {
     await result.removeSmallIslands();
   } catch (err) {
     console.warn('[Solid.fillet] simplify failed; continuing without simplification', { featureID, error: err?.message || err });
+  }
+
+  if (smoothGeneratedEdges) {
+    // Smooth newly generated fillet edges using endpoint-constrained curve fitting.
+    try {
+      const edgeSmoothing = smoothFilletGeneratedEdges(result, filletEntries, featureID, 1);
+      try { result.__filletEdgeSmoothing = edgeSmoothing; } catch { }
+      if ((Number(edgeSmoothing?.consideredEdges) || 0) > 0) {
+        console.log('[Solid.fillet] Applied edge smoothing to fillet-generated edges.', {
+          featureID,
+          consideredEdges: edgeSmoothing.consideredEdges,
+          eligibleEdges: edgeSmoothing.eligibleEdges,
+          smoothedEdges: edgeSmoothing.smoothedEdges,
+          skippedClosedLoops: edgeSmoothing.skippedClosedLoops,
+          movedVertices: edgeSmoothing.movedVertices,
+        });
+      }
+    } catch (err) {
+      console.warn('[Solid.fillet] Fillet edge smoothing failed; continuing without smoothing', {
+        featureID,
+        error: err?.message || err,
+      });
+    }
+  } else {
+    try { result.__filletEdgeSmoothing = null; } catch { }
   }
 
   if (debug && collapseEdgeDebugMarkers.length > 0) {
@@ -2808,7 +3564,7 @@ export async function fillet(opts = {}) {
       finalTriCount,
       finalVertCount,
       edgeCount: unique.length,
-      direction: dir,
+      direction: directionMode,
       inflate,
     });
   }
