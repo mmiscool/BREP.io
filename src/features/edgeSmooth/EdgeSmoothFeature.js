@@ -2,6 +2,7 @@ import {
     getSolidGeometryCounts,
 } from "../edgeFeatureUtils.js";
 import { fitAndSnapOpenEdgePolyline } from "./edgeCurveFit.js";
+import { applyConstrainedVertexTargets } from "./vertexTargetConstraints.js";
 
 const DEFAULT_FIT_STRENGTH = 1;
 const POINT_MATCH_EPSILON = 1e-9;
@@ -506,39 +507,24 @@ function rebuildSolidVertexKeyMap(solid) {
 
 function applyVertexTargets(solid, targetMap) {
     const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : null;
-    if (!vp || vp.length < 3 || !(targetMap instanceof Map) || targetMap.size === 0) return 0;
-
-    const maxIndex = ((vp.length / 3) | 0) - 1;
-    let movedVertices = 0;
-    for (const [rawIndex, aggregate] of targetMap.entries()) {
-        const index = Number(rawIndex);
-        if (!Number.isInteger(index) || index < 0 || index > maxIndex) continue;
-
-        const count = Number(aggregate?.count);
-        if (!(count > 0)) continue;
-        const tx = Number(aggregate?.x) / count;
-        const ty = Number(aggregate?.y) / count;
-        const tz = Number(aggregate?.z) / count;
-        if (!Number.isFinite(tx) || !Number.isFinite(ty) || !Number.isFinite(tz)) continue;
-
-        const base = index * 3;
-        const ox = vp[base + 0];
-        const oy = vp[base + 1];
-        const oz = vp[base + 2];
-        if (!Number.isFinite(ox) || !Number.isFinite(oy) || !Number.isFinite(oz)) continue;
-
-        const dx = tx - ox;
-        const dy = ty - oy;
-        const dz = tz - oz;
-        const distSq = (dx * dx) + (dy * dy) + (dz * dz);
-        if (distSq > 1e-30) movedVertices++;
-
-        vp[base + 0] = tx;
-        vp[base + 1] = ty;
-        vp[base + 2] = tz;
+    const tv = Array.isArray(solid?._triVerts) ? solid._triVerts : null;
+    if (!vp || vp.length < 3 || !(targetMap instanceof Map) || targetMap.size === 0) {
+        return { movedVertices: 0, constrainedVertices: 0, rejectedVertices: 0 };
     }
 
-    if (movedVertices <= 0) return 0;
+    const moveStats = applyConstrainedVertexTargets(vp, tv, targetMap, {
+        minArea2Ratio: 0.04,
+        minNormalDot: 0.1,
+        minArea2Abs: 1e-24,
+    });
+    const movedVertices = Number(moveStats?.movedVertices) || 0;
+    if (movedVertices <= 0) {
+        return {
+            movedVertices: 0,
+            constrainedVertices: Number(moveStats?.constrainedVertices) || 0,
+            rejectedVertices: Number(moveStats?.rejectedVertices) || 0,
+        };
+    }
 
     rebuildSolidVertexKeyMap(solid);
     solid._dirty = true;
@@ -568,7 +554,11 @@ function applyVertexTargets(solid, targetMap) {
         });
     }
 
-    return movedVertices;
+    return {
+        movedVertices,
+        constrainedVertices: Number(moveStats?.constrainedVertices) || 0,
+        rejectedVertices: Number(moveStats?.rejectedVertices) || 0,
+    };
 }
 
 function groupDescriptorsBySolid(descriptors) {
@@ -595,7 +585,8 @@ function smoothEdgesOnClone(sourceSolid, descriptors, options, featureID) {
     const targetInfo = collectTargetsForDescriptors(outSolid, descriptors, options);
     if (targetInfo.targetMap.size === 0) return null;
 
-    const movedVertices = applyVertexTargets(outSolid, targetInfo.targetMap);
+    const moveStats = applyVertexTargets(outSolid, targetInfo.targetMap);
+    const movedVertices = Number(moveStats?.movedVertices) || 0;
     if (movedVertices <= 0) return null;
 
     const { triCount, vertCount } = getSolidGeometryCounts(outSolid);
@@ -617,6 +608,8 @@ function smoothEdgesOnClone(sourceSolid, descriptors, options, featureID) {
         skippedClosedLoops: targetInfo.skippedClosedLoops,
         targetAssignments: targetInfo.targetAssignments,
         lockedEndpointCount: targetInfo.lockedEndpointCount,
+        constrainedVertices: Number(moveStats?.constrainedVertices) || 0,
+        rejectedVertices: Number(moveStats?.rejectedVertices) || 0,
     };
 }
 
@@ -677,6 +670,8 @@ export class EdgeSmoothFeature {
         let totalSkippedClosedLoops = 0;
         let totalTargetAssignments = 0;
         let totalLockedEndpoints = 0;
+        let totalConstrainedVertices = 0;
+        let totalRejectedVertices = 0;
         const featureID = this.inputParams?.featureID || this.inputParams?.id || null;
 
         for (const [sourceSolid, edgeDescriptors] of grouped.entries()) {
@@ -696,6 +691,8 @@ export class EdgeSmoothFeature {
             totalSkippedClosedLoops += Number(result.skippedClosedLoops) || 0;
             totalTargetAssignments += Number(result.targetAssignments) || 0;
             totalLockedEndpoints += Number(result.lockedEndpointCount) || 0;
+            totalConstrainedVertices += Number(result.constrainedVertices) || 0;
+            totalRejectedVertices += Number(result.rejectedVertices) || 0;
         }
 
         if (!added.length) {
@@ -722,6 +719,8 @@ export class EdgeSmoothFeature {
             totalSkippedClosedLoops,
             totalTargetAssignments,
             totalLockedEndpoints,
+            totalConstrainedVertices,
+            totalRejectedVertices,
             targetSolidCount: added.length,
             fitStrength,
         };

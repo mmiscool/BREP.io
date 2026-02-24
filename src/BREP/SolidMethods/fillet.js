@@ -5,7 +5,7 @@ import { resolveEdgesFromInputs } from './edgeResolution.js';
 import { computeFaceAreaFromTriangles } from '../fillets/filletGeometry.js';
 import { getCachedFaceDataForTris, localFaceNormalAtPoint, averageFaceNormalObjectSpace } from '../fillets/inset.js';
 import { createQuantizer } from '../../utils/geometryTolerance.js';
-import { fitAndSnapOpenEdgePolyline, fitAndSnapClosedEdgePolyline } from '../../features/edgeSmooth/edgeCurveFit.js';
+import { applyConstrainedVertexTargets } from '../../features/edgeSmooth/vertexTargetConstraints.js';
 
 // Threshold for collapsing tiny end caps into the round face.
 const END_CAP_AREA_RATIO_THRESHOLD = 0.05;
@@ -1023,7 +1023,180 @@ function pointsMatchWithinTolerance(a, b, eps = 1e-9) {
   return ((dx * dx) + (dy * dy) + (dz * dz)) <= (eps * eps);
 }
 
-function collectFilletGeneratedEdgeSmoothTargets(resultSolid, filletEntries, featureID, fitStrength = 1) {
+function filletEdgeSmoothClonePoints(points) {
+  if (!Array.isArray(points)) return [];
+  return points.map((p) => isFinitePoint3Array(p) ? [p[0], p[1], p[2]] : [0, 0, 0]);
+}
+
+function filletEdgeSmoothDot(a, b) {
+  return (a[0] * b[0]) + (a[1] * b[1]) + (a[2] * b[2]);
+}
+
+function filletEdgeSmoothHasBacktrackingAgainstSourceOpen(sourcePoints, candidatePoints) {
+  const source = Array.isArray(sourcePoints) ? sourcePoints : [];
+  const candidate = Array.isArray(candidatePoints) ? candidatePoints : [];
+  if (source.length !== candidate.length || source.length < 2) return true;
+  for (let i = 0; i < source.length - 1; i++) {
+    const s0 = source[i];
+    const s1 = source[i + 1];
+    const c0 = candidate[i];
+    const c1 = candidate[i + 1];
+    if (!isFinitePoint3Array(s0) || !isFinitePoint3Array(s1) || !isFinitePoint3Array(c0) || !isFinitePoint3Array(c1)) {
+      return true;
+    }
+    const srcSeg = [s1[0] - s0[0], s1[1] - s0[1], s1[2] - s0[2]];
+    const candSeg = [c1[0] - c0[0], c1[1] - c0[1], c1[2] - c0[2]];
+    const srcLen = Math.hypot(srcSeg[0], srcSeg[1], srcSeg[2]);
+    const candLen = Math.hypot(candSeg[0], candSeg[1], candSeg[2]);
+    if (!(srcLen > 1e-12) || !(candLen > 1e-12)) continue;
+    const cos = filletEdgeSmoothDot(srcSeg, candSeg) / (srcLen * candLen);
+    if (cos < -1e-6) return true;
+  }
+  return false;
+}
+
+function filletEdgeSmoothHasBacktrackingAgainstSourceClosed(sourcePoints, candidatePoints) {
+  const source = Array.isArray(sourcePoints) ? sourcePoints : [];
+  const candidate = Array.isArray(candidatePoints) ? candidatePoints : [];
+  const count = source.length;
+  if (count !== candidate.length || count < 3) return true;
+  for (let i = 0; i < count; i++) {
+    const next = (i + 1) % count;
+    const s0 = source[i];
+    const s1 = source[next];
+    const c0 = candidate[i];
+    const c1 = candidate[next];
+    if (!isFinitePoint3Array(s0) || !isFinitePoint3Array(s1) || !isFinitePoint3Array(c0) || !isFinitePoint3Array(c1)) {
+      return true;
+    }
+    const srcSeg = [s1[0] - s0[0], s1[1] - s0[1], s1[2] - s0[2]];
+    const candSeg = [c1[0] - c0[0], c1[1] - c0[1], c1[2] - c0[2]];
+    const srcLen = Math.hypot(srcSeg[0], srcSeg[1], srcSeg[2]);
+    const candLen = Math.hypot(candSeg[0], candSeg[1], candSeg[2]);
+    if (!(srcLen > 1e-12) || !(candLen > 1e-12)) continue;
+    const cos = filletEdgeSmoothDot(srcSeg, candSeg) / (srcLen * candLen);
+    if (cos < -1e-6) return true;
+  }
+  return false;
+}
+
+function filletEdgeSmoothBlendPolylines(sourcePoints, candidatePoints, alpha, isClosedLoop) {
+  const source = Array.isArray(sourcePoints) ? sourcePoints : [];
+  const candidate = Array.isArray(candidatePoints) ? candidatePoints : [];
+  const count = Math.min(source.length, candidate.length);
+  const out = new Array(count);
+  const t = Math.max(0, Math.min(1, Number(alpha) || 0));
+  const u = 1 - t;
+  for (let i = 0; i < count; i++) {
+    if (!isClosedLoop && (i === 0 || i === (count - 1))) {
+      out[i] = [source[i][0], source[i][1], source[i][2]];
+      continue;
+    }
+    out[i] = [
+      (source[i][0] * u) + (candidate[i][0] * t),
+      (source[i][1] * u) + (candidate[i][1] * t),
+      (source[i][2] * u) + (candidate[i][2] * t),
+    ];
+  }
+  return out;
+}
+
+function filletEdgeSmoothEnforceNoBacktracking(sourcePoints, candidatePoints, isClosedLoop) {
+  const source = Array.isArray(sourcePoints) ? sourcePoints : [];
+  const candidate = Array.isArray(candidatePoints) ? candidatePoints : [];
+  const hasBacktracking = isClosedLoop
+    ? filletEdgeSmoothHasBacktrackingAgainstSourceClosed(source, candidate)
+    : filletEdgeSmoothHasBacktrackingAgainstSourceOpen(source, candidate);
+  if (!hasBacktracking) return candidate;
+
+  let lo = 0;
+  let hi = 1;
+  let safe = filletEdgeSmoothClonePoints(source);
+  for (let i = 0; i < 14; i++) {
+    const alpha = (lo + hi) * 0.5;
+    const blended = filletEdgeSmoothBlendPolylines(source, candidate, alpha, isClosedLoop);
+    const bad = isClosedLoop
+      ? filletEdgeSmoothHasBacktrackingAgainstSourceClosed(source, blended)
+      : filletEdgeSmoothHasBacktrackingAgainstSourceOpen(source, blended);
+    if (bad) hi = alpha;
+    else {
+      lo = alpha;
+      safe = blended;
+    }
+  }
+  return safe;
+}
+
+function filletEdgeSmoothPolylineKinks(points, options = {}) {
+  const source = Array.isArray(points) ? points : [];
+  const count = source.length;
+  const isClosedLoop = !!options?.closedLoop;
+  const rawStrength = Number(options?.strength);
+  const strength = Number.isFinite(rawStrength)
+    ? Math.max(0, Math.min(1, rawStrength))
+    : 1;
+  if (count < 3 || strength <= 0) return filletEdgeSmoothClonePoints(source);
+  if (!source.every((p) => isFinitePoint3Array(p))) return filletEdgeSmoothClonePoints(source);
+
+  const iterations = 1 + Math.floor(strength * 2); // 1..3 passes
+  let current = filletEdgeSmoothClonePoints(source);
+  for (let pass = 0; pass < iterations; pass++) {
+    const next = filletEdgeSmoothClonePoints(current);
+    let movedInPass = false;
+    for (let i = 0; i < count; i++) {
+      if (!isClosedLoop && (i === 0 || i === (count - 1))) continue;
+      const prevIndex = (i + count - 1) % count;
+      const nextIndex = (i + 1) % count;
+      const prev = current[prevIndex];
+      const cur = current[i];
+      const after = current[nextIndex];
+      if (!isFinitePoint3Array(prev) || !isFinitePoint3Array(cur) || !isFinitePoint3Array(after)) continue;
+
+      const vPrev = [cur[0] - prev[0], cur[1] - prev[1], cur[2] - prev[2]];
+      const vNext = [after[0] - cur[0], after[1] - cur[1], after[2] - cur[2]];
+      const lenPrev = Math.hypot(vPrev[0], vPrev[1], vPrev[2]);
+      const lenNext = Math.hypot(vNext[0], vNext[1], vNext[2]);
+      if (!(lenPrev > 1e-12) || !(lenNext > 1e-12)) continue;
+
+      const dotRaw = filletEdgeSmoothDot(vPrev, vNext) / (lenPrev * lenNext);
+      const dot = Math.max(-1, Math.min(1, dotRaw));
+      const kinkFactor = Math.max(0, (1 - dot) * 0.5);
+      if (kinkFactor < 0.01) continue;
+
+      const localWeight = strength * Math.sqrt(kinkFactor);
+      if (!(localWeight > 1e-6)) continue;
+
+      const tx = (prev[0] + after[0]) * 0.5;
+      const ty = (prev[1] + after[1]) * 0.5;
+      const tz = (prev[2] + after[2]) * 0.5;
+      let mx = (tx - cur[0]) * localWeight;
+      let my = (ty - cur[1]) * localWeight;
+      let mz = (tz - cur[2]) * localWeight;
+      const moveLen = Math.hypot(mx, my, mz);
+      if (!(moveLen > 1e-12)) continue;
+      const maxMove = Math.min(lenPrev, lenNext) * 0.45;
+      if (moveLen > maxMove && maxMove > 1e-12) {
+        const s = maxMove / moveLen;
+        mx *= s;
+        my *= s;
+        mz *= s;
+      }
+
+      next[i] = [
+        cur[0] + mx,
+        cur[1] + my,
+        cur[2] + mz,
+      ];
+      movedInPass = true;
+    }
+    current = next;
+    if (!movedInPass) break;
+  }
+
+  return filletEdgeSmoothEnforceNoBacktracking(source, current, isClosedLoop);
+}
+
+function collectFilletGeneratedEdgeSmoothTargets(resultSolid, filletEntries, featureID, smoothStrength = 1) {
   const targetMap = new Map();
   const lockedEndpointIndices = new Set();
   const filletNamePrefixes = [];
@@ -1052,8 +1225,8 @@ function collectFilletGeneratedEdgeSmoothTargets(resultSolid, filletEntries, fea
     };
   }
 
-  const clampedStrength = Number.isFinite(Number(fitStrength))
-    ? Math.max(0, Math.min(1, Number(fitStrength)))
+  const clampedStrength = Number.isFinite(Number(smoothStrength))
+    ? Math.max(0, Math.min(1, Number(smoothStrength)))
     : 1;
   const boundaries = resultSolid.getBoundaryEdgePolylines() || [];
   for (const boundary of boundaries) {
@@ -1097,9 +1270,10 @@ function collectFilletGeneratedEdgeSmoothTargets(resultSolid, filletEntries, fea
     }
 
     eligibleEdges++;
-    const snapped = isClosedLoop
-      ? fitAndSnapClosedEdgePolyline(cleanedPositions, { fitStrength: clampedStrength })
-      : fitAndSnapOpenEdgePolyline(cleanedPositions, { fitStrength: clampedStrength });
+    const snapped = filletEdgeSmoothPolylineKinks(cleanedPositions, {
+      closedLoop: isClosedLoop,
+      strength: clampedStrength,
+    });
     if (!Array.isArray(snapped) || snapped.length !== cleanedPositions.length) continue;
     smoothedEdges++;
 
@@ -1140,40 +1314,24 @@ function collectFilletGeneratedEdgeSmoothTargets(resultSolid, filletEntries, fea
 
 function applyFilletEdgeSmoothTargets(resultSolid, targetMap) {
   const vp = Array.isArray(resultSolid?._vertProperties) ? resultSolid._vertProperties : null;
-  if (!vp || vp.length < 3 || !(targetMap instanceof Map) || targetMap.size === 0) return 0;
-
-  const maxIndex = ((vp.length / 3) | 0) - 1;
-  let movedVertices = 0;
-  for (const [rawIndex, aggregate] of targetMap.entries()) {
-    const index = Number(rawIndex);
-    if (!Number.isInteger(index) || index < 0 || index > maxIndex) continue;
-    const count = Number(aggregate?.count);
-    if (!(count > 0)) continue;
-
-    const tx = Number(aggregate?.x) / count;
-    const ty = Number(aggregate?.y) / count;
-    const tz = Number(aggregate?.z) / count;
-    if (!Number.isFinite(tx) || !Number.isFinite(ty) || !Number.isFinite(tz)) continue;
-
-    const base = index * 3;
-    const ox = vp[base + 0];
-    const oy = vp[base + 1];
-    const oz = vp[base + 2];
-    if (!Number.isFinite(ox) || !Number.isFinite(oy) || !Number.isFinite(oz)) continue;
-
-    const dx = tx - ox;
-    const dy = ty - oy;
-    const dz = tz - oz;
-    const distSq = (dx * dx) + (dy * dy) + (dz * dz);
-    if (distSq <= 1e-30) continue;
-
-    vp[base + 0] = tx;
-    vp[base + 1] = ty;
-    vp[base + 2] = tz;
-    movedVertices++;
+  const tv = Array.isArray(resultSolid?._triVerts) ? resultSolid._triVerts : null;
+  if (!vp || vp.length < 3 || !(targetMap instanceof Map) || targetMap.size === 0) {
+    return { movedVertices: 0, constrainedVertices: 0, rejectedVertices: 0 };
   }
 
-  if (movedVertices <= 0) return 0;
+  const moveStats = applyConstrainedVertexTargets(vp, tv, targetMap, {
+    minArea2Ratio: 0.04,
+    minNormalDot: 0.1,
+    minArea2Abs: 1e-24,
+  });
+  const movedVertices = Number(moveStats?.movedVertices) || 0;
+  if (movedVertices <= 0) {
+    return {
+      movedVertices: 0,
+      constrainedVertices: Number(moveStats?.constrainedVertices) || 0,
+      rejectedVertices: Number(moveStats?.rejectedVertices) || 0,
+    };
+  }
 
   resultSolid._vertProperties = vp;
   resultSolid._dirty = true;
@@ -1196,17 +1354,22 @@ function applyFilletEdgeSmoothTargets(resultSolid, targetMap) {
       resultSolid._manifoldize();
     }
   } catch { }
-  return movedVertices;
+  return {
+    movedVertices,
+    constrainedVertices: Number(moveStats?.constrainedVertices) || 0,
+    rejectedVertices: Number(moveStats?.rejectedVertices) || 0,
+  };
 }
 
-function smoothFilletGeneratedEdges(resultSolid, filletEntries, featureID, fitStrength = 1) {
+function smoothFilletGeneratedEdges(resultSolid, filletEntries, featureID, smoothStrength = 1) {
   const targetInfo = collectFilletGeneratedEdgeSmoothTargets(
     resultSolid,
     filletEntries,
     featureID,
-    fitStrength,
+    smoothStrength,
   );
-  const movedVertices = applyFilletEdgeSmoothTargets(resultSolid, targetInfo.targetMap);
+  const moveStats = applyFilletEdgeSmoothTargets(resultSolid, targetInfo.targetMap);
+  const movedVertices = Number(moveStats?.movedVertices) || 0;
   return {
     consideredEdges: targetInfo.consideredEdges,
     eligibleEdges: targetInfo.eligibleEdges,
@@ -1215,8 +1378,10 @@ function smoothFilletGeneratedEdges(resultSolid, filletEntries, featureID, fitSt
     targetAssignments: targetInfo.targetAssignments,
     lockedEndpointCount: targetInfo.lockedEndpointCount,
     movedVertices,
-    fitStrength: Number.isFinite(Number(fitStrength))
-      ? Math.max(0, Math.min(1, Number(fitStrength)))
+    constrainedVertices: Number(moveStats?.constrainedVertices) || 0,
+    rejectedVertices: Number(moveStats?.rejectedVertices) || 0,
+    smoothStrength: Number.isFinite(Number(smoothStrength))
+      ? Math.max(0, Math.min(1, Number(smoothStrength)))
       : 1,
   };
 }
@@ -3113,7 +3278,7 @@ function removeSelectedEndCapTrianglesAndPatch(resultSolid, endCapFaceIDs, featu
  * @param {boolean} [opts.debugShowCombinedBeforeTarget=false] Emit the combined fillet solid before target boolean
  * @param {boolean} [opts.showTangentOverlays=false] Show pre-inflate tangent overlays on the fillet tube
  * @param {boolean} [opts.patchFilletEndCaps=false] Enable three-face tip cleanup and end-cap triangle replacement patching
- * @param {boolean} [opts.smoothGeneratedEdges=false] Apply curve-fit smoothing to fillet-generated boundary edges
+ * @param {boolean} [opts.smoothGeneratedEdges=false] Apply localized kink smoothing to fillet-generated boundary edges
  * @param {string} [opts.featureID='FILLET'] For naming of intermediates and result
  * @param {number} [opts.cleanupTinyFaceIslandsArea=0.001] area threshold for face-island relabeling (<= 0 disables)
  * @returns {import('../BetterSolid.js').Solid}
@@ -3542,7 +3707,7 @@ export async function fillet(opts = {}) {
   }
 
   if (smoothGeneratedEdges) {
-    // Smooth newly generated fillet edges using endpoint-constrained curve fitting.
+    // Smooth newly generated fillet edges using localized kink cleanup.
     try {
       const edgeSmoothing = smoothFilletGeneratedEdges(result, filletEntries, featureID, 1);
       try { result.__filletEdgeSmoothing = edgeSmoothing; } catch { }
@@ -3554,6 +3719,8 @@ export async function fillet(opts = {}) {
           smoothedEdges: edgeSmoothing.smoothedEdges,
           skippedClosedLoops: edgeSmoothing.skippedClosedLoops,
           movedVertices: edgeSmoothing.movedVertices,
+          constrainedVertices: edgeSmoothing.constrainedVertices,
+          rejectedVertices: edgeSmoothing.rejectedVertices,
         });
       }
     } catch (err) {

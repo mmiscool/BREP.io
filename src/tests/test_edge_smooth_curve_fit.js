@@ -3,6 +3,7 @@ import {
   fitAndSnapClosedEdgePolyline,
   hasLocalBacktrackingAgainstSource,
 } from "../features/edgeSmooth/edgeCurveFit.js";
+import { applyConstrainedVertexTargets } from "../features/edgeSmooth/vertexTargetConstraints.js";
 import { EdgeSmoothFeature } from "../features/edgeSmooth/EdgeSmoothFeature.js";
 
 function pointDistanceSq(a, b) {
@@ -105,6 +106,62 @@ export async function test_edge_smooth_curve_fit_closed_loop() {
   const unchanged = fitAndSnapClosedEdgePolyline(source, { fitStrength: 0 });
   for (let i = 0; i < source.length; i++) {
     assertPointNear(unchanged[i], source[i], 1e-12);
+  }
+}
+
+export async function test_edge_smooth_constraints_prevent_triangle_foldback() {
+  const vp = [
+    0, 0, 0,
+    1, 0, 0,
+    1, 1, 0,
+    0, 1, 0,
+  ];
+  const tv = [
+    0, 1, 2,
+    0, 2, 3,
+  ];
+
+  const targetMap = new Map();
+  targetMap.set(1, { x: 0.2, y: 0.8, z: 0, count: 1 });
+
+  const res = applyConstrainedVertexTargets(vp, tv, targetMap, {
+    minArea2Ratio: 0.04,
+    minNormalDot: 0.1,
+    minArea2Abs: 1e-24,
+  });
+
+  if ((Number(res?.movedVertices) || 0) !== 1) {
+    throw new Error("Constrained edge smoothing should move the target vertex.");
+  }
+  if ((Number(res?.constrainedVertices) || 0) <= 0) {
+    throw new Error("Constrained edge smoothing should scale back fold-causing targets.");
+  }
+
+  const x = vp[3];
+  const y = vp[4];
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    throw new Error("Constrained edge smoothing produced invalid coordinates.");
+  }
+  if (Math.abs(x - 0.2) < 1e-9 && Math.abs(y - 0.8) < 1e-9) {
+    throw new Error("Constrained smoothing should not apply a fold-causing target at full displacement.");
+  }
+
+  const triNormalZ = (ia, ib, ic) => {
+    const a = ia * 3;
+    const b = ib * 3;
+    const c = ic * 3;
+    const ux = vp[b + 0] - vp[a + 0];
+    const uy = vp[b + 1] - vp[a + 1];
+    const vx = vp[c + 0] - vp[a + 0];
+    const vy = vp[c + 1] - vp[a + 1];
+    return (ux * vy) - (uy * vx);
+  };
+
+  if (!(triNormalZ(0, 1, 2) > 0)) {
+    throw new Error("Primary triangle normal flipped after constrained smoothing.");
+  }
+  if (!(triNormalZ(0, 2, 3) > 0)) {
+    throw new Error("Adjacent triangle normal flipped after constrained smoothing.");
   }
 }
 

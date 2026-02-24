@@ -39,6 +39,7 @@ import { test_history_expand_does_not_dirty, afterRun_history_expand_does_not_di
 import {
     test_edge_smooth_curve_fit,
     test_edge_smooth_curve_fit_closed_loop,
+    test_edge_smooth_constraints_prevent_triangle_foldback,
     test_edge_smooth_whole_solid_selection,
     test_edge_smooth_face_selection,
 } from './test_edge_smooth_curve_fit.js';
@@ -96,6 +97,7 @@ export const testFunctions = [
     { test: test_Chamfer, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_edge_smooth_curve_fit, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_edge_smooth_curve_fit_closed_loop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_edge_smooth_constraints_prevent_triangle_foldback, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_edge_smooth_whole_solid_selection, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_edge_smooth_face_selection, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_hole_through, afterRun: afterRun_hole_through, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },

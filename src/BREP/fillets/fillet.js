@@ -1389,7 +1389,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                 radius: inflatedTubeRadius,
                 innerRadius: 0,
                 resolution: tubeResolution,
-                selfUnion: false,
+                selfUnion: true,
                 name: `${name}_TUBE`,
             });
 

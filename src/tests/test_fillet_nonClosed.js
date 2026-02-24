@@ -32,6 +32,12 @@ export async function afterRun_Fillet_NonClosed(partHistory) {
   if ((Number(smoothing.consideredEdges) || 0) <= 0) {
     throw new Error("Fillet edge smoothing should consider at least one generated edge.");
   }
+  if (!Number.isFinite(Number(smoothing.smoothStrength))) {
+    throw new Error("Fillet edge smoothing should report the localized smoothing strength.");
+  }
+  if (!Number.isFinite(Number(smoothing.constrainedVertices)) || !Number.isFinite(Number(smoothing.rejectedVertices))) {
+    throw new Error("Fillet edge smoothing should report constrained and rejected vertex counts.");
+  }
   
   // Verify that the fillet solid exists in the scene
   const filletGroup = (partHistory.scene?.children || []).find(
