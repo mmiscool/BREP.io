@@ -20,6 +20,14 @@ Sketch Mode opens the 2D sketcher on a selected plane or face. Geometry is const
 4. Refine profiles with Trim, construction toggles, and spline edits
 5. Use the sketch as input for other features like Extrude, Revolve, Sweep, or Loft
 
+### Recommended Day-to-Day Flow
+1. Start rough: lay down the main profile shape first (lines/arcs/circles), without over-constraining.
+2. Clean topology: trim overlaps, close loops, and mark helper geometry as construction (`◐`).
+3. Lock design intent: use the context toolbar to add only the constraints needed for predictable edits.
+4. Dimension critical values: set distances/angles/radii that should drive the design.
+5. Finish and consume: exit sketch, then drive solids from the sketch with Extrude/Revolve/Sweep/Loft.
+6. Re-open safely: when upstream geometry changes, edit the same sketch and keep downstream features live.
+
 ## Tool Icons
 Sketch Mode uses Unicode icon buttons for quick tool switching. The top toolbar includes:
 
@@ -77,6 +85,22 @@ A floating context toolbar follows the sketch viewport and updates itself based 
 - **Construction toggle** – Any time geometry is highlighted the toolbar shows a toggle that flips the selection between regular sketch curves and construction geometry. Construction curves remain in the sketch for constraints but are ignored when profiles are consumed by downstream features.
 - **Fix / Unfix** – When one or more points are selected the toolbar offers a fast fix toggle, adding or removing `⏚` constraints without opening the constraint picker.
 - **Cleanup & delete** – The toolbar always offers a cleanup button (🧹) to remove orphan points, and shows delete actions when a selection is active.
+
+### Context Toolbar Workflow
+Use selection as the main driver of what appears:
+
+1. Select geometry or points first.
+2. Read the toolbar options that appear for that exact selection.
+3. Apply one constraint/dimension at a time.
+4. Drag a point to verify behavior, then add the next constraint.
+5. Use cleanup/delete/construction toggles as needed before finishing.
+
+Typical passes:
+
+1. `Two lines` -> add `∥`, `⟂`, `∠`, or `⇌` to establish relationships.
+2. `One line + one point` -> add `↥` for perpendicular offset control.
+3. `One arc/circle` -> add `R` or `⌀` to lock radial intent.
+4. `Points` -> add `⏚`, `━`, `│`, `≡`, `⟺`, `⋯` based on the design intent.
 
 ### Context Action Icons
 | Icon | Action | Notes |

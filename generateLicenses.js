@@ -88,8 +88,22 @@ h1{margin:0 0 18px;font-size:22px;color:var(--accent);font-weight:700}
 .prose p{margin:0 0 10px}
 .prose ul,.prose ol{margin:0 0 10px 18px}
 .prose li{margin:4px 0}
-.prose code{background:#0d1520;border:1px solid var(--border);padding:1px 5px;border-radius:6px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono','Courier New',monospace;font-size:12px}
-.prose pre{background:#0d1520;border:1px solid var(--border);padding:12px;border-radius:12px;overflow:auto}
+.prose :not(pre)>code{background:#0d1520;border:1px solid var(--border);padding:1px 5px;border-radius:6px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono','Courier New',monospace;font-size:12px}
+.prose pre{margin:0;overflow:auto}
+.prose pre code{display:block;border:0;background:transparent;padding:0;white-space:pre;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono','Courier New',monospace;font-size:13px;line-height:1.55;color:#eef4ff}
+.prose .doc-codeblock{margin:14px 0;background:#1a2131;border:1px solid #3a4b74;border-radius:12px;overflow:hidden}
+.prose .doc-codeblock-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;background:#2a3247;border-bottom:1px solid #3a4b74}
+.prose .doc-codeblock-lang{font-size:20px;line-height:1;color:#e7efff;text-transform:lowercase}
+.prose .doc-codeblock-body{padding:14px}
+.prose .doc-codeblock-copy{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid transparent;border-radius:8px;background:transparent;color:#9fc5ff;cursor:pointer}
+.prose .doc-codeblock-copy:hover,.prose .doc-codeblock-copy:focus-visible{border-color:#4f6494;background:rgba(159,197,255,0.08);outline:none}
+.prose .doc-codeblock-copy-icon{display:block;width:18px;height:18px}
+.prose .doc-codeblock-copy-icon svg{display:block;width:100%;height:100%}
+.prose .doc-codeblock-copy.is-copied{color:#a8ffd4}
+.prose .doc-codeblock-copy.is-copied .doc-codeblock-copy-icon svg rect{stroke:currentColor}
+.prose .doc-codeblock-js .tok-keyword{color:#d68dff;font-weight:600}
+.prose .doc-codeblock-js .tok-string{color:#7be3a3}
+.prose .doc-codeblock-js .tok-comment{color:#76839f}
 .prose a{color:var(--accent)}
 .prose img{max-width:100%;height:auto;}
 .prose img.doc-gallery-trigger{cursor:zoom-in}
@@ -503,13 +517,81 @@ function parseTable(tableLines) {
   return { headers, alignments, dataRows };
 }
 
+const normalizeCodeLanguage = (rawLanguage = "") => {
+  const firstToken = String(rawLanguage || "").trim().split(/\s+/)[0].toLowerCase();
+  if (!firstToken) return "";
+  if (firstToken === "js" || firstToken === "cjs" || firstToken === "mjs") return "javascript";
+  if (firstToken === "ts" || firstToken === "tsx") return "typescript";
+  if (firstToken === "sh" || firstToken === "shell" || firstToken === "zsh") return "bash";
+  if (firstToken === "yml") return "yaml";
+  return firstToken;
+};
+
+const highlightJavaScriptCode = (rawCode = "") => {
+  const source = String(rawCode ?? "");
+  const tokenRegex = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b(?:const|let|var|function|return|if|else|for|while|switch|case|break|continue|new|class|extends|import|from|export|default|try|catch|finally|throw|await|async|typeof|instanceof|in|of|null|undefined|true|false)\b)/g;
+  let out = "";
+  let lastIdx = 0;
+  for (const match of source.matchAll(tokenRegex)) {
+    const idx = Number(match.index || 0);
+    const token = match[0] || "";
+    out += escape(source.slice(lastIdx, idx));
+    if (token.startsWith("//") || token.startsWith("/*")) {
+      out += `<span class="tok-comment">${escape(token)}</span>`;
+    } else if (token.startsWith('"') || token.startsWith("'") || token.startsWith("`")) {
+      out += `<span class="tok-string">${escape(token)}</span>`;
+    } else {
+      out += `<span class="tok-keyword">${escape(token)}</span>`;
+    }
+    lastIdx = idx + token.length;
+  }
+  out += escape(source.slice(lastIdx));
+  return out;
+};
+
+const renderFencedCodeBlock = ({ language = "", code = "" } = {}) => {
+  const normalizedLanguage = normalizeCodeLanguage(language) || "code";
+  const languageLabel = escape(normalizedLanguage);
+  const languageClass = escape(normalizedLanguage.replace(/[^a-z0-9_-]/gi, "-"));
+  const codeText = String(code ?? "").replace(/\s+$/, "");
+  const codeHtml = normalizedLanguage === "javascript"
+    ? highlightJavaScriptCode(codeText)
+    : escape(codeText);
+  const codeBlockClass = normalizedLanguage === "javascript" ? "doc-codeblock doc-codeblock-js" : "doc-codeblock";
+  return `<div class="${codeBlockClass}" data-code-language="${languageLabel}">
+  <div class="doc-codeblock-header">
+    <span class="doc-codeblock-lang">${languageLabel}</span>
+    <button type="button" class="doc-codeblock-copy" data-copy-code aria-label="Copy code" title="Copy code">
+      <span class="doc-codeblock-copy-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <rect x="9" y="3" width="12" height="16" rx="2" stroke="currentColor" stroke-width="2"></rect>
+          <rect x="3" y="9" width="12" height="12" rx="2" stroke="currentColor" stroke-width="2"></rect>
+        </svg>
+      </span>
+    </button>
+  </div>
+  <div class="doc-codeblock-body"><pre><code class="language-${languageClass}">${codeHtml}</code></pre></div>
+</div>`;
+};
+
 function renderMarkdown(md, { assetBasePath = rootDir } = {}) {
   // Extract fenced code blocks first and replace with placeholders
   const codeBlocks = [];
   let tmp = md;
-  tmp = tmp.replace(/```([\s\S]*?)```/g, (_m, code) => {
+  tmp = tmp.replace(/```([\s\S]*?)```/g, (_m, rawBlock) => {
+    const block = String(rawBlock ?? "");
+    let language = "";
+    let code = block;
+    const firstLineMatch = block.match(/^([^\r\n]+)\r?\n([\s\S]*)$/);
+    if (firstLineMatch) {
+      const candidateLanguage = firstLineMatch[1].trim();
+      if (/^[a-z0-9_+-]{1,24}$/i.test(candidateLanguage)) {
+        language = candidateLanguage;
+        code = firstLineMatch[2];
+      }
+    }
     const idx = codeBlocks.length;
-    codeBlocks.push(`<pre><code>${escape(code.trim())}</code></pre>`);
+    codeBlocks.push(renderFencedCodeBlock({ language, code }));
     return `§§CODE${idx}§§`;
   });
 
@@ -626,12 +708,22 @@ function renderMarkdown(md, { assetBasePath = rootDir } = {}) {
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
     const line = raw.trimEnd();
+    const trimmedLine = line.trim();
     if (!line.trim()) {
       if (inTable) {
         flushTable();
       }
       if (inList) { html += `</${listType}>`; inList = false; listType = null; }
       flushPara();
+      continue;
+    }
+
+    // fenced code placeholder (restored after markdown block parsing)
+    if (/^§§CODE\d+§§$/.test(trimmedLine)) {
+      if (inTable) { flushTable(); }
+      if (inList) { html += `</${listType}>`; inList = false; listType = null; }
+      flushPara();
+      html += trimmedLine;
       continue;
     }
 
@@ -989,6 +1081,58 @@ ${content}
     }
   });
 
+  const initCodeCopyButtons = () => {
+    const copyButtons = Array.from(document.querySelectorAll("[data-copy-code]"));
+    if (!copyButtons.length) return;
+
+    const copyText = async (value) => {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        return true;
+      }
+      const ta = document.createElement("textarea");
+      ta.value = value;
+      ta.setAttribute("readonly", "readonly");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      ta.style.pointerEvents = "none";
+      document.body.appendChild(ta);
+      ta.select();
+      let copied = false;
+      try {
+        copied = document.execCommand("copy");
+      } catch {
+        copied = false;
+      }
+      document.body.removeChild(ta);
+      return copied;
+    };
+
+    copyButtons.forEach((button) => {
+      button.addEventListener("click", async () => {
+        const wrapper = button.closest(".doc-codeblock");
+        const codeEl = wrapper?.querySelector("code");
+        const text = codeEl?.textContent || "";
+        if (!text.trim()) return;
+        let didCopy = false;
+        try {
+          didCopy = await copyText(text);
+        } catch {
+          didCopy = false;
+        }
+        if (!didCopy) return;
+        button.classList.add("is-copied");
+        button.setAttribute("aria-label", "Copied");
+        button.setAttribute("title", "Copied");
+        window.setTimeout(() => {
+          button.classList.remove("is-copied");
+          button.setAttribute("aria-label", "Copy code");
+          button.setAttribute("title", "Copy code");
+        }, 1200);
+      });
+    });
+  };
+
   const initImageGallery = () => {
     const proseRoot = document.querySelector(".prose");
     if (!proseRoot) return;
@@ -1220,6 +1364,7 @@ ${content}
     });
   };
 
+  initCodeCopyButtons();
   initImageGallery();
 })();
 </script>

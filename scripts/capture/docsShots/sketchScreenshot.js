@@ -60,6 +60,109 @@ export async function prepareSketchScreenshot(page, fixtureJson) {
       controls?.update?.();
     };
 
+    const selectLineForContextToolbar = async () => {
+      const sketchMode = viewer._sketchMode;
+      const geometries = sketchMode?._solver?.sketchObject?.geometries;
+      if (!Array.isArray(geometries) || geometries.length === 0) return false;
+
+      const targetGeometry = geometries.find((geo) => String(geo?.type || '').toLowerCase() === 'line')
+        || geometries[0];
+      const targetId = Number(targetGeometry?.id);
+      if (!Number.isFinite(targetId)) return false;
+
+      const isSelected = () => Array.from(sketchMode?._selection || []).some(
+        (item) => item?.type === 'geometry' && Number(item?.id) === targetId,
+      );
+
+      const clickLineMidpointInViewport = async () => {
+        const camera = viewer.camera;
+        const rendererEl = viewer.renderer?.domElement;
+        const basis = sketchMode?._lock?.basis;
+        const points = sketchMode?._solver?.sketchObject?.points;
+        const linePointIds = Array.isArray(targetGeometry?.points) ? targetGeometry.points : [];
+        if (
+          !camera
+          || !rendererEl
+          || !basis?.origin
+          || !basis?.x
+          || !basis?.y
+          || !Array.isArray(points)
+          || linePointIds.length < 2
+        ) return false;
+
+        const id0 = Number(linePointIds[0]);
+        const id1 = Number(linePointIds[1]);
+        const p0 = points.find((point) => Number(point?.id) === id0);
+        const p1 = points.find((point) => Number(point?.id) === id1);
+        if (!p0 || !p1) return false;
+
+        const midX = (Number(p0.x) + Number(p1.x)) * 0.5;
+        const midY = (Number(p0.y) + Number(p1.y)) * 0.5;
+        if (!Number.isFinite(midX) || !Number.isFinite(midY)) return false;
+
+        const rect = rendererEl.getBoundingClientRect?.();
+        if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+
+        const worldPoint = basis.origin.clone().addScaledVector(basis.x, midX).addScaledVector(basis.y, midY);
+        const ndc = worldPoint.project(camera);
+        if (!Number.isFinite(ndc.x) || !Number.isFinite(ndc.y)) return false;
+
+        const clientX = rect.left + ((ndc.x + 1) * 0.5) * rect.width;
+        const clientY = rect.top + ((1 - ndc.y) * 0.5) * rect.height;
+        if (
+          clientX < rect.left
+          || clientX > rect.right
+          || clientY < rect.top
+          || clientY > rect.bottom
+        ) return false;
+
+        const downOpts = {
+          bubbles: true,
+          cancelable: true,
+          clientX,
+          clientY,
+          button: 0,
+          buttons: 1,
+        };
+        const upOpts = {
+          bubbles: true,
+          cancelable: true,
+          clientX,
+          clientY,
+          button: 0,
+          buttons: 0,
+        };
+
+        try { sketchMode?._selection?.clear?.(); } catch { /* ignore */ }
+        if (typeof window.PointerEvent === 'function') {
+          rendererEl.dispatchEvent(new PointerEvent('pointerdown', { ...downOpts, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+          window.dispatchEvent(new PointerEvent('pointerup', { ...upOpts, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+        } else {
+          rendererEl.dispatchEvent(new MouseEvent('mousedown', downOpts));
+          window.dispatchEvent(new MouseEvent('mouseup', upOpts));
+        }
+        rendererEl.dispatchEvent(new MouseEvent('click', upOpts));
+        await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+        return isSelected();
+      };
+
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        const listRoot = sketchMode?._acc?.uiElement;
+        const rowButton = (listRoot && typeof listRoot.querySelector === 'function')
+          ? listRoot.querySelector(`[data-act="g:${targetId}"]`)
+          : null;
+        if (rowButton instanceof HTMLElement) {
+          try { sketchMode?._selection?.clear?.(); } catch { /* ignore */ }
+          rowButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+          await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+          if (isSelected()) return true;
+        }
+        await wait(50);
+      }
+      return clickLineMidpointInViewport();
+    };
+
     const partHistory = viewer.partHistory;
     try { viewer.endSketchMode?.(); } catch { /* ignore */ }
     try { viewer.endPMIMode?.(); } catch { /* ignore */ }
@@ -90,8 +193,15 @@ export async function prepareSketchScreenshot(page, fixtureJson) {
       await new Promise((resolve) => requestAnimationFrame(() => resolve()));
       try { panSketchClearOfSidebar(); } catch { /* ignore */ }
     }
+    let didSelectLine = false;
+    try { didSelectLine = await selectLineForContextToolbar(); } catch { /* ignore */ }
+    if (!didSelectLine) {
+      // One final settle if async sidebar/list rendering lagged unexpectedly.
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
   }, { fixtureJsonValue: fixtureJson || '' });
 
   await page.waitForLoadState('networkidle');
-  await page.waitForTimeout(450);
+  await page.waitForTimeout(3000);
 }
