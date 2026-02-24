@@ -10,8 +10,8 @@ import { prepareSketchScreenshot } from './capture/docsShots/sketchScreenshot.js
 import { preparePmiScreenshot } from './capture/docsShots/pmiScreenshot.js';
 
 const require = createRequire(import.meta.url);
-const DEFAULT_BASE_URL = process.env.CAPTURE_BASE_URL || 'http://localhost:5173';
-const LOCAL_CAPTURE_SERVER_URL = 'http://localhost:5173/';
+const DEFAULT_BASE_URL = process.env.CAPTURE_BASE_URL || 'http://127.0.0.1:5173';
+const LOCAL_CAPTURE_SERVER_URL = 'http://127.0.0.1:5173/';
 const DOCS_CAPTURE_VIEWPORT = { width: 1200, height: 800 };
 const DEFAULT_VIEWPORT = { ...DOCS_CAPTURE_VIEWPORT };
 const DEVICE_SCALE_FACTOR = 1;

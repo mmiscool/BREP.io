@@ -1,9 +1,9 @@
 # Documentation Screenshots
 
 1. Run `pnpm dev` and open at least one of the capture helper pages:
-   - `http://localhost:5173/feature-dialog-capture.html`
-   - `http://localhost:5173/pmi-dialog-capture.html`
-   - `http://localhost:5173/assembly-constraint-capture.html`
+   - `http://127.0.0.1:5173/feature-dialog-capture.html`
+   - `http://127.0.0.1:5173/pmi-dialog-capture.html`
+   - `http://127.0.0.1:5173/assembly-constraint-capture.html`
 2. With the dev server running, execute `pnpm capture` to export screenshots. Outputs land in:
    - `docs/features` (feature dialogs)
    - `docs/pmi-annotations` (PMI annotations)
