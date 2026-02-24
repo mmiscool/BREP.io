@@ -402,44 +402,51 @@ function buildHullTube(points, radius, resolution, closed, keepSpheres = false, 
   return { manifold: hull, spheres };
 }
 
-function rebuildSolidFromManifold(target, manifold, faceMap) {
-  const rebuilt = Solid._fromManifold(manifold, faceMap);
-
-  // Copy authoring buffers and metadata without clobbering THREE.Object3D fields
-  target._numProp = rebuilt._numProp;
-  target._vertProperties = rebuilt._vertProperties;
-  target._triVerts = rebuilt._triVerts;
-  target._triIDs = rebuilt._triIDs;
-  target._vertKeyToIndex = new Map(rebuilt._vertKeyToIndex);
-
-  target._idToFaceName = new Map(rebuilt._idToFaceName);
-  target._faceNameToID = new Map(rebuilt._faceNameToID);
-  target._faceMetadata = new Map(rebuilt._faceMetadata);
-  target._edgeMetadata = new Map(rebuilt._edgeMetadata);
-
-  target._manifold = rebuilt._manifold;
-  target._dirty = false;
-  target._faceIndex = null;
-  return target;
-}
-
-function distanceToSegmentSquared(p, a, b) {
-  const ab = b.clone().sub(a);
-  const ap = p.clone().sub(a);
-  const t = THREE.MathUtils.clamp(ap.dot(ab) / ab.lengthSq(), 0, 1);
-  const closest = a.clone().addScaledVector(ab, t);
-  return p.distanceToSquared(closest);
-}
-
-function minDistanceToPolyline(points, polyline) {
-  if (!Array.isArray(polyline) || polyline.length < 2) return Infinity;
-  let minSq = Infinity;
+function buildPolylineSegmentCache(polyline) {
+  if (!Array.isArray(polyline) || polyline.length < 2) return [];
+  const segments = [];
   for (let i = 0; i < polyline.length - 1; i++) {
     const a = polyline[i];
     const b = polyline[i + 1];
-    minSq = Math.min(minSq, distanceToSegmentSquared(points, a, b));
+    if (!a || !b) continue;
+    const ax = a.x;
+    const ay = a.y;
+    const az = a.z;
+    const dx = b.x - ax;
+    const dy = b.y - ay;
+    const dz = b.z - az;
+    const lenSq = dx * dx + dy * dy + dz * dz;
+    segments.push({ ax, ay, az, dx, dy, dz, lenSq });
   }
-  return Math.sqrt(minSq);
+  return segments;
+}
+
+function minDistanceToPolylineSq(px, py, pz, segments, breakAtSq = Infinity) {
+  if (!Array.isArray(segments) || segments.length === 0) return Infinity;
+  let minSq = Infinity;
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    if (!seg) continue;
+    if (seg.lenSq <= EPS_SQ) continue;
+    const apx = px - seg.ax;
+    const apy = py - seg.ay;
+    const apz = pz - seg.az;
+    let t = (apx * seg.dx + apy * seg.dy + apz * seg.dz) / seg.lenSq;
+    if (t < 0) t = 0;
+    else if (t > 1) t = 1;
+    const cx = seg.ax + (seg.dx * t);
+    const cy = seg.ay + (seg.dy * t);
+    const cz = seg.az + (seg.dz * t);
+    const ddx = px - cx;
+    const ddy = py - cy;
+    const ddz = pz - cz;
+    const distSq = ddx * ddx + ddy * ddy + ddz * ddz;
+    if (distSq < minSq) {
+      minSq = distSq;
+      if (minSq <= breakAtSq) break;
+    }
+  }
+  return minSq;
 }
 
 function relabelFaces(solid, pathPoints, startNormal, endNormal, outerRadius, innerRadius, closed, faceTag) {
@@ -455,9 +462,12 @@ function relabelFaces(solid, pathPoints, startNormal, endNormal, outerRadius, in
 
   const nStart = startNormal ? startNormal.clone().normalize() : null;
   const nEnd = endNormal ? endNormal.clone().normalize() : null;
-  const startOffset = nStart ? nStart.dot(pathPoints[0]) : 0;
-  const endOffset = nEnd ? nEnd.dot(pathPoints[pathPoints.length - 1]) : 0;
+  const pathStart = pathPoints[0];
+  const pathEnd = pathPoints[pathPoints.length - 1];
+  const startOffset = nStart ? nStart.dot(pathStart) : 0;
+  const endOffset = nEnd ? nEnd.dot(pathEnd) : 0;
   const capTol = Math.max(outerRadius * 1e-2, 1e-5);
+  const capReachSq = (outerRadius + capTol) * (outerRadius + capTol);
 
   const idOuter = solid._getOrCreateID(`${faceTag}_Outer`);
   const idInner = innerRadius > 0 ? solid._getOrCreateID(`${faceTag}_Inner`) : idOuter;
@@ -467,8 +477,15 @@ function relabelFaces(solid, pathPoints, startNormal, endNormal, outerRadius, in
   const newIDs = new Array(triCount);
   const vp = solid._vertProperties;
   const tv = solid._triVerts;
-  const polyline = pathPoints;
   const innerOuterThreshold = innerRadius > 0 ? (innerRadius + outerRadius) * 0.5 : outerRadius * 0.5;
+  const innerOuterThresholdSq = innerOuterThreshold * innerOuterThreshold;
+  const segmentCache = innerRadius > 0 ? buildPolylineSegmentCache(pathPoints) : null;
+  const nStartX = nStart ? nStart.x : 0;
+  const nStartY = nStart ? nStart.y : 0;
+  const nStartZ = nStart ? nStart.z : 0;
+  const nEndX = nEnd ? nEnd.x : 0;
+  const nEndY = nEnd ? nEnd.y : 0;
+  const nEndZ = nEnd ? nEnd.z : 0;
 
   for (let t = 0; t < triCount; t++) {
     const i0 = tv[t * 3 + 0] * 3;
@@ -477,18 +494,36 @@ function relabelFaces(solid, pathPoints, startNormal, endNormal, outerRadius, in
     const cx = (vp[i0 + 0] + vp[i1 + 0] + vp[i2 + 0]) / 3;
     const cy = (vp[i0 + 1] + vp[i1 + 1] + vp[i2 + 1]) / 3;
     const cz = (vp[i0 + 2] + vp[i1 + 2] + vp[i2 + 2]) / 3;
-    const centroid = new THREE.Vector3(cx, cy, cz);
 
     let assigned = idOuter;
-    const distToStart = centroid.distanceTo(pathPoints[0]);
-    const distToEnd = centroid.distanceTo(pathPoints[pathPoints.length - 1]);
-    if (!closed && nStart && Math.abs(nStart.dot(centroid) - startOffset) <= capTol && distToStart <= outerRadius + capTol) {
-      assigned = idCapStart;
-    } else if (!closed && nEnd && Math.abs(nEnd.dot(centroid) - endOffset) <= capTol && distToEnd <= outerRadius + capTol) {
-      assigned = idCapEnd;
-    } else if (innerRadius > 0) {
-      const dist = minDistanceToPolyline(centroid, polyline);
-      assigned = dist <= innerOuterThreshold ? idInner : idOuter;
+    if (!closed && nStart) {
+      const planeDistStart = Math.abs((nStartX * cx + nStartY * cy + nStartZ * cz) - startOffset);
+      if (planeDistStart <= capTol) {
+        const dsx = cx - pathStart.x;
+        const dsy = cy - pathStart.y;
+        const dsz = cz - pathStart.z;
+        if ((dsx * dsx + dsy * dsy + dsz * dsz) <= capReachSq) {
+          assigned = idCapStart;
+        }
+      }
+    }
+    if (assigned === idOuter && !closed && nEnd) {
+      const planeDistEnd = Math.abs((nEndX * cx + nEndY * cy + nEndZ * cz) - endOffset);
+      if (planeDistEnd <= capTol) {
+        const dex = cx - pathEnd.x;
+        const dey = cy - pathEnd.y;
+        const dez = cz - pathEnd.z;
+        if ((dex * dex + dey * dey + dez * dez) <= capReachSq) {
+          assigned = idCapEnd;
+        }
+      }
+    }
+    if (assigned === idOuter && innerRadius > 0) {
+      const distSq = minDistanceToPolylineSq(cx, cy, cz, segmentCache, innerOuterThresholdSq);
+      assigned = distSq <= innerOuterThresholdSq ? idInner : idOuter;
+    }
+    if (assigned !== idOuter && assigned !== idInner && assigned !== idCapStart && assigned !== idCapEnd) {
+      assigned = idOuter;
     }
     newIDs[t] = assigned;
   }
@@ -824,13 +859,18 @@ export class Tube extends Solid {
 
     if (inner > 0) {
       const { manifold: innerManifold, spheres: innerSpheres } = buildHullTube(cleanPoints, inner, segs, isClosed, keepSpheres, trimPlanes);
-
-      const outerSolid = Solid._fromManifold(outerManifold, new Map([[0, `${faceTag}_Outer`]]));
-      const innerSolid = Solid._fromManifold(innerManifold, new Map([[0, `${faceTag}_Inner`]]));
-      finalSolid = outerSolid.subtract(innerSolid);
-      try { outerSolid.free(); } catch { }
-      try { innerSolid.free(); } catch { }
-      try { if (innerManifold && typeof innerManifold.delete === 'function') innerManifold.delete(); } catch { }
+      let differenceManifold = null;
+      try {
+        differenceManifold = outerManifold.subtract(innerManifold);
+      } finally {
+        if (outerManifold && outerManifold !== differenceManifold) {
+          try { if (typeof outerManifold.delete === 'function') outerManifold.delete(); } catch { }
+        }
+        if (innerManifold && innerManifold !== differenceManifold) {
+          try { if (typeof innerManifold.delete === 'function') innerManifold.delete(); } catch { }
+        }
+      }
+      finalSolid = Solid._fromManifold(differenceManifold, new Map([[0, `${faceTag}_Outer`]]));
       if (keepSpheres) {
         this.debugSphereSolids = [
           ...(this.debugSphereSolids || []),
@@ -845,11 +885,8 @@ export class Tube extends Solid {
       }
     }
 
-    let relabeled = relabelFaces(finalSolid, cleanPoints, startNormal, endCutNormal, radius, inner, isClosed, faceTag);
-    // Ensure we have a manifold to copy from; if rebuild failed, fall back
-    const manifoldForCopy = relabeled?._manifold || finalSolid._manifold;
-    const faceMapForCopy = relabeled?._idToFaceName || finalSolid._idToFaceName;
-    rebuildSolidFromManifold(this, manifoldForCopy, faceMapForCopy);
+    const relabeled = relabelFaces(finalSolid, cleanPoints, startNormal, endCutNormal, radius, inner, isClosed, faceTag);
+    copySolidState(this, relabeled || finalSolid);
     this.name = name;
     this.params.closed = isClosed;
 
