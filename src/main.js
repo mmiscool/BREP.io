@@ -38,6 +38,7 @@ const EXPLORER_VIEW_MODE_PREF_KEY = '__BREP_UI_EXPLORER_VIEW_MODE__';
 const EXPLORER_ICON_SIZE_PREF_KEY = '__BREP_UI_EXPLORER_ICON_SIZE__';
 const EXPLORER_LOCATION_PREF_KEY = '__BREP_UI_EXPLORER_LOCATION__';
 const HOME_SNAPSHOT_PREF_KEY = '__BREP_HOME_SNAPSHOT__';
+const HOME_INVERT_THEME_PREF_KEY = '__BREP_HOME_INVERT_THEME__';
 const HOME_SNAPSHOT_MAX_AGE_MS = 10 * 60 * 1000;
 const EXPLORER_ICON_SIZE_MIN = 72;
 const EXPLORER_ICON_SIZE_MAX = 192;
@@ -45,6 +46,7 @@ const EXPLORER_ICON_SIZE_DEFAULT = 132;
 const TRASH_FOLDER_NAME = '__BREP_TRASH__';
 const TRASH_ROOT_REPO_FULL = '__BREP_TRASH_ROOT__';
 const GITHUB_API_BASE = 'https://api.github.com';
+const HOME_INVERT_FILTER = 'invert(1)';
 
 const githubDefaultBranchCache = new Map();
 const githubDefaultBranchInflight = new Map();
@@ -98,6 +100,7 @@ const state = {
   busyOverlayEl: null,
   busyMessageEl: null,
   busyDetailEl: null,
+  homeInvertTheme: false,
 };
 
 if (!state.root) throw new Error('Missing #app mount element');
@@ -190,6 +193,7 @@ async function boot() {
   }
 
   loadUiPreferences();
+  applyHomeThemeFilter(state.homeInvertTheme);
 
   window.addEventListener(STORAGE_BACKEND_EVENT, () => {
     refreshStorageBadge();
@@ -197,6 +201,36 @@ async function boot() {
   });
 
   await renderHome();
+}
+
+function applyHomeThemeFilter(enabled) {
+  if (!document?.documentElement) return;
+  if (enabled) {
+    document.documentElement.style.filter = HOME_INVERT_FILTER;
+  } else {
+    document.documentElement.style.removeProperty('filter');
+  }
+}
+
+function syncHomeThemeToggleButton(button) {
+  if (!button) return;
+  const isInverted = !!state.homeInvertTheme;
+  button.textContent = isInverted ? '🌙' : '🔆';
+  button.setAttribute('aria-pressed', isInverted ? 'true' : 'false');
+  button.setAttribute('aria-label', isInverted ? 'Switch to dark mode' : 'Switch to light mode');
+  button.title = isInverted ? 'Switch to dark mode' : 'Switch to light mode';
+}
+
+function setHomeThemeInverted(enabled, {
+  persist = true,
+  toggleButton = null,
+} = {}) {
+  state.homeInvertTheme = !!enabled;
+  applyHomeThemeFilter(state.homeInvertTheme);
+  syncHomeThemeToggleButton(toggleButton);
+  if (persist) {
+    saveUiPreference(HOME_INVERT_THEME_PREF_KEY, state.homeInvertTheme ? '1' : '0');
+  }
 }
 
 function buildCadUrl(options = {}) {
@@ -404,6 +438,13 @@ function hydrateHomeSnapshotIntoState() {
 }
 
 function loadUiPreferences() {
+  const invertRaw = loadUiPreference(HOME_INVERT_THEME_PREF_KEY, '').trim().toLowerCase();
+  if (invertRaw === '1' || invertRaw === 'true') {
+    state.homeInvertTheme = true;
+  } else if (invertRaw === '0' || invertRaw === 'false') {
+    state.homeInvertTheme = false;
+  }
+
   const recentRaw = loadUiPreference(RECENT_EXPANDED_PREF_KEY, '');
   if (recentRaw === '0' || recentRaw === 'false') {
     state.recentExpanded = false;
@@ -655,6 +696,7 @@ async function renderHome() {
         </div>
         <div class="hub-header-actions">
           <a class="hub-link-btn" href="./help/developer-index.html" target="_blank" rel="noreferrer">Docs</a>
+          <button type="button" class="hub-ghost-btn" data-action="toggle-theme" aria-pressed="false" aria-label="Switch to light mode" title="Switch to light mode">🔆</button>
           <button type="button" class="hub-icon-btn" data-action="toggle-settings" title="Settings" aria-label="Settings">⚙</button>
           <button type="button" class="hub-primary-btn" data-action="new">New Model</button>
         </div>
@@ -803,6 +845,7 @@ async function renderHome() {
   const repoSummary = state.root.querySelector('[data-role="repo-summary"]');
   const mountPicker = state.root.querySelector('[data-role="mount-picker"]');
   const mountSummary = state.root.querySelector('[data-role="mount-summary"]');
+  const toggleThemeBtn = state.root.querySelector('[data-action="toggle-theme"]');
   const toggleSettingsBtn = state.root.querySelector('[data-action="toggle-settings"]');
   const toggleWorkspaceBtn = state.root.querySelector('[data-action="toggle-workspace"]');
   const addRepoBtn = state.root.querySelector('[data-action="add-repo"]');
@@ -820,6 +863,13 @@ async function renderHome() {
   state.root.querySelector('[data-action="refresh"]')?.addEventListener('click', () => {
     if (isUiBusy()) return;
     void loadFiles();
+  });
+
+  syncHomeThemeToggleButton(toggleThemeBtn);
+  toggleThemeBtn?.addEventListener('click', () => {
+    setHomeThemeInverted(!state.homeInvertTheme, {
+      toggleButton: toggleThemeBtn,
+    });
   });
 
   if (searchInput) searchInput.value = state.searchTerm;

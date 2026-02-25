@@ -13,11 +13,32 @@ const GITHUB_HOST = 'github.com';
 const GITHUB_RAW_HOST = 'raw.githubusercontent.com';
 const JSDELIVR_GH_HOST = 'cdn.jsdelivr.net';
 const GITHUB_API_BASE = 'https://api.github.com';
+const HOME_INVERT_THEME_PREF_KEY = '__BREP_HOME_INVERT_THEME__';
+const HOME_INVERT_FILTER = 'invert(1)';
 const isViewerOnlyMode = detectViewerOnlyRuntime();
 
 if (!viewportEl || !sidebarEl) throw new Error('Missing CAD mount elements (#viewport, #sidebar).');
 
+applyHomeThemeFilter(loadHomeThemePreference());
 void boot();
+
+function loadHomeThemePreference() {
+  try {
+    const raw = String(window?.localStorage?.getItem(HOME_INVERT_THEME_PREF_KEY) || '').trim().toLowerCase();
+    return raw === '1' || raw === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function applyHomeThemeFilter(enabled) {
+  if (!document?.documentElement) return;
+  if (enabled) {
+    document.documentElement.style.filter = HOME_INVERT_FILTER;
+  } else {
+    document.documentElement.style.removeProperty('filter');
+  }
+}
 
 async function boot() {
   try {
