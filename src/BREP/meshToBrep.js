@@ -242,6 +242,7 @@ export class MeshToBrep extends Solid {
         const diag = Math.hypot(maxX - minX, maxY - minY, maxZ - minZ);
 
         const triFaceName = new Array(triCount);
+        const autoPlanarFaceNames = new Set();
         let faceCounter = 0;
 
         const dot = (a, b) => {
@@ -262,7 +263,17 @@ export class MeshToBrep extends Solid {
                 const distTol = Number.isFinite(this.planarDistanceTolerance)
                     ? Math.max(0, Number(this.planarDistanceTolerance))
                     : Math.max(this.weldTolerance * 4, diag * 1e-6, 1e-9);
-                const planarVisited = new Uint8Array(triCount);
+                const planarLocked = new Uint8Array(triCount);
+                const planarVisitToken = new Uint32Array(triCount);
+                let planarVisitRun = 1;
+                const beginPlanarVisitRun = () => {
+                    planarVisitRun += 1;
+                    if (planarVisitRun === 0xffffffff) {
+                        planarVisitToken.fill(0);
+                        planarVisitRun = 1;
+                    }
+                    return planarVisitRun;
+                };
 
                 const triIsCoplanar = (triIndex, planeNormal, planeD) => {
                     const n = triGeoNormals[triIndex];
@@ -278,25 +289,27 @@ export class MeshToBrep extends Solid {
                 };
 
                 for (let seed = 0; seed < triCount; seed++) {
-                    if (planarVisited[seed]) continue;
-                    planarVisited[seed] = 1;
+                    if (planarLocked[seed]) continue;
                     if (triAreas[seed] <= 0) continue;
 
                     const seedNormal = triGeoNormals[seed];
                     const [seedA] = triVerts[seed];
                     const p0 = indexToPos[seedA];
                     const planeD = -((seedNormal.x * p0[0]) + (seedNormal.y * p0[1]) + (seedNormal.z * p0[2]));
+                    const runToken = beginPlanarVisitRun();
                     const queue = [seed];
                     const component = [seed];
                     let areaSum = triAreas[seed];
                     let qHead = 0;
+                    planarVisitToken[seed] = runToken;
 
                     while (qHead < queue.length) {
                         const t = queue[qHead++];
                         for (const nb of neighbors[t]) {
-                            if (planarVisited[nb]) continue;
+                            if (planarLocked[nb]) continue;
+                            if (planarVisitToken[nb] === runToken) continue;
+                            planarVisitToken[nb] = runToken;
                             if (!triIsCoplanar(nb, seedNormal, planeD)) continue;
-                            planarVisited[nb] = 1;
                             component.push(nb);
                             areaSum += triAreas[nb];
                             queue.push(nb);
@@ -305,8 +318,11 @@ export class MeshToBrep extends Solid {
 
                     if (areaSum >= minPlanarArea) {
                         const faceName = `STL_FACE_${++faceCounter}`;
+                        autoPlanarFaceNames.add(faceName);
                         for (let i = 0; i < component.length; i++) {
-                            triFaceName[component[i]] = faceName;
+                            const triIndex = component[i];
+                            triFaceName[triIndex] = faceName;
+                            planarLocked[triIndex] = 1;
                         }
                     }
                 }
@@ -352,6 +368,17 @@ export class MeshToBrep extends Solid {
             const pb = indexToPos[b];
             const pc = indexToPos[c];
             this.addTriangle(name, pa, pb, pc);
+        }
+
+        // Mark faces that were explicitly extracted by the planar pre-pass so downstream
+        // import segmentation can preserve them and only split the remaining regions.
+        if (autoPlanarFaceNames.size > 0) {
+            for (const faceName of autoPlanarFaceNames) {
+                this.setFaceMetadata(faceName, {
+                    source: 'MESH_TO_BREP',
+                    importAutoPlanarGroup: true,
+                });
+            }
         }
 
         // Let downstream visualization build per-face meshes and edges

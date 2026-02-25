@@ -11,6 +11,26 @@ import { test_boolean_subtract } from './test_boolean_subtract.js';
 import { test_primitiveSphere } from './test_primitiveSphere.js';
 import { test_primitivePyramid } from './test_primitivePyramid.js';
 import { test_stlLoader } from './test_stlLoader.js';
+import {
+    test_import3d_decimation_reduces_triangle_count,
+    afterRun_import3d_decimation_reduces_triangle_count,
+    test_import3d_decimation_reapplies_from_cached_source_mesh,
+    afterRun_import3d_decimation_reapplies_from_cached_source_mesh,
+    test_import3d_decimation_100_restores_original_geometry,
+    afterRun_import3d_decimation_100_restores_original_geometry,
+    test_import3d_decimation_seeds_source_snapshot_for_legacy_cache,
+    afterRun_import3d_decimation_seeds_source_snapshot_for_legacy_cache,
+    test_import3d_decimation_preserves_source_snapshot_without_json_clone,
+    afterRun_import3d_decimation_preserves_source_snapshot_without_json_clone,
+} from './test_import3dDecimation.js';
+import {
+    test_import3d_planar_extraction_merges_sliver_bridge,
+    afterRun_import3d_planar_extraction_merges_sliver_bridge,
+} from './test_import3dPlanarExtraction.js';
+import {
+    test_import3d_extract_multiple_solids_toggle,
+    afterRun_import3d_extract_multiple_solids_toggle,
+} from './test_import3dMultipleSolids.js';
 import { test_SweepFace } from './test_sweepFace.js';
 import { test_ExtrudeFace } from './test_extrudeFace.js';
 import { test_Fillet } from './test_fillet.js';
@@ -77,6 +97,62 @@ export const testFunctions = [
     { test: test_primitiveSphere, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_boolean_subtract, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_stlLoader, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    {
+        test: test_import3d_decimation_reduces_triangle_count,
+        afterRun: afterRun_import3d_decimation_reduces_triangle_count,
+        printArtifacts: false,
+        exportFaces: true,
+        exportSolids: true,
+        resetHistory: true,
+    },
+    {
+        test: test_import3d_decimation_reapplies_from_cached_source_mesh,
+        afterRun: afterRun_import3d_decimation_reapplies_from_cached_source_mesh,
+        printArtifacts: false,
+        exportFaces: true,
+        exportSolids: true,
+        resetHistory: true,
+    },
+    {
+        test: test_import3d_decimation_100_restores_original_geometry,
+        afterRun: afterRun_import3d_decimation_100_restores_original_geometry,
+        printArtifacts: false,
+        exportFaces: true,
+        exportSolids: true,
+        resetHistory: true,
+    },
+    {
+        test: test_import3d_decimation_seeds_source_snapshot_for_legacy_cache,
+        afterRun: afterRun_import3d_decimation_seeds_source_snapshot_for_legacy_cache,
+        printArtifacts: false,
+        exportFaces: true,
+        exportSolids: true,
+        resetHistory: true,
+    },
+    {
+        test: test_import3d_decimation_preserves_source_snapshot_without_json_clone,
+        afterRun: afterRun_import3d_decimation_preserves_source_snapshot_without_json_clone,
+        printArtifacts: false,
+        exportFaces: true,
+        exportSolids: true,
+        resetHistory: true,
+    },
+    {
+        test: test_import3d_planar_extraction_merges_sliver_bridge,
+        afterRun: afterRun_import3d_planar_extraction_merges_sliver_bridge,
+        printArtifacts: false,
+        exportFaces: true,
+        exportSolids: true,
+        resetHistory: true,
+    },
+    {
+        test: test_import3d_extract_multiple_solids_toggle,
+        afterRun: afterRun_import3d_extract_multiple_solids_toggle,
+        printArtifacts: false,
+        exportFaces: true,
+        exportSolids: true,
+        resetHistory: true,
+    },
     { test: test_SweepFace, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_tube, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_tube_closedLoop, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
