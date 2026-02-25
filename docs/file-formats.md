@@ -15,7 +15,7 @@
 - **Import**: Supports ASCII or binary STL. Imports as geometry only without feature history.
 
 ## OBJ
-- **Export**: Writes ASCII OBJ (ZIP with one OBJ per solid when multiple bodies are selected). Unit scaling applies at export time.
+- **Export**: Writes ASCII OBJ (ZIP with one OBJ per solid when multiple bodies are selected). Unit scaling applies at export time. An export-dialog checkbox can optionally include vertex colors (`v x y z r g b`).
 
 ## BREP JSON
 - **Export**: Saves the feature history only as JSON (`.BREP.json`) with no mesh data. Useful for versioning or quick backups.
