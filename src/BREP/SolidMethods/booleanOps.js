@@ -12,27 +12,40 @@ export function _combineIdMaps(other) {
     return merged;
 }
 
+function _invertFaceNameMap(nameToId) {
+    const idToName = new Map();
+    if (!nameToId || typeof nameToId.entries !== 'function') return idToName;
+    for (const [name, id] of nameToId.entries()) {
+        idToName.set(id, name);
+    }
+    return idToName;
+}
+
 function _collapseFaceIdsByName(solid) {
     if (!solid || !solid._faceNameToID || !solid._idToFaceName || !Array.isArray(solid._triIDs)) return false;
     const nameToId = solid._faceNameToID;
+    const idToName = solid._idToFaceName;
+    const triIDs = solid._triIDs;
+    const canonicalById = new Map();
     let changed = false;
 
-    for (let i = 0; i < solid._triIDs.length; i++) {
-        const id = solid._triIDs[i];
-        const name = solid._idToFaceName.get(id);
-        if (!name) continue;
-        const canonical = nameToId.get(name);
-        if (canonical !== undefined && canonical !== id) {
-            solid._triIDs[i] = canonical;
+    for (let i = 0; i < triIDs.length; i++) {
+        const id = triIDs[i];
+        let canonical = canonicalById.get(id);
+        if (canonical === undefined) {
+            const name = idToName.get(id);
+            canonical = (name !== undefined) ? (nameToId.get(name) ?? id) : id;
+            canonicalById.set(id, canonical);
+        }
+        if (canonical !== id) {
+            triIDs[i] = canonical;
             changed = true;
         }
     }
 
     if (!changed) return false;
 
-    solid._idToFaceName = new Map(
-        [...solid._faceNameToID.entries()].map(([name, id]) => [id, name]),
-    );
+    solid._idToFaceName = _invertFaceNameMap(solid._faceNameToID);
     solid._faceIndex = null;
     solid._dirty = true;
     try { if (solid._manifold && typeof solid._manifold.delete === 'function') solid._manifold.delete(); } catch { }
@@ -54,7 +67,6 @@ export function union(other) {
     try { out._auxEdges = [...(this._auxEdges || []), ...(other?._auxEdges || [])]; } catch { }
     try { out._faceMetadata = this._combineFaceMetadata(other); } catch { }
     try { out._edgeMetadata = this._combineEdgeMetadata(other); } catch { }
-    _collapseFaceIdsByName(out);
     return out;
 }
 
@@ -68,7 +80,6 @@ export function subtract(other) {
     try { out._auxEdges = [...(this._auxEdges || []), ...(other?._auxEdges || [])]; } catch { }
     try { out._faceMetadata = this._combineFaceMetadata(other); } catch { }
     try { out._edgeMetadata = this._combineEdgeMetadata(other); } catch { }
-    _collapseFaceIdsByName(out);
 
     return out;
 }
@@ -82,7 +93,6 @@ export function intersect(other) {
     try { out._auxEdges = [...(this._auxEdges || []), ...(other?._auxEdges || [])]; } catch { }
     try { out._faceMetadata = this._combineFaceMetadata(other); } catch { }
     try { out._edgeMetadata = this._combineEdgeMetadata(other); } catch { }
-    _collapseFaceIdsByName(out);
     return out;
 }
 
@@ -99,7 +109,6 @@ export function difference(other) {
     try { out._auxEdges = [...(this._auxEdges || []), ...(other?._auxEdges || [])]; } catch { }
     try { out._faceMetadata = this._combineFaceMetadata(other); } catch { }
     try { out._edgeMetadata = this._combineEdgeMetadata(other); } catch { }
-    _collapseFaceIdsByName(out);
     return out;
 }
 
@@ -112,7 +121,6 @@ export function setTolerance(tolerance) {
     try { out._auxEdges = Array.isArray(this._auxEdges) ? this._auxEdges.slice() : []; } catch { }
     try { out._faceMetadata = new Map(this._faceMetadata); } catch { }
     try { out._edgeMetadata = new Map(this._edgeMetadata); } catch { }
-    _collapseFaceIdsByName(out);
     return out;
 }
 export function simplify(tolerance = undefined, updateInPlace = false) {
@@ -133,14 +141,8 @@ export function simplify(tolerance = undefined, updateInPlace = false) {
         this._triVerts = Array.from(meshOut.triVerts);
         this._triIDs = Solid._expandTriIDsFromMesh(meshOut);
 
-        // Rebuild vertex key map
+        // Defer rebuilding key map until authoring methods need it.
         this._vertKeyToIndex = new Map();
-        for (let i = 0; i < this._vertProperties.length; i += 3) {
-            const x = this._vertProperties[i + 0];
-            const y = this._vertProperties[i + 1];
-            const z = this._vertProperties[i + 2];
-            this._vertKeyToIndex.set(`${x},${y},${z}`, (i / 3) | 0);
-        }
 
         // Keep existing face name map; best-effort completion for any new IDs
         const completeMap = new Map(this._idToFaceName);
@@ -160,9 +162,10 @@ export function simplify(tolerance = undefined, updateInPlace = false) {
             }
         } catch { /* ignore */ }
         this._idToFaceName = completeMap;
-        this._faceNameToID = new Map(
-            [...this._idToFaceName.entries()].map(([id, name]) => [name, id]),
-        );
+        this._faceNameToID = new Map();
+        for (const [id, name] of this._idToFaceName.entries()) {
+            this._faceNameToID.set(name, id);
+        }
 
         // Replace cached manifold and reset caches
         try { if (this._manifold && this._manifold !== outM && typeof this._manifold.delete === 'function') this._manifold.delete(); } catch { }
@@ -209,13 +212,8 @@ export function _fromManifold(manifoldObj, idToFaceName) {
     solid._vertProperties = Array.from(mesh.vertProperties);
     solid._triVerts = Array.from(mesh.triVerts);
     solid._triIDs = Solid._expandTriIDsFromMesh(mesh);
-
-    for (let i = 0; i < mesh.vertProperties.length; i += 3) {
-        const x = mesh.vertProperties[i + 0];
-        const y = mesh.vertProperties[i + 1];
-        const z = mesh.vertProperties[i + 2];
-        solid._vertKeyToIndex.set(`${x},${y},${z}`, i / 3);
-    }
+    // Avoid O(vertexCount) string allocations here; authoring methods lazily rebuild this map.
+    solid._vertKeyToIndex = new Map();
 
     const completeMap = new Map(idToFaceName);
     try {
@@ -235,9 +233,10 @@ export function _fromManifold(manifoldObj, idToFaceName) {
     } catch (_) { /* best-effort completion */ }
 
     solid._idToFaceName = new Map(completeMap);
-    solid._faceNameToID = new Map(
-        [...solid._idToFaceName.entries()].map(([id, name]) => [name, id]),
-    );
+    solid._faceNameToID = new Map();
+    for (const [id, name] of solid._idToFaceName.entries()) {
+        solid._faceNameToID.set(name, id);
+    }
 
     solid._manifold = manifoldObj;
     solid._dirty = false;

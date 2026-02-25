@@ -23,6 +23,17 @@ export function _getPointIndex(p) {
         throw new Error(`Invalid point coordinates: (${x}, ${y}, ${z}) - must be finite numbers`);
     }
     
+    // Some reconstruction paths intentionally leave this map empty and rebuild lazily.
+    if ((this._vertKeyToIndex?.size || 0) === 0 && Array.isArray(this._vertProperties) && this._vertProperties.length > 0) {
+        this._vertKeyToIndex = new Map();
+        for (let i = 0; i < this._vertProperties.length; i += 3) {
+            const vx = this._vertProperties[i + 0];
+            const vy = this._vertProperties[i + 1];
+            const vz = this._vertProperties[i + 2];
+            this._vertKeyToIndex.set(`${vx},${vy},${vz}`, (i / 3) | 0);
+        }
+    }
+
     const k = this._key(p);
     const found = this._vertKeyToIndex.get(k);
     if (found !== undefined) return found;

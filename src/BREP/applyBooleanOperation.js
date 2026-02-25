@@ -531,7 +531,6 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
       };
 
       const addResult = (solid, target) => {
-        solid.visualize();
         const inheritedName = target?.name || target?.uuid || null;
         const finalName = inheritedName || (featureID ? `${featureID}_${++idx}` : solid.name || 'RESULT');
         try { solid.name = finalName; } catch (_) { }
@@ -681,7 +680,6 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
         }
       }
     }
-    result.visualize();
     debugLog('Boolean successful', {
       result: __booleanDebugSummarizeSolid(result),
       removedCount: tools.length + (baseSolid ? 1 : 0),
