@@ -33,4 +33,5 @@ Text to Face converts a text string into a sketch-like face that can be used dow
 - Use the flip controls for mirrored labels or stamped text.
 - Built-in Braille HC options include `Braille Grid HC`, `Braille Latin HC`, `Braille Pinboard HC`, and `Braille Pixel HC` (font rendering only; no runtime character remapping code).
 - Use `fontFile` if you need a different Braille convention or style.
+- The resolved font binary is saved into the feature's `persistentData.fontFile` (same data-URL format used by the Custom Font upload field), so existing parts can still rebuild even if that font is later removed from the app catalog.
 - If a font fails to load, try a different file or remove exotic glyphs from the text string.

@@ -207,7 +207,9 @@ export class TextToFaceFeature {
 
   async run(partHistory) {
     const params = this.inputParams || {};
-    const fontEntry = getSelectedFontEntry(params);
+    this.persistentData = (this.persistentData && typeof this.persistentData === 'object')
+      ? this.persistentData
+      : {};
     const rawText = (params.text != null) ? String(params.text) : '';
     const text = rawText.trim();
     if (!text) return { added: [], removed: [] };
@@ -218,9 +220,12 @@ export class TextToFaceFeature {
 
     const curveRes = Math.max(4, Math.floor(Number(params?.curveResolution) || 12));
 
-    let font;
+    let fontResolution = null;
+    let font = null;
     try {
-      font = await resolveFont(params, fontEntry);
+      fontResolution = await resolveFont(params, this.persistentData);
+      font = fontResolution?.font || null;
+      persistResolvedFont(this.persistentData, fontResolution);
     } catch (e) {
       console.warn('[TEXT] Failed to load font:', e?.message || e);
       return { added: [], removed: [] };
@@ -760,25 +765,149 @@ function computeSketchBasis(base, delta) {
   };
 }
 
-async function resolveFont(params, selectedEntry = null) {
-  const fontFile = (params && typeof params.fontFile === 'string') ? params.fontFile.trim() : '';
-  if (fontFile) {
-    return loadFontFromSource(fontFile, { type: 'data' });
+const PERSISTENT_FONT_FILE_KEY = 'fontFile';
+const PERSISTENT_FONT_REQUEST_KEY = 'fontFileKey';
+
+async function resolveFont(params, persistentData = null) {
+  const fontFile = getNormalizedFontFile(params);
+  const requestedFontId = getRequestedFontId(params);
+  const requestKey = buildFontRequestKey({ fontFile, requestedFontId });
+  const persistedFontFile = getPersistedFontFileForRequest(persistentData, { requestKey, fontFile, requestedFontId });
+
+  if (persistedFontFile) {
+    try {
+      const sourceType = persistedFontFile.startsWith('data:') ? 'data' : 'url';
+      const payload = await loadFontFromSource(persistedFontFile, { type: sourceType });
+      return {
+        font: payload.font,
+        fontFile: payload.dataUrl,
+        requestKey,
+      };
+    } catch (e) {
+      console.warn('[TEXT] Persisted font file load failed; falling back to source font:', e?.message || e);
+    }
   }
 
-  const entry = selectedEntry || getSelectedFontEntry(params);
+  if (fontFile) {
+    const sourceType = fontFile.startsWith('data:') ? 'data' : 'url';
+    const payload = await loadFontFromSource(fontFile, { type: sourceType });
+    return {
+      font: payload.font,
+      fontFile: payload.dataUrl,
+      requestKey,
+    };
+  }
+
+  const matchedEntry = FONT_CATALOG.find((font) => font.id === requestedFontId) || null;
+  const entry = matchedEntry || getSelectedFontEntry(params);
+  if (!entry) throw new Error('No font available');
+
+  if (!matchedEntry && requestedFontId && requestedFontId !== entry.id) {
+    console.warn(`[TEXT] Font "${requestedFontId}" not found; using "${entry.id}"`);
+  }
+
   const url = await resolveFontUrl(entry);
   if (!url) throw new Error('No font available');
-  return loadFontFromSource(url, { type: 'url' });
+
+  const payload = await loadFontFromSource(url, { type: 'url' });
+  return {
+    font: payload.font,
+    fontFile: payload.dataUrl,
+    requestKey,
+  };
 }
 
 function getSelectedFontEntry(params) {
-  const fontId = (params && typeof params.font === 'string') ? params.font : null;
+  const fontId = getRequestedFontId(params);
   if (fontId) {
     const match = FONT_CATALOG.find((font) => font.id === fontId);
     if (match) return match;
   }
-  return FONT_CATALOG.find((font) => font.id === DEFAULT_FONT_ID) || FONT_CATALOG[0];
+  return FONT_CATALOG.find((font) => font.id === DEFAULT_FONT_ID) || FONT_CATALOG[0] || null;
+}
+
+function getRequestedFontId(params) {
+  const raw = (params && typeof params.font === 'string') ? params.font.trim() : '';
+  if (raw.length > 0) return raw;
+  if (typeof DEFAULT_FONT_ID === 'string' && DEFAULT_FONT_ID.length > 0) return DEFAULT_FONT_ID;
+  return FONT_CATALOG[0]?.id || null;
+}
+
+function getNormalizedFontFile(params) {
+  return (params && typeof params.fontFile === 'string') ? params.fontFile.trim() : '';
+}
+
+function buildFontRequestKey({ fontFile, requestedFontId }) {
+  if (typeof fontFile === 'string' && fontFile.length > 0) {
+    const signature = buildFontFileSignature(fontFile);
+    return `fontFile:${signature || 'unknown'}`;
+  }
+  return `font:${requestedFontId || ''}`;
+}
+
+function getPersistedFontFileForRequest(persistentData, { requestKey, fontFile, requestedFontId }) {
+  if (!persistentData || typeof persistentData !== 'object') return '';
+
+  const storedFontFile = (typeof persistentData[PERSISTENT_FONT_FILE_KEY] === 'string')
+    ? persistentData[PERSISTENT_FONT_FILE_KEY].trim()
+    : '';
+  const storedKey = (typeof persistentData[PERSISTENT_FONT_REQUEST_KEY] === 'string')
+    ? persistentData[PERSISTENT_FONT_REQUEST_KEY]
+    : '';
+  if (storedFontFile && storedKey && storedKey === requestKey) {
+    return storedFontFile;
+  }
+
+  // Backward compatibility with previously serialized embedded font records.
+  const legacy = (persistentData.embeddedFont && typeof persistentData.embeddedFont === 'object')
+    ? persistentData.embeddedFont
+    : null;
+  const legacyDataUrl = (typeof legacy?.dataUrl === 'string') ? legacy.dataUrl.trim() : '';
+  if (!legacyDataUrl.startsWith('data:')) return '';
+
+  if (typeof fontFile === 'string' && fontFile.length > 0) {
+    return legacyDataUrl === fontFile ? legacyDataUrl : '';
+  }
+  if (legacy?.mode === 'catalog' && typeof legacy?.fontId === 'string' && legacy.fontId.trim().length > 0) {
+    return legacy.fontId.trim() === requestedFontId ? legacyDataUrl : '';
+  }
+  return '';
+}
+
+function persistResolvedFont(persistentData, resolution) {
+  if (!persistentData || typeof persistentData !== 'object') return;
+  if (!resolution || typeof resolution !== 'object') return;
+
+  const dataUrl = (typeof resolution.fontFile === 'string') ? resolution.fontFile.trim() : '';
+  const requestKey = (typeof resolution.requestKey === 'string') ? resolution.requestKey : '';
+  if (!dataUrl.startsWith('data:')) return;
+  if (!requestKey) return;
+
+  const prevFontFile = (typeof persistentData[PERSISTENT_FONT_FILE_KEY] === 'string')
+    ? persistentData[PERSISTENT_FONT_FILE_KEY]
+    : '';
+  const prevRequestKey = (typeof persistentData[PERSISTENT_FONT_REQUEST_KEY] === 'string')
+    ? persistentData[PERSISTENT_FONT_REQUEST_KEY]
+    : '';
+  if (prevFontFile === dataUrl && prevRequestKey === requestKey) return;
+
+  persistentData[PERSISTENT_FONT_FILE_KEY] = dataUrl;
+  persistentData[PERSISTENT_FONT_REQUEST_KEY] = requestKey;
+  try { delete persistentData.embeddedFont; } catch { }
+}
+
+function buildFontFileSignature(value) {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  return `${value.length}:${hashStringFNV1a(value)}`;
+}
+
+function hashStringFNV1a(value) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
 }
 
 async function loadFontFromSource(source, { type }) {
@@ -794,7 +923,12 @@ async function loadFontFromSource(source, { type }) {
     }
     if (!buffer) throw new Error('Font buffer unavailable');
     const json = ttfLoader.parse(buffer);
-    return new Font(json);
+    const font = new Font(json);
+    const dataUrl = (type === 'data' && typeof source === 'string' && source.startsWith('data:'))
+      ? source
+      : arrayBufferToDataUrl(buffer, inferFontMimeType(source));
+    if (!dataUrl) throw new Error('Failed to encode font data URL');
+    return { font, dataUrl };
   })();
 
   fontCache.set(key, promise);
@@ -851,6 +985,50 @@ function dataUrlToArrayBuffer(dataUrl) {
     if (typeof Buffer !== 'undefined') {
       const buf = Buffer.from(b64, 'base64');
       return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    }
+  } catch { }
+  return null;
+}
+
+function inferFontMimeType(source) {
+  if (typeof source !== 'string' || source.length === 0) return 'application/octet-stream';
+  if (source.startsWith('data:')) {
+    const m = /^data:([^;,]+)[;,]/i.exec(source);
+    if (m && m[1]) return m[1];
+    return 'application/octet-stream';
+  }
+
+  const clean = source.split('#')[0].split('?')[0].toLowerCase();
+  if (clean.endsWith('.otf')) return 'font/otf';
+  if (clean.endsWith('.woff2')) return 'font/woff2';
+  if (clean.endsWith('.woff')) return 'font/woff';
+  if (clean.endsWith('.ttc')) return 'font/collection';
+  if (clean.endsWith('.ttf')) return 'font/ttf';
+  return 'application/octet-stream';
+}
+
+function arrayBufferToDataUrl(buffer, mimeType = 'application/octet-stream') {
+  if (!buffer) return null;
+  try {
+    if (typeof Buffer !== 'undefined') {
+      const view = buffer instanceof Uint8Array
+        ? buffer
+        : new Uint8Array(buffer);
+      const base64 = Buffer.from(view.buffer, view.byteOffset, view.byteLength).toString('base64');
+      return `data:${mimeType};base64,${base64}`;
+    }
+
+    if (typeof btoa === 'function') {
+      const view = buffer instanceof Uint8Array
+        ? buffer
+        : new Uint8Array(buffer);
+      let binary = '';
+      const chunkSize = 0x8000;
+      for (let i = 0; i < view.length; i += chunkSize) {
+        const chunk = view.subarray(i, i + chunkSize);
+        binary += String.fromCharCode(...chunk);
+      }
+      return `data:${mimeType};base64,${btoa(binary)}`;
     }
   } catch { }
   return null;

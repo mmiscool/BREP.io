@@ -41,7 +41,6 @@ export async function test_textToFace(partHistory) {
   text.inputParams.textHeight = 10;
   text.inputParams.curveResolution = 12;
   text.inputParams.placementPlane = plane.inputParams.featureID;
-  text.inputParams.font = 'Noto Sans';
 
   return partHistory;
 }
@@ -53,6 +52,15 @@ export async function afterRun_textToFace(partHistory) {
   expectTruthy(textFeature, '[text_to_face] No TEXT feature found');
   if (String(textFeature?.previouseExpressions?.text ?? '') !== 'BREP') {
     throw new Error('[text_to_face] Text expression did not resolve to BREP');
+  }
+
+  const persistedFontFile = textFeature?.persistentData?.fontFile;
+  if (typeof persistedFontFile !== 'string' || !persistedFontFile.startsWith('data:')) {
+    throw new Error('[text_to_face] Missing persistentData.fontFile data URL');
+  }
+  const persistedFontFileKey = textFeature?.persistentData?.fontFileKey;
+  if (typeof persistedFontFileKey !== 'string' || !persistedFontFileKey.startsWith('font:')) {
+    throw new Error('[text_to_face] Missing or invalid persistentData.fontFileKey');
   }
 
   const sketchGroup = findSketchGroup(partHistory.scene);
@@ -101,4 +109,30 @@ export async function afterRun_textToFace(partHistory) {
   } catch {
     // ignore if normal computation fails in test runtime
   }
+
+  // Simulate a missing catalog font entry and verify fallback to persisted font file.
+  const removedFontId = '__text_to_face_removed_font_test__';
+  textFeature.inputParams.font = removedFontId;
+  textFeature.inputParams.fontFile = '';
+  textFeature.persistentData = textFeature.persistentData || {};
+  textFeature.persistentData.fontFile = persistedFontFile;
+  textFeature.persistentData.fontFileKey = `font:${removedFontId}`;
+  await partHistory.runHistory();
+
+  const textFeatureAfterFallback = (Array.isArray(partHistory.features)
+    ? partHistory.features.find((f) => f && f.type === 'TEXT')
+    : null);
+  expectTruthy(textFeatureAfterFallback, '[text_to_face] No TEXT feature found after persisted-font fallback run');
+  if (textFeatureAfterFallback?.persistentData?.fontFileKey !== `font:${removedFontId}`) {
+    throw new Error('[text_to_face] Persisted font fallback did not preserve missing font id key');
+  }
+  if (typeof textFeatureAfterFallback?.persistentData?.fontFile !== 'string'
+    || !textFeatureAfterFallback.persistentData.fontFile.startsWith('data:')) {
+    throw new Error('[text_to_face] Persisted font fallback lost font data URL');
+  }
+
+  const fallbackSketchGroup = findSketchGroup(partHistory.scene);
+  expectTruthy(fallbackSketchGroup, '[text_to_face] No SKETCH group found after persisted-font fallback run');
+  const fallbackFace = findSketchFace(fallbackSketchGroup);
+  expectTruthy(fallbackFace, '[text_to_face] No FACE found after persisted-font fallback run');
 }
