@@ -12,7 +12,7 @@ export class ViewCube {
    * @param {THREE.Camera} opts.targetCamera
    * @param {Object} [opts.controls] - ArcballControls (optional)
    * @param {number} [opts.size=110] - widget size in pixels
-   * @param {number} [opts.margin=10] - margin from top-right
+   * @param {number} [opts.margin=10] - margin from bottom-right
    */
   constructor({ renderer, targetCamera, controls = null, size = 110, margin = 10, colors = null } = {}) {
     if (!renderer || !targetCamera) throw new Error('ViewCube requires { renderer, targetCamera }');
@@ -37,28 +37,8 @@ export class ViewCube {
     this.pickGroup = new THREE.Group();
     this.root.add(this.pickGroup);
 
-    // Visual cube (subtle base)
-    const baseGeom = new THREE.BoxGeometry(1, 1, 1);
-    const baseMat = new THREE.MeshBasicMaterial({ color: 0x9a9a9a, opacity: 0.18, transparent: true });
-    const baseMesh = new THREE.Mesh(baseGeom, baseMat);
-    this.root.add(baseMesh);
-
-    // Edges for contrast
-    try {
-      const edges = new THREE.EdgesGeometry(baseGeom);
-      const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xffffff }));
-      this.root.add(line);
-    } catch { }
-
     // Small helpers for color + label texture
     const hexToRgb = (hex) => ({ r: (hex >> 16) & 255, g: (hex >> 8) & 255, b: hex & 255 });
-    const relLuma = (hex) => {
-      const { r, g, b } = hexToRgb(hex);
-      const s = [r, g, b].map(v => v / 255);
-      const lin = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
-      const [R, G, B] = s.map(lin);
-      return 0.2126 * R + 0.7152 * G + 0.0722 * B;
-    };
     // Convert a CSS color or hex-int to a normalized css hex string and hex-int
     const toCssAndHex = (input) => {
       let css = '#ffffff';
@@ -96,35 +76,61 @@ export class ViewCube {
       const hex = parseInt(css.slice(1), 16) & 0xffffff;
       return { css, hex };
     };
+    const mixColors = (a, b, t = 0.5) => {
+      const A = hexToRgb(toCssAndHex(a).hex);
+      const B = hexToRgb(toCssAndHex(b).hex);
+      const u = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0.5));
+      const r = Math.round(A.r + (B.r - A.r) * u);
+      const g = Math.round(A.g + (B.g - A.g) * u);
+      const b2 = Math.round(A.b + (B.b - A.b) * u);
+      const hex = ((r << 16) | (g << 8) | b2).toString(16).padStart(6, '0');
+      return `#${hex}`;
+    };
+    const readCssVar = (name, fallback) => {
+      try {
+        if (typeof window === 'undefined' || typeof document === 'undefined') return fallback;
+        const root = window.getComputedStyle(document.documentElement);
+        const value = root && root.getPropertyValue ? root.getPropertyValue(name) : '';
+        const clean = typeof value === 'string' ? value.trim() : '';
+        return clean || fallback;
+      } catch {
+        return fallback;
+      }
+    };
+
+    // Shared UI tokens so the cube blends into the CAD interface.
+    const THEME_BG_ELEV = readCssVar('--bg-elev', '#12141b');
+    const THEME_BORDER = readCssVar('--border', '#262b36');
+    const THEME_TEXT = readCssVar('--text', '#e6e6e6');
+    const THEME_ACCENT = readCssVar('--accent', '#6ea8fe');
+    const FACE_HOVER_ACCENT = (colors && colors.hoverFace) || mixColors(THEME_ACCENT, '#ffffff', 0.62);
 
     // Create a texture with the face color and imprinted label
-    const makeFaceTexture = (text, faceColor) => {
+    const makeFaceTexture = (text, faceColor, hovered = false) => {
       const size = 512; // square to avoid distortion on a square plane
       const canvas = document.createElement('canvas');
       canvas.width = size; canvas.height = size;
       const ctx = canvas.getContext('2d');
       // Background fill
-      const { css: faceCss, hex: faceHex } = toCssAndHex(faceColor);
-      ctx.fillStyle = faceCss;
+      const { css: faceCss } = toCssAndHex(faceColor);
+      const grad = ctx.createLinearGradient(0, 0, 0, size);
+      grad.addColorStop(0, hovered ? mixColors(faceCss, '#ffffff', 0.14) : mixColors(faceCss, '#ffffff', 0.06));
+      grad.addColorStop(1, hovered ? mixColors(faceCss, THEME_BG_ELEV, 0.20) : mixColors(faceCss, THEME_BG_ELEV, 0.26));
+      ctx.fillStyle = grad;
       ctx.fillRect(0, 0, size, size);
+      ctx.strokeStyle = hovered ? mixColors(FACE_HOVER_ACCENT, faceCss, 0.24) : mixColors(faceCss, THEME_BORDER, 0.45);
+      ctx.lineWidth = 18;
+      ctx.strokeRect(9, 9, size - 18, size - 18);
       // Imprinted text effect: shadow + highlight to look engraved
-      const fontSize = 100; // smaller labels for better balance
+      const fontSize = 118;
       ctx.font = `bold ${fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const cx = size / 2, cy = size / 2;
-      const luma = relLuma(faceHex);
-      const baseText = luma < 0.45 ? '#f0f0f0' : '#111111';
-      const shadow = luma < 0.45 ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.35)';
-      const highlight = luma < 0.45 ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.55)';
-      // Soft inner shadow (dark offset)
-      ctx.fillStyle = shadow;
-      ctx.fillText(text, cx + 3, cy + 3);
-      // Highlight edge (light offset)
-      ctx.fillStyle = highlight;
-      ctx.fillText(text, cx - 1, cy - 1);
-      // Base text color chosen for contrast
-      ctx.fillStyle = baseText;
+      // Soft text depth for readability at small sizes
+      ctx.fillStyle = 'rgba(0,0,0,0.52)';
+      ctx.fillText(text, cx + 2, cy + 2);
+      ctx.fillStyle = '#ffffff';
       ctx.fillText(text, cx, cy);
       const tex = new THREE.CanvasTexture(canvas);
       tex.minFilter = THREE.LinearFilter;
@@ -137,38 +143,67 @@ export class ViewCube {
       const k = Math.abs(maskVec.x) + Math.abs(maskVec.y) + Math.abs(maskVec.z); // 1, 2 or 3
       return 0.5 * Math.sqrt(k);
     };
+    const FACE_SURFACE_EPSILON = 0.008;
+    const CORNER_SURFACE_EPSILON = 0.03;
+    const CORNER_TUBE_RADIUS = Math.max(
+      0.01,
+      Number.isFinite(colors?.cornerTubeRadius) ? Number(colors.cornerTubeRadius) : 0.08,
+    );
+    const CORNER_SPHERE_RADIUS = CORNER_TUBE_RADIUS * 1.5;
 
     // Face planes for picking + labels (main 6 faces)
-    const mkFace = (dir, color, name) => {
+    const mkFace = (dir, color, name, label = name) => {
       const g = new THREE.PlaneGeometry(0.98, 0.98);
-      const m = new THREE.MeshBasicMaterial({ map: makeFaceTexture(name, color), side: THREE.FrontSide });
+      const normalMap = makeFaceTexture(label, color, false);
+      const hoverMap = makeFaceTexture(label, color, true);
+      const m = new THREE.MeshBasicMaterial({
+        map: normalMap,
+        side: THREE.FrontSide,
+      });
       const p = new THREE.Mesh(g, m);
       // place at distance where face coincides with cube side (0.5)
       const off = planeOffsetForMask(dir);
       const n = dir.clone().normalize();
-      p.position.copy(n.multiplyScalar(off));
+      p.position.copy(n.multiplyScalar(off + FACE_SURFACE_EPSILON));
       // orient plane to face outward
       const q = new THREE.Quaternion();
       q.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.clone().normalize());
       p.quaternion.copy(q);
-      p.userData = { dir: dir.clone().normalize(), name };
+      p.userData = {
+        dir: dir.clone().normalize(),
+        name,
+        highlightKind: 'face-map',
+        normalMap,
+        hoverMap,
+      };
       p.renderOrder = 1; // draw on top of base box
       this.pickGroup.add(p);
 
       return p;
     };
 
-    // Dark-mode friendly distinct colors for the 6 faces
+    // Dark defaults with a subtle nod to the original per-face hues.
     // Accept any CSS color string or hex. You can override via constructor
     // with { colors: { faces: { RIGHT: 'tomato', ... }, edge: '...', corner: '...' } }
-    const FACE_DEFAULTS = {
-      RIGHT: '#ff0000',
-      LEFT: '#0055ffff',
-      TOP: '#00ff77ff',
-      BOTTOM: '#ffb300ff',
-      FRONT: '#ff00b7ff',
-      BACK: '#00ffe5ff',
+    const ORIGINAL_FACE_TINGE = {
+      RIGHT: '#ff4d4d',
+      LEFT: '#005eff',
+      TOP: '#55ff00',
+      BOTTOM: '#ffea00',
+      FRONT: '#ff0084',
+      BACK: '#00e5ff',
     };
+    const DARK_FACE_BLEND = 0.0;
+    const darkFace = (hue) => mixColors(hue, THEME_BG_ELEV, DARK_FACE_BLEND);
+    const FACE_DEFAULTS = {
+      RIGHT: darkFace(ORIGINAL_FACE_TINGE.RIGHT),
+      LEFT: darkFace(ORIGINAL_FACE_TINGE.LEFT),
+      TOP: darkFace(ORIGINAL_FACE_TINGE.TOP),
+      BOTTOM: darkFace(ORIGINAL_FACE_TINGE.BOTTOM),
+      FRONT: darkFace(ORIGINAL_FACE_TINGE.FRONT),
+      BACK: darkFace(ORIGINAL_FACE_TINGE.BACK),
+    };
+    const FACE_LABELS = { RIGHT: 'R', LEFT: 'L', TOP: 'T', BOTTOM: 'B', FRONT: 'F', BACK: 'BK' };
     let faceOverrides = {};
     if (colors) {
       if (colors.faces) faceOverrides = colors.faces;
@@ -177,88 +212,101 @@ export class ViewCube {
     const FACE = Object.assign({}, FACE_DEFAULTS, faceOverrides);
 
     // Edge/corner colors (define before creating materials)
-    const EDGE_COLOR = (colors && colors.edge) || '#ffffffff';
-    const CORNER_COLOR = (colors && colors.corner) || '#3a3636ff';
+    const EDGE_COLOR = (colors && colors.edge) || mixColors(THEME_BORDER, THEME_TEXT, 0.14);
+    const CORNER_COLOR = (colors && colors.corner) || mixColors(THEME_ACCENT, THEME_BORDER, 0.45);
     const EDGE_COLOR_CSS = toCssAndHex(EDGE_COLOR).css;
+    const EDGE_HOVER_COLOR_CSS = mixColors(EDGE_COLOR_CSS, '#ffffff', 0.58);
     const CORNER_COLOR_CSS = toCssAndHex(CORNER_COLOR).css;
-    mkFace(new THREE.Vector3(1, 0, 0), FACE.RIGHT, 'RIGHT');
-    mkFace(new THREE.Vector3(-1, 0, 0), FACE.LEFT, 'LEFT');
-    mkFace(new THREE.Vector3(0, 1, 0), FACE.TOP, 'TOP');
-    mkFace(new THREE.Vector3(0, -1, 0), FACE.BOTTOM, 'BOTTOM');
-    mkFace(new THREE.Vector3(0, 0, 1), FACE.FRONT, 'FRONT');
-    mkFace(new THREE.Vector3(0, 0, -1), FACE.BACK, 'BACK');
+    const CORNER_HOVER_COLOR_CSS = mixColors(CORNER_COLOR_CSS, '#ffffff', 0.58);
 
-    // Edge faces (12) - beveled rectangles to mimic chamfered edges
-    const mkEdge = (normalMask, along, name) => {
-      const n = normalMask.clone().normalize();
-      const u = along.clone().normalize(); // width axis on the plane (edge direction)
-      const v = new THREE.Vector3().crossVectors(n, u).normalize();
-      const matBasis = new THREE.Matrix4().makeBasis(u, v, n);
-      const q = new THREE.Quaternion().setFromRotationMatrix(matBasis);
-      const g = new THREE.PlaneGeometry(0.98, 0.16);
-      const m = new THREE.MeshBasicMaterial({ color: EDGE_COLOR_CSS, opacity: 1.0, transparent: false, side: THREE.FrontSide });
-      const mesh = new THREE.Mesh(g, m);
-      mesh.quaternion.copy(q);
-      const off = planeOffsetForMask(normalMask);
-      mesh.position.copy(n.clone().multiplyScalar(off));
-      mesh.userData = { dir: n.clone(), name };
-      mesh.renderOrder = 2;
-      this.pickGroup.add(mesh);
-      return mesh;
-    };
+    mkFace(new THREE.Vector3(1, 0, 0), FACE.RIGHT, 'RIGHT', FACE_LABELS.RIGHT);
+    mkFace(new THREE.Vector3(-1, 0, 0), FACE.LEFT, 'LEFT', FACE_LABELS.LEFT);
+    mkFace(new THREE.Vector3(0, 1, 0), FACE.TOP, 'TOP', FACE_LABELS.TOP);
+    mkFace(new THREE.Vector3(0, -1, 0), FACE.BOTTOM, 'BOTTOM', FACE_LABELS.BOTTOM);
+    mkFace(new THREE.Vector3(0, 0, 1), FACE.FRONT, 'FRONT', FACE_LABELS.FRONT);
+    mkFace(new THREE.Vector3(0, 0, -1), FACE.BACK, 'BACK', FACE_LABELS.BACK);
 
-    // X± Y± edges -> along Z
-    mkEdge(new THREE.Vector3(1, 1, 0), new THREE.Vector3(0, 0, 1), 'TOP RIGHT EDGE');
-    mkEdge(new THREE.Vector3(-1, 1, 0), new THREE.Vector3(0, 0, 1), 'TOP LEFT EDGE');
-    mkEdge(new THREE.Vector3(1, -1, 0), new THREE.Vector3(0, 0, 1), 'BOTTOM RIGHT EDGE');
-    mkEdge(new THREE.Vector3(-1, -1, 0), new THREE.Vector3(0, 0, 1), 'BOTTOM LEFT EDGE');
-
-    // X± Z± edges -> along Y
-    mkEdge(new THREE.Vector3(1, 0, 1), new THREE.Vector3(0, 1, 0), 'FRONT RIGHT EDGE');
-    mkEdge(new THREE.Vector3(-1, 0, 1), new THREE.Vector3(0, 1, 0), 'FRONT LEFT EDGE');
-    mkEdge(new THREE.Vector3(1, 0, -1), new THREE.Vector3(0, 1, 0), 'BACK RIGHT EDGE');
-    mkEdge(new THREE.Vector3(-1, 0, -1), new THREE.Vector3(0, 1, 0), 'BACK LEFT EDGE');
-
-    // Y± Z± edges -> along X
-    mkEdge(new THREE.Vector3(0, 1, 1), new THREE.Vector3(1, 0, 0), 'TOP FRONT EDGE');
-    mkEdge(new THREE.Vector3(0, -1, 1), new THREE.Vector3(1, 0, 0), 'BOTTOM FRONT EDGE');
-    mkEdge(new THREE.Vector3(0, 1, -1), new THREE.Vector3(1, 0, 0), 'TOP BACK EDGE');
-    mkEdge(new THREE.Vector3(0, -1, -1), new THREE.Vector3(1, 0, 0), 'BOTTOM BACK EDGE');
-
-    // Corner knobs for isometric views (clickable)
-    // Slightly protruding spheres at cube corners, each maps to a diagonal view
+    // Corner spheres + edge tubes share the same exact corner-center points.
+    // This keeps tube endpoints and sphere centers perfectly aligned.
     const mkCorner = (dirMask, color, name) => {
       const n = dirMask.clone().normalize();
-      // Triangular disk to resemble a chamfered corner
-      const g = new THREE.CircleGeometry(0.14, 3);
-      const m = new THREE.MeshBasicMaterial({ color: CORNER_COLOR_CSS, opacity: 1.0, transparent: false, side: THREE.FrontSide });
-      const tri = new THREE.Mesh(g, m);
-      // Build basis so X axis is some stable vector in the plane
-      let u = new THREE.Vector3(0, 1, 0);
-      if (Math.abs(n.dot(u)) > 0.9) u = new THREE.Vector3(1, 0, 0); // avoid parallel
-      u = new THREE.Vector3().crossVectors(u, n).normalize();
-      const v = new THREE.Vector3().crossVectors(n, u).normalize();
-      const matBasis = new THREE.Matrix4().makeBasis(u, v, n);
-      const q = new THREE.Quaternion().setFromRotationMatrix(matBasis);
-      tri.quaternion.copy(q);
-      const off = planeOffsetForMask(dirMask);
-      tri.position.copy(n.clone().multiplyScalar(off));
-      tri.userData = { dir: n, name };
-      tri.renderOrder = 3;
-      this.pickGroup.add(tri);
-      return tri;
+      const off = planeOffsetForMask(dirMask) + CORNER_SURFACE_EPSILON;
+      const center = n.clone().multiplyScalar(off);
+      const g = new THREE.SphereGeometry(CORNER_SPHERE_RADIUS, 14, 10);
+      const m = new THREE.MeshBasicMaterial({
+        color: toCssAndHex(color).css,
+        side: THREE.FrontSide,
+      });
+      const sphere = new THREE.Mesh(g, m);
+      sphere.position.copy(center);
+      sphere.userData = {
+        dir: n.clone(),
+        name,
+        highlightKind: 'solid-color',
+        baseColor: CORNER_COLOR_CSS,
+        hoverColor: CORNER_HOVER_COLOR_CSS,
+      };
+      sphere.renderOrder = 3;
+      this.pickGroup.add(sphere);
+      return { center, dir: n.clone(), mesh: sphere };
+    };
+    const mkEdgeTube = (cornerA, cornerB, name) => {
+      if (!cornerA || !cornerB) return null;
+      const p0 = cornerA.center;
+      const p1 = cornerB.center;
+      const delta = p1.clone().sub(p0);
+      const len = delta.length();
+      if (!(len > 1e-8)) return null;
+
+      const tube = new THREE.Mesh(
+        new THREE.CylinderGeometry(CORNER_TUBE_RADIUS, CORNER_TUBE_RADIUS, len, 12, 1, false),
+        new THREE.MeshBasicMaterial({ color: EDGE_COLOR_CSS, side: THREE.FrontSide }),
+      );
+      tube.position.copy(p0).add(p1).multiplyScalar(0.5);
+      tube.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), delta.normalize());
+      const dir = p0.clone().add(p1);
+      if (dir.lengthSq() > 1e-12) dir.normalize();
+      else dir.set(0, 0, 1);
+      tube.userData = {
+        dir,
+        name,
+        highlightKind: 'solid-color',
+        baseColor: EDGE_COLOR_CSS,
+        hoverColor: EDGE_HOVER_COLOR_CSS,
+      };
+      tube.renderOrder = 2;
+      this.pickGroup.add(tube);
+      return tube;
     };
 
     // Define all 8 corners with readable names
     const C = (x, y, z) => new THREE.Vector3(x, y, z);
-    mkCorner(C(1, 1, 1), CORNER_COLOR, 'TOP FRONT RIGHT');
-    mkCorner(C(-1, 1, 1), CORNER_COLOR, 'TOP FRONT LEFT');
-    mkCorner(C(1, 1, -1), CORNER_COLOR, 'TOP BACK RIGHT');
-    mkCorner(C(-1, 1, -1), CORNER_COLOR, 'TOP BACK LEFT');
-    mkCorner(C(1, -1, 1), CORNER_COLOR, 'BOTTOM FRONT RIGHT');
-    mkCorner(C(-1, -1, 1), CORNER_COLOR, 'BOTTOM FRONT LEFT');
-    mkCorner(C(1, -1, -1), CORNER_COLOR, 'BOTTOM BACK RIGHT');
-    mkCorner(C(-1, -1, -1), CORNER_COLOR, 'BOTTOM BACK LEFT');
+    const corners = {
+      TFR: mkCorner(C(1, 1, 1), CORNER_COLOR, 'TOP FRONT RIGHT'),
+      TFL: mkCorner(C(-1, 1, 1), CORNER_COLOR, 'TOP FRONT LEFT'),
+      TBR: mkCorner(C(1, 1, -1), CORNER_COLOR, 'TOP BACK RIGHT'),
+      TBL: mkCorner(C(-1, 1, -1), CORNER_COLOR, 'TOP BACK LEFT'),
+      BFR: mkCorner(C(1, -1, 1), CORNER_COLOR, 'BOTTOM FRONT RIGHT'),
+      BFL: mkCorner(C(-1, -1, 1), CORNER_COLOR, 'BOTTOM FRONT LEFT'),
+      BBR: mkCorner(C(1, -1, -1), CORNER_COLOR, 'BOTTOM BACK RIGHT'),
+      BBL: mkCorner(C(-1, -1, -1), CORNER_COLOR, 'BOTTOM BACK LEFT'),
+    };
+
+    // 12 cube edges as true tubes whose endpoints are corner-sphere centers.
+    mkEdgeTube(corners.TFR, corners.TBR, 'TOP RIGHT EDGE');
+    mkEdgeTube(corners.TFL, corners.TBL, 'TOP LEFT EDGE');
+    mkEdgeTube(corners.BFR, corners.BBR, 'BOTTOM RIGHT EDGE');
+    mkEdgeTube(corners.BFL, corners.BBL, 'BOTTOM LEFT EDGE');
+
+    mkEdgeTube(corners.TFR, corners.BFR, 'FRONT RIGHT EDGE');
+    mkEdgeTube(corners.TFL, corners.BFL, 'FRONT LEFT EDGE');
+    mkEdgeTube(corners.TBR, corners.BBR, 'BACK RIGHT EDGE');
+    mkEdgeTube(corners.TBL, corners.BBL, 'BACK LEFT EDGE');
+
+    mkEdgeTube(corners.TFR, corners.TFL, 'TOP FRONT EDGE');
+    mkEdgeTube(corners.BFR, corners.BFL, 'BOTTOM FRONT EDGE');
+    mkEdgeTube(corners.TBR, corners.TBL, 'TOP BACK EDGE');
+    mkEdgeTube(corners.BBR, corners.BBL, 'BOTTOM BACK EDGE');
 
     // Soft ambient to ensure steady colors regardless of renderer state
     const amb = new THREE.AmbientLight(0xffffff, 0.9);
@@ -266,6 +314,7 @@ export class ViewCube {
 
     // Raycaster for cube picking
     this._raycaster = new THREE.Raycaster();
+    this._hoveredObject = null;
   }
 
   // Keep cube orientation in sync with target camera
@@ -290,7 +339,7 @@ export class ViewCube {
     return { xCss, yCss, xGL, yGL, w, h, width, height };
   }
 
-  // Render the view cube using scissor in the top-right corner
+  // Render the view cube using scissor in the bottom-right corner
   render() {
     const { xGL, yGL, w, h, width, height } = this._viewportRect();
     const r = this.renderer;
@@ -333,9 +382,8 @@ export class ViewCube {
       py >= rect.yCss && py <= rect.yCss + rect.h);
   }
 
-  // Attempt to handle a click; returns true if consumed
-  handleClick(event) {
-    if (!this.isEventInside(event)) return false;
+  _pickObjectAtEvent(event) {
+    if (!this.isEventInside(event)) return null;
     const { xCss, yCss, w, h } = this._viewportRect();
     const elRect = this.renderer.domElement.getBoundingClientRect();
     const cx = event.clientX - elRect.left;
@@ -346,8 +394,48 @@ export class ViewCube {
 
     this._raycaster.setFromCamera(ndc, this.camera);
     const intersects = this._raycaster.intersectObjects(this.pickGroup.children, false);
-    if (intersects && intersects.length) {
-      const face = intersects[0].object;
+    return (intersects && intersects.length) ? intersects[0].object : null;
+  }
+
+  _applyHoverState(obj, active) {
+    if (!obj || !obj.material) return;
+    const ud = obj.userData || {};
+    if (ud.highlightKind === 'face-map') {
+      const nextMap = active ? ud.hoverMap : ud.normalMap;
+      if (nextMap && obj.material.map !== nextMap) {
+        obj.material.map = nextMap;
+        obj.material.needsUpdate = true;
+      }
+      return;
+    }
+    if (ud.highlightKind === 'solid-color' && obj.material.color) {
+      obj.material.color.setStyle(active ? (ud.hoverColor || '#ffffff') : (ud.baseColor || '#ffffff'));
+    }
+  }
+
+  _setHoveredObject(nextObj) {
+    if (this._hoveredObject === nextObj) return false;
+    if (this._hoveredObject) this._applyHoverState(this._hoveredObject, false);
+    this._hoveredObject = nextObj || null;
+    if (this._hoveredObject) this._applyHoverState(this._hoveredObject, true);
+    return true;
+  }
+
+  // Update hover highlight from pointer move; faces/edges/corners all respond.
+  handlePointerMove(event) {
+    const hit = this._pickObjectAtEvent(event);
+    this._setHoveredObject(hit);
+    return !!hit;
+  }
+
+  clearHover() {
+    this._setHoveredObject(null);
+  }
+
+  // Attempt to handle a click; returns true if consumed
+  handleClick(event) {
+    const face = this._pickObjectAtEvent(event);
+    if (face) {
       const dir = face?.userData?.dir;
       const name = face?.userData?.name || '';
       if (dir) this._reorientCamera(dir, name);
@@ -365,17 +453,75 @@ export class ViewCube {
       ? this.controls._gizmos.position.clone()
       : new THREE.Vector3(0, 0, 0);
     const dist = cam.position.distanceTo(pivot) || cam.position.length() || 10;
-    const pos = pivot.clone().add(dir.clone().normalize().multiplyScalar(dist));
+    const viewDir = dir.clone().normalize(); // from pivot -> camera
+    const toPos = pivot.clone().add(viewDir.clone().multiplyScalar(dist));
+    const newForward = pivot.clone().sub(toPos).normalize(); // from camera -> pivot
 
-    // Choose a stable up vector for the final view
-    const useZup = Math.abs(dir.y) > 0.9; // top/bottom -> Z up to avoid roll
-    const up = useZup ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+    const projectToViewPlane = (v, normal) => {
+      const p = v.clone().sub(normal.clone().multiplyScalar(v.dot(normal)));
+      const len = p.length();
+      return len > 1e-8 ? p.multiplyScalar(1 / len) : null;
+    };
 
-    const toPos = pos;
+    // Current camera basis in world space.
+    const oldForward = pivot.clone().sub(cam.position).normalize();
+    const oldUp = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion).normalize();
+
+    // Transport old up by the minimal forward-alignment rotation so we keep perceived roll stable.
+    const alignQ = new THREE.Quaternion().setFromUnitVectors(oldForward, newForward);
+    let desiredUp = oldUp.clone().applyQuaternion(alignQ);
+    desiredUp = projectToViewPlane(desiredUp, newForward);
+    if (!desiredUp) {
+      desiredUp = projectToViewPlane(new THREE.Vector3(0, 1, 0), newForward)
+        || projectToViewPlane(new THREE.Vector3(1, 0, 0), newForward)
+        || new THREE.Vector3(0, 0, 1);
+    }
+
+    // Build canonical in-plane axes for the target face.
+    // These define the four valid "square to screen" roll states (0/90/180/270).
+    const ax = Math.abs(newForward.x);
+    const ay = Math.abs(newForward.y);
+    const az = Math.abs(newForward.z);
+    let baseA = null;
+    let baseB = null;
+    if (ax >= ay && ax >= az) {
+      baseA = new THREE.Vector3(0, 1, 0);
+      baseB = new THREE.Vector3(0, 0, 1);
+    } else if (ay >= ax && ay >= az) {
+      baseA = new THREE.Vector3(1, 0, 0);
+      baseB = new THREE.Vector3(0, 0, 1);
+    } else {
+      baseA = new THREE.Vector3(1, 0, 0);
+      baseB = new THREE.Vector3(0, 1, 0);
+    }
+    const a = projectToViewPlane(baseA, newForward);
+    const b = projectToViewPlane(baseB, newForward);
+    const candidates = [];
+    if (a) { candidates.push(a.clone()); candidates.push(a.clone().negate()); }
+    if (b) { candidates.push(b.clone()); candidates.push(b.clone().negate()); }
+    if (!candidates.length) candidates.push(desiredUp.clone());
+
+    // Snap roll to nearest 90-degree canonical orientation (minimum roll delta).
+    let bestUp = candidates[0];
+    let bestDot = -Infinity;
+    for (let i = 0; i < candidates.length; i++) {
+      const d = candidates[i].dot(desiredUp);
+      if (d > bestDot) {
+        bestDot = d;
+        bestUp = candidates[i];
+      }
+    }
+
+    // Orthonormalize against forward.
+    const right = new THREE.Vector3().crossVectors(newForward, bestUp);
+    if (right.lengthSq() > 1e-10) {
+      right.normalize();
+      bestUp = new THREE.Vector3().crossVectors(right, newForward).normalize();
+    }
 
     // Immediate reorientation: absolute pose using lookAt toward pivot
     cam.position.copy(toPos);
-    cam.up.copy(up);
+    cam.up.copy(bestUp);
     cam.lookAt(pivot);
     cam.updateMatrixWorld(true);
 

@@ -813,6 +813,7 @@ export class Viewer {
         this._selectAt = this._selectAt.bind(this);
         this._onPointerLeave = () => {
             try { SelectionFilter.clearHover(); } catch (_) { }
+            try { this.viewCube?.clearHover?.(); } catch (_) { }
             this._lastPointerEvent = null;
         };
         this._onPointerEnter = (ev) => { this._lastPointerEvent = ev; };
@@ -3220,7 +3221,10 @@ export class Viewer {
         this._lastPointerEvent = event;
         // If hovering over the view cube, avoid main-scene hover
         try {
-            if (this.viewCube && this.viewCube.isEventInside(event)) return;
+            if (this.viewCube) {
+                try { this.viewCube.handlePointerMove?.(event); } catch { }
+                if (this.viewCube.isEventInside(event)) return;
+            }
         } catch { }
         // If hovering TransformControls gizmo, skip scene hover handling
         try {
