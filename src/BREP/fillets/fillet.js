@@ -142,6 +142,293 @@ function computeProjectionRange(verts, dir) {
     return { min, max };
 }
 
+function isFiniteFilletPoint(point) {
+    return !!point
+        && Number.isFinite(point.x)
+        && Number.isFinite(point.y)
+        && Number.isFinite(point.z);
+}
+
+function cloneFilletPoint(point) {
+    if (!isFiniteFilletPoint(point)) return { x: 0, y: 0, z: 0 };
+    return { x: point.x, y: point.y, z: point.z };
+}
+
+function cloneFilletPolyline(points, count = null) {
+    const src = Array.isArray(points) ? points : [];
+    const n = Number.isInteger(count)
+        ? Math.max(0, Math.min(src.length, count))
+        : src.length;
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) out[i] = cloneFilletPoint(src[i]);
+    return out;
+}
+
+function filletPointsMatchWithinTolerance(a, b, eps = 1e-9) {
+    if (!isFiniteFilletPoint(a) || !isFiniteFilletPoint(b)) return false;
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    const dz = a.z - b.z;
+    return ((dx * dx) + (dy * dy) + (dz * dz)) <= (eps * eps);
+}
+
+function filletPolylineBacktrackingStats(referencePoints, candidatePoints) {
+    const ref = Array.isArray(referencePoints) ? referencePoints : [];
+    const candidate = Array.isArray(candidatePoints) ? candidatePoints : [];
+    const count = Math.min(ref.length, candidate.length);
+    if (count < 2) {
+        return { checkedSegments: 0, backtrackingSegments: 0, worstCos: 1 };
+    }
+
+    let checkedSegments = 0;
+    let backtrackingSegments = 0;
+    let worstCos = 1;
+    for (let i = 0; i < count - 1; i++) {
+        const r0 = ref[i];
+        const r1 = ref[i + 1];
+        const c0 = candidate[i];
+        const c1 = candidate[i + 1];
+        if (!isFiniteFilletPoint(r0) || !isFiniteFilletPoint(r1)
+            || !isFiniteFilletPoint(c0) || !isFiniteFilletPoint(c1)) {
+            continue;
+        }
+
+        const rdx = r1.x - r0.x;
+        const rdy = r1.y - r0.y;
+        const rdz = r1.z - r0.z;
+        const cdx = c1.x - c0.x;
+        const cdy = c1.y - c0.y;
+        const cdz = c1.z - c0.z;
+        const rLen = Math.hypot(rdx, rdy, rdz);
+        const cLen = Math.hypot(cdx, cdy, cdz);
+        if (!(rLen > 1e-12) || !(cLen > 1e-12)) continue;
+
+        checkedSegments++;
+        const cos = (rdx * cdx + rdy * cdy + rdz * cdz) / (rLen * cLen);
+        if (cos < worstCos) worstCos = cos;
+        if (cos < -1e-6) backtrackingSegments++;
+    }
+
+    return { checkedSegments, backtrackingSegments, worstCos };
+}
+
+function filletSmoothPolylineKinks(points, options = {}) {
+    const source = Array.isArray(points) ? points : [];
+    const count = source.length;
+    const rawStrength = Number(options?.strength);
+    const strength = Number.isFinite(rawStrength)
+        ? Math.max(0, Math.min(1, rawStrength))
+        : 1;
+    if (count < 3 || strength <= 0) return cloneFilletPolyline(source);
+    if (!source.every((p) => isFiniteFilletPoint(p))) return cloneFilletPolyline(source);
+
+    const iterations = 1 + Math.floor(strength * 2); // 1..3 passes
+    let current = cloneFilletPolyline(source);
+    for (let pass = 0; pass < iterations; pass++) {
+        const next = cloneFilletPolyline(current);
+        let movedInPass = false;
+        for (let i = 1; i < count - 1; i++) {
+            const prev = current[i - 1];
+            const cur = current[i];
+            const after = current[i + 1];
+            if (!isFiniteFilletPoint(prev) || !isFiniteFilletPoint(cur) || !isFiniteFilletPoint(after)) continue;
+
+            const vPrevX = cur.x - prev.x;
+            const vPrevY = cur.y - prev.y;
+            const vPrevZ = cur.z - prev.z;
+            const vNextX = after.x - cur.x;
+            const vNextY = after.y - cur.y;
+            const vNextZ = after.z - cur.z;
+            const lenPrev = Math.hypot(vPrevX, vPrevY, vPrevZ);
+            const lenNext = Math.hypot(vNextX, vNextY, vNextZ);
+            if (!(lenPrev > 1e-12) || !(lenNext > 1e-12)) continue;
+
+            const dotRaw = ((vPrevX * vNextX) + (vPrevY * vNextY) + (vPrevZ * vNextZ)) / (lenPrev * lenNext);
+            const dot = Math.max(-1, Math.min(1, dotRaw));
+            const kinkFactor = Math.max(0, (1 - dot) * 0.5);
+            if (kinkFactor < 0.01) continue;
+
+            const localWeight = strength * Math.sqrt(kinkFactor);
+            if (!(localWeight > 1e-6)) continue;
+
+            const targetX = (prev.x + after.x) * 0.5;
+            const targetY = (prev.y + after.y) * 0.5;
+            const targetZ = (prev.z + after.z) * 0.5;
+            let moveX = (targetX - cur.x) * localWeight;
+            let moveY = (targetY - cur.y) * localWeight;
+            let moveZ = (targetZ - cur.z) * localWeight;
+            const moveLen = Math.hypot(moveX, moveY, moveZ);
+            if (!(moveLen > 1e-12)) continue;
+
+            const maxMove = Math.min(lenPrev, lenNext) * 0.45;
+            if (moveLen > maxMove && maxMove > 1e-12) {
+                const scale = maxMove / moveLen;
+                moveX *= scale;
+                moveY *= scale;
+                moveZ *= scale;
+            }
+
+            next[i] = {
+                x: cur.x + moveX,
+                y: cur.y + moveY,
+                z: cur.z + moveZ,
+            };
+            movedInPass = true;
+        }
+        current = next;
+        if (!movedInPass) break;
+    }
+    return current;
+}
+
+function filletEnforcePolylineForwardProgress(referencePoints, candidatePoints, options = {}) {
+    const ref = Array.isArray(referencePoints) ? referencePoints : [];
+    const source = Array.isArray(candidatePoints) ? candidatePoints : [];
+    const count = Math.min(ref.length, source.length);
+    const out = cloneFilletPolyline(source, count);
+    if (count < 2) return { points: out, correctedSegments: 0 };
+
+    const lockEndpoints = !!options?.lockEndpoints;
+    const passes = Number.isFinite(Number(options?.passes))
+        ? Math.max(1, Math.min(8, Math.floor(Number(options.passes))))
+        : 4;
+
+    let correctedSegments = 0;
+    for (let pass = 0; pass < passes; pass++) {
+        let changedInPass = false;
+        for (let i = 0; i < count - 1; i++) {
+            const r0 = ref[i];
+            const r1 = ref[i + 1];
+            const p0 = out[i];
+            const p1 = out[i + 1];
+            if (!isFiniteFilletPoint(r0) || !isFiniteFilletPoint(r1)
+                || !isFiniteFilletPoint(p0) || !isFiniteFilletPoint(p1)) {
+                continue;
+            }
+
+            const rdx = r1.x - r0.x;
+            const rdy = r1.y - r0.y;
+            const rdz = r1.z - r0.z;
+            const rLen = Math.hypot(rdx, rdy, rdz);
+            if (!(rLen > 1e-12)) continue;
+            const invLen = 1 / rLen;
+            const ux = rdx * invLen;
+            const uy = rdy * invLen;
+            const uz = rdz * invLen;
+
+            const segX = p1.x - p0.x;
+            const segY = p1.y - p0.y;
+            const segZ = p1.z - p0.z;
+            const forward = (segX * ux) + (segY * uy) + (segZ * uz);
+            const minForward = Math.max(1e-10, rLen * 1e-6);
+            if (forward >= minForward) continue;
+
+            const correction = minForward - forward;
+            const canMovePrev = !lockEndpoints || (i > 0);
+            const canMoveNext = !lockEndpoints || ((i + 1) < (count - 1));
+            if (!canMovePrev && !canMoveNext) continue;
+
+            if (canMovePrev && canMoveNext) {
+                const half = correction * 0.5;
+                p0.x -= ux * half;
+                p0.y -= uy * half;
+                p0.z -= uz * half;
+                p1.x += ux * half;
+                p1.y += uy * half;
+                p1.z += uz * half;
+            } else if (canMoveNext) {
+                p1.x += ux * correction;
+                p1.y += uy * correction;
+                p1.z += uz * correction;
+            } else {
+                p0.x -= ux * correction;
+                p0.y -= uy * correction;
+                p0.z -= uz * correction;
+            }
+
+            correctedSegments++;
+            changedInPass = true;
+        }
+        if (!changedInPass) break;
+    }
+
+    return { points: out, correctedSegments };
+}
+
+function sanitizeFilletTangentPolyline(centerlinePoints, tangentPoints, options = {}) {
+    const ref = Array.isArray(centerlinePoints) ? centerlinePoints : [];
+    const tangent = Array.isArray(tangentPoints) ? tangentPoints : [];
+    const count = Math.min(ref.length, tangent.length);
+    const closedLoop = !!options?.closedLoop;
+    const rawStrength = Number(options?.strength);
+    const strength = Number.isFinite(rawStrength)
+        ? Math.max(0, Math.min(1, rawStrength))
+        : 1;
+
+    if (count < 2) {
+        return {
+            points: cloneFilletPolyline(tangent, count),
+            stats: {
+                checkedSegments: 0,
+                backtrackingBefore: 0,
+                backtrackingAfter: 0,
+                worstCosBefore: 1,
+                worstCosAfter: 1,
+                correctedSegments: 0,
+            },
+        };
+    }
+
+    const source = cloneFilletPolyline(tangent, count);
+    const statsBefore = filletPolylineBacktrackingStats(ref, source);
+    let working = (strength > 0)
+        ? filletSmoothPolylineKinks(source, { strength })
+        : cloneFilletPolyline(source);
+
+    const primary = filletEnforcePolylineForwardProgress(ref, working, {
+        lockEndpoints: true,
+        passes: 4,
+    });
+    working = primary.points;
+    let correctedSegments = primary.correctedSegments;
+
+    if (closedLoop && working.length >= 2 && filletPointsMatchWithinTolerance(source[0], source[source.length - 1])) {
+        working[working.length - 1] = cloneFilletPoint(working[0]);
+    }
+
+    let statsAfter = filletPolylineBacktrackingStats(ref, working);
+    if (statsAfter.backtrackingSegments > 0) {
+        const fallback = filletEnforcePolylineForwardProgress(ref, working, {
+            lockEndpoints: false,
+            passes: 4,
+        });
+        working = fallback.points;
+        correctedSegments += fallback.correctedSegments;
+        if (closedLoop && working.length >= 2 && filletPointsMatchWithinTolerance(source[0], source[source.length - 1])) {
+            working[working.length - 1] = cloneFilletPoint(working[0]);
+        }
+        statsAfter = filletPolylineBacktrackingStats(ref, working);
+    }
+
+    if (tangent.length > count) {
+        for (let i = count; i < tangent.length; i++) {
+            working.push(cloneFilletPoint(tangent[i]));
+        }
+    }
+
+    return {
+        points: working,
+        stats: {
+            checkedSegments: Math.max(statsBefore.checkedSegments, statsAfter.checkedSegments),
+            backtrackingBefore: statsBefore.backtrackingSegments,
+            backtrackingAfter: statsAfter.backtrackingSegments,
+            worstCosBefore: statsBefore.worstCos,
+            worstCosAfter: statsAfter.worstCos,
+            correctedSegments,
+        },
+    };
+}
+
 /**
  * Compute the fillet centerline polyline for an input edge without building the fillet solid.
  *
@@ -1015,6 +1302,33 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
         const centerlineCopy = centerline.map(pt => ({ x: pt.x, y: pt.y, z: pt.z }));
         let tangentACopy = tangentA.map(pt => ({ x: pt.x, y: pt.y, z: pt.z }));
         let tangentBCopy = tangentB.map(pt => ({ x: pt.x, y: pt.y, z: pt.z }));
+        const tangentSmoothStrength = 1;
+        const tangentASanitized = sanitizeFilletTangentPolyline(centerlineCopy, tangentACopy, {
+            closedLoop,
+            strength: tangentSmoothStrength,
+        });
+        const tangentBSanitized = sanitizeFilletTangentPolyline(centerlineCopy, tangentBCopy, {
+            closedLoop,
+            strength: tangentSmoothStrength,
+        });
+        tangentACopy = tangentASanitized.points;
+        tangentBCopy = tangentBSanitized.points;
+        if (debug) {
+            try {
+                const aStats = tangentASanitized.stats || {};
+                const bStats = tangentBSanitized.stats || {};
+                const changedA = (aStats.correctedSegments > 0)
+                    || (aStats.backtrackingBefore > aStats.backtrackingAfter);
+                const changedB = (bStats.correctedSegments > 0)
+                    || (bStats.backtrackingBefore > bStats.backtrackingAfter);
+                if (changedA || changedB) {
+                    logDebug('Sanitized tangent polylines before wedge build.', {
+                        tangentA: aStats,
+                        tangentB: bStats,
+                    });
+                }
+            } catch { }
+        }
         const tangentASnap = tangentACopy.map(pt => ({ x: pt.x, y: pt.y, z: pt.z }));
         const tangentBSnap = tangentBCopy.map(pt => ({ x: pt.x, y: pt.y, z: pt.z }));
         let edgeCopy = edgePts.map(pt => ({ x: pt.x, y: pt.y, z: pt.z }));
@@ -1092,6 +1406,37 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                 }
             }
             try { if (offsetDistance) logDebug(`Applied tangent offsetDistance=${offsetDistance} to ${n} samples`); } catch { }
+        }
+
+        // Final guard after inflation: enforce forward progression against centerline
+        // so local tangent kinks cannot flip segment direction and fold wedge strips.
+        {
+            const tangentAAfterOffset = sanitizeFilletTangentPolyline(centerlineCopy, tangentACopy, {
+                closedLoop,
+                strength: 0,
+            });
+            const tangentBAfterOffset = sanitizeFilletTangentPolyline(centerlineCopy, tangentBCopy, {
+                closedLoop,
+                strength: 0,
+            });
+            tangentACopy = tangentAAfterOffset.points;
+            tangentBCopy = tangentBAfterOffset.points;
+            if (debug) {
+                try {
+                    const aStats = tangentAAfterOffset.stats || {};
+                    const bStats = tangentBAfterOffset.stats || {};
+                    const changedA = (aStats.correctedSegments > 0)
+                        || (aStats.backtrackingBefore > aStats.backtrackingAfter);
+                    const changedB = (bStats.correctedSegments > 0)
+                        || (bStats.backtrackingBefore > bStats.backtrackingAfter);
+                    if (changedA || changedB) {
+                        logDebug('Applied post-offset tangent backtracking guard.', {
+                            tangentA: aStats,
+                            tangentB: bStats,
+                        });
+                    }
+                } catch { }
+            }
         }
 
         // Push wedge edge points slightly relative to the centerline to ensure
