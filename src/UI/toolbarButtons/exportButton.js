@@ -97,36 +97,310 @@ function _meshToAsciiSTL(mesh, name = 'solid', precision = 6, scale = 1) {
   return out.join('\n');
 }
 
-function _meshToAsciiOBJ(mesh, name = 'object', precision = 6, scale = 1) {
+function _objClamp01(n) {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(1, n));
+}
+
+function _objParseRgbComponent(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return NaN;
+  if (s.endsWith('%')) {
+    const num = parseFloat(s.slice(0, -1));
+    if (!Number.isFinite(num)) return NaN;
+    return (num / 100) * 255;
+  }
+  const num = parseFloat(s);
+  if (!Number.isFinite(num)) return NaN;
+  return num;
+}
+
+function _objParseHue(raw) {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if (!s) return NaN;
+  if (s.endsWith('turn')) {
+    const num = parseFloat(s.slice(0, -4));
+    if (!Number.isFinite(num)) return NaN;
+    return num * 360;
+  }
+  if (s.endsWith('rad')) {
+    const num = parseFloat(s.slice(0, -3));
+    if (!Number.isFinite(num)) return NaN;
+    return (num * 180) / Math.PI;
+  }
+  if (s.endsWith('deg')) {
+    const num = parseFloat(s.slice(0, -3));
+    if (!Number.isFinite(num)) return NaN;
+    return num;
+  }
+  const num = parseFloat(s);
+  if (!Number.isFinite(num)) return NaN;
+  return num;
+}
+
+function _objParsePercent(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return NaN;
+  if (s.endsWith('%')) {
+    const num = parseFloat(s.slice(0, -1));
+    if (!Number.isFinite(num)) return NaN;
+    return num / 100;
+  }
+  const num = parseFloat(s);
+  if (!Number.isFinite(num)) return NaN;
+  return num > 1 ? num / 100 : num;
+}
+
+function _objHslToRgb(h, s, l) {
+  const hue = ((h % 360) + 360) % 360;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs((hue / 60) % 2 - 1));
+  const m = l - c / 2;
+  let r = 0; let g = 0; let b = 0;
+  if (hue < 60) { r = c; g = x; b = 0; }
+  else if (hue < 120) { r = x; g = c; b = 0; }
+  else if (hue < 180) { r = 0; g = c; b = x; }
+  else if (hue < 240) { r = 0; g = x; b = c; }
+  else if (hue < 300) { r = x; g = 0; b = c; }
+  else { r = c; g = 0; b = x; }
+  return [r + m, g + m, b + m];
+}
+
+function _parseColorToOBJRgb(value) {
+  if (value == null) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const n = Math.max(0, Math.min(0xffffff, Math.round(value)));
+    return [((n >> 16) & 0xFF) / 255, ((n >> 8) & 0xFF) / 255, (n & 0xFF) / 255];
+  }
+  if (typeof value === 'string') {
+    const v = value.trim();
+    if (!v) return null;
+    const hexMatch = v.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (hexMatch) {
+      const h = hexMatch[1];
+      if (h.length === 3) {
+        return [
+          parseInt(h[0] + h[0], 16) / 255,
+          parseInt(h[1] + h[1], 16) / 255,
+          parseInt(h[2] + h[2], 16) / 255,
+        ];
+      }
+      return [
+        parseInt(h.slice(0, 2), 16) / 255,
+        parseInt(h.slice(2, 4), 16) / 255,
+        parseInt(h.slice(4, 6), 16) / 255,
+      ];
+    }
+    const hex0xMatch = v.match(/^0x([0-9a-f]{6})$/i);
+    if (hex0xMatch) {
+      const h = hex0xMatch[1];
+      return [
+        parseInt(h.slice(0, 2), 16) / 255,
+        parseInt(h.slice(2, 4), 16) / 255,
+        parseInt(h.slice(4, 6), 16) / 255,
+      ];
+    }
+    const rgbMatch = v.match(/^rgba?\((.+)\)$/i);
+    if (rgbMatch) {
+      const inner = rgbMatch[1].replace('/', ' ');
+      const parts = inner.split(/[, ]+/).map((p) => p.trim()).filter(Boolean);
+      if (parts.length < 3) return null;
+      const r = _objParseRgbComponent(parts[0]);
+      const g = _objParseRgbComponent(parts[1]);
+      const b = _objParseRgbComponent(parts[2]);
+      if (![r, g, b].every(Number.isFinite)) return null;
+      return [_objClamp01(r / 255), _objClamp01(g / 255), _objClamp01(b / 255)];
+    }
+    const hslMatch = v.match(/^hsla?\((.+)\)$/i);
+    if (hslMatch) {
+      const inner = hslMatch[1].replace('/', ' ');
+      const parts = inner.split(/[, ]+/).map((p) => p.trim()).filter(Boolean);
+      if (parts.length < 3) return null;
+      const h = _objParseHue(parts[0]);
+      const s = _objParsePercent(parts[1]);
+      const l = _objParsePercent(parts[2]);
+      if (![h, s, l].every(Number.isFinite)) return null;
+      return _objHslToRgb(h, s, l).map(_objClamp01);
+    }
+    return null;
+  }
+  if (Array.isArray(value) && value.length >= 3) {
+    const r = Number(value[0]);
+    const g = Number(value[1]);
+    const b = Number(value[2]);
+    if (![r, g, b].every(Number.isFinite)) return null;
+    const max = Math.max(r, g, b);
+    if (max <= 1) return [_objClamp01(r), _objClamp01(g), _objClamp01(b)];
+    return [_objClamp01(r / 255), _objClamp01(g / 255), _objClamp01(b / 255)];
+  }
+  if (typeof value === 'object') {
+    const r = Number(value.r);
+    const g = Number(value.g);
+    const b = Number(value.b);
+    if ([r, g, b].every(Number.isFinite)) {
+      const max = Math.max(r, g, b);
+      if (max <= 1) return [_objClamp01(r), _objClamp01(g), _objClamp01(b)];
+      return [_objClamp01(r / 255), _objClamp01(g / 255), _objClamp01(b / 255)];
+    }
+  }
+  return null;
+}
+
+function _pickColorValue(meta, keys) {
+  if (!meta || typeof meta !== 'object') return null;
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(meta, key)) continue;
+    const raw = meta[key];
+    if (raw == null) continue;
+    if (typeof raw === 'string' && raw.trim() === '') continue;
+    return raw;
+  }
+  return null;
+}
+
+function _resolveColorFromMeta(meta, keys) {
+  return _parseColorToOBJRgb(_pickColorValue(meta, keys));
+}
+
+function _extractMaterialColor(material) {
+  if (!material) return null;
+  if (Array.isArray(material)) {
+    for (const mat of material) {
+      const c = _extractMaterialColor(mat);
+      if (c) return c;
+    }
+    return null;
+  }
+  if (material.color) {
+    const c = _parseColorToOBJRgb(material.color);
+    if (c) return c;
+    try {
+      if (typeof material.color.getHex === 'function') {
+        const hex = material.color.getHex();
+        const parsed = _parseColorToOBJRgb(hex);
+        if (parsed) return parsed;
+      }
+    } catch {}
+  }
+  return null;
+}
+
+function _buildOBJColorContext(solid, mesh, metadataManager) {
+  const solidKeys = ['solidColor', 'color'];
+  const faceKeys = ['faceColor', 'color'];
+  const triCount = (mesh?.triVerts?.length / 3) | 0;
+  const faceIDs = (mesh?.faceID && mesh.faceID.length === triCount) ? mesh.faceID : null;
+
+  const getMetadata = (name) => {
+    if (!name || !metadataManager || typeof metadataManager.getMetadata !== 'function') return null;
+    try { return metadataManager.getMetadata(name); } catch { return null; }
+  };
+
+  let solidColor = _resolveColorFromMeta(getMetadata(solid?.name), solidKeys)
+    || _resolveColorFromMeta(solid?.userData?.metadata || null, solidKeys)
+    || _parseColorToOBJRgb(solid?.userData?.__metadataColor)
+    || _extractMaterialColor(solid?.material);
+
+  let idToFaceName = (solid && solid._idToFaceName instanceof Map) ? solid._idToFaceName : null;
+  if (!idToFaceName && solid && solid._faceNameToID instanceof Map) {
+    const inverted = new Map();
+    for (const [faceName, faceId] of solid._faceNameToID.entries()) {
+      if (faceId == null || faceName == null) continue;
+      inverted.set(faceId, String(faceName));
+    }
+    if (inverted.size) idToFaceName = inverted;
+  }
+
+  const faceColorById = new Map();
+  if (faceIDs && idToFaceName) {
+    const faceDisplayColorByName = new Map();
+    const children = Array.isArray(solid?.children) ? solid.children : [];
+    for (const child of children) {
+      if (!child || child.type !== 'FACE') continue;
+      const faceName = child.name || child.userData?.faceName || null;
+      if (!faceName) continue;
+      const color = _parseColorToOBJRgb(child?.userData?.__metadataColor)
+        || _extractMaterialColor(child.material);
+      if (color) faceDisplayColorByName.set(faceName, color);
+    }
+
+    const seen = new Set();
+    for (let t = 0; t < faceIDs.length; t++) {
+      const fid = faceIDs[t] >>> 0;
+      if (seen.has(fid)) continue;
+      seen.add(fid);
+      const faceName = idToFaceName.get(fid) || `FACE_${fid}`;
+      let faceMeta = null;
+      try { faceMeta = (typeof solid?.getFaceMetadata === 'function') ? solid.getFaceMetadata(faceName) : null; } catch { faceMeta = null; }
+      const faceColor = _resolveColorFromMeta(getMetadata(faceName), faceKeys)
+        || _resolveColorFromMeta(faceMeta, faceKeys)
+        || faceDisplayColorByName.get(faceName)
+        || null;
+      if (faceColor) faceColorById.set(fid, faceColor);
+    }
+  }
+
+  if (!solidColor && faceColorById.size === 1) {
+    solidColor = faceColorById.values().next().value || null;
+  }
+
+  if (!solidColor && faceColorById.size === 0) {
+    return { enabled: false, defaultColor: null, faceIDs: null, faceColorById: new Map() };
+  }
+  const defaultColor = solidColor || [0.75, 0.75, 0.75];
+  return { enabled: true, defaultColor, faceIDs, faceColorById };
+}
+
+function _meshToAsciiOBJ(mesh, name = 'object', precision = 6, scale = 1, colorContext = null) {
   const vp = mesh.vertProperties;
   const tv = mesh.triVerts;
   const fmt = (n) => Number.isFinite(n) ? n.toFixed(precision) : '0';
+  const colorFmt = (n) => _objClamp01(n).toFixed(precision);
   const out = [];
   // Object/group name (safe ASCII)
   out.push(`# Exported by BREP`);
+  if (colorContext?.enabled) out.push('# Vertex colors are encoded as "v x y z r g b" (0..1)');
   out.push(`o ${name}`);
   // Emit unique vertices referenced by triVerts to keep file smaller
-  const indexMap = new Map(); // original index -> 1-based OBJ index
+  const indexMap = new Map(); // original index(+color) -> 1-based OBJ index
   let nextIndex = 1;
   const faces = []; // store triples of mapped indices
   const triCount = (tv.length / 3) | 0;
+  const faceColorById = colorContext?.faceColorById || null;
+  const faceIDs = (colorContext?.enabled && colorContext?.faceIDs && colorContext.faceIDs.length === triCount)
+    ? colorContext.faceIDs
+    : null;
+  const defaultColor = colorContext?.enabled ? (colorContext.defaultColor || [0.75, 0.75, 0.75]) : null;
   for (let t = 0; t < triCount; t++) {
     const i0 = tv[t * 3 + 0] >>> 0;
     const i1 = tv[t * 3 + 1] >>> 0;
     const i2 = tv[t * 3 + 2] >>> 0;
-    const mapIndex = (i) => {
-      let id = indexMap.get(i);
+    const triColor = colorContext?.enabled
+      ? ((faceIDs && faceColorById) ? (faceColorById.get(faceIDs[t] >>> 0) || defaultColor) : defaultColor)
+      : null;
+    const mapIndex = (i, rgb) => {
+      const colorKey = rgb
+        ? `${colorFmt(rgb[0])},${colorFmt(rgb[1])},${colorFmt(rgb[2])}`
+        : '';
+      const key = `${i}|${colorKey}`;
+      let id = indexMap.get(key);
       if (!id) {
         const x = vp[i * 3 + 0] * scale;
         const y = vp[i * 3 + 1] * scale;
         const z = vp[i * 3 + 2] * scale;
-        out.push(`v ${fmt(x)} ${fmt(y)} ${fmt(z)}`);
+        if (rgb) {
+          out.push(`v ${fmt(x)} ${fmt(y)} ${fmt(z)} ${colorFmt(rgb[0])} ${colorFmt(rgb[1])} ${colorFmt(rgb[2])}`);
+        } else {
+          out.push(`v ${fmt(x)} ${fmt(y)} ${fmt(z)}`);
+        }
         id = nextIndex++;
-        indexMap.set(i, id);
+        indexMap.set(key, id);
       }
       return id;
     };
-    const a = mapIndex(i0), b = mapIndex(i1), c = mapIndex(i2);
+    const a = mapIndex(i0, triColor);
+    const b = mapIndex(i1, triColor);
+    const c = mapIndex(i2, triColor);
     faces.push([a, b, c]);
   }
   // Faces (referencing v indices; no normals/UVs)
@@ -211,6 +485,18 @@ function _openExportDialog(viewer) {
   try { selUnit.value = 'millimeter'; } catch {}
   rowUnit.appendChild(labUnit); rowUnit.appendChild(selUnit);
 
+  // OBJ color option
+  const rowObjColors = document.createElement('div'); rowObjColors.className = 'exp-row';
+  const labObjColors = document.createElement('div'); labObjColors.className = 'exp-label'; labObjColors.textContent = 'OBJ';
+  const chkObjColors = document.createElement('input'); chkObjColors.type = 'checkbox'; chkObjColors.checked = false;
+  const objColorsWrap = document.createElement('label');
+  objColorsWrap.style.display = 'flex';
+  objColorsWrap.style.alignItems = 'center';
+  objColorsWrap.style.gap = '6px';
+  objColorsWrap.appendChild(chkObjColors);
+  objColorsWrap.appendChild(document.createTextNode('Include vertex colors'));
+  rowObjColors.appendChild(labObjColors); rowObjColors.appendChild(objColorsWrap);
+
   // STEP tessellation options
   const rowTess = document.createElement('div'); rowTess.className = 'exp-row';
   const labTess = document.createElement('div'); labTess.className = 'exp-label'; labTess.textContent = 'STEP';
@@ -249,6 +535,7 @@ function _openExportDialog(viewer) {
   const updateUnitVisibility = () => {
     const fmt = selFmt.value;
     rowUnit.style.display = (fmt === 'stl' || fmt === '3mf' || fmt === 'obj' || fmt === 'step') ? 'flex' : 'none';
+    rowObjColors.style.display = (fmt === 'obj') ? 'flex' : 'none';
     rowTess.style.display = (fmt === 'step') ? 'flex' : 'none';
     rowStepFaces.style.display = (fmt === 'step') ? 'flex' : 'none';
     rowStepEdges.style.display = (fmt === 'step') ? 'flex' : 'none';
@@ -272,6 +559,7 @@ function _openExportDialog(viewer) {
       const fmt = selFmt.value;
       const unit = selUnit.value;
       const scale = _unitScale(unit);
+      const metadataManager = viewer?.partHistory?.metadataManager || null;
 
       if (fmt === 'json') {
         try {
@@ -376,11 +664,13 @@ function _openExportDialog(viewer) {
       }
 
       if (fmt === 'obj') {
+        const includeObjColors = !!chkObjColors.checked;
         // Single solid -> OBJ
         if (solids.length === 1) {
           const s = solids[0];
           const mesh = s.getMesh();
-          const obj = _meshToAsciiOBJ(mesh, base, 6, scale);
+          const colorContext = includeObjColors ? _buildOBJColorContext(s, mesh, metadataManager) : null;
+          const obj = _meshToAsciiOBJ(mesh, base, 6, scale, colorContext);
           try { if (mesh && typeof mesh.delete === 'function') mesh.delete(); } catch {}
           _download(`${base}.obj`, obj, 'text/plain');
           close();
@@ -392,7 +682,8 @@ function _openExportDialog(viewer) {
           try {
             const safe = _safeName(s.name || `solid_${idx}`);
             const mesh = s.getMesh();
-            const obj = _meshToAsciiOBJ(mesh, safe, 6, scale);
+            const colorContext = includeObjColors ? _buildOBJColorContext(s, mesh, metadataManager) : null;
+            const obj = _meshToAsciiOBJ(mesh, safe, 6, scale, colorContext);
             try { if (mesh && typeof mesh.delete === 'function') mesh.delete(); } catch {}
             zip.file(`${safe}.obj`, obj);
           } catch {}
@@ -440,6 +731,7 @@ function _openExportDialog(viewer) {
   modal.appendChild(rowName);
   modal.appendChild(rowFmt);
   modal.appendChild(rowUnit);
+  modal.appendChild(rowObjColors);
   modal.appendChild(rowTess);
   modal.appendChild(rowStepFaces);
   modal.appendChild(rowStepEdges);
