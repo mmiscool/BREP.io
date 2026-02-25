@@ -17,6 +17,6 @@ Fixed constraints lock an assembly component in place so other constraints treat
 - Reports whether the component was already fixed so the UI can skip redundant status updates.
 
 ## Usage Tips
-- Always fix at least one component in an assembly; otherwise every constraint will read as `blocked` because both sides appear movable.
+- Fix at least one component when you want a stable assembly reference frame; this improves solver determinism.
 - Use Fixed constraints for temporary jig components: remove the constraint after the rest of the assembly is solved to free the part again.
 - When importing legacy data, run the solver once—Fixed constraints will refresh feature metadata that older saves might not have populated.

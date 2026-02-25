@@ -19,6 +19,19 @@ Image Heightmap Solid samples a grayscale (or RGB) image and extrudes the pixels
 - `simplifyTolerance` – Tolerance for Manifold simplify (0 disables).
 - `boolean.operation` / `boolean.targets` – Optional boolean with existing solids.
 
+## Shared Image Editor
+This feature uses the shared editor documented at [Image Editor (Shared)](image-editor.md).
+
+Relevant editor functions for Heightmap:
+- Paint/erase/fill the source image used for height sampling.
+- Adjust canvas size when you need more or less sampled area.
+- Use zoom/pan + undo/redo for precise grayscale sculpting before rebuild.
+
+How to use:
+1. Click `Edit Image`.
+2. Paint grayscale content (white/high, black/low unless `invertHeights` is enabled).
+3. Click `Finish` to save the edited PNG back into `fileToImport`.
+
 ## Behaviour
 - Decodes the image to a grid, samples with the requested stride, and builds top/bottom meshes offset by `baseHeight` plus scaled pixel heights (with optional invert).
 - Positions the mesh on the selected plane (or world XY) and centers it if requested.

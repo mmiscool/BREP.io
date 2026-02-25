@@ -48,7 +48,8 @@ Sketch Mode uses Unicode icon buttons for quick tool switching. The top toolbar 
 
 ## Inputs
 - `sketchPlane` – face or datum plane that defines the sketch basis. The plane orientation updates automatically when the reference moves.
-- `Edit Sketch` – opens the in-app sketcher (`viewer.startSketchMode`) so you can add points, curves, and constraints.
+- `editSketch` – button that opens the in-app sketcher (`viewer.startSketchMode`) so you can add points, curves, and constraints.
+- `dumpSketchDiagnostics` – button that exports sketch/triangulation diagnostics for debugging.
 - `curveResolution` – tessellation setting used when generating circular geometry for downstream features.
 
 ## Behaviour

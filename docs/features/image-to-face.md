@@ -4,27 +4,37 @@ Status: Implemented
 
 ![Image to Face feature dialog](Image_to_Face_dialog.png)
 
-Image to Face traces a source image into planar geometry that can be placed on any sketch plane or selected face. It is ideal for logos, decorative cutouts, and relief features.
+Image to Face traces a PNG into sketch geometry that can be consumed by downstream modeling features.
 
 ![Image to Face 2D Trace](./image-to-face-2D_dialog.png)
 ![Image to Face 3D Result](./image-to-face-3D_dialog.png)
 
-## Parameters
-- **threshold** (0-255) controls how dark a pixel must be to form geometry.
-- **invert** flips dark and light interpretation for the trace.
-- **pixelScale** and **center** adjust the size and placement of the resulting sketch.
-- **simplify options** reduce jagged edges on the traced outline.
-- **placementPlane** lets you place the traced sketch onto a selected face or datum plane; otherwise the world origin is used.
-- **Edit Image** opens the integrated editor.
+## Inputs
+- `fileToImport` – source PNG payload.
+- `editImage` – opens the integrated paint-style editor and writes the edited image back into the feature.
+- `threshold` / `invert` – foreground classification controls.
+- `pixelScale` / `center` – traced geometry scale and centering behavior.
+- `smoothCurves` / `curveTolerance` – optional curve fitting controls.
+- `speckleArea` – drops tiny loops below the configured pixel area.
+- `simplifyCollinear` / `rdpTolerance` – polyline simplification controls.
+- `edgeSplitAngle` / `edgeMinSpacing` – controls for splitting traced loops into edge segments.
+- `placementPlane` – optional target plane/face for placement.
 
-The feature emits a `SKETCH` group that contains a triangulated face and edge polylines. Downstream features (Extrude, Revolve, Sweep) can consume the face directly.
+## Shared Image Editor
+This feature uses the shared editor documented at [Image Editor (Shared)](image-editor.md).
 
-## Inline Image Editor
-- Starts with your current image or a default 300x300 white canvas.
-- Dark themed UI renders at 1:1 pixels with device pixel ratio awareness for crisp previews.
-- Tools include Brush, Eraser, Pan (Space), and Paint Bucket with a tolerance slider (0-255).
-- Brush tool offers live cursor outline, multiple shapes (round, square, diamond), and an eraser that respects the selected shape.
-- Bottom-right resize handle lets you expand or crop the canvas while preserving existing strokes.
-- Undo and Redo history, Fit view, Finish (saves back to the feature), and Cancel are available during editing.
+Relevant editor functions for Image to Face:
+- Raster editing: brush, eraser, bucket fill, pan/zoom, canvas resize, undo/redo.
+- Trace-assist controls: live vector overlay, manual break placement/removal (`Break` tool), and persisted break metadata.
+- Sidebar parameter editing (when opened from this feature) so trace parameters can be adjusted while editing.
 
-Use Finish to update the feature image and rerun the timeline, or Cancel to discard any edits.
+How to use:
+1. Click `Edit Image`.
+2. Draw/clean the bitmap and optionally tune trace behavior.
+3. Click `Finish` to push the edited PNG back into `fileToImport`, then rebuild the feature.
+
+## Behaviour
+- Decodes image data, traces contour loops, applies optional smoothing/simplification, and discards invalid/intersecting loops.
+- Emits a `SKETCH` group with a triangulated face plus edge polylines, including boundary-loop metadata for downstream features.
+- If `placementPlane` is provided, maps traced geometry into the selected plane/face basis; otherwise uses world default placement.
+- Stores editor/breakpoint state in feature data so manual image edits and split decisions survive rebuilds.

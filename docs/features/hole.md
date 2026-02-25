@@ -4,28 +4,27 @@ Status: Implemented
 
 ![Hole feature dialog](Hole_dialog.png)
 
-Adds drilled-style holes with optional countersink or counterbore. The feature accepts a sketch or one or more vertices as placement inputs and produces separate holes for every point selected (sketch center P0 is ignored by default).
+Adds drilled-style holes from sketch points, with support for countersink, counterbore, and threaded hole generation.
 
 ## Inputs
-- **Placement (sketch or points)** – Pick a sketch (all sketch points except the auto center) or select individual vertices. Each point creates its own hole.
-- **Hole type** – `SIMPLE`, `COUNTERSINK`, or `COUNTERBORE`.
-- **Diameter** – Core hole diameter.
-- **Depth** – Total hole depth (straight portion). For countersink/counterbore, the sink/bore occupies part of this total; the straight leg shortens accordingly.
-- **Through all** – If enabled, cuts through the entire target; depth is ignored.
-- **Countersink diameter / angle** – For countersinks.
-- **Counterbore diameter / depth** – For counterbores.
-- **Thread standard / designation** – When `Hole type` is `THREADED`, choose a standard (ISO, Unified, etc.) and a size (e.g., `#10-24 UNC`).
-- **Thread modeling** – `SYMBOLIC` (fast preview) or `MODELED` (helical geometry).
-- **Thread radial offset** – Clearance offset applied to crest/root.
-- **Thread segments/turn** – Controls modeled thread tessellation (ignored for symbolic).
-- **Boolean** – Optional boolean operation (defaults to subtracting from the target solid).
+- `face` – placement sketch reference. The feature reads sketch points (excluding the sketch origin point) and creates one hole per unique point.
+- `holeType` – `SIMPLE`, `COUNTERSINK`, `COUNTERBORE`, or `THREADED`.
+- `clearanceFit` / `clearanceStandard` / `clearanceDesignation` – optional clearance-hole lookup controls for non-threaded holes (`NONE` keeps manual diameter).
+- `diameter` – base straight-hole diameter (or fallback when clearance lookup is disabled).
+- `depth` – straight depth for non-through holes.
+- `throughAll` – extends the cut through the target body thickness.
+- `countersinkDiameter` / `countersinkAngle` – countersink controls.
+- `counterboreDiameter` / `counterboreDepth` – counterbore controls.
+- `threadStandard` / `threadDesignation` – thread definition for `THREADED` holes.
+- `threadMode` – `SYMBOLIC` or `MODELED`.
+- `threadRadialOffset` – radial clearance/interference offset for thread geometry.
+- `threadSegmentsPerTurn` – tessellation for modeled threads.
+- `debugShowSolid` – keeps/visualizes tool solids for debugging.
+- `boolean` – optional target/operation configuration (defaults to subtract behavior).
 
-## Notes
-- When a sketch is selected, the feature automatically gathers its sketch points (except P0) and places one hole per point.
-- Countersink/counterbore depth is part of the total depth: e.g., total depth 4 with counterbore depth 1 yields a 1‑unit bore plus a 3‑unit straight leg.
-- Hole metadata (center, normal, dimensions, and source selection) is stored for PMI hole callouts.
-- Threaded holes:
-  - **Symbolic** threads cut the minor-diameter cylinder and add dashed overlay rings at the major diameter plus a centerline. This keeps previews lightweight but communicates thread extents.
-  - **Modeled** threads build helical geometry; for internal threads, the helix extends one pitch beyond both ends to avoid flat terminations.
-  - Thread metadata (standard, designation, pitch, modeled vs symbolic, offsets) is attached to faces for downstream references.
-- Enabling “Debug: show tool solid” visualizes the tool bodies (cylinder/cone/thread core) used for the boolean.
+## Behaviour
+- Requires a sketch selection for placement. Hole centers are taken from sketch vertices and de-duplicated by position.
+- Chooses or infers a boolean target solid from explicit targets, sketch parent, or nearest solid in scene.
+- Builds per-point tool solids (cylinder/countersink/counterbore/thread), transforms them along the sketch normal, then applies boolean subtraction (or requested operation).
+- For threaded holes, symbolic mode prioritizes speed while modeled mode generates helical geometry and stores thread metadata.
+- Stores hole descriptors in `persistentData.holes` for downstream PMI Hole Callout annotations.

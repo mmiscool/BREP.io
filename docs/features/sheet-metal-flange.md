@@ -11,6 +11,7 @@ Sheet Metal Flange extends an existing sheet-metal tree by attaching bend childr
 - `angle` – Bend angle relative to the parent flat.
 - `useOppositeCenterline` – Flips bend direction by changing bend angle sign.
 - `flangeLength` – Child flat leg length.
+- `edgeStartSetback` / `edgeEndSetback` – trim the active flange span back from the selected edge endpoints.
 - `flangeLengthReference` – Interprets `flangeLength` as `inside`, `outside`, or `web` distance and converts to the engine’s tangent-based web leg.
 - `inset` – Controls parent-edge repositioning in 2D before bend creation:
   `material_inside = thickness + bendRadius`,
@@ -18,12 +19,12 @@ Sheet Metal Flange extends an existing sheet-metal tree by attaching bend childr
   `bend_outside = 0`.
 - `bendRadius` – Inside bend radius override.
 - `offset` – Additional signed bend-edge offset (positive = outward, negative = inward).
-- `neutralFactor` – K-factor override.
 
 ## Behavior
 - Reads the source `SheetMetalTree` from the selected sheet-metal model.
 - Resolves selected edge targets by stable `flatId/edgeId` metadata.
 - For `inset`/`offset`, rewrites the parent flat loop by moving the target bend edge (`material_inside = t + r`, `material_outside = r`, `bend_outside = 0`) and inserting bridge edges so the flat remains closed.
+- Applies start/end setbacks before bend construction so flanges can terminate short of edge corners.
 - For `flangeLengthReference`, adjusts the child web leg length from inside/outside/web reference to tangent-based leg length.
 - Adds deterministic bend + child-flat nodes, then re-evaluates 3D and 2D outputs with the shared engine.
 - Replaces the previous sheet-metal model object in scene with the updated one.

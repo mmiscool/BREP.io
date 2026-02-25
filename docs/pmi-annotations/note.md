@@ -4,19 +4,14 @@ Status: Implemented
 
 ![Note annotation dialog](Note_dialog.png)
 
-Note annotations drop standalone text markers into a PMI view for general instructions, inspection checkpoints, or revision flags.
+Note annotations place standalone text markers at explicit world positions.
 
 ## Inputs
-- `annotationID` – optional persistent identifier.
-- `text` – single-line message; defaults to the PMI `noteText` preference.
-- `position` – world-space coordinates of the note marker.
+- `id` – optional annotation identifier.
+- `text` – note content.
+- `position` – note marker position in world coordinates.
 
 ## Behaviour
-- Renders a screen-space dot at the saved position and displays the note text as a floating label.
-- Automatically offsets the label from the view normal so it remains legible; dragging the label stores a new world position.
-- Plays nicely with PMI label formatting utilities, enabling consistent text styling across annotations.
-
-## Usage Tips
-- Use notes for freeform callouts that do not require geometry selection.
-- Combine with leader annotations when you need both a persistent marker and directional leader text.
-- Adjust the label placement by dragging once it appears to avoid overlapping other PMI elements.
+- Renders a dot marker at `position` and a floating label for `text`.
+- Auto-places label with view-relative offset when no custom label position exists.
+- Supports dragging the label and persisting the dragged world-space location.

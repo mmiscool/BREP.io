@@ -11,8 +11,11 @@ Import 3D Model loads STL or 3MF data, optionally runs a mesh repair pass, and c
 - `deflectionAngle` – face split angle in degrees used when converting the triangle mesh into analytic faces.
 - `meshRepairLevel` – `NONE`, `BASIC`, or `AGGRESSIVE` passes through `BREP.MeshRepairer`.
 - `centerMesh` – translate the imported geometry so its bounding box center is at the origin before conversion.
+- `extractPlanarFaces` – enables planar-region extraction before angle-based grouping.
+- `planarFaceMinAreaPercent` – minimum planar region size (percent of total mesh area) used when `extractPlanarFaces` is enabled.
 
 ## Behaviour
 - Strings are treated as ASCII STL unless the data begins with a base64 data URL; ArrayBuffers are inspected for ZIP headers (`PK`) to decide between 3MF and binary STL.
 - When a 3MF file is provided, all meshes in the archive are transformed into world space and merged into a single BufferGeometry before conversion.
+- The feature caches a solid snapshot in `persistentData.importCache` keyed by both source payload and import parameters so timeline rebuilds can skip reparsing.
 - No timeline or feature history is recovered from the source file—the importer always produces a single solid representing the mesh.

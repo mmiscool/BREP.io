@@ -8,7 +8,7 @@ Distance constraints maintain a target separation between two references. They s
 
 ## Inputs
 - `id` – unique label used across the solver UI and logs.
-- `elements` – two references (faces, edges, or vertices). Component references are treated as points at their representative location.
+- `elements` – two references (`FACE`, `EDGE`, or `VERTEX`).
 - `distance` – desired separation in scene units. Negative input is clamped to zero.
 - `opposeNormals` – for face-to-face alignment, flips the normal on the second selection before the parallel alignment stage.
 
