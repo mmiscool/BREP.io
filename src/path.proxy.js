@@ -4,9 +4,7 @@
 // Browser: minimal POSIX path implementation compatible with Node's API.
 
 const isNode =
-  typeof process !== 'undefined' &&
-  process.versions &&
-  process.versions.node &&
+  !!globalThis?.process?.versions?.node &&
   typeof window === 'undefined';
 
 // -------------------- Node path passthrough (POSIX) --------------------
@@ -33,8 +31,9 @@ function getNodePosixSync() {
   /* eslint-enable no-undef */
 
   // Some runtimes expose module.createRequire in CJS-like contexts
-  if (typeof module !== 'undefined' && module && typeof module.createRequire === 'function') {
-    const req = module.createRequire(typeof __filename !== 'undefined' ? __filename : process.cwd());
+  const runtimeModule = globalThis?.module;
+  if (runtimeModule && typeof runtimeModule.createRequire === 'function') {
+    const req = runtimeModule.createRequire(globalThis.__filename || globalThis.process.cwd());
     const mod = req('node:path');
     return (mod.default ?? mod).posix;
   }

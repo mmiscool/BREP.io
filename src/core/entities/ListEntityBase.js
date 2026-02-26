@@ -100,7 +100,7 @@ export class ListEntityBase {
   }
 
   // Subclasses must override.
-  // eslint-disable-next-line class-methods-use-this, no-unused-vars
+   
   run(_context = {}) {
     throw new Error(`${this.constructor.name} must implement run(context)`);
   }

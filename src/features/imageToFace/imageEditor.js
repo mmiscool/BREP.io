@@ -1123,8 +1123,7 @@ export class ImageEditorUI {
         const id = cctx.getImageData(0, 0, w, h);
         const data = id.data;
         const idx0 = (y0 * w + x0) * 4;
-        const tr = data[idx0], tg = data[idx0 + 1], tb = data[idx0 + 2], ta = data[idx0 + 3];
-        const target = (ta << 24) | (tb << 16) | (tg << 8) | tr;
+        const tr = data[idx0], tg = data[idx0 + 1], tb = data[idx0 + 2];
 
         // Flood fill mask
         const stack = [x0, y0];
@@ -1182,7 +1181,6 @@ export class ImageEditorUI {
         const [ix, iy] = this._canvasToImage(mx, my);
         const delta = e.deltaY > 0 ? 0.9 : 1.1111111;
         const newScale = Math.max(this.minScale, Math.min(this.maxScale, this.scale * delta));
-        const k = newScale / (this.scale || 1);
         // zoom around mouse
         this.offsetX = mx - (ix * newScale);
         this.offsetY = my - (iy * newScale);

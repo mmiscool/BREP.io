@@ -243,7 +243,7 @@ async function registerPartFileTests() {
                     _sourceFile: filePath,
                 });
             }
-        } catch (e) {
+        } catch {
             // Directory may not exist; ignore silently in CI
         }
     } catch (e) {
@@ -563,7 +563,7 @@ async function export3mfArtifact({ partHistory, exportName, exportPath, solids }
                 modelMetadata,
                 metadataManager,
             });
-        } catch (e) {
+        } catch {
             data = await generate3MF([], {
                 unit: 'millimeter',
                 precision: 6,

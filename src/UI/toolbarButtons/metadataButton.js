@@ -81,7 +81,6 @@ class MetadataPanelController {
 
     _ensurePanel() {
         if (this.root) return;
-        const height = Math.max(240, Math.floor((window?.innerHeight || 800) * 0.45));
         const fw = new FloatingWindow({
             title: 'Metadata',
             width: 500,

@@ -1950,7 +1950,7 @@ function buildFlatFromFace(faceObj, featureID, label = "Tab") {
   return { flat, frame };
 }
 
-function faceOutlineLoops3FromFace(faceObj, featureID) {
+function faceOutlineLoops3FromFace(faceObj, _featureID) {
   const normalHint = (typeof faceObj?.getAverageNormal === "function")
     ? faceObj.getAverageNormal()
     : null;

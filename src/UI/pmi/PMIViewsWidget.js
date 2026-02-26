@@ -500,8 +500,7 @@ export class PMIViewsWidget {
     if (!viewer || !canvas) throw new Error('Viewer is not ready to export images');
 
     const captures = [];
-    try {
-      await this._withViewCubeHidden(async () => {
+    await this._withViewCubeHidden(async () => {
         this._exportingImages = true;
         const originalSnapshot = captureCameraSnapshot(viewer.camera, { controls: viewer.controls });
         const originalWireframe = this._detectWireframe(viewer.scene);
@@ -530,9 +529,6 @@ export class PMIViewsWidget {
           this._exportingImages = false;
         }
       });
-    } finally {
-    }
-
     const files = {};
     captures.forEach(({ name, dataUrl }) => {
       const fileName = `${this._safeFileName(name, 'view')}.png`;
@@ -544,66 +540,61 @@ export class PMIViewsWidget {
 
   async _buildExportAnnotations(view) {
     const cleanup = () => {};
-    try {
-      const viewer = this.viewer;
-      const scene = viewer?.partHistory?.scene || viewer?.scene;
-      if (!viewer || !scene) return { labels: [], cleanup };
+    const viewer = this.viewer;
+    const scene = viewer?.partHistory?.scene || viewer?.scene;
+    if (!viewer || !scene) return { labels: [], cleanup };
 
-      const pmimode = {
-        viewer,
-        _opts: {
-          dimDecimals: 3,
-          angleDecimals: 1,
-          noteText: '',
-          leaderText: 'TEXT HERE',
-        },
-        __explodeTraceState: new Map(),
-      };
-      const history = new AnnotationHistory(pmimode);
-      try { history.load(Array.isArray(view?.annotations) ? view.annotations : []); } catch { }
-      const entries = history.getEntries();
-      if (!entries.length) return { labels: [], cleanup };
+    const pmimode = {
+      viewer,
+      _opts: {
+        dimDecimals: 3,
+        angleDecimals: 1,
+        noteText: '',
+        leaderText: 'TEXT HERE',
+      },
+      __explodeTraceState: new Map(),
+    };
+    const history = new AnnotationHistory(pmimode);
+    try { history.load(Array.isArray(view?.annotations) ? view.annotations : []); } catch { }
+    const entries = history.getEntries();
+    if (!entries.length) return { labels: [], cleanup };
 
-      const group = new THREE.Group();
-      group.name = '__PMI_EXPORT_ANN__';
-      group.renderOrder = 9994;
-      scene.add(group);
+    const group = new THREE.Group();
+    group.name = '__PMI_EXPORT_ANN__';
+    group.renderOrder = 9994;
+    scene.add(group);
 
-      const labels = [];
-      const ctx = {
-        screenSizeWorld: (px) => this._screenSizeWorld(px),
-        alignNormal: (alignment, ann) => this._alignNormal(alignment, ann),
-        formatReferenceLabel: (ann, text) => this._formatReferenceLabel(ann, text),
-        updateLabel: (idx, text, worldPos, ann) => {
-          if (!worldPos || text == null) return;
-          const world = this._normalizeLabelPosition(worldPos);
-          if (!world) return;
-          labels[idx] = {
-            text: String(text),
-            world,
-            anchor: ann?.anchorPosition || ann?.alignmentAnchor || null,
-          };
-        },
-      };
+    const labels = [];
+    const ctx = {
+      screenSizeWorld: (px) => this._screenSizeWorld(px),
+      alignNormal: (alignment, ann) => this._alignNormal(alignment, ann),
+      formatReferenceLabel: (ann, text) => this._formatReferenceLabel(ann, text),
+      updateLabel: (idx, text, worldPos, ann) => {
+        if (!worldPos || text == null) return;
+        const world = this._normalizeLabelPosition(worldPos);
+        if (!world) return;
+        labels[idx] = {
+          text: String(text),
+          world,
+          anchor: ann?.anchorPosition || ann?.alignmentAnchor || null,
+        };
+      },
+    };
 
-      for (let i = 0; i < entries.length; i++) {
-        const entry = entries[i];
-        if (!entry || typeof entry.run !== 'function' || entry.enabled === false) continue;
-        // eslint-disable-next-line no-await-in-loop
-        await entry.run({ pmimode, group, idx: i, ctx });
-      }
-
-      if (entries.length && labels.length === 0) {
-        throw new Error('Annotation export produced no labels');
-      }
-
-      const cleanupFn = () => {
-        try { scene.remove(group); } catch { }
-      };
-      return { labels: labels.filter(Boolean), cleanup: cleanupFn };
-    } catch (err) {
-      throw err;
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      if (!entry || typeof entry.run !== 'function' || entry.enabled === false) continue;
+      await entry.run({ pmimode, group, idx: i, ctx });
     }
+
+    if (entries.length && labels.length === 0) {
+      throw new Error('Annotation export produced no labels');
+    }
+
+    const cleanupFn = () => {
+      try { scene.remove(group); } catch { }
+    };
+    return { labels: labels.filter(Boolean), cleanup: cleanupFn };
   }
 
   async _captureCanvasImage(labels = []) {
@@ -616,8 +607,7 @@ export class PMIViewsWidget {
     if (!Array.isArray(labels) || labels.length === 0) return baseData;
 
     const cssWidth = canvas.clientWidth || width;
-    const cssHeight = canvas.clientHeight || height;
-    const svgMarkup = this._composeLabelSVG(baseData, labels, width, height, cssWidth, cssHeight);
+    const svgMarkup = this._composeLabelSVG(baseData, labels, width, height, cssWidth);
     if (!svgMarkup) throw new Error('Failed to compose SVG for labels');
     const svgPng = await this._svgToPngDataUrl(svgMarkup, width, height);
     if (!svgPng) throw new Error('Failed to convert SVG to PNG');
@@ -744,7 +734,7 @@ export class PMIViewsWidget {
     } catch { return text; }
   }
 
-  _composeLabelSVG(baseImage, labels, width, height, cssWidth = null, cssHeight = null) {
+  _composeLabelSVG(baseImage, labels, width, height, cssWidth = null) {
     if (!baseImage) throw new Error('Base image missing for SVG composition');
     const camera = this.viewer?.camera;
     const safeCssWidth = Math.max(1, cssWidth || width);

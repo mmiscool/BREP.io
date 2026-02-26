@@ -49,7 +49,7 @@ export class PatternLinearFeature {
     this.persistentData = {};
   }
 
-  async run(partHistory) {
+  async run(_partHistory) {
     const raw = Array.isArray(this.inputParams.solids) ? this.inputParams.solids.filter(Boolean) : [];
     const solids = [];
     for (const o of raw) {

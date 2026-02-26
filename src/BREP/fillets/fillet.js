@@ -1671,13 +1671,6 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                 // For closed loops: ensure the tube polyline has the same point at start and end
                 if (tubePoints.length >= 2) {
                     const firstPt = tubePoints[0];
-                    const lastPt = tubePoints[tubePoints.length - 1];
-
-                    // Check if first and last points are different
-                    const dx = firstPt[0] - lastPt[0];
-                    const dy = firstPt[1] - lastPt[1];
-                    const dz = firstPt[2] - lastPt[2];
-                    const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
                     // Add the first point at the end to close the loop
                     tubePoints.push([firstPt[0], firstPt[1], firstPt[2]]);

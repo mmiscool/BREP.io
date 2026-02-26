@@ -335,7 +335,7 @@ export class DistanceConstraint extends BaseAssemblyConstraint {
     return null;
   }
 
-  #measureDistance(infoA, infoB, targetDistance, tolerance) {
+  #measureDistance(infoA, infoB, _targetDistance, _tolerance) {
     const kindA = (infoA.kind || selectionKindFrom(infoA.object, infoA.selection)).toUpperCase?.()
       || selectionKindFrom(infoA.object, infoA.selection);
     const kindB = (infoB.kind || selectionKindFrom(infoB.object, infoB.selection)).toUpperCase?.()

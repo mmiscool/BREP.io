@@ -52,7 +52,7 @@ export class BaseAnnotation extends ListEntityBase {
     return refs;
   }
 
-  async run(renderingContext) {
+  async run(_renderingContext) {
     // Base implementation - subclasses should override
     // renderingContext contains: { pmimode, group, idx, ctx }
     console.warn(`BaseAnnotation.run() not implemented for ${this.constructor.name}`);

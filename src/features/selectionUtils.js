@@ -75,7 +75,7 @@ export function selectionHasSketch(selection, partHistory) {
     if (typeof item === 'string') {
       const raw = item.trim();
       if (!raw) continue;
-      const base = raw.split(/[:|\[]/, 1)[0];
+      const base = raw.split(/[:|[]/, 1)[0];
       if (base && isSketchFeatureId(partHistory, base)) return true;
     }
     const obj = resolveSelectionObject(item, partHistory);
@@ -83,7 +83,7 @@ export function selectionHasSketch(selection, partHistory) {
     if (obj.type === 'SKETCH') return true;
     if (obj.parent && obj.parent.type === 'SKETCH') return true;
     if (obj.name) {
-      const base = String(obj.name).split(/[:|\[]/, 1)[0];
+      const base = String(obj.name).split(/[:|[]/, 1)[0];
       if (base && isSketchFeatureId(partHistory, base)) return true;
     }
   }

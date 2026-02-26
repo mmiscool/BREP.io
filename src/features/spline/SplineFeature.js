@@ -278,13 +278,13 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
     return false;
   };
 
-  const disposeSession = (force = false) => {
+  const disposeSession = () => {
     if (!state.session) return;
 
     // Always dispose when explicitly requested or forced
     try {
       state.session.dispose();
-    } catch (error) {
+    } catch {
       /* ignore */
     }
     state.session = null;
@@ -309,7 +309,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
     }
   };
 
-  const handleSessionSplineChange = (nextData, reason = "transform") => {
+  const handleSessionSplineChange = (nextData, _reason = "transform") => {
     if (state.destroyed || state.inSplineChange) {
       return;
     }
@@ -389,8 +389,6 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
       if (currentSelection) {
 
         session.selectObject(currentSelection);
-      } else {
-
       }
 
       state.selection = currentSelection;
@@ -427,7 +425,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
           // Check if transform controls exist and are in scene
           let hasVisibleControls = false;
           if (session._transformsById) {
-            for (const [id, entry] of session._transformsById.entries()) {
+            for (const [, entry] of session._transformsById.entries()) {
               const control = entry?.control;
               const inScene = !!(control && session.viewer?.scene && session.viewer.scene.children.includes(control));
 
@@ -465,7 +463,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
         }, 100);
       }
 
-    } catch (error) {
+    } catch {
       /* ignore */
       disposeSession(true); // Force disposal on error
     } finally {
@@ -705,10 +703,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
     if (!fromSession && viewer && featureID && !state.creatingSession) {
       if (!activeSession) {
         activeSession = ensureSession();
-      } else {
       }
-    } else {
-
     }
 
     if (activeSession && !fromSession) {
@@ -739,7 +734,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
       : [];
     if (points.length <= 2) return;
 
-    const [removed] = points.splice(index, 1);
+    points.splice(index, 1);
 
     // Determine fallback selection after removal
     let newSelection = null;
@@ -763,7 +758,6 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
     const normalized = normalizeSplineData(state.spline);
     state.spline = cloneSplineData(normalized);
 
-    const oldSignature = state.signature;
     state.signature = computeSignature(state.spline);
 
     ui.params[key] = state.signature;
@@ -772,6 +766,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
     markDirty(feature, state.spline);
 
     const ph = getPartHistory();
+    const featureID = getFeatureID();
     if (ph && Array.isArray(ph.features)) {
       for (const item of ph.features) {
         if (
@@ -801,7 +796,6 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
     // For manual commits (add/remove/reorder points), we do need to update the feature
     // But for transform operations, we rely on preview mode
 
-    const oldSignature = state.signature;
     state.signature = computeSignature(state.spline);
 
     ui.params[key] = state.signature;
@@ -894,7 +888,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
     }
 
     // Helper function to find midpoint along polyline and get segment direction
-    const findPolylineMidpoint = (p0, p1, t0, t1) => {
+    const findPolylineMidpoint = (p0, p1) => {
       // Generate the polyline between these two points using current spline settings
       const tempSpline = {
         points: [p0, p1]
@@ -1031,23 +1025,6 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
         yAxis[0], yAxis[1], yAxis[2],
         zAxis[0], zAxis[1], zAxis[2]
       ];
-    };    // Helper function to calculate tangent vector from point data
-    const calculateTangent = (pointData, isForward) => {
-      const rotation = pointData.rotation || [1, 0, 0, 0, 1, 0, 0, 0, 1];
-      let direction = [rotation[0], rotation[1], rotation[2]]; // X-axis from rotation matrix
-
-      if (pointData.flipDirection) {
-        direction = [-direction[0], -direction[1], -direction[2]];
-      }
-
-      const distance = isForward ? pointData.forwardDistance : pointData.backwardDistance;
-      const tangentDir = isForward ? direction : [-direction[0], -direction[1], -direction[2]];
-
-      return [
-        tangentDir[0] * distance,
-        tangentDir[1] * distance,
-        tangentDir[2] * distance
-      ];
     };
 
     // Find the currently selected point
@@ -1075,9 +1052,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
         // Find point and direction along polyline between second-to-last and last point
         const p0 = points[points.length - 2];
         const p1 = points[points.length - 1];
-        const t0 = calculateTangent(p0, true); // Forward tangent of first point
-        const t1 = calculateTangent(p1, false); // Backward tangent of second point
-        const result = findPolylineMidpoint(p0, p1, t0, t1);
+        const result = findPolylineMidpoint(p0, p1);
         newPosition = result.position;
         newRotation = createRotationFromDirection(result.direction);
       }
@@ -1093,9 +1068,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
         // Find point and direction along polyline between selected point and next point
         const p0 = points[selectedIndex];
         const p1 = points[selectedIndex + 1];
-        const t0 = calculateTangent(p0, true); // Forward tangent of first point
-        const t1 = calculateTangent(p1, false); // Backward tangent of second point
-        const result = findPolylineMidpoint(p0, p1, t0, t1);
+        const result = findPolylineMidpoint(p0, p1);
         newPosition = result.position;
         newRotation = createRotationFromDirection(result.direction);
       }
@@ -1136,7 +1109,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
     // Try multiple times with increasing delays
     const retryDelays = [50, 200, 500, 1000]; // Try at 50ms, 200ms, 500ms, and 1s
 
-    retryDelays.forEach((delay, index) => {
+    retryDelays.forEach((delay, _index) => {
       setTimeout(() => {
         if (!state.session && !state.destroyed) {
           renderAll();
@@ -1160,7 +1133,6 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
       const viewer = getViewer();
       const featureID = getFeatureID();
 
-      const stack = new Error().stack;
       state.refreshing = true;
 
       try {
@@ -1191,7 +1163,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
         if (!state.session && viewer && featureID && !state.creatingSession) {
           renderAll(); // This will create the session
         }
-      } catch (error) {
+      } catch {
         /* ignore */
       } finally {
         // Use setTimeout to prevent rapid successive calls - increase delay to break loops

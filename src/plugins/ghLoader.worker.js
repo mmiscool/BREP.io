@@ -87,7 +87,7 @@ async function buildGraph(entryUrl) {
 
     // Recursively load children first
     const mapLitToBlob = new Map();
-    for (const [k, t] of uniq.entries()) {
+    for (const [, t] of uniq.entries()) {
       const childBlob = await loadModule(t.abs);
       mapLitToBlob.set(t.lit, childBlob);
     }

@@ -82,7 +82,7 @@ export class AssemblyComponentFeature {
     this.persistentData = {};
   }
 
-  async run(partHistory) {
+  async run(_partHistory) {
     try { console.log('[AssemblyComponentFeature] run: begin', { componentName: this.inputParams?.componentName || null, featureID: this.inputParams?.featureID || null }); } catch { }
     const componentData = await this._resolveComponentData();
     if (!componentData || !componentData.bytes || componentData.bytes.length === 0) {

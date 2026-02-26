@@ -977,9 +977,10 @@ async function renderHome() {
       if (!silent) setWorkspaceStatus(`Repo load failed: ${errorMessage(err)}`, 'error');
       renderWorkspaceRepos();
     } finally {
-      if (callId !== workspaceRepoLoadCallId) return;
-      state.workspaceReposLoading = false;
-      renderWorkspaceRepos();
+      if (callId === workspaceRepoLoadCallId) {
+        state.workspaceReposLoading = false;
+        renderWorkspaceRepos();
+      }
     }
   };
 

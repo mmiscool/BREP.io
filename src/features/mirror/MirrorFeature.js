@@ -54,8 +54,7 @@ export class MirrorFeature {
         this.inputParams = {};
         this.persistentData = {};
     }
-    async run(partHistory) {
-        const scene = partHistory.scene;
+    async run(_partHistory) {
         const featureID = this.inputParams.featureID || 'MIRROR';
 
         // Resolve targets as objects

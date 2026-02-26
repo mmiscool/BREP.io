@@ -34,7 +34,7 @@ function djson(tag, obj) {
   if (!sweepDebugEnabled()) return;
   try {
     console.log(`[SweepDBG-JSON] ${tag} ` + JSON.stringify(obj));
-  } catch (e) {
+  } catch {
     try { console.log(`[SweepDBG-JSON] ${tag} (stringify failed)`, obj); } catch(_) {}
   }
 }
@@ -77,7 +77,6 @@ export class FacesSolid extends Solid {
 
     // Determine totals
     let totalVerts = 0;
-    let totalTriIndices = 0;
     let totalTris = 0;
     const entries = [];
     for (const mesh of meshes) {
@@ -93,7 +92,6 @@ export class FacesSolid extends Solid {
       entries.push({ mesh, vCount, triCount, indexed: !!indexAttr });
       totalVerts += vCount;
       totalTris += triCount;
-      totalTriIndices += triCount * 3;
     }
     if (entries.length === 0) {
       throw new Error('FacesSolid.manifoldFromFaces: no valid triangle meshes found');
@@ -397,7 +395,9 @@ export class Sweep extends FacesSolid {
       }
 
       // Continue consuming until stuck
-      while (tryConsumeFromNode(cursorKey)) { }
+      while (tryConsumeFromNode(cursorKey)) {
+        // Keep consuming connected edges until no extension is possible.
+      }
 
       // If some edges remain unused (disconnected components), return the longest chain across components
       let best = chain.slice();

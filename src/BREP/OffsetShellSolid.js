@@ -45,7 +45,7 @@ export class OffsetShellSolid extends Solid {
 
     const {
       newSolidName = `${sourceSolid.name || 'Solid'}_${Math.abs(dist)}`,
-      featureId = 'OffsetShell',
+      featureId: _featureId = 'OffsetShell',
     } = options;
 
     const positionsRaw = Array.isArray(sourceSolid._vertProperties)
@@ -437,7 +437,6 @@ export class OffsetShellSolid extends Solid {
         }
 
         let selected = [];
-        let raySelected = null;
         if (triNormalHasDirection) {
           probePoint.copy(centroid);
           const rayOrigin = probePoint;
@@ -484,7 +483,6 @@ export class OffsetShellSolid extends Solid {
             });
             const bestHit = hitFaces.find((hit) => (hit.alignScore ?? -Infinity) > 0.05) || hitFaces[0];
             if (bestHit && (bestHit.alignScore ?? 0) > -0.2) {
-              raySelected = bestHit.name;
               selected = [bestHit.name];
             }
           }

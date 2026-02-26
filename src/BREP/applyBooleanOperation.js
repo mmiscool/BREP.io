@@ -10,8 +10,9 @@ import { computeBoundsFromVertices } from "./boundsUtils.js";
 
 const __booleanDebugConfig = (() => {
   try {
-    if (typeof process === 'undefined' || !process?.env) return null;
-    const raw = process.env.DEBUG_BOOLEAN;
+    const runtimeProcess = globalThis?.process;
+    if (!runtimeProcess?.env) return null;
+    const raw = runtimeProcess.env.DEBUG_BOOLEAN;
     if (!raw) return null;
     const tokens = String(raw)
       .split(/[,;|]+|\s+/g)

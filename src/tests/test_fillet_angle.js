@@ -1,4 +1,3 @@
-import { posix as path } from '../path.proxy.js';
 import { fs } from '../fs.proxy.js';
 import { computeFilletCenterline } from '../BREP/fillets/fillet.js';
 import { projectPointOntoFaceTriangles } from '../BREP/fillets/inset.js';

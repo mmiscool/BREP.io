@@ -126,8 +126,6 @@ export class Torus extends PrimitiveBase {
     // classify caps if open arc
     const FULL = arcDegrees >= 360 - 1e-6;
     const vp = use.vertProperties;
-    const tv = use.triVerts;
-    const triCount = (tv.length / 3) | 0;
     const TAU = Math.PI * 2; const norm = (a)=>{let x=a%TAU; if(x<0)x+=TAU; return x;};
     const V = (vp.length / 3) | 0;
     const uOfV = new Float32Array(V);

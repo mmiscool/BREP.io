@@ -3,7 +3,7 @@ const THREE = BREP.THREE;
 
 export const DEFAULT_RESOLUTION = 24;
 
-const ensurePoint = (point, fallbackId, fallbackPosition, index = 0) => {
+const ensurePoint = (point, fallbackId, fallbackPosition, _index = 0) => {
   const positionSource = Array.isArray(point?.position)
     ? point.position
     : Array.isArray(fallbackPosition)

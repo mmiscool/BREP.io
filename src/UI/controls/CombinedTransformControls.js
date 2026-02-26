@@ -109,7 +109,7 @@ export class CombinedTransformControls extends THREE.Object3D {
 
     // Axis builders
     const axes = [];
-    const addAxis = (axis, colorText, spriteLabel) => {
+    const addAxis = (axis, colorText, _spriteLabel) => {
       const group = new THREE.Group();
       group.renderOrder = this.renderOrder; // Ensure gizmo renders on top of all other geometry
       group.name = `Axis${axis}`;
@@ -302,7 +302,7 @@ export class CombinedTransformControls extends THREE.Object3D {
     const p = this._planeIntersect();
     if (!p) return;
 
-    const { handle, startPos, startQuat, axis, startPoint } = this._drag;
+    const { handle, startPos, axis, startPoint } = this._drag;
     if (handle.kind === 'translate') {
       const diff = this._tmpV.copy(p).sub(startPoint);
       const amt = diff.dot(axis);
@@ -347,7 +347,7 @@ export class CombinedTransformControls extends THREE.Object3D {
     this.dispatchEvent({ type: 'change' });
   }
 
-  _handlePointerUp(e) {
+  _handlePointerUp(_e) {
     if (!this.dragging) return;
     this.dragging = false;
     this._drag = null;

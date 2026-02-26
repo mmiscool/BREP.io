@@ -326,7 +326,7 @@ function resolveSolidObject(ref, scene) {
   return null;
 }
 
-function captureSnapshot(object, viewer = null) {
+function captureSnapshot(object, _viewer = null) {
   try { object.updateMatrixWorld(true); } catch { }
   const pos = object.position.clone();
   const quat = object.quaternion.clone();

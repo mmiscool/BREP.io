@@ -94,7 +94,7 @@ export class AngleDimensionAnnotation extends BaseAnnotation {
       if (!elements || !elements.__2d) return [];
 
       const color = 0xf59e0b;
-      const { N, P, A_p, B_p, A_d, B_d, V2, basis, sweep = 0, dirSign = 1 } = elements.__2d;
+      const { N, P, A_d, B_d, V2, basis, sweep = 0, dirSign = 1 } = elements.__2d;
 
       let R = null;
       if (ann.persistentData?.labelWorld) {
@@ -728,7 +728,7 @@ function pointFromAny(value) {
 
 function resolveLabelPosition(pmimode, ann, elements, radiusOverride, ctx) {
   try {
-    const { N, P, A_d, B_d, V2, basis, bisector: storedBisector } = elements.__2d;
+    const { P, A_d, B_d, V2, basis, bisector: storedBisector } = elements.__2d;
     let bisector = storedBisector ? storedBisector.clone() : new THREE.Vector2().addVectors(A_d, B_d);
     if (bisector.lengthSq() < 1e-10) bisector.set(-A_d.y, A_d.x);
     bisector.normalize();

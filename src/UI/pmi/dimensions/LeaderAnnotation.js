@@ -276,7 +276,7 @@ function resolveLabelPosition(pmimode, ann, targets, ctx) {
   return label;
 }
 
-function computeViewBasis(pmimode, viewer, ann) {
+function computeViewBasis(pmimode, viewer, _ann) {
   const saved = basisFromSavedCamera(pmimode?.viewEntry?.camera);
   if (saved) return saved;
 

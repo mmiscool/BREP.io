@@ -543,7 +543,7 @@ async function decodeToImageData(raw) {
       // Try to parse as binary base64 (png)
       try {
         const b64 = raw;
-        const binaryStr = (typeof atob === 'function') ? atob(b64) : (typeof Buffer !== 'undefined' ? Buffer.from(b64, 'base64').toString('binary') : '');
+        const binaryStr = (typeof atob === 'function') ? atob(b64) : (typeof globalThis.Buffer !== 'undefined' ? globalThis.Buffer.from(b64, 'base64').toString('binary') : '');
         const len = binaryStr.length | 0;
         const bytes = new Uint8Array(len);
         for (let i = 0; i < len; i++) bytes[i] = binaryStr.charCodeAt(i) & 0xff;

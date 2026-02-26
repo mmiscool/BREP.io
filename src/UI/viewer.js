@@ -682,7 +682,7 @@ export class Viewer {
             [1, -1, -1],
             [-1, -1, 1],
         ];
-        const pointLights = lightDirections.map(([x, y, z]) => {
+        const pointLights = lightDirections.map(() => {
             const light = new THREE.PointLight(0xffffff, lightIntensity);
             // No distance attenuation so brightness stays consistent with huge scenes
             light.distance = 0;
@@ -2589,7 +2589,6 @@ export class Viewer {
                     const target = it.object;
                     if (typeof target.onClick === 'function') {
                         return { hit: it, target };
-                    } else {
                     }
                 }
             }

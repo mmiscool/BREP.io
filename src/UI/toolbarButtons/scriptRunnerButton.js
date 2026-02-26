@@ -251,7 +251,7 @@ class ScriptRunnerPanel {
       this._setConsoleHeight(startHeight - dy);
       try { e.preventDefault(); } catch {}
     };
-    const onUp = (e) => {
+    const onUp = (_e) => {
       window.removeEventListener('pointermove', onMove, true);
       window.removeEventListener('pointerup', onUp, true);
       try { this._consoleHeight = (this.consoleWrap?.getBoundingClientRect?.().height) || this._consoleHeight; } catch {}

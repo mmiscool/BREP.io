@@ -146,8 +146,8 @@ function parseRepo(full) {
 
 function encodeBase64(text) {
   const v = toStringValue(text);
-  if (typeof Buffer !== 'undefined') {
-    return Buffer.from(v, 'utf8').toString('base64');
+  if (typeof globalThis.Buffer !== 'undefined') {
+    return globalThis.Buffer.from(v, 'utf8').toString('base64');
   }
   if (typeof TextEncoder !== 'undefined' && typeof btoa === 'function') {
     const bytes = new TextEncoder().encode(v);
@@ -163,8 +163,8 @@ function encodeBase64(text) {
 
 function decodeBase64(b64) {
   const clean = String(b64 || '').replace(/\s+/g, '');
-  if (typeof Buffer !== 'undefined') {
-    return Buffer.from(clean, 'base64').toString('utf8');
+  if (typeof globalThis.Buffer !== 'undefined') {
+    return globalThis.Buffer.from(clean, 'base64').toString('utf8');
   }
   if (typeof TextDecoder !== 'undefined' && typeof atob === 'function') {
     const binary = atob(clean);

@@ -491,9 +491,9 @@ export class BrowserTesting {
       const name = this.testNames[i];
       if (!this.enabled.get(name)) continue;
       this._selectRow(i);
-      /* eslint-disable no-await-in-loop */
+       
       await this._runSingleByName(name);
-      /* eslint-enable no-await-in-loop */
+       
     }
   }
 }

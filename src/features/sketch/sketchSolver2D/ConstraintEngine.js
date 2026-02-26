@@ -133,7 +133,6 @@ class ConstraintEngine {
         ];
 
         let prev = JSON.stringify(this.points);
-        let converged = false;
 
         for (let i = 0; i < iterations; i++) {
             this._distanceSolvePassToken = `${this._distanceSolveCycleId}:${i}`;
@@ -150,7 +149,6 @@ class ConstraintEngine {
 
             const cur = JSON.stringify(this.points);
             if (cur === prev && !hasPendingDistanceTargetSlides()) {
-                converged = true;
                 break;
             }
             prev = cur;
@@ -212,7 +210,7 @@ export class ConstraintSolver {
      */
     constructor(opts = {}) {
         this.hooks = {
-            notifyUser: typeof opts.notifyUser === "function" ? opts.notifyUser : (m) => { /* no-op in headless */ },
+            notifyUser: typeof opts.notifyUser === "function" ? opts.notifyUser : (_m) => { /* no-op in headless */ },
             updateCanvas: typeof opts.updateCanvas === "function" ? opts.updateCanvas : () => { },
             getSelectionItems: typeof opts.getSelectionItems === "function" ? opts.getSelectionItems : () => []
         };
@@ -799,7 +797,7 @@ export class ConstraintSolver {
         });
 
         // Merge overlapping groups
-        for (const [point, group] of Object.entries(coincidentGroups)) {
+        for (const [, group] of Object.entries(coincidentGroups)) {
             for (const other of group) {
                 if (coincidentGroups[other]) {
                     for (const p of coincidentGroups[other]) {
@@ -861,7 +859,7 @@ export class ConstraintSolver {
     }
 
     // Helper method to choose optimal points for tangent constraint
-    #optimizePointsForTangent(items, selected) {
+    #optimizePointsForTangent(items, _selected) {
         const geometries = items.filter(item => item.type === "geometry");
         if (geometries.length !== 2) return null;
 

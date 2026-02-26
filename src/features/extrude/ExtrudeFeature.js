@@ -1,4 +1,3 @@
-import { increment } from "three/tsl";
 import { BREP } from "../../BREP/BREP.js";
 import { selectionHasSketch } from "../selectionUtils.js";
 

@@ -1865,7 +1865,7 @@ export class SchemaForm {
                 }
             } catch (_) { /* ignore */ }
             if (!addedToScene) {
-                // eslint-disable-next-line no-console
+                 
                 console.warn('[TransformControls] Could not add gizmo to scene (no Object3D found).');
             }
         }
@@ -1972,7 +1972,6 @@ export class SchemaForm {
             const el = resolveInput();
             return (el && el.__refSelectionDef) || (this.schema ? (this.schema[key] || null) : null);
         };
-        const def = resolveDef();
         if (chipsWrap && !chipsWrap.__refHoverBound) {
             chipsWrap.__refHoverBound = true;
             chipsWrap.__refHoverName = null;
@@ -2117,7 +2116,7 @@ export class SchemaForm {
             try {
                 this.options.onChange(featureID, details);
             } catch (error) {
-                // eslint-disable-next-line no-console
+                 
                 console.log(error);
             }
         }

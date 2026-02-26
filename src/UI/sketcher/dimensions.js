@@ -299,7 +299,9 @@ export function renderDimensions(inst) {
         const t = 0;
         const col = sel ? DIM_COLOR_SELECTED : (hov ? DIM_COLOR_HOVER : dimBaseColor);
         dimDistance3D(inst, p0, p1, c.id, col, { anchor0: ends.anchorA });
-        mk(c, String((Number(c.value) ?? 0).toFixed(3)), to3((p0.x + p1.x) / 2, (p0.y + p1.y) / 2), { du: basis.tx * t + basis.nx * (base + d), dv: basis.ty * t + basis.ny * (base + d) }, true);
+        const valueNum = Number(c.value);
+        const displayValue = Number.isFinite(valueNum) ? valueNum : 0;
+        mk(c, String(displayValue.toFixed(3)), to3((p0.x + p1.x) / 2, (p0.y + p1.y) / 2), { du: basis.tx * t + basis.nx * (base + d), dv: basis.ty * t + basis.ny * (base + d) }, true);
       }
     }
     if (c.type === '∠' && c.points?.length >= 4) {
@@ -554,7 +556,7 @@ function attachDimLabelEvents(inst, el, c, world) {
   // Drag handling with commit-on-drop
   let dragging = false, moved = false, sx = 0, sy = 0, start = {};
   let sClientX = 0, sClientY = 0;
-  let distNx = 0, distNy = 0, distTx = 0, distTy = 0, distStartD = 0, distStartT = 0;
+  let distNx = 0, distNy = 0, distStartD = 0;
   let angStartDU = 0, angStartDV = 0, angMidDX = 0, angMidDY = 0, angStartMag = 0;
   let pendingOff = null;
   let swallowPointerCycle = false;
@@ -588,12 +590,11 @@ function attachDimLabelEvents(inst, el, c, world) {
         const p0 = ends.a;
         const p1 = ends.b;
         const dx = p1.x - p0.x, dy = p1.y - p0.y; const L = Math.hypot(dx, dy) || 1;
-        const tx = dx / L, ty = dy / L; distTx = tx; distTy = ty;
+        const tx = dx / L, ty = dy / L;
         distNx = -ty; distNy = tx;
         const du0 = Number(start.du) || 0, dv0 = Number(start.dv) || 0;
         distStartD = (typeof start.d === 'number') ? Number(start.d) : (du0 * distNx + dv0 * distNy);
         // Constrain label to center: lock initial tangential offset to 0
-        distStartT = 0;
       } else if (c.type === '∠') {
         angStartDU = Number(start.du) || 0; angStartDV = Number(start.dv) || 0;
         angStartMag = Math.hypot(angStartDU, angStartDV);
@@ -636,13 +637,13 @@ function attachDimLabelEvents(inst, el, c, world) {
       const ends = resolveLinearDistanceEndpoints(inst._solver.sketchObject, c);
       if (ends) {
         const deltaN = du * distNx + dv * distNy;
-        const newD = distStartD + deltaN; const newT = 0;
-        pendingOff = { d: newD, t: newT };
+        const newD = distStartD + deltaN;
+        pendingOff = { d: newD, t: 0 };
         const rect = inst.viewer.renderer.domElement.getBoundingClientRect();
         const base = Math.max(0.1, worldPerPixel(inst.viewer.camera, rect.width, rect.height) * 20);
         const toLabel = { du: distNx * (base + newD), dv: distNy * (base + newD) };
         updateOneDimPosition(inst, el, world, toLabel, true);
-        dbg('preview-distance', { cid: c.id, d: newD, t: newT, toLabel });
+        dbg('preview-distance', { cid: c.id, d: newD, t: 0, toLabel });
         try { inst._dimOffsets.set(c.id, { du: toLabel.du, dv: toLabel.dv }); _redrawDim3D(inst, c.id); } catch { }
       } else if (c.type === '∠') {
         // Constrain angle label to arc midpoint: allow only radial changes along midpoint direction
@@ -680,8 +681,8 @@ function attachDimLabelEvents(inst, el, c, world) {
       if (ends) {
         const du = uv.u - sx; const dv = uv.v - sy;
         const deltaN = du * distNx + dv * distNy;
-        const newD = distStartD + deltaN; const newT = 0;
-        return { d: newD, t: newT };
+        const newD = distStartD + deltaN;
+        return { d: newD, t: 0 };
       } else if (c.type === '∠') {
         const du = uv.u - sx; const dv = uv.v - sy;
         const deltaRadial = du * angMidDX + dv * angMidDY;
@@ -801,9 +802,6 @@ function dimRadius3D(inst, pc, pr, cid, color = 0x69a8ff, displayStyle = 'radius
   }
   const ux = dx / L;
   const uy = dy / L;
-  const nx = -uy;
-  const ny = ux;
-
   const near = { u: pc.x + ux * radius, v: pc.y + uy * radius };
   const far = { u: pc.x - ux * radius, v: pc.y - uy * radius };
 

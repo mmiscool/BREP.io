@@ -901,7 +901,6 @@ export function collapseTinyTriangles(lengthThreshold) {
 export function splitSelfIntersectingTriangles(diagnostics = false) {
     const vp = this._vertProperties;
     const tv = this._triVerts;
-    const ids = this._triIDs;
     const triCount0 = (tv.length / 3) | 0;
     if (triCount0 < 2) return 0;
     
@@ -1103,13 +1102,6 @@ export function splitSelfIntersectingTriangles(diagnostics = false) {
             // create a cutting line across the overlapping region
             
             // Find the centroid of the overlapping region
-            const allPoints = [A, B, C, D, E, F];
-            const centroid = [
-                allPoints.reduce((sum, p) => sum + p[0], 0) / allPoints.length,
-                allPoints.reduce((sum, p) => sum + p[1], 0) / allPoints.length,
-                allPoints.reduce((sum, p) => sum + p[2], 0) / allPoints.length
-            ];
-            
             // Create a cutting line that passes through the overlap
             // Use the longest edge of the smaller triangle as the basis
             const tri1Area = 0.5 * vec.len(vec.cross(vec.sub(B, A), vec.sub(C, A)));

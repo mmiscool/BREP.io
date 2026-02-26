@@ -75,7 +75,7 @@ export class TransformFeature {
     this.persistentData = {};
   }
 
-  async run(partHistory) {
+  async run(_partHistory) {
     const solids = Array.isArray(this.inputParams.solids) ? this.inputParams.solids.filter(s => s && s.type === 'SOLID') : [];
     if (!solids.length) return { added: [], removed: [] };
 

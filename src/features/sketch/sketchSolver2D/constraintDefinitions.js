@@ -97,7 +97,7 @@ function resolveDistanceTargetForSolvePass(solverObject, constraint, requestedTa
 }
 
 
-(constraintFunctions["━"] = function (solverObject, constraint, points, constraintValue) {
+(constraintFunctions["━"] = function (solverObject, constraint, points, _constraintValue) {
     // Horizontal constraint
     // test if the points are already on the same horizontal line with a tolerance
     if (Math.abs(points[0].y - points[1].y) < tolerance) {
@@ -123,7 +123,7 @@ function resolveDistanceTargetForSolvePass(solverObject, constraint, requestedTa
 
 
 
-(constraintFunctions["│"] = function (solverObject, constraint, points, constraintValue) {
+(constraintFunctions["│"] = function (solverObject, constraint, points, _constraintValue) {
     // Vertical constraint
     // test if the points are already on the same vertical line with a tolerance
     if (Math.abs(points[0].x - points[1].x) < tolerance * 2) {
@@ -312,7 +312,7 @@ function resolveDistanceTargetForSolvePass(solverObject, constraint, requestedTa
 
 
 
-(constraintFunctions["⇌"] = function (solverObject, constraint, points, constraintValue) {
+(constraintFunctions["⇌"] = function (solverObject, constraint, points, _constraintValue) {
     // Equal Distance constraint
     const [pointA, pointB, pointC, pointD] = points;
 
@@ -358,7 +358,7 @@ function resolveDistanceTargetForSolvePass(solverObject, constraint, requestedTa
     pointsRequired: 4,
 };
 
-(constraintFunctions["∥"] = function (solverObject, constraint, points, constraintValue) {
+(constraintFunctions["∥"] = function (solverObject, constraint, points, _constraintValue) {
     // Parallel constraint
     // check if either line has a vertical or horizontal constraint applied to it
     // if so simply apply the vertical or horizontal constraint to the other line
@@ -416,7 +416,7 @@ function resolveDistanceTargetForSolvePass(solverObject, constraint, requestedTa
 };
 
 
-(constraintFunctions["⟂"] = function (solverObject, constraint, points, constraintValue) {
+(constraintFunctions["⟂"] = function (solverObject, constraint, points, _constraintValue) {
     // Perpendicular constraint
     // check if either line has a vertical or horizontal constraint applied to it
     // if so simply apply the vertical or horizontal constraint to the other line
@@ -585,7 +585,7 @@ function resolveDistanceTargetForSolvePass(solverObject, constraint, requestedTa
 };
 
 
-(constraintFunctions["≡"] = function (solverObject, constraint, points, constraintValue) {
+(constraintFunctions["≡"] = function (solverObject, constraint, points, _constraintValue) {
     // Coincident constraint
     const [point1, point2] = points;
 
@@ -632,7 +632,7 @@ function resolveDistanceTargetForSolvePass(solverObject, constraint, requestedTa
 
 
 
-(constraintFunctions["⏛"] = function (solverObject, constraint, points, constraintValue) {
+(constraintFunctions["⏛"] = function (solverObject, constraint, points, _constraintValue) {
     const [pointA, pointB, pointC] = points; // Line AB, Point C
 
     // Vector AB
@@ -698,10 +698,6 @@ function resolveDistanceTargetForSolvePass(solverObject, constraint, requestedTa
     // A moves by +Error * (1-t).
     // B moves by +Error * t.
     // (This effectively rotates/moves the line based on the lever arm t)
-
-    let wA = !pointA.fixed ? 1 : 0;
-    let wB = !pointB.fixed ? 1 : 0;
-    let wC = !pointC.fixed ? 1 : 0;
 
     // Normalize weights? 
     // Actually, we can just apply the delta directly with a damping/learning rate or just full Newton step geometry.
@@ -792,7 +788,7 @@ function resolveDistanceTargetForSolvePass(solverObject, constraint, requestedTa
 };
 
 // Midpoint constraint with bidirectional update
-(constraintFunctions["⋯"] = function (solverObject, constraint, points, constraintValue) {
+(constraintFunctions["⋯"] = function (solverObject, constraint, points, _constraintValue) {
     // Gracefully change the name of the constraint to upgrade from old files if needed
     if (constraint.type === "⋱") constraint.type = "⋯";
 
@@ -857,7 +853,7 @@ function resolveDistanceTargetForSolvePass(solverObject, constraint, requestedTa
 
 
 
-(constraintFunctions["⏚"] = function (solverObject, constraint, points, constraintValue) {
+(constraintFunctions["⏚"] = function (solverObject, constraint, points, _constraintValue) {
     // Fixed constraint
     points[0].fixed = true;
 }).hints = {

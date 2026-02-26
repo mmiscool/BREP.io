@@ -6,6 +6,8 @@
     "dev": "node ./scripts/prepareFontAssets.js && pnpm prepareFonts && pnpm build:kernel && vite --host 0.0.0.0",
     "build": "pnpm prepareFonts && pnpm build:kernel && vite build",
     "build:kernel": "pnpm generateLicenses && vite build --config vite.config.kernel.js && node ./scripts/syncKernelAssets.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "liveTesting": "nodemon --watch src --watch tests --ext js --exec \"pnpm test\"",
     "test": "node ./src/tests/tests.js",
     "generateLicenses": "node ./generateLicenses.js && node ./scripts/generateLicenseBundle.js",
@@ -62,6 +64,9 @@
     "access": "public"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.3",
+    "eslint": "^9.39.3",
+    "globals": "^16.5.0",
     "nodemon": "^3.1.14",
     "playwright": "^1.58.2",
     "vite": "^7.3.1",

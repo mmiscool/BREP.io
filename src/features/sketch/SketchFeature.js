@@ -993,7 +993,6 @@ export class SketchFeature {
         }
 
         // Triangulate groups using THREE.ShapeUtils.triangulateShape
-        let profileFace=null;
         if (groups.length){
             const triPositions = [];
             const boundaryEdges = new Set();
@@ -1105,7 +1104,6 @@ export class SketchFeature {
                     }
                 } catch { }
                 sceneGroup.add(face);
-                profileFace = face;
                 this.persistentData.lastProfileDiagnostics = {
                     status: 'ok',
                     loops2D: normalizedLoops.map((loop) => loop.map((pt) => [Number(pt[0]) || 0, Number(pt[1]) || 0])),

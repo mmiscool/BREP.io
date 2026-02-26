@@ -39,7 +39,7 @@ function xmlEsc(s) {
   return String(s ?? '').replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/\"/g, '&quot;')
+    .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
 }
 
@@ -292,7 +292,7 @@ export function computeTriangleMaterialIndices(solid, mesh, opts = {}) {
 
     if (hasMetadataColors) {
       const colorToIndex = new Map();
-      const addMaterial = (hex, label) => {
+      const addMaterial = (hex) => {
         if (!hex) return null;
         if (!colorToIndex.has(hex)) {
           colorToIndex.set(hex, colorToIndex.size);
@@ -300,18 +300,15 @@ export function computeTriangleMaterialIndices(solid, mesh, opts = {}) {
         return colorToIndex.get(hex);
       };
       if (hasSolidColor) {
-        const solidLabel = solid?.name ? `${solid.name}_SOLID` : 'SOLID';
-        solidMatIndex = addMaterial(solidColorHex, solidLabel);
+        solidMatIndex = addMaterial(solidColorHex);
       } else {
-        const defaultLabel = solid?.name ? `${solid.name}_DEFAULT` : 'DEFAULT';
         const defaultHex = _parseColorToHex(opts.defaultFaceColor) || '#c0c0c0';
-        defaultMatIndex = addMaterial(defaultHex, defaultLabel);
+        defaultMatIndex = addMaterial(defaultHex);
       }
       if (hasFaceColors && faceColorById) {
         faceMatIndexById = new Map();
         for (const [fid, hex] of faceColorById.entries()) {
-          const faceName = idToFaceName ? (idToFaceName.get(fid) || `FACE_${fid}`) : `FACE_${fid}`;
-          const idx = addMaterial(hex, faceName);
+          const idx = addMaterial(hex);
           faceMatIndexById.set(fid, idx);
         }
       }

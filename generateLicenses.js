@@ -485,7 +485,7 @@ function parseTable(tableLines) {
 
   // Parse separator row (must be second line)
   const separatorLine = tableLines[1].trim();
-  if (!separatorLine.match(/^\|?[\s\-\|:]+\|?$/)) return null;
+  if (!separatorLine.match(/^\|?[\s|:-]+\|?$/)) return null;
 
   // Extract headers
   const headers = headerLine.split('|')
@@ -693,7 +693,7 @@ function renderMarkdown(md, { assetBasePath = rootDir } = {}) {
     // links [text](url)
     out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, t, u) => `<a href="${u}">${t}</a>`);
     // auto-link naked URLs (https:// and http://)
-    out = out.replace(/(^|[^">=\])])((https?:\/\/[^\s<>"'`\])\}]+))/g, (match, prefix, url) => {
+    out = out.replace(/(^|[^">=\])])((https?:\/\/[^\s<>"'`\])}]+))/g, (match, prefix, url) => {
       return `${prefix}<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
     });
     // code `x`
@@ -954,7 +954,7 @@ ${content}
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
-  const escapeRegExp = (text = "") => text.replace(/[.*+?^{}()|\[\]\\$]/g, "\\$&");
+  const escapeRegExp = (text = "") => text.replace(/[.*+?^{}()|[\\]$]/g, "\\$&");
 
   const highlight = (text, terms) => {
     if (!terms.length) return escapeHtml(text);
@@ -1375,9 +1375,6 @@ ${content}
 function generateTableOfContents(pages, outputDir) {
   // Create a tree structure from the pages
   const tree = {};
-
-  // Add root-level files first
-  const rootFiles = pages.filter(p => !p.href.includes('/'));
 
   // Add files in subdirectories
   pages.forEach(page => {

@@ -86,7 +86,7 @@ export async function importGithubPlugin(repoUrl) {
   baseUrls.push(jsdBase);
 
   // Web worker fetch + rewrite to absolute imports for the chosen base
-  const { code, usedUrl, usedBase, __worker, __cleanup } = await fetchAndPrepareEntryViaWorker(entryUrls, baseUrls, t);
+  const { code, __worker, __cleanup } = await fetchAndPrepareEntryViaWorker(entryUrls, baseUrls, t);
   const blob = new Blob([code], { type: 'application/javascript' });
   const url = URL.createObjectURL(blob);
   try {
@@ -123,7 +123,7 @@ export async function importUrlPlugin(rawUrl) {
       baseUrl = u.href;
       entryUrl = new URL('plugin.js', baseUrl).href;
     }
-  } catch (e) {
+  } catch {
     throw new Error('Invalid URL');
   }
 
@@ -222,7 +222,6 @@ export async function loadPlugins(viewer, repoUrls) {
   const results = [];
   for (const u of urls) {
     try {
-      // eslint-disable-next-line no-await-in-loop
       const ok = await loadPluginFromRepoUrl(viewer, u);
       results.push({ url: u, ok, error: null });
     } catch (e) {

@@ -2,11 +2,11 @@
 // Universal loader that works in both Node.js and the browser (Vite)
 
 const INLINE_WASM_BASE64 =
-  typeof __MANIFOLD_WASM_BASE64__ !== 'undefined' && __MANIFOLD_WASM_BASE64__;
+  typeof globalThis.__MANIFOLD_WASM_BASE64__ !== 'undefined' && globalThis.__MANIFOLD_WASM_BASE64__;
 
 const isNode =
   typeof window === 'undefined' ||
-  (typeof process !== 'undefined' && process.versions?.node);
+  !!globalThis?.process?.versions?.node;
 
 const patchFileURLToPathForDataUrl = async () => {
   if (!isNode) return;
@@ -22,7 +22,7 @@ const patchFileURLToPathForDataUrl = async () => {
       } catch (err) {
         const href = typeof value === 'string' ? value : value?.href;
         if (href && (href.startsWith('data:') || href.startsWith('blob:'))) {
-          return process.cwd();
+          return globalThis.process.cwd();
         }
         throw err;
       }
@@ -45,8 +45,8 @@ const decodeBase64ToUint8Array = (base64) => {
     ? base64.slice(base64.indexOf('base64,') + 7)
     : base64;
 
-  if (typeof Buffer !== 'undefined') {
-    return new Uint8Array(Buffer.from(normalized, 'base64'));
+  if (typeof globalThis.Buffer !== 'undefined') {
+    return new Uint8Array(globalThis.Buffer.from(normalized, 'base64'));
   }
   if (typeof atob === 'function') {
     const binary = atob(normalized);

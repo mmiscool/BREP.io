@@ -49,7 +49,7 @@ export class MeshRepairer {
     return this._norm([nx, ny, nz]);
   }
   static _basisFromNormal(n) {
-    const ax = Math.abs(n[0]), ay = Math.abs(n[1]), az = Math.abs(n[2]);
+    const ax = Math.abs(n[0]), ay = Math.abs(n[1]);
     const t = ax < 0.9 ? [1, 0, 0] : (ay < 0.9 ? [0, 1, 0] : [0, 0, 1]);
     const u = this._norm(this._cross(t, n));
     const v = this._norm(this._cross(n, u));
@@ -390,7 +390,7 @@ export class MeshRepairer {
     }
 
     // Iterate each unique unordered edge exactly once
-    for (const [ekey, e] of edgeUse.entries()) {
+    for (const [ekey] of edgeUse.entries()) {
       const parts = ekey.split('/');
       const i = parseInt(parts[0], 10);
       const j = parseInt(parts[1], 10);

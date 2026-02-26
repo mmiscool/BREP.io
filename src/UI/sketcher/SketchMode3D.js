@@ -205,10 +205,7 @@ export class SketchMode3D {
       sketch: initialSketch || undefined,
       getSelectionItems: () => Array.from(this._selection),
       updateCanvas: () => this.#rebuildSketchGraphics(),
-      notifyUser: (m) => {
-        try {
-        } catch { }
-      },
+      notifyUser: (_m) => {},
     });
     this._solver.sketchObject = this.#normalizeSketchInput(this._solver.sketchObject);
     this.#refreshExternalRefPointIdsCache();
@@ -2831,9 +2828,9 @@ export class SketchMode3D {
     if (!this._acc || !this._solver) return;
     const s = this._solver.sketchObject;
     const row = (label, act, delAct) => `
-      <div class=\"sk-row\" style=\"display:flex;align-items:center;gap:6px;margin:2px 0\"> 
-        <button data-act=\"${act}\" style=\"flex:1;text-align:left;background:transparent;color:#ddd;border:1px solid #364053;border-radius:4px;padding:3px 6px\">${label}</button>
-        <button data-del=\"${delAct}\" title=\"Delete\" style=\"color:#ff8b8b;background:transparent;border:1px solid #5b2b2b;border-radius:4px;padding:3px 6px\">✕</button>
+      <div class="sk-row" style="display:flex;align-items:center;gap:6px;margin:2px 0"> 
+        <button data-act="${act}" style="flex:1;text-align:left;background:transparent;color:#ddd;border:1px solid #364053;border-radius:4px;padding:3px 6px">${label}</button>
+        <button data-del="${delAct}" title="Delete" style="color:#ff8b8b;background:transparent;border:1px solid #5b2b2b;border-radius:4px;padding:3px 6px">✕</button>
       </div>`;
     if (this._secConstraints)
       this._secConstraints.uiElement.innerHTML = (s.constraints || [])
@@ -2935,7 +2932,6 @@ export class SketchMode3D {
     try { updateListHighlights(this); } catch { }
   }
 
-  #updateListHighlights() { try { updateListHighlights(this); } catch { } }
   #applyHoverAndSelectionColors() { try { applyHoverAndSelectionColors(this); } catch { } }
 
   #refreshContextBar() {
@@ -4184,10 +4180,6 @@ export class SketchMode3D {
     return added;
   }
 
-  #getGeometryEndpoints(geo, pointById) {
-    return this.#getGeometryEndpointInfos(geo, pointById).map((entry) => entry.point).filter(Boolean);
-  }
-
   #getGeometryEndpointInfos(geo, pointById) {
     if (!geo || !pointById || !Array.isArray(geo.points)) return [];
     if (geo.type === "line" && geo.points.length >= 2) {
@@ -4219,17 +4211,6 @@ export class SketchMode3D {
     return [];
   }
 
-  #endpointsTouchSample(endpoints, sample) {
-    if (!Array.isArray(endpoints) || endpoints.length === 0) return false;
-    const samples = sample?.samples;
-    if (!Array.isArray(samples) || samples.length < 2) return false;
-    const tol = this.#sampleTol(samples);
-    for (const pt of endpoints) {
-      if (pt && this.#pointNearSamples(pt, samples, tol)) return true;
-    }
-    return false;
-  }
-
   #sampleTol(samples) {
     if (!Array.isArray(samples) || samples.length === 0) return 1e-3;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -4247,19 +4228,6 @@ export class SketchMode3D {
     return Math.max(1e-5, Math.min(1e-2, diag * 1e-3));
   }
 
-  #pointNearSamples(pt, samples, tol) {
-    if (!pt || !Array.isArray(samples) || samples.length < 2) return false;
-    const px = pt.x, py = pt.y;
-    for (let i = 0; i < samples.length - 1; i++) {
-      const a = samples[i];
-      const b = samples[i + 1];
-      if (!a || !b) continue;
-      const d = this.#distancePointToSeg(a.x, a.y, b.x, b.y, px, py);
-      if (d <= tol) return true;
-    }
-    return false;
-  }
-
   #distancePointToSeg(ax, ay, bx, by, px, py) {
     const vx = bx - ax;
     const vy = by - ay;
@@ -4271,105 +4239,6 @@ export class SketchMode3D {
     const nx = ax + vx * t;
     const ny = ay + vy * t;
     return Math.hypot(px - nx, py - ny);
-  }
-
-  #isTrimOverlap(targetGeo, otherGeo, pointById) {
-    if (!targetGeo || !otherGeo || !pointById) return false;
-    if (targetGeo.type === "line" && otherGeo.type === "line") {
-      return this.#lineLiesOnLine(targetGeo, otherGeo, pointById);
-    }
-    if ((targetGeo.type === "arc" || targetGeo.type === "circle") &&
-      (otherGeo.type === "arc" || otherGeo.type === "circle")) {
-      return this.#arcLiesOnArc(targetGeo, otherGeo, pointById);
-    }
-    return false;
-  }
-
-  #lineLiesOnLine(targetGeo, otherGeo, pointById) {
-    const tIds = Array.isArray(targetGeo.points) ? targetGeo.points : [];
-    const oIds = Array.isArray(otherGeo.points) ? otherGeo.points : [];
-    if (tIds.length < 2 || oIds.length < 2) return false;
-    const t0 = pointById.get(tIds[0]);
-    const t1 = pointById.get(tIds[1]);
-    const o0 = pointById.get(oIds[0]);
-    const o1 = pointById.get(oIds[1]);
-    if (!t0 || !t1 || !o0 || !o1) return false;
-
-    const dx = o1.x - o0.x;
-    const dy = o1.y - o0.y;
-    const len2 = dx * dx + dy * dy;
-    if (len2 < 1e-12) return false;
-    const len = Math.sqrt(len2);
-    const tol = Math.max(1e-5, Math.min(1e-2, len * 1e-3));
-    const eps = 1e-4;
-
-    const onOther = (p) => {
-      const t = ((p.x - o0.x) * dx + (p.y - o0.y) * dy) / len2;
-      if (t < -eps || t > 1 + eps) return false;
-      const cx = o0.x + t * dx;
-      const cy = o0.y + t * dy;
-      return Math.hypot(p.x - cx, p.y - cy) <= tol;
-    };
-
-    return onOther(t0) && onOther(t1);
-  }
-
-  #arcLiesOnArc(targetGeo, otherGeo, pointById) {
-    const tInfo = this.#arcInfo(targetGeo, pointById);
-    const oInfo = this.#arcInfo(otherGeo, pointById);
-    if (!tInfo || !oInfo) return false;
-    const r = Math.max(tInfo.r, oInfo.r);
-    const tol = Math.max(1e-5, Math.min(1e-2, r * 1e-3));
-    if (Math.hypot(tInfo.cx - oInfo.cx, tInfo.cy - oInfo.cy) > tol) return false;
-    if (Math.abs(tInfo.r - oInfo.r) > tol) return false;
-    if (oInfo.full) return true;
-    if (tInfo.full) return false;
-
-    const endAng = this.#normAngle(tInfo.a0 + tInfo.d);
-    return this.#angleOnArc(oInfo, tInfo.a0) && this.#angleOnArc(oInfo, endAng);
-  }
-
-  #arcInfo(geo, pointById) {
-    if (!geo || !pointById || !Array.isArray(geo.points)) return null;
-    if (geo.type === "circle" && geo.points.length >= 2) {
-      const pc = pointById.get(geo.points[0]);
-      const pr = pointById.get(geo.points[1]);
-      if (!pc || !pr) return null;
-      const r = Math.hypot(pr.x - pc.x, pr.y - pc.y);
-      if (!Number.isFinite(r) || r < 1e-9) return null;
-      return { cx: pc.x, cy: pc.y, r, a0: 0, d: Math.PI * 2, full: true };
-    }
-    if (geo.type === "arc" && geo.points.length >= 3) {
-      const pc = pointById.get(geo.points[0]);
-      const pa = pointById.get(geo.points[1]);
-      const pb = pointById.get(geo.points[2]);
-      if (!pc || !pa || !pb) return null;
-      const r = Math.hypot(pa.x - pc.x, pa.y - pc.y);
-      if (!Number.isFinite(r) || r < 1e-9) return null;
-      let a0 = this.#normAngle(Math.atan2(pa.y - pc.y, pa.x - pc.x));
-      let a1 = this.#normAngle(Math.atan2(pb.y - pc.y, pb.x - pc.x));
-      let d = a1 - a0;
-      if (d < 0) d += Math.PI * 2;
-      const full = d < 1e-6;
-      if (full) d = Math.PI * 2;
-      return { cx: pc.x, cy: pc.y, r, a0, d, full };
-    }
-    return null;
-  }
-
-  #normAngle(a) {
-    const twoPi = Math.PI * 2;
-    a = a % twoPi;
-    if (a < 0) a += twoPi;
-    return a;
-  }
-
-  #angleOnArc(arcInfo, ang) {
-    if (!arcInfo) return false;
-    if (arcInfo.full) return true;
-    const twoPi = Math.PI * 2;
-    const delta = this.#normAngle(ang - arcInfo.a0);
-    return delta <= arcInfo.d + Math.max(1e-6, twoPi * 1e-6);
   }
 
   #splitBezierAt(geo, segIndex, t) {
@@ -4894,7 +4763,6 @@ export class SketchMode3D {
       const y = ((A.x * A.y - B.x * B.y) * (C.y - D.y) - (A.y - B.y) * (C.x * C.y - D.x * D.y)) / den;
       return { x, y };
     };
-    const normAng = (a) => { const t = Math.PI * 2; a = a % t; return a < 0 ? a + t : a; };
     const linearDistanceEndpoints = (constraint) => {
       if (!constraint || !Array.isArray(constraint.points)) return null;
       if (constraint.type === '⟺' && constraint.points.length >= 2 &&
@@ -5329,36 +5197,6 @@ export class SketchMode3D {
 
 
 
-  #startDimDrag(cid, e) {
-    this._dragDim.active = true;
-    this._dragDim.cid = cid;
-    const uv = this.#pointerToPlaneUV(e) || { u: 0, v: 0 };
-    this._dragDim.sx = uv.u;
-    this._dragDim.sy = uv.v;
-    const off = this._dimOffsets.get(cid) || {};
-    const c = this.#getConstraintById(cid);
-    if (c && c.type === "⟺" && c.displayStyle === "radius") {
-      this._dragDim.mode = "radius";
-      this._dragDim.start = {
-        dr: Number(off.dr) || 0,
-        dp: Number(off.dp) || 0,
-      };
-    } else if (c && (c.type === "⟺" || c.type === POINT_LINE_DISTANCE_TYPE) && (c.points || []).length >= 2) {
-      this._dragDim.mode = "distance";
-      this._dragDim.start = { d: typeof off.d === "number" ? off.d : 0 };
-    } else {
-      this._dragDim.mode = "distance";
-      this._dragDim.start = { d: 0 };
-    }
-    try {
-      e.target.setPointerCapture?.(e.pointerId);
-    } catch { }
-    // Disable camera controls during dimension drag
-    try { if (this.viewer?.controls) this.viewer.controls.enabled = false; } catch { }
-    e.preventDefault();
-    try { e.stopImmediatePropagation(); } catch { }
-    e.stopPropagation();
-  }
   #moveDimDrag(e) {
     if (!this._dragDim.active) return;
     const uv = this.#pointerToPlaneUV(e);
@@ -5439,7 +5277,7 @@ export class SketchMode3D {
     setTimeout(() => { this.#notifyControlsEnd(e); }, 30);
   }
 
-  #notifyControlsEnd(e) {
+  #notifyControlsEnd(_e) {
     // Notify controls the interaction ended without synthesizing DOM events,
     // to avoid re-entering our own pointerup handler.
     try { this.viewer?.controls?.dispatchEvent?.({ type: "end" }); } catch { }

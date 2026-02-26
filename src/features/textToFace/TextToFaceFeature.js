@@ -8,7 +8,7 @@ import { GOOGLE_OFL_FONTS } from '../../assets/fonts/google-ofl/catalog.js';
 import { SelectionState } from '../../UI/SelectionState.js';
 import { FONT_URL_LOADERS } from '#textToFace/fontUrlLoaders';
 
-const IS_NODE_RUNTIME = typeof process !== 'undefined' && process.versions && process.versions.node && typeof window === 'undefined';
+const IS_NODE_RUNTIME = !!globalThis?.process?.versions?.node && typeof window === 'undefined';
 
 const normalizeFontKey = (relPath) => (
   `../../assets/fonts/${relPath}`.replace(/\\/g, "/")
@@ -982,8 +982,8 @@ function dataUrlToArrayBuffer(dataUrl) {
       for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i) & 0xff;
       return bytes.buffer;
     }
-    if (typeof Buffer !== 'undefined') {
-      const buf = Buffer.from(b64, 'base64');
+    if (typeof globalThis.Buffer !== 'undefined') {
+      const buf = globalThis.Buffer.from(b64, 'base64');
       return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
     }
   } catch { }
@@ -1010,11 +1010,11 @@ function inferFontMimeType(source) {
 function arrayBufferToDataUrl(buffer, mimeType = 'application/octet-stream') {
   if (!buffer) return null;
   try {
-    if (typeof Buffer !== 'undefined') {
+    if (typeof globalThis.Buffer !== 'undefined') {
       const view = buffer instanceof Uint8Array
         ? buffer
         : new Uint8Array(buffer);
-      const base64 = Buffer.from(view.buffer, view.byteOffset, view.byteLength).toString('base64');
+      const base64 = globalThis.Buffer.from(view.buffer, view.byteOffset, view.byteLength).toString('base64');
       return `data:${mimeType};base64,${base64}`;
     }
 

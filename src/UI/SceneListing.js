@@ -176,7 +176,7 @@ export class SceneListing {
         }
 
         // Remove nodes whose objects are gone
-        for (const [uuid, info] of [...this.nodes]) {
+        for (const [uuid] of [...this.nodes]) {
             if (!present.has(uuid)) this.#removeNode(uuid);
         }
     }
@@ -244,10 +244,6 @@ export class SceneListing {
 
         // Selection: name click -> recursive toggle selection (unchanged)
         nameBtn.addEventListener("click", (e) => {
-            // If any descendant (including self) is not selected, select all; otherwise deselect all.
-            const anyUnselected = this.#anyRecursive(obj, n => !!n.selected === false);
-            const target = anyUnselected ? true : false;
-            //this.#setSelectedRecursive(obj, target);
             this.#syncAttributes();
 
             try { obj.onClick(); } catch { }
@@ -482,12 +478,6 @@ export class SceneListing {
             const obj = info ? info.obj : null;
             if (obj) this.#rememberOpenState(obj, open);
         } catch (_) { }
-    }
-
-    #setAllOpen(open) {
-        for (const info of this.nodes.values()) {
-            if (this.#isSolid(info.obj)) this.#setOpen(info.li, open);
-        }
     }
 
     #rememberOpenState(obj, open) {

@@ -1,5 +1,4 @@
 import { SelectionState } from "./SelectionState.js";
-import {BREP} from '../BREP/BREP.js';
 
 const debugMode = false;
 

@@ -580,9 +580,6 @@ function buildConeHypothesis(activeIndices, activeCount, samples, rng, distEps) 
   const p1x = pos[b + 0];
   const p1y = pos[b + 1];
   const p1z = pos[b + 2];
-  const p2x = pos[c + 0];
-  const p2y = pos[c + 1];
-  const p2z = pos[c + 2];
 
   const n0x = nrm[a + 0];
   const n0y = nrm[a + 1];
@@ -987,9 +984,6 @@ function refitCylinderFromSamples(sampleIndices, samples, prevParams, distEps) {
   let c11 = 0;
   let c12 = 0;
   let c22 = 0;
-  let sx = 0;
-  let sy = 0;
-  let sz = 0;
   let count = 0;
 
   for (let i = 0; i < sampleIndices.length; i += 1) {
@@ -1004,9 +998,6 @@ function refitCylinderFromSamples(sampleIndices, samples, prevParams, distEps) {
     c11 += ny * ny;
     c12 += ny * nz;
     c22 += nz * nz;
-    sx += pos[b + 0];
-    sy += pos[b + 1];
-    sz += pos[b + 2];
     count += 1;
   }
   if (!(count > 0)) return prevParams || null;
@@ -2324,100 +2315,5 @@ export function segmentMeshPrimitives(mesh, options = {}) {
     regions: segmented.regions,
     regionFaceID,
     boundaryEdges,
-  };
-}
-
-function appendParametricPatch(builder, uSegments, vSegments, evalPos, flipWinding = false) {
-  const grid = new Array((uSegments + 1) * (vSegments + 1));
-  for (let v = 0; v <= vSegments; v += 1) {
-    const fv = vSegments > 0 ? (v / vSegments) : 0;
-    for (let u = 0; u <= uSegments; u += 1) {
-      const fu = uSegments > 0 ? (u / uSegments) : 0;
-      const p = evalPos(fu, fv);
-      const idx = (builder.verts.length / 3) | 0;
-      builder.verts.push(p[0], p[1], p[2]);
-      grid[(v * (uSegments + 1)) + u] = idx;
-    }
-  }
-  for (let v = 0; v < vSegments; v += 1) {
-    for (let u = 0; u < uSegments; u += 1) {
-      const a = grid[(v * (uSegments + 1)) + u];
-      const b = grid[(v * (uSegments + 1)) + (u + 1)];
-      const c = grid[((v + 1) * (uSegments + 1)) + (u + 1)];
-      const d = grid[((v + 1) * (uSegments + 1)) + u];
-      if (!flipWinding) {
-        builder.tris.push(a, b, c, a, c, d);
-      } else {
-        builder.tris.push(a, c, b, a, d, c);
-      }
-    }
-  }
-}
-
-function buildSyntheticPrimitiveMesh() {
-  const builder = { verts: [], tris: [] };
-
-  // Planar patch (XY plane).
-  appendParametricPatch(
-    builder,
-    24,
-    24,
-    (u, v) => [
-      -2 + (4 * u),
-      -2 + (4 * v),
-      0,
-    ],
-    false
-  );
-
-  // Partial cylinder (axis: +Y).
-  const cylRadius = 1.25;
-  const cylY0 = -1.5;
-  const cylY1 = 1.5;
-  const cylTheta0 = -0.9 * Math.PI;
-  const cylTheta1 = 0.1 * Math.PI;
-  appendParametricPatch(
-    builder,
-    48,
-    24,
-    (u, v) => {
-      const theta = cylTheta0 + ((cylTheta1 - cylTheta0) * u);
-      const y = cylY0 + ((cylY1 - cylY0) * v);
-      return [
-        6 + (cylRadius * Math.cos(theta)),
-        y,
-        cylRadius * Math.sin(theta),
-      ];
-    },
-    true
-  );
-
-  // Partial cone (axis: +Y, truncated away from apex).
-  const apex = [-6, -1.25, 0];
-  const coneAngle = 24 * DEG2RAD;
-  const h0 = 0.8;
-  const h1 = 3.2;
-  const coneTheta0 = -0.8 * Math.PI;
-  const coneTheta1 = 0.35 * Math.PI;
-  appendParametricPatch(
-    builder,
-    48,
-    24,
-    (u, v) => {
-      const theta = coneTheta0 + ((coneTheta1 - coneTheta0) * u);
-      const h = h0 + ((h1 - h0) * v);
-      const r = h * Math.tan(coneAngle);
-      return [
-        apex[0] + (r * Math.cos(theta)),
-        apex[1] + h,
-        apex[2] + (r * Math.sin(theta)),
-      ];
-    },
-    true
-  );
-
-  return {
-    vertProperties: new Float32Array(builder.verts),
-    triVerts: new Uint32Array(builder.tris),
   };
 }

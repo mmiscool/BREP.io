@@ -35,7 +35,6 @@ export function visualize(options = {}) {
 
 
 
-    const Solid = this.constructor;
     const preservedDebugChildren = [];
     // Clear existing children and dispose resources
     for (let i = this.children.length - 1; i >= 0; i--) {
@@ -227,7 +226,7 @@ export function visualize(options = {}) {
                 // Create polyline objects between differing face IDs (authoring labels)
                 const nameOf = (id) => this._idToFaceName && this._idToFaceName.get ? this._idToFaceName.get(id) : String(id);
                 const pairToEdges = new Map(); // pairKey -> array of [u,v]
-                for (const [key, arr] of e2t.entries()) {
+                for (const [, arr] of e2t.entries()) {
                     if (arr.length !== 2) continue;
                     const a = arr[0], b = arr[1];
                     if (a.id === b.id) continue;

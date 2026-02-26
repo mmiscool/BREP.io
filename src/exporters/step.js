@@ -1089,7 +1089,7 @@ export function generateSTEP(solids, opts = {}) {
           curveItems.push(polyId);
         }
       }
-    } catch (err) {
+    } catch {
       skipped.push(String(s?.name || `solid_${solidIdx + 1}`));
     } finally {
       try { if (mesh && typeof mesh.delete === 'function') mesh.delete(); } catch { /* ignore */ }

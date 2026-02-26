@@ -381,7 +381,7 @@ export class ExtrudeSolid extends Solid {
           }
         }
       }
-    } catch (err) {
+    } catch {
       // Silently continue if metadata detection fails
     }
 

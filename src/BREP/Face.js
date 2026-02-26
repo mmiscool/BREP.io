@@ -100,7 +100,7 @@ export class Face extends THREE.Mesh {
         return area;
     }
 
-    async points() {
+    async points(applyWorld = true) {
         // return an array of point objects {x,y,z} in world space
         const tmp = new THREE.Vector3();
         const arr = [];

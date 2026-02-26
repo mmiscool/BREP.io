@@ -22,7 +22,6 @@ export function createSaveButton(viewer) {
       const renderer = viewer?.renderer;
       const canvas = renderer?.domElement;
       const cam = viewer?.camera;
-      const controls = viewer?.controls;
       if (!canvas || !cam) return null;
 
       // Temporarily reorient exactly like clicking the ViewCube corner (top-front-right)

@@ -93,7 +93,7 @@ export class RadialDimensionAnnotation extends BaseAnnotation {
     super(opts);
   }
 
-  uiFieldsTest(context) {
+  uiFieldsTest(_context) {
     const planeRef = this.inputParams?.planeRef;
     const hasPlane = Array.isArray(planeRef)
       ? planeRef.length > 0
@@ -228,7 +228,7 @@ function ensurePersistent(ann) {
   if (!ann.persistentData || typeof ann.persistentData !== 'object') ann.persistentData = {};
 }
 
-function computeRadialPoints(pmimode, ann, ctx) {
+function computeRadialPoints(pmimode, ann, _ctx) {
   try {
     const scene = pmimode?.viewer?.partHistory?.scene;
     if (!scene || !ann.cylindricalFaceRef) return null;

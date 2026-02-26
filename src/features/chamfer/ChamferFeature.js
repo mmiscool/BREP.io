@@ -63,7 +63,7 @@ export class ChamferFeature {
         this.inputParams = {};
         this.persistentData = {};
     }
-    async run(partHistory) {
+    async run(_partHistory) {
         const inputObjects = Array.isArray(this.inputParams.edges) ? this.inputParams.edges.filter(Boolean) : [];
         const edgeObjs = collectEdgesFromSelection(inputObjects);
 

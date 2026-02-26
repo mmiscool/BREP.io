@@ -683,7 +683,7 @@ function parseDataUrlBase64(input) {
     try {
         const binary = (typeof atob === 'function')
             ? atob(b64)
-            : (typeof Buffer !== 'undefined' ? Buffer.from(b64, 'base64').toString('binary') : '');
+            : (typeof globalThis.Buffer !== 'undefined' ? globalThis.Buffer.from(b64, 'base64').toString('binary') : '');
         const len = binary.length | 0;
         const bytes = new Uint8Array(len);
         for (let i = 0; i < len; i += 1) bytes[i] = binary.charCodeAt(i) & 0xff;

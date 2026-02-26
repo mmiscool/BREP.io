@@ -29,7 +29,7 @@ const sanitizeLabel = (value) => {
   const raw = value == null ? "" : String(value);
   const trimmed = raw.trim();
   if (!trimmed) return "";
-  return trimmed.replace(/[:\[\]]+/g, "_").replace(/\s+/g, "_").replace(/[^A-Za-z0-9_.-]/g, "_");
+  return trimmed.replace(/[:[\]]+/g, "_").replace(/\s+/g, "_").replace(/[^A-Za-z0-9_.-]/g, "_");
 };
 
 const uniqueName = (base, used) => {

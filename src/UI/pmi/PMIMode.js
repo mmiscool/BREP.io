@@ -1267,7 +1267,7 @@ export class PMIMode {
     this.#collapseAnnotationsToIndex(idx);
   }
 
-  #handleLabelDragEnd(idx, ann, e) {
+  #handleLabelDragEnd(idx, _ann, _e) {
     // Expand the dialog associated with the label that was dragged
     this.#collapseAnnotationsToIndex(idx);
   }
@@ -1445,64 +1445,6 @@ export class PMIMode {
         if (info && info.dist < bestD) { best = { type: 'edge', edgeId: e.id, edgeName: e.name || null, solidName: e.parent?.name || null, t: info.t }; bestD = info.dist; }
       }
       if (best) return best;
-    } catch { }
-    return null;
-  }
-
-  // Hit-test for anchor: prefer VERTEX, else EDGE at fraction along length
-  #pickAnchor(e) {
-    const v = this.viewer;
-    if (!v) return null;
-    // First, try vertices via raycast
-    try {
-      const rect = v.renderer.domElement.getBoundingClientRect();
-      const ndc = new THREE.Vector2(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -(((e.clientY - rect.top) / rect.height) * 2 - 1),
-      );
-      v.raycaster.setFromCamera(ndc, v.camera);
-      // include Points children; we'll walk up to VERTEX parents
-      const targets = [];
-      v.scene.traverse((obj) => { if (obj && (obj.type === 'VERTEX' || obj.isPoints) && obj.visible !== false) targets.push(obj); });
-      const hits = targets.length ? v.raycaster.intersectObjects(targets, true) : [];
-      if (hits && hits.length) {
-        let obj = hits[0].object;
-        while (obj && obj.type !== 'VERTEX' && obj.parent) obj = obj.parent;
-        if (obj && obj.type === 'VERTEX') {
-          const w = obj.getWorldPosition(new THREE.Vector3());
-          return { anchor: { type: 'vertex', vertexId: obj.id, name: obj.name || null, solidName: obj.parent?.name || null }, world: w };
-        }
-      }
-    } catch { }
-
-    // Next, try edges using a generous Line/Line2 threshold
-    try {
-      const rect = v.renderer.domElement.getBoundingClientRect();
-      const ndc = new THREE.Vector2(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -(((e.clientY - rect.top) / rect.height) * 2 - 1),
-      );
-      v.raycaster.setFromCamera(ndc, v.camera);
-      try {
-        const { width, height } = { width: rect.width, height: rect.height };
-        const wpp = this.#worldPerPixel(v.camera, width, height);
-        v.raycaster.params.Line = v.raycaster.params.Line || {};
-        v.raycaster.params.Line.threshold = Math.max(0.05, wpp * 6);
-        const dpr = (window.devicePixelRatio || 1);
-        v.raycaster.params.Line2 = v.raycaster.params.Line2 || {};
-        v.raycaster.params.Line2.threshold = Math.max(1, 2 * dpr);
-      } catch { }
-      const edges = [];
-      v.scene.traverse((obj) => { if (obj && obj.type === 'EDGE' && obj.visible !== false) edges.push(obj); });
-      const hits = edges.length ? v.raycaster.intersectObjects(edges, true) : [];
-      if (hits && hits.length) {
-        const hit = hits[0];
-        const edge = hit.object;
-        const info = this.#edgeFractionAtWorld(edge, hit.point);
-        if (info) {
-          return { anchor: { type: 'edge', edgeId: edge.id, edgeName: edge.name || null, solidName: edge.parent?.name || null, t: info.t }, world: info.point };
-        }
-      }
     } catch { }
     return null;
   }

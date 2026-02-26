@@ -64,7 +64,7 @@ function stripModelFileExtension(input) {
 }
 
 export class FileManagerWidget {
-  constructor(viewer, options = {}) {
+  constructor(viewer, _options = {}) {
     this.viewer = viewer;
     this.uiElement = document.createElement('div');
     // Per-model storage prefix

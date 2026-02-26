@@ -348,7 +348,7 @@ export class PartHistory {
         if (!FeatureClass) {
           // Record an error on the feature but do not abort the whole run.
           const t1 = nowMs();
-          const msg = `Feature type \"${feature.type}\" is not installed`;
+          const msg = `Feature type "${feature.type}" is not installed`;
           try { feature.lastRun = { ok: false, startedAt: t1, endedAt: t1, durationMs: 0, error: { name: 'MissingFeature', message: msg, stack: null } }; } catch { }
           // Skip visualization/add/remove steps for this feature
           continue;

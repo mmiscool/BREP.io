@@ -314,7 +314,7 @@ async function openLegacyDb() {
     let req;
     try {
       req = indexedDB.open(LEGACY_DB_NAME);
-    } catch (e) {
+    } catch {
       resolve({ db: null, created: false });
       return;
     }
@@ -506,7 +506,7 @@ class VfsStorage {
       if (typeof BroadcastChannel !== 'undefined') {
         this._bc = new BroadcastChannel(BC_NAME);
         this._bc.onmessage = (ev) => {
-          const { type, key, newValue, oldValue } = ev.data || {};
+          const { type, key, newValue } = ev.data || {};
           if (type === 'set') {
             const prev = this._cache.get(key) ?? null;
             const next = toStringValue(newValue);

@@ -40,7 +40,7 @@ export function renderFileField({ ui, key, def, id, controlWrap }) {
                 const sub = bytes.subarray(i, i + chunk);
                 binary += String.fromCharCode.apply(null, sub);
             }
-            const b64 = (typeof btoa === 'function') ? btoa(binary) : (typeof Buffer !== 'undefined' ? Buffer.from(bytes).toString('base64') : '');
+            const b64 = (typeof btoa === 'function') ? btoa(binary) : (typeof globalThis.Buffer !== 'undefined' ? globalThis.Buffer.from(bytes).toString('base64') : '');
             const mime = (f.type && f.type.length) ? f.type : 'application/octet-stream';
             const dataUrl = `data:${mime};base64,${b64}`;
             ui.params[key] = dataUrl;

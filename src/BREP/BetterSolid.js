@@ -87,7 +87,7 @@ export class Solid extends THREE.Group {
      * @param {THREE.Matrix4|{elements:number[]}} matrix Matrix or matrix-like object
      * @returns {Solid}
      */
-    bakeTransform(matrix) {
+    bakeTransform(..._args) {
         return SolidMethods.bakeTransform.apply(this, arguments);
     }
 
@@ -96,7 +96,7 @@ export class Solid extends THREE.Group {
      * @param {{t?:number[],rDeg?:number[],s?:number[]}} trs TRS description in degrees
      * @returns {Solid}
      */
-    bakeTRS(trs) {
+    bakeTRS(..._args) {
         return SolidMethods.bakeTRS.apply(this, arguments);
     }
 
@@ -105,7 +105,7 @@ export class Solid extends THREE.Group {
      * @param {[number,number,number]} param0
      * @returns {string}
      */
-    _key([x, y, z]) {
+    _key(..._args) {
         return SolidMethods._key.apply(this, arguments);
     }
 
@@ -114,7 +114,7 @@ export class Solid extends THREE.Group {
      * @param {number[]|{x:number,y:number,z:number}} p
      * @returns {number} vertex index
      */
-    _getPointIndex(p) {
+    _getPointIndex(..._args) {
         return SolidMethods._getPointIndex.apply(this, arguments);
     }
 
@@ -123,7 +123,7 @@ export class Solid extends THREE.Group {
      * @param {string} faceName
      * @returns {number}
      */
-    _getOrCreateID(faceName) {
+    _getOrCreateID(..._args) {
         return SolidMethods._getOrCreateID.apply(this, arguments);
     }
 
@@ -135,7 +135,7 @@ export class Solid extends THREE.Group {
      * @param {[number,number,number]} v3
      * @returns {Solid}
      */
-    addTriangle(faceName, v1, v2, v3) {
+    addTriangle(..._args) {
         return SolidMethods.addTriangle.apply(this, arguments);
     }
 
@@ -149,7 +149,7 @@ export class Solid extends THREE.Group {
      * @param {'OVERLAY'|'BASE'|string} [options.materialKey='OVERLAY'] visualization material tag
      * @returns {Solid}
      */
-    addAuxEdge(name, points, options = {}) {
+    addAuxEdge(..._args) {
         return SolidMethods.addAuxEdge.apply(this, arguments);
     }
 
@@ -164,7 +164,7 @@ export class Solid extends THREE.Group {
      * @param {'OVERLAY'|'BASE'|string} [options.materialKey='OVERLAY'] visualization material tag
      * @returns {Solid}
      */
-    addCenterline(a, b, name = 'CENTERLINE', options = {}) {
+    addCenterline(..._args) {
         return SolidMethods.addCenterline.apply(this, arguments);
     }
 
@@ -174,7 +174,7 @@ export class Solid extends THREE.Group {
      * @param {object} metadata
      * @returns {Solid}
      */
-    setFaceMetadata(faceName, metadata) {
+    setFaceMetadata(..._args) {
         return SolidMethods.setFaceMetadata.apply(this, arguments);
     }
 
@@ -183,7 +183,7 @@ export class Solid extends THREE.Group {
      * @param {string} faceName
      * @returns {object}
      */
-    getFaceMetadata(faceName) {
+    getFaceMetadata(..._args) {
         return SolidMethods.getFaceMetadata.apply(this, arguments);
     }
 
@@ -193,7 +193,7 @@ export class Solid extends THREE.Group {
      * @param {string} newName
      * @returns {Solid}
      */
-    renameFace(oldName, newName) {
+    renameFace(..._args) {
         return SolidMethods.renameFace.apply(this, arguments);
     }
 
@@ -203,7 +203,7 @@ export class Solid extends THREE.Group {
      * @param {object} metadata
      * @returns {Solid}
      */
-    setEdgeMetadata(edgeName, metadata) {
+    setEdgeMetadata(..._args) {
         return SolidMethods.setEdgeMetadata.apply(this, arguments);
     }
 
@@ -212,7 +212,7 @@ export class Solid extends THREE.Group {
      * @param {string} edgeName
      * @returns {object|null}
      */
-    getEdgeMetadata(edgeName) {
+    getEdgeMetadata(..._args) {
         return SolidMethods.getEdgeMetadata.apply(this, arguments);
     }
 
@@ -223,7 +223,7 @@ export class Solid extends THREE.Group {
      * @param {number} [options.maxIterations=10] number of remesh passes to attempt
      * @returns {Solid}
      */
-    remesh({ maxEdgeLength, maxIterations = 10 } = {}) {
+    remesh(..._args) {
         return SolidMethods.remesh.apply(this, arguments);
     }
 
@@ -235,7 +235,7 @@ export class Solid extends THREE.Group {
      * @param {boolean} [options.removeExternal=true] drop islands outside the main shell
      * @returns {number} triangles removed
      */
-    removeSmallIslands({ maxTriangles = 30, removeInternal = true, removeExternal = true } = {}) {
+    removeSmallIslands(..._args) {
         return SolidMethods.removeSmallIslands.apply(this, arguments);
     }
 
@@ -244,7 +244,7 @@ export class Solid extends THREE.Group {
      * @param {number} [maxTriangles=30]
      * @returns {number}
      */
-    removeSmallInternalIslands(maxTriangles = 30) {
+    removeSmallInternalIslands(..._args) {
         return SolidMethods.removeSmallInternalIslands.apply(this, arguments);
     }
 
@@ -254,7 +254,7 @@ export class Solid extends THREE.Group {
      * @param {number} [options.normalDotThreshold=-0.95] dot-product threshold for opposite normals
      * @returns {number} triangles removed
      */
-    removeOppositeSingleEdgeFaces({ normalDotThreshold = -0.95 } = {}) {
+    removeOppositeSingleEdgeFaces(..._args) {
         return SolidMethods.removeOppositeSingleEdgeFaces.apply(this, arguments);
     }
 
@@ -264,7 +264,7 @@ export class Solid extends THREE.Group {
      * @param {number[]|THREE.Vector3} normal
      * @returns {Solid}
      */
-    mirrorAcrossPlane(point, normal) {
+    mirrorAcrossPlane(..._args) {
         return SolidMethods.mirrorAcrossPlane.apply(this, arguments);
     }
 
@@ -274,7 +274,7 @@ export class Solid extends THREE.Group {
      * @param {number} distance
      * @returns {Solid}
      */
-    pushFace(faceName, distance) {
+    pushFace(..._args) {
         return SolidMethods.pushFace.apply(this, arguments);
     }
 
@@ -284,7 +284,7 @@ export class Solid extends THREE.Group {
      * @param {number} [maxIterations=1]
      * @returns {number} flips applied
      */
-    removeTinyBoundaryTriangles(areaThreshold, maxIterations = 1) {
+    removeTinyBoundaryTriangles(..._args) {
         return SolidMethods.removeTinyBoundaryTriangles.apply(this, arguments);
     }
 
@@ -293,7 +293,7 @@ export class Solid extends THREE.Group {
      * @param {number} lengthThreshold
      * @returns {number} edge collapses performed
      */
-    collapseTinyTriangles(lengthThreshold) {
+    collapseTinyTriangles(..._args) {
         return SolidMethods.collapseTinyTriangles.apply(this, arguments);
     }
 
@@ -301,7 +301,7 @@ export class Solid extends THREE.Group {
      * Flip all triangle windings to invert normals and rebuild the manifold.
      * @returns {Solid}
      */
-    invertNormals() {
+    invertNormals(..._args) {
         return SolidMethods.invertNormals.apply(this, arguments);
     }
 
@@ -309,7 +309,7 @@ export class Solid extends THREE.Group {
      * Fix triangle winding coherency across shared edges.
      * @returns {Solid}
      */
-    fixTriangleWindingsByAdjacency() {
+    fixTriangleWindingsByAdjacency(..._args) {
         return SolidMethods.fixTriangleWindingsByAdjacency.apply(this, arguments);
     }
 
@@ -317,7 +317,7 @@ export class Solid extends THREE.Group {
      * Check whether the authored mesh is a coherently oriented manifold.
      * @returns {boolean}
      */
-    _isCoherentlyOrientedManifold() {
+    _isCoherentlyOrientedManifold(..._args) {
         return SolidMethods._isCoherentlyOrientedManifold.apply(this, arguments);
     }
 
@@ -326,7 +326,7 @@ export class Solid extends THREE.Group {
      * @param {number} [epsilon=0]
      * @returns {Solid}
      */
-    setEpsilon(epsilon = 0) {
+    setEpsilon(..._args) {
         return SolidMethods.setEpsilon.apply(this, arguments);
     }
 
@@ -334,7 +334,7 @@ export class Solid extends THREE.Group {
      * Create a lightweight clone of this Solid (copies geometry, labels, metadata, aux edges).
      * @returns {Solid}
      */
-    clone() {
+    clone(..._args) {
         return SolidMethods.clone.apply(this, arguments);
     }
 
@@ -343,7 +343,7 @@ export class Solid extends THREE.Group {
      * @param {number} eps
      * @returns {Solid}
      */
-    _weldVerticesByEpsilon(eps) {
+    _weldVerticesByEpsilon(..._args) {
         return SolidMethods._weldVerticesByEpsilon.apply(this, arguments);
     }
 
@@ -351,7 +351,7 @@ export class Solid extends THREE.Group {
      * Build (or reuse) the cached Manifold from authored arrays, fixing winding/orientation first.
      * @returns {import('./SolidShared.js').Manifold}
      */
-    _manifoldize() {
+    _manifoldize(..._args) {
         return SolidMethods._manifoldize.apply(this, arguments);
     }
 
@@ -359,7 +359,7 @@ export class Solid extends THREE.Group {
      * Get a fresh MeshGL snapshot (`vertProperties`, `triVerts`, `faceID`) from the manifold.
      * @returns {import('./SolidShared.js').ManifoldMesh}
      */
-    getMesh() {
+    getMesh(..._args) {
         return SolidMethods.getMesh.apply(this, arguments);
     }
 
@@ -367,7 +367,7 @@ export class Solid extends THREE.Group {
      * Dispose the cached Manifold to free wasm memory and mark the solid dirty.
      * @returns {Solid}
      */
-    free() {
+    free(..._args) {
         return SolidMethods.free.apply(this, arguments);
     }
 
@@ -377,7 +377,7 @@ export class Solid extends THREE.Group {
      * @param {number} distance
      * @returns {Solid}
      */
-    offsetFace(faceName, distance) {
+    offsetFace(..._args) {
         return SolidMethods.offsetFace.apply(this, arguments);
     }
 
@@ -385,7 +385,7 @@ export class Solid extends THREE.Group {
      * Internal: build faceID -> triangle index cache if missing.
      * @returns {void}
      */
-    _ensureFaceIndex() {
+    _ensureFaceIndex(..._args) {
         return SolidMethods._ensureFaceIndex.apply(this, arguments);
     }
 
@@ -394,7 +394,7 @@ export class Solid extends THREE.Group {
      * @param {string} name
      * @returns {Array<{faceName:string,indices:number[],p1:number[],p2:number[],p3:number[]}>}
      */
-    getFace(name) {
+    getFace(..._args) {
         return SolidMethods.getFace.apply(this, arguments);
     }
 
@@ -402,7 +402,7 @@ export class Solid extends THREE.Group {
      * List all face labels present on this solid.
      * @returns {string[]}
      */
-    getFaceNames() {
+    getFaceNames(..._args) {
         return SolidMethods.getFaceNames.apply(this, arguments);
     }
 
@@ -412,7 +412,7 @@ export class Solid extends THREE.Group {
      * @param {number} [precision=6]
      * @returns {string}
      */
-    toSTL(name = "solid", precision = 6) {
+    toSTL(..._args) {
         return SolidMethods.toSTL.apply(this, arguments);
     }
 
@@ -423,7 +423,7 @@ export class Solid extends THREE.Group {
      * @param {number} [precision=6]
      * @returns {Promise<string>} resolves with file path
      */
-    async writeSTL(filePath, name = "solid", precision = 6) {
+    async writeSTL(..._args) {
         return SolidMethods.writeSTL.apply(this, arguments);
     }
 
@@ -433,7 +433,7 @@ export class Solid extends THREE.Group {
      * @param {{unit?: string, precision?: number, scale?: number, applyWorldTransform?: boolean}} [options]
      * @returns {string}
      */
-    toSTEP(name = undefined, options = {}) {
+    toSTEP(..._args) {
         return SolidMethods.toSTEP.apply(this, arguments);
     }
 
@@ -444,7 +444,7 @@ export class Solid extends THREE.Group {
      * @param {{unit?: string, precision?: number, scale?: number, applyWorldTransform?: boolean}} [options]
      * @returns {Promise<string>} resolves with file path
      */
-    async writeSTEP(filePath, name = undefined, options = {}) {
+    async writeSTEP(..._args) {
         return SolidMethods.writeSTEP.apply(this, arguments);
     }
 
@@ -453,7 +453,7 @@ export class Solid extends THREE.Group {
      * @param {boolean} [includeEmpty=false]
      * @returns {Array<{faceName:string,triangles:any[]}>}
      */
-    getFaces(includeEmpty = false) {
+    getFaces(..._args) {
         return SolidMethods.getFaces.apply(this, arguments);
     }
 
@@ -465,7 +465,7 @@ export class Solid extends THREE.Group {
      * @param {boolean} [options.authoringOnly=false] skip manifold path entirely (fallback visualization)
      * @returns {void}
      */
-    visualize(options = {}) {
+    visualize(..._args) {
         return SolidMethods.visualize.apply(this, arguments);
     }
 
@@ -473,7 +473,7 @@ export class Solid extends THREE.Group {
      * Extract boundary polylines between differing face labels from the current mesh.
      * @returns {Array<{name:string,faceA:string,faceB:string,positions:number[][],indices:number[]}>}
      */
-    getBoundaryEdgePolylines() {
+    getBoundaryEdgePolylines(..._args) {
         return SolidMethods.getBoundaryEdgePolylines.apply(this, arguments);
     }
 
@@ -482,7 +482,7 @@ export class Solid extends THREE.Group {
      * @param {Solid} other
      * @returns {Map<number,string>}
      */
-    _combineIdMaps(other) {
+    _combineIdMaps(..._args) {
         return SolidMethods._combineIdMaps.apply(this, arguments);
     }
 
@@ -491,7 +491,7 @@ export class Solid extends THREE.Group {
      * @param {Solid} other
      * @returns {Map<string,object>}
      */
-    _combineFaceMetadata(other) {
+    _combineFaceMetadata(..._args) {
         return SolidMethods._combineFaceMetadata.apply(this, arguments);
     }
 
@@ -500,7 +500,7 @@ export class Solid extends THREE.Group {
      * @param {import('./SolidShared.js').ManifoldMesh} mesh
      * @returns {number[]}
      */
-    static _expandTriIDsFromMesh(mesh) {
+    static _expandTriIDsFromMesh(..._args) {
         return SolidMethods._expandTriIDsFromMeshStatic.apply(this, arguments);
     }
 
@@ -510,7 +510,7 @@ export class Solid extends THREE.Group {
      * @param {Map<number,string>} idToFaceName
      * @returns {Solid}
      */
-    static _fromManifold(manifoldObj, idToFaceName) {
+    static _fromManifold(..._args) {
         return SolidMethods._fromManifoldStatic.apply(this, arguments);
     }
 
@@ -519,7 +519,7 @@ export class Solid extends THREE.Group {
      * @param {Solid} other
      * @returns {Solid}
      */
-    union(other) {
+    union(..._args) {
         return SolidMethods.union.apply(this, arguments);
     }
 
@@ -528,7 +528,7 @@ export class Solid extends THREE.Group {
      * @param {Solid} other
      * @returns {Solid}
      */
-    subtract(other) {
+    subtract(..._args) {
         return SolidMethods.subtract.apply(this, arguments);
     }
 
@@ -537,7 +537,7 @@ export class Solid extends THREE.Group {
      * @param {Solid} other
      * @returns {Solid}
      */
-    intersect(other) {
+    intersect(..._args) {
         return SolidMethods.intersect.apply(this, arguments);
     }
 
@@ -546,7 +546,7 @@ export class Solid extends THREE.Group {
      * @param {Solid} other
      * @returns {Solid}
      */
-    difference(other) {
+    difference(..._args) {
         return SolidMethods.difference.apply(this, arguments);
     }
 
@@ -556,7 +556,7 @@ export class Solid extends THREE.Group {
      * @param {boolean} [updateInPlace] when true, mutate this solid instead of returning a clone
      * @returns {Solid}
      */
-    simplify(tolerance = undefined) {
+    simplify(..._args) {
         return SolidMethods.simplify.apply(this, arguments);
     }
 
@@ -565,7 +565,7 @@ export class Solid extends THREE.Group {
      * @param {number} tolerance
      * @returns {Solid}
      */
-    setTolerance(tolerance) {
+    setTolerance(..._args) {
         return SolidMethods.setTolerance.apply(this, arguments);
     }
 
@@ -573,7 +573,7 @@ export class Solid extends THREE.Group {
      * Compute volume from the current manifold mesh.
      * @returns {number}
      */
-    volume() {
+    volume(..._args) {
         return SolidMethods.volume.apply(this, arguments);
     }
 
@@ -581,7 +581,7 @@ export class Solid extends THREE.Group {
      * Compute total surface area from the current manifold mesh.
      * @returns {number}
      */
-    surfaceArea() {
+    surfaceArea(..._args) {
         return SolidMethods.surfaceArea.apply(this, arguments);
     }
 
@@ -589,7 +589,7 @@ export class Solid extends THREE.Group {
      * Count triangles in the current manifold mesh.
      * @returns {number}
      */
-    getTriangleCount() {
+    getTriangleCount(..._args) {
         return SolidMethods.getTriangleCount.apply(this, arguments);
     }
 
@@ -598,7 +598,7 @@ export class Solid extends THREE.Group {
      * @param {boolean} [diagnostics=false]
      * @returns {number} splits applied
      */
-    splitSelfIntersectingTriangles() {
+    splitSelfIntersectingTriangles(..._args) {
         return SolidMethods.splitSelfIntersectingTriangles.apply(this, arguments);
     }
 
@@ -606,7 +606,7 @@ export class Solid extends THREE.Group {
      * Remove triangles with duplicate or collinear vertices.
      * @returns {number} triangles removed
      */
-    removeDegenerateTriangles() {
+    removeDegenerateTriangles(..._args) {
         return SolidMethods.removeDegenerateTriangles.apply(this, arguments);
     }
 
@@ -614,7 +614,7 @@ export class Solid extends THREE.Group {
      * Rebuild authoring arrays from the manifold’s exterior surface, dropping internal faces.
      * @returns {number} triangles removed
      */
-    removeInternalTriangles() {
+    removeInternalTriangles(..._args) {
         return SolidMethods.removeInternalTriangles.apply(this, arguments);
     }
 
@@ -622,7 +622,7 @@ export class Solid extends THREE.Group {
      * Remove internal triangles via centroid ray tests without needing manifoldization.
      * @returns {number} triangles removed
      */
-    removeInternalTrianglesByRaycast() {
+    removeInternalTrianglesByRaycast(..._args) {
         return SolidMethods.removeInternalTrianglesByRaycast.apply(this, arguments);
     }
 
@@ -643,7 +643,7 @@ export class Solid extends THREE.Group {
      * @param {number} size area threshold
      * @returns {number} triangles reassigned
      */
-    cleanupTinyFaceIslands(size) {
+    cleanupTinyFaceIslands(..._args) {
         return SolidMethods.cleanupTinyFaceIslands.apply(this, arguments);
     }
 
@@ -652,7 +652,7 @@ export class Solid extends THREE.Group {
      * @param {number} [maxArea=0.001] area threshold
      * @returns {this}
      */
-    mergeTinyFaces(maxArea = 0.001) {
+    mergeTinyFaces(..._args) {
         return SolidMethods.mergeTinyFaces.apply(this, arguments);
     }
 

@@ -3,9 +3,7 @@
 // - Browser: IndexedDB-backed VFS for a common subset.
 
 const isNode =
-  typeof process !== 'undefined' &&
-  process.versions &&
-  process.versions.node &&
+  !!globalThis?.process?.versions?.node &&
   typeof window === 'undefined';
 // Node ESM: preload sync fs once via top-level await.
 // Node ESM: preload sync fs once WITHOUT top-level await (safe for browsers).

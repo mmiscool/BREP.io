@@ -308,7 +308,7 @@ export class SplineEditorSession {
       try {
         this.viewer.scene.remove(obj);
         obj.dispose?.();
-      } catch (error) {
+      } catch {
         /* ignore */
       }
     }
@@ -597,19 +597,19 @@ export class SplineEditorSession {
       if (control && listeners) {
         try {
           control.removeEventListener("change", listeners.changeHandler);
-        } catch (error) {
+        } catch {
           /* ignore */
         }
         try {
           control.removeEventListener("dragging-changed", listeners.dragHandler);
-        } catch (error) {
+        } catch {
           /* ignore */
         }
       }
 
       try {
         control?.detach?.();
-      } catch (error) {
+      } catch {
         /* ignore */
       }
 
@@ -617,14 +617,14 @@ export class SplineEditorSession {
       if (control) {
         try {
           this.viewer?.scene?.remove(control);
-        } catch (error) {
+        } catch {
           /* ignore */
         }
       }
 
       try {
         control?.dispose?.();
-      } catch (error) {
+      } catch {
         /* ignore */
       }
     }
@@ -688,7 +688,7 @@ export class SplineEditorSession {
     this._previewGroup.add(this._line);
 
     // Create handles for each point - no separate extension handles
-    this._splineData.points.forEach((pt, index) => {
+    this._splineData.points.forEach((pt, _index) => {
       // Create a simple point geometry for invisible click target
       const pointGeometry = new THREE.BufferGeometry();
       const position = new Float32Array([
@@ -904,7 +904,7 @@ export class SplineEditorSession {
       if (this.viewer?.controls) {
         this.viewer.controls.enabled = !dragging;
       }
-    } catch (error) {
+    } catch {
       /* ignore */
     }
 

@@ -1217,7 +1217,7 @@ export class HistoryCollectionWidget {
   }
 
   // Subclasses can override to add extra helper utilities.
-  // eslint-disable-next-line class-methods-use-this, no-unused-vars
+   
   _augmentHelperContext(_baseHelpers, _context) {
     return {};
   }
@@ -1239,7 +1239,7 @@ export class HistoryCollectionWidget {
     };
   }
 
-  _composeMenuItem(rawType, rawLabel, source = null, extraNames = []) {
+  _composeMenuItem(rawType, rawLabel, source = null, _extraNames = []) {
     if (!rawType && rawType !== 0) return null;
     const normalizedType = String(rawType);
     const nameInfo = this._extractDisplayNames(source, normalizedType, rawLabel);

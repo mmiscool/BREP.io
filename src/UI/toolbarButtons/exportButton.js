@@ -568,7 +568,7 @@ function _openExportDialog(viewer) {
           _download(`${base}.BREP.json`, text, 'application/json');
           close();
           return;
-        } catch (e) { /* fall through to show alert below */ }
+        } catch { /* fall through to show alert below */ }
       }
 
       if (fmt === '3mf') {
@@ -599,7 +599,7 @@ function _openExportDialog(viewer) {
               const name = _safeName(s?.name || `solid_${idx}`);
               skipped.push(name);
             }
-          } catch (e) {
+          } catch {
             const name = _safeName(s?.name || `solid_${idx}`);
             skipped.push(name);
           }
@@ -617,7 +617,7 @@ function _openExportDialog(viewer) {
           try {
             const metadataManager = viewer?.partHistory?.metadataManager || null;
             data = await generate3MF([], { unit, precision: 6, scale, additionalFiles, modelMetadata, thumbnail, metadataManager });
-          } catch (e2) {
+          } catch {
             throw e; // fall back to outer error handler
           }
         }

@@ -30,7 +30,7 @@ export class OffsetShellFeature {
     this.persistentData = {};
   }
 
-  async run(partHistory) {
+  async run(_partHistory) {
     const faceEntries = Array.isArray(this.inputParams.faces) ? this.inputParams.faces.filter(Boolean) : [];
     if (!faceEntries.length) {
       console.warn('[OffsetShellFeature] No faces selected.');

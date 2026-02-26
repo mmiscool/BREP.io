@@ -444,7 +444,7 @@ export class ViewCube {
     return false;
   }
 
-  _reorientCamera(dir, faceName = '') {
+  _reorientCamera(dir, _faceName = '') {
     const cam = this.targetCamera;
     if (!cam) return;
 

@@ -87,7 +87,7 @@ export class LinearDimensionAnnotation extends BaseAnnotation {
     super(opts);
   }
 
-  uiFieldsTest(context) {
+  uiFieldsTest(_context) {
     const planeRefName = this.inputParams?.planeRefName;
     const hasPlane = Array.isArray(planeRefName)
       ? planeRefName.length > 0
