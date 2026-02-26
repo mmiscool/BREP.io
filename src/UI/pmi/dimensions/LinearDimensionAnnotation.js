@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BaseAnnotation } from '../BaseAnnotation.js';
-import { addArrowCone, makeOverlayLine, objectRepresentativePoint } from '../annUtils.js';
+import { addArrowCone, makeOverlayLine, objectRepresentativePoint, screenSizeWorld } from '../annUtils.js';
+import { buildLinearDimensionGeometry, vectorFromAny } from '../../dimensions/dimensionGeometry.js';
 
 const inputParamsSchema = {
   id: {
@@ -113,41 +114,26 @@ export class LinearDimensionAnnotation extends BaseAnnotation {
     try {
       const color = 0x10b981;
       const normal = ctx.alignNormal ? ctx.alignNormal(ann?.alignment || 'view', ann) : new THREE.Vector3(0, 0, 1);
-      const dir = new THREE.Vector3().subVectors(pts.p1, pts.p0);
-      if (dir.lengthSq() < 1e-8) return [];
-      dir.normalize();
-      const t = new THREE.Vector3().crossVectors(normal, dir).normalize();
+      const geometry = buildLinearDimensionGeometry({
+        pointA: pts.p0,
+        pointB: pts.p1,
+        normal,
+        offset: ann?.offset,
+        showExtensions: ann?.showExt !== false,
+        labelWorld: persistent.labelWorld || ann.labelWorld,
+        screenSizeWorld: ctx.screenSizeWorld,
+        fallbackScreenSizeWorld: (pixels) => screenSizeWorld(pmimode?.viewer, pixels),
+      });
+      if (!geometry) return [];
 
-      let off = Number(ann?.offset);
-      if (!Number.isFinite(off)) off = ctx.screenSizeWorld ? ctx.screenSizeWorld(20) : 0.05;
-      const p0o = pts.p0.clone().addScaledVector(t, off);
-      const p1o = pts.p1.clone().addScaledVector(t, off);
-
-      if (ann?.showExt !== false && off !== 0) {
-        group.add(makeOverlayLine(pts.p0, p0o, color));
-        group.add(makeOverlayLine(pts.p1, p1o, color));
+      for (const [start, end] of geometry.segments) {
+        group.add(makeOverlayLine(start, end, color));
       }
-      group.add(makeOverlayLine(p0o, p1o, color));
-
-      const arrowLength = ctx.screenSizeWorld ? ctx.screenSizeWorld(12) : 0.08;
-      const arrowWidth = ctx.screenSizeWorld ? ctx.screenSizeWorld(4) : 0.03;
-      addArrowCone(group, p0o, dir.clone().negate(), arrowLength, arrowWidth, color);
-      addArrowCone(group, p1o, dir.clone(), arrowLength, arrowWidth, color);
-
-      if (persistent.labelWorld) {
-        try {
-          const labelVec = arrayToVector(persistent.labelWorld);
-          const lineLen = p0o.distanceTo(p1o);
-          if (lineLen > 1e-6) {
-            const toLabel = labelVec.clone().sub(p0o);
-            const along = toLabel.dot(dir);
-            const clamped = Math.max(0, Math.min(lineLen, along));
-            const nearest = p0o.clone().addScaledVector(dir, clamped);
-            const perpDist = labelVec.distanceTo(nearest);
-            const threshold = ctx.screenSizeWorld ? ctx.screenSizeWorld(6) : 0.02;
-            if (perpDist > threshold) group.add(makeOverlayLine(nearest, labelVec, color));
-          }
-        } catch { /* ignore */ }
+      for (const arrow of geometry.arrowSpecs) {
+        addArrowCone(group, arrow.tip, arrow.direction, arrow.length, arrow.width, color);
+      }
+      if (geometry.leaderSegment) {
+        group.add(makeOverlayLine(geometry.leaderSegment[0], geometry.leaderSegment[1], color));
       }
 
       const dec = Number.isFinite(ann.decimals) ? ann.decimals : (pmimode?._opts?.dimDecimals | 0);
@@ -155,15 +141,7 @@ export class LinearDimensionAnnotation extends BaseAnnotation {
       const displayInfo = formatLinearLabel(value, ann, dec);
       ann.value = displayInfo.display;
       const labelText = ctx.formatReferenceLabel ? ctx.formatReferenceLabel(ann, displayInfo.raw) : displayInfo.display;
-
-      const labelPos = (() => {
-        if (persistent.labelWorld) return arrayToVector(persistent.labelWorld);
-        if (ann.labelWorld) return arrayToVector(ann.labelWorld);
-        const mid = new THREE.Vector3().addVectors(p0o, p1o).multiplyScalar(0.5);
-        const lift = ctx.screenSizeWorld ? ctx.screenSizeWorld(6) : 0.02;
-        return mid.addScaledVector(t, lift);
-      })();
-
+      const labelPos = geometry.labelPosition;
       if (labelPos) ctx.updateLabel(idx, labelText, labelPos, ann);
     } catch { /* ignore */ }
     return [];
@@ -520,13 +498,7 @@ function closestPointsOnSegments(p1, q1, p2, q2) {
 }
 
 function arrayToVector(value) {
-  if (!value) return null;
-  if (value instanceof THREE.Vector3) return value.clone();
-  if (Array.isArray(value)) return new THREE.Vector3(value[0] || 0, value[1] || 0, value[2] || 0);
-  if (typeof value === 'object') {
-    return new THREE.Vector3(value.x || 0, value.y || 0, value.z || 0);
-  }
-  return null;
+  return vectorFromAny(value);
 }
 
 function vectorFromAnnotationPoint(point) {

@@ -10,7 +10,6 @@ export class AssemblyConstraintControlsWidget {
 
     wrap.appendChild(this.#buildSolverControls());
     wrap.appendChild(this.#buildVisualizationControls());
-    wrap.appendChild(this.#buildDebugControls());
 
     return wrap;
   }
@@ -242,30 +241,6 @@ export class AssemblyConstraintControlsWidget {
     if (host) {
       host._constraintGraphicsCheckbox = checkbox;
     }
-
-    return wrap;
-  }
-
-  #buildDebugControls() {
-    const host = this.host;
-    const wrap = document.createElement('div');
-    wrap.className = 'control-panel-section debug-controls';
-
-    const label = document.createElement('label');
-    label.className = 'toggle-control';
-
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.addEventListener('change', () => {
-      host?._handleDebugCheckboxChange?.call(host, checkbox.checked);
-    });
-
-    const span = document.createElement('span');
-    span.textContent = 'Debug Normals';
-
-    label.appendChild(checkbox);
-    label.appendChild(span);
-    wrap.appendChild(label);
 
     return wrap;
   }

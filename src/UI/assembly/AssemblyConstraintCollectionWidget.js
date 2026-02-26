@@ -58,6 +58,33 @@ const COLLECTION_EXTRA_CSS = `
   }
 `;
 
+function resolveConstraintType(entry) {
+  if (!entry) return '';
+  const raw = entry.type || entry?.constraintClass?.constraintType || entry?.inputParams?.type || '';
+  return String(raw).trim().toLowerCase();
+}
+
+function normalizedAngleMagnitude(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  const wrapped = ((Math.abs(numeric) % 360) + 360) % 360;
+  const folded = wrapped > 180 ? 360 - wrapped : wrapped;
+  if (!Number.isFinite(folded)) return null;
+  if (folded <= 1e-9) return 0;
+  if (Math.abs(folded - 180) <= 1e-9) return 180;
+  return folded;
+}
+
+function remapSupplementaryAngle(value) {
+  const magnitude = normalizedAngleMagnitude(value);
+  if (!Number.isFinite(magnitude)) return null;
+  const sign = Number(value) < 0 ? -1 : 1;
+  const remapped = (180 - magnitude) * sign;
+  if (Math.abs(remapped) <= 1e-9) return 0;
+  if (Math.abs(Math.abs(remapped) - 180) <= 1e-9) return 180 * sign;
+  return remapped;
+}
+
 export class AssemblyConstraintCollectionWidget extends HistoryCollectionWidget {
   constructor({
     history = null,
@@ -101,11 +128,31 @@ export class AssemblyConstraintCollectionWidget extends HistoryCollectionWidget 
           if (!constraintId) return;
           const key = details?.key;
           if (!key || !Object.prototype.hasOwnProperty.call(details, 'value')) return;
-          await callBeforeChange({ entry, reason: 'params', key, value: details.value });
+          const nextValue = details.value;
+          const nextParams = {};
+          const isAngleConstraint = resolveConstraintType(entry) === 'angle';
+          if (isAngleConstraint && key === 'exteriorAngle') {
+            const currentParams = (details?.params && typeof details.params === 'object')
+              ? details.params
+              : (entry?.inputParams && typeof entry.inputParams === 'object' ? entry.inputParams : null);
+            const remappedAngle = remapSupplementaryAngle(currentParams?.angle);
+            if (Number.isFinite(remappedAngle)) {
+              nextParams.angle = remappedAngle;
+              if (currentParams) currentParams.angle = remappedAngle;
+            }
+          }
+
+          await callBeforeChange({ entry, reason: 'params', key, value: nextValue });
           historyRef?.updateConstraintParams?.(constraintId, (params) => {
             if (!params || typeof params !== 'object') return;
-            params[key] = details.value;
+            params[key] = nextValue;
+            if (Object.prototype.hasOwnProperty.call(nextParams, 'angle')) {
+              params.angle = nextParams.angle;
+            }
           });
+          if (Object.prototype.hasOwnProperty.call(nextParams, 'angle')) {
+            try { details?.form?.refreshFromParams?.(); } catch { /* ignore */ }
+          }
         },
       };
     };

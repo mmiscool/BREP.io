@@ -1,6 +1,16 @@
 import * as THREE from 'three';
 import { SelectionFilter } from '../SelectionFilter.js';
 import { LabelOverlay } from '../pmi/LabelOverlay.js';
+import { addArrowCone, screenSizeWorld, getElementDirection } from '../pmi/annUtils.js';
+import {
+  buildAngleDimensionGeometry,
+  buildLinearDimensionGeometry,
+  dirTo2D,
+  intersectLines2D,
+  planeBasis,
+  resolveAngleOrientation2D,
+  to2D,
+} from '../dimensions/dimensionGeometry.js';
 import { resolveSelectionObject } from './constraintSelectionUtils.js';
 import {
   isFaceObject,
@@ -30,6 +40,16 @@ function resolveConstraintId(entry, fallback = null) {
   return fallback;
 }
 
+function normalizedAngleMagnitude(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  const wrapped = ((Math.abs(numeric) % 360) + 360) % 360;
+  const folded = wrapped > 180 ? 360 - wrapped : wrapped;
+  if (folded <= 1e-9) return 0;
+  if (Math.abs(folded - 180) <= 1e-9) return 180;
+  return folded;
+}
+
 export class AssemblyConstraintsWidget {
   constructor(viewer) {
     this.viewer = viewer || null;
@@ -43,8 +63,8 @@ export class AssemblyConstraintsWidget {
 
     this._defaultIterations = 1000;
     this._normalArrows = new Set();
-    this._debugMode = false;
     this._constraintLines = new Map();
+    this._constraintArrowGroups = new Map();
     this._labelPositions = new Map();
     this._onControlsChange = () => this._refreshConstraintLabels();
     this._onWindowResize = () => this._refreshConstraintLabels();
@@ -93,7 +113,7 @@ export class AssemblyConstraintsWidget {
     if (this.viewer) {
       this._labelOverlay = new LabelOverlay(
         this.viewer,
-        null,
+        (idx, ann, ev) => { try { this.#handleLabelPointerDown(idx, ann, ev); } catch { } },
         null,
         (idx, ann, ev) => { try { this.#handleLabelClick(idx, ann, ev); } catch { } },
       );
@@ -170,6 +190,7 @@ export class AssemblyConstraintsWidget {
     }
     this._constraintGroup = null;
     this._constraintLines.clear();
+    this._constraintArrowGroups.clear();
     this._labelPositions.clear();
     try { this._labelOverlay?.dispose?.(); } catch { }
     this._labelOverlay = null;
@@ -309,7 +330,6 @@ export class AssemblyConstraintsWidget {
 
   _startSolver(iterations) {
     if (!this.history) return;
-    this.#clearConstraintDebugArrows();
     this._clearNormalArrows();
 
     const abortController = new AbortController();
@@ -379,7 +399,6 @@ export class AssemblyConstraintsWidget {
         await this.history.runAll(this.partHistory, {
           iterations,
           viewer: this.viewer || null,
-          debugMode: !!this._debugMode,
           iterationDelayMs,
           controller: {
             signal: abortController.signal,
@@ -527,15 +546,6 @@ export class AssemblyConstraintsWidget {
     run.labelRefreshCounter = 0;
     const entries = typeof this.history?.list === 'function' ? (this.history.list() || []) : [];
     this._updateConstraintVisuals(entries);
-  }
-
-  _handleDebugCheckboxChange(checked) {
-    this._debugMode = !!checked;
-    this.#clearConstraintDebugArrows();
-    if (!this._debugMode) {
-      this._clearNormalArrows();
-    }
-    this.#requestViewerRender();
   }
 
   _updateSolverUI() {
@@ -816,41 +826,96 @@ export class AssemblyConstraintsWidget {
 
   #setConstraintLineHighlight(constraintID, active) {
     const line = this._constraintLines.get(constraintID);
-    if (!line || !line.material) return;
-    const mat = line.material;
-    line.userData = line.userData || {};
+    if (line && line.material) {
+      const mat = line.material;
+      line.userData = line.userData || {};
 
-    if (active) {
-      if (!line.userData.__hoverOriginal) {
-        line.userData.__hoverOriginal = {
-          color: mat.color ? mat.color.clone() : null,
-          linewidth: mat.linewidth,
-          opacity: mat.opacity,
-          depthTest: mat.depthTest,
-          depthWrite: mat.depthWrite,
-        };
+      if (active) {
+        if (!line.userData.__hoverOriginal) {
+          line.userData.__hoverOriginal = {
+            color: mat.color ? mat.color.clone() : null,
+            linewidth: mat.linewidth,
+            opacity: mat.opacity,
+            depthTest: mat.depthTest,
+            depthWrite: mat.depthWrite,
+          };
+        }
+        try { mat.color?.set('#ffffff'); } catch { }
+        try { mat.opacity = 1; } catch { }
+        try { mat.linewidth = 2; } catch { }
+        try { mat.depthTest = false; mat.depthWrite = false; } catch { }
+        line.renderOrder = 10050;
+      } else {
+        const original = line.userData.__hoverOriginal;
+        if (original) {
+          try {
+            if (original.color && mat.color) mat.color.copy(original.color);
+            if (original.opacity != null) mat.opacity = original.opacity;
+            if (original.linewidth != null) mat.linewidth = original.linewidth;
+            if (original.depthTest != null) mat.depthTest = original.depthTest;
+            if (original.depthWrite != null) mat.depthWrite = original.depthWrite;
+          } catch { }
+        }
+        delete line.userData.__hoverOriginal;
+        line.renderOrder = 9999;
       }
-      try { mat.color?.set('#ffffff'); } catch { }
-      try { mat.opacity = 1; } catch { }
-      try { mat.linewidth = 2; } catch { }
-      try { mat.depthTest = false; mat.depthWrite = false; } catch { }
-      line.renderOrder = 10050;
-    } else {
-      const original = line.userData.__hoverOriginal;
-      if (original) {
-        try {
-          if (original.color && mat.color) mat.color.copy(original.color);
-          if (original.opacity != null) mat.opacity = original.opacity;
-          if (original.linewidth != null) mat.linewidth = original.linewidth;
-          if (original.depthTest != null) mat.depthTest = original.depthTest;
-          if (original.depthWrite != null) mat.depthWrite = original.depthWrite;
-        } catch { }
-      }
-      delete line.userData.__hoverOriginal;
-      line.renderOrder = 9999;
+
+      try { mat.needsUpdate = true; } catch { }
     }
 
-    try { mat.needsUpdate = true; } catch { }
+    this.#setConstraintArrowHighlight(constraintID, active);
+  }
+
+  #setConstraintArrowHighlight(constraintID, active) {
+    const group = this._constraintArrowGroups.get(constraintID);
+    if (!group) return;
+    group.userData = group.userData || {};
+
+    if (active) {
+      if (!Array.isArray(group.userData.__hoverOriginal)) {
+        const original = [];
+        for (const child of group.children) {
+          if (!child?.isMesh) continue;
+          const mat = child.material;
+          if (!mat) continue;
+          original.push({
+            child,
+            color: mat.color?.clone?.() || null,
+            opacity: mat.opacity,
+            depthTest: mat.depthTest,
+            depthWrite: mat.depthWrite,
+          });
+        }
+        group.userData.__hoverOriginal = original;
+      }
+      for (const child of group.children) {
+        if (!child?.isMesh || !child.material) continue;
+        try { child.material.color?.set?.('#ffffff'); } catch { }
+        try { child.material.opacity = 1; } catch { }
+        try { child.material.depthTest = false; child.material.depthWrite = false; } catch { }
+        child.renderOrder = 10050;
+        try { child.material.needsUpdate = true; } catch { }
+      }
+      return;
+    }
+
+    const originals = Array.isArray(group.userData.__hoverOriginal)
+      ? group.userData.__hoverOriginal
+      : [];
+    for (const record of originals) {
+      const child = record?.child;
+      const mat = child?.material;
+      if (!mat) continue;
+      try {
+        if (record.color && mat.color) mat.color.copy(record.color);
+        if (record.opacity != null) mat.opacity = record.opacity;
+        if (record.depthTest != null) mat.depthTest = record.depthTest;
+        if (record.depthWrite != null) mat.depthWrite = record.depthWrite;
+      } catch { }
+      if (child) child.renderOrder = 9996;
+      try { mat.needsUpdate = true; } catch { }
+    }
+    delete group.userData.__hoverOriginal;
   }
 
   _updateConstraintVisuals(entries = []) {
@@ -877,22 +942,18 @@ export class AssemblyConstraintsWidget {
       const constraintClass = this._resolveConstraintClass(entry);
       const statusInfo = constraintStatusInfo(entry);
       const color = statusInfo?.color || DEFAULT_CONSTRAINT_COLOR;
-      const segments = this.#constraintSegments(entry);
+      const visual = this.#constraintVisualData(entry, constraintClass);
+      const segments = Array.isArray(visual?.segments) ? visual.segments : [];
+      const arrowSpecs = Array.isArray(visual?.arrowSpecs) ? visual.arrowSpecs : [];
       let labelPosition = null;
 
-      if (Array.isArray(segments) && segments.length > 0) {
-        this.#upsertConstraintLines(constraintID, segments, color);
-        const midpoint = new THREE.Vector3();
-        let midpointCount = 0;
-        for (const [start, end] of segments) {
-          if (!start || !end) continue;
-          midpoint.add(start.clone().add(end).multiplyScalar(0.5));
-          midpointCount += 1;
+      if ((segments.length > 0) || (arrowSpecs.length > 0)) {
+        this.#upsertConstraintVisual(constraintID, { segments, arrowSpecs }, color);
+        labelPosition = visual?.labelPosition?.clone?.() || null;
+        if (!labelPosition) {
+          labelPosition = this.#segmentsMidpoint(segments);
         }
-        if (midpointCount > 0) {
-          midpoint.divideScalar(midpointCount);
-          labelPosition = midpoint;
-        } else {
+        if (!labelPosition) {
           labelPosition = this.#constraintStandalonePosition(entry, constraintClass);
         }
       } else {
@@ -951,11 +1012,20 @@ export class AssemblyConstraintsWidget {
         record.color = color;
         const constraintClass = this._resolveConstraintClass(record.entry);
         record.text = constraintLabelText(record.entry, constraintClass, this.partHistory);
-        const segments = this.#constraintSegments(record.entry);
-        if (Array.isArray(segments) && segments.length > 0) {
-          this.#upsertConstraintLines(constraintID, segments, color);
+        const visual = this.#constraintVisualData(record.entry, constraintClass);
+        const segments = Array.isArray(visual?.segments) ? visual.segments : [];
+        const arrowSpecs = Array.isArray(visual?.arrowSpecs) ? visual.arrowSpecs : [];
+        if ((segments.length > 0) || (arrowSpecs.length > 0)) {
+          this.#upsertConstraintVisual(constraintID, { segments, arrowSpecs }, color);
+          const labelPosition = visual?.labelPosition?.clone?.()
+            || this.#segmentsMidpoint(segments)
+            || this.#constraintStandalonePosition(record.entry, constraintClass)
+            || record.position;
+          if (labelPosition) record.position = labelPosition.clone();
         } else {
           this.#removeConstraintLine(constraintID);
+          const fallbackPosition = this.#constraintStandalonePosition(record.entry, constraintClass);
+          if (fallbackPosition) record.position = fallbackPosition.clone();
         }
       } else {
         record.color = color;
@@ -992,12 +1062,20 @@ export class AssemblyConstraintsWidget {
     for (const constraintID of Array.from(this._constraintLines.keys())) {
       this.#removeConstraintLine(constraintID);
     }
+    for (const constraintID of Array.from(this._constraintArrowGroups.keys())) {
+      this.#removeConstraintArrows(constraintID);
+    }
   }
 
   _removeUnusedConstraintLines(activeIds) {
     for (const constraintID of Array.from(this._constraintLines.keys())) {
       if (!activeIds.has(constraintID)) {
         this.#removeConstraintLine(constraintID);
+      }
+    }
+    for (const constraintID of Array.from(this._constraintArrowGroups.keys())) {
+      if (!activeIds.has(constraintID)) {
+        this.#removeConstraintArrows(constraintID);
       }
     }
   }
@@ -1023,25 +1101,291 @@ export class AssemblyConstraintsWidget {
     this._normalArrows.clear();
   }
 
-  #clearConstraintDebugArrows() {
-    const scene = this.viewer?.scene || null;
-    if (!scene || typeof scene.traverse !== 'function') return;
-    const prefixes = [
-      'parallel-constraint-normal-',
-      'distance-constraint-normal-',
-      'touch-align-normal-',
-    ];
-    const toRemove = [];
-    scene.traverse((obj) => {
-      if (!obj || typeof obj.name !== 'string') return;
-      if (prefixes.some((prefix) => obj.name.startsWith(prefix))) {
-        toRemove.push(obj);
-      }
-    });
-    for (const obj of toRemove) {
-      try { obj.parent?.remove?.(obj); }
-      catch { }
+  #constraintVisualData(entry, cls = null) {
+    if (!entry?.inputParams) return { segments: [], arrowSpecs: [], labelPosition: null };
+    const constraintClass = cls || this._resolveConstraintClass(entry);
+    const typeValue = entry?.type || constraintClass?.constraintType;
+    const type = typeof typeValue === 'string' ? typeValue.toLowerCase() : String(typeValue || '').toLowerCase();
+
+    if (type === 'distance') {
+      const distanceVisual = this.#distanceConstraintVisual(entry);
+      if (distanceVisual) return distanceVisual;
+      return {
+        segments: [],
+        arrowSpecs: [],
+        labelPosition: this.#constraintStandalonePosition(entry, constraintClass),
+      };
     }
+    if (type === 'angle') {
+      const angleVisual = this.#angleConstraintVisual(entry);
+      if (angleVisual) return angleVisual;
+      return {
+        segments: [],
+        arrowSpecs: [],
+        labelPosition: this.#constraintStandalonePosition(entry, constraintClass),
+      };
+    }
+
+    const segments = this.#constraintSegments(entry);
+    return {
+      segments,
+      arrowSpecs: [],
+      labelPosition: this.#segmentsMidpoint(segments),
+    };
+  }
+
+  #distanceConstraintVisual(entry) {
+    const points = this.#collectReferenceSelectionPoints(entry, { limit: 2 });
+    if (!Array.isArray(points) || points.length < 2) return null;
+
+    const [pointA, pointB] = points;
+    if (!pointA || !pointB) return null;
+
+    const pd = entry?.persistentData || {};
+    const geometry = buildLinearDimensionGeometry({
+      pointA,
+      pointB,
+      normal: this.#viewerViewNormal(),
+      offset: Number(pd.annotationOffset),
+      showExtensions: true,
+      labelWorld: pd.labelWorld || null,
+      screenSizeWorld: (pixels) => screenSizeWorld(this.viewer, pixels),
+      fallbackScreenSizeWorld: (pixels) => screenSizeWorld(this.viewer, pixels),
+    });
+    if (!geometry) return null;
+
+    return {
+      segments: Array.isArray(geometry.segments) ? geometry.segments : [],
+      arrowSpecs: Array.isArray(geometry.arrowSpecs) ? geometry.arrowSpecs : [],
+      labelPosition: geometry.labelPosition?.clone?.() || null,
+    };
+  }
+
+  #angleConstraintVisual(entry) {
+    const refs = this.#collectConstraintReferenceSelections(entry, { limit: 2 });
+    if (!Array.isArray(refs) || refs.length < 2) return null;
+
+    const selectionA = this.#resolveSelectionVisualInfo(refs[0]);
+    const selectionB = this.#resolveSelectionVisualInfo(refs[1]);
+    if (!selectionA || !selectionB) return null;
+    if (!selectionA.origin || !selectionB.origin || !selectionA.direction || !selectionB.direction) return null;
+
+    const dirA0 = selectionA.direction.clone().normalize();
+    const dirB0 = selectionB.direction.clone().normalize();
+    if (dirA0.lengthSq() <= 1e-12 || dirB0.lengthSq() <= 1e-12) return null;
+
+    let planeNormal = new THREE.Vector3().crossVectors(dirA0, dirB0);
+    if (planeNormal.lengthSq() <= 1e-12) {
+      planeNormal = this.#viewerViewNormal();
+    }
+    if (planeNormal.lengthSq() <= 1e-12) return null;
+    planeNormal.normalize();
+    const planePoint = selectionA.origin.clone().add(selectionB.origin).multiplyScalar(0.5);
+
+    const lineA = this.#lineInPlaneForSelection(selectionA, planeNormal, planePoint);
+    const lineB = this.#lineInPlaneForSelection(selectionB, planeNormal, planePoint);
+    if (!lineA || !lineB) return null;
+
+    const basis = planeBasis(planeNormal, lineA.direction);
+    let pA2 = to2D(lineA.point, planePoint, basis);
+    let pB2 = to2D(lineB.point, planePoint, basis);
+    let dA2 = dirTo2D(lineA.direction, basis);
+    let dB2 = dirTo2D(lineB.direction, basis);
+    let anchorA = lineA.point.clone();
+    let anchorB = lineB.point.clone();
+    if (dA2.lengthSq() <= 1e-12 || dB2.lengthSq() <= 1e-12) return null;
+    dA2.normalize();
+    dB2.normalize();
+
+    const angleRaw = Number(entry?.inputParams?.angle ?? 0);
+    const angleMagnitude = normalizedAngleMagnitude(angleRaw);
+    const angleType = angleMagnitude > 90 ? 'obtuse' : 'acute';
+
+    const reverse = Number.isFinite(angleRaw) && angleRaw < 0;
+    if (reverse) {
+      [pA2, pB2] = [pB2, pA2];
+      [dA2, dB2] = [dB2, dA2];
+      [anchorA, anchorB] = [anchorB, anchorA];
+    }
+
+    let orientation = resolveAngleOrientation2D(dA2, dB2, angleType, true);
+    if (!orientation) {
+      orientation = resolveAngleOrientation2D(dA2, dB2, 'acute', false);
+    }
+    if (!orientation) return null;
+
+    const rayA = orientation.start.clone();
+    const rayB = orientation.end.clone();
+    let vertex2D = intersectLines2D(pA2, rayA, pB2, rayB);
+    if (vertex2D) {
+      const base = Math.max(1e-6, pA2.distanceTo(pB2));
+      const maxDist = Math.max(vertex2D.distanceTo(pA2), vertex2D.distanceTo(pB2));
+      if (maxDist > base * 8) vertex2D = null;
+    }
+    if (!vertex2D) vertex2D = new THREE.Vector2().addVectors(pA2, pB2).multiplyScalar(0.5);
+
+    const pd = entry?.persistentData || {};
+    const geometry = buildAngleDimensionGeometry({
+      planePoint,
+      planeNormal,
+      basis,
+      vertex2D,
+      directionA2D: rayA,
+      directionB2D: rayB,
+      sweepRad: orientation.sweep,
+      sweepDirection: orientation.dirSign,
+      bisector2D: orientation.bisector,
+      labelWorld: pd.labelWorld || null,
+      screenSizeWorld: (pixels) => screenSizeWorld(this.viewer, pixels),
+      fallbackScreenSizeWorld: (pixels) => screenSizeWorld(this.viewer, pixels),
+    });
+    if (!geometry) return null;
+
+    const segments = [];
+    const arcPoints = Array.isArray(geometry.arcPoints) ? geometry.arcPoints : [];
+    for (let i = 0; i < arcPoints.length - 1; i += 1) {
+      const start = arcPoints[i];
+      const end = arcPoints[i + 1];
+      if (!start || !end) continue;
+      segments.push([start, end]);
+    }
+    if (arcPoints.length) {
+      const arcStart = arcPoints[0];
+      const arcEnd = arcPoints[arcPoints.length - 1];
+      if (anchorA && arcStart) segments.push([anchorA.clone(), arcStart.clone()]);
+      if (anchorB && arcEnd) segments.push([anchorB.clone(), arcEnd.clone()]);
+    }
+
+    return {
+      segments,
+      arrowSpecs: Array.isArray(geometry.arrowSpecs) ? geometry.arrowSpecs : [],
+      labelPosition: geometry.labelPosition?.clone?.() || null,
+      planeNormal: planeNormal.clone(),
+      planePoint: planePoint.clone(),
+    };
+  }
+
+  #collectConstraintReferenceSelections(entry, { limit = Infinity } = {}) {
+    const cls = this._resolveConstraintClass(entry);
+    const schema = cls?.inputParamsSchema || {};
+    const refKeys = Object.entries(schema)
+      .filter(([, def]) => def?.type === 'reference_selection')
+      .map(([key]) => key);
+    if (!refKeys.length) return [];
+
+    const results = [];
+    const push = (value) => {
+      if (value == null || results.length >= limit) return;
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          push(item);
+          if (results.length >= limit) break;
+        }
+        return;
+      }
+      results.push(value);
+    };
+
+    for (const key of refKeys) {
+      push(entry?.inputParams?.[key]);
+      if (results.length >= limit) break;
+    }
+
+    return results;
+  }
+
+  #resolveSelectionVisualInfo(selection) {
+    if (!selection) return null;
+    const objects = this._resolveReferenceObjects(selection);
+    const object = Array.isArray(objects) && objects.length ? objects[0] : null;
+    if (!object) return null;
+
+    const kind = this.#selectionKindFrom(object, selection);
+    let origin = null;
+    let direction = null;
+
+    if (kind === 'FACE') {
+      origin = computeFaceOrigin(object) || extractWorldPoint(object);
+      direction = computeFaceNormal(object) || getElementDirection(null, object);
+    } else if (kind === 'EDGE') {
+      origin = extractWorldPoint(object);
+      direction = getElementDirection(null, object);
+    }
+
+    if (!origin || !direction) return null;
+    if (direction.lengthSq() <= 1e-12) return null;
+    direction = direction.clone().normalize();
+
+    return {
+      selection,
+      object,
+      kind,
+      origin: origin.clone ? origin.clone() : new THREE.Vector3(origin.x, origin.y, origin.z),
+      direction,
+    };
+  }
+
+  #selectionKindFrom(object, selection) {
+    const val = (selection && typeof selection.kind === 'string') ? selection.kind : null;
+    const raw = (object?.userData?.type || object?.userData?.brepType || object?.type || val || '')
+      .toString()
+      .toUpperCase();
+    if (!raw) return 'UNKNOWN';
+    if (raw.includes('FACE')) return 'FACE';
+    if (raw.includes('EDGE')) return 'EDGE';
+    if (raw.includes('VERTEX') || raw.includes('POINT')) return 'POINT';
+    if (raw.includes('COMPONENT')) return 'COMPONENT';
+    return raw;
+  }
+
+  #lineInPlaneForSelection(selectionInfo, planeNormal, planePoint) {
+    if (!selectionInfo || !selectionInfo.origin || !selectionInfo.direction) return null;
+    if (!planeNormal || planeNormal.lengthSq() <= 1e-12) return null;
+    const normal = planeNormal.clone().normalize();
+    const anchor = selectionInfo.origin.clone().sub(
+      normal.clone().multiplyScalar(selectionInfo.origin.clone().sub(planePoint).dot(normal)),
+    );
+
+    let direction = null;
+    if (selectionInfo.kind === 'FACE') {
+      direction = new THREE.Vector3().crossVectors(selectionInfo.direction, normal);
+    } else {
+      direction = selectionInfo.direction.clone().projectOnPlane(normal);
+    }
+    if (!direction || direction.lengthSq() <= 1e-12) {
+      direction = selectionInfo.direction.clone().projectOnPlane(normal);
+    }
+    if (!direction || direction.lengthSq() <= 1e-12) {
+      direction = this.#arbitraryPerpendicular(normal).projectOnPlane(normal);
+    }
+    if (!direction || direction.lengthSq() <= 1e-12) return null;
+    direction.normalize();
+
+    return { point: anchor, direction };
+  }
+
+  #viewerViewNormal() {
+    const camera = this.viewer?.camera || null;
+    if (camera && typeof camera.getWorldDirection === 'function') {
+      try {
+        const dir = camera.getWorldDirection(new THREE.Vector3());
+        if (dir.lengthSq() > 1e-12) return dir.normalize();
+      } catch { /* ignore */ }
+    }
+    return new THREE.Vector3(0, 0, 1);
+  }
+
+  #segmentsMidpoint(segments) {
+    if (!Array.isArray(segments) || segments.length === 0) return null;
+    const midpoint = new THREE.Vector3();
+    let midpointCount = 0;
+    for (const [start, end] of segments) {
+      if (!start || !end) continue;
+      midpoint.add(start.clone().add(end).multiplyScalar(0.5));
+      midpointCount += 1;
+    }
+    if (midpointCount <= 0) return null;
+    return midpoint.divideScalar(midpointCount);
   }
 
   #constraintSegments(entry) {
@@ -1100,6 +1444,10 @@ export class AssemblyConstraintsWidget {
       try { this.viewer?.scene?.add(this._constraintGroup); } catch { }
     }
     let line = this._constraintLines.get(constraintID);
+    if (line && !line.isLineSegments) {
+      this.#removeConstraintLine(constraintID);
+      line = null;
+    }
     if (!line) {
       const geometry = new THREE.BufferGeometry();
       const material = new THREE.LineBasicMaterial({
@@ -1110,7 +1458,7 @@ export class AssemblyConstraintsWidget {
         depthTest: false,
         depthWrite: false,
       });
-      line = new THREE.Line(geometry, material);
+      line = new THREE.LineSegments(geometry, material);
       line.name = `constraint-line-${constraintID}`;
       line.renderOrder = 9999;
       line.userData.excludeFromFit = true;
@@ -1152,13 +1500,87 @@ export class AssemblyConstraintsWidget {
     line.geometry.computeBoundingSphere?.();
   }
 
+  #upsertConstraintArrows(constraintID, arrowSpecs = [], color = DEFAULT_CONSTRAINT_COLOR) {
+    if (!this._constraintGroup) return;
+    const specs = Array.isArray(arrowSpecs) ? arrowSpecs : [];
+    if (specs.length === 0) {
+      this.#removeConstraintArrows(constraintID);
+      return;
+    }
+    if (!this._constraintGroup.parent) {
+      try { this.viewer?.scene?.add(this._constraintGroup); } catch { }
+    }
+
+    let group = this._constraintArrowGroups.get(constraintID);
+    if (!group) {
+      group = new THREE.Group();
+      group.name = `constraint-arrows-${constraintID}`;
+      group.userData.excludeFromFit = true;
+      try { this._constraintGroup.add(group); } catch { }
+      this._constraintArrowGroups.set(constraintID, group);
+    }
+
+    const prevChildren = Array.from(group.children || []);
+    for (const child of prevChildren) {
+      try { group.remove(child); } catch { }
+      try { child.geometry?.dispose?.(); } catch { }
+      try { child.material?.dispose?.(); } catch { }
+    }
+    delete group.userData.__hoverOriginal;
+
+    for (const arrow of specs) {
+      const tip = arrow?.tip;
+      const direction = arrow?.direction;
+      if (!tip || !direction) continue;
+      const length = Number(arrow?.length);
+      const width = Number(arrow?.width);
+      const arrowLength = Number.isFinite(length) && length > 0 ? length : screenSizeWorld(this.viewer, 10);
+      const arrowWidth = Number.isFinite(width) && width > 0 ? width : screenSizeWorld(this.viewer, 4);
+      const mesh = addArrowCone(group, tip, direction, arrowLength, arrowWidth, color);
+      if (mesh) {
+        mesh.name = `constraint-arrow-${constraintID}`;
+        mesh.userData.excludeFromFit = true;
+      }
+    }
+
+    if (!group.children.length) {
+      this.#removeConstraintArrows(constraintID);
+    }
+  }
+
+  #upsertConstraintVisual(constraintID, visual = {}, color = DEFAULT_CONSTRAINT_COLOR) {
+    const segments = Array.isArray(visual?.segments) ? visual.segments : [];
+    const arrows = Array.isArray(visual?.arrowSpecs) ? visual.arrowSpecs : [];
+    if (segments.length > 0) this.#upsertConstraintLines(constraintID, segments, color);
+    else this.#removeConstraintLine(constraintID);
+    this.#upsertConstraintArrows(constraintID, arrows, color);
+  }
+
+  #removeConstraintArrows(constraintID) {
+    const group = this._constraintArrowGroups.get(constraintID);
+    if (!group) return;
+    const children = Array.from(group.children || []);
+    for (const child of children) {
+      try { group.remove(child); } catch { }
+      try { child.geometry?.dispose?.(); } catch { }
+      try { child.material?.dispose?.(); } catch { }
+    }
+    try { group.parent?.remove(group); } catch { }
+    if (group.userData && Object.prototype.hasOwnProperty.call(group.userData, '__hoverOriginal')) {
+      delete group.userData.__hoverOriginal;
+    }
+    this._constraintArrowGroups.delete(constraintID);
+  }
+
   #removeConstraintLine(constraintID) {
     const line = this._constraintLines.get(constraintID);
-    if (!line) return;
-    try { line.parent?.remove(line); } catch { }
-    try { line.geometry?.dispose?.(); } catch { }
-    try { line.material?.dispose?.(); } catch { }
-    this._constraintLines.delete(constraintID);
+    if (line) {
+      try { line.parent?.remove(line); } catch { }
+      try { line.geometry?.dispose?.(); } catch { }
+      try { line.material?.dispose?.(); } catch { }
+      this._constraintLines.delete(constraintID);
+    }
+    this.#removeConstraintArrows(constraintID);
   }
 
   #resolveSelectionPoint(selection) {
@@ -1269,6 +1691,217 @@ export class AssemblyConstraintsWidget {
     return null;
   }
 
+  #findConstraintEntryById(id) {
+    if (id == null) return null;
+    const targetId = String(id);
+    if (!targetId) return null;
+    const entries = this.history?.list?.() || [];
+    return entries.find((entry) => resolveConstraintId(entry) === targetId) || null;
+  }
+
+  #handleLabelPointerDown(idx, _ann, ev) {
+    if (idx == null || !ev) return;
+    const id = String(idx);
+    if (!id) return;
+    const entry = this.#findConstraintEntryById(id);
+    if (!entry) return;
+    const constraintClass = this._resolveConstraintClass(entry);
+    const typeValue = entry?.type || constraintClass?.constraintType;
+    const type = typeof typeValue === 'string' ? typeValue.toLowerCase() : String(typeValue || '').toLowerCase();
+    if (type === 'distance') {
+      this.#beginDistanceLabelDrag(id, entry, ev, constraintClass);
+      return;
+    }
+    if (type === 'angle') {
+      this.#beginAngleLabelDrag(id, entry, ev, constraintClass);
+    }
+  }
+
+  #beginDistanceLabelDrag(constraintID, entry, event, constraintClass = null) {
+    const points = this.#collectReferenceSelectionPoints(entry, { limit: 2 });
+    if (!Array.isArray(points) || points.length < 2) return;
+    const pointA = points[0]?.clone?.();
+    const pointB = points[1]?.clone?.();
+    if (!pointA || !pointB) return;
+
+    const direction = pointB.clone().sub(pointA);
+    if (direction.lengthSq() < 1e-12) return;
+    direction.normalize();
+
+    const planeNormal = this.#viewerViewNormal();
+    let tangent = new THREE.Vector3().crossVectors(planeNormal, direction);
+    if (tangent.lengthSq() < 1e-12) {
+      tangent = this.#arbitraryPerpendicular(direction);
+    } else {
+      tangent.normalize();
+    }
+    if (tangent.lengthSq() < 1e-12) return;
+
+    const midpoint = pointA.clone().add(pointB).multiplyScalar(0.5);
+    const dragPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, midpoint);
+
+    const controls = this.viewer?.controls || null;
+    const previousControlsEnabled = controls ? controls.enabled !== false : false;
+    try { if (controls) controls.enabled = false; } catch { /* ignore */ }
+
+    const onMove = (moveEvent) => {
+      const hit = this.#intersectPointerWithPlane(moveEvent, dragPlane);
+      if (!hit) return;
+
+      if (!entry.persistentData || typeof entry.persistentData !== 'object') {
+        entry.persistentData = {};
+      }
+      const toHit = hit.clone().sub(midpoint);
+      const offset = toHit.dot(tangent);
+      entry.persistentData.annotationOffset = Number.isFinite(offset) ? offset : 0;
+      entry.persistentData.labelWorld = [hit.x, hit.y, hit.z];
+      this.#refreshConstraintVisualFromEntry(constraintID, entry, constraintClass);
+    };
+
+    const onUp = (upEvent) => {
+      try { window.removeEventListener('pointermove', onMove, true); } catch { /* ignore */ }
+      try { window.removeEventListener('pointerup', onUp, true); } catch { /* ignore */ }
+      try { if (controls) controls.enabled = previousControlsEnabled; } catch { /* ignore */ }
+      this._scheduleSync();
+      try {
+        upEvent?.preventDefault?.();
+        upEvent?.stopImmediatePropagation?.();
+        upEvent?.stopPropagation?.();
+      } catch { /* ignore */ }
+    };
+
+    try { window.addEventListener('pointermove', onMove, true); } catch { /* ignore */ }
+    try { window.addEventListener('pointerup', onUp, true); } catch { /* ignore */ }
+    onMove(event);
+  }
+
+  #beginAngleLabelDrag(constraintID, entry, event, constraintClass = null) {
+    const cls = constraintClass || this._resolveConstraintClass(entry);
+    const visual = this.#constraintVisualData(entry, cls);
+    const planeNormal = visual?.planeNormal?.clone?.() || this.#viewerViewNormal();
+    const planePoint = visual?.planePoint?.clone?.()
+      || this.#constraintStandalonePosition(entry, cls)
+      || this.#segmentsMidpoint(visual?.segments || [])
+      || new THREE.Vector3();
+    if (!planeNormal || planeNormal.lengthSq() <= 1e-12 || !planePoint) return;
+    planeNormal.normalize();
+
+    const dragPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, planePoint);
+    const controls = this.viewer?.controls || null;
+    const previousControlsEnabled = controls ? controls.enabled !== false : false;
+    try { if (controls) controls.enabled = false; } catch { /* ignore */ }
+
+    const onMove = (moveEvent) => {
+      const hit = this.#intersectPointerWithPlane(moveEvent, dragPlane);
+      if (!hit) return;
+      if (!entry.persistentData || typeof entry.persistentData !== 'object') {
+        entry.persistentData = {};
+      }
+      entry.persistentData.labelWorld = [hit.x, hit.y, hit.z];
+      this.#refreshConstraintVisualFromEntry(constraintID, entry, cls);
+    };
+
+    const onUp = (upEvent) => {
+      try { window.removeEventListener('pointermove', onMove, true); } catch { /* ignore */ }
+      try { window.removeEventListener('pointerup', onUp, true); } catch { /* ignore */ }
+      try { if (controls) controls.enabled = previousControlsEnabled; } catch { /* ignore */ }
+      this._scheduleSync();
+      try {
+        upEvent?.preventDefault?.();
+        upEvent?.stopImmediatePropagation?.();
+        upEvent?.stopPropagation?.();
+      } catch { /* ignore */ }
+    };
+
+    try { window.addEventListener('pointermove', onMove, true); } catch { /* ignore */ }
+    try { window.addEventListener('pointerup', onUp, true); } catch { /* ignore */ }
+    onMove(event);
+  }
+
+  #refreshConstraintVisualFromEntry(constraintID, entry, constraintClass = null) {
+    if (!constraintID || !entry) return;
+    const cls = constraintClass || this._resolveConstraintClass(entry);
+    const visual = this.#constraintVisualData(entry, cls);
+    const segments = Array.isArray(visual?.segments) ? visual.segments : [];
+    const arrowSpecs = Array.isArray(visual?.arrowSpecs) ? visual.arrowSpecs : [];
+    const statusInfo = constraintStatusInfo(entry);
+    const color = statusInfo?.color || DEFAULT_CONSTRAINT_COLOR;
+
+    if ((segments.length > 0) || (arrowSpecs.length > 0)) {
+      this.#upsertConstraintVisual(constraintID, { segments, arrowSpecs }, color);
+    } else {
+      this.#removeConstraintLine(constraintID);
+    }
+
+    const labelPosition = visual?.labelPosition?.clone?.()
+      || this.#segmentsMidpoint(segments)
+      || this.#constraintStandalonePosition(entry, cls);
+    if (!labelPosition) {
+      this._labelPositions.delete(constraintID);
+      this.#requestViewerRender();
+      return;
+    }
+
+    const text = constraintLabelText(entry, cls, this.partHistory);
+    const overlayData = { id: constraintID, constraintID };
+    this._labelPositions.set(constraintID, {
+      position: labelPosition.clone(),
+      text,
+      data: overlayData,
+      entry,
+      color,
+    });
+
+    if (this._constraintGraphicsEnabled) {
+      try { this._labelOverlay?.updateLabel(constraintID, text, labelPosition.clone(), overlayData); } catch { }
+      const el = this._labelOverlay?.getElement?.(constraintID);
+      if (el) {
+        try {
+          el.classList.add('constraint-label');
+          el.dataset.constraintId = constraintID;
+        } catch { /* ignore */ }
+        this.#applyConstraintLabelColor(el, color);
+        this.#attachLabelHoverHandlers(el, entry, constraintID);
+      }
+    }
+
+    this.#requestViewerRender();
+  }
+
+  #intersectPointerWithPlane(event, plane) {
+    const ray = this.#rayFromPointerEvent(event);
+    if (!ray || !plane) return null;
+    const hit = new THREE.Vector3();
+    const ok = ray.intersectPlane(plane, hit);
+    return ok ? hit : null;
+  }
+
+  #rayFromPointerEvent(event) {
+    const camera = this.viewer?.camera || null;
+    const domElement = this.viewer?.renderer?.domElement || null;
+    if (!camera || !domElement || !event) return null;
+    const rect = domElement.getBoundingClientRect?.();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+    const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    if (!this._labelDragRaycaster) this._labelDragRaycaster = new THREE.Raycaster();
+    this._labelDragRaycaster.setFromCamera(new THREE.Vector2(x, y), camera);
+    return this._labelDragRaycaster.ray;
+  }
+
+  #arbitraryPerpendicular(direction) {
+    if (!direction || direction.lengthSq() === 0) return new THREE.Vector3(0, 0, 1);
+    const axis = Math.abs(direction.dot(new THREE.Vector3(0, 0, 1))) < 0.9
+      ? new THREE.Vector3(0, 0, 1)
+      : new THREE.Vector3(0, 1, 0);
+    const perp = new THREE.Vector3().crossVectors(direction, axis);
+    if (perp.lengthSq() === 0) {
+      perp.crossVectors(direction, new THREE.Vector3(1, 0, 0));
+    }
+    return perp.lengthSq() === 0 ? new THREE.Vector3(1, 0, 0) : perp.normalize();
+  }
+
   #handleLabelClick(idx, _ann, ev) {
     if (idx == null) return;
     const id = String(idx);
@@ -1278,7 +1911,7 @@ export class AssemblyConstraintsWidget {
       try { ev.stopPropagation(); } catch { }
     }
     const entries = this.history?.list?.() || [];
-    const targetEntry = entries.find((entry) => resolveConstraintId(entry) === id) || null;
+    const targetEntry = this.#findConstraintEntryById(id);
 
     let changed = false;
     if (typeof this.history?.setExclusiveOpen === 'function') {

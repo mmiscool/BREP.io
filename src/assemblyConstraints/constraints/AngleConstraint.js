@@ -24,7 +24,13 @@ const inputParamsSchema = {
     type: 'number',
     label: 'Angle (deg)',
     default_value: 90,
-    hint: 'Desired signed angle between Element A and Element B in degrees (-360 to 360).',
+    hint: 'Desired signed angle between Element A and Element B in degrees. Exterior uses supplementary angle (180 - interior).',
+  },
+  exteriorAngle: {
+    type: 'boolean',
+    label: 'Exterior Angle',
+    default_value: false,
+    hint: 'Measure and solve using the exterior (supplementary) angle.',
   },
 };
 
@@ -44,8 +50,10 @@ export class AngleConstraint extends BaseAssemblyConstraint {
   async solve(context = {}) {
     const pd = this.persistentData = this.persistentData || {};
     const [selA, selB] = selectionPair(this.inputParams);
-    const targetAngleValue = Number(this.inputParams.angle ?? 0);
-    let effectiveTargetAngleDeg = clampAndNormalizeAngleDeg(targetAngleValue);
+    const useExteriorAngle = this.#useExteriorAngle();
+    const targetAngleMode = resolveTargetAngleMode(this.inputParams.angle, useExteriorAngle);
+    let effectiveTargetAngleDeg = targetAngleMode.modeDeg;
+    let targetSignPreference = targetAngleMode.signPreference;
     let effectiveTargetAngleRad = THREE.MathUtils.degToRad(effectiveTargetAngleDeg);
 
     if (!selA || !selB) {
@@ -131,17 +139,24 @@ export class AngleConstraint extends BaseAssemblyConstraint {
     const angleDeg = measurement.angleDeg;
     const signedAngle = measurement.signedAngle;
     const signedAngleDeg = measurement.signedAngleDeg;
+    const measuredSignPreference = signedAngleDeg < -1e-9 ? -1 : (signedAngleDeg > 1e-9 ? 1 : 0);
+    const exteriorAngle = Math.max(0, Math.PI - angle);
+    const exteriorAngleDeg = Math.max(0, 180 - angleDeg);
+    const measuredModeAngle = useExteriorAngle ? exteriorAngle : angle;
+    const measuredModeAngleDeg = useExteriorAngle ? exteriorAngleDeg : angleDeg;
     let initializedFromMeasuredAngle = false;
 
     if (pd.isNewConstraint === true) {
-      effectiveTargetAngleDeg = clampAndNormalizeAngleDeg(signedAngleDeg);
+      effectiveTargetAngleDeg = measuredModeAngleDeg;
+      targetSignPreference = measuredSignPreference || targetSignPreference;
       effectiveTargetAngleRad = THREE.MathUtils.degToRad(effectiveTargetAngleDeg);
       initializedFromMeasuredAngle = true;
       pd.initializedAngle = effectiveTargetAngleDeg;
       pd.isNewConstraint = false;
     }
 
-    const error = signedAngle - effectiveTargetAngleRad;
+    const desiredSignedAngle = chooseSignedTargetAngle(signedAngle, effectiveTargetAngleRad, targetSignPreference);
+    const error = normalizeSignedAngleRad(signedAngle - desiredSignedAngle);
 
     const fixedA = context.isComponentFixed?.(infoA.component);
     const fixedB = context.isComponentFixed?.(infoB.component);
@@ -157,7 +172,7 @@ export class AngleConstraint extends BaseAssemblyConstraint {
 
     if (Math.abs(error) <= angleTolerance) {
       const message = initializedFromMeasuredAngle
-        ? 'Initialized angle from current orientation.'
+        ? `Initialized ${useExteriorAngle ? 'exterior' : 'interior'} angle from current orientation.`
         : 'Angle satisfied within tolerance.';
       pd.status = 'satisfied';
       pd.message = message;
@@ -175,6 +190,7 @@ export class AngleConstraint extends BaseAssemblyConstraint {
         signedAngle,
         signedAngleDeg,
         targetAngle: effectiveTargetAngleRad,
+        targetSignedAngle: desiredSignedAngle,
         error,
         message,
         infoA,
@@ -182,10 +198,16 @@ export class AngleConstraint extends BaseAssemblyConstraint {
         diagnostics: {
           angle,
           angleDeg,
+          exteriorAngle,
+          exteriorAngleDeg,
+          measuredModeAngle,
+          measuredModeAngleDeg,
           signedAngle,
           signedAngleDeg,
           targetAngle: effectiveTargetAngleRad,
+          targetSignedAngle: desiredSignedAngle,
           targetAngleDeg: effectiveTargetAngleDeg,
+          useExteriorAngle,
           error,
           initializedFromMeasuredAngle,
         },
@@ -209,6 +231,7 @@ export class AngleConstraint extends BaseAssemblyConstraint {
         angle,
         angleDeg,
         targetAngle: effectiveTargetAngleRad,
+        targetSignedAngle: desiredSignedAngle,
         error,
         message,
         infoA,
@@ -216,17 +239,22 @@ export class AngleConstraint extends BaseAssemblyConstraint {
         diagnostics: {
           angle,
           angleDeg,
+          exteriorAngle,
+          exteriorAngleDeg,
+          measuredModeAngle,
+          measuredModeAngleDeg,
           signedAngle,
           signedAngleDeg,
           targetAngle: effectiveTargetAngleRad,
+          targetSignedAngle: desiredSignedAngle,
           targetAngleDeg: effectiveTargetAngleDeg,
+          useExteriorAngle,
           error,
           initializedFromMeasuredAngle,
         },
       };
     }
 
-    const desiredSignedAngle = effectiveTargetAngleRad;
     const delta = signedAngle - desiredSignedAngle;
 
     const phiACurrent = 0;
@@ -296,6 +324,7 @@ export class AngleConstraint extends BaseAssemblyConstraint {
       signedAngle,
       signedAngleDeg,
       targetAngle: effectiveTargetAngleRad,
+      targetSignedAngle: desiredSignedAngle,
       error,
       message,
       infoA,
@@ -304,10 +333,16 @@ export class AngleConstraint extends BaseAssemblyConstraint {
       diagnostics: {
         angle,
         angleDeg,
+        exteriorAngle,
+        exteriorAngleDeg,
+        measuredModeAngle,
+        measuredModeAngleDeg,
         signedAngle,
         signedAngleDeg,
         targetAngle: effectiveTargetAngleRad,
+        targetSignedAngle: desiredSignedAngle,
         targetAngleDeg: effectiveTargetAngleDeg,
+        useExteriorAngle,
         error,
         shareA,
         shareB,
@@ -319,6 +354,10 @@ export class AngleConstraint extends BaseAssemblyConstraint {
 
   async run(context = {}) {
     return this.solve(context);
+  }
+
+  #useExteriorAngle() {
+    return this.inputParams?.exteriorAngle === true;
   }
 
   #resolveSelectionInfo(context, selection, label) {
@@ -493,11 +532,72 @@ function arbitraryPerpendicular(dir) {
   return perp.lengthSq() === 0 ? new THREE.Vector3(1, 0, 0) : perp.normalize();
 }
 
-function clampAndNormalizeAngleDeg(value) {
-  const safeValue = Number.isFinite(value) ? THREE.MathUtils.clamp(value, -360, 360) : 0;
-  const wrapped = ((safeValue % 360) + 360) % 360;
-  if (wrapped === 180) return safeValue < 0 ? -180 : 180;
-  return wrapped > 180 ? wrapped - 360 : wrapped;
+function resolveTargetAngleMode(rawValue, useExteriorAngle = false) {
+  const numericValue = Number(rawValue);
+  const safeValue = Number.isFinite(numericValue) ? THREE.MathUtils.clamp(numericValue, -360, 360) : 0;
+  const signPreference = safeValue < -1e-9 ? -1 : (safeValue > 1e-9 ? 1 : 0);
+  const magnitude = normalizePositiveAngleDeg(Math.abs(safeValue));
+  const interiorDeg = magnitude > 180 ? 360 - magnitude : magnitude;
+  const exteriorDeg = interiorDeg >= 180 - 1e-9 ? 0 : 180 - interiorDeg;
+  return {
+    modeDeg: useExteriorAngle ? exteriorDeg : interiorDeg,
+    signPreference,
+  };
+}
+
+function chooseSignedTargetAngle(currentSignedAngle, targetModeAngle, signPreference = 0) {
+  const targetMode = normalizePositiveAngleRad(targetModeAngle);
+  const baseSigned = normalizeSignedAngleRad(targetMode);
+  const absBase = Math.abs(baseSigned);
+
+  if (absBase <= 1e-9 || Math.abs(absBase - Math.PI) <= 1e-9) {
+    return baseSigned;
+  }
+
+  const candidates = [baseSigned, -baseSigned];
+  if (signPreference > 0) {
+    return candidates.find((candidate) => candidate > 0) ?? candidates[0];
+  }
+  if (signPreference < 0) {
+    return candidates.find((candidate) => candidate < 0) ?? candidates[0];
+  }
+
+  const current = Number.isFinite(currentSignedAngle) ? normalizeSignedAngleRad(currentSignedAngle) : 0;
+  let best = candidates[0];
+  let bestDistance = angularDistanceSignedRad(current, best);
+
+  for (let idx = 1; idx < candidates.length; idx += 1) {
+    const distance = angularDistanceSignedRad(current, candidates[idx]);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = candidates[idx];
+    }
+  }
+
+  return best;
+}
+
+function normalizePositiveAngleDeg(value) {
+  if (!Number.isFinite(value)) return 0;
+  const wrapped = ((value % 360) + 360) % 360;
+  return wrapped <= 1e-9 || Math.abs(wrapped - 360) <= 1e-9 ? 0 : wrapped;
+}
+
+function normalizePositiveAngleRad(value) {
+  if (!Number.isFinite(value)) return 0;
+  const twoPi = Math.PI * 2;
+  const wrapped = ((value % twoPi) + twoPi) % twoPi;
+  return wrapped <= 1e-9 || Math.abs(wrapped - twoPi) <= 1e-9 ? 0 : wrapped;
+}
+
+function normalizeSignedAngleRad(value) {
+  const wrapped = normalizePositiveAngleRad(value);
+  if (wrapped > Math.PI) return wrapped - (Math.PI * 2);
+  return wrapped;
+}
+
+function angularDistanceSignedRad(a, b) {
+  return Math.abs(normalizeSignedAngleRad(a - b));
 }
 
 function computeRotationTowards(fromDir, toDir, gain = 1) {
