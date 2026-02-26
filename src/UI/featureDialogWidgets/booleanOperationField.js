@@ -24,8 +24,16 @@ export function renderBooleanOperationField({ ui, key, def, controlWrap }) {
     sel.value = String(ui.params[key].operation || 'NONE');
     sel.addEventListener('change', () => {
         if (!ui.params[key] || typeof ui.params[key] !== 'object') ui.params[key] = { targets: [], operation: 'NONE' };
-        ui.params[key].operation = sel.value;
+        const nextOperation = String(sel.value || 'NONE').toUpperCase();
+        ui.params[key].operation = nextOperation;
         ui._emitParamsChange(key, ui.params[key]);
+        if (nextOperation === 'NONE') return;
+
+        const activateTargets = () => {
+            try { refField?.activate?.(); } catch (_) { }
+        };
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => activateTargets());
+        else setTimeout(activateTargets, 0);
     });
     wrap.appendChild(sel);
 

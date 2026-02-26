@@ -85,7 +85,7 @@ export class PartHistory {
     this.scene.remove = (...args) => {
       //console.log("Removing from scene:", args);
       if (args[0]?.userData?.preventRemove) {
-        console.log("Removal prevented by object flag.");
+        //console.log("Removal prevented by object flag.");
         return;
       }
 
@@ -622,6 +622,130 @@ export class PartHistory {
       return out;
     };
 
+    const extractFaceCenterNormal = (face, edgePositions = null) => {
+      if (!face) return null;
+      try { face.updateMatrixWorld?.(true); } catch { }
+
+      let centerVec = null;
+      try {
+        const geom = face.geometry;
+        const pos = geom && typeof geom.getAttribute === 'function' ? geom.getAttribute('position') : null;
+        if (pos && pos.itemSize === 3 && pos.count > 0) {
+          const sum = new THREE.Vector3();
+          const tmp = new THREE.Vector3();
+          for (let i = 0; i < pos.count; i++) {
+            tmp.set(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(face.matrixWorld);
+            sum.add(tmp);
+          }
+          centerVec = sum.multiplyScalar(1 / pos.count);
+        }
+      } catch { /* ignore */ }
+
+      const loops = Array.isArray(edgePositions) ? edgePositions : extractFaceEdgePositions(face);
+      if (!centerVec && Array.isArray(loops) && loops.length) {
+        const pts = [];
+        for (const positions of loops) {
+          if (!Array.isArray(positions)) continue;
+          for (let i = 0; i + 2 < positions.length; i += 3) {
+            const x = Number(positions[i]);
+            const y = Number(positions[i + 1]);
+            const z = Number(positions[i + 2]);
+            if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+            pts.push(new THREE.Vector3(x, y, z));
+          }
+        }
+        if (pts.length) {
+          centerVec = new THREE.Vector3();
+          for (const p of pts) centerVec.add(p);
+          centerVec.multiplyScalar(1 / pts.length);
+        }
+      }
+
+      let normalVec = null;
+      try {
+        if (typeof face.getAverageNormal === 'function') {
+          const n = face.getAverageNormal();
+          if (n && n.lengthSq() > 1e-12) {
+            normalVec = n.clone().normalize();
+          }
+        }
+      } catch { /* ignore */ }
+
+      if (!normalVec) {
+        try {
+          const geom = face.geometry;
+          const pos = geom && typeof geom.getAttribute === 'function' ? geom.getAttribute('position') : null;
+          const idx = geom && typeof geom.getIndex === 'function' ? geom.getIndex() : null;
+          if (pos && pos.itemSize === 3 && pos.count >= 3) {
+            const v0 = new THREE.Vector3();
+            const v1 = new THREE.Vector3();
+            const v2 = new THREE.Vector3();
+            const e1 = new THREE.Vector3();
+            const e2 = new THREE.Vector3();
+            const accum = new THREE.Vector3();
+            const triCount = idx ? Math.floor(idx.count / 3) : Math.floor(pos.count / 3);
+            const samples = Math.min(triCount, 60);
+
+            for (let tri = 0; tri < samples; tri += 1) {
+              let i0;
+              let i1;
+              let i2;
+              if (idx) {
+                const base = tri * 3;
+                if (base + 2 >= idx.count) break;
+                i0 = idx.getX(base);
+                i1 = idx.getX(base + 1);
+                i2 = idx.getX(base + 2);
+              } else {
+                i0 = tri * 3;
+                i1 = i0 + 1;
+                i2 = i0 + 2;
+                if (i2 >= pos.count) break;
+              }
+
+              v0.set(pos.getX(i0), pos.getY(i0), pos.getZ(i0)).applyMatrix4(face.matrixWorld);
+              v1.set(pos.getX(i1), pos.getY(i1), pos.getZ(i1)).applyMatrix4(face.matrixWorld);
+              v2.set(pos.getX(i2), pos.getY(i2), pos.getZ(i2)).applyMatrix4(face.matrixWorld);
+              e1.subVectors(v1, v0);
+              e2.subVectors(v2, v0);
+              const n = new THREE.Vector3().crossVectors(e1, e2);
+              if (n.lengthSq() > 1e-12) accum.add(n);
+            }
+
+            if (accum.lengthSq() > 1e-12) normalVec = accum.normalize();
+          }
+        } catch { /* ignore */ }
+      }
+
+      if (!normalVec && centerVec && Array.isArray(loops) && loops.length) {
+        const accum = new THREE.Vector3();
+        for (const positions of loops) {
+          if (!Array.isArray(positions)) continue;
+          const pts = [];
+          for (let i = 0; i + 2 < positions.length; i += 3) {
+            const x = Number(positions[i]);
+            const y = Number(positions[i + 1]);
+            const z = Number(positions[i + 2]);
+            if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+            pts.push(new THREE.Vector3(x, y, z));
+          }
+          for (let i = 0; i < pts.length - 1; i += 1) {
+            const a = pts[i].clone().sub(centerVec);
+            const b = pts[i + 1].clone().sub(centerVec);
+            const cross = new THREE.Vector3().crossVectors(a, b);
+            if (cross.lengthSq() > 1e-12) accum.add(cross);
+          }
+        }
+        if (accum.lengthSq() > 1e-12) normalVec = accum.normalize();
+      }
+
+      if (!centerVec && !normalVec) return null;
+      return {
+        center: centerVec ? [centerVec.x, centerVec.y, centerVec.z] : null,
+        normal: normalVec ? [normalVec.x, normalVec.y, normalVec.z] : null,
+      };
+    };
+
     for (const key in schema) {
       if (!Object.prototype.hasOwnProperty.call(schema, key)) continue;
       const def = schema[key];
@@ -648,8 +772,17 @@ export class PartHistory {
           const edgePositions = extractFaceEdgePositions(obj);
           if (edgePositions && edgePositions.length) {
             const snapType = (objType === SelectionFilter.PLANE || objType === 'PLANE') ? 'PLANE' : 'FACE';
+            const faceGeom = extractFaceCenterNormal(obj, edgePositions);
             for (const bucket of buckets) {
-              bucket[refName] = { type: snapType, edgePositions, sourceUuid, sourceFeatureId, sourceTimestamp };
+              bucket[refName] = {
+                type: snapType,
+                edgePositions,
+                center: Array.isArray(faceGeom?.center) ? faceGeom.center : null,
+                normal: Array.isArray(faceGeom?.normal) ? faceGeom.normal : null,
+                sourceUuid,
+                sourceFeatureId,
+                sourceTimestamp,
+              };
             }
           }
         } else if (objType === SelectionFilter.VERTEX || objType === 'VERTEX') {

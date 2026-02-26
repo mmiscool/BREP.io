@@ -1,7 +1,9 @@
 import { SelectionFilter } from './SelectionFilter.js';
 import { HistoryCollectionWidget } from './history/HistoryCollectionWidget.js';
+import { FeatureDimensionOverlay } from './featureDimensions/FeatureDimensionOverlay.js';
 
 const FALLBACK_INTERVAL_MS = 200;
+const FEATURE_DRAG_RUN_THROTTLE_MS = 120;
 
 export class HistoryWidget extends HistoryCollectionWidget {
   constructor(viewer) {
@@ -30,6 +32,19 @@ export class HistoryWidget extends HistoryCollectionWidget {
     this._rafHandle = null;
     this._rafIsTimeout = false;
     this._runPromise = null;
+    this._featureDragRunTimer = null;
+    this._featureDragRunPending = false;
+    this._featureDimensionOverlay = null;
+    try {
+      this._featureDimensionOverlay = new FeatureDimensionOverlay({
+        viewer: this.viewer,
+        onFieldChange: (payload) => this.#handleFeatureDimensionFieldChange(payload),
+        onFieldFocus: (payload) => this.#handleFeatureDimensionFieldFocus(payload),
+      });
+    } catch (error) {
+      console.warn('[HistoryWidget] Failed to initialize feature dimension overlays:', error);
+      this._featureDimensionOverlay = null;
+    }
 
     this.uiElement.classList.add('history-widget');
     this.render();
@@ -40,7 +55,14 @@ export class HistoryWidget extends HistoryCollectionWidget {
 
   dispose() {
     this.#stopAutoSyncLoop();
+    this.#cancelFeatureDragRun();
+    try { this._featureDimensionOverlay?.dispose?.(); } catch { /* ignore */ }
+    this._featureDimensionOverlay = null;
     super.dispose();
+  }
+
+  isFeatureDimensionDragging() {
+    return !!this._featureDimensionOverlay?.isDragging?.();
   }
 
   render() {
@@ -51,6 +73,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
     this._itemEls.clear();
     super.render();
     this._syncHeaderState();
+    this._syncFeatureDimensionOverlay();
   }
 
   async _moveEntry(id, delta) {
@@ -201,6 +224,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
     this._idsSignature = this.#computeIdsSignature();
     this._syncHeaderState();
     this.#refreshOpenForms();
+    this._syncFeatureDimensionOverlay();
     try { this.viewer?._refreshAssemblyConstraintsPanelVisibility?.(); } catch { /* ignore */ }
   }
 
@@ -244,6 +268,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
       }
     }
     this.#safeRunHistory();
+    this._syncFeatureDimensionOverlay();
   }
 
   #handleEntryChange({ entry }) {
@@ -262,6 +287,110 @@ export class HistoryWidget extends HistoryCollectionWidget {
   #handleFormReady({ id, entry }) {
     if (!id || !entry) return;
     this._paramSignatures.set(String(id), this.#computeParamsSig(entry.inputParams));
+    this._syncFeatureDimensionOverlay();
+  }
+
+  #handleFeatureDimensionFieldChange(payload = {}) {
+    const entryId = payload?.entryId != null ? String(payload.entryId) : null;
+    const fieldKey = payload?.fieldKey != null ? String(payload.fieldKey) : null;
+    if (!entryId || !fieldKey) return;
+
+    const info = this._findEntryInfoById(entryId);
+    const entry = info?.entry || null;
+    const params = entry?.inputParams;
+    if (!entry || !params || typeof params !== 'object') return;
+
+    const nextValue = Number(payload?.value);
+    if (!Number.isFinite(nextValue)) return;
+    params[fieldKey] = nextValue;
+
+    const exprMap = params.__expr;
+    if (exprMap && typeof exprMap === 'object' && Object.prototype.hasOwnProperty.call(exprMap, fieldKey)) {
+      try { delete exprMap[fieldKey]; } catch { /* ignore */ }
+    }
+
+    this._paramSignatures.set(entryId, this.#computeParamsSig(params));
+    try { this.getFormForEntry(entryId)?.refreshFromParams?.(); } catch { /* ignore */ }
+
+    this.#setCurrentHistoryStep(entryId);
+
+    if (payload?.commit) {
+      this.#cancelFeatureDragRun();
+      this.#handleEntryChange({ entry });
+      return;
+    }
+
+    entry.lastRunInputParams = null;
+    this.#scheduleFeatureDragRun();
+    this._syncFeatureDimensionOverlay();
+  }
+
+  #scheduleFeatureDragRun() {
+    this._featureDragRunPending = true;
+    if (this._featureDragRunTimer) return;
+    this._featureDragRunTimer = setTimeout(() => {
+      this._featureDragRunTimer = null;
+      if (!this._featureDragRunPending) return;
+      this._featureDragRunPending = false;
+      this.#safeRunHistory();
+      this._syncFeatureDimensionOverlay();
+    }, FEATURE_DRAG_RUN_THROTTLE_MS);
+  }
+
+  #cancelFeatureDragRun() {
+    this._featureDragRunPending = false;
+    if (!this._featureDragRunTimer) return;
+    try { clearTimeout(this._featureDragRunTimer); } catch { /* ignore */ }
+    this._featureDragRunTimer = null;
+  }
+
+  #handleFeatureDimensionFieldFocus(payload = {}) {
+    const entryId = payload?.entryId != null ? String(payload.entryId) : null;
+    const fieldKey = payload?.fieldKey != null ? String(payload.fieldKey) : null;
+    if (!entryId) return;
+
+    const info = this._findEntryInfoById(entryId);
+    const entry = info?.entry || null;
+    if (!entry) return;
+
+    if (!this._expandedId || String(this._expandedId) !== entryId) {
+      if (this._autoSyncOpenState) {
+        const previousInfo = this._expandedId ? this._findEntryInfoById(this._expandedId) : null;
+        if (previousInfo?.entry) this._applyOpenState(previousInfo.entry, false);
+        this._applyOpenState(entry, true);
+      }
+      this._expandedId = entryId;
+      if (this._autoFocusOnExpand) this._pendingFocusEntryId = entryId;
+      this.render();
+    }
+
+    const focusField = () => {
+      const form = this.getFormForEntry(entryId);
+      if (!form) return;
+
+      let handled = false;
+      if (fieldKey && typeof form.activateField === 'function') {
+        try { handled = form.activateField(fieldKey) === true; } catch { /* ignore */ }
+      }
+      if (handled) return;
+
+      const root = form?._shadow || form?.uiElement || null;
+      if (!root?.querySelector || !fieldKey) return;
+      const escapedField = typeof CSS !== 'undefined' && CSS?.escape
+        ? CSS.escape(fieldKey)
+        : fieldKey.replace(/"/g, '\\"');
+      const row = root.querySelector(`[data-key="${escapedField}"]`);
+      if (!row) return;
+      const target = row.querySelector(
+        'input:not([type="hidden"]), select, textarea, button, [tabindex]:not([tabindex="-1"])',
+      );
+      try { target?.focus?.(); } catch { /* ignore */ }
+    };
+
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => focusField());
+    else setTimeout(focusField, 0);
+
+    this._syncFeatureDimensionOverlay();
   }
 
   #buildFormOptions(context = {}) {
@@ -365,6 +494,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
     const exprChanged = exprSig !== this._expressionsSig;
     if (exprChanged) this._expressionsSig = exprSig;
     const entries = this._getEntries();
+    let hasRefreshed = false;
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
       const id = this._extractEntryId(entry, i);
@@ -375,7 +505,9 @@ export class HistoryWidget extends HistoryCollectionWidget {
       if (!exprChanged && this._paramSignatures.get(id) === sig) continue;
       this._paramSignatures.set(id, sig);
       try { form.refreshFromParams?.(); } catch { /* ignore */ }
+      hasRefreshed = true;
     }
+    if (hasRefreshed) this._syncFeatureDimensionOverlay();
   }
 
   #ensureCurrentExpanded() {
@@ -395,6 +527,39 @@ export class HistoryWidget extends HistoryCollectionWidget {
       }
       this.render();
       return;
+    }
+  }
+
+  _syncFeatureDimensionOverlay() {
+    const overlay = this._featureDimensionOverlay;
+    if (!overlay) return;
+    try {
+      const expandedId = this._expandedId != null ? String(this._expandedId) : null;
+      if (!expandedId) {
+        overlay.clearActive();
+        return;
+      }
+
+      const info = this._findEntryInfoById(expandedId);
+      const entry = info?.entry || null;
+      const form = this.getFormForEntry(expandedId);
+      const featureClass = this._resolveFeatureClass(entry?.type);
+
+      if (!entry || !form || !featureClass) {
+        overlay.clearActive();
+        return;
+      }
+
+      overlay.setActive({
+        entryId: expandedId,
+        entry,
+        featureClass,
+        form,
+      });
+      overlay.refresh();
+    } catch (error) {
+      console.warn('[HistoryWidget] Feature dimension overlay sync failed:', error);
+      try { overlay.clearActive(); } catch { /* ignore */ }
     }
   }
 

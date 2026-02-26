@@ -71,6 +71,7 @@ export class MainToolbar {
         font-size: 13px;
         line-height: 18px;
         user-select: none;
+        min-width: 36px;
       }
       .mtb-btn.mtb-icon {
         min-width: 36px;

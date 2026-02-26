@@ -4,6 +4,10 @@ import { PartHistory } from "../PartHistory.js";
 import { posix as path } from '../path.proxy.js';
 import { registerSketchSolverTopologyFixtureTests } from './sketchSolverTopologyFixtureLoader.js';
 import { test_boolean_subtract } from './test_boolean_subtract.js';
+import {
+    afterRun_boolean_operation_target_name_preserved,
+    test_boolean_operation_target_name_preserved,
+} from './test_boolean_operation_target_name.js';
 import { test_Chamfer } from './test_chamfer.js';
 import {
     test_edge_smooth_constraints_prevent_triangle_foldback,
@@ -96,6 +100,14 @@ export const testFunctions = [
     { test: test_primitiveTorus, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_primitiveSphere, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_boolean_subtract, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    {
+        test: test_boolean_operation_target_name_preserved,
+        afterRun: afterRun_boolean_operation_target_name_preserved,
+        printArtifacts: false,
+        exportFaces: true,
+        exportSolids: true,
+        resetHistory: true,
+    },
     { test: test_stlLoader, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     {
         test: test_import3d_decimation_reduces_triangle_count,

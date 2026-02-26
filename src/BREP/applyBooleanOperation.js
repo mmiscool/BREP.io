@@ -126,6 +126,27 @@ function __booleanDebugLogger(featureID, op, baseSolid, tools) {
   };
 }
 
+function __booleanResolveFoldNameSource(baseSolid, tools, featureID) {
+  const base = (baseSolid && typeof baseSolid === 'object') ? baseSolid : null;
+  const targets = Array.isArray(tools) ? tools.filter(Boolean) : [];
+  if (!base && targets.length === 0) return null;
+  if (targets.length === 0) return base;
+
+  const featureLabel = (featureID == null) ? '' : String(featureID).trim();
+  if (!featureLabel) return base || targets[0] || null;
+
+  const baseName = (base?.name == null) ? '' : String(base.name).trim();
+  const baseOwner = (base?.owningFeatureID == null) ? '' : String(base.owningFeatureID).trim();
+  const baseLooksLikeFeatureBody = (
+    (baseName && baseName === featureLabel)
+    || (baseOwner && baseOwner === featureLabel)
+  );
+  if (baseLooksLikeFeatureBody) {
+    return targets[0] || base;
+  }
+  return base || targets[0];
+}
+
 function __booleanSolidToGeometry(solid) {
   try {
     if (!solid || typeof solid !== 'object') return null;
@@ -685,7 +706,10 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
       result: __booleanDebugSummarizeSolid(result),
       removedCount: tools.length + (baseSolid ? 1 : 0),
     });
-    try { result.name = featureID || result.name || 'RESULT'; } catch (_) { }
+    const nameSource = __booleanResolveFoldNameSource(baseSolid, tools, featureID);
+    const inheritedName = nameSource?.name || nameSource?.uuid || nameSource?.id || null;
+    const fallbackName = featureID || result.name || 'RESULT';
+    try { result.name = inheritedName || fallbackName; } catch (_) { }
     // UNION/INTERSECT: remove tools and the base solid (replace base with result)
     const removed = tools.slice();
     if (baseSolid) removed.push(baseSolid);

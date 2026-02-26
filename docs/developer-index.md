@@ -38,6 +38,7 @@ This page is a quick entry point for implementation and integration docs.
 
 ## Application and UI Architecture
 - [History Systems](./history-systems.md)
+- [Feature Dimension Gizmos (Developer)](./feature-dimension-gizmos.md)
 - [Input Params Schema](./input-params-schema.md)
 - [UI Overview (Browser)](./ui-overview.md)
 - [Plugins and Examples](./plugins.md)

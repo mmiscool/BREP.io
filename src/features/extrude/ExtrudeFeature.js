@@ -21,12 +21,12 @@ const inputParamsSchema = {
   },
   distance: {
     type: "number",
-    default_value: 1,
+    default_value: 10,
     hint: "Extrude distance when no path is provided",
   },
   distanceBack: {
     type: "number",
-    default_value: 0,
+    default_value: 10,
     hint: "Optional backward extrude distance (two-sided extrude)",
   },
   boolean: {

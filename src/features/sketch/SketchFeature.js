@@ -427,6 +427,39 @@ export class SketchFeature {
         const featureId = (typeof sceneGroup.name === 'string' && sceneGroup.name.length)
             ? sceneGroup.name
             : (this.inputParams?.featureID ? String(this.inputParams.featureID) : 'Sketch');
+        const ownProfileFaceName = featureId ? `${featureId}:PROFILE` : null;
+        const toReferenceName = (ref) => {
+            if (ref == null) return null;
+            if (typeof ref === 'string') {
+                const trimmed = ref.trim();
+                return trimmed || null;
+            }
+            if (typeof ref === 'object') {
+                const name = typeof ref?.name === 'string' ? ref.name.trim() : '';
+                if (name) return name;
+                const faceName = typeof ref?.userData?.faceName === 'string' ? ref.userData.faceName.trim() : '';
+                return faceName || null;
+            }
+            return null;
+        };
+        const rawSketchPlane = this.inputParams?.sketchPlane;
+        const sketchPlaneRefs = Array.isArray(rawSketchPlane)
+            ? rawSketchPlane
+            : (rawSketchPlane != null ? [rawSketchPlane] : []);
+        const selectedSelfProfileFace = !!(ownProfileFaceName && sketchPlaneRefs.some((ref) => toReferenceName(ref) === ownProfileFaceName));
+        if (selectedSelfProfileFace) {
+            this.inputParams.sketchPlane = [];
+            const entries = Array.isArray(partHistory?.features) ? partHistory.features : [];
+            const entry = entries.find((item) => String(item?.inputParams?.featureID ?? '') === String(featureId));
+            if (entry?.inputParams && Object.prototype.hasOwnProperty.call(entry.inputParams, 'sketchPlane')) {
+                entry.inputParams.sketchPlane = null;
+                const exprMap = entry.inputParams.__expr;
+                if (exprMap && typeof exprMap === 'object' && !Array.isArray(exprMap)) {
+                    delete exprMap.sketchPlane;
+                    if (Object.keys(exprMap).length === 0) delete entry.inputParams.__expr;
+                }
+            }
+        }
         const edgeNamePrefix = featureId ? `${featureId}:` : '';
         sceneGroup.type = 'SKETCH';
         // Provide a harmless onClick so Scene Manager rows don't error

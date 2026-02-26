@@ -713,7 +713,7 @@ export class SelectionFilter {
                 || 'Object'
             ));
             const desc = names.length ? names.join(', ') : '(none)';
-            console.log(`[SelectionFilter] selection changed -> ${desc}`);
+            //console.log(`[SelectionFilter] selection changed -> ${desc}`);
         } catch { /* noop */ }
         try {
             const ev = new CustomEvent('selection-changed');

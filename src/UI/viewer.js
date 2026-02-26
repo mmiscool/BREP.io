@@ -2701,12 +2701,24 @@ export class Viewer {
     }
 
     _updateHover(event) {
+        if (this._shouldSuppressSceneHover()) {
+            try { SelectionFilter.clearHover(); } catch { }
+            return;
+        }
         const { primary } = this._collectSelectionCandidates(event);
         if (primary) {
             try { SelectionFilter.setHoverObject(primary); } catch { }
         } else {
             try { SelectionFilter.clearHover(); } catch { }
         }
+    }
+
+    _isFeatureDimensionDragActive() {
+        try { return !!this.historyWidget?.isFeatureDimensionDragging?.(); } catch { return false; }
+    }
+
+    _shouldSuppressSceneHover() {
+        return this._isFeatureDimensionDragActive();
     }
 
     _collectSelectionCandidates(event) {
@@ -3230,6 +3242,10 @@ export class Viewer {
             const ax = (typeof window !== 'undefined') ? (window.__BREP_activeXform || null) : null;
             if (ax && typeof ax.isOver === 'function' && ax.isOver(event)) return;
         } catch { }
+        if (this._shouldSuppressSceneHover()) {
+            try { SelectionFilter.clearHover(); } catch { }
+            return;
+        }
         this._updateHover(event);
     }
 
@@ -4344,7 +4360,11 @@ export class Viewer {
     _onControlsChange() {
         if (this._disposed) return;
         // Re-evaluate hover while camera moves (if we have a last pointer)
-        if (this._lastPointerEvent) this._updateHover(this._lastPointerEvent);
+        if (this._shouldSuppressSceneHover()) {
+            try { SelectionFilter.clearHover(); } catch { }
+        } else if (this._lastPointerEvent) {
+            this._updateHover(this._lastPointerEvent);
+        }
         // Keep dash lengths stable while zooming/panning/orbiting
         try {
             const size = this.renderer?.getSize?.(new THREE.Vector2()) || null;
