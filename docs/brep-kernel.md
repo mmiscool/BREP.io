@@ -47,10 +47,9 @@ All extend `Solid` and immediately generate geometry.
   - `fillHoles(geometry)`
   - `fixTriangleNormals(geometry)`
   - `repairAll(geometry, { weldEps=5e-4, lineEps=5e-4, gridCell=0.01 })`
-- **Point cloud wrapper** – `buildTightPointCloudWrap(rawPoints, { padding=0.02*diag, alphaRadius=0.6*medianKNN })` builds a solid via marching cubes over a density field.
 
 ## Misc helpers
-- **MeshToBrep**, **MeshRepairer**, **applyBooleanOperation**, **PointCloudWrap** live in `src/BREP` and are re-exported via `BREP.js` (`docs/brep-api.md`).
+- **MeshToBrep**, **MeshRepairer**, and **applyBooleanOperation** live in `src/BREP` and are re-exported via `BREP.js` (`docs/brep-api.md`).
 - **SolidMethod docs** – `docs/solid-methods.md` covers all core operations (authoring, cleanup, booleans, export).
 
 ## Example: boolean with primitives
