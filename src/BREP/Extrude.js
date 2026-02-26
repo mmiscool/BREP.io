@@ -397,7 +397,3 @@ export class ExtrudeSolid extends Solid {
     return this;
   }
 }
-
-export function extrudeFace({ face, distance = 1, dir = null, distanceBack = 0, name = 'Extrude' } = {}) {
-  return new ExtrudeSolid({ face, distance, dir, distanceBack, name });
-}

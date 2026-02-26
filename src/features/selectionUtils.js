@@ -120,16 +120,3 @@ export function normalizeSelectionName(value) {
   const asString = String(value);
   return asString.trim() || null;
 }
-
-export function normalizeSelectionList(values) {
-  if (!Array.isArray(values)) return [];
-  const seen = new Set();
-  const out = [];
-  for (const item of values) {
-    const normalized = normalizeSelectionName(item);
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    out.push(normalized);
-  }
-  return out;
-}

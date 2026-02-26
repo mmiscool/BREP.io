@@ -70,14 +70,6 @@ function isTrashRoot(source, repoFull = '') {
     && String(repoFull || '').trim() === TRASH_ROOT_REPO_FULL;
 }
 
-function stripModelFileExtension(pathValue) {
-  const clean = normalizePath(pathValue);
-  if (!clean) return '';
-  const lower = clean.toLowerCase();
-  if (lower.endsWith('.3mf')) return clean.slice(0, -4);
-  return clean;
-}
-
 function ensureModelExtension(name) {
   const value = String(name || '').trim();
   if (!value) return '';

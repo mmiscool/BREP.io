@@ -4448,14 +4448,6 @@ async function duplicateFile(entryOrName) {
   }
 }
 
-async function deleteFile(entryOrName) {
-  const entry = (entryOrName && typeof entryOrName === 'object')
-    ? entryOrName
-    : state.entryByKey.get(getEntrySelectionKey(entryOrName));
-  if (!entry) return;
-  await moveEntriesToTrash([entry], { confirm: true });
-}
-
 function refreshStorageBadge() {
   if (!state.storageBadgeEl) return;
   const cfg = getGithubStorageConfig();

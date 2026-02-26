@@ -271,15 +271,6 @@ export function savePluginEnabledMap(map) {
   } catch { }
 }
 
-export function setPluginEnabled(url, enabled) {
-  try {
-    const m = getPluginEnabledMap();
-    if (!url) return;
-    m[String(url)] = Boolean(enabled);
-    savePluginEnabledMap(m);
-  } catch { }
-}
-
 export async function loadSavedPlugins(viewer) {
   const urls = getSavedPluginUrls();
   if (!urls.length) return [];

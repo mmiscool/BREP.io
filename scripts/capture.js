@@ -842,17 +842,6 @@ async function downscaleScreenshot(page, buffer, scale) {
   }
 }
 
-function resolveDeviceScaleFactor(value) {
-  const fallback = 2;
-  if (!value) return fallback;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 1) {
-    console.warn(`⚠️  Invalid device scale factor "${value}". Falling back to ${fallback}.`);
-    return fallback;
-  }
-  return parsed;
-}
-
 function resolveHeadless(value) {
   if (value == null || value === '') return false;
   const normalized = String(value).trim().toLowerCase();
@@ -894,14 +883,6 @@ function waitForShutdownSignal() {
 async function closeCaptureBrowser(context, browser) {
   try { await context?.close?.(); } catch { /* ignore */ }
   try { await browser?.close?.(); } catch { /* ignore */ }
-}
-
-function resolveOutputScale(value, deviceScale) {
-  if (!value) {
-    return deviceScale > 1 ? 'css' : 'device';
-  }
-  const normalized = String(value).trim().toLowerCase();
-  return normalized === 'device' ? 'device' : 'css';
 }
 
 run().catch((err) => {

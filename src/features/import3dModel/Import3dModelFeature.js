@@ -175,14 +175,6 @@ function cleanString(value, fallback = '') {
     return out || String(fallback || '');
 }
 
-function sanitizeToken(value, fallback = 'IMPORT3D') {
-    const base = cleanString(value, fallback);
-    const token = base
-        .replace(/[^A-Za-z0-9_]+/g, '_')
-        .replace(/^_+|_+$/g, '');
-    return token || fallback;
-}
-
 function toArrayBuffer(input) {
     if (input instanceof ArrayBuffer) return input;
     if (ArrayBuffer.isView(input)) {

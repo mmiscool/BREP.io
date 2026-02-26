@@ -868,17 +868,6 @@ function tesselateBoundaryContours2(contours) {
   }
 }
 
-function orientSegmentLikeEdge(a, b, edge) {
-  const forward = [copyPoint2(a), copyPoint2(b)];
-  const reverse = [copyPoint2(b), copyPoint2(a)];
-  if (!edge || !Array.isArray(edge.polyline) || edge.polyline.length < 2) return forward;
-  const edgeStart = edge.polyline[0];
-  const edgeEnd = edge.polyline[edge.polyline.length - 1];
-  const sameDirScore = pointDistance2(edgeStart, a) + pointDistance2(edgeEnd, b);
-  const reversedScore = pointDistance2(edgeStart, b) + pointDistance2(edgeEnd, a);
-  return sameDirScore <= reversedScore ? forward : reverse;
-}
-
 function orientPolylineLikeEdge(polyline, edge) {
   const points = Array.isArray(polyline) ? polyline.map((point) => copyPoint2(point)) : [];
   if (points.length < 2) return points;
@@ -2014,11 +2003,6 @@ function faceOutlineLoops3FromFace(faceObj, featureID) {
   }
 
   return loops;
-}
-
-function faceOutlineLoop3FromFace(faceObj, featureID) {
-  const loops = faceOutlineLoops3FromFace(faceObj, featureID);
-  return loops[0] || null;
 }
 
 function collectCutoutProfileLoops(profileSelections, featureID) {

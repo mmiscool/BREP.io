@@ -205,6 +205,7 @@ function startStaticServer({ host, port }) {
       }
       openStreamResponse(res, filePath);
     } catch (error) {
+      console.log("Error handling request:", error);
       res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
       res.end("Internal server error.");
     }

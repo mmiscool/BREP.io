@@ -252,10 +252,6 @@ function combinePathPolylinesWithUsage(edges, tol = 1e-5) {
   return { points: best, usedEdges, unusedEdges };
 }
 
-function combinePathPolylines(edges, tol = 1e-5) {
-  return combinePathPolylinesWithUsage(edges, tol).points;
-}
-
 function groupEdgesByConnectivity(edges, tol = 1e-5) {
   const { polys, edges: validEdges } = collectEdgePolylines(edges);
   if (polys.length === 0) return [];

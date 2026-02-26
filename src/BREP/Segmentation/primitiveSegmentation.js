@@ -2421,32 +2421,3 @@ function buildSyntheticPrimitiveMesh() {
     triVerts: new Uint32Array(builder.tris),
   };
 }
-
-export function debugSyntheticPrimitiveSegmentation() {
-  const mesh = buildSyntheticPrimitiveMesh();
-  const result = segmentMeshPrimitives(mesh, {
-    sampleCount: 18000,
-    minInliers: 300,
-    minVotesPerTriangle: 2,
-    minRegionTriangles: 50,
-    randomSeed: 1337,
-  });
-
-  const countsByType = {};
-  for (let i = 0; i < result.regions.length; i += 1) {
-    const type = result.regions[i].type;
-    countsByType[type] = (countsByType[type] || 0) + 1;
-  }
-
-  console.log("[primitiveSegmentation] region count:", result.regions.length);
-  console.log("[primitiveSegmentation] type counts:", countsByType);
-  for (let i = 0; i < result.regions.length; i += 1) {
-    const region = result.regions[i];
-    console.log(
-      `[primitiveSegmentation] region ${region.id} ${region.type} tris=${region.triIndices.length} rms=${region.rms}`
-    );
-  }
-  console.log("[primitiveSegmentation] boundary edges:", result.boundaryEdges.length);
-
-  return { mesh, result };
-}

@@ -45,13 +45,6 @@ export async function loadPNGToImageData(source) {
   throw new Error("Unsupported source type. Provide ImageData, canvas, image, Blob, or URL string.");
 }
 
-export async function vectorizePNGToSVG(source, options = {}) {
-  const imageData = await loadPNGToImageData(source);
-  const { svg: svgOptions, ...vectorOptions } = options;
-  const shapes = vectorizeImageData(imageData, vectorOptions);
-  return shapesToSVG(shapes, imageData.width, imageData.height, svgOptions);
-}
-
 export function vectorizeImageData(imageData, options = {}) {
   const opts = { ...defaultOptions, ...options };
   const { width, height, data } = imageData;
