@@ -55,8 +55,7 @@ export class AssemblyConstraintsWidget {
     this._activeHoverConstraintId = null;
     this._syncScheduled = false;
     this._solverRun = null;
-    this._startButton = null;
-    this._stopButton = null;
+    this._solverActionButton = null;
     this._solverStatusLabel = null;
     this._solverLoopLabel = null;
     this._solverConstraintLabel = null;
@@ -71,7 +70,7 @@ export class AssemblyConstraintsWidget {
     this._updateComponentsBtn = null;
     this._updatingComponents = false;
     this._onStorageEvent = null;
-    this._fullSolveOnChange = false;
+    this._fullSolveOnChange = true;
     this._pendingFullSolve = false;
     this._ignoreFullSolveChangeCount = 0;
     this._fullSolveCheckbox = null;
@@ -184,8 +183,7 @@ export class AssemblyConstraintsWidget {
     }
     this._solverRun = null;
     this._iterationInput = null;
-    this._startButton = null;
-    this._stopButton = null;
+    this._solverActionButton = null;
     this._solverStatusLabel = null;
     this._solverLoopLabel = null;
     this._solverConstraintLabel = null;
@@ -546,11 +544,20 @@ export class AssemblyConstraintsWidget {
     const stopping = !!run?.abortController?.signal?.aborted && !!run?.running;
     const awaitingContinue = !!run?.awaitingContinue;
 
-    if (this._startButton) {
-      this._startButton.disabled = running || stopping;
-    }
-    if (this._stopButton) {
-      this._stopButton.disabled = !run || (!running && !stopping);
+    if (this._solverActionButton) {
+      const isStopMode = running || stopping;
+      this._solverActionButton.classList.toggle('solver-start-btn', !isStopMode);
+      this._solverActionButton.classList.toggle('solver-stop-btn', isStopMode);
+      if (stopping) {
+        this._solverActionButton.textContent = 'Stopping...';
+        this._solverActionButton.disabled = true;
+      } else if (running) {
+        this._solverActionButton.textContent = 'Stop';
+        this._solverActionButton.disabled = false;
+      } else {
+        this._solverActionButton.textContent = 'Start';
+        this._solverActionButton.disabled = false;
+      }
     }
     if (this._iterationInput) {
       this._iterationInput.disabled = running || stopping;

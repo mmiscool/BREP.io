@@ -45,8 +45,8 @@ export class AngleConstraint extends BaseAssemblyConstraint {
     const pd = this.persistentData = this.persistentData || {};
     const [selA, selB] = selectionPair(this.inputParams);
     const targetAngleValue = Number(this.inputParams.angle ?? 0);
-    const targetAngleDeg = clampAndNormalizeAngleDeg(targetAngleValue);
-    const targetAngleRad = THREE.MathUtils.degToRad(targetAngleDeg);
+    let effectiveTargetAngleDeg = clampAndNormalizeAngleDeg(targetAngleValue);
+    let effectiveTargetAngleRad = THREE.MathUtils.degToRad(effectiveTargetAngleDeg);
 
     if (!selA || !selB) {
       pd.status = 'incomplete';
@@ -131,7 +131,17 @@ export class AngleConstraint extends BaseAssemblyConstraint {
     const angleDeg = measurement.angleDeg;
     const signedAngle = measurement.signedAngle;
     const signedAngleDeg = measurement.signedAngleDeg;
-    const error = signedAngle - targetAngleRad;
+    let initializedFromMeasuredAngle = false;
+
+    if (pd.isNewConstraint === true) {
+      effectiveTargetAngleDeg = clampAndNormalizeAngleDeg(signedAngleDeg);
+      effectiveTargetAngleRad = THREE.MathUtils.degToRad(effectiveTargetAngleDeg);
+      initializedFromMeasuredAngle = true;
+      pd.initializedAngle = effectiveTargetAngleDeg;
+      pd.isNewConstraint = false;
+    }
+
+    const error = signedAngle - effectiveTargetAngleRad;
 
     const fixedA = context.isComponentFixed?.(infoA.component);
     const fixedB = context.isComponentFixed?.(infoB.component);
@@ -146,7 +156,9 @@ export class AngleConstraint extends BaseAssemblyConstraint {
     pd.errorDeg = Math.abs(THREE.MathUtils.radToDeg(error));
 
     if (Math.abs(error) <= angleTolerance) {
-      const message = 'Angle satisfied within tolerance.';
+      const message = initializedFromMeasuredAngle
+        ? 'Initialized angle from current orientation.'
+        : 'Angle satisfied within tolerance.';
       pd.status = 'satisfied';
       pd.message = message;
       pd.satisfied = true;
@@ -162,11 +174,22 @@ export class AngleConstraint extends BaseAssemblyConstraint {
         angleDeg,
         signedAngle,
         signedAngleDeg,
-        targetAngle: targetAngleRad,
+        targetAngle: effectiveTargetAngleRad,
         error,
         message,
         infoA,
         infoB,
+        diagnostics: {
+          angle,
+          angleDeg,
+          signedAngle,
+          signedAngleDeg,
+          targetAngle: effectiveTargetAngleRad,
+          targetAngleDeg: effectiveTargetAngleDeg,
+          error,
+          initializedFromMeasuredAngle,
+        },
+        persistInputParams: initializedFromMeasuredAngle ? { angle: effectiveTargetAngleDeg } : null,
       };
     }
 
@@ -185,15 +208,25 @@ export class AngleConstraint extends BaseAssemblyConstraint {
         applied: false,
         angle,
         angleDeg,
-        targetAngle: targetAngleRad,
+        targetAngle: effectiveTargetAngleRad,
         error,
         message,
         infoA,
         infoB,
+        diagnostics: {
+          angle,
+          angleDeg,
+          signedAngle,
+          signedAngleDeg,
+          targetAngle: effectiveTargetAngleRad,
+          targetAngleDeg: effectiveTargetAngleDeg,
+          error,
+          initializedFromMeasuredAngle,
+        },
       };
     }
 
-    const desiredSignedAngle = targetAngleRad;
+    const desiredSignedAngle = effectiveTargetAngleRad;
     const delta = signedAngle - desiredSignedAngle;
 
     const phiACurrent = 0;
@@ -262,7 +295,7 @@ export class AngleConstraint extends BaseAssemblyConstraint {
       angleDeg,
       signedAngle,
       signedAngleDeg,
-      targetAngle: targetAngleRad,
+      targetAngle: effectiveTargetAngleRad,
       error,
       message,
       infoA,
@@ -273,11 +306,13 @@ export class AngleConstraint extends BaseAssemblyConstraint {
         angleDeg,
         signedAngle,
         signedAngleDeg,
-        targetAngle: targetAngleRad,
+        targetAngle: effectiveTargetAngleRad,
+        targetAngleDeg: effectiveTargetAngleDeg,
         error,
         shareA,
         shareB,
         desiredSignedAngle,
+        initializedFromMeasuredAngle,
       },
     };
   }

@@ -117,7 +117,6 @@ export class TouchAlignConstraint extends BaseAssemblyConstraint {
       pd.preferredOppose = dot < 0;
       pd.lastOrientationDot = dot;
     }
-    pd.isNewConstraint = false;
     return !!pd.preferredOppose;
   }
 

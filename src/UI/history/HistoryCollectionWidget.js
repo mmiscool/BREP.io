@@ -1071,9 +1071,18 @@ export class HistoryCollectionWidget {
 
   _handleHistoryEvent(payload) {
     const reason = payload?.reason || 'update';
-    const skipRender = reason === 'update' && this._hasActiveReferenceSelection();
+    const hasActiveReferenceSelection = this._hasActiveReferenceSelection();
+    const structuralReason = reason === 'add'
+      || reason === 'remove'
+      || reason === 'reorder'
+      || reason === 'replace'
+      || reason === 'clear'
+      || reason === 'load';
+    const skipRender = hasActiveReferenceSelection && !structuralReason;
     if (!skipRender) {
       this.render();
+    } else {
+      this._refreshOpenFormsFromParams();
     }
     try {
       if (payload && payload.reason) {
@@ -1091,25 +1100,56 @@ export class HistoryCollectionWidget {
     const active = getActive();
     if (!active) return false;
 
-    try {
-      const root = (typeof active.getRootNode === 'function') ? active.getRootNode() : null;
-      if (root && root === this._shadow) return true;
-      if (root && root === this.uiElement) return true;
-    } catch (_) { /* ignore */ }
+    const isOwnedByWidget = (node) => {
+      if (!node) return false;
+      const seen = new Set();
+      let current = node;
+      while (current && !seen.has(current)) {
+        seen.add(current);
+        if (current === this._shadow || current === this.uiElement) return true;
+        try {
+          if (this._shadow && typeof this._shadow.contains === 'function' && this._shadow.contains(current)) {
+            return true;
+          }
+        } catch (_) { /* ignore */ }
+        try {
+          if (this.uiElement && typeof this.uiElement.contains === 'function' && this.uiElement.contains(current)) {
+            return true;
+          }
+        } catch (_) { /* ignore */ }
 
-    try {
-      if (this._shadow && typeof this._shadow.contains === 'function' && this._shadow.contains(active)) {
-        return true;
+        const parent = current.parentNode || null;
+        if (parent) {
+          current = parent;
+          continue;
+        }
+
+        let next = null;
+        try {
+          const root = (typeof current.getRootNode === 'function') ? current.getRootNode() : null;
+          if (root === this._shadow || root === this.uiElement) return true;
+          next = root?.host || null;
+        } catch (_) { /* ignore */ }
+        current = next;
       }
-    } catch (_) { /* ignore */ }
+      return false;
+    };
 
-    try {
-      if (this.uiElement && typeof this.uiElement.contains === 'function' && this.uiElement.contains(active)) {
-        return true;
-      }
-    } catch (_) { /* ignore */ }
+    return isOwnedByWidget(active);
+  }
 
-    return false;
+  _refreshOpenFormsFromParams() {
+    if (!(this._forms instanceof Map) || this._forms.size === 0) return;
+    for (const [id, form] of this._forms.entries()) {
+      if (!form || typeof form.refreshFromParams !== 'function') continue;
+      try {
+        form.refreshFromParams();
+      } catch (_) { /* ignore */ }
+
+      const info = this._findEntryInfoById(id);
+      if (!info?.entry) continue;
+      this._updateTitleElement(String(id), info.entry);
+    }
   }
 
   _emitCollectionChange(reason, entry) {

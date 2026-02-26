@@ -151,19 +151,34 @@ export class ParallelConstraint extends BaseAssemblyConstraint {
 
   #preferredOppose(context, selectionA, selectionB) {
     const pd = this.persistentData = this.persistentData || {};
-    if (typeof pd.preferredOppose !== 'boolean') {
-      const infoA = resolveParallelSelection(this, context, selectionA, 'elements[0]');
-      const infoB = resolveParallelSelection(this, context, selectionB, 'elements[1]');
-      const dirA = infoA?.direction?.clone()?.normalize();
-      const dirB = infoB?.direction?.clone()?.normalize();
-      if (!dirA || !dirB || dirA.lengthSq() === 0 || dirB.lengthSq() === 0) {
-        throw new Error('ParallelConstraint: Unable to resolve directions for orientation preference.');
+    const selectionSignature = constraintSelectionPairSignature(context, selectionA, selectionB);
+    const hasSelectionSignature = !!selectionSignature;
+    const shouldRecomputePreference = typeof pd.preferredOppose !== 'boolean'
+      || (hasSelectionSignature && pd.preferredOpposeSignature !== selectionSignature);
+    if (shouldRecomputePreference) {
+      try {
+        const infoA = resolveParallelSelection(this, context, selectionA, 'elements[0]');
+        const infoB = resolveParallelSelection(this, context, selectionB, 'elements[1]');
+        const dirA = infoA?.direction?.clone()?.normalize();
+        const dirB = infoB?.direction?.clone()?.normalize();
+        if (!dirA || !dirB || dirA.lengthSq() === 0 || dirB.lengthSq() === 0) {
+          throw new Error('ParallelConstraint: Unable to resolve directions for orientation preference.');
+        }
+        const dot = THREE.MathUtils.clamp(dirA.dot(dirB), -1, 1);
+        pd.preferredOppose = dot < 0;
+        pd.lastOrientationDot = dot;
+        if (hasSelectionSignature) pd.preferredOpposeSignature = selectionSignature;
+        else if (pd.preferredOpposeSignature) delete pd.preferredOpposeSignature;
+      } catch (error) {
+        if (typeof pd.preferredOppose !== 'boolean') pd.preferredOppose = false;
+        if (context?.debugMode) {
+          console.warn('[ParallelConstraint] Failed to capture orientation preference.', {
+            id: this.inputParams?.id ?? this.inputParams?.constraintID ?? null,
+            error,
+          });
+        }
       }
-      const dot = THREE.MathUtils.clamp(dirA.dot(dirB), -1, 1);
-      pd.preferredOppose = dot < 0;
-      pd.lastOrientationDot = dot;
     }
-    pd.isNewConstraint = false;
     return !!pd.preferredOppose;
   }
 
@@ -249,4 +264,67 @@ function selectionPair(params) {
   if (picks.length === 2) return picks;
   if (picks.length === 1) return [picks[0], null];
   return [null, null];
+}
+
+function constraintSelectionPairSignature(context, selectionA, selectionB) {
+  const keyA = constraintSelectionToken(context, selectionA);
+  const keyB = constraintSelectionToken(context, selectionB);
+  if (!keyA || !keyB) return null;
+  const pair = [keyA, keyB].sort();
+  return pair.join('|');
+}
+
+function constraintSelectionToken(context, selection, depth = 0, seen = new Set()) {
+  if (selection == null) return null;
+  if (depth > 5) return null;
+  const t = typeof selection;
+  if (t === 'string' || t === 'number' || t === 'boolean') {
+    return `${t}:${String(selection)}`;
+  }
+  if (Array.isArray(selection)) {
+    const parts = [];
+    const max = Math.min(selection.length, 4);
+    for (let i = 0; i < max; i += 1) {
+      const token = constraintSelectionToken(context, selection[i], depth + 1, seen);
+      if (token) parts.push(token);
+    }
+    return parts.length ? `arr:[${parts.join(',')}]` : null;
+  }
+  if (t !== 'object') return null;
+  if (seen.has(selection)) return null;
+  seen.add(selection);
+  try {
+    const keys = ['kind', 'type', 'name', 'selectionName', 'objectName', 'path', 'uuid', 'id', 'featureID'];
+    const parts = [];
+    for (const key of keys) {
+      const value = selection[key];
+      if (value == null) continue;
+      const valueType = typeof value;
+      if (valueType === 'string' || valueType === 'number' || valueType === 'boolean') {
+        parts.push(`${key}:${String(value)}`);
+      }
+    }
+    const resolvedFallback = resolvedSelectionToken(context, selection);
+    if (resolvedFallback) parts.push(resolvedFallback);
+    if (parts.length) return `obj:{${parts.join(',')}}`;
+    return null;
+  } finally {
+    seen.delete(selection);
+  }
+}
+
+function resolvedSelectionToken(context, selection) {
+  if (!context || selection == null) return null;
+  const object = context.resolveObject?.(selection) || null;
+  const component = context.resolveComponent?.(selection) || null;
+  const parts = [];
+  if (object) {
+    const objectKey = object.uuid || object.name || object.id || null;
+    if (objectKey != null) parts.push(`object:${String(objectKey)}`);
+  }
+  if (component) {
+    const componentKey = component.uuid || component.name || component.id || null;
+    if (componentKey != null) parts.push(`component:${String(componentKey)}`);
+  }
+  return parts.length ? parts.join(',') : null;
 }

@@ -50,35 +50,31 @@ export class AssemblyConstraintControlsWidget {
     const buttonGroup = document.createElement('div');
     buttonGroup.className = 'solver-button-group';
 
-    const startBtn = document.createElement('button');
-    startBtn.type = 'button';
-    startBtn.className = 'btn solver-start-btn';
-    startBtn.textContent = 'Start';
-    startBtn.addEventListener('click', (ev) => {
+    const actionBtn = document.createElement('button');
+    actionBtn.type = 'button';
+    actionBtn.className = 'btn solver-start-btn';
+    actionBtn.textContent = 'Start';
+    actionBtn.addEventListener('click', (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      const promise = host?._handleStartClick?.call(host);
-      if (promise?.catch) {
-        try { promise.catch(() => { }); } catch { /* ignore */ }
+      const run = host?._solverRun || null;
+      const running = !!run?.running && !run?.abortController?.signal?.aborted;
+      const stopping = !!run?.abortController?.signal?.aborted && !!run?.running;
+      if (stopping) return;
+      if (running) {
+        const stopPromise = host?._stopSolver?.call(host, { wait: false });
+        if (stopPromise?.catch) {
+          try { stopPromise.catch(() => { }); } catch { /* ignore */ }
+        }
+        return;
+      }
+      const startPromise = host?._handleStartClick?.call(host);
+      if (startPromise?.catch) {
+        try { startPromise.catch(() => { }); } catch { /* ignore */ }
       }
     });
 
-    const stopBtn = document.createElement('button');
-    stopBtn.type = 'button';
-    stopBtn.className = 'btn solver-stop-btn';
-    stopBtn.textContent = 'Stop';
-    stopBtn.disabled = true;
-    stopBtn.addEventListener('click', (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      const stopPromise = host?._stopSolver?.call(host, { wait: false });
-      if (stopPromise?.catch) {
-        try { stopPromise.catch(() => { }); } catch { /* ignore */ }
-      }
-    });
-
-    buttonGroup.appendChild(startBtn);
-    buttonGroup.appendChild(stopBtn);
+    buttonGroup.appendChild(actionBtn);
 
     mainRow.appendChild(label);
     mainRow.appendChild(buttonGroup);
@@ -204,8 +200,7 @@ export class AssemblyConstraintControlsWidget {
 
     if (host) {
       host._iterationInput = input;
-      host._startButton = startBtn;
-      host._stopButton = stopBtn;
+      host._solverActionButton = actionBtn;
       host._solverStatusLabel = statusLabel;
       host._solverLoopLabel = loopLabel;
       host._solverConstraintLabel = constraintLabel;

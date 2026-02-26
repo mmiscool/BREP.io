@@ -375,7 +375,9 @@ export class AssemblyConstraintHistory {
     const entry = {
       type: normalizedType,
       inputParams: { ...defaults },
-      persistentData: {},
+      persistentData: {
+        isNewConstraint: true,
+      },
       __open: true,
       enabled: true,
     };
@@ -1184,18 +1186,26 @@ export class AssemblyConstraintHistory {
 
       entry.persistentData = nextPersistent;
       if (runtime.originalInputParams) {
+        const restoredInputParams = deepClone(runtime.originalInputParams) || {};
+        if (result.persistInputParams && typeof result.persistInputParams === 'object') {
+          Object.assign(restoredInputParams, deepClone(result.persistInputParams));
+        }
         const target = (entry.inputParams && typeof entry.inputParams === 'object')
           ? entry.inputParams
           : {};
         for (const key of Object.keys(target)) {
-          if (!Object.prototype.hasOwnProperty.call(runtime.originalInputParams, key)) {
+          if (!Object.prototype.hasOwnProperty.call(restoredInputParams, key)) {
             delete target[key];
           }
         }
-        Object.assign(target, runtime.originalInputParams);
+        Object.assign(target, restoredInputParams);
         entry.inputParams = target;
       } else {
-        entry.inputParams = { ...(entry.inputParams || {}) };
+        const target = { ...(entry.inputParams || {}) };
+        if (result.persistInputParams && typeof result.persistInputParams === 'object') {
+          Object.assign(target, deepClone(result.persistInputParams));
+        }
+        entry.inputParams = target;
       }
 
       const constraintID = resolveConstraintEntryId(entry);
@@ -1499,6 +1509,9 @@ export class AssemblyConstraintHistory {
       else status = 'pending';
     }
     const errorValue = Number.isFinite(result.error) ? result.error : null;
+    const persistInputParams = (result.persistInputParams && typeof result.persistInputParams === 'object')
+      ? deepClone(result.persistInputParams)
+      : null;
 
     // Ensure persistent data on the instance reflects the normalized status.
     if (instance) {
@@ -1507,6 +1520,13 @@ export class AssemblyConstraintHistory {
       if (message && !instance.persistentData.message) instance.persistentData.message = message;
       instance.persistentData.satisfied = satisfied;
       if (errorValue != null) instance.persistentData.error = errorValue;
+      if (
+        instance.persistentData.isNewConstraint === true
+        && ok
+        && applied
+      ) {
+        instance.persistentData.isNewConstraint = false;
+      }
     }
 
     return {
@@ -1518,6 +1538,7 @@ export class AssemblyConstraintHistory {
       message,
       iteration,
       diagnostics: result.diagnostics || null,
+      persistInputParams,
     };
   }
 

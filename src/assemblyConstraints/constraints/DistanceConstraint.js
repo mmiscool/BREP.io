@@ -75,12 +75,13 @@ export class DistanceConstraint extends BaseAssemblyConstraint {
     let parallelResult = null;
 
     if (faceFace) {
+      const opposeNormals = this.#effectiveOppose(context, selA, selB);
       parallelResult = solveParallelAlignment({
         constraint: this,
         context,
         selectionA: selA,
         selectionB: selB,
-        opposeNormals: !!this.inputParams.opposeNormals,
+        opposeNormals,
         selectionLabelA: 'elements[0]',
         selectionLabelB: 'elements[1]',
       });
@@ -142,7 +143,18 @@ export class DistanceConstraint extends BaseAssemblyConstraint {
     }
 
     const distance = measurement.distance;
-    const error = distance - targetDistance;
+    let effectiveTargetDistance = targetDistance;
+    let initializedFromFaceDistance = false;
+
+    // First successful face-face solve initializes the target distance from current separation.
+    if (faceFace && pd.isNewConstraint === true) {
+      effectiveTargetDistance = Math.max(0, distance);
+      initializedFromFaceDistance = true;
+      pd.initializedDistance = effectiveTargetDistance;
+      pd.isNewConstraint = false;
+    }
+
+    const error = distance - effectiveTargetDistance;
 
     const fixedA = context.isComponentFixed?.(infoA.component);
     const fixedB = context.isComponentFixed?.(infoB.component);
@@ -151,7 +163,9 @@ export class DistanceConstraint extends BaseAssemblyConstraint {
     pd.errorDeg = null;
 
     if (Math.abs(error) <= tolerance) {
-      const message = 'Distance satisfied within tolerance.';
+      const message = initializedFromFaceDistance
+        ? 'Initialized distance from current face separation.'
+        : 'Distance satisfied within tolerance.';
       pd.status = 'satisfied';
       pd.message = message;
       pd.satisfied = true;
@@ -166,7 +180,14 @@ export class DistanceConstraint extends BaseAssemblyConstraint {
         message,
         infoA,
         infoB,
-        diagnostics: { distance, targetDistance, error, stage: faceFace ? 'offset' : 'general' },
+        diagnostics: {
+          distance,
+          targetDistance: effectiveTargetDistance,
+          error,
+          stage: faceFace ? 'offset' : 'general',
+          initializedFromFaceDistance,
+        },
+        persistInputParams: initializedFromFaceDistance ? { distance: effectiveTargetDistance } : null,
       };
     }
 
@@ -186,7 +207,13 @@ export class DistanceConstraint extends BaseAssemblyConstraint {
         message,
         infoA,
         infoB,
-        diagnostics: { distance, targetDistance, error, stage: faceFace ? 'offset' : 'general' },
+        diagnostics: {
+          distance,
+          targetDistance: effectiveTargetDistance,
+          error,
+          stage: faceFace ? 'offset' : 'general',
+          initializedFromFaceDistance,
+        },
       };
     }
 
@@ -196,7 +223,7 @@ export class DistanceConstraint extends BaseAssemblyConstraint {
 
     const applyCorrection = (info, dir, share) => {
       if (!info?.component || !dir || dir.lengthSq() === 0 || share === 0) return false;
-      const move = dir.clone().normalize().multiplyScalar(share * translationGain * (targetDistance - distance));
+      const move = dir.clone().normalize().multiplyScalar(share * translationGain * (effectiveTargetDistance - distance));
       if (move.lengthSq() === 0) return false;
       const ok = context.applyTranslation?.(info.component, move);
       if (ok) {
@@ -239,16 +266,56 @@ export class DistanceConstraint extends BaseAssemblyConstraint {
       infoB,
       diagnostics: {
         distance,
-        targetDistance,
+        targetDistance: effectiveTargetDistance,
         error,
         moves,
         stage: faceFace ? 'offset' : 'general',
+        initializedFromFaceDistance,
       },
     };
   }
 
   async run(context = {}) {
     return this.solve(context);
+  }
+
+  #effectiveOppose(context, selectionA, selectionB) {
+    const base = this.#preferredOppose(context, selectionA, selectionB);
+    const reverseToggle = !!this.inputParams.opposeNormals;
+    return reverseToggle ? !base : base;
+  }
+
+  #preferredOppose(context, selectionA, selectionB) {
+    const pd = this.persistentData = this.persistentData || {};
+    const selectionSignature = constraintSelectionPairSignature(context, selectionA, selectionB);
+    const hasSelectionSignature = !!selectionSignature;
+    const shouldRecomputePreference = typeof pd.preferredOppose !== 'boolean'
+      || (hasSelectionSignature && pd.preferredOpposeSignature !== selectionSignature);
+    if (shouldRecomputePreference) {
+      try {
+        const infoA = resolveParallelSelection(this, context, selectionA, 'elements[0]');
+        const infoB = resolveParallelSelection(this, context, selectionB, 'elements[1]');
+        const dirA = infoA?.direction?.clone()?.normalize();
+        const dirB = infoB?.direction?.clone()?.normalize();
+        if (!dirA || !dirB || dirA.lengthSq() === 0 || dirB.lengthSq() === 0) {
+          throw new Error('DistanceConstraint: Unable to resolve directions for orientation preference.');
+        }
+        const dot = THREE.MathUtils.clamp(dirA.dot(dirB), -1, 1);
+        pd.preferredOppose = dot < 0;
+        pd.lastOrientationDot = dot;
+        if (hasSelectionSignature) pd.preferredOpposeSignature = selectionSignature;
+        else if (pd.preferredOpposeSignature) delete pd.preferredOpposeSignature;
+      } catch (error) {
+        if (typeof pd.preferredOppose !== 'boolean') pd.preferredOppose = false;
+        if (context?.debugMode) {
+          console.warn('[DistanceConstraint] Failed to capture orientation preference.', {
+            id: this.inputParams?.id ?? this.inputParams?.constraintID ?? null,
+            error,
+          });
+        }
+      }
+    }
+    return !!pd.preferredOppose;
   }
 
   #isFaceFace(context, selA, selB) {
@@ -614,4 +681,67 @@ function selectionKindFrom(object, selection) {
   if (raw.includes('VERTEX') || raw.includes('POINT')) return 'POINT';
   if (raw.includes('COMPONENT')) return 'COMPONENT';
   return raw;
+}
+
+function constraintSelectionPairSignature(context, selectionA, selectionB) {
+  const keyA = constraintSelectionToken(context, selectionA);
+  const keyB = constraintSelectionToken(context, selectionB);
+  if (!keyA || !keyB) return null;
+  const pair = [keyA, keyB].sort();
+  return pair.join('|');
+}
+
+function constraintSelectionToken(context, selection, depth = 0, seen = new Set()) {
+  if (selection == null) return null;
+  if (depth > 5) return null;
+  const t = typeof selection;
+  if (t === 'string' || t === 'number' || t === 'boolean') {
+    return `${t}:${String(selection)}`;
+  }
+  if (Array.isArray(selection)) {
+    const parts = [];
+    const max = Math.min(selection.length, 4);
+    for (let i = 0; i < max; i += 1) {
+      const token = constraintSelectionToken(context, selection[i], depth + 1, seen);
+      if (token) parts.push(token);
+    }
+    return parts.length ? `arr:[${parts.join(',')}]` : null;
+  }
+  if (t !== 'object') return null;
+  if (seen.has(selection)) return null;
+  seen.add(selection);
+  try {
+    const keys = ['kind', 'type', 'name', 'selectionName', 'objectName', 'path', 'uuid', 'id', 'featureID'];
+    const parts = [];
+    for (const key of keys) {
+      const value = selection[key];
+      if (value == null) continue;
+      const valueType = typeof value;
+      if (valueType === 'string' || valueType === 'number' || valueType === 'boolean') {
+        parts.push(`${key}:${String(value)}`);
+      }
+    }
+    const resolvedFallback = resolvedSelectionToken(context, selection);
+    if (resolvedFallback) parts.push(resolvedFallback);
+    if (parts.length) return `obj:{${parts.join(',')}}`;
+    return null;
+  } finally {
+    seen.delete(selection);
+  }
+}
+
+function resolvedSelectionToken(context, selection) {
+  if (!context || selection == null) return null;
+  const object = context.resolveObject?.(selection) || null;
+  const component = context.resolveComponent?.(selection) || null;
+  const parts = [];
+  if (object) {
+    const objectKey = object.uuid || object.name || object.id || null;
+    if (objectKey != null) parts.push(`object:${String(objectKey)}`);
+  }
+  if (component) {
+    const componentKey = component.uuid || component.name || component.id || null;
+    if (componentKey != null) parts.push(`component:${String(componentKey)}`);
+  }
+  return parts.length ? parts.join(',') : null;
 }
