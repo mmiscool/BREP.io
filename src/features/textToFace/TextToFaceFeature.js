@@ -1,12 +1,12 @@
-import { BREP } from "../../BREP/BREP.js";
-import { LineGeometry } from 'three/examples/jsm/Addons.js';
-import { TTFLoader } from 'three/examples/jsm/loaders/TTFLoader.js';
-import { Font } from 'three/examples/jsm/loaders/FontLoader.js';
-import { combineBaseWithDeltaDeg } from '../../utils/xformMath.js';
-import { renderTransformField } from '../../UI/featureDialogWidgets/transformField.js';
-import { GOOGLE_OFL_FONTS } from '../../assets/fonts/google-ofl/catalog.js';
-import { SelectionState } from '../../UI/SelectionState.js';
 import { FONT_URL_LOADERS } from '#textToFace/fontUrlLoaders';
+import { LineGeometry } from 'three/examples/jsm/Addons.js';
+import { Font } from 'three/examples/jsm/loaders/FontLoader.js';
+import { TTFLoader } from 'three/examples/jsm/loaders/TTFLoader.js';
+import { GOOGLE_OFL_FONTS } from '../../assets/fonts/google-ofl/catalog.js';
+import { BREP } from "../../BREP/BREP.js";
+import { renderTransformField } from '../../UI/featureDialogWidgets/transformField.js';
+import { SelectionState } from '../../UI/SelectionState.js';
+import { combineBaseWithDeltaDeg } from '../../utils/xformMath.js';
 
 const IS_NODE_RUNTIME = !!globalThis?.process?.versions?.node && typeof window === 'undefined';
 

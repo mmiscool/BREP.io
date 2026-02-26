@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
-import { generate3MF } from '../../exporters/threeMF.js';
 import { generateSTEP } from '../../exporters/step.js';
+import { generate3MF } from '../../exporters/threeMF.js';
 
 async function _captureThumbnail(viewer, size = 256) {
   try {

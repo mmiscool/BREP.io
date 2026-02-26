@@ -5,13 +5,13 @@
 // - Produces: about.html (one <div> per license, with repo/homepage + author)
 
 import {
-  writeFileSync,
-  readFileSync,
+  copyFileSync,
+  existsSync,
   mkdirSync,
   readdirSync,
-  copyFileSync,
+  readFileSync,
   rmSync,
-  existsSync,
+  writeFileSync,
 } from "fs";
 import path from "path";
 import { collectDependencyLicenseData } from "./scripts/collectDependencyLicenses.js";

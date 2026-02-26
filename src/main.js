@@ -1,35 +1,35 @@
+import { WorkspaceFileBrowserWidget } from './UI/WorkspaceFileBrowserWidget.js';
+import './UI/dialogs.js';
+import brepHomeBannerSvg from './assets/brand/brep-home-banner.svg?raw';
+import { fetchGithubUserRepos } from './githubStorage.js';
 import {
   localStorage as LS,
   STORAGE_BACKEND_EVENT,
   configureGithubStorage,
   getGithubStorageConfig,
 } from './idbStorage.js';
-import { fetchGithubUserRepos } from './githubStorage.js';
 import {
-  readBrowserStorageValue,
-  writeBrowserStorageValue,
-  removeBrowserStorageValue,
-} from './utils/browserStorage.js';
+  createWorkspaceFolder,
+  getComponentRecord,
+  listComponentRecords,
+  listWorkspaceFolders,
+  removeComponentRecord,
+  removeWorkspaceFolder,
+  setComponentRecord,
+} from './services/componentLibrary.js';
+import { readDroppedWorkspaceFileRecord } from './services/droppedWorkspaceFiles.js';
 import {
   isSystemAccessSupported,
   listMountedDirectories,
   promptAndMountDirectory,
   unmountDirectory,
 } from './services/mountedStorage.js';
-import {
-  listComponentRecords,
-  listWorkspaceFolders,
-  createWorkspaceFolder,
-  removeWorkspaceFolder,
-  getComponentRecord,
-  removeComponentRecord,
-  setComponentRecord,
-} from './services/componentLibrary.js';
-import { readDroppedWorkspaceFileRecord } from './services/droppedWorkspaceFiles.js';
-import { WorkspaceFileBrowserWidget } from './UI/WorkspaceFileBrowserWidget.js';
-import './UI/dialogs.js';
 import './styles/landing.css';
-import brepHomeBannerSvg from './assets/brand/brep-home-banner.svg?raw';
+import {
+  readBrowserStorageValue,
+  removeBrowserStorageValue,
+  writeBrowserStorageValue,
+} from './utils/browserStorage.js';
 
 const MODEL_FILE_EXTENSION = '.3mf';
 const MANUAL_WORKSPACE_REPOS_KEY = '__BREP_WORKSPACE_MANUAL_REPOS__';

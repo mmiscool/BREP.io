@@ -7,13 +7,13 @@
 // - Persists annotations back into the PMI view entry on Finish
 
 import * as THREE from 'three';
-import { annotationRegistry } from './AnnotationRegistry.js';
-import { getPMIStyle, setPMIStyle, sanitizePMIStyle } from './pmiStyle.js';
-import { AnnotationHistory } from './AnnotationHistory.js';
-import { LabelOverlay } from './LabelOverlay.js';
-import { AnnotationCollectionWidget } from './AnnotationCollectionWidget.js';
-import { SelectionFilter } from '../SelectionFilter.js';
 import { readBrowserStorageValue, writeBrowserStorageValue } from '../../utils/browserStorage.js';
+import { SelectionFilter } from '../SelectionFilter.js';
+import { AnnotationCollectionWidget } from './AnnotationCollectionWidget.js';
+import { AnnotationHistory } from './AnnotationHistory.js';
+import { annotationRegistry } from './AnnotationRegistry.js';
+import { LabelOverlay } from './LabelOverlay.js';
+import { getPMIStyle, sanitizePMIStyle, setPMIStyle } from './pmiStyle.js';
 
 const cssEscape = (value) => {
   if (window.CSS && typeof window.CSS.escape === 'function') {

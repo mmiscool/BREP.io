@@ -57,12 +57,12 @@
  *   (`_dirty`). Face queries iterate triangles and filter by `faceID`, which is
  *   linear in triangle count.
  */
+import * as SolidMethods from "./SolidMethods/index.js";
 import {
     THREE,
     debugMode,
 } from "./SolidShared.js";
-import * as SolidMethods from "./SolidMethods/index.js";
-export { Edge, Vertex, Face } from "./SolidShared.js";
+export { Edge, Face, Vertex } from "./SolidShared.js";
 /**
  * Solid
  * - Add triangles with a face name.

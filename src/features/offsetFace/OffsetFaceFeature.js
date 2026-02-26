@@ -1,7 +1,7 @@
-import { BREP } from "../../BREP/BREP.js";
 import { LineGeometry } from "three/examples/jsm/Addons.js";
-import { resolveSelectionObject } from "../selectionUtils.js";
+import { BREP } from "../../BREP/BREP.js";
 import { SelectionState } from '../../UI/SelectionState.js';
+import { resolveSelectionObject } from "../selectionUtils.js";
 
 const THREE = BREP.THREE;
 

@@ -5,12 +5,12 @@ import * as THREE from 'three';
 // Feature classes live in their own files; registry wires them up.
 import { FeatureRegistry } from './FeatureRegistry.js';
 import { SelectionFilter } from './UI/SelectionFilter.js';
-import { MetadataManager } from './metadataManager.js';
-import { AssemblyConstraintRegistry } from './assemblyConstraints/AssemblyConstraintRegistry.js';
 import { AssemblyConstraintHistory } from './assemblyConstraints/AssemblyConstraintHistory.js';
+import { AssemblyConstraintRegistry } from './assemblyConstraints/AssemblyConstraintRegistry.js';
 import { AssemblyComponentFeature } from './features/assemblyComponent/AssemblyComponentFeature.js';
-import { getComponentRecord, base64ToUint8Array } from './services/componentLibrary.js';
+import { MetadataManager } from './metadataManager.js';
 import { PMIViewsManager } from './pmi/PMIViewsManager.js';
+import { base64ToUint8Array, getComponentRecord } from './services/componentLibrary.js';
 import { deepClone } from './utils/deepClone.js';
 
 

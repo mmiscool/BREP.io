@@ -1,8 +1,8 @@
-import * as THREE from "three";
 import Tess2 from "tess2";
-import { SelectionState } from "../../UI/SelectionState.js";
+import * as THREE from "three";
 import { BREP } from "../../BREP/BREP.js";
 import { Solid } from "../../BREP/BetterSolid.js";
+import { SelectionState } from "../../UI/SelectionState.js";
 import { deepClone } from "../../utils/deepClone.js";
 import { buildTwoDGroup, evaluateSheetMetal } from "./engine/index.js";
 import { buildFlatPatternExportData } from "./flatPatternExport.js";

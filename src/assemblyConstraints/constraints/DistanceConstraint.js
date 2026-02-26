@@ -1,7 +1,7 @@
 import * as THREE from 'three';
+import { getElementDirection, objectRepresentativePoint } from '../../UI/pmi/annUtils.js';
 import { BaseAssemblyConstraint } from '../BaseAssemblyConstraint.js';
-import { solveParallelAlignment, resolveParallelSelection } from '../constraintUtils/parallelAlignment.js';
-import { objectRepresentativePoint, getElementDirection } from '../../UI/pmi/annUtils.js';
+import { resolveParallelSelection, solveParallelAlignment } from '../constraintUtils/parallelAlignment.js';
 
 const DEFAULT_DISTANCE_TOLERANCE = 1e-6;
 

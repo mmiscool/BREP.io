@@ -1,9 +1,9 @@
-import { BREP } from "../../BREP/BREP.js";
-const THREE = BREP.THREE;
 import { LineGeometry } from 'three/examples/jsm/Addons.js';
-import { ImageEditorUI } from './imageEditor.js';
-import { traceImageDataToPolylines, applyCurveFit, rdp, assignBreaksToLoops, splitLoopIntoEdges, sanitizeLoopsForExtrude, dropIntersectingLoops } from './traceUtils.js';
+import { BREP } from "../../BREP/BREP.js";
 import { SelectionState } from '../../UI/SelectionState.js';
+import { ImageEditorUI } from './imageEditor.js';
+import { applyCurveFit, assignBreaksToLoops, dropIntersectingLoops, rdp, sanitizeLoopsForExtrude, splitLoopIntoEdges, traceImageDataToPolylines } from './traceUtils.js';
+const THREE = BREP.THREE;
 
 const renderHiddenField = ({ id, row }) => {
   if (row && row.style) row.style.display = 'none';

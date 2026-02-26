@@ -1,13 +1,13 @@
-import { BREP } from "../../BREP/BREP.js";
-const THREE = BREP.THREE;
 import { LineGeometry } from "three/examples/jsm/Addons.js";
+import { BREP } from "../../BREP/BREP.js";
+import { SplineEditorSession } from "./SplineEditorSession.js";
 import {
-  DEFAULT_RESOLUTION,
-  normalizeSplineData,
   buildHermitePolyline,
   cloneSplineData,
+  DEFAULT_RESOLUTION,
+  normalizeSplineData,
 } from "./splineUtils.js";
-import { SplineEditorSession } from "./SplineEditorSession.js";
+const THREE = BREP.THREE;
 
 function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
   const normalizeNumber = (value) => {

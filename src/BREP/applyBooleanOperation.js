@@ -3,9 +3,9 @@
 // a list of scene solids referenced by name via the boolean param widget.
 
 import * as THREE from 'three';
-import { Manifold, ManifoldMesh } from "./SolidShared.js";
 import { Solid } from "./BetterSolid.js";
 import { MeshRepairer } from "./MeshRepairer.js";
+import { Manifold, ManifoldMesh } from "./SolidShared.js";
 import { computeBoundsFromVertices } from "./boundsUtils.js";
 
 const __booleanDebugConfig = (() => {

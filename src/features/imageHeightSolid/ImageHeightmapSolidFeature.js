@@ -1,6 +1,6 @@
 import { BREP } from "../../BREP/BREP.js";
-const THREE = BREP.THREE;
 import { ImageEditorUI } from '../imageToFace/imageEditor.js';
+const THREE = BREP.THREE;
 
 const inputParamsSchema = {
   id: {

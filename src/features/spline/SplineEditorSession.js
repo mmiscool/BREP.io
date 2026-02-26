@@ -1,11 +1,11 @@
 import * as THREE from "three";
-import { CombinedTransformControls  } from "../../UI/controls/CombinedTransformControls.js";
 import { BREP } from "../../BREP/BREP.js";
+import { CombinedTransformControls } from "../../UI/controls/CombinedTransformControls.js";
 import {
-  DEFAULT_RESOLUTION,
-  normalizeSplineData,
   buildHermitePolyline,
   cloneSplineData,
+  DEFAULT_RESOLUTION,
+  normalizeSplineData,
 } from "./splineUtils.js";
 
 const noop = () => { };

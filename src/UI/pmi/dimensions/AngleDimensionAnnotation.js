@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { BaseAnnotation } from '../BaseAnnotation.js';
-import { makeOverlayLine, addArrowCone, getElementDirection, objectRepresentativePoint, screenSizeWorld } from '../annUtils.js';
+import { addArrowCone, getElementDirection, makeOverlayLine, objectRepresentativePoint, screenSizeWorld } from '../annUtils.js';
 
 const inputParamsSchema = {
   id: {

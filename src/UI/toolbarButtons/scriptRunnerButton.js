@@ -1,5 +1,5 @@
-import { FloatingWindow } from '../FloatingWindow.js';
 import '../EnvMonacoEditor.js';
+import { FloatingWindow } from '../FloatingWindow.js';
 
 const PANEL_KEY = Symbol('ScriptRunnerPanel');
 const DEFAULT_SNIPPET = `// Access the app environment via the global "env" object.

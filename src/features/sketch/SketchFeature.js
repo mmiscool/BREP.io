@@ -1,11 +1,11 @@
 
-import { ConstraintEngine } from './sketchSolver2D/ConstraintEngine.js';
-import { BREP } from "../../BREP/BREP.js";
-const THREE = BREP.THREE;
 import { LineGeometry } from 'three/examples/jsm/Addons.js';
-import { deepClone } from '../../utils/deepClone.js';
+import { BREP } from "../../BREP/BREP.js";
 import { SelectionState } from '../../UI/SelectionState.js';
 import { renderButtonField } from '../../UI/featureDialogWidgets/buttonField.js';
+import { deepClone } from '../../utils/deepClone.js';
+import { ConstraintEngine } from './sketchSolver2D/ConstraintEngine.js';
+const THREE = BREP.THREE;
 
 function hasReferenceValue(value) {
     if (value == null) return false;

@@ -1,5 +1,5 @@
 "use strict";
-import { calculateAngle, rotatePoint, distance, roundToDecimals } from "./mathHelpersMod.js";
+import { calculateAngle, distance, rotatePoint, roundToDecimals } from "./mathHelpersMod.js";
 let tolerance = 0.00001;
 let distanceSlideThresholdRatio = 0.10;
 let distanceSlideStepRatio = 0.10;

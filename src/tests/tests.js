@@ -1,87 +1,87 @@
-import { posix as path } from '../path.proxy.js';
+import { generate3MF } from '../exporters/threeMF.js';
 import { fs } from '../fs.proxy.js';
 import { PartHistory } from "../PartHistory.js";
-import { test_primitiveCube } from './test_primitiveCube.js';
-import { test_solidMetrics, afterRun_solidMetrics } from './test_solidMetrics.js';
-import { test_primitiveCylinder } from './test_primitiveCylinder.js';
-import { test_plane } from './test_plane.js';
-import { test_primitiveCone } from './test_primitiveCone.js';
-import { test_primitiveTorus } from './test_primitiveTorus.js';
-import { test_boolean_subtract } from './test_boolean_subtract.js';
-import { test_primitiveSphere } from './test_primitiveSphere.js';
-import { test_primitivePyramid } from './test_primitivePyramid.js';
-import { test_stlLoader } from './test_stlLoader.js';
-import {
-    test_import3d_decimation_reduces_triangle_count,
-    afterRun_import3d_decimation_reduces_triangle_count,
-    test_import3d_decimation_reapplies_from_cached_source_mesh,
-    afterRun_import3d_decimation_reapplies_from_cached_source_mesh,
-    test_import3d_decimation_100_restores_original_geometry,
-    afterRun_import3d_decimation_100_restores_original_geometry,
-    test_import3d_decimation_seeds_source_snapshot_for_legacy_cache,
-    afterRun_import3d_decimation_seeds_source_snapshot_for_legacy_cache,
-    test_import3d_decimation_preserves_source_snapshot_without_json_clone,
-    afterRun_import3d_decimation_preserves_source_snapshot_without_json_clone,
-} from './test_import3dDecimation.js';
-import {
-    test_import3d_planar_extraction_merges_sliver_bridge,
-    afterRun_import3d_planar_extraction_merges_sliver_bridge,
-} from './test_import3dPlanarExtraction.js';
-import {
-    test_import3d_extract_multiple_solids_toggle,
-    afterRun_import3d_extract_multiple_solids_toggle,
-} from './test_import3dMultipleSolids.js';
-import { test_SweepFace } from './test_sweepFace.js';
-import { test_ExtrudeFace } from './test_extrudeFace.js';
-import { test_Fillet } from './test_fillet.js';
-import { test_fillet_angle, afterRun_fillet_angle } from './test_fillet_angle.js';
-import { test_Chamfer } from './test_chamfer.js';
-import { test_mirror } from './test_mirror.js';
-import { test_fillets_more_dificult } from './test_filletsMoreDifficult.js';
-import { test_tube } from './test_tube.js';
-import { test_tube_closedLoop } from './test_tube_closedLoop.js';
-import { test_offsetShellGrouping } from './test_offsetShellGrouping.js';
-import { test_pushFace, afterRun_pushFace } from './test_pushFace.js';
-import { test_sketch_openLoop, afterRun_sketch_openLoop } from './test_sketch_openLoop.js';
-import {
-    test_sketch_solver_topology_rect_shared_points,
-    test_sketch_solver_topology_coincident_chain,
-    test_sketch_solver_topology_coincident_loop_no_flip,
-    test_sketch_solver_topology_rect_round_trip_sequence,
-    test_sketch_solver_topology_coincident_chain_multi_step,
-    test_sketch_solver_distance_slide_large_drop_settles_single_solve,
-    test_sketch_solver_line_to_point_distance_constraint,
-} from './test_sketch_solver_topology_stability.js';
+import { posix as path } from '../path.proxy.js';
 import { registerSketchSolverTopologyFixtureTests } from './sketchSolverTopologyFixtureLoader.js';
-import { test_Fillet_NonClosed, afterRun_Fillet_NonClosed } from './test_fillet_nonClosed.js';
-import { test_history_features_basic, afterRun_history_features_basic } from './test_history_features_basic.js';
-import { test_history_expand_does_not_dirty, afterRun_history_expand_does_not_dirty } from './test_history_expand_does_not_dirty.js';
+import { test_boolean_subtract } from './test_boolean_subtract.js';
+import { test_Chamfer } from './test_chamfer.js';
 import {
+    test_edge_smooth_constraints_prevent_triangle_foldback,
     test_edge_smooth_curve_fit,
     test_edge_smooth_curve_fit_closed_loop,
-    test_edge_smooth_constraints_prevent_triangle_foldback,
-    test_edge_smooth_whole_solid_selection,
     test_edge_smooth_face_selection,
+    test_edge_smooth_whole_solid_selection,
 } from './test_edge_smooth_curve_fit.js';
-import { test_textToFace, afterRun_textToFace } from './test_textToFace.js';
-import { test_sheetMetal_nonManifold_sm_f18 } from './test_sheetMetal_nonManifold_sm_f18.js';
-import { test_sheetMetal_cutoutEdge_flange_controls } from './test_sheetMetal_cutoutEdge_flange_controls.js';
-import { test_sheetMetal_corner_fillet } from './test_sheetMetal_corner_fillet.js';
-import { test_sheetMetal_corner_fillet_selection_resolution } from './test_sheetMetal_corner_fillet_selection_resolution.js';
-import { test_sheetMetal_corner_fillet_compound_reference } from './test_sheetMetal_corner_fillet_compound_reference.js';
-import { generate3MF } from '../exporters/threeMF.js';
+import { test_ExtrudeFace } from './test_extrudeFace.js';
+import { test_Fillet } from './test_fillet.js';
+import { afterRun_fillet_angle, test_fillet_angle } from './test_fillet_angle.js';
+import { afterRun_Fillet_NonClosed, test_Fillet_NonClosed } from './test_fillet_nonClosed.js';
+import { test_fillets_more_dificult } from './test_filletsMoreDifficult.js';
+import { afterRun_history_expand_does_not_dirty, test_history_expand_does_not_dirty } from './test_history_expand_does_not_dirty.js';
+import { afterRun_history_features_basic, test_history_features_basic } from './test_history_features_basic.js';
 import {
-    test_hole_through,
-    afterRun_hole_through,
-    test_hole_thread_symbolic,
-    afterRun_hole_thread_symbolic,
-    test_hole_thread_modeled,
-    afterRun_hole_thread_modeled,
-    test_hole_countersink,
-    afterRun_hole_countersink,
-    test_hole_counterbore,
     afterRun_hole_counterbore,
+    afterRun_hole_countersink,
+    afterRun_hole_thread_modeled,
+    afterRun_hole_thread_symbolic,
+    afterRun_hole_through,
+    test_hole_counterbore,
+    test_hole_countersink,
+    test_hole_thread_modeled,
+    test_hole_thread_symbolic,
+    test_hole_through,
 } from './test_hole.js';
+import {
+    afterRun_import3d_decimation_100_restores_original_geometry,
+    afterRun_import3d_decimation_preserves_source_snapshot_without_json_clone,
+    afterRun_import3d_decimation_reapplies_from_cached_source_mesh,
+    afterRun_import3d_decimation_reduces_triangle_count,
+    afterRun_import3d_decimation_seeds_source_snapshot_for_legacy_cache,
+    test_import3d_decimation_100_restores_original_geometry,
+    test_import3d_decimation_preserves_source_snapshot_without_json_clone,
+    test_import3d_decimation_reapplies_from_cached_source_mesh,
+    test_import3d_decimation_reduces_triangle_count,
+    test_import3d_decimation_seeds_source_snapshot_for_legacy_cache,
+} from './test_import3dDecimation.js';
+import {
+    afterRun_import3d_extract_multiple_solids_toggle,
+    test_import3d_extract_multiple_solids_toggle,
+} from './test_import3dMultipleSolids.js';
+import {
+    afterRun_import3d_planar_extraction_merges_sliver_bridge,
+    test_import3d_planar_extraction_merges_sliver_bridge,
+} from './test_import3dPlanarExtraction.js';
+import { test_mirror } from './test_mirror.js';
+import { test_offsetShellGrouping } from './test_offsetShellGrouping.js';
+import { test_plane } from './test_plane.js';
+import { test_primitiveCone } from './test_primitiveCone.js';
+import { test_primitiveCube } from './test_primitiveCube.js';
+import { test_primitiveCylinder } from './test_primitiveCylinder.js';
+import { test_primitivePyramid } from './test_primitivePyramid.js';
+import { test_primitiveSphere } from './test_primitiveSphere.js';
+import { test_primitiveTorus } from './test_primitiveTorus.js';
+import { afterRun_pushFace, test_pushFace } from './test_pushFace.js';
+import { test_sheetMetal_corner_fillet } from './test_sheetMetal_corner_fillet.js';
+import { test_sheetMetal_corner_fillet_compound_reference } from './test_sheetMetal_corner_fillet_compound_reference.js';
+import { test_sheetMetal_corner_fillet_selection_resolution } from './test_sheetMetal_corner_fillet_selection_resolution.js';
+import { test_sheetMetal_cutoutEdge_flange_controls } from './test_sheetMetal_cutoutEdge_flange_controls.js';
+import { test_sheetMetal_nonManifold_sm_f18 } from './test_sheetMetal_nonManifold_sm_f18.js';
+import { afterRun_sketch_openLoop, test_sketch_openLoop } from './test_sketch_openLoop.js';
+import {
+    test_sketch_solver_distance_slide_large_drop_settles_single_solve,
+    test_sketch_solver_line_to_point_distance_constraint,
+    test_sketch_solver_topology_coincident_chain,
+    test_sketch_solver_topology_coincident_chain_multi_step,
+    test_sketch_solver_topology_coincident_loop_no_flip,
+    test_sketch_solver_topology_rect_round_trip_sequence,
+    test_sketch_solver_topology_rect_shared_points,
+} from './test_sketch_solver_topology_stability.js';
+import { afterRun_solidMetrics, test_solidMetrics } from './test_solidMetrics.js';
+import { test_stlLoader } from './test_stlLoader.js';
+import { test_SweepFace } from './test_sweepFace.js';
+import { afterRun_textToFace, test_textToFace } from './test_textToFace.js';
+import { test_tube } from './test_tube.js';
+import { test_tube_closedLoop } from './test_tube_closedLoop.js';
 
 const IS_NODE_RUNTIME = typeof process !== 'undefined' && process.versions && process.versions.node && typeof window === 'undefined';
 const TEST_LOG_PATH = path.join('tests', 'test-run.log');

@@ -1,8 +1,8 @@
 "use strict";
 
-import { SelectionFilter } from './SelectionFilter.js';
 import * as THREE from 'three';
 import { Line2, LineGeometry, LineMaterial } from 'three/examples/jsm/Addons.js';
+import { SelectionFilter } from './SelectionFilter.js';
 // Use hybrid translate+rotate gizmo used by the Viewer
 import { CombinedTransformControls } from './controls/CombinedTransformControls.js';
 import { getWidgetRenderer } from './featureDialogWidgets/index.js';

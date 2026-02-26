@@ -1,7 +1,7 @@
 "use strict";
 
 import { constraints } from "./constraintDefinitions.js";
-import { distance, calculateAngle } from "./mathHelpersMod.js";
+import { calculateAngle, distance } from "./mathHelpersMod.js";
 
 // === Constraint function table ===
 const constraintFunctions = constraints.constraintFunctions;

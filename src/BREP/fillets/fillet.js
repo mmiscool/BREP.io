@@ -1,22 +1,22 @@
-import { Solid } from "../BetterSolid.js";
 import * as THREE from 'three';
+import { Solid } from "../BetterSolid.js";
+import { Tube } from "../Tube.js";
+import { computeFaceAreaFromTriangles } from "./filletGeometry.js";
 import {
-    getScaleAdaptiveTolerance,
-    getDistanceTolerance,
-    getAngleTolerance,
-    getCachedFaceDataForTris,
     averageFaceNormalObjectSpace,
-    localFaceNormalAtPoint,
-    projectPointOntoFaceTriangles,
     batchProjectPointsOntoFace,
     clamp,
+    getAngleTolerance,
+    getCachedFaceDataForTris,
+    getDistanceTolerance,
+    getScaleAdaptiveTolerance,
     isFiniteVec3,
+    localFaceNormalAtPoint,
+    projectPointOntoFaceTriangles,
 } from './inset.js';
 import {
     solveCenterFromOffsetPlanesAnchored,
 } from './outset.js';
-import { Tube } from "../Tube.js";
-import { computeFaceAreaFromTriangles } from "./filletGeometry.js";
 
 export { clearFilletCaches, trimFilletCaches } from './inset.js';
 export { fixTJunctionsAndPatchHoles } from './outset.js';

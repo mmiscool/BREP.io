@@ -1,32 +1,32 @@
 // fileManagerWidget.js
 // A lightweight widget to save/load/delete models using IndexedDB storage.
 // Designed to be embedded as an Accordion section (similar to expressionsManager).
-import * as THREE from 'three';
 import JSZip from 'jszip';
-import { generate3MF, computeTriangleMaterialIndices } from '../exporters/threeMF.js';
-import { CADmaterials } from './CADmaterials.js';
+import * as THREE from 'three';
+import { computeTriangleMaterialIndices, generate3MF } from '../exporters/threeMF.js';
 import {
   localStorage as LS,
   STORAGE_BACKEND_EVENT,
   getGithubStorageConfig,
 } from '../idbStorage.js';
 import {
+  MODEL_STORAGE_PREFIX,
+  base64ToUint8Array,
+  getComponentRecord,
+  listComponentRecords,
+  removeComponentRecord,
+  setComponentRecord,
+  uint8ArrayToBase64,
+} from '../services/componentLibrary.js';
+import { readDroppedWorkspaceFileRecord } from '../services/droppedWorkspaceFiles.js';
+import { listMountedDirectories } from '../services/mountedStorage.js';
+import {
   readBrowserStorageValue,
   writeBrowserStorageValue,
 } from '../utils/browserStorage.js';
-import {
-  listComponentRecords,
-  getComponentRecord,
-  setComponentRecord,
-  removeComponentRecord,
-  MODEL_STORAGE_PREFIX,
-  uint8ArrayToBase64,
-  base64ToUint8Array,
-} from '../services/componentLibrary.js';
-import { readDroppedWorkspaceFileRecord } from '../services/droppedWorkspaceFiles.js';
+import { CADmaterials } from './CADmaterials.js';
 import { HISTORY_COLLECTION_REFRESH_EVENT } from './history/HistoryCollectionWidget.js';
 import { WorkspaceFileBrowserWidget } from './WorkspaceFileBrowserWidget.js';
-import { listMountedDirectories } from '../services/mountedStorage.js';
 
 const THUMBNAIL_CAPTURE_SIZE = 240;
 

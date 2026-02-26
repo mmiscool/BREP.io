@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Solid } from './BetterSolid.js';
-import { getEdgePolylineWorld } from './edgePolylineUtils.js';
 import { computeBoundsFromVertices } from './boundsUtils.js';
+import { getEdgePolylineWorld } from './edgePolylineUtils.js';
 
 // Build a closed extruded solid from a single face by translating
 // the face and sweeping exactly one side wall per original edge.

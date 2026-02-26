@@ -1,7 +1,7 @@
 import { SchemaForm } from '../featureDialogs.js';
 import { SelectionFilter } from '../SelectionFilter.js';
-import { resolveEntryId, resolveHistoryDisplayInfo } from './historyDisplayInfo.js';
 import { HISTORY_COLLECTION_WIDGET_CSS } from './historyCollectionWidget.css.js';
+import { resolveEntryId, resolveHistoryDisplayInfo } from './historyDisplayInfo.js';
 
 export const HISTORY_COLLECTION_REFRESH_EVENT = 'brep:history-collections-refresh';
 

@@ -4,8 +4,8 @@
 // Views are persisted with the PartHistory instance.
 
 import * as THREE from 'three';
-import { captureCameraSnapshot, applyCameraSnapshot, adjustOrthographicFrustum } from './annUtils.js';
 import { AnnotationHistory } from './AnnotationHistory.js';
+import { adjustOrthographicFrustum, applyCameraSnapshot, captureCameraSnapshot } from './annUtils.js';
 
 const UPDATE_CAMERA_TOOLTIP = 'Update this view to match the current camera';
 

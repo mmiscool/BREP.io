@@ -1,13 +1,13 @@
+import { SelectionState } from "../../UI/SelectionState.js";
 import {
-    THREE,
     CADmaterials,
-    LineGeometry,
     debugMode,
     Edge,
-    Vertex,
-    Face
+    Face,
+    LineGeometry,
+    THREE,
+    Vertex
 } from "../SolidShared.js";
-import { SelectionState } from "../../UI/SelectionState.js";
 
 
 

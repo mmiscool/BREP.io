@@ -1,6 +1,4 @@
 import * as THREE from 'three';
-import { BaseAnnotation } from '../BaseAnnotation.js';
-import { getPMIStyle } from '../pmiStyle.js';
 import {
   addArrowCone,
   makeOverlayLine,
@@ -8,6 +6,8 @@ import {
   objectRepresentativePoint,
   screenSizeWorld,
 } from '../annUtils.js';
+import { BaseAnnotation } from '../BaseAnnotation.js';
+import { getPMIStyle } from '../pmiStyle.js';
 
 const inputParamsSchema = {
   id: {

@@ -772,12 +772,7 @@ async function clearGithubStorageConfig() {
 }
 
 export {
-  localStorage,
-  getLocalStorageBackend,
-  STORAGE_BACKEND_EVENT,
-  configureGithubStorage,
-  getGithubStorageConfig,
-  getStorageMode,
-  setStorageMode,
-  clearGithubStorageConfig,
+  clearGithubStorageConfig, configureGithubStorage,
+  getGithubStorageConfig, getLocalStorageBackend, getStorageMode, localStorage, setStorageMode, STORAGE_BACKEND_EVENT
 };
+

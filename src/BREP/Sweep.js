@@ -1,7 +1,7 @@
-import { Solid } from './BetterSolid.js';
-import { getEdgePolylineWorld } from './edgePolylineUtils.js';
-import { computeBoundsFromVertices } from './boundsUtils.js';
 import * as THREE from 'three';
+import { Solid } from './BetterSolid.js';
+import { computeBoundsFromVertices } from './boundsUtils.js';
+import { getEdgePolylineWorld } from './edgePolylineUtils.js';
 const DEBUG = false;
 
 // Debug helper for sweep/pathAlign. Enable by setting window.BREP_DEBUG_SWEEP = 1

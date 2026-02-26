@@ -1,6 +1,6 @@
-import { fs } from '../fs.proxy.js';
 import { computeFilletCenterline } from '../BREP/fillets/fillet.js';
 import { projectPointOntoFaceTriangles } from '../BREP/fillets/inset.js';
+import { fs } from '../fs.proxy.js';
 
 const PART_PATH = 'src/tests/partFiles/fillet_angle_test.BREP.json';
 

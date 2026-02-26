@@ -1,6 +1,6 @@
 // Image editor that displays as a full screen paint-like editor
 import { SchemaForm } from '../../UI/featureDialogs.js';
-import { traceImageDataToPolylines, applyCurveFit, assignBreaksToLoops, splitLoopIntoEdges, sanitizeLoopsForExtrude, dropIntersectingLoops } from './traceUtils.js';
+import { applyCurveFit, assignBreaksToLoops, dropIntersectingLoops, sanitizeLoopsForExtrude, splitLoopIntoEdges, traceImageDataToPolylines } from './traceUtils.js';
 
 export class ImageEditorUI {
     // onSaveCallback can be a function (dataUrl)=>void, or an object { onSave, onCancel }

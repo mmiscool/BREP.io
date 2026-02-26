@@ -1,6 +1,6 @@
+import * as THREE from 'three';
 import { generate3MF } from '../../exporters/threeMF.js';
 import { localStorage as LS } from '../../idbStorage.js';
-import * as THREE from 'three';
 
 const THUMBNAIL_CAPTURE_SIZE = 240;
 

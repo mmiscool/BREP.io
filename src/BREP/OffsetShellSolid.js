@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
-import { Manifold } from './SolidShared.js';
 import { Solid } from './BetterSolid.js';
+import { Manifold } from './SolidShared.js';
 
 // Manifold imported directly as named export
 

@@ -3,11 +3,11 @@
 import * as THREE from "three";
 import { Line2, LineGeometry, LineMaterial } from "three/examples/jsm/Addons.js";
 import { ConstraintSolver } from "../../features/sketch/sketchSolver2D/ConstraintEngine.js";
-import { updateListHighlights, applyHoverAndSelectionColors } from "./highlights.js";
+import { deepClone } from "../../utils/deepClone.js";
+import { AccordionWidget } from "../AccordionWidget.js";
 import { renderDimensions as dimsRender } from "./dimensions.js";
 import { vectorizeImageData } from "./handDrawToVectors/fuzzydraw.js";
-import { AccordionWidget } from "../AccordionWidget.js";
-import { deepClone } from "../../utils/deepClone.js";
+import { applyHoverAndSelectionColors, updateListHighlights } from "./highlights.js";
 
 const POINT_LINE_DISTANCE_TYPE = "↥";
 
