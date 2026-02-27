@@ -289,20 +289,35 @@ export class HistoryCollectionWidget {
       index,
     });
     if (elements.titleEl) {
-      elements.titleEl.textContent = info.name || '';
+      const title = info.name || '';
+      if (elements.titleEl.textContent !== title) {
+        elements.titleEl.textContent = title;
+      }
     }
     if (elements.metaEl) {
       const parts = [];
       if (info.id) parts.push(`#${info.id}`);
       if (info.statusText) parts.push(info.statusText);
-      elements.metaEl.textContent = parts.join(' · ');
-      elements.metaEl.title = info.statusTitle || '';
-      elements.metaEl.style.color = info.statusColor || '';
+      const metaText = parts.join(' · ');
+      const metaTitle = info.statusTitle || '';
+      const metaColor = info.statusColor || '';
+      if (elements.metaEl.textContent !== metaText) elements.metaEl.textContent = metaText;
+      if (elements.metaEl.title !== metaTitle) elements.metaEl.title = metaTitle;
+      if (elements.metaEl.style.color !== metaColor) elements.metaEl.style.color = metaColor;
     }
     if (elements.item) {
-      elements.item.classList.toggle('has-error', Boolean(info.hasError));
-      elements.item.classList.toggle('is-running', Boolean(info.isRunning));
-      elements.item.setAttribute('aria-busy', info.isRunning ? 'true' : 'false');
+      const hasError = Boolean(info.hasError);
+      const isRunning = Boolean(info.isRunning);
+      if (elements.item.classList.contains('has-error') !== hasError) {
+        elements.item.classList.toggle('has-error', hasError);
+      }
+      if (elements.item.classList.contains('is-running') !== isRunning) {
+        elements.item.classList.toggle('is-running', isRunning);
+      }
+      const ariaBusy = isRunning ? 'true' : 'false';
+      if (elements.item.getAttribute('aria-busy') !== ariaBusy) {
+        elements.item.setAttribute('aria-busy', ariaBusy);
+      }
     }
     return info;
   }

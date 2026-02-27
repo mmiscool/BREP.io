@@ -210,6 +210,28 @@ function base64ToUint8(b64) {
   for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
   return out;
 }
+let decodedEntryCache = null;
+let decodedEntryCacheB64 = '';
+let decodedEntryCacheBytes = null;
+let decodedEntryCacheUtf8 = null;
+
+function getDecodedEntryCache(entry, b64) {
+  if (
+    decodedEntryCache === entry
+    && decodedEntryCacheB64 === b64
+    && decodedEntryCacheBytes instanceof Uint8Array
+  ) {
+    return { bytes: decodedEntryCacheBytes, utf8: decodedEntryCacheUtf8 };
+  }
+  return null;
+}
+
+function setDecodedEntryCache(entry, b64, bytes, utf8 = null) {
+  decodedEntryCache = entry || null;
+  decodedEntryCacheB64 = typeof b64 === 'string' ? b64 : '';
+  decodedEntryCacheBytes = bytes instanceof Uint8Array ? bytes : new Uint8Array();
+  decodedEntryCacheUtf8 = typeof utf8 === 'string' ? utf8 : null;
+}
 function nowMs() { return Date.now(); }
 
 class IndexedDbFS {
@@ -359,7 +381,7 @@ class IndexedDbFS {
 
     const content = uint8ToBase64(bytes);
     const exists = !!this.index.entries[path];
-    this.index.entries[path] = {
+    const entry = {
       type: 'file',
       data: content,
       encoding: 'base64',
@@ -367,6 +389,9 @@ class IndexedDbFS {
       mtimeMs: nowMs(),
       mode: (options.mode ?? 0o666)
     };
+    this.index.entries[path] = entry;
+    const cachedUtf8 = (typeof data === 'string' && (!enc || enc === 'utf8')) ? data : null;
+    setDecodedEntryCache(entry, content, bytes.slice(), cachedUtf8);
     const touched = new Set([path]);
     if (!exists) {
       const p = this._linkIntoParent(path);
@@ -397,7 +422,8 @@ class IndexedDbFS {
     if (!existing) return this.writeFileSync(path, appendBytes, options);
     if (existing.type !== 'file') throw this._enoent('EISDIR', path);
 
-    const current = base64ToUint8(existing.data);
+    const cached = getDecodedEntryCache(existing, existing.data);
+    const current = cached ? cached.bytes : base64ToUint8(existing.data);
     const merged = new Uint8Array(current.length + appendBytes.length);
     merged.set(current, 0);
     merged.set(appendBytes, current.length);
@@ -405,6 +431,7 @@ class IndexedDbFS {
     existing.data = uint8ToBase64(merged);
     existing.size = merged.length;
     existing.mtimeMs = nowMs();
+    setDecodedEntryCache(existing, existing.data, merged, null);
     this._save([path]);
   }
 
@@ -414,13 +441,22 @@ class IndexedDbFS {
     const entry = this.index.entries[path];
     if (!entry || entry.type !== 'file') throw this._enoent('ENOENT', path);
 
-    const bytes = base64ToUint8(entry.data);
+    let cached = getDecodedEntryCache(entry, entry.data);
+    if (!cached) {
+      const decoded = base64ToUint8(entry.data);
+      setDecodedEntryCache(entry, entry.data, decoded, null);
+      cached = getDecodedEntryCache(entry, entry.data);
+    }
+    const bytes = cached?.bytes || new Uint8Array();
     const enc = this._resolveEncoding(options);
     if (enc) {
       if (enc !== 'utf8') throw new Error(`Unsupported encoding in browser VFS: ${enc}`);
-      return uint8ToStr(bytes);
+      if (typeof cached?.utf8 === 'string') return cached.utf8;
+      const text = uint8ToStr(bytes);
+      setDecodedEntryCache(entry, entry.data, bytes, text);
+      return text;
     }
-    return bytes;
+    return bytes.slice();
   }
 
   mkdirSync(path, options = {}) {

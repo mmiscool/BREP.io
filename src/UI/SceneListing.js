@@ -2,6 +2,9 @@
 // Tree UI for Solid → Face/Edge/Loop with per-object (non-recursive) visibility + selection sync.
 import { SelectionFilter } from './SelectionFilter.js';
 
+const SCENE_MEMBERSHIP_SYNC_MS = 200;
+const SCENE_ATTRIBUTES_SYNC_MS = 75;
+
 export class SceneListing {
     /**
      * @param {THREE.Scene} scene
@@ -41,6 +44,8 @@ export class SceneListing {
         this._hoveredUuids = new Set();
         this._running = false;
         this._raf = 0;
+        this._lastMembershipSyncAt = -Infinity;
+        this._lastAttributesSyncAt = -Infinity;
 
         this.#attachTypeVisibilityButtons();
         this.#attachDisplayModeToggle();
@@ -72,6 +77,11 @@ export class SceneListing {
         this.#syncMembership();
         // Then ensure attributes (visibility / selection) reflect scene
         this.#syncAttributes();
+        const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+            ? performance.now()
+            : Date.now();
+        this._lastMembershipSyncAt = now;
+        this._lastAttributesSyncAt = now;
     }
 
     start() {
@@ -79,8 +89,19 @@ export class SceneListing {
         this._running = true;
         const tick = () => {
             if (!this._running) return;
-            this.#syncMembership();
-            this.#syncAttributes();
+            const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+                ? performance.now()
+                : Date.now();
+            let didMembershipSync = false;
+            if ((now - this._lastMembershipSyncAt) >= SCENE_MEMBERSHIP_SYNC_MS) {
+                this.#syncMembership();
+                this._lastMembershipSyncAt = now;
+                didMembershipSync = true;
+            }
+            if (didMembershipSync || (now - this._lastAttributesSyncAt) >= SCENE_ATTRIBUTES_SYNC_MS) {
+                this.#syncAttributes();
+                this._lastAttributesSyncAt = now;
+            }
             this._raf = requestAnimationFrame(tick);
         };
         this._raf = requestAnimationFrame(tick);

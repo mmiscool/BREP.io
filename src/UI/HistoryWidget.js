@@ -4,6 +4,7 @@ import { FeatureDimensionOverlay } from './featureDimensions/FeatureDimensionOve
 
 const FALLBACK_INTERVAL_MS = 200;
 const FEATURE_DRAG_RUN_THROTTLE_MS = 120;
+const HEADER_SYNC_MIN_INTERVAL_MS = 120;
 
 export class HistoryWidget extends HistoryCollectionWidget {
   constructor(viewer) {
@@ -34,6 +35,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
     this._runPromise = null;
     this._featureDragRunTimer = null;
     this._featureDragRunPending = false;
+    this._lastHeaderSyncTs = -Infinity;
     this._featureDimensionOverlay = null;
     try {
       this._featureDimensionOverlay = new FeatureDimensionOverlay({
@@ -72,7 +74,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
     this._metaEls.clear();
     this._itemEls.clear();
     super.render();
-    this._syncHeaderState();
+    this._syncHeaderState(true);
     this._syncFeatureDimensionOverlay();
   }
 
@@ -222,7 +224,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
 
   #afterPartHistoryMutated() {
     this._idsSignature = this.#computeIdsSignature();
-    this._syncHeaderState();
+    this._syncHeaderState(true);
     this.#refreshOpenForms();
     this._syncFeatureDimensionOverlay();
     try { this.viewer?._refreshAssemblyConstraintsPanelVisibility?.(); } catch { /* ignore */ }
@@ -471,7 +473,12 @@ export class HistoryWidget extends HistoryCollectionWidget {
     body.appendChild(wrap);
   }
 
-  _syncHeaderState() {
+  _syncHeaderState(force = false) {
+    const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+      ? performance.now()
+      : Date.now();
+    if (!force && (now - this._lastHeaderSyncTs) < HEADER_SYNC_MIN_INTERVAL_MS) return;
+    this._lastHeaderSyncTs = now;
     const entries = this._getEntries();
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];

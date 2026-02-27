@@ -30,6 +30,7 @@ const GITHUB_TREE_CACHE_TTL_MS = 15 * 1000;
 const githubRepoTreeCache = new Map();
 const githubRepoTreeInflight = new Map();
 const githubRepoTreeVersion = new Map();
+const localComponentParseCache = new Map();
 
 function normalizeBase64Payload(payload) {
   let b64 = String(payload || '');
@@ -822,6 +823,16 @@ function safeParse(json) {
   }
 }
 
+function parseLocalComponentRecordCached(key, raw) {
+  const rawText = typeof raw === 'string' ? raw : '';
+  if (!rawText) return null;
+  const cached = localComponentParseCache.get(key);
+  if (cached && cached.raw === rawText) return cached.parsed;
+  const parsed = safeParse(rawText);
+  localComponentParseCache.set(key, { raw: rawText, parsed });
+  return parsed;
+}
+
 function decodeModelKey(key) {
   try {
     return decodeURIComponent(key.slice(MODEL_STORAGE_PREFIX.length));
@@ -1271,7 +1282,7 @@ async function listLocalComponentRecords() {
       if (!key || !key.startsWith(MODEL_STORAGE_PREFIX)) continue;
       const raw = store.getItem(key);
       if (!raw) continue;
-      const parsed = safeParse(raw);
+      const parsed = parseLocalComponentRecordCached(key, raw);
       if (!parsed || (!parsed.data3mf && !parsed.data)) continue;
       const modelPath = decodeModelKey(key);
       const pathParts = splitComponentPath(modelPath);
@@ -1312,7 +1323,7 @@ async function getLocalComponentRecord(name, options = {}) {
     const store = await getLocalStore();
     const raw = store.getItem(key);
     if (!raw) return null;
-    const parsed = safeParse(raw);
+    const parsed = parseLocalComponentRecordCached(key, raw);
     if (!parsed) return null;
     const pathParts = splitComponentPath(modelPath);
     const thumbnail = normalizeStoredThumbnail(parsed.thumbnail);
@@ -1346,7 +1357,12 @@ async function setLocalComponentRecord(name, dataObj, options = {}) {
     } else if (payload.thumbnail !== undefined) {
       payload.thumbnail = normalizeStoredThumbnail(payload.thumbnail) || null;
     }
-    store.setItem(key, JSON.stringify(payload));
+    const rawPayload = JSON.stringify(payload);
+    store.setItem(key, rawPayload);
+    localComponentParseCache.set(key, {
+      raw: rawPayload,
+      parsed: safeParse(rawPayload),
+    });
   } catch {}
 }
 
@@ -1357,6 +1373,7 @@ async function removeLocalComponentRecord(name, options = {}) {
   try {
     const store = await getLocalStore();
     store.removeItem(key);
+    localComponentParseCache.delete(key);
   } catch {}
 }
 
