@@ -237,6 +237,101 @@ export class PartHistory {
     }
   }
 
+  #resolveVisibilityAnchor(obj) {
+    if (!obj || typeof obj !== 'object') return null;
+
+    const explicitParentSolid = obj.parentSolid || obj?.userData?.parentSolid || null;
+    if (explicitParentSolid && explicitParentSolid.isObject3D) return explicitParentSolid;
+
+    const isAnchorType = (candidate) => {
+      const t = String(candidate?.type || '').toUpperCase();
+      return t === 'SOLID' || t === 'COMPONENT' || t === 'SKETCH' || t === 'DATUM' || t === 'HELIX';
+    };
+
+    let cursor = obj.parent || null;
+    while (cursor && cursor !== this.scene) {
+      if (isAnchorType(cursor)) return cursor;
+      cursor = cursor.parent || null;
+    }
+    return null;
+  }
+
+  #buildVisibilityPersistenceKey(obj) {
+    if (!obj || typeof obj !== 'object' || typeof obj.visible === 'undefined') return null;
+
+    const type = String(obj.type || '').toUpperCase();
+    if (type !== 'SOLID' && type !== 'FACE' && type !== 'EDGE') return null;
+
+    const anchor = this.#resolveVisibilityAnchor(obj);
+    const anchorType = String(anchor?.type || '').toUpperCase();
+    const anchorName = String(anchor?.name || '');
+    const anchorFeatureIdRaw = anchor?.owningFeatureID ?? anchor?.userData?.owningFeatureID ?? null;
+    const anchorFeatureId = anchorFeatureIdRaw == null ? '' : String(anchorFeatureIdRaw);
+
+    const objectFeatureIdRaw = obj?.owningFeatureID ?? obj?.userData?.owningFeatureID ?? anchorFeatureIdRaw;
+    const objectFeatureId = objectFeatureIdRaw == null ? '' : String(objectFeatureIdRaw);
+
+    let objectName = '';
+    if (type === 'FACE') objectName = String(obj?.userData?.faceName || obj?.name || '');
+    else objectName = String(obj?.name || '');
+
+    let faceA = '';
+    let faceB = '';
+    if (type === 'EDGE') {
+      faceA = String(obj?.userData?.faceA || '');
+      faceB = String(obj?.userData?.faceB || '');
+      if (faceA > faceB) {
+        const tmp = faceA;
+        faceA = faceB;
+        faceB = tmp;
+      }
+    }
+
+    return JSON.stringify({
+      type,
+      objectName,
+      objectFeatureId,
+      anchorType,
+      anchorName,
+      anchorFeatureId,
+      faceA,
+      faceB,
+    });
+  }
+
+  #captureHiddenVisibilityState() {
+    const hiddenKeyCounts = new Map();
+    if (!this.scene || typeof this.scene.traverse !== 'function') return hiddenKeyCounts;
+
+    this.scene.traverse((obj) => {
+      if (!obj || obj.visible !== false) return;
+      const key = this.#buildVisibilityPersistenceKey(obj);
+      if (!key) return;
+      hiddenKeyCounts.set(key, (hiddenKeyCounts.get(key) || 0) + 1);
+    });
+
+    return hiddenKeyCounts;
+  }
+
+  #restoreHiddenVisibilityState(hiddenKeyCounts) {
+    if (!(hiddenKeyCounts instanceof Map) || hiddenKeyCounts.size === 0) return;
+    if (!this.scene || typeof this.scene.traverse !== 'function') return;
+
+    const remaining = new Map(hiddenKeyCounts);
+    this.scene.traverse((obj) => {
+      if (!obj || remaining.size === 0) return;
+      const key = this.#buildVisibilityPersistenceKey(obj);
+      if (!key) return;
+
+      const remainingCount = remaining.get(key) || 0;
+      if (remainingCount <= 0) return;
+
+      try { obj.visible = false; } catch { }
+      if (remainingCount === 1) remaining.delete(key);
+      else remaining.set(key, remainingCount - 1);
+    });
+  }
+
   static evaluateExpression(expressionsSource, equation) {
     const exprSource = typeof expressionsSource === 'string' ? expressionsSource : '';
     const fnBody = `${exprSource}; return ${equation} ;`;
@@ -307,6 +402,7 @@ export class PartHistory {
 
   async runHistory() {
     const whatStepToStopAt = this.currentHistoryStepId;
+    const hiddenVisibilityState = this.#captureHiddenVisibilityState();
 
     this.#setFeatureRunningState(null);
     try {
@@ -481,6 +577,7 @@ export class PartHistory {
             previousFeatureTimestamp = feature.timestamp;
             instance.errorString = `Error occurred while running feature ${featureId}: ${e.message}`;
             console.error(e);
+            try { this.#restoreHiddenVisibilityState(hiddenVisibilityState); } catch { }
             return;
           }
         }
@@ -510,6 +607,7 @@ export class PartHistory {
       } catch (error) {
         console.warn('[PartHistory] Assembly constraints run failed:', error);
       }
+      try { this.#restoreHiddenVisibilityState(hiddenVisibilityState); } catch { }
 
       // Do not clear currentHistoryStepId here. Keeping it preserves the UX of
       // "stop at the currently expanded feature" across subsequent runs. The
