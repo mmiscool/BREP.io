@@ -12,6 +12,7 @@ import { createShareButton } from './shareButton.js';
 import { createAboutButton } from './aboutButton.js';
 import { createTestsButton } from './testsButton.js';
 import { createScriptRunnerButton } from './scriptRunnerButton.js';
+import { createHistoryTestSnippetButton } from './historyTestSnippetButton.js';
 import { createSelectionStateButton } from './selectionStateButton.js';
 import { createSheetMetalFlatExportButton } from './sheetMetalFlatExportButton.js';
 import { createSheetMetalDebugButton } from './sheetMetalDebugButton.js';
@@ -48,6 +49,7 @@ export function registerDefaultToolbarButtons(viewer) {
   if (isLocalhost) creators.push(createSheetMetalDebugButton);
   creators.push(createAboutButton);
   if (isLocalhost) creators.push(createTestsButton);
+  if (isLocalhost) creators.push(createHistoryTestSnippetButton);
   creators.push(createScriptRunnerButton);
   if (isLocalhost) creators.push(createSelectionStateButton);
   creators.push(createUndoButton, createRedoButton);
