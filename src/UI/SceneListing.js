@@ -4,6 +4,7 @@ import { SelectionFilter } from './SelectionFilter.js';
 
 const SCENE_MEMBERSHIP_SYNC_MS = 200;
 const SCENE_ATTRIBUTES_SYNC_MS = 75;
+const SCENE_TREE_INDENT_STEP_PX = 20;
 
 export class SceneListing {
     /**
@@ -35,7 +36,7 @@ export class SceneListing {
 
         // --- State ------------------------------------------------------------------
         this._showAllObjects = false;
-        /** @type {Map<string, {obj: any, li: HTMLLIElement, chk: HTMLInputElement, nameEl: HTMLButtonElement, caret: HTMLButtonElement, childrenUL?: HTMLUListElement, lastSelected?: boolean}>} */
+        /** @type {Map<string, {obj: any, li: HTMLLIElement, chk: HTMLInputElement, nameEl: HTMLButtonElement, caret: HTMLButtonElement, childrenUL?: HTMLUListElement, depth: number, lastSelected?: boolean}>} */
         this.nodes = new Map();
         // Remember per-solid expand/collapse state across scene rebuilds (keyed by solid name)
         this._expandedByName = new Map(); // name -> boolean
@@ -203,10 +204,9 @@ export class SceneListing {
     }
 
     #ensureNodeFor(obj, parentSolid /* may be null for Solid itself */) {
-        if (this.nodes.has(obj.uuid)) return this.nodes.get(obj.uuid);
-
         // Parent UL: solids go at root; others under their owning solid node
         let parentUL = this.treeRoot;
+        let depth = 0;
         if (parentSolid) {
             const pInfo = this.nodes.get(parentSolid.uuid) || this.#ensureNodeFor(parentSolid, null);
             if (!pInfo.childrenUL) {
@@ -216,11 +216,24 @@ export class SceneListing {
                 pInfo.li.classList.add("is-parent");
             }
             parentUL = pInfo.childrenUL;
+            depth = ((typeof pInfo.depth === "number") ? pInfo.depth : 0) + 1;
+        }
+
+        const existing = this.nodes.get(obj.uuid);
+        if (existing) {
+            // Keep structure and indent coherent even if parentage changes between sync passes.
+            if (existing.li.parentElement !== parentUL) parentUL.appendChild(existing.li);
+            if (existing.depth !== depth) {
+                existing.depth = depth;
+                existing.li.style.setProperty("--st-indent", `${depth * SCENE_TREE_INDENT_STEP_PX}px`);
+            }
+            return existing;
         }
 
         const li = document.createElement("li");
         li.className = "scene-tree__item";
         li.dataset.uuid = obj.uuid;
+        li.style.setProperty("--st-indent", `${depth * SCENE_TREE_INDENT_STEP_PX}px`);
 
         // Row content: [▸][☑][name (button)]
         const row = document.createElement("div");
@@ -291,6 +304,7 @@ export class SceneListing {
             chk,
             nameEl: nameBtn,
             caret: toggle,
+            depth,
             childrenUL: null,
             lastSelected: undefined
         };
@@ -552,9 +566,12 @@ export class SceneListing {
 
     #ensureStyles() {
         const ID = "scene-tree-styles";
-        if (document.getElementById(ID)) return;
-        const style = document.createElement("style");
-        style.id = ID;
+        let style = document.getElementById(ID);
+        if (!style) {
+            style = document.createElement("style");
+            style.id = ID;
+            document.head.appendChild(style);
+        }
         style.textContent = `
 /* Dark, minimalist tree for CAD scene - Expand/Collapse fix included */
 .scene-tree{
@@ -606,7 +623,12 @@ export class SceneListing {
   border-bottom:1px solid #0f1620;
 }
 .scene-tree__row{
-  display:flex; align-items:center; gap:2px; padding:2px 2px; background:var(--row);
+  display:grid;
+  grid-template-columns: var(--st-indent, 0px) 20px 14px minmax(0, 1fr);
+  align-items:center;
+  column-gap:2px;
+  padding:2px;
+  background:var(--row);
 }
 .scene-tree__item:nth-child(even) > .scene-tree__row{ background:var(--row2); }
 .scene-tree__item.is-selected > .scene-tree__row{
@@ -619,22 +641,31 @@ export class SceneListing {
 }
 .scene-tree__item.is-parent.open > .scene-tree__row{ border-bottom:1px solid #111a26; }
 .st-caret{
+  grid-column:2;
   width:20px; height:20px; border:0; background:transparent; color:var(--muted);
   cursor:pointer; line-height:1; padding:0;
+  display:flex; align-items:center; justify-content:center;
 }
 .st-caret.is-leaf{ opacity:.35; cursor:default; }
 .st-chk{
+  grid-column:3;
   width:14px; height:14px; accent-color: var(--accent);
   cursor:pointer;
+  margin:0;
 }
 .st-name{
+  grid-column:4;
   background:transparent; border:0; color:var(--fg); cursor:pointer; padding:0;
   font:inherit; text-align:left;
-  width: 100%;
+  min-width:0;
+  width:auto;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 .st-name:hover{ text-decoration: underline; }
 .scene-tree__list--child{
-  margin:0; padding-left:24px;
+  margin:0; padding-left:0;
 }
 
 /* ▼▼ Expand/Collapse behavior (fix): hide child UL when parent isn't open */
@@ -650,6 +681,5 @@ export class SceneListing {
 .t-plane .st-name{ color:#c7ffcf; }
 
 `;
-        document.head.appendChild(style);
     }
 }

@@ -2012,11 +2012,13 @@ export class SchemaForm {
         for (const name of normalizedValues) {
             const chip = document.createElement('span');
             chip.className = 'ref-chip';
+            chip.title = name;
             try { chip.dataset.refName = name; } catch (_) { }
 
             const label = document.createElement('span');
             label.className = 'ref-chip-label';
             label.textContent = name;
+            label.title = name;
             chip.appendChild(label);
 
             // Hover highlight on chip hover
@@ -2688,8 +2690,8 @@ export class SchemaForm {
         0% { box-shadow: 0 0 0 0 rgba(249,115,22,0.32); }
         100% { box-shadow: 0 0 0 12px rgba(249,115,22,0); }
       }
-      .ref-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; background: #1a2030; border: 1px solid var(--border); font-size: 12px; max-width: 100%; }
-      .ref-chip-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
+      .ref-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; background: #1a2030; border: 1px solid var(--border); font-size: 12px; min-width: 0; max-width: min(100%, 340px); }
+      .ref-chip-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .ref-chip-remove { color: var(--muted); cursor: pointer; flex: 0 0 auto; }
       .ref-chip-remove:hover { color: var(--danger); }
 

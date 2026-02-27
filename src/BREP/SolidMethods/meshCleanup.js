@@ -2297,7 +2297,7 @@ export function cleanupTinyFaceIslands(size) {
         faceArea.set(id, (faceArea.get(id) || 0) + a);
     }
 
-    // Build edge -> triangles map, then triangle adjacency and boundary neighbors.
+    // Build edge -> triangles map, then triangle adjacency.
     const nv = (vp.length / 3) | 0;
     const NV = BigInt(Math.max(1, nv));
     const eKey = (a, b) => {
@@ -2322,10 +2322,8 @@ export function cleanupTinyFaceIslands(size) {
     }
 
     const triAdj = new Array(triCount);
-    const triNeighborFaces = new Array(triCount);
     for (let t = 0; t < triCount; t++) {
         triAdj[t] = [];
-        triNeighborFaces[t] = new Set();
     }
 
     for (const [, tris] of edgeToTris.entries()) {
@@ -2334,92 +2332,154 @@ export function cleanupTinyFaceIslands(size) {
         const b = tris[1] | 0;
         triAdj[a].push(b);
         triAdj[b].push(a);
-        const idA = ids[a] >>> 0;
-        const idB = ids[b] >>> 0;
-        if (idA !== idB) {
-            triNeighborFaces[a].add(idB);
-            triNeighborFaces[b].add(idA);
-        }
     }
-
-    // Tokenized visited array avoids clearing large buffers per face.
-    const seenToken = new Int32Array(triCount);
-    let token = 1;
 
     let reassigned = 0;
 
+    // Detect tiny faces by total face area (face-level trigger).
+    const tinyFaceIds = [];
     for (const [faceId, tris] of faceToTris.entries()) {
-        if (!tris || tris.length < 2) continue;
+        if (!tris || tris.length === 0) continue;
+        if ((faceArea.get(faceId) || 0) <= maxArea) tinyFaceIds.push(faceId >>> 0);
+    }
 
-        token++;
-        const components = [];
-        const stack = [];
+    // For each tiny face, reassign triangles one-by-one.
+    // Target face is chosen per triangle from that triangle's directly-adjacent faces.
+    // Prefer candidates that share more edges with the triangle, then larger face area.
+    for (let f = 0; f < tinyFaceIds.length; f++) {
+        const tinyFaceId = tinyFaceIds[f] >>> 0;
+        const tinyFaceTris = faceToTris.get(tinyFaceId);
+        if (!tinyFaceTris || tinyFaceTris.length === 0) continue;
 
-        for (let i = 0; i < tris.length; i++) {
-            const seed = tris[i] | 0;
-            if (seenToken[seed] === token) continue;
-            seenToken[seed] = token;
-            stack.length = 0;
-            stack.push(seed);
+        // Iterate until no triangle from this tiny face can be moved.
+        let movedInPass = true;
+        while (movedInPass) {
+            movedInPass = false;
+            for (let i = 0; i < tinyFaceTris.length; i++) {
+                const t = tinyFaceTris[i] | 0;
+                if ((ids[t] >>> 0) !== tinyFaceId) continue;
 
-            const compTris = [];
-            let compArea = 0;
-
-            while (stack.length) {
-                const t = stack.pop() | 0;
-                compTris.push(t);
-                compArea += areas[t];
+                const contactCount = new Map(); // neighbor face id -> shared-edge count
+                let bestId = null;
+                let bestContact = -Infinity;
+                let bestArea = -Infinity;
                 const nbrs = triAdj[t];
                 for (let j = 0; j < nbrs.length; j++) {
                     const u = nbrs[j] | 0;
-                    if (seenToken[u] === token) continue;
-                    if ((ids[u] >>> 0) !== faceId) continue;
-                    seenToken[u] = token;
-                    stack.push(u);
+                    const nid = ids[u] >>> 0;
+                    if (nid === tinyFaceId) continue;
+                    contactCount.set(nid, (contactCount.get(nid) || 0) + 1);
                 }
-            }
 
-            components.push({ tris: compTris, area: compArea });
-        }
-
-        if (components.length <= 1) continue;
-
-        for (let c = 0; c < components.length; c++) {
-            const comp = components[c];
-            if (!comp || !(comp.area <= maxArea)) continue;
-
-            const neighborIds = new Set();
-            for (let i = 0; i < comp.tris.length; i++) {
-                const t = comp.tris[i] | 0;
-                const nbrFaces = triNeighborFaces[t];
-                for (const nid of nbrFaces) {
-                    if ((nid >>> 0) === faceId) continue;
-                    neighborIds.add(nid >>> 0);
+                for (const [nid, count] of contactCount.entries()) {
+                    const a = faceArea.get(nid) || 0;
+                    if (count > bestContact || (count === bestContact && a > bestArea)) {
+                        bestContact = count;
+                        bestArea = a;
+                        bestId = nid;
+                    }
                 }
-            }
-            if (neighborIds.size === 0) continue;
+                if (bestId === null) continue;
 
-            let bestId = null;
-            let bestArea = -Infinity;
-            for (const nid of neighborIds) {
-                const a = faceArea.get(nid) || 0;
-                if (a > bestArea) {
-                    bestArea = a;
-                    bestId = nid;
-                }
-            }
-            if (bestId === null) continue;
-
-            for (let i = 0; i < comp.tris.length; i++) {
-                const t = comp.tris[i] | 0;
                 ids[t] = bestId;
+                const triA = areas[t] || 0;
+                faceArea.set(tinyFaceId, (faceArea.get(tinyFaceId) || 0) - triA);
+                faceArea.set(bestId, (faceArea.get(bestId) || 0) + triA);
                 reassigned++;
+                movedInPass = true;
+            }
+        }
+    }
+
+    // Stabilization: collapse any tiny disconnected label-islands that may remain
+    // after per-triangle moves, to prevent visual seam noise.
+    const collapseTinyLabelIslands = () => {
+        const currFaceToTris = new Map();
+        for (let t = 0; t < triCount; t++) {
+            const id = ids[t] >>> 0;
+            let arr = currFaceToTris.get(id);
+            if (!arr) { arr = []; currFaceToTris.set(id, arr); }
+            arr.push(t);
+        }
+
+        const seenToken = new Int32Array(triCount);
+        let token = 1;
+        const stack = [];
+        let changed = false;
+
+        for (const [faceIdRaw, tris] of currFaceToTris.entries()) {
+            const faceId = faceIdRaw >>> 0;
+            if (!tris || tris.length === 0) continue;
+
+            token++;
+            if (token <= 0) {
+                seenToken.fill(0);
+                token = 1;
             }
 
-            // Keep face area accounting roughly correct for subsequent choices.
-            faceArea.set(faceId, (faceArea.get(faceId) || 0) - comp.area);
-            faceArea.set(bestId, (faceArea.get(bestId) || 0) + comp.area);
+            for (let i = 0; i < tris.length; i++) {
+                const seed = tris[i] | 0;
+                if ((ids[seed] >>> 0) !== faceId) continue;
+                if (seenToken[seed] === token) continue;
+                seenToken[seed] = token;
+
+                stack.length = 0;
+                stack.push(seed);
+                const compTris = [];
+                let compArea = 0;
+                const neighborIds = new Set();
+
+                while (stack.length) {
+                    const t = stack.pop() | 0;
+                    compTris.push(t);
+                    compArea += areas[t] || 0;
+                    const nbrs = triAdj[t];
+                    for (let j = 0; j < nbrs.length; j++) {
+                        const u = nbrs[j] | 0;
+                        const nid = ids[u] >>> 0;
+                        if (nid === faceId) {
+                            if (seenToken[u] === token) continue;
+                            seenToken[u] = token;
+                            stack.push(u);
+                        } else {
+                            neighborIds.add(nid);
+                        }
+                    }
+                }
+
+                if (!(compArea <= maxArea)) continue;
+                if (neighborIds.size === 0) continue;
+
+                let bestId = null;
+                let bestArea = -Infinity;
+                for (const nid of neighborIds) {
+                    const a = faceArea.get(nid) || 0;
+                    if (a > bestArea) {
+                        bestArea = a;
+                        bestId = nid;
+                    }
+                }
+                if (bestId === null) continue;
+
+                for (let k = 0; k < compTris.length; k++) {
+                    const t = compTris[k] | 0;
+                    if ((ids[t] >>> 0) === faceId) {
+                        ids[t] = bestId;
+                        reassigned++;
+                        changed = true;
+                    }
+                }
+                faceArea.set(faceId, Math.max(0, (faceArea.get(faceId) || 0) - compArea));
+                faceArea.set(bestId, (faceArea.get(bestId) || 0) + compArea);
+            }
         }
+        return changed;
+    };
+
+    let islandPasses = 0;
+    while (collapseTinyLabelIslands()) {
+        islandPasses++;
+        if (islandPasses >= 8) break;
     }
 
     if (reassigned > 0) {

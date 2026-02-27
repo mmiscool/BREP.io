@@ -11,6 +11,8 @@ export function generateObjectUI(target, options = {}) {
     showTypes: options.showTypes ?? true,
     collapseChildren: options.collapseChildren ?? options.collapsed ?? true,
     maxPreview: options.maxPreview ?? 40,  // preview length for summaries
+    resolveReference: (typeof options.resolveReference === 'function') ? options.resolveReference : null,
+    onReferenceNavigate: (typeof options.onReferenceNavigate === 'function') ? options.onReferenceNavigate : null,
   };
 
   // Root container
@@ -106,6 +108,20 @@ function ensureStyles() {
     .value-input, .value-date{ width:100%; box-sizing:border-box; background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:5px 7px; font:12px ui-monospace, Menlo, Consolas, monospace; }
     .value-input.readonly, .value-date.readonly{ background:#0f141a; color:#c9d1d9; border-color:#1e2430; user-select:text; }
     .value-checkbox{ width:16px; height:16px; }
+    .objui-link{
+      width:100%;
+      box-sizing:border-box;
+      border:1px solid #35568f;
+      background:rgba(59,130,246,0.14);
+      color:#dbeafe;
+      border-radius:6px;
+      padding:5px 7px;
+      font:12px ui-monospace, Menlo, Consolas, monospace;
+      text-align:left;
+      cursor:pointer;
+    }
+    .objui-link:hover{ background:rgba(59,130,246,0.24); }
+    .objui-link:disabled{ cursor:not-allowed; opacity:0.65; }
 
     .hidden{ display:none !important; }
   `;
@@ -337,7 +353,8 @@ function renderKV(state, key, value, path, cfg) {
 
   // Value editor
   const valueEl = document.createElement('div');
-  const editor = makeEditorForType(value, t);
+  const refInfo = resolveReference(cfg, { key, value, path: path.slice(), target: state.target });
+  const editor = refInfo ? makeReferenceEditor(refInfo, value, cfg) : makeEditorForType(value, t);
   valueEl.appendChild(editor);
   row.appendChild(valueEl);
 
@@ -348,6 +365,35 @@ function renderKV(state, key, value, path, cfg) {
   row.appendChild(typeBadge);
 
   return row;
+}
+
+function resolveReference(cfg, context) {
+  if (typeof cfg.resolveReference !== 'function') return null;
+  try {
+    const out = cfg.resolveReference(context);
+    if (!out || !out.target) return null;
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+function makeReferenceEditor(refInfo, value, cfg) {
+  const btn = document.createElement('button');
+  btn.className = 'objui-link';
+  btn.type = 'button';
+  btn.textContent = String(refInfo?.label ?? showPreview(value, 80));
+  btn.title = refInfo?.title || 'Open in new inspector window';
+  if (typeof cfg.onReferenceNavigate !== 'function') {
+    btn.disabled = true;
+    return btn;
+  }
+  btn.addEventListener('click', (event) => {
+    try { event.preventDefault(); } catch { }
+    try { event.stopPropagation(); } catch { }
+    try { cfg.onReferenceNavigate(refInfo); } catch { }
+  });
+  return btn;
 }
 
 function makeEditorForType(value, t) {

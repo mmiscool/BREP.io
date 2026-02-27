@@ -783,6 +783,8 @@ export class Viewer {
         this._inspectorOpen = false;
         this._inspectorEl = null;
         this._inspectorContent = null;
+        this._inspectorLinkedWindows = new Set();
+        this._inspectorLinkedWindowSeed = 0;
         // Plugin-related state
         this._pendingToolbarButtons = [];
         // Component transform gizmo session state
@@ -1493,6 +1495,12 @@ export class Viewer {
         if (this._webglRenderer && this._webglRenderer !== this.renderer) {
             try { this._webglRenderer.dispose(); } catch { }
         }
+        try {
+            for (const fw of this._inspectorLinkedWindows || []) {
+                try { fw.destroy?.(); } catch { }
+            }
+            this._inspectorLinkedWindows?.clear?.();
+        } catch { }
         try { if (this._sketchMode) this._sketchMode.dispose(); } catch { }
         try { if (this._splineMode) this._splineMode.dispose(); } catch { }
         if (el && el.parentNode) el.parentNode.removeChild(el);
@@ -3755,11 +3763,7 @@ export class Viewer {
         }
         if (!target) { this._setInspectorPlaceholder('Nothing selected.'); return; }
         try {
-            const { out, downloadFactory } = this._buildDiagnostics(target);
-            this._inspectorContent.innerHTML = '';
-            // Attach object UI tree
-            const ui = generateObjectUI(out, { title: 'Object Inspector', showTypes: true, collapseChildren: true });
-            this._inspectorContent.appendChild(ui);
+            const { out, downloadFactory } = this._renderInspectorTree(target, this._inspectorContent, { title: 'Object Inspector' });
             // Persist download factory and raw JSON for header button
             this._lastInspectorDownload = downloadFactory;
             this._lastInspectorJSON = JSON.stringify(out, null, 2);
@@ -3767,6 +3771,202 @@ export class Viewer {
             console.warn(e);
             this._setInspectorPlaceholder('Inspector failed. See console.');
         }
+    }
+
+    _renderInspectorTree(target, container, options = {}) {
+        const title = options?.title || 'Object Inspector';
+        const { out, downloadFactory } = this._buildDiagnostics(target);
+        if (container) {
+            container.innerHTML = '';
+            const ui = generateObjectUI(out, {
+                title,
+                showTypes: true,
+                collapseChildren: true,
+                resolveReference: (context) => this._resolveInspectorReference(target, context),
+                onReferenceNavigate: (ref) => this._openDetachedInspectorWindowFor(ref?.target || null),
+            });
+            container.appendChild(ui);
+        }
+        return { out, downloadFactory };
+    }
+
+    _formatInspectorTargetLabel(target) {
+        const type = String(target?.type || target?.constructor?.name || 'Object').toUpperCase();
+        const name = target?.name || target?.userData?.faceName || target?.userData?.edgeName || null;
+        return name ? `${type} ${name}` : type;
+    }
+
+    _makeInspectorReference(node, label) {
+        if (!node) return null;
+        const fallbackLabel = this._formatInspectorTargetLabel(node);
+        const text = String(label || fallbackLabel);
+        return {
+            target: node,
+            label: text,
+            title: `Open ${text} in a new inspector window`,
+        };
+    }
+
+    _nodeHasName(node, expectedName) {
+        if (!node || !expectedName) return false;
+        const names = [
+            node?.name,
+            node?.userData?.faceName,
+            node?.userData?.edgeName,
+            node?.userData?.vertexName,
+            node?.userData?.name,
+        ];
+        for (const candidate of names) {
+            if (typeof candidate === 'string' && candidate === expectedName) return true;
+        }
+        return false;
+    }
+
+    _findSceneNodeByTypeAndName(type, name, sourceTarget = null) {
+        if (!type || !name) return null;
+        const typeNorm = String(type).toUpperCase();
+        const roots = [];
+        const solid = this._findParentSolid(sourceTarget);
+        if (solid) roots.push(solid);
+        if (sourceTarget) roots.push(sourceTarget);
+        const scene = this.partHistory?.scene || this.scene || null;
+        if (scene) roots.push(scene);
+        const visited = new Set();
+        for (const root of roots) {
+            if (!root || visited.has(root)) continue;
+            visited.add(root);
+            let found = null;
+            if (typeof root.traverse === 'function') {
+                root.traverse((node) => {
+                    if (found || !node) return;
+                    if (String(node.type || '').toUpperCase() !== typeNorm) return;
+                    if (this._nodeHasName(node, name)) found = node;
+                });
+            } else if (String(root?.type || '').toUpperCase() === typeNorm && this._nodeHasName(root, name)) {
+                found = root;
+            }
+            if (found) return found;
+        }
+        return null;
+    }
+
+    _resolveInspectorReference(sourceTarget, context = {}) {
+        if (!sourceTarget || !context) return null;
+        const path = Array.isArray(context.path) ? context.path : [];
+        const key = context.key;
+        const value = context.value;
+        if (!path.length || typeof value !== 'string' || !value) return null;
+        const sourceType = String(sourceTarget.type || '').toUpperCase();
+        const asIndex = (v) => Number.isInteger(v) ? v : -1;
+        const faceRef = (name, direct = null) => {
+            const directFace = (direct && String(direct.type || '').toUpperCase() === 'FACE') ? direct : null;
+            const faceNode = directFace || this._findSceneNodeByTypeAndName('FACE', name, sourceTarget);
+            return this._makeInspectorReference(faceNode, `FACE ${name}`);
+        };
+        const edgeRef = (name, direct = null) => {
+            const directEdge = (direct && String(direct.type || '').toUpperCase() === 'EDGE') ? direct : null;
+            const edgeNode = directEdge || this._findSceneNodeByTypeAndName('EDGE', name, sourceTarget);
+            return this._makeInspectorReference(edgeNode, `EDGE ${name}`);
+        };
+
+        if (sourceType === 'EDGE') {
+            if (path[0] === 'faces') {
+                const faceIdx = asIndex(path[1]);
+                const directFace = (Array.isArray(sourceTarget.faces) && faceIdx >= 0) ? sourceTarget.faces[faceIdx] : null;
+                return faceRef(value, directFace);
+            }
+            return null;
+        }
+
+        if (sourceType === 'FACE') {
+            if (path[0] === 'neighbors') {
+                return faceRef(value);
+            }
+            if (path[0] === 'edges') {
+                const edgeIdx = asIndex(path[1]);
+                const edgeObj = (Array.isArray(sourceTarget.edges) && edgeIdx >= 0) ? sourceTarget.edges[edgeIdx] : null;
+                if (path[2] === 'name') return edgeRef(value, edgeObj);
+                if (path[2] === 'faces') {
+                    const faceIdx = asIndex(path[3]);
+                    const directFace = (Array.isArray(edgeObj?.faces) && faceIdx >= 0) ? edgeObj.faces[faceIdx] : null;
+                    return faceRef(value, directFace);
+                }
+            }
+        }
+
+        if (sourceType === 'SOLID') {
+            if ((key === 'faceName' || key === 'face') && typeof value === 'string') {
+                return faceRef(value);
+            }
+            if (key === 'name' && path[0] === 'edges') {
+                return edgeRef(value);
+            }
+        }
+
+        if (key === 'faceName' && typeof value === 'string') return faceRef(value);
+        return null;
+    }
+
+    _openDetachedInspectorWindowFor(target) {
+        if (!target) return null;
+        const windowIndex = this._inspectorLinkedWindowSeed++;
+        const width = 520;
+        const height = Math.max(260, Math.floor((window?.innerHeight || 800) * 0.62));
+        const x = 28 + ((windowIndex % 8) * 26);
+        const y = 52 + ((windowIndex % 8) * 20);
+        let fw = null;
+        let downloadFactory = null;
+        let lastJSON = '{}';
+        const title = `Inspector: ${this._formatInspectorTargetLabel(target)}`;
+        fw = new FloatingWindow({
+            title,
+            width,
+            height,
+            x,
+            y,
+            shaded: false,
+            onClose: () => {
+                try { this._inspectorLinkedWindows.delete(fw); } catch { }
+                try { fw?.destroy?.(); } catch { }
+            },
+        });
+        this._inspectorLinkedWindows.add(fw);
+
+        const btnDownload = document.createElement('button');
+        btnDownload.className = 'fw-btn';
+        btnDownload.textContent = 'Download JSON';
+        btnDownload.addEventListener('click', () => {
+            try {
+                const json = downloadFactory ? downloadFactory() : lastJSON;
+                const blob = new Blob([json], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url; a.download = 'diagnostics.json'; document.body.appendChild(a); a.click();
+                setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
+            } catch { }
+        });
+        fw.addHeaderAction(btnDownload);
+
+        const content = document.createElement('div');
+        content.style.display = 'block';
+        content.style.width = '100%';
+        content.style.height = '100%';
+        fw.content.appendChild(content);
+
+        try {
+            const rendered = this._renderInspectorTree(target, content, { title: 'Object Inspector' });
+            downloadFactory = rendered.downloadFactory;
+            lastJSON = JSON.stringify(rendered.out, null, 2);
+        } catch (error) {
+            try { console.warn('Detached inspector render failed:', error); } catch { }
+            content.innerHTML = '';
+            const msg = document.createElement('div');
+            msg.textContent = 'Inspector failed. See console.';
+            msg.style.color = '#9aa4b2';
+            msg.style.font = '12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+            content.appendChild(msg);
+        }
+        try { fw.bringToFront?.(); } catch { }
+        return fw;
     }
 
     _getTriangleDebugger() {
