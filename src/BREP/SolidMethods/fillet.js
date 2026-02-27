@@ -281,6 +281,437 @@ function normalizeFilletDirectionMode(rawDirection) {
   return 'AUTO';
 }
 
+function normalizeFilletSectionDebuggerName(name) {
+  if (name == null) return null;
+  const raw = String(name).trim();
+  if (!raw) return null;
+  return raw.replace(/\[\d+\]$/, '');
+}
+
+function filletSectionDebuggerMatchesEdge(state, featureID, edgeObj) {
+  if (!state || !state.enabled) return false;
+  const feature = featureID == null ? null : String(featureID);
+  if (state.featureID != null && state.featureID !== '' && feature != null) {
+    if (String(state.featureID) !== feature) return false;
+  }
+  const targetRaw = normalizeFilletSectionDebuggerName(state.edgeName);
+  if (!targetRaw) return true;
+  const edgeNameRaw = normalizeFilletSectionDebuggerName(edgeObj?.name);
+  if (!edgeNameRaw) return false;
+  return edgeNameRaw === targetRaw;
+}
+
+function buildSectionPlaneBasis(normal) {
+  if (!Array.isArray(normal) || normal.length < 3) return null;
+  const nx = Number(normal[0]) || 0;
+  const ny = Number(normal[1]) || 0;
+  const nz = Number(normal[2]) || 0;
+  const nLen = Math.hypot(nx, ny, nz);
+  if (!(nLen > 1e-12)) return null;
+  const uxN = nx / nLen;
+  const uyN = ny / nLen;
+  const uzN = nz / nLen;
+
+  const ref = (Math.abs(uxN) < 0.8) ? [1, 0, 0] : [0, 1, 0];
+  let ux = uyN * ref[2] - uzN * ref[1];
+  let uy = uzN * ref[0] - uxN * ref[2];
+  let uz = uxN * ref[1] - uyN * ref[0];
+  let uLen = Math.hypot(ux, uy, uz);
+  if (!(uLen > 1e-12)) {
+    ux = uyN * 1 - uzN * 0;
+    uy = uzN * 0 - uxN * 1;
+    uz = uxN * 0 - uyN * 0;
+    uLen = Math.hypot(ux, uy, uz);
+  }
+  if (!(uLen > 1e-12)) return null;
+  ux /= uLen; uy /= uLen; uz /= uLen;
+
+  let vx = uyN * uz - uzN * uy;
+  let vy = uzN * ux - uxN * uz;
+  let vz = uxN * uy - uyN * ux;
+  const vLen = Math.hypot(vx, vy, vz);
+  if (!(vLen > 1e-12)) return null;
+  vx /= vLen; vy /= vLen; vz /= vLen;
+
+  return {
+    n: [uxN, uyN, uzN],
+    u: [ux, uy, uz],
+    v: [vx, vy, vz],
+  };
+}
+
+function sectionPolylineTangent(points, idx) {
+  const pts = Array.isArray(points) ? points : [];
+  const n = pts.length;
+  if (n < 2) return [1, 0, 0];
+  const i = Math.max(0, Math.min(n - 1, idx | 0));
+  const prev = pts[Math.max(0, i - 1)];
+  const next = pts[Math.min(n - 1, i + 1)];
+  if (!prev || !next) return [1, 0, 0];
+  let tx = (next.x - prev.x);
+  let ty = (next.y - prev.y);
+  let tz = (next.z - prev.z);
+  let len = Math.hypot(tx, ty, tz);
+  if (!(len > 1e-12)) {
+    if (i + 1 < n) {
+      const cur = pts[i];
+      const n1 = pts[i + 1];
+      tx = n1.x - cur.x; ty = n1.y - cur.y; tz = n1.z - cur.z;
+      len = Math.hypot(tx, ty, tz);
+    }
+  }
+  if (!(len > 1e-12)) return [1, 0, 0];
+  return [tx / len, ty / len, tz / len];
+}
+
+function distPoint3(a, b) {
+  if (!a || !b) return NaN;
+  return Math.hypot((a.x - b.x), (a.y - b.y), (a.z - b.z));
+}
+
+function pushUniquePoint3(list, point, eps2) {
+  if (!Array.isArray(list) || !point) return;
+  const px = Number(point.x);
+  const py = Number(point.y);
+  const pz = Number(point.z);
+  if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) return;
+  for (const q of list) {
+    const dx = px - q.x;
+    const dy = py - q.y;
+    const dz = pz - q.z;
+    if (((dx * dx) + (dy * dy) + (dz * dz)) <= eps2) return;
+  }
+  list.push({ x: px, y: py, z: pz });
+}
+
+function pickFarthestPointPair(points) {
+  const pts = Array.isArray(points) ? points : [];
+  if (pts.length < 2) return null;
+  let bestI = 0;
+  let bestJ = 1;
+  let bestD2 = -Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = i + 1; j < pts.length; j++) {
+      const a = pts[i];
+      const b = pts[j];
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      const dz = a.z - b.z;
+      const d2 = (dx * dx) + (dy * dy) + (dz * dz);
+      if (d2 > bestD2) {
+        bestD2 = d2;
+        bestI = i;
+        bestJ = j;
+      }
+    }
+  }
+  if (!(bestD2 > 0)) return null;
+  return [pts[bestI], pts[bestJ]];
+}
+
+function buildPlaneIntersectionSegments(solid, planePoint, planeNormal, tolerance = 1e-5) {
+  const tv = Array.isArray(solid?._triVerts) ? solid._triVerts : null;
+  const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : null;
+  if (!tv || !vp || tv.length < 3 || vp.length < 9) return [];
+
+  const eps = Math.max(1e-9, Math.abs(Number(tolerance) || 0));
+  const eps2 = eps * eps;
+  const nx = Number(planeNormal?.[0]) || 0;
+  const ny = Number(planeNormal?.[1]) || 0;
+  const nz = Number(planeNormal?.[2]) || 0;
+  const px = Number(planePoint?.x);
+  const py = Number(planePoint?.y);
+  const pz = Number(planePoint?.z);
+  if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) return [];
+  if (!(Math.hypot(nx, ny, nz) > 1e-12)) return [];
+
+  const triCount = (tv.length / 3) | 0;
+  const segments = [];
+  const evalSigned = (p) => ((p.x - px) * nx) + ((p.y - py) * ny) + ((p.z - pz) * nz);
+  const intersectEdge = (a, b, da, db) => {
+    const denom = da - db;
+    if (Math.abs(denom) <= 1e-20) return null;
+    const t = da / denom;
+    if (t < -1e-9 || t > 1 + 1e-9) return null;
+    return {
+      x: a.x + (b.x - a.x) * t,
+      y: a.y + (b.y - a.y) * t,
+      z: a.z + (b.z - a.z) * t,
+    };
+  };
+
+  for (let ti = 0; ti < triCount; ti++) {
+    const b = ti * 3;
+    const ia = (tv[b + 0] >>> 0) * 3;
+    const ib = (tv[b + 1] >>> 0) * 3;
+    const ic = (tv[b + 2] >>> 0) * 3;
+    if (ia + 2 >= vp.length || ib + 2 >= vp.length || ic + 2 >= vp.length) continue;
+    const pA = { x: vp[ia + 0], y: vp[ia + 1], z: vp[ia + 2] };
+    const pB = { x: vp[ib + 0], y: vp[ib + 1], z: vp[ib + 2] };
+    const pC = { x: vp[ic + 0], y: vp[ic + 1], z: vp[ic + 2] };
+    const dA = evalSigned(pA);
+    const dB = evalSigned(pB);
+    const dC = evalSigned(pC);
+
+    if ((dA > eps && dB > eps && dC > eps) || (dA < -eps && dB < -eps && dC < -eps)) continue;
+
+    const hits = [];
+    if (Math.abs(dA) <= eps) pushUniquePoint3(hits, pA, eps2);
+    if (Math.abs(dB) <= eps) pushUniquePoint3(hits, pB, eps2);
+    if (Math.abs(dC) <= eps) pushUniquePoint3(hits, pC, eps2);
+
+    if (dA * dB < -eps2) {
+      const p = intersectEdge(pA, pB, dA, dB);
+      if (p) pushUniquePoint3(hits, p, eps2);
+    }
+    if (dB * dC < -eps2) {
+      const p = intersectEdge(pB, pC, dB, dC);
+      if (p) pushUniquePoint3(hits, p, eps2);
+    }
+    if (dC * dA < -eps2) {
+      const p = intersectEdge(pC, pA, dC, dA);
+      if (p) pushUniquePoint3(hits, p, eps2);
+    }
+
+    if (hits.length < 2) continue;
+    const pair = pickFarthestPointPair(hits);
+    if (!pair) continue;
+    segments.push(pair);
+  }
+  return segments;
+}
+
+function stitchPlaneIntersectionPolylines(segments, tolerance = 1e-5) {
+  const segs = Array.isArray(segments) ? segments : [];
+  if (!segs.length) return [];
+  const tol = Math.max(1e-9, Math.abs(Number(tolerance) || 0));
+  const invTol = 1 / tol;
+  const keyOf = (p) => {
+    const x = Math.round((Number(p.x) || 0) * invTol);
+    const y = Math.round((Number(p.y) || 0) * invTol);
+    const z = Math.round((Number(p.z) || 0) * invTol);
+    return `${x},${y},${z}`;
+  };
+  const edgeKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+
+  const keyToPoint = new Map();
+  const adj = new Map();
+  const uniqueEdges = new Set();
+
+  for (const seg of segs) {
+    const a = Array.isArray(seg) ? seg[0] : null;
+    const b = Array.isArray(seg) ? seg[1] : null;
+    if (!a || !b) continue;
+    const ka = keyOf(a);
+    const kb = keyOf(b);
+    if (!ka || !kb || ka === kb) continue;
+    const ek = edgeKey(ka, kb);
+    if (uniqueEdges.has(ek)) continue;
+    uniqueEdges.add(ek);
+    if (!keyToPoint.has(ka)) keyToPoint.set(ka, { x: a.x, y: a.y, z: a.z });
+    if (!keyToPoint.has(kb)) keyToPoint.set(kb, { x: b.x, y: b.y, z: b.z });
+    if (!adj.has(ka)) adj.set(ka, new Set());
+    if (!adj.has(kb)) adj.set(kb, new Set());
+    adj.get(ka).add(kb);
+    adj.get(kb).add(ka);
+  }
+
+  const visitedEdges = new Set();
+  const buildWalk = (start) => {
+    const path = [start];
+    let prev = null;
+    let cur = start;
+    while (true) {
+      const neighbors = Array.from(adj.get(cur) || []);
+      let next = null;
+      for (const cand of neighbors) {
+        const ek = edgeKey(cur, cand);
+        if (visitedEdges.has(ek)) continue;
+        if (prev !== null && cand === prev && neighbors.length > 1) continue;
+        next = cand;
+        break;
+      }
+      if (next === null) break;
+      const ek = edgeKey(cur, next);
+      visitedEdges.add(ek);
+      prev = cur;
+      cur = next;
+      path.push(cur);
+      if (cur === start) break;
+    }
+    return path;
+  };
+
+  const starts = Array.from(adj.keys()).sort((a, b) => {
+    const da = (adj.get(a)?.size || 0);
+    const db = (adj.get(b)?.size || 0);
+    return da - db;
+  });
+  const polylines = [];
+
+  for (const s of starts) {
+    const walk = buildWalk(s);
+    if (!Array.isArray(walk) || walk.length < 2) continue;
+    const pts = [];
+    for (const key of walk) {
+      const p = keyToPoint.get(key);
+      if (!p) continue;
+      pts.push({ x: p.x, y: p.y, z: p.z });
+    }
+    if (pts.length >= 2) polylines.push(pts);
+  }
+
+  return polylines;
+}
+
+function createSectionDebugMarker(position, name, colorHex = '#ffcc00') {
+  const p = position || { x: 0, y: 0, z: 0 };
+  const marker = new Vertex([p.x || 0, p.y || 0, p.z || 0], { name });
+  try {
+    const ptMat = marker?._point?.material;
+    if (ptMat && ptMat.isPointsMaterial) {
+      const mat = ptMat.clone();
+      mat.color.set(colorHex);
+      mat.size = 9;
+      mat.sizeAttenuation = false;
+      mat.depthTest = false;
+      mat.depthWrite = false;
+      mat.transparent = true;
+      mat.opacity = 1;
+      marker._point.material = mat;
+    }
+    if (marker?._point) {
+      marker._point.renderOrder = 10045;
+      marker._point.frustumCulled = false;
+    }
+    marker.renderOrder = 10045;
+    marker.frustumCulled = false;
+    marker.userData = {
+      ...(marker.userData || {}),
+      filletDebug: true,
+      debugType: 'section_debug_marker',
+    };
+  } catch { }
+  return marker;
+}
+
+function buildFilletSectionDebugSolid({
+  baseSolid = null,
+  edgeObj = null,
+  featureID = 'FILLET',
+  filletName = 'FILLET',
+  centerline = null,
+  tangentA = null,
+  tangentB = null,
+  edgePoints = null,
+  radius = 1,
+  rawStepIndex = 0,
+  DebugSolidClass = null,
+} = {}) {
+  const c = Array.isArray(centerline) ? centerline : [];
+  const a = Array.isArray(tangentA) ? tangentA : [];
+  const b = Array.isArray(tangentB) ? tangentB : [];
+  const e = Array.isArray(edgePoints) ? edgePoints : [];
+  const sampleCount = Math.min(c.length, a.length, b.length, e.length);
+  if (sampleCount < 1) return null;
+
+  const raw = Number(rawStepIndex);
+  const stepRaw = Number.isFinite(raw) ? Math.trunc(raw) : 0;
+  let step = stepRaw % sampleCount;
+  if (step < 0) step += sampleCount;
+
+  const centerPt = c[step];
+  const tangentAPt = a[step];
+  const tangentBPt = b[step];
+  const edgePt = e[step];
+  if (!centerPt || !tangentAPt || !tangentBPt || !edgePt) return null;
+
+  const tangentDir = sectionPolylineTangent(c, step);
+  const basis = buildSectionPlaneBasis(tangentDir);
+  if (!basis) return null;
+
+  const localRadius = Math.max(
+    Math.abs(Number(radius) || 0),
+    distPoint3(centerPt, edgePt) || 0,
+    distPoint3(centerPt, tangentAPt) || 0,
+    distPoint3(centerPt, tangentBPt) || 0,
+    1e-3,
+  );
+  const prevCenter = c[Math.max(0, step - 1)] || centerPt;
+  const nextCenter = c[Math.min(sampleCount - 1, step + 1)] || centerPt;
+  const localStep = Math.max(1e-3, distPoint3(prevCenter, nextCenter) || 0);
+  const planeSize = Math.max(localRadius * 2.75, localStep * 1.5, 0.5);
+
+  const ux = basis.u[0], uy = basis.u[1], uz = basis.u[2];
+  const vx = basis.v[0], vy = basis.v[1], vz = basis.v[2];
+  const px = edgePt.x, py = edgePt.y, pz = edgePt.z;
+  const c0 = [px + (-ux - vx) * planeSize, py + (-uy - vy) * planeSize, pz + (-uz - vz) * planeSize];
+  const c1 = [px + (ux - vx) * planeSize, py + (uy - vy) * planeSize, pz + (uz - vz) * planeSize];
+  const c2 = [px + (ux + vx) * planeSize, py + (uy + vy) * planeSize, pz + (uz + vz) * planeSize];
+  const c3 = [px + (-ux + vx) * planeSize, py + (-uy + vy) * planeSize, pz + (-uz + vz) * planeSize];
+
+  const tol = deriveSolidToleranceFromVerts(baseSolid, 1e-5) * 2;
+  const segs = buildPlaneIntersectionSegments(baseSolid, edgePt, basis.n, tol);
+  const sectionPolylines = stitchPlaneIntersectionPolylines(segs, tol);
+
+  const SolidClass = DebugSolidClass || baseSolid?.constructor?.BaseSolid || baseSolid?.constructor;
+  if (typeof SolidClass !== 'function') return null;
+  const debugSolid = new SolidClass();
+  const rootName = `${featureID || 'FILLET'}_SECTION_STEP_${step + 1}`;
+  debugSolid.name = `${rootName}_DEBUG`;
+  debugSolid.addTriangle(`${rootName}_SECTION_PLANE`, c0, c1, c2);
+  debugSolid.addTriangle(`${rootName}_SECTION_PLANE`, c0, c2, c3);
+
+  const partialCenter = c.slice(0, step + 1).map((p) => ({ x: p.x, y: p.y, z: p.z }));
+  const partialA = a.slice(0, step + 1).map((p) => ({ x: p.x, y: p.y, z: p.z }));
+  const partialB = b.slice(0, step + 1).map((p) => ({ x: p.x, y: p.y, z: p.z }));
+  if (partialCenter.length >= 2) debugSolid.addAuxEdge(`${rootName}_CENTERLINE`, partialCenter, { materialKey: 'OVERLAY' });
+  if (partialA.length >= 2) debugSolid.addAuxEdge(`${rootName}_TANGENT_A`, partialA, { materialKey: 'OVERLAY' });
+  if (partialB.length >= 2) debugSolid.addAuxEdge(`${rootName}_TANGENT_B`, partialB, { materialKey: 'OVERLAY' });
+
+  debugSolid.addAuxEdge(`${rootName}_SECTION_CENTER_TO_EDGE`, [centerPt, edgePt], { materialKey: 'OVERLAY' });
+  debugSolid.addAuxEdge(`${rootName}_SECTION_CENTER_TO_TA`, [centerPt, tangentAPt], { materialKey: 'OVERLAY' });
+  debugSolid.addAuxEdge(`${rootName}_SECTION_CENTER_TO_TB`, [centerPt, tangentBPt], { materialKey: 'OVERLAY' });
+  debugSolid.addAuxEdge(`${rootName}_SECTION_TANGENT_CHORD`, [tangentAPt, tangentBPt], { materialKey: 'OVERLAY' });
+  debugSolid.addAuxEdge(`${rootName}_SECTION_NORMAL`, [
+    edgePt,
+    {
+      x: edgePt.x + basis.n[0] * planeSize * 0.8,
+      y: edgePt.y + basis.n[1] * planeSize * 0.8,
+      z: edgePt.z + basis.n[2] * planeSize * 0.8,
+    },
+  ], { materialKey: 'OVERLAY' });
+
+  for (let i = 0; i < sectionPolylines.length; i++) {
+    const poly = sectionPolylines[i];
+    if (!Array.isArray(poly) || poly.length < 2) continue;
+    debugSolid.addAuxEdge(`${rootName}_MESH_SECTION_${i}`, poly, { materialKey: 'OVERLAY' });
+  }
+
+  debugSolid.add(createSectionDebugMarker(edgePt, `${rootName}_EDGE_PT`, '#ff44ff'));
+  debugSolid.add(createSectionDebugMarker(centerPt, `${rootName}_CENTER_PT`, '#ffd166'));
+  debugSolid.add(createSectionDebugMarker(tangentAPt, `${rootName}_TANGENT_A_PT`, '#2ce6ff'));
+  debugSolid.add(createSectionDebugMarker(tangentBPt, `${rootName}_TANGENT_B_PT`, '#76ff03'));
+
+  try {
+    debugSolid.userData = {
+      ...(debugSolid.userData || {}),
+      filletDebug: true,
+      debugType: 'fillet_section_step',
+      filletName: filletName || null,
+      featureID: featureID || null,
+      edgeName: edgeObj?.name || null,
+      sampleCount,
+      stepIndex: step,
+      stepDisplayIndex: step + 1,
+      rawStepIndex: stepRaw,
+      planeIntersectionPolylines: sectionPolylines.length,
+    };
+  } catch { }
+
+  return { debugSolid, sampleCount, resolvedStep: step };
+}
+
 function buildPointInsideTester(solid) {
   if (!solid) return null;
   const tv = solid._triVerts;
@@ -387,6 +818,26 @@ function samplePolylineAt(polylineLocal, tNorm) {
     a[1] + (b[1] - a[1]) * t,
     a[2] + (b[2] - a[2]) * t,
   ];
+}
+
+function buildEdgeSamplePointsForCount(edgeObj, sampleCount) {
+  const count = Number.isFinite(Number(sampleCount)) ? Math.max(0, Math.floor(Number(sampleCount))) : 0;
+  if (count < 1) return [];
+  const poly = getEdgePolylineLocal(edgeObj);
+  if (!Array.isArray(poly) || poly.length < 2) return [];
+  if (count === 1) {
+    const p0 = samplePolylineAt(poly, 0);
+    if (!Array.isArray(p0) || p0.length < 3) return [];
+    return [{ x: p0[0], y: p0[1], z: p0[2] }];
+  }
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const t = i / (count - 1);
+    const p = samplePolylineAt(poly, t);
+    if (!Array.isArray(p) || p.length < 3) continue;
+    out.push({ x: p[0], y: p[1], z: p[2] });
+  }
+  return out;
 }
 
 function findBoundaryPolylineForEdge(baseSolid, edgeObj, faceAName, faceBName, boundaryPolylines = null) {
@@ -3284,7 +3735,11 @@ function removeSelectedEndCapTrianglesAndPatch(resultSolid, endCapFaceIDs, featu
  * @returns {import('../BetterSolid.js').Solid}
  */
 export async function fillet(opts = {}) {
-  const { filletSolid } = await import("../fillets/fillet.js");
+  const {
+    filletSolid,
+    getFilletSectionDebuggerState,
+    setFilletSectionDebuggerState,
+  } = await import("../fillets/fillet.js");
   const radius = Number(opts.radius);
   if (!Number.isFinite(radius) || radius <= 0) {
     throw new Error(`Solid.fillet: radius must be > 0, got ${opts.radius}`);
@@ -3332,6 +3787,9 @@ export async function fillet(opts = {}) {
   const filletEntries = [];
   let idx = 0;
   const debugAdded = [];
+  const sectionDebuggerState = getFilletSectionDebuggerState();
+  const sectionDebuggerEnabled = !!sectionDebuggerState?.enabled;
+  let sectionDebuggerCaptured = false;
   const attachDebugSolids = (target) => {
     if (!target || debugAdded.length === 0) return;
     try { target.__debugAddedSolids = debugAdded; } catch { }
@@ -3342,8 +3800,8 @@ export async function fillet(opts = {}) {
     attachDebugSolids(fallback);
     return fallback;
   };
-  const pushDebugSolid = (solid) => {
-    if (!debug || !solid) return;
+  const pushDebugSolid = (solid, force = false) => {
+    if ((!debug && !force) || !solid) return;
     debugAdded.push(solid);
   };
   const pushNamedDebugSnapshot = (solid, snapshotName, requireClone = false) => {
@@ -3399,6 +3857,9 @@ export async function fillet(opts = {}) {
   );
 
   const insideTester = autoDirection ? buildPointInsideTester(this) : null;
+  const sectionDebuggerEdgeTarget = normalizeFilletSectionDebuggerName(sectionDebuggerState?.edgeName);
+  const sectionDebuggerExplicitEdge = !!sectionDebuggerEdgeTarget;
+  const sectionDebuggerSingleEdgeFallback = sectionDebuggerExplicitEdge && unique.length === 1;
   const directionDecision = {
     mode: directionMode,
     autoEnabled: autoDirection,
@@ -3408,6 +3869,103 @@ export async function fillet(opts = {}) {
     outsetEdges: 0,
     fallbackEdges: 0,
     ambiguousEdges: 0,
+  };
+  const captureSectionDebuggerForEdge = (edgeObj, filletName, filletResult) => {
+    if (!sectionDebuggerEnabled || sectionDebuggerCaptured) return;
+    const edgeMatchesTarget = filletSectionDebuggerMatchesEdge(sectionDebuggerState, featureID, edgeObj);
+    if (!edgeMatchesTarget && !sectionDebuggerSingleEdgeFallback) return;
+
+    const centerline = Array.isArray(filletResult?.centerline) ? filletResult.centerline : [];
+    const tangentA = Array.isArray(filletResult?.tangentA) ? filletResult.tangentA : [];
+    const tangentB = Array.isArray(filletResult?.tangentB) ? filletResult.tangentB : [];
+    const sampleCountHint = Math.min(centerline.length, tangentA.length, tangentB.length);
+    const rawStep = Number(sectionDebuggerState?.stepIndex);
+    const requestedStep = Number.isFinite(rawStep) ? Math.trunc(rawStep) : 0;
+    const resolvedFallbackStep = sampleCountHint > 0
+      ? ((requestedStep % sampleCountHint) + sampleCountHint) % sampleCountHint
+      : 0;
+
+    if (!(sampleCountHint > 0)) {
+      if (sectionDebuggerExplicitEdge) {
+        sectionDebuggerCaptured = true;
+        setFilletSectionDebuggerState({
+          enabled: true,
+          featureID,
+          edgeName: edgeObj?.name || sectionDebuggerEdgeTarget || null,
+          lastSampleCount: 0,
+          lastResolvedStepIndex: 0,
+          lastEdgeName: edgeObj?.name || null,
+        });
+      }
+      return;
+    }
+
+    let edgePoints = Array.isArray(filletResult?.edge) ? filletResult.edge : [];
+    if (edgePoints.length < sampleCountHint) {
+      edgePoints = buildEdgeSamplePointsForCount(edgeObj, sampleCountHint);
+    }
+    if (edgePoints.length < sampleCountHint) {
+      if (sectionDebuggerExplicitEdge) {
+        sectionDebuggerCaptured = true;
+        setFilletSectionDebuggerState({
+          enabled: true,
+          featureID,
+          edgeName: edgeObj?.name || sectionDebuggerEdgeTarget || null,
+          lastSampleCount: sampleCountHint,
+          lastResolvedStepIndex: resolvedFallbackStep,
+          lastEdgeName: edgeObj?.name || null,
+        });
+      }
+      return;
+    }
+
+    const sectionDebug = buildFilletSectionDebugSolid({
+      baseSolid: this,
+      edgeObj,
+      featureID,
+      filletName,
+      centerline,
+      tangentA,
+      tangentB,
+      edgePoints,
+      radius,
+      rawStepIndex: requestedStep,
+      DebugSolidClass: this?.constructor?.BaseSolid || this?.constructor || null,
+    });
+    if (!sectionDebug?.debugSolid) {
+      if (sectionDebuggerExplicitEdge) {
+        sectionDebuggerCaptured = true;
+        setFilletSectionDebuggerState({
+          enabled: true,
+          featureID,
+          edgeName: edgeObj?.name || sectionDebuggerEdgeTarget || null,
+          lastSampleCount: sampleCountHint,
+          lastResolvedStepIndex: resolvedFallbackStep,
+          lastEdgeName: edgeObj?.name || null,
+        });
+      }
+      return;
+    }
+
+    pushDebugSolid(sectionDebug.debugSolid, true);
+    sectionDebuggerCaptured = true;
+    setFilletSectionDebuggerState({
+      enabled: true,
+      featureID,
+      edgeName: edgeObj?.name || sectionDebuggerEdgeTarget || null,
+      lastSampleCount: sectionDebug.sampleCount,
+      lastResolvedStepIndex: sectionDebug.resolvedStep,
+      lastEdgeName: edgeObj?.name || null,
+    });
+    console.log('[Solid.fillet] Section debugger captured step.', {
+      featureID,
+      edge: edgeObj?.name || null,
+      requestedEdge: sectionDebuggerEdgeTarget || null,
+      sampleCount: sectionDebug.sampleCount,
+      requestedStep,
+      resolvedStep: sectionDebug.resolvedStep,
+      usedSingleEdgeFallback: (!edgeMatchesTarget && sectionDebuggerSingleEdgeFallback),
+    });
   };
 
   for (const e of unique) {
@@ -3450,6 +4008,15 @@ export async function fillet(opts = {}) {
     if (res.error) {
       console.warn(`Fillet failed for edge ${e?.name || idx}: ${res.error}`);
     }
+    try {
+      captureSectionDebuggerForEdge(e, name, res);
+    } catch (err) {
+      console.warn('[Solid.fillet] Failed to build section debugger solid.', {
+        featureID,
+        edge: e?.name || null,
+        error: err?.message || err,
+      });
+    }
     if (!res.finalSolid) {
       // When finalSolid is missing, always keep tube/wedge to help diagnose failure.
       pushTubeAndWedgeDebug(res);
@@ -3486,6 +4053,21 @@ export async function fillet(opts = {}) {
         pushDebugSolid(res.finalSolid);
       }
     }
+  }
+  if (sectionDebuggerEnabled && !sectionDebuggerCaptured && sectionDebuggerExplicitEdge) {
+    setFilletSectionDebuggerState({
+      enabled: true,
+      featureID,
+      edgeName: sectionDebuggerEdgeTarget,
+      lastSampleCount: 0,
+      lastResolvedStepIndex: 0,
+      lastEdgeName: null,
+    });
+    console.warn('[Solid.fillet] Section debugger did not match any edge.', {
+      featureID,
+      requestedEdge: sectionDebuggerEdgeTarget,
+      candidateEdges: unique.map((edgeObj) => edgeObj?.name).filter(Boolean),
+    });
   }
   if (autoDirection) {
     console.log('[Solid.fillet] AUTO direction classification complete.', {

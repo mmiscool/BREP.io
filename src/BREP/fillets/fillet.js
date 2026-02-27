@@ -40,6 +40,82 @@ function createFilletSidePolicy(sideMode = 'INSET') {
     };
 }
 
+const __filletSectionDebuggerState = {
+    enabled: false,
+    featureID: null,
+    edgeName: null,
+    stepIndex: 0,
+    lastSampleCount: 0,
+    lastResolvedStepIndex: 0,
+    lastEdgeName: null,
+    lastUpdatedAt: 0,
+};
+
+function normalizeFilletSectionDebuggerName(name) {
+    if (name == null) return null;
+    const raw = String(name).trim();
+    if (!raw) return null;
+    return raw.replace(/\[\d+\]$/, '');
+}
+
+export function getFilletSectionDebuggerState() {
+    return { ...__filletSectionDebuggerState };
+}
+
+export function setFilletSectionDebuggerState(next = {}) {
+    if (!next || typeof next !== 'object') return getFilletSectionDebuggerState();
+
+    if (Object.prototype.hasOwnProperty.call(next, 'enabled')) {
+        __filletSectionDebuggerState.enabled = !!next.enabled;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'featureID')) {
+        __filletSectionDebuggerState.featureID = next.featureID == null ? null : String(next.featureID);
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'edgeName')) {
+        __filletSectionDebuggerState.edgeName = normalizeFilletSectionDebuggerName(next.edgeName);
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'stepIndex')) {
+        const step = Number(next.stepIndex);
+        __filletSectionDebuggerState.stepIndex = Number.isFinite(step) ? Math.floor(step) : 0;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'lastSampleCount')) {
+        const n = Number(next.lastSampleCount);
+        __filletSectionDebuggerState.lastSampleCount = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'lastResolvedStepIndex')) {
+        const idx = Number(next.lastResolvedStepIndex);
+        __filletSectionDebuggerState.lastResolvedStepIndex = Number.isFinite(idx) ? Math.max(0, Math.floor(idx)) : 0;
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'lastEdgeName')) {
+        __filletSectionDebuggerState.lastEdgeName = normalizeFilletSectionDebuggerName(next.lastEdgeName);
+    }
+    __filletSectionDebuggerState.lastUpdatedAt = Date.now();
+    return getFilletSectionDebuggerState();
+}
+
+export function advanceFilletSectionDebuggerStep(delta = 1) {
+    const step = Number(delta);
+    const current = Number.isFinite(Number(__filletSectionDebuggerState.stepIndex))
+        ? Number(__filletSectionDebuggerState.stepIndex)
+        : 0;
+    const next = current + (Number.isFinite(step) ? Math.trunc(step) : 1);
+    __filletSectionDebuggerState.stepIndex = Number.isFinite(next) ? Math.trunc(next) : current;
+    __filletSectionDebuggerState.lastUpdatedAt = Date.now();
+    return getFilletSectionDebuggerState();
+}
+
+export function clearFilletSectionDebuggerState() {
+    __filletSectionDebuggerState.enabled = false;
+    __filletSectionDebuggerState.featureID = null;
+    __filletSectionDebuggerState.edgeName = null;
+    __filletSectionDebuggerState.stepIndex = 0;
+    __filletSectionDebuggerState.lastSampleCount = 0;
+    __filletSectionDebuggerState.lastResolvedStepIndex = 0;
+    __filletSectionDebuggerState.lastEdgeName = null;
+    __filletSectionDebuggerState.lastUpdatedAt = Date.now();
+    return getFilletSectionDebuggerState();
+}
+
 function buildPointInsideTester(solid) {
     if (!solid) return null;
     const tv = solid._triVerts;
@@ -1747,6 +1823,8 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                 centerline: centerlineCopy || [],
                 tangentA: tangentACopy || [],
                 tangentB: tangentBCopy || [],
+                edge: edgeCopy || [],
+                edgeWedge: edgeWedgeCopy || [],
                 tangentASeam: tangentASnap || [],
                 tangentBSeam: tangentBSnap || [],
                 error: 'Insufficient centerline points for tube generation'
@@ -1769,6 +1847,8 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                 centerline: centerlineCopy || [],
                 tangentA: tangentACopy || [],
                 tangentB: tangentBCopy || [],
+                edge: edgeCopy || [],
+                edgeWedge: edgeWedgeCopy || [],
                 tangentASeam: tangentASnap || [],
                 tangentBSeam: tangentBSnap || [],
                 error: 'Degenerate centerline: all points are identical'
@@ -1915,6 +1995,8 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                 centerline: centerlineCopy,
                 tangentA: tangentACopy,
                 tangentB: tangentBCopy,
+                edge: edgeCopy || [],
+                edgeWedge: edgeWedgeCopy || [],
                 tangentASeam: tangentASnap || [],
                 tangentBSeam: tangentBSnap || [],
                 error: `Tube generation failed: ${tubeError?.message || tubeError}`
@@ -1990,6 +2072,8 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                         centerline: centerlineCopy,
                         tangentA: tangentACopy,
                         tangentB: tangentBCopy,
+                        edge: edgeCopy || [],
+                        edgeWedge: edgeWedgeCopy || [],
                         tangentASeam: tangentASnap || [],
                         tangentBSeam: tangentBSnap || [],
                         error: 'No valid triangles could be created for wedge solid - all were degenerate'
@@ -2005,6 +2089,8 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                     centerline: centerlineCopy,
                     tangentA: tangentACopy,
                     tangentB: tangentBCopy,
+                    edge: edgeCopy || [],
+                    edgeWedge: edgeWedgeCopy || [],
                     tangentASeam: tangentASnap || [],
                     tangentBSeam: tangentBSnap || [],
                     error: `Wedge triangle creation failed: ${wedgeError?.message || wedgeError}`
@@ -2122,6 +2208,8 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                         centerline: centerlineCopy,
                         tangentA: tangentACopy,
                         tangentB: tangentBCopy,
+                        edge: edgeCopy || [],
+                        edgeWedge: edgeWedgeCopy || [],
                         tangentASeam: tangentASnap || [],
                         tangentBSeam: tangentBSnap || [],
                         error: 'No valid triangles could be created for non-closed wedge solid - all were degenerate'
@@ -2137,6 +2225,8 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                     centerline: centerlineCopy,
                     tangentA: tangentACopy,
                     tangentB: tangentBCopy,
+                    edge: edgeCopy || [],
+                    edgeWedge: edgeWedgeCopy || [],
                     tangentASeam: tangentASnap || [],
                     tangentBSeam: tangentBSnap || [],
                     error: `Non-closed wedge triangle creation failed: ${wedgeError?.message || wedgeError}`
@@ -2213,6 +2303,8 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                 centerline: centerlineCopy,
                 tangentA: tangentACopy,
                 tangentB: tangentBCopy,
+                edge: edgeCopy || [],
+                edgeWedge: edgeWedgeCopy || [],
                 tangentASeam: tangentASnap || [],
                 tangentBSeam: tangentBSnap || [],
             };
@@ -2226,6 +2318,8 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                 centerline: centerlineCopy,
                 tangentA: tangentACopy,
                 tangentB: tangentBCopy,
+                edge: edgeCopy || [],
+                edgeWedge: edgeWedgeCopy || [],
                 tangentASeam: tangentASnap || [],
                 tangentBSeam: tangentBSnap || [],
                 error: `Boolean operation failed: ${booleanError?.message || booleanError}`
@@ -2241,6 +2335,8 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
             centerline: [],
             tangentA: [],
             tangentB: [],
+            edge: [],
+            edgeWedge: [],
             tangentASeam: [],
             tangentBSeam: [],
             error: `Fillet operation failed: ${globalError?.message || globalError}`

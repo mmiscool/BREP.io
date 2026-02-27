@@ -1,4 +1,10 @@
-import { clearFilletCaches } from "../../BREP/fillets/fillet.js";
+import {
+    advanceFilletSectionDebuggerStep,
+    clearFilletCaches,
+    clearFilletSectionDebuggerState,
+    getFilletSectionDebuggerState,
+    setFilletSectionDebuggerState,
+} from "../../BREP/fillets/fillet.js";
 import {
     collectEdgesFromSelection,
     getSolidGeometryCounts,
@@ -10,6 +16,111 @@ const DEBUG_MODE_NONE = "NONE";
 const DEBUG_MODE_WEDGE_AND_TUBE = "WEDGE AND TUBE";
 const DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEAN = "WEDGE AND TUBE AFTER BOOLEAN";
 const DEBUG_MODE_COMBINED_BEFORE_TARGET = "COMBINED FILLET BEFORE TARGET BOOLEAN";
+
+function normalizeFilletDebuggerEdgeName(value) {
+    if (value == null) return null;
+    const raw = String(value).trim();
+    if (!raw) return null;
+    return raw.replace(/\[\d+\]$/, '');
+}
+
+function resolveFilletDebuggerEdgeFromParams(params, partHistory = null) {
+    const firstNormalizedToken = (value) => {
+        if (value == null) return null;
+        const raw = String(value).trim();
+        if (!raw) return null;
+        const parts = raw.includes('|') ? raw.split('|') : [raw];
+        for (const part of parts) {
+            const normalized = normalizeFilletDebuggerEdgeName(part);
+            if (normalized) return normalized;
+        }
+        return null;
+    };
+    const list = Array.isArray(params?.edges) ? params.edges : [];
+
+    // Prefer resolving through the same edge collection path used by the feature run.
+    // This avoids token mismatches for composite reference strings (e.g. "A|B").
+    if (partHistory) {
+        try {
+            const expanded = expandReferenceSelections(list, partHistory);
+            const edgeObjs = collectEdgesFromSelection(expanded?.selections || []);
+            for (const edgeObj of edgeObjs) {
+                const normalized = firstNormalizedToken(edgeObj?.name || edgeObj?.userData?.edgeName);
+                if (normalized) return normalized;
+            }
+        } catch { }
+    }
+
+    for (const item of list) {
+        if (!item) continue;
+        if (typeof item === 'object') {
+            const normalized =
+                firstNormalizedToken(item?.name)
+                || firstNormalizedToken(item?.userData?.edgeName)
+                || firstNormalizedToken(item?.userData?.faceName);
+            if (normalized) return normalized;
+            continue;
+        }
+        const normalized = firstNormalizedToken(item);
+        if (normalized) return normalized;
+    }
+    return null;
+}
+
+async function rerunFilletDebugger(partHistory, viewer, featureID = null, paramsRef = null) {
+    if (!partHistory || typeof partHistory.runHistory !== 'function') return;
+
+    const normalizeId = (value) => {
+        if (value == null) return null;
+        const text = String(value).trim();
+        return text ? text : null;
+    };
+    const resolveEntryId = (entry) => {
+        if (!entry || typeof entry !== 'object') return null;
+        const directId = normalizeId(entry.id) || normalizeId(entry.featureID);
+        if (directId) return directId;
+        const params = entry.inputParams;
+        if (params && typeof params === 'object') {
+            return normalizeId(params.id) || normalizeId(params.featureID);
+        }
+        return null;
+    };
+    const targetId = normalizeId(featureID);
+    try {
+        const features = Array.isArray(partHistory?.features) ? partHistory.features : [];
+        let marked = false;
+        for (const entry of features) {
+            if (!entry || typeof entry !== 'object') continue;
+            const entryId = resolveEntryId(entry);
+            const sameById = !!targetId && entryId === targetId;
+            const sameByParams = !!paramsRef && entry?.inputParams && entry.inputParams === paramsRef;
+            if (!sameById && !sameByParams) continue;
+            entry.dirty = true;
+            marked = true;
+            break;
+        }
+        if (!marked && targetId) {
+            for (const entry of features) {
+                const paramsId = normalizeId(entry?.inputParams?.featureID) || normalizeId(entry?.inputParams?.id);
+                if (paramsId === targetId) {
+                    entry.dirty = true;
+                    marked = true;
+                    break;
+                }
+            }
+        }
+    } catch { }
+
+    try {
+        if (featureID != null && featureID !== '') {
+            partHistory.currentHistoryStepId = String(featureID);
+        }
+    } catch { }
+    try { await partHistory.runHistory(); } catch (err) {
+        console.warn('[FilletFeature] Section debugger rerun failed.', { message: err?.message || err });
+    }
+    try { if (viewer && typeof viewer.render === 'function') viewer.render(); } catch { }
+}
 
 
 const inputParamsSchema = {
@@ -80,6 +191,64 @@ const inputParamsSchema = {
         type: "boolean",
         default_value: false,
         hint: "Show pre-inflate tangent overlays on the fillet tube",
+    },
+    sectionDebuggerStart: {
+        type: "button",
+        label: "Start Section Debugger",
+        hint: "Activate per-cross-section debugger overlays and reset to the first section sample.",
+        actionFunction: async ({ featureID, params, partHistory, viewer }) => {
+            const edgeName = resolveFilletDebuggerEdgeFromParams(params, partHistory);
+            setFilletSectionDebuggerState({
+                enabled: true,
+                featureID: featureID || params?.featureID || params?.id || null,
+                edgeName,
+                stepIndex: 0,
+            });
+            await rerunFilletDebugger(partHistory, viewer, featureID || params?.featureID || params?.id || null, params || null);
+        },
+    },
+    sectionDebuggerPrev: {
+        type: "button",
+        label: "Prev Section",
+        hint: "Step the fillet section debugger to the previous sample.",
+        actionFunction: async ({ featureID, params, partHistory, viewer }) => {
+            const fid = featureID || params?.featureID || params?.id || null;
+            const state = getFilletSectionDebuggerState();
+            const edgeName = resolveFilletDebuggerEdgeFromParams(params, partHistory);
+            setFilletSectionDebuggerState({
+                enabled: true,
+                featureID: fid,
+                edgeName: state?.edgeName || edgeName,
+            });
+            advanceFilletSectionDebuggerStep(-1);
+            await rerunFilletDebugger(partHistory, viewer, fid, params || null);
+        },
+    },
+    sectionDebuggerNext: {
+        type: "button",
+        label: "Next Section",
+        hint: "Step the fillet section debugger to the next sample.",
+        actionFunction: async ({ featureID, params, partHistory, viewer }) => {
+            const fid = featureID || params?.featureID || params?.id || null;
+            const state = getFilletSectionDebuggerState();
+            const edgeName = resolveFilletDebuggerEdgeFromParams(params, partHistory);
+            setFilletSectionDebuggerState({
+                enabled: true,
+                featureID: fid,
+                edgeName: state?.edgeName || edgeName,
+            });
+            advanceFilletSectionDebuggerStep(1);
+            await rerunFilletDebugger(partHistory, viewer, fid, params || null);
+        },
+    },
+    sectionDebuggerClear: {
+        type: "button",
+        label: "Clear Section Debugger",
+        hint: "Disable and clear fillet section debugger overlays.",
+        actionFunction: async ({ featureID, params, partHistory, viewer }) => {
+            clearFilletSectionDebuggerState();
+            await rerunFilletDebugger(partHistory, viewer, featureID || params?.featureID || params?.id || null, params || null);
+        },
     },
 };
 
@@ -361,7 +530,7 @@ export class FilletFeature {
         });
         const collectDebugSolids = (res) => {
             const out = [];
-            if (!debugEnabled || !Array.isArray(res?.__debugAddedSolids)) return out;
+            if (!Array.isArray(res?.__debugAddedSolids)) return out;
             for (const dbg of res.__debugAddedSolids) {
                 if (!dbg) continue;
                 try { dbg.name = `${fid}_${dbg.name || 'DEBUG'}`; } catch { }
