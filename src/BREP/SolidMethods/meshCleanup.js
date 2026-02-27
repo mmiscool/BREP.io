@@ -2386,7 +2386,7 @@ export function cleanupTinyFaceIslands(size) {
 
         for (let c = 0; c < components.length; c++) {
             const comp = components[c];
-            if (!comp || !(comp.area < maxArea)) continue;
+            if (!comp || !(comp.area <= maxArea)) continue;
 
             const neighborIds = new Set();
             for (let i = 0; i < comp.tris.length; i++) {

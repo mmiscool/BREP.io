@@ -8,6 +8,8 @@ import { MeshRepairer } from "./MeshRepairer.js";
 import { Manifold, ManifoldMesh } from "./SolidShared.js";
 import { computeBoundsFromVertices } from "./boundsUtils.js";
 
+const BOOLEAN_TINY_FACE_MAX_AREA = 0.001;
+
 const __booleanDebugConfig = (() => {
   try {
     const runtimeProcess = globalThis?.process;
@@ -124,6 +126,22 @@ function __booleanDebugLogger(featureID, op, baseSolid, tools) {
   return (...args) => {
     try { console.log(tag, ...args); } catch { }
   };
+}
+
+async function __booleanPostTinyFaceCleanup(solid, debugLog, context = null) {
+  if (!solid || typeof solid !== 'object') return solid;
+  try {
+    if (typeof solid.cleanupTinyFaceIslands === 'function') {
+      await solid.cleanupTinyFaceIslands(BOOLEAN_TINY_FACE_MAX_AREA);
+    }
+  } catch (err) {
+    debugLog?.('Post-boolean tiny-face cleanup failed', {
+      maxArea: BOOLEAN_TINY_FACE_MAX_AREA,
+      context,
+      message: err?.message || err,
+    });
+  }
+  return solid;
 }
 
 function __booleanResolveFoldNameSource(baseSolid, tools, featureID) {
@@ -552,7 +570,8 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
         try { if (typeof solid.fixTriangleWindingsByAdjacency === 'function') solid.fixTriangleWindingsByAdjacency(); } catch {}
       };
 
-      const addResult = (solid, target) => {
+      const addResult = async (solid, target) => {
+        solid = await __booleanPostTinyFaceCleanup(solid, debugLog, { op: 'SUBTRACT' });
         const inheritedName = target?.name || target?.uuid || null;
         const finalName = inheritedName || (featureID ? `${featureID}_${++idx}` : solid.name || 'RESULT');
         try { solid.name = finalName; } catch (_) { }
@@ -566,7 +585,7 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
         let success = false;
         try {
           const out = target.subtract(baseSolid);
-          addResult(out, target);
+          await addResult(out, target);
           success = true;
         } catch (e1) {
           debugLog('Primary subtract failed; attempting welded fallback', {
@@ -585,7 +604,7 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
           preCleanLocal(a, eps);
           preCleanLocal(b, eps);
           const out = a.subtract(b);
-          addResult(out, target);
+          await addResult(out, target);
           success = true;
         } catch (e2) {
           debugLog('Welded subtract fallback failed; passing target through', {
@@ -702,6 +721,7 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
         }
       }
     }
+    result = await __booleanPostTinyFaceCleanup(result, debugLog, { op });
     debugLog('Boolean successful', {
       result: __booleanDebugSummarizeSolid(result),
       removedCount: tools.length + (baseSolid ? 1 : 0),
