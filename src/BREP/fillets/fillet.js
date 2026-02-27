@@ -128,6 +128,36 @@ function collectFaceVertices(tris) {
     return verts;
 }
 
+function sanitizeFilletInputPolyline(polylineLocal, tolerance = 1e-9) {
+    const src = Array.isArray(polylineLocal) ? polylineLocal : [];
+    if (src.length === 0) return [];
+
+    const tol = Number.isFinite(tolerance)
+        ? Math.max(1e-12, Math.abs(tolerance))
+        : 1e-9;
+    const tol2 = tol * tol;
+    const out = [];
+
+    for (let i = 0; i < src.length; i++) {
+        const pt = src[i];
+        if (!Array.isArray(pt) || pt.length < 3) continue;
+        const x = Number(pt[0]);
+        const y = Number(pt[1]);
+        const z = Number(pt[2]);
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+
+        if (out.length > 0) {
+            const prev = out[out.length - 1];
+            const dx = x - prev[0];
+            const dy = y - prev[1];
+            const dz = z - prev[2];
+            if (((dx * dx) + (dy * dy) + (dz * dz)) <= tol2) continue;
+        }
+        out.push([x, y, z]);
+    }
+    return out;
+}
+
 function computeProjectionRange(verts, dir) {
     if (!Array.isArray(verts) || verts.length === 0 || !dir) return null;
     let min = Infinity;
@@ -429,6 +459,79 @@ function sanitizeFilletTangentPolyline(centerlinePoints, tangentPoints, options 
     };
 }
 
+function filletPointDistance(a, b) {
+    if (!isFiniteFilletPoint(a) || !isFiniteFilletPoint(b)) return NaN;
+    return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+function filletMedian(values) {
+    const arr = (Array.isArray(values) ? values : [])
+        .filter((v) => Number.isFinite(v))
+        .sort((a, b) => a - b);
+    if (!arr.length) return NaN;
+    const mid = (arr.length / 2) | 0;
+    if ((arr.length % 2) === 1) return arr[mid];
+    return 0.5 * (arr[mid - 1] + arr[mid]);
+}
+
+function filletCopyOffsetSampleToEndpoint(samples, edgePts, fromIdx, toIdx) {
+    if (!Array.isArray(samples) || !Array.isArray(edgePts)) return false;
+    const from = samples[fromIdx];
+    const edgeFrom = edgePts[fromIdx];
+    const edgeTo = edgePts[toIdx];
+    if (!isFiniteFilletPoint(from) || !isFiniteFilletPoint(edgeFrom) || !isFiniteFilletPoint(edgeTo)) return false;
+    samples[toIdx] = {
+        x: edgeTo.x + (from.x - edgeFrom.x),
+        y: edgeTo.y + (from.y - edgeFrom.y),
+        z: edgeTo.z + (from.z - edgeFrom.z),
+    };
+    return true;
+}
+
+function stabilizeOpenFilletEndpoints(centerlinePoints, tangentA, tangentB, edgePoints, radius = 1) {
+    const c = Array.isArray(centerlinePoints) ? centerlinePoints : [];
+    const a = Array.isArray(tangentA) ? tangentA : [];
+    const b = Array.isArray(tangentB) ? tangentB : [];
+    const e = Array.isArray(edgePoints) ? edgePoints : [];
+    const n = Math.min(c.length, a.length, b.length, e.length);
+    if (n < 3) return { stabilized: 0 };
+
+    const d = new Array(n);
+    for (let i = 0; i < n; i++) d[i] = filletPointDistance(c[i], e[i]);
+
+    const interior = [];
+    for (let i = 1; i < n - 1; i++) {
+        const v = d[i];
+        if (Number.isFinite(v) && v > 1e-9) interior.push(v);
+    }
+    const all = d.filter((v) => Number.isFinite(v) && v > 1e-9);
+    const baseDist = Number.isFinite(filletMedian(interior))
+        ? filletMedian(interior)
+        : filletMedian(all);
+    if (!(baseDist > 0)) return { stabilized: 0 };
+
+    const r = Math.max(0, Math.abs(Number(radius) || 0));
+    const outlierThreshold = Math.max(baseDist * 2.25, r * 2.5, baseDist + Math.max(0.5, r));
+    let stabilized = 0;
+
+    const maybeStabilize = (idx, neighborIdx) => {
+        const dist = d[idx];
+        const neighborDist = d[neighborIdx];
+        const tooFar = Number.isFinite(dist)
+            ? (dist > outlierThreshold && (!Number.isFinite(neighborDist) || dist > (neighborDist * 2.25)))
+            : true;
+        if (!tooFar) return;
+        const okCenter = filletCopyOffsetSampleToEndpoint(c, e, neighborIdx, idx);
+        const okA = filletCopyOffsetSampleToEndpoint(a, e, neighborIdx, idx);
+        const okB = filletCopyOffsetSampleToEndpoint(b, e, neighborIdx, idx);
+        if (okCenter && okA && okB) stabilized++;
+    };
+
+    maybeStabilize(0, 1);
+    maybeStabilize(n - 1, n - 2);
+    return { stabilized };
+}
+
 /**
  * Compute the fillet centerline polyline for an input edge without building the fillet solid.
  *
@@ -460,14 +563,16 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
         const useSegmentPairs = Array.isArray(segmentFacePairs) && segmentFacePairs.length > 0;
         if (!useSegmentPairs && (!faceNameA || !faceNameB)) return out;
 
-        const polyLocal = edgeObj.userData?.polylineLocal;
-        if (!Array.isArray(polyLocal) || polyLocal.length < 2) return out;
+        const polyLocalRaw = edgeObj.userData?.polylineLocal;
+        if (!Array.isArray(polyLocalRaw) || polyLocalRaw.length < 2) return out;
 
         // Tolerances (scale-adaptive to radius)
         const eps = getScaleAdaptiveTolerance(radius, 1e-12);
         const distTol = getDistanceTolerance(radius);
         const angleTol = getAngleTolerance();
         const vecLengthTol = getScaleAdaptiveTolerance(radius, 1e-14);
+        const polyLocal = sanitizeFilletInputPolyline(polyLocalRaw, distTol);
+        if (!Array.isArray(polyLocal) || polyLocal.length < 2) return out;
 
         // Average outward normals per face (object space)
         let nAavg = null;
@@ -524,7 +629,12 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
             const src = polyLocal.slice();
             if (isClosed && src.length > 2) {
                 const a = src[0], b = src[src.length - 1];
-                if (a && b && a[0] === b[0] && a[1] === b[1] && a[2] === b[2]) src.pop();
+                if (a && b) {
+                    const dx = a[0] - b[0];
+                    const dy = a[1] - b[1];
+                    const dz = a[2] - b[2];
+                    if (((dx * dx) + (dy * dy) + (dz * dz)) <= (distTol * distTol)) src.pop();
+                }
             }
 
             const outPts = [];
@@ -543,12 +653,22 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
                 const j = i + 1;
                 if (isClosed) {
                     const b = src[(i + 1) % src.length];
-                    outPts.push(new THREE.Vector3(0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1]), 0.5 * (a[2] + b[2])));
-                    segIdxs.push(segIdxMid);
+                    const dx = b[0] - a[0];
+                    const dy = b[1] - a[1];
+                    const dz = b[2] - a[2];
+                    if (((dx * dx) + (dy * dy) + (dz * dz)) > (distTol * distTol)) {
+                        outPts.push(new THREE.Vector3(0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1]), 0.5 * (a[2] + b[2])));
+                        segIdxs.push(segIdxMid);
+                    }
                 } else if (j < src.length) {
                     const b = src[j];
-                    outPts.push(new THREE.Vector3(0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1]), 0.5 * (a[2] + b[2])));
-                    segIdxs.push(segIdxMid);
+                    const dx = b[0] - a[0];
+                    const dy = b[1] - a[1];
+                    const dz = b[2] - a[2];
+                    if (((dx * dx) + (dy * dy) + (dz * dz)) > (distTol * distTol)) {
+                        outPts.push(new THREE.Vector3(0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1]), 0.5 * (a[2] + b[2])));
+                        segIdxs.push(segIdxMid);
+                    }
                 }
             }
             samples = outPts;
@@ -901,6 +1021,11 @@ export function computeFilletCenterline(edgeObj, radius = 1, sideMode = 'INSET')
 
         // For closed loops, explicitly duplicate the start point at the end
         // so the centerline is a closed polyline (last point equals first point).
+        if (!isClosed && centers.length >= 3 && tanA.length >= 3 && tanB.length >= 3 && edgePts.length >= 3) {
+            try {
+                stabilizeOpenFilletEndpoints(centers, tanA, tanB, edgePts, rEff);
+            } catch { /* best-effort stabilization */ }
+        }
         if (isClosed && centers.length >= 2) {
             const firstCenter = centers[0];
             const lastCenter = centers[centers.length - 1];
