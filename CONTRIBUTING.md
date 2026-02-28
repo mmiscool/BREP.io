@@ -1,5 +1,7 @@
 Pull requests welcome.
 
+Developer discussion and support: [Discord](https://discord.gg/R5KNAKrQ).
+
 For bug reports and how to generate reproducible test-case snippets with the `🪲` toolbar button, see [docs/bug-reporting.md](docs/bug-reporting.md).
 
 Please don't reformat files without a good reason (tabs vs. spaces), as this just adds noise during review.

@@ -2,6 +2,7 @@
 # [Source https://github.com/mmiscool/BREP](https://github.com/mmiscool/BREP)  
 - [NPM package: `brep-io-kernel` https://www.npmjs.com/package/brep-io-kernel](https://www.npmjs.com/package/brep-io-kernel)  
 - [Live API examples https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
+- [Developer Discord https://discord.gg/R5KNAKrQ](https://discord.gg/R5KNAKrQ)
 
 BREP.io is a browser-based CAD application and JavaScript kernel for feature-based solid modeling.  
 At its core is a BREP-style modeler with explicit geometry/topology objects such as `Solid`, `Face`, `Edge`, and `Vertex`, paired with an editable feature-history pipeline.  
