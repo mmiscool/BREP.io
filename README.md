@@ -24,6 +24,7 @@ This project is in active development and APIs may continue to evolve.
 General:
 - [Getting Started](docs/getting-started.md)
 - [Developer Docs Index](docs/developer-index.md)
+- [Bug Reporting and Repro Test Cases](docs/bug-reporting.md)
 - [Highlights](docs/highlights.md)
 - [What's New](docs/whats-new.md)
 - [API Examples](docs/api-examples.md)

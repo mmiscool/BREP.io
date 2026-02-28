@@ -1,5 +1,7 @@
 Pull requests welcome.
 
+For bug reports and how to generate reproducible test-case snippets with the `🪲` toolbar button, see [docs/bug-reporting.md](docs/bug-reporting.md).
+
 Please don't reformat files without a good reason (tabs vs. spaces), as this just adds noise during review.
 
 Be sure you comply with the license.

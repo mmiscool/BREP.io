@@ -8,6 +8,7 @@ This page is a quick entry point for implementation and integration docs.
 
 ## Start Here
 - [Getting Started](./getting-started.md)
+- [Bug Reporting and Repro Test Cases](./bug-reporting.md)
 - [API Examples (Live Demos)](./api-examples.md)
 - [BREP API (BREP.js exports)](./brep-api.md)
 - [BREP Kernel (core classes & helpers)](./brep-kernel.md)

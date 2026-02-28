@@ -49,7 +49,7 @@ export function registerDefaultToolbarButtons(viewer) {
   if (isLocalhost) creators.push(createSheetMetalDebugButton);
   creators.push(createAboutButton);
   if (isLocalhost) creators.push(createTestsButton);
-  if (isLocalhost) creators.push(createHistoryTestSnippetButton);
+  creators.push(createHistoryTestSnippetButton);
   creators.push(createScriptRunnerButton);
   if (isLocalhost) creators.push(createSelectionStateButton);
   creators.push(createUndoButton, createRedoButton);

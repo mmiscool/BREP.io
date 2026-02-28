@@ -1,6 +1,8 @@
 const DEFAULT_EXPRESSIONS = '//Examples:\nx = 10 + 6; \ny = x * 2;';
 const UI_ONLY_INPUT_PARAM_KEYS = new Set(['__open']);
 const DIALOG_STYLE_ID = 'history-test-snippet-dialog-styles';
+const BUG_REPORT_URL_BASE = 'https://github.com/mmiscool/BREP/issues/new';
+const BUG_REPORT_TEMPLATE = 'bug_report.yml';
 
 function sanitizeFunctionName(rawName) {
   const trimmed = String(rawName || '').trim();
@@ -146,6 +148,19 @@ async function copyTextToClipboard(text) {
   }
 }
 
+function buildBugReportUrl(functionName, featureCount) {
+  try {
+    const issueUrl = new URL(BUG_REPORT_URL_BASE);
+    issueUrl.searchParams.set('template', BUG_REPORT_TEMPLATE);
+    const count = Number.isFinite(featureCount) ? featureCount : 0;
+    const plural = count === 1 ? '' : 's';
+    issueUrl.searchParams.set('title', `[Bug]: Repro from ${functionName} (${count} feature${plural})`);
+    return issueUrl.toString();
+  } catch {
+    return `${BUG_REPORT_URL_BASE}?template=${encodeURIComponent(BUG_REPORT_TEMPLATE)}`;
+  }
+}
+
 function ensureDialogStyles() {
   if (document.getElementById(DIALOG_STYLE_ID)) return;
   const style = document.createElement('style');
@@ -159,6 +174,7 @@ function ensureDialogStyles() {
     .testsnip-actions { display: flex; justify-content: flex-end; gap: 8px; }
     .testsnip-btn { background: rgba(255,255,255,.03); color: #f9fafb; border: 1px solid #374151; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 12px; line-height: 1; }
     .testsnip-btn:hover { border-color: #3b82f6; background: rgba(59,130,246,.12); }
+    .testsnip-link { text-decoration: none; display: inline-flex; align-items: center; }
   `;
   document.head.appendChild(style);
 }
@@ -189,6 +205,13 @@ function openSnippetDialog({ snippet, functionName, featureCount, copied }) {
   const actions = document.createElement('div');
   actions.className = 'testsnip-actions';
 
+  const issueLink = document.createElement('a');
+  issueLink.className = 'testsnip-btn testsnip-link';
+  issueLink.textContent = 'Open GitHub Issue';
+  issueLink.href = buildBugReportUrl(functionName, featureCount);
+  issueLink.target = '_blank';
+  issueLink.rel = 'noopener noreferrer';
+
   const copyBtn = document.createElement('button');
   copyBtn.className = 'testsnip-btn';
   copyBtn.textContent = 'Copy';
@@ -206,6 +229,7 @@ function openSnippetDialog({ snippet, functionName, featureCount, copied }) {
     try { document.body.removeChild(overlay); } catch { /* ignore */ }
   });
 
+  actions.appendChild(issueLink);
   actions.appendChild(copyBtn);
   actions.appendChild(closeBtn);
   modal.appendChild(title);
@@ -230,7 +254,7 @@ function openSnippetDialog({ snippet, functionName, featureCount, copied }) {
 export function createHistoryTestSnippetButton(viewer) {
   if (!viewer) return null;
   return {
-    label: 'TGEN',
+    label: '🪲',
     title: 'Generate a test snippet from current feature history',
     onClick: async () => {
       try {

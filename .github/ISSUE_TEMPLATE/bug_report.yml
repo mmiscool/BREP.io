@@ -1,0 +1,87 @@
+name: Bug report
+description: Report a reproducible bug in BREP
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug.
+
+        Before submitting, please generate a reproducible snippet with the `🪲` toolbar button when possible.
+        Full instructions: https://github.com/mmiscool/BREP/blob/main/docs/bug-reporting.md
+
+  - type: input
+    id: app_url
+    attributes:
+      label: App URL
+      description: Where did this happen? (for example https://brep.io or your deployment URL)
+      placeholder: https://brep.io
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Browser and OS
+      description: Example: Chrome 123 on macOS 15.2
+      placeholder: Chrome 123 on Windows 11
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps_to_reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Use numbered steps and include exact values/clicks when relevant.
+      placeholder: |
+        1. Open ...
+        2. Create ...
+        3. Click ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual_behavior
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: bug_snippet
+    attributes:
+      label: Bug-button snippet (required for modeling-history bugs)
+      description: |
+        Click `🪲` in the CAD toolbar and paste the generated snippet here.
+        If `🪲` is not applicable, write "N/A" and explain why.
+      render: javascript
+      placeholder: |
+        // Paste generated snippet from the bug button
+    validations:
+      required: true
+
+  - type: textarea
+    id: console_errors
+    attributes:
+      label: Console errors
+      description: Paste console output and stack traces (if any).
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: attachments
+    attributes:
+      label: Attachments
+      description: Add screenshots, recordings, or .BREP.json files if relevant.
+    validations:
+      required: false
