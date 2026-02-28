@@ -25,7 +25,7 @@ body:
     id: environment
     attributes:
       label: Browser and OS
-      description: Example: Chrome 123 on macOS 15.2
+      description: "Example: Chrome 123 on macOS 15.2"
       placeholder: Chrome 123 on Windows 11
     validations:
       required: true
