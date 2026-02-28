@@ -223,7 +223,10 @@ export class HistoryWidget extends HistoryCollectionWidget {
   }
 
   #afterPartHistoryMutated() {
-    this._idsSignature = this.#computeIdsSignature();
+    const nextIdsSignature = this.#computeIdsSignature();
+    const idsChanged = nextIdsSignature !== this._idsSignature;
+    this._idsSignature = nextIdsSignature;
+    if (idsChanged) this.render();
     this._syncHeaderState(true);
     this.#refreshOpenForms();
     this._syncFeatureDimensionOverlay();
