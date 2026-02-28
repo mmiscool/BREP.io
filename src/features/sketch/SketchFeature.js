@@ -178,6 +178,58 @@ function normalizeSketchPointAttributes(sketch, externalRefPointIds = null) {
     }
 }
 
+function computeObjectWorldCentroid(object) {
+    if (!object) return null;
+    try { object.updateWorldMatrix?.(true, true); } catch { /* ignore */ }
+    try {
+        const geom = object.geometry;
+        const pos = geom?.getAttribute?.('position');
+        if (pos && pos.itemSize === 3 && pos.count > 0) {
+            const sum = new THREE.Vector3();
+            const tmp = new THREE.Vector3();
+            for (let i = 0; i < pos.count; i++) {
+                tmp.set(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(object.matrixWorld);
+                sum.add(tmp);
+            }
+            return sum.multiplyScalar(1 / pos.count);
+        }
+    } catch { /* ignore */ }
+    try {
+        const box = new THREE.Box3().setFromObject(object);
+        if (!box.isEmpty()) return box.getCenter(new THREE.Vector3());
+    } catch { /* ignore */ }
+    try { return object.getWorldPosition(new THREE.Vector3()); } catch { /* ignore */ }
+    return null;
+}
+
+function computeObjectWorldBoundsCenter(object) {
+    if (!object) return null;
+    try { object.updateWorldMatrix?.(true, true); } catch { /* ignore */ }
+    try {
+        const box = new THREE.Box3().setFromObject(object);
+        if (!box.isEmpty()) return box.getCenter(new THREE.Vector3());
+    } catch { /* ignore */ }
+    return null;
+}
+
+function computeObjectWorldPoint(object) {
+    if (!object) return null;
+    try { object.updateWorldMatrix?.(true, true); } catch { /* ignore */ }
+    try {
+        const geom = object.geometry;
+        const pos = geom?.getAttribute?.('position');
+        if (pos && pos.itemSize === 3 && pos.count > 0) {
+            return new THREE.Vector3(
+                pos.getX(0),
+                pos.getY(0),
+                pos.getZ(0),
+            ).applyMatrix4(object.matrixWorld);
+        }
+    } catch { /* ignore */ }
+    try { return object.getWorldPosition(new THREE.Vector3()); } catch { /* ignore */ }
+    return null;
+}
+
 export class SketchFeature {
     static shortName = "S";
     static longName = "Sketch";
@@ -227,24 +279,24 @@ export class SketchFeature {
 
         if (refObj) {
             refObj.updateWorldMatrix(true, true);
-            // Prefer geometric center if available
-            try {
-                const g = refObj.geometry;
-                if (g) {
-                    const bs = g.boundingSphere || (g.computeBoundingSphere(), g.boundingSphere);
-                    if (bs) origin.copy(refObj.localToWorld(bs.center.clone()));
-                    else origin.copy(refObj.getWorldPosition(new THREE.Vector3()));
-                } else origin.copy(refObj.getWorldPosition(new THREE.Vector3()));
-            } catch { origin.copy(refObj.getWorldPosition(new THREE.Vector3())); }
+            const center = computeObjectWorldBoundsCenter(refObj) || computeObjectWorldCentroid(refObj);
+            if (center) origin.copy(center);
+            else origin.copy(refObj.getWorldPosition(new THREE.Vector3()));
             // For Face, use its avg normal; otherwise use object orientation
             if (refObj.type === 'FACE' && typeof refObj.getAverageNormal === 'function') {
-                const n = refObj.getAverageNormal();
+                const n = refObj.getAverageNormal().clone();
+                if (n.lengthSq() < 1e-12) n.set(0, 0, 1);
+                n.normalize();
+                // Keep sketch origin on the reference face plane.
+                const planePoint = computeObjectWorldPoint(refObj) || origin;
+                const signedOffset = origin.clone().sub(planePoint).dot(n);
+                origin.addScaledVector(n, -signedOffset);
                 const worldUp = new THREE.Vector3(0,1,0);
                 const tmp = new THREE.Vector3();
                 const zx = Math.abs(n.dot(worldUp)) > 0.9 ? new THREE.Vector3(1,0,0) : worldUp;
                 x.copy(tmp.crossVectors(zx, n).normalize());
                 y.copy(tmp.crossVectors(n, x).normalize());
-                z.copy(n.clone().normalize());
+                z.copy(n);
             } else {
                 const n = new THREE.Vector3(0,0,1).applyQuaternion(refObj.getWorldQuaternion(new THREE.Quaternion())).normalize();
                 const worldUp = new THREE.Vector3(0,1,0);

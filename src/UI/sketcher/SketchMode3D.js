@@ -1855,6 +1855,54 @@ export class SketchMode3D {
     } catch { return null; }
   }
 
+  #referenceWorldCentroid(obj) {
+    if (!obj) return null;
+    try { obj.updateWorldMatrix?.(true, true); } catch { /* ignore */ }
+    try {
+      const geom = obj.geometry;
+      const pos = geom?.getAttribute?.('position');
+      if (pos && pos.itemSize === 3 && pos.count > 0) {
+        const sum = new THREE.Vector3();
+        const tmp = new THREE.Vector3();
+        for (let i = 0; i < pos.count; i++) {
+          tmp.set(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(obj.matrixWorld);
+          sum.add(tmp);
+        }
+        return sum.multiplyScalar(1 / pos.count);
+      }
+    } catch { /* ignore */ }
+    try {
+      const box = new THREE.Box3().setFromObject(obj);
+      if (!box.isEmpty()) return box.getCenter(new THREE.Vector3());
+    } catch { /* ignore */ }
+    try { return obj.getWorldPosition(new THREE.Vector3()); } catch { /* ignore */ }
+    return null;
+  }
+
+  #referenceWorldBoundsCenter(obj) {
+    if (!obj) return null;
+    try { obj.updateWorldMatrix?.(true, true); } catch { /* ignore */ }
+    try {
+      const box = new THREE.Box3().setFromObject(obj);
+      if (!box.isEmpty()) return box.getCenter(new THREE.Vector3());
+    } catch { /* ignore */ }
+    return null;
+  }
+
+  #referenceWorldPoint(obj) {
+    if (!obj) return null;
+    try { obj.updateWorldMatrix?.(true, true); } catch { /* ignore */ }
+    try {
+      const geom = obj.geometry;
+      const pos = geom?.getAttribute?.('position');
+      if (pos && pos.itemSize === 3 && pos.count > 0) {
+        return new THREE.Vector3(pos.getX(0), pos.getY(0), pos.getZ(0)).applyMatrix4(obj.matrixWorld);
+      }
+    } catch { /* ignore */ }
+    try { return obj.getWorldPosition(new THREE.Vector3()); } catch { /* ignore */ }
+    return null;
+  }
+
   #basisFromReference(obj) {
     const x = new THREE.Vector3(1, 0, 0);
     const y = new THREE.Vector3(0, 1, 0);
@@ -1862,22 +1910,23 @@ export class SketchMode3D {
     const origin = new THREE.Vector3(0, 0, 0);
     if (!obj) return { x, y, z, origin };
 
-    // Compute origin: object world position or centroid of geometry
+    // Compute origin from a robust world centroid (never bounding-sphere center)
     obj.updateWorldMatrix(true, true);
-    origin.copy(obj.getWorldPosition(new THREE.Vector3()));
+    const center = this.#referenceWorldBoundsCenter(obj) || this.#referenceWorldCentroid(obj);
+    if (center) origin.copy(center);
+    else origin.copy(obj.getWorldPosition(new THREE.Vector3()));
 
     // If FACE, attempt to use its average normal and a stable X axis
     if (obj.type === "FACE" && typeof obj.getAverageNormal === "function") {
       // Raw normal from face triangles (may be inward)
       let n = obj.getAverageNormal();
       const rawN = n.clone();
-      // origin ~ face centroid if available (used for outward test)
-      try {
-        const g = obj.geometry;
-        const bs = g.boundingSphere || (g.computeBoundingSphere(), g.boundingSphere);
-        if (bs) origin.copy(obj.localToWorld(bs.center.clone()));
-        else origin.copy(obj.getWorldPosition(new THREE.Vector3()));
-      } catch { origin.copy(obj.getWorldPosition(new THREE.Vector3())); }
+      if (n.lengthSq() < 1e-12) n.set(0, 0, 1);
+      n.normalize();
+      // Keep origin on the reference face plane.
+      const planePoint = this.#referenceWorldPoint(obj) || origin;
+      const signedOffset = origin.clone().sub(planePoint).dot(n);
+      origin.addScaledVector(n, -signedOffset);
 
       // Determine solid center if possible
       let solidCenter = null;

@@ -80,6 +80,10 @@ import { test_sheetMetal_cutoutEdge_flange_controls } from './test_sheetMetal_cu
 import { test_sheetMetal_nonManifold_sm_f18 } from './test_sheetMetal_nonManifold_sm_f18.js';
 import { afterRun_sketch_openLoop, test_sketch_openLoop } from './test_sketch_openLoop.js';
 import {
+    afterRun_sketch_face_attachment_alignment,
+    test_sketch_face_attachment_alignment,
+} from './test_sketch_face_attachment_alignment.js';
+import {
     test_sketch_solver_distance_slide_large_drop_settles_single_solve,
     test_sketch_solver_line_to_point_distance_constraint,
     test_sketch_solver_topology_coincident_chain,
@@ -181,6 +185,14 @@ export const testFunctions = [
     { test: test_tube, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_tube_closedLoop, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_sketch_openLoop, afterRun: afterRun_sketch_openLoop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    {
+        test: test_sketch_face_attachment_alignment,
+        afterRun: afterRun_sketch_face_attachment_alignment,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
     { test: test_sketch_solver_topology_rect_shared_points, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_solver_topology_coincident_chain, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_solver_topology_coincident_loop_no_flip, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
