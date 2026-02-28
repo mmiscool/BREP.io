@@ -611,20 +611,15 @@ export class Sweep extends FacesSolid {
     // offset on either side of the base face.
     const twoSided = (offsets.length < 2) && typeof distanceBack === 'number' && isFinite(distanceBack) && Math.abs(distanceBack) > 1e-12;
     if (twoSided) {
-      // If the forward vector is extremely small (e.g. distance ~ 0 with a tiny
-      // bias from certain boolean modes), derive the back direction from the
-      // face normal instead of the sign of dirF to avoid flipping semantics.
-      const EPS_FWD = 1e-8;
-      let n = null;
-      if (dirF && dirF.length() > EPS_FWD) {
-        n = dirF.clone().normalize();
-      } else {
-        n = (typeof face.getAverageNormal === 'function') ? face.getAverageNormal().clone() : new THREE.Vector3(0, 1, 0);
-        if (n.lengthSq() < 1e-20) n.set(0, 1, 0);
-        n.normalize();
-      }
-      // Preserve the sign of distanceBack: positive means offset "behind"
-      // the base along -n; negative moves the start cap in the +n direction.
+      // Keep backward axis stable to the profile normal so crossing distance=0
+      // does not flip which side "Distance Back" controls.
+      const n = (typeof face.getAverageNormal === 'function')
+        ? face.getAverageNormal().clone()
+        : new THREE.Vector3(0, 1, 0);
+      if (n.lengthSq() < 1e-20) n.set(0, 1, 0);
+      n.normalize();
+      // Preserve the sign of distanceBack on the stable axis:
+      // positive means offset behind (-n), negative means offset ahead (+n).
       dirB = n.multiplyScalar(-distanceBack);
     }
 

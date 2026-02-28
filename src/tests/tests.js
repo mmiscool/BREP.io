@@ -16,6 +16,10 @@ import {
     test_edge_smooth_face_selection,
     test_edge_smooth_whole_solid_selection,
 } from './test_edge_smooth_curve_fit.js';
+import {
+    afterRun_extrude_negative_distance_cap_alignment,
+    test_extrude_negative_distance_cap_alignment,
+} from './test_extrude_negative_distance.js';
 import { test_ExtrudeFace } from './test_extrudeFace.js';
 import { test_Fillet } from './test_fillet.js';
 import { afterRun_fillet_angle, test_fillet_angle } from './test_fillet_angle.js';
@@ -185,6 +189,14 @@ export const testFunctions = [
     { test: test_sketch_solver_distance_slide_large_drop_settles_single_solve, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_solver_line_to_point_distance_constraint, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_offsetShellGrouping, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    {
+        test: test_extrude_negative_distance_cap_alignment,
+        afterRun: afterRun_extrude_negative_distance_cap_alignment,
+        printArtifacts: false,
+        exportFaces: true,
+        exportSolids: true,
+        resetHistory: true,
+    },
     { test: test_ExtrudeFace, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_Fillet, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_fillet_angle, afterRun: afterRun_fillet_angle, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
