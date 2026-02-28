@@ -3177,6 +3177,16 @@ export class SketchMode3D {
       return;
     }
 
+    // 2 selected points + 1 selected line geometry -> perpendicular between
+    // the implicit points-line and the selected line.
+    const oneLineAndTwoPoints =
+      geos.length === 1 &&
+      geos[0]?.type === "line" &&
+      selectedPointIds.length === 2;
+    if (oneLineAndTwoPoints) {
+      addConstraintButton({ label: "⟂", type: "⟂", tooltip: "Perpendicular" });
+    }
+
     if (pointCount === 1) addConstraintButton({ label: "⏚", type: "⏚", tooltip: "Ground (fix point)" });
     if (pointCount === 2) {
       addConstraintButton({ label: "━", type: "━", tooltip: "Horizontal" });
