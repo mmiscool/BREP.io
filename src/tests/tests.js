@@ -94,7 +94,11 @@ import {
 } from './test_sketch_solver_topology_stability.js';
 import { afterRun_solidMetrics, test_solidMetrics } from './test_solidMetrics.js';
 import { test_stlLoader } from './test_stlLoader.js';
-import { test_SweepFace } from './test_sweepFace.js';
+import {
+    afterRun_sweepFace_pathAlign_multi_loop_islands,
+    test_SweepFace,
+    test_SweepFace_pathAlign_multi_loop_islands,
+} from './test_sweepFace.js';
 import { afterRun_textToFace, test_textToFace } from './test_textToFace.js';
 import { test_tube } from './test_tube.js';
 import { test_tube_closedLoop } from './test_tube_closedLoop.js';
@@ -182,6 +186,14 @@ export const testFunctions = [
         resetHistory: true,
     },
     { test: test_SweepFace, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    {
+        test: test_SweepFace_pathAlign_multi_loop_islands,
+        afterRun: afterRun_sweepFace_pathAlign_multi_loop_islands,
+        printArtifacts: false,
+        exportFaces: true,
+        exportSolids: true,
+        resetHistory: true,
+    },
     { test: test_tube, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_tube_closedLoop, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_sketch_openLoop, afterRun: afterRun_sketch_openLoop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
