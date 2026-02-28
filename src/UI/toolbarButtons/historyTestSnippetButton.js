@@ -197,10 +197,11 @@ function openSnippetDialog({ snippet, functionName, featureCount, copied }) {
     ? `Copied to clipboard. Function: ${functionName}. Features: ${featureCount}.`
     : `Clipboard copy was unavailable. Function: ${functionName}. Features: ${featureCount}.`;
 
-  const text = document.createElement('textarea');
-  text.className = 'testsnip-text';
-  text.value = String(snippet || '');
-  text.readOnly = true;
+  const code3 = document.createElement('textarea');
+  code3.id = 'code3';
+  code3.className = 'testsnip-text';
+  code3.value = String(snippet || '');
+  code3.readOnly = true;
 
   const actions = document.createElement('div');
   actions.className = 'testsnip-actions';
@@ -216,7 +217,7 @@ function openSnippetDialog({ snippet, functionName, featureCount, copied }) {
   copyBtn.className = 'testsnip-btn';
   copyBtn.textContent = 'Copy';
   copyBtn.addEventListener('click', async () => {
-    const ok = await copyTextToClipboard(text.value);
+    const ok = await copyTextToClipboard(code3.value);
     hint.textContent = ok
       ? `Copied to clipboard. Function: ${functionName}. Features: ${featureCount}.`
       : 'Clipboard copy failed. Use Ctrl/Cmd+C in the textbox.';
@@ -234,7 +235,7 @@ function openSnippetDialog({ snippet, functionName, featureCount, copied }) {
   actions.appendChild(closeBtn);
   modal.appendChild(title);
   modal.appendChild(hint);
-  modal.appendChild(text);
+  modal.appendChild(code3);
   modal.appendChild(actions);
   overlay.appendChild(modal);
 
@@ -246,8 +247,8 @@ function openSnippetDialog({ snippet, functionName, featureCount, copied }) {
   document.body.appendChild(overlay);
 
   try {
-    text.focus();
-    text.select();
+    code3.focus();
+    code3.select();
   } catch { /* ignore */ }
 }
 
