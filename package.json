@@ -46,6 +46,7 @@
   "author": "",
   "license": "SEE LICENSE IN LICENSE.md",
   "dependencies": {
+    "@malgorithms/m3": "^0.0.1",
     "@tarikjabiri/dxf": "^2.8.9",
     "jszip": "^3.10.1",
     "manifold-3d": "^3.3.2",

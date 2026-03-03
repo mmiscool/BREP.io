@@ -23,9 +23,7 @@ export async function test_filletsMoreDifficult(partHistory) {
     `${cone.inputParams.featureID}_S|${cube.inputParams.featureID}_PY[0]`,
   ];
   fillet1.inputParams.radius = 1;
-  fillet1.inputParams.inflate = 0.1;
   fillet1.inputParams.direction = "AUTO";
-  fillet1.inputParams.debug = "NONE";
 
   // 4) Fillet around top ring of the cone
   const fillet2 = await partHistory.newFeature("F");
@@ -33,9 +31,7 @@ export async function test_filletsMoreDifficult(partHistory) {
     `${cone.inputParams.featureID}_S|${cone.inputParams.featureID}_T[0]`,
   ];
   fillet2.inputParams.radius = 1;
-  fillet2.inputParams.inflate = 0.1;
   fillet2.inputParams.direction = "AUTO";
-  fillet2.inputParams.debug = "NONE";
 
   return partHistory;
 }

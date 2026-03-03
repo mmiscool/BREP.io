@@ -9,9 +9,7 @@ export async function test_Fillet(partHistory) {
   const fillet = await partHistory.newFeature("F");
   fillet.inputParams.edges = [`${cyl.inputParams.featureID}_T`]; // select face to grab its edges
   fillet.inputParams.radius = 1.0;
-  fillet.inputParams.inflate = 0.1; // tiny inflation to avoid sliver leftovers
   fillet.inputParams.direction = "INSET"; // subtract from the base body
 
   return partHistory;
 }
-

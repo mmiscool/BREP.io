@@ -135,60 +135,15 @@ export class SketchMode3D {
     }
 
     // Basis used for projecting points to/from world; also align camera now
-    const pivotBasis = basis.origin.clone();
-    // Compute a better visual pivot: world-space center of the reference object (face/plane)
-    let pivotLook = pivotBasis.clone();
-    try {
-      if (refObj) {
-        refObj.updateWorldMatrix(true, true);
-        // Prefer world-space bounding box center
-        const box = new THREE.Box3().setFromObject(refObj);
-        if (box && !box.isEmpty()) {
-          pivotLook.copy(box.getCenter(new THREE.Vector3()));
-        } else {
-          // Fallback to bounding sphere center in local -> world
-          const g = refObj.geometry;
-          const bs = g && (g.boundingSphere || (g.computeBoundingSphere(), g.boundingSphere));
-          if (bs) pivotLook.copy(refObj.localToWorld(bs.center.clone()));
-          else pivotLook.copy(refObj.getWorldPosition(new THREE.Vector3()));
-        }
-      }
-    } catch { }
+    const pivotLook = this.#computeSketchViewTarget(refObj, basis.origin);
     const currentDist = v.camera.position.distanceTo(pivotLook);
     this._lock = { basis, distance: currentDist || 20 };
 
     // Reposition and orient camera to face the sketch plane head-on.
-    try {
-      const cam = v.camera;
-      const dist = Math.max(0.01, Math.abs(this._lock.distance || 20));
-      const z = basis.z.clone().normalize();
-      // Ensure we view the front side of the reference face/plane
-      let viewDir = z.clone();
-      try {
-        const faceBasis = basis.rawNormal
-          ? { z: basis.rawNormal }
-          : (refObj ? this.#basisFromReference(refObj) : null);
-        const faceNormal = faceBasis?.z?.clone()?.normalize();
-        if (faceNormal && viewDir.dot(faceNormal) < 0) {
-          viewDir.multiplyScalar(-1);
-        }
-      } catch { }
-      const y = basis.y.clone().normalize();
-      const pos = pivotLook.clone().add(viewDir.multiplyScalar(dist));
-      cam.position.copy(pos);
-      cam.up.copy(y);
-      cam.lookAt(pivotLook);
-      cam.updateMatrixWorld(true);
-      // Align Arcball target/pivot to the face center so first drag won't jump
-      try { if (v.controls) v.controls.target.copy(pivotLook); } catch { }
-      try { v.controls && v.controls._gizmos && v.controls._gizmos.position && v.controls._gizmos.position.copy(pivotLook); } catch { }
-      // Sync internal control matrices and gizmo size/state
-      try { v.controls && v.controls.update && v.controls.update(); } catch { }
-      // Ensure gizmo matrices are current before snapshotting state (prevents first-pan jump)
-      try { v.controls && v.controls._gizmos && v.controls._gizmos.updateMatrixWorld && v.controls._gizmos.updateMatrixWorld(true); } catch { }
-      try { v.controls && v.controls.updateMatrixState && v.controls.updateMatrixState(); } catch { }
-      try { v.render && v.render(); } catch { }
-    } catch { }
+    this.#orientCameraPerpendicularToSketchPlane({
+      target: pivotLook,
+      distance: currentDist || 20,
+    });
 
     // Keep other sketch groups visible so they can be referenced while editing
     this._hiddenSketches = [];
@@ -1855,6 +1810,92 @@ export class SketchMode3D {
     } catch { return null; }
   }
 
+  #computeSketchViewTarget(refObj, fallbackPoint = null) {
+    const pivot = fallbackPoint instanceof THREE.Vector3
+      ? fallbackPoint.clone()
+      : new THREE.Vector3();
+    try {
+      if (!refObj) return pivot;
+      refObj.updateWorldMatrix(true, true);
+      const box = new THREE.Box3().setFromObject(refObj);
+      if (box && !box.isEmpty()) {
+        pivot.copy(box.getCenter(new THREE.Vector3()));
+        return pivot;
+      }
+      const geom = refObj.geometry;
+      const sphere = geom && (geom.boundingSphere || (geom.computeBoundingSphere(), geom.boundingSphere));
+      if (sphere) {
+        pivot.copy(refObj.localToWorld(sphere.center.clone()));
+        return pivot;
+      }
+      pivot.copy(refObj.getWorldPosition(new THREE.Vector3()));
+    } catch { /* ignore */ }
+    return pivot;
+  }
+
+  #orientCameraPerpendicularToSketchPlane({ target = null, distance = null } = {}) {
+    const v = this.viewer;
+    const cam = v?.camera;
+    const basis = this._lock?.basis;
+    if (!v || !cam || !basis) return false;
+
+    try {
+      const pivotFallback = basis.origin instanceof THREE.Vector3
+        ? basis.origin
+        : new THREE.Vector3();
+      const pivotLook = target instanceof THREE.Vector3
+        ? target.clone()
+        : this.#computeSketchViewTarget(this._refObj, pivotFallback);
+
+      let dist = Number(distance);
+      if (!Number.isFinite(dist) || dist <= 0) {
+        dist = cam.position.distanceTo(pivotLook);
+      }
+      if (!Number.isFinite(dist) || dist <= 0) {
+        dist = Math.max(0.01, Math.abs(this._lock?.distance || 20));
+      }
+      dist = Math.max(0.01, Math.abs(dist));
+
+      const z = (basis.z instanceof THREE.Vector3 ? basis.z : new THREE.Vector3(0, 0, 1)).clone();
+      if (z.lengthSq() < 1e-12) z.set(0, 0, 1);
+      z.normalize();
+
+      let viewDir = z.clone();
+      try {
+        const refBasis = this._refObj ? this.#basisFromReference(this._refObj) : null;
+        const faceNormal = (basis.rawNormal instanceof THREE.Vector3 ? basis.rawNormal : null)
+          || (refBasis?.rawNormal instanceof THREE.Vector3 ? refBasis.rawNormal : null)
+          || (refBasis?.z instanceof THREE.Vector3 ? refBasis.z : null);
+        if (faceNormal) {
+          const n = faceNormal.clone();
+          if (n.lengthSq() > 1e-12 && viewDir.dot(n.normalize()) < 0) {
+            viewDir.multiplyScalar(-1);
+          }
+        }
+      } catch { /* ignore */ }
+
+      const y = (basis.y instanceof THREE.Vector3 ? basis.y : new THREE.Vector3(0, 1, 0)).clone();
+      if (y.lengthSq() < 1e-12) y.set(0, 1, 0);
+      y.normalize();
+
+      const pos = pivotLook.clone().add(viewDir.multiplyScalar(dist));
+      cam.position.copy(pos);
+      cam.up.copy(y);
+      cam.lookAt(pivotLook);
+      cam.updateMatrixWorld(true);
+      try { if (v.controls) v.controls.target.copy(pivotLook); } catch { /* ignore */ }
+      try { v.controls && v.controls._gizmos && v.controls._gizmos.position && v.controls._gizmos.position.copy(pivotLook); } catch { /* ignore */ }
+      try { v.controls && v.controls.update && v.controls.update(); } catch { /* ignore */ }
+      try { v.controls && v.controls._gizmos && v.controls._gizmos.updateMatrixWorld && v.controls._gizmos.updateMatrixWorld(true); } catch { /* ignore */ }
+      try { v.controls && v.controls.updateMatrixState && v.controls.updateMatrixState(); } catch { /* ignore */ }
+      try { v.render && v.render(); } catch { /* ignore */ }
+      if (this._lock) this._lock.distance = dist;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   #referenceWorldCentroid(obj) {
     if (!obj) return null;
     try { obj.updateWorldMatrix?.(true, true); } catch { /* ignore */ }
@@ -2809,6 +2850,16 @@ export class SketchMode3D {
       this._toolbarButtons.push(btn);
       return btn;
     };
+    mkAction({
+      label: "Perp",
+      tooltip: "Orient camera perpendicular to sketch plane",
+      onClick: () => {
+        const ok = this.#orientCameraPerpendicularToSketchPlane();
+        if (!ok) {
+          try { this.viewer?._toast?.("Unable to orient camera to sketch plane."); } catch { }
+        }
+      },
+    });
     this._undoButtons.undo = mkAction({
       label: "↶",
       tooltip: "Undo (Ctrl+Z)",
