@@ -123,7 +123,9 @@ function buildPayload({
       edgeName: entry?.edgeName || null,
       requested: requestedDirection,
       resolved: entry?.resolvedDirection || resolvedDefaultDirection,
-      operation: entry?.operation || entry?.wedgeOperation || "subtract",
+      operation: entry?.operation || entry?.targetOperation || entry?.wedgeOperation || "subtract",
+      targetOperation: entry?.targetOperation || entry?.operation || entry?.wedgeOperation || "subtract",
+      toolPairOperation: entry?.toolPairOperation || entry?.tubeOperation || "subtract",
       wedgeOperation: entry?.wedgeOperation || null,
       tubeOperation: entry?.tubeOperation || null,
       miterDistance: entry?.distance || radius,
@@ -700,6 +702,7 @@ function collectDebugSolidsForMode({
     const tools = [
       { solid: entry?.debugWedgeTool || entry?.wedgeTool || null, suffix: "WEDGE" },
       { solid: entry?.debugTubeTool || entry?.debugTool || entry?.tool || null, suffix: "TUBE" },
+      { solid: entry?.debugCombinedTool || entry?.combinedTool || null, suffix: "PAIR" },
     ];
     for (const item of tools) {
       const tool = item.solid;
@@ -737,8 +740,9 @@ function collectDebugSolidsForMode({
  * - Computes centerlines/tangent rails from computeFilletCenterline.
  * - Builds per-edge miter wedges and centerline tube tools.
  * - Snaps shared tangent endpoints across adjacent edges so tube caps align.
- * - Applies wedge boolean by direction first (INSET subtract, OUTSET union),
- *   then applies the opposite boolean with the tubes.
+ * - Combines each wedge/tube pair into a single fillet tool first.
+ * - Applies that combined tool to the target by direction
+ *   (INSET subtract, OUTSET union).
  * - AUTO currently defaults to INSET while retaining decision metadata.
  */
 export async function fillet(opts = {}) {
@@ -801,8 +805,8 @@ export async function fillet(opts = {}) {
   for (const edge of edges) {
     const edgeName = edge?.name || `edge_${idx}`;
     const resolvedDirection = resolvedDefaultDirection;
-    const wedgeOperation = resolvedDirection === "OUTSET" ? "union" : "subtract";
-    const tubeOperation = wedgeOperation === "union" ? "subtract" : "union";
+    const targetOperation = resolvedDirection === "OUTSET" ? "union" : "subtract";
+    const toolPairOperation = "subtract";
     const sizing = computeMiterDistanceFromRadius(edge, radius);
     const inflate = inflateRaw;
     let centerlineData = null;
@@ -816,9 +820,11 @@ export async function fillet(opts = {}) {
         faceNormalA: getFaceAverageNormal(edge?.faces?.[0] || null),
         faceNormalB: getFaceAverageNormal(edge?.faces?.[1] || null),
         resolvedDirection,
-        operation: wedgeOperation,
-        wedgeOperation,
-        tubeOperation,
+        operation: targetOperation,
+        targetOperation,
+        wedgeOperation: targetOperation,
+        toolPairOperation,
+        tubeOperation: toolPairOperation,
         sizing,
         inflate,
         sharedEndpointMask: { start: false, end: false },
@@ -905,9 +911,11 @@ export async function fillet(opts = {}) {
         tool: tubeTool,
         toolFaceNames: built.toolFaceNames,
         resolvedDirection: seed.resolvedDirection,
-        operation: seed.wedgeOperation,
-        wedgeOperation: seed.wedgeOperation,
-        tubeOperation: seed.tubeOperation,
+        operation: seed.targetOperation,
+        targetOperation: seed.targetOperation,
+        wedgeOperation: seed.targetOperation,
+        toolPairOperation: seed.toolPairOperation,
+        tubeOperation: seed.toolPairOperation,
         distance: Number.isFinite(built.miterDistance) ? built.miterDistance : seed?.sizing?.distance,
         inflate: built.inflate,
         edgeOvershoot: built.edgeOvershoot,
@@ -969,49 +977,58 @@ export async function fillet(opts = {}) {
   let result = this;
   let appliedBooleanCount = 0;
 
-  // Stage 1: apply miter wedges by direction.
+  // Stage 1: combine each wedge/tube pair into one tool.
   for (const entry of entries) {
     try {
-      result = entry.wedgeOperation === "union"
-        ? result.union(entry.wedgeTool)
-        : result.subtract(entry.wedgeTool);
-      appliedBooleanCount += 1;
-      entry.wedgeApplied = true;
-      try { result.name = this.name; } catch { }
+      const pairOperation = entry.toolPairOperation || entry.tubeOperation || "subtract";
+      const combinedTool = pairOperation === "union"
+        ? entry.wedgeTool.union(entry.tool)
+        : entry.wedgeTool.subtract(entry.tool);
+      entry.combinedTool = combinedTool;
+      if (debugMode !== DEBUG_MODE_NONE) {
+        try {
+          if (combinedTool && typeof combinedTool.clone === "function") {
+            entry.debugCombinedTool = combinedTool.clone();
+          }
+        } catch {
+          entry.debugCombinedTool = combinedTool;
+        }
+      }
     } catch (error) {
       failures.push({
         edgeName: entry.edgeName,
-        stage: "apply_wedge_boolean",
+        stage: "combine_wedge_tube_boolean",
         error: error?.message || String(error),
       });
-      console.warn("[Solid.fillet] Failed to apply wedge boolean for edge.", {
+      console.warn("[Solid.fillet] Failed to combine wedge and tube tools for edge.", {
         featureID,
         edgeName: entry.edgeName,
-        operation: entry.wedgeOperation,
+        operation: entry.toolPairOperation || entry.tubeOperation || "subtract",
         error: error?.message || error,
       });
     }
   }
 
-  // Stage 2: apply tube booleans opposite to wedge booleans.
+  // Stage 2: apply the combined fillet tool to the target body.
   for (const entry of entries) {
-    if (!entry.wedgeApplied) continue;
+    if (!entry.combinedTool) continue;
     try {
-      result = entry.tubeOperation === "union"
-        ? result.union(entry.tool)
-        : result.subtract(entry.tool);
+      const targetOperation = entry.targetOperation || entry.operation || entry.wedgeOperation || "subtract";
+      result = targetOperation === "union"
+        ? result.union(entry.combinedTool)
+        : result.subtract(entry.combinedTool);
       appliedBooleanCount += 1;
       try { result.name = this.name; } catch { }
     } catch (error) {
       failures.push({
         edgeName: entry.edgeName,
-        stage: "apply_tube_boolean",
+        stage: "apply_combined_tool_boolean",
         error: error?.message || String(error),
       });
-      console.warn("[Solid.fillet] Failed to apply tube boolean for edge.", {
+      console.warn("[Solid.fillet] Failed to apply combined fillet tool for edge.", {
         featureID,
         edgeName: entry.edgeName,
-        operation: entry.tubeOperation,
+        operation: entry.targetOperation || entry.operation || entry.wedgeOperation || "subtract",
         error: error?.message || error,
       });
     }
