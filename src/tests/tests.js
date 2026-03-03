@@ -27,6 +27,10 @@ import {
     afterRun_fillet_edge_degenerate_segment,
     test_fillet_edge_degenerate_segment,
 } from './test_fillet_edge_degenerate_segment.js';
+import {
+    afterRun_fillet_corner_bridge,
+    test_fillet_corner_bridge,
+} from './test_fillet_corner_bridge.js';
 import { afterRun_Fillet_NonClosed, test_Fillet_NonClosed } from './test_fillet_nonClosed.js';
 import { test_fillets_more_dificult } from './test_filletsMoreDifficult.js';
 import { afterRun_history_expand_does_not_dirty, test_history_expand_does_not_dirty } from './test_history_expand_does_not_dirty.js';
@@ -224,6 +228,14 @@ export const testFunctions = [
     { test: test_ExtrudeFace, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_Fillet, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_fillet_angle, afterRun: afterRun_fillet_angle, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    {
+        test: test_fillet_corner_bridge,
+        afterRun: afterRun_fillet_corner_bridge,
+        printArtifacts: false,
+        exportFaces: true,
+        exportSolids: true,
+        resetHistory: true,
+    },
     {
         test: test_fillet_edge_degenerate_segment,
         afterRun: afterRun_fillet_edge_degenerate_segment,

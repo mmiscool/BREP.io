@@ -3184,7 +3184,7 @@ export class Viewer {
         }
 
         this._hideSelectionOverlay();
-        this._applySelectionTarget(primary);
+        this._applySelectionTarget(primary, { pointerEvent: event });
     }
 
     _applySelectionTarget(target, options = {}) {
@@ -3197,6 +3197,7 @@ export class Viewer {
         const {
             triggerOnClick = true,
             allowDiagnostics = true,
+            pointerEvent = undefined,
         } = options;
         // One-shot diagnostic inspector
         if (allowDiagnostics && this._diagPickOnce) {
@@ -3218,7 +3219,7 @@ export class Viewer {
             catch (e) { try { console.warn('Metadata panel update failed:', e); } catch { } }
         }
         if (triggerOnClick && typeof target.onClick === 'function') {
-            try { target.onClick(); } catch { }
+            try { target.onClick(pointerEvent); } catch { }
         }
     }
 
@@ -3642,6 +3643,7 @@ export class Viewer {
         if (this._disposed) return;
         try { this._clearSelectionOverlayTimer(); } catch { }
         try { this._hideSelectionOverlay(); } catch { }
+        try { this._splineMode?.clearSelection?.(); } catch { }
         try { this._toggleComponentTransform?.(null); } catch { }
         try { this._stopComponentTransformSession?.(); } catch { }
         try {

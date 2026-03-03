@@ -100,12 +100,17 @@ function buildPayload({
   resolution,
   edges,
   entries,
+  cornerEntries,
   failures,
   appliedCount,
 }) {
   const edgeList = Array.isArray(edges) ? edges : [];
   const appliedEntries = Array.isArray(entries) ? entries : [];
+  const cornerBridgeEntries = Array.isArray(cornerEntries)
+    ? cornerEntries
+    : [];
   const failedEntries = Array.isArray(failures) ? failures : [];
+  const edgeToolEntries = appliedEntries.filter((entry) => !entry?.isCornerBridge);
   return {
     implemented: true,
     strategy: "miter_tangent_boolean",
@@ -116,10 +121,11 @@ function buildPayload({
     requestedDirection,
     resolvedDefaultDirection,
     requestedEdgeCount: edgeList.length,
-    builtToolCount: appliedEntries.length,
+    builtToolCount: edgeToolEntries.length,
+    cornerBridgeCount: cornerBridgeEntries.length,
     failedToolCount: failedEntries.length,
     appliedBooleanCount: Number.isFinite(appliedCount) ? appliedCount : 0,
-    edgeDecisions: appliedEntries.map((entry) => ({
+    edgeDecisions: edgeToolEntries.map((entry) => ({
       edgeName: entry?.edgeName || null,
       requested: requestedDirection,
       resolved: entry?.resolvedDirection || resolvedDefaultDirection,
@@ -135,6 +141,14 @@ function buildPayload({
       angleDeg: Number.isFinite(entry?.angleDeg) ? entry.angleDeg : null,
       interiorAngleDeg: Number.isFinite(entry?.interiorAngleDeg) ? entry.interiorAngleDeg : null,
       distanceSource: entry?.distanceSource || "unknown",
+    })),
+    cornerBridges: cornerBridgeEntries.map((entry) => ({
+      edgeName: entry?.edgeName || null,
+      sourceEdgeNames: Array.isArray(entry?.sourceEdgeNames) ? entry.sourceEdgeNames : [],
+      operation: entry?.operation || entry?.targetOperation || entry?.wedgeOperation || "subtract",
+      targetOperation: entry?.targetOperation || entry?.operation || entry?.wedgeOperation || "subtract",
+      toolPairOperation: entry?.toolPairOperation || entry?.tubeOperation || "subtract",
+      fallbackMode: entry?.cornerFallbackMode || null,
     })),
     failures: failedEntries.map((entry) => ({
       edgeName: entry?.edgeName || null,
@@ -185,6 +199,15 @@ function toNumericPoint(point) {
   const x = Number(point.x);
   const y = Number(point.y);
   const z = Number(point.z);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
+  return { x, y, z };
+}
+
+function toNumericArrayPoint(point) {
+  if (!Array.isArray(point) || point.length < 3) return null;
+  const x = Number(point[0]);
+  const y = Number(point[1]);
+  const z = Number(point[2]);
   if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
   return { x, y, z };
 }
@@ -433,6 +456,25 @@ function collectOpenEdgeEndpointRecords(entries) {
       if (!centerPoint || !tangentPointA || !tangentPointB || !edgePoint || !edgeNear) return null;
       const tangentDir = normalizePoint(pointSub(edgeNear, edgePoint));
       const localScale = pointDistance(edgePoint, edgeNear);
+
+      const sourcePolyline = Array.isArray(entry?.edge?.userData?.polylineLocal)
+        ? entry.edge.userData.polylineLocal
+        : [];
+      const srcCount = sourcePolyline.length;
+      const srcIdx = atStart ? 0 : (srcCount - 1);
+      const srcNearIdx = atStart ? 1 : (srcCount - 2);
+      const topologyPoint = srcCount >= 2
+        ? toNumericArrayPoint(sourcePolyline[srcIdx])
+        : null;
+      const topologyNear = srcCount >= 2
+        ? toNumericArrayPoint(sourcePolyline[srcNearIdx])
+        : null;
+      const topologyDir = (topologyPoint && topologyNear)
+        ? normalizePoint(pointSub(topologyNear, topologyPoint))
+        : null;
+      const topologyScale = (topologyPoint && topologyNear)
+        ? pointDistance(topologyPoint, topologyNear)
+        : 0;
       return {
         entryIndex,
         side,
@@ -441,6 +483,9 @@ function collectOpenEdgeEndpointRecords(entries) {
         tangentPointA,
         tangentPointB,
         edgePoint,
+        topologyPoint: topologyPoint || edgePoint,
+        topologyDir,
+        topologyScale: Number.isFinite(topologyScale) ? topologyScale : 0,
         tangentDir,
         localScale: Number.isFinite(localScale) ? localScale : 0,
       };
@@ -454,18 +499,13 @@ function collectOpenEdgeEndpointRecords(entries) {
   return out;
 }
 
-function stitchTangentConnectedEdgeEndpoints(entries, { radius = 1 } = {}) {
-  const list = Array.isArray(entries) ? entries : [];
-  if (list.length < 2) {
-    return { stitchedEndpoints: 0, stitchedGroups: 0 };
-  }
-
-  const endpoints = collectOpenEdgeEndpointRecords(list);
-  if (endpoints.length < 2) {
-    return { stitchedEndpoints: 0, stitchedGroups: 0 };
-  }
-
-  const n = endpoints.length;
+function groupEndpointRecordsByJoinCriteria(endpoints, {
+  radius = 1,
+  tangentDotMin = null,
+} = {}) {
+  const nodes = Array.isArray(endpoints) ? endpoints : [];
+  const n = nodes.length;
+  if (n < 2) return [];
   const parent = new Array(n);
   const rank = new Array(n).fill(0);
   for (let i = 0; i < n; i++) parent[i] = i;
@@ -493,19 +533,30 @@ function stitchTangentConnectedEdgeEndpoints(entries, { radius = 1 } = {}) {
     rank[ra] += 1;
   };
 
-  const tangentDotMin = Math.cos((10 * Math.PI) / 180);
+  const requireTangentAlignment = Number.isFinite(Number(tangentDotMin));
+  const tangentMin = requireTangentAlignment ? Number(tangentDotMin) : null;
   for (let i = 0; i < n - 1; i++) {
-    const a = endpoints[i];
+    const a = nodes[i];
     for (let j = i + 1; j < n; j++) {
-      const b = endpoints[j];
+      const b = nodes[j];
       if (a.entryIndex === b.entryIndex) continue;
+      const topoA = a.topologyPoint || a.edgePoint;
+      const topoB = b.topologyPoint || b.edgePoint;
+      if (!topoA || !topoB) continue;
       const minScale = Math.max(1e-8, Math.min(a.localScale || 0, b.localScale || 0));
+      const minTopoScale = Math.max(1e-8, Math.min(a.topologyScale || 0, b.topologyScale || 0));
       const snapTol = Math.max(1e-5, Math.abs(Number(radius) || 0) * 0.05, minScale * 0.12);
-      const joinDistance = pointDistance(a.edgePoint, b.edgePoint);
-      if (!(joinDistance <= snapTol)) continue;
-      if (!a.tangentDir || !b.tangentDir) continue;
-      const tangentDot = Math.abs(clamp(pointDot(a.tangentDir, b.tangentDir), -1, 1));
-      if (!(tangentDot >= tangentDotMin)) continue;
+      const topologyTol = Math.max(1e-6, Math.abs(Number(radius) || 0) * 1e-4, minTopoScale * 2e-3);
+      const usingTopology = !!(a.topologyPoint && b.topologyPoint);
+      const joinDistance = pointDistance(topoA, topoB);
+      if (!(joinDistance <= (usingTopology ? topologyTol : snapTol))) continue;
+      if (requireTangentAlignment) {
+        const dirA = a.topologyDir || a.tangentDir;
+        const dirB = b.topologyDir || b.tangentDir;
+        if (!dirA || !dirB) continue;
+        const tangentDot = Math.abs(clamp(pointDot(dirA, dirB), -1, 1));
+        if (!(tangentDot >= tangentMin)) continue;
+      }
       union(i, j);
     }
   }
@@ -514,13 +565,34 @@ function stitchTangentConnectedEdgeEndpoints(entries, { radius = 1 } = {}) {
   for (let i = 0; i < n; i++) {
     const root = find(i);
     if (!groups.has(root)) groups.set(root, []);
-    groups.get(root).push(endpoints[i]);
+    groups.get(root).push(nodes[i]);
+  }
+  return [...groups.values()].filter((group) => Array.isArray(group) && group.length >= 2);
+}
+
+function stitchTangentConnectedEdgeEndpoints(entries, { radius = 1 } = {}) {
+  const list = Array.isArray(entries) ? entries : [];
+  if (list.length < 2) {
+    return { stitchedEndpoints: 0, stitchedGroups: 0 };
+  }
+
+  const endpoints = collectOpenEdgeEndpointRecords(list);
+  if (endpoints.length < 2) {
+    return { stitchedEndpoints: 0, stitchedGroups: 0 };
+  }
+
+  const tangentDotMin = Math.cos((10 * Math.PI) / 180);
+  const groupedEndpoints = groupEndpointRecordsByJoinCriteria(endpoints, {
+    radius,
+    tangentDotMin,
+  });
+  if (groupedEndpoints.length === 0) {
+    return { stitchedEndpoints: 0, stitchedGroups: 0 };
   }
 
   let stitchedEndpoints = 0;
   let stitchedGroups = 0;
-  for (const group of groups.values()) {
-    if (!Array.isArray(group) || group.length < 2) continue;
+  for (const group of groupedEndpoints) {
     const reference = group[0];
     const refA = reference.tangentPointA;
     const refB = reference.tangentPointB;
@@ -564,6 +636,255 @@ function stitchTangentConnectedEdgeEndpoints(entries, { radius = 1 } = {}) {
   }
 
   return { stitchedEndpoints, stitchedGroups };
+}
+
+function buildCornerBridgeTools({
+  entries = [],
+  radius = 1,
+  resolution = 32,
+  featureID = "FILLET",
+  SphereClass = null,
+  debugMode = DEBUG_MODE_NONE,
+}) {
+  const list = Array.isArray(entries) ? entries : [];
+  if (typeof SphereClass !== "function") {
+    return { entries: [], failures: [] };
+  }
+  if (list.length < 2) {
+    return { entries: [], failures: [] };
+  }
+
+  const radiusAbs = Math.abs(Number(radius) || 0);
+  if (!(radiusAbs > 0)) {
+    return { entries: [], failures: [] };
+  }
+
+  const endpoints = collectOpenEdgeEndpointRecords(list);
+  if (endpoints.length < 2) {
+    return { entries: [], failures: [] };
+  }
+
+  const groupedEndpoints = groupEndpointRecordsByJoinCriteria(endpoints, {
+    radius: radiusAbs,
+    tangentDotMin: null,
+  });
+  if (groupedEndpoints.length === 0) {
+    return { entries: [], failures: [] };
+  }
+
+  const sphereResolution = (Number.isFinite(Number(resolution)) && Number(resolution) > 0)
+    ? Math.max(8, Math.floor(Number(resolution) * 0.75))
+    : 24;
+  const cornerEntries = [];
+  const failures = [];
+
+  for (let groupIndex = 0; groupIndex < groupedEndpoints.length; groupIndex++) {
+    const group = groupedEndpoints[groupIndex];
+    if (!Array.isArray(group) || group.length < 2) continue;
+
+    const nodesByEntry = new Map();
+    for (const node of group) {
+      if (!node) continue;
+      if (!nodesByEntry.has(node.entryIndex)) nodesByEntry.set(node.entryIndex, node);
+    }
+    const nodes = [...nodesByEntry.values()];
+    if (nodes.length < 2) continue;
+
+    const endpointCoreData = [];
+    for (const node of nodes) {
+      const e = node?.edgePoint || null;
+      const a = node?.tangentPointA || null;
+      const b = node?.tangentPointB || null;
+      if (!e || !a || !b) continue;
+      const core = {
+        x: (e.x + a.x + b.x) / 3,
+        y: (e.y + a.y + b.y) / 3,
+        z: (e.z + a.z + b.z) / 3,
+      };
+      const scale = Math.max(
+        pointDistance(e, a),
+        pointDistance(e, b),
+        pointDistance(a, b) * 0.5,
+      );
+      endpointCoreData.push({ core, scale });
+    }
+
+    const cornerAnchor = averagePointCloud(nodes.map((node) => node.topologyPoint || node.edgePoint));
+    const centerlineCenter = averagePointCloud(nodes.map((node) => node.centerPoint));
+    const wedgeCoreCenter = averagePointCloud(endpointCoreData.map((item) => item.core));
+    const centerSources = [wedgeCoreCenter, cornerAnchor, centerlineCenter].filter(Boolean);
+    const center = averagePointCloud(centerSources);
+    if (!center) continue;
+    const centerKey = [
+      Math.round(center.x * 1e6),
+      Math.round(center.y * 1e6),
+      Math.round(center.z * 1e6),
+    ].join(":");
+
+    for (let i = 0; i < nodes.length - 1; i++) {
+      const nodeA = nodes[i];
+      for (let j = i + 1; j < nodes.length; j++) {
+        const nodeB = nodes[j];
+        const entryA = list[nodeA.entryIndex];
+        const entryB = list[nodeB.entryIndex];
+        if (!entryA || !entryB) continue;
+        if (!entryA.wedgeTool || !entryA.tool || !entryB.wedgeTool || !entryB.tool) continue;
+
+        const targetOperationA = entryA.targetOperation || entryA.operation || entryA.wedgeOperation || "subtract";
+        const targetOperationB = entryB.targetOperation || entryB.operation || entryB.wedgeOperation || "subtract";
+        if (targetOperationA !== targetOperationB) {
+          failures.push({
+            edgeName: `${entryA.edgeName || `edge_${nodeA.entryIndex}`}|${entryB.edgeName || `edge_${nodeB.entryIndex}`}`,
+            stage: "build_corner_bridge_operation_mismatch",
+            error: `Mismatched target operations: ${targetOperationA} vs ${targetOperationB}`,
+          });
+          continue;
+        }
+
+        const pairOperationA = entryA.toolPairOperation || entryA.tubeOperation || "subtract";
+        const pairOperationB = entryB.toolPairOperation || entryB.tubeOperation || "subtract";
+        const pairOperation = (pairOperationA === "union" && pairOperationB === "union")
+          ? "union"
+          : "subtract";
+
+        const sourceEdgeNames = [entryA.edgeName, entryB.edgeName].filter(Boolean);
+        const edgeName = sourceEdgeNames.length > 0
+          ? sourceEdgeNames.join("~")
+          : `corner_pair_${nodeA.entryIndex}_${nodeB.entryIndex}`;
+        const bridgeName = `${featureID}_CORNER_BRIDGE_${cornerEntries.length + 1}`;
+        const localA = Number(nodeA.topologyScale || nodeA.localScale || 0);
+        const localB = Number(nodeB.topologyScale || nodeB.localScale || 0);
+        const localMin = Math.max(0, Math.min(localA, localB));
+        const anchorToCenterline = (cornerAnchor && centerlineCenter)
+          ? pointDistance(cornerAnchor, centerlineCenter)
+          : 0;
+        const anchorToWedge = (cornerAnchor && wedgeCoreCenter)
+          ? pointDistance(cornerAnchor, wedgeCoreCenter)
+          : 0;
+        const wedgeScaleAvg = endpointCoreData.length > 0
+          ? endpointCoreData.reduce((sum, item) => sum + Number(item.scale || 0), 0) / endpointCoreData.length
+          : 0;
+        const bridgeRadius = Math.max(
+          radiusAbs * 1.2,
+          localMin * 0.75,
+          anchorToCenterline + (radiusAbs * 0.65),
+          anchorToWedge + (radiusAbs * 0.6),
+          wedgeScaleAvg * 0.9,
+        );
+
+        try {
+          const bridgeSphere = new SphereClass({
+            r: bridgeRadius,
+            resolution: sphereResolution,
+            name: bridgeName,
+          });
+          bridgeSphere.bakeTRS({ t: [center.x, center.y, center.z] });
+
+          if (!entryA.combinedTool || !entryB.combinedTool) {
+            failures.push({
+              edgeName,
+              stage: "build_corner_bridge_missing_pair_tool",
+              error: "Missing per-edge combined tools for corner bridge delta.",
+            });
+            continue;
+          }
+
+          const cornerWedgeUnion = entryA.wedgeTool.union(entryB.wedgeTool);
+          const cornerTubeUnion = entryA.tool.union(entryB.tool);
+          const cornerPairUnion = entryA.combinedTool.union(entryB.combinedTool);
+          const cornerComposite = pairOperation === "union"
+            ? cornerWedgeUnion.union(cornerTubeUnion)
+            : cornerWedgeUnion.subtract(cornerTubeUnion);
+          const bridgeDelta = cornerComposite.subtract(cornerPairUnion);
+          let bridgeTool = bridgeDelta;
+          const clippedDelta = bridgeDelta.intersect(bridgeSphere);
+          let usedFallback = false;
+          let clipApplied = false;
+          const clippedCounts = getGeometryCounts(clippedDelta);
+          if (clippedCounts.triCount > 0 && clippedCounts.vertCount > 0) {
+            bridgeTool = clippedDelta;
+            clipApplied = true;
+          } else {
+            bridgeTool = bridgeDelta;
+          }
+
+          if (pairOperation === "union" && !clipApplied) {
+            // OUTSET can degenerate to zero-delta near nearly tangent corners.
+            const wedgeClip = cornerWedgeUnion.intersect(bridgeSphere);
+            const wedgeClipCounts = getGeometryCounts(wedgeClip);
+            if (wedgeClipCounts.triCount > 0 && wedgeClipCounts.vertCount > 0) {
+              bridgeTool = wedgeClip;
+              usedFallback = true;
+            }
+          }
+
+          let { triCount, vertCount } = getGeometryCounts(bridgeTool);
+          if ((triCount <= 0 || vertCount <= 0) && pairOperation !== "union") {
+            const wedgeClip = cornerWedgeUnion.intersect(bridgeSphere);
+            const wedgeClipCounts = getGeometryCounts(wedgeClip);
+            if (wedgeClipCounts.triCount > 0 && wedgeClipCounts.vertCount > 0) {
+              bridgeTool = wedgeClip;
+              triCount = wedgeClipCounts.triCount;
+              vertCount = wedgeClipCounts.vertCount;
+              usedFallback = true;
+            }
+          }
+          if (triCount <= 0 || vertCount <= 0) {
+            failures.push({
+              edgeName,
+              stage: "build_corner_bridge_empty",
+              error: `Bridge tool empty geometry (tri=${triCount}, vert=${vertCount})`,
+            });
+            continue;
+          }
+          try { bridgeTool.name = bridgeName; } catch { }
+
+          const bridgeEntry = {
+            edgeName,
+            sourceEdgeNames,
+            sourceEntryIndices: [nodeA.entryIndex, nodeB.entryIndex],
+            isCornerBridge: true,
+            combinedTool: bridgeTool,
+            resolvedDirection: entryA.resolvedDirection || entryB.resolvedDirection || "INSET",
+            operation: targetOperationA,
+            targetOperation: targetOperationA,
+            wedgeOperation: targetOperationA,
+            toolPairOperation: pairOperation,
+            tubeOperation: pairOperation,
+            distance: radiusAbs,
+            cornerCenter: clonePoint(center),
+            cornerGroupIndex: groupIndex,
+            cornerCenterKey: centerKey,
+            cornerFallbackMode: usedFallback ? "wedge_clip" : (clipApplied ? null : "delta_unclipped"),
+          };
+
+          if (debugMode !== DEBUG_MODE_NONE) {
+            try {
+              if (bridgeTool && typeof bridgeTool.clone === "function") {
+                bridgeEntry.debugCombinedTool = bridgeTool.clone();
+              }
+            } catch {
+              bridgeEntry.debugCombinedTool = bridgeTool;
+            }
+          }
+          cornerEntries.push(bridgeEntry);
+        } catch (error) {
+          failures.push({
+            edgeName,
+            stage: "build_corner_bridge_tool",
+            error: error?.message || String(error),
+          });
+          console.warn("[Solid.fillet] Failed to build corner bridge tool.", {
+            featureID,
+            edgeName,
+            error: error?.message || error,
+          });
+        }
+      }
+    }
+  }
+
+  return { entries: cornerEntries, failures };
 }
 
 function pointDot(a, b) {
@@ -699,11 +1020,13 @@ function collectDebugSolidsForMode({
 
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
-    const tools = [
-      { solid: entry?.debugWedgeTool || entry?.wedgeTool || null, suffix: "WEDGE" },
-      { solid: entry?.debugTubeTool || entry?.debugTool || entry?.tool || null, suffix: "TUBE" },
-      { solid: entry?.debugCombinedTool || entry?.combinedTool || null, suffix: "PAIR" },
-    ];
+    const tools = entry?.isCornerBridge
+      ? [{ solid: entry?.debugCombinedTool || entry?.combinedTool || null, suffix: "CORNER" }]
+      : [
+        { solid: entry?.debugWedgeTool || entry?.wedgeTool || null, suffix: "WEDGE" },
+        { solid: entry?.debugTubeTool || entry?.debugTool || entry?.tool || null, suffix: "TUBE" },
+        { solid: entry?.debugCombinedTool || entry?.combinedTool || null, suffix: "PAIR" },
+      ];
     for (const item of tools) {
       const tool = item.solid;
       if (!tool) continue;
@@ -741,6 +1064,7 @@ function collectDebugSolidsForMode({
  * - Builds per-edge miter wedges and centerline tube tools.
  * - Snaps shared tangent endpoints across adjacent edges so tube caps align.
  * - Combines each wedge/tube pair into a single fillet tool first.
+ * - Builds corner-bridge tools across shared sharp endpoints to patch cap gaps.
  * - Applies that combined tool to the target by direction
  *   (INSET subtract, OUTSET union).
  * - AUTO currently defaults to INSET while retaining decision metadata.
@@ -762,6 +1086,7 @@ export async function fillet(opts = {}) {
   const { computeFilletCenterline } = await import("../fillets/fillet.js");
   const { Tube: TubeClass } = await import("../Tube.js");
   const { ChamferSolid: ChamferSolidClass } = await import("../chamfer.js");
+  const { Sphere: SphereClass } = await import("../primitives.js");
 
   const edges = resolveEdgesFromInputs(this, {
     edgeNames: opts.edgeNames,
@@ -778,6 +1103,7 @@ export async function fillet(opts = {}) {
       resolution,
       edges,
       entries: [],
+      cornerEntries: [],
       failures: [],
       appliedCount: 0,
     });
@@ -954,6 +1280,7 @@ export async function fillet(opts = {}) {
       resolution,
       edges,
       entries,
+      cornerEntries: [],
       failures,
       appliedCount: 0,
     });
@@ -976,6 +1303,7 @@ export async function fillet(opts = {}) {
 
   let result = this;
   let appliedBooleanCount = 0;
+  let cornerEntries = [];
 
   // Stage 1: combine each wedge/tube pair into one tool.
   for (const entry of entries) {
@@ -1009,8 +1337,23 @@ export async function fillet(opts = {}) {
     }
   }
 
+  const cornerBridgeBuild = buildCornerBridgeTools({
+    entries,
+    radius,
+    resolution,
+    featureID,
+    SphereClass,
+    debugMode,
+  });
+  cornerEntries = Array.isArray(cornerBridgeBuild?.entries) ? cornerBridgeBuild.entries : [];
+  if (Array.isArray(cornerBridgeBuild?.failures) && cornerBridgeBuild.failures.length > 0) {
+    failures.push(...cornerBridgeBuild.failures);
+  }
+
+  const entriesToApply = [...entries, ...cornerEntries];
+
   // Stage 2: apply the combined fillet tool to the target body.
-  for (const entry of entries) {
+  for (const entry of entriesToApply) {
     if (!entry.combinedTool) continue;
     try {
       const targetOperation = entry.targetOperation || entry.operation || entry.wedgeOperation || "subtract";
@@ -1043,6 +1386,7 @@ export async function fillet(opts = {}) {
     resolution,
     edges,
     entries,
+    cornerEntries,
     failures,
     appliedCount: appliedBooleanCount,
   });
@@ -1087,7 +1431,7 @@ export async function fillet(opts = {}) {
 
   const debugSolids = collectDebugSolidsForMode({
     debugMode,
-    entries,
+    entries: entriesToApply,
     result,
     featureID,
   });
