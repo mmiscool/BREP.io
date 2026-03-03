@@ -33,6 +33,7 @@ import { TubeFeature } from './features/tube/TubeFeature.js';
 import { AssemblyComponentFeature } from './features/assemblyComponent/AssemblyComponentFeature.js';
 import { OffsetShellFeature } from './features/offsetShell/OffsetShellFeature.js';
 import { OffsetFaceFeature } from './features/offsetFace/OffsetFaceFeature.js';
+import { NurbsFaceSolidFeature } from './features/nurbsFaceSolid/NurbsFaceSolidFeature.js';
 import { SplineFeature } from './features/spline/SplineFeature.js';
 import { SheetMetalTabFeature } from './features/sheetMetal/SheetMetalTabFeature.js';
 import { SheetMetalContourFlangeFeature } from './features/sheetMetal/SheetMetalContourFlangeFeature.js';
@@ -93,6 +94,7 @@ export class FeatureRegistry {
     this.register(EdgeSmoothFeature);
     this.register(OffsetShellFeature);
     this.register(OffsetFaceFeature);
+    this.register(NurbsFaceSolidFeature);
     this.register(SheetMetalTabFeature);
     this.register(SheetMetalContourFlangeFeature);
     this.register(SheetMetalFlangeFeature);

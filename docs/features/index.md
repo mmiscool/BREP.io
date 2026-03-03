@@ -22,6 +22,7 @@ Reference docs for the built-in modeling features.
 - [Import 3D Model](import-3d-model.md)
 - [Loft](loft.md)
 - [Mirror](mirror.md)
+- [NURBS Face Solid](nurbs-face-solid.md)
 - [Offset Face](offset-face.md)
 - [Offset Shell](offset-shell.md)
 - [Overlap Cleanup](overlap-cleanup.md)
