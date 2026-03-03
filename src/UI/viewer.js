@@ -269,6 +269,44 @@ function ensureSidebarDockStyles() {
     document.head.appendChild(style);
 }
 
+function ensureViewCubeCameraToggleStyles() {
+    if (typeof document === 'undefined') return;
+    if (document.getElementById('viewcube-camera-toggle-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'viewcube-camera-toggle-styles';
+    style.textContent = `
+        .viewcube-camera-toggle {
+            position: absolute;
+            left: 0;
+            top: 0;
+            transform: translate(-100%, -50%);
+            border: 1px solid #364053;
+            border-radius: 8px;
+            background: rgba(20,24,30,0.92);
+            color: #d6dde6;
+            font: 700 11px/1.1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            letter-spacing: 0.45px;
+            padding: 7px 8px;
+            min-width: 58px;
+            text-align: center;
+            cursor: pointer;
+            z-index: 6;
+            user-select: none;
+            box-shadow: 0 4px 14px rgba(0,0,0,.32);
+        }
+        .viewcube-camera-toggle:hover {
+            border-color: #6ea8fe;
+            color: #edf4ff;
+        }
+        .viewcube-camera-toggle.is-perspective {
+            border-color: #6ea8fe;
+            color: #e9f0ff;
+            box-shadow: 0 0 0 1px rgba(110,168,254,.2) inset, 0 4px 14px rgba(0,0,0,.32);
+        }
+    `;
+    document.head.appendChild(style);
+}
+
 const safe = (fn) => {
     try { fn(); } catch { }
 };
@@ -667,6 +705,14 @@ export class Viewer {
         );
         this._defaultNear = near;
         this._defaultFar = far;
+        this._defaultPerspectiveNear = 0.01;
+        this._perspectiveFov = 50;
+        this._cameraProjectionToggleButton = null;
+        this._onCameraProjectionToggleClick = (event) => {
+            try { event?.preventDefault?.(); } catch { }
+            try { event?.stopPropagation?.(); } catch { }
+            this.toggleCameraProjection();
+        };
 
 
 
@@ -728,36 +774,7 @@ export class Viewer {
         this.controls.setGizmosVisible(false);
         this.controls.minDistance = 0.01; // relevant when switching to perspective; harmless here
 
-
-        this.camera.enableIdleCallbacks({
-            controls: this.controls,
-            idleMs: 300,
-            onMove: () => {
-                // hide sidebar when moving
-                if (this.sidebar) {
-                    this.sidebar.style.opacity = .9;
-                }
-                this._cameraMoving = true;
-                this._updateDepthRange();
-                // (quiet) camera moving
-            },
-            onIdle: () => {
-                // show sidebar when idle
-                if (this.sidebar) {
-                    this.sidebar.style.opacity = .9;
-                }
-                this._cameraMoving = false;
-
-                // recompute bounding spheres for all geometries (Mesh, Line/Line2, Points)
-                this.scene.traverse((object) => {
-                    const g = object && object.geometry;
-                    if (g && typeof g.computeBoundingSphere === 'function') {
-                        try { g.computeBoundingSphere(); } catch (_) { /* noop */ }
-                    }
-                });
-                this._updateDepthRange();
-            }
-        })
+        this._configureCameraIdleCallbacks();
 
 
 
@@ -923,8 +940,284 @@ export class Viewer {
         this.controls = controls;
     }
 
+    _onCameraMove() {
+        if (this.sidebar) this.sidebar.style.opacity = 0.9;
+        this._cameraMoving = true;
+        this._updateDepthRange();
+    }
+
+    _onCameraIdle() {
+        if (this.sidebar) this.sidebar.style.opacity = 0.9;
+        this._cameraMoving = false;
+        // Recompute cached bounds once interaction settles.
+        this.scene.traverse((object) => {
+            const g = object && object.geometry;
+            if (g && typeof g.computeBoundingSphere === 'function') {
+                try { g.computeBoundingSphere(); } catch { /* ignore */ }
+            }
+        });
+        this._updateDepthRange();
+    }
+
+    _configureCameraIdleCallbacks() {
+        try { this.camera?.disableIdleCallbacks?.(); } catch { /* ignore */ }
+        try { this.camera?.attachControls?.(this.controls); } catch { /* ignore */ }
+        if (typeof this.camera?.enableIdleCallbacks !== 'function') return;
+        try {
+            this.camera.enableIdleCallbacks({
+                controls: this.controls,
+                idleMs: 300,
+                onMove: () => this._onCameraMove(),
+                onIdle: () => this._onCameraIdle(),
+            });
+        } catch { /* ignore */ }
+    }
+
+    _syncActiveTransformGizmosForCamera({ resetSize = false } = {}) {
+        const camera = this.camera || null;
+        const domElement = this.renderer?.domElement || null;
+
+        const applyGizmoCamera = (controls, updateFn = null) => {
+            if (!controls) return;
+            let setCameraHandledReset = false;
+            try {
+                if (typeof controls.setCamera === 'function') {
+                    controls.setCamera(camera, { resetSize, refresh: false });
+                    setCameraHandledReset = true;
+                } else if (camera) {
+                    controls.camera = camera;
+                }
+            } catch { /* ignore */ }
+            try {
+                if (typeof controls.setDomElement === 'function') controls.setDomElement(domElement);
+                else if (domElement) controls.domElement = domElement;
+            } catch { /* ignore */ }
+            if (resetSize && !setCameraHandledReset) {
+                try {
+                    if (typeof controls.resetSize === 'function') controls.resetSize();
+                    else if (typeof controls.setSize === 'function') controls.setSize(2);
+                } catch { /* ignore */ }
+            }
+            try {
+                if (typeof updateFn === 'function') updateFn();
+                else if (typeof controls.update === 'function') controls.update();
+                else controls.updateMatrixWorld?.(true);
+            } catch { /* ignore */ }
+        };
+
+        const rebindCameraChange = (state, handlerKey = 'cameraChangeHandler', sourceKey = 'cameraChangeSource') => {
+            if (!state) return;
+            const handler = state[handlerKey];
+            if (typeof handler !== 'function') return;
+            const prevSource = state[sourceKey];
+            if (prevSource && prevSource !== this.controls && typeof prevSource.removeEventListener === 'function') {
+                try { prevSource.removeEventListener('change', handler); } catch { /* ignore */ }
+            }
+            if (this.controls && typeof this.controls.addEventListener === 'function') {
+                try { this.controls.addEventListener('change', handler); } catch { /* ignore */ }
+            }
+            state[sourceKey] = this.controls || null;
+        };
+
+        const componentSession = this._componentTransformSession;
+        if (componentSession?.controls) {
+            applyGizmoCamera(componentSession.controls, componentSession.globalState?.updateForCamera || null);
+            rebindCameraChange(componentSession, 'cameraChangeHandler', 'cameraChangeSource');
+        }
+
+        const formState = SchemaForm?.getActiveTransformState?.() || SchemaForm?.__activeXform || null;
+        if (formState?.viewer === this && formState.controls) {
+            applyGizmoCamera(formState.controls, formState.controlsChangeHandler || null);
+            rebindCameraChange(formState, 'controlsChangeHandler', 'controlsChangeSource');
+        }
+
+        try {
+            const globalState = (typeof window !== 'undefined') ? window.__BREP_activeXform : null;
+            if (globalState?.viewer === this && globalState.controls) {
+                applyGizmoCamera(globalState.controls, globalState.updateForCamera || null);
+            }
+        } catch { /* ignore */ }
+    }
+
+    _refreshCameraProjectionToggleButton() {
+        const btn = this._cameraProjectionToggleButton;
+        if (!btn || !this.camera) return;
+        const isOrtho = !!this.camera.isOrthographicCamera;
+        btn.textContent = isOrtho ? 'ORTHO' : 'PERSP';
+        btn.classList.toggle('is-perspective', !isOrtho);
+        btn.title = isOrtho ? 'Switch to perspective camera' : 'Switch to orthographic camera';
+        btn.setAttribute('aria-label', btn.title);
+    }
+
+    _positionCameraProjectionToggle() {
+        const btn = this._cameraProjectionToggleButton;
+        if (!btn) return;
+        if (!this.viewCube || this._rendererMode !== 'webgl') {
+            btn.style.display = 'none';
+            return;
+        }
+        const cubeRect = this.viewCube?._viewportRect?.();
+        if (!cubeRect) {
+            btn.style.display = 'none';
+            return;
+        }
+        btn.style.display = '';
+        const gapPx = 10;
+        const x = Math.max(10, Math.round(cubeRect.xCss - gapPx));
+        const y = Math.round(cubeRect.yCss + cubeRect.h * 0.5);
+        btn.style.left = `${x}px`;
+        btn.style.top = `${y}px`;
+    }
+
+    _ensureCameraProjectionToggle() {
+        if (!this.container || typeof document === 'undefined') return;
+        if (!this._cameraProjectionToggleButton) {
+            ensureViewCubeCameraToggleStyles();
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'viewcube-camera-toggle';
+            btn.addEventListener('click', this._onCameraProjectionToggleClick);
+            btn.addEventListener('pointerdown', (event) => {
+                try { event.stopPropagation(); } catch { /* ignore */ }
+            });
+            try {
+                const computed = window.getComputedStyle(this.container);
+                if (computed?.position === 'static') this.container.style.position = 'relative';
+            } catch { /* ignore */ }
+            this.container.appendChild(btn);
+            this._cameraProjectionToggleButton = btn;
+        }
+        this._refreshCameraProjectionToggleButton();
+        this._positionCameraProjectionToggle();
+    }
+
+    setCameraProjection(mode = 'orthographic') {
+        if (!this.camera) return false;
+        const requested = String(mode || '').toLowerCase();
+        const nextKind = requested.startsWith('pers') ? 'perspective' : 'orthographic';
+        const isAlready = (nextKind === 'perspective')
+            ? !!this.camera.isPerspectiveCamera
+            : !!this.camera.isOrthographicCamera;
+        if (isAlready) {
+            this._refreshCameraProjectionToggleButton();
+            this._positionCameraProjectionToggle();
+            return true;
+        }
+
+        const currentCamera = this.camera;
+        const oldTarget = this.controls?.target?.clone?.() || new THREE.Vector3(0, 0, 0);
+        const { width, height } = this._getContainerSize();
+        const aspect = Math.max(1e-6, width / Math.max(1, height));
+        let nextCamera = null;
+
+        if (nextKind === 'perspective') {
+            const fov = Number.isFinite(this._perspectiveFov) ? this._perspectiveFov : 50;
+            const near = Math.max(1e-4, Number(this._defaultPerspectiveNear) || 0.01);
+            const far = Math.max(100, Number(currentCamera.far) || Math.abs(this._defaultFar) || 1000000);
+            nextCamera = new THREE.PerspectiveCamera(fov, aspect, near, far);
+            let distance = currentCamera.position.distanceTo(oldTarget);
+            if (currentCamera.isOrthographicCamera) {
+                const zoom = (typeof currentCamera.zoom === 'number' && currentCamera.zoom > 0) ? currentCamera.zoom : 1;
+                const spanY = Math.abs((Number(currentCamera.top) - Number(currentCamera.bottom)) / zoom);
+                const denom = Math.tan(THREE.MathUtils.degToRad(fov) * 0.5);
+                if (Number.isFinite(spanY) && spanY > 1e-6 && Number.isFinite(denom) && denom > 1e-6) {
+                    distance = (spanY * 0.5) / denom;
+                }
+            }
+            if (!Number.isFinite(distance) || distance < 1e-4) distance = 10;
+            const viewDir = currentCamera.position.clone().sub(oldTarget);
+            if (viewDir.lengthSq() < 1e-12) {
+                try {
+                    currentCamera.getWorldDirection(viewDir);
+                    viewDir.multiplyScalar(-1);
+                } catch {
+                    viewDir.set(1, 1, 1);
+                }
+            }
+            viewDir.normalize();
+            nextCamera.position.copy(oldTarget).addScaledVector(viewDir, distance);
+            nextCamera.up.copy(currentCamera.up);
+            nextCamera.lookAt(oldTarget);
+            nextCamera.zoom = (typeof currentCamera.zoom === 'number' && currentCamera.zoom > 0) ? currentCamera.zoom : 1;
+            this._perspectiveFov = fov;
+        } else {
+            let spanY = this.viewSize * 2;
+            if (currentCamera.isPerspectiveCamera) {
+                const dist = Math.max(1e-6, currentCamera.position.distanceTo(oldTarget));
+                const fovRad = THREE.MathUtils.degToRad(Number(currentCamera.fov) || 50);
+                const zoom = (typeof currentCamera.zoom === 'number' && currentCamera.zoom > 0) ? currentCamera.zoom : 1;
+                const fitSpan = 2 * Math.tan(fovRad * 0.5) * dist / zoom;
+                if (Number.isFinite(fitSpan) && fitSpan > 1e-6) spanY = fitSpan;
+                this._perspectiveFov = Number.isFinite(currentCamera.fov) ? currentCamera.fov : this._perspectiveFov;
+            } else if (currentCamera.isOrthographicCamera) {
+                const zoom = (typeof currentCamera.zoom === 'number' && currentCamera.zoom > 0) ? currentCamera.zoom : 1;
+                const curSpan = Math.abs((Number(currentCamera.top) - Number(currentCamera.bottom)) / zoom);
+                if (Number.isFinite(curSpan) && curSpan > 1e-6) spanY = curSpan;
+            }
+            const halfHeight = Math.max(1e-6, spanY * 0.5);
+            const halfWidth = halfHeight * aspect;
+            nextCamera = new OrthoCameraIdle(
+                -halfWidth,
+                halfWidth,
+                halfHeight,
+                -halfHeight,
+                this._defaultNear,
+                this._defaultFar
+            );
+            nextCamera.zoom = 1;
+            this.viewSize = halfHeight;
+            nextCamera.position.copy(currentCamera.position);
+            nextCamera.quaternion.copy(currentCamera.quaternion);
+            nextCamera.up.copy(currentCamera.up);
+        }
+
+        if (!nextCamera) return false;
+        try { currentCamera.disableIdleCallbacks?.(); } catch { /* ignore */ }
+        const lightNodes = Array.isArray(currentCamera.children)
+            ? currentCamera.children.filter((node) => node?.isLight)
+            : [];
+        for (const light of lightNodes) {
+            try { currentCamera.remove(light); } catch { /* ignore */ }
+            try { nextCamera.add(light); } catch { /* ignore */ }
+        }
+        try { nextCamera.userData = { ...(currentCamera.userData || {}), preventRemove: true }; } catch { /* ignore */ }
+
+        try { this.scene.add(nextCamera); } catch { /* ignore */ }
+        try { this.scene.remove(currentCamera); } catch { /* ignore */ }
+        this.camera = nextCamera;
+        try { this.partHistory.camera = nextCamera; } catch { /* ignore */ }
+
+        this._rebuildControls(this.renderer.domElement);
+        try { this.controls?.addEventListener?.('change', this._onControlsChange); } catch { /* ignore */ }
+        try { this.controls?.target?.copy?.(oldTarget); } catch { /* ignore */ }
+        this._configureCameraIdleCallbacks();
+        this._syncActiveTransformGizmosForCamera({ resetSize: true });
+
+        if (this.viewCube) {
+            this.viewCube.targetCamera = this.camera;
+            this.viewCube.controls = this.controls;
+        }
+
+        this._resizeRendererToDisplaySize();
+        this._updateDepthRange();
+        this._refreshCameraProjectionToggleButton();
+        this._positionCameraProjectionToggle();
+        this.render();
+        return true;
+    }
+
+    toggleCameraProjection() {
+        const nextKind = this.camera?.isOrthographicCamera ? 'perspective' : 'orthographic';
+        return this.setCameraProjection(nextKind);
+    }
+
     _ensureViewCube() {
-        if (this.viewCube && this.viewCube.renderer === this.renderer) return;
+        if (this.viewCube && this.viewCube.renderer === this.renderer) {
+            this.viewCube.targetCamera = this.camera;
+            this.viewCube.controls = this.controls;
+            this._ensureCameraProjectionToggle();
+            return;
+        }
         this.viewCube = new ViewCube({
             renderer: this.renderer,
             targetCamera: this.camera,
@@ -932,6 +1225,7 @@ export class Viewer {
             size: 120,
             margin: 12,
         });
+        this._ensureCameraProjectionToggle();
     }
 
     setRendererMode(mode) {
@@ -960,12 +1254,14 @@ export class Viewer {
         this._attachRendererEvents(this.renderer.domElement);
         this._rebuildControls(this.renderer.domElement);
         try { this.controls?.addEventListener?.('change', this._onControlsChange); } catch { }
-        try { this.camera?.attachControls?.(this.controls); } catch { }
+        this._configureCameraIdleCallbacks();
+        this._syncActiveTransformGizmosForCamera({ resetSize: false });
 
         if (nextMode === 'webgl') {
             this._ensureViewCube();
         } else {
             this.viewCube = null;
+            this._positionCameraProjectionToggle();
         }
 
         try { this.renderer.domElement.style.marginTop = '0px'; } catch { }
@@ -1487,9 +1783,18 @@ export class Viewer {
         this._sidebarHomeBanner = null;
         const el = this.renderer?.domElement;
         this._detachRendererEvents(el);
+        try { this.camera?.disableIdleCallbacks?.(); } catch { /* ignore */ }
         window.removeEventListener('pointerup', this._onPointerUp, { capture: true });
         window.removeEventListener('resize', this._onResize);
         window.removeEventListener('keydown', this._onKeyDown, { passive: false });
+        try {
+            const btn = this._cameraProjectionToggleButton;
+            if (btn) {
+                btn.removeEventListener('click', this._onCameraProjectionToggleClick);
+                btn.remove();
+            }
+        } catch { /* ignore */ }
+        this._cameraProjectionToggleButton = null;
         this.controls?.dispose?.();
         this.renderer?.dispose?.();
         if (this._webglRenderer && this._webglRenderer !== this.renderer) {
@@ -1693,6 +1998,7 @@ export class Viewer {
         if (this.camera && this.camera.parent !== this.scene) {
             try { this.scene.add(this.camera); } catch { /* ignore add errors */ }
         }
+        this._positionCameraProjectionToggle();
         this._updateAxisHelpers();
         this._updateCameraLightRig();
         this._updateDepthRange();
@@ -2159,9 +2465,11 @@ export class Viewer {
             }
         }
 
-        const near = 0;
-        let far = Math.max(1, -minZ + pad);
+        const far = Math.max(1, -minZ + pad);
         if (!Number.isFinite(far)) return false;
+        const near = this.camera.isPerspectiveCamera
+            ? Math.max(1e-4, Math.min(1, far * 0.001))
+            : 0;
 
         const nearChanged = Math.abs((this.camera.near || 0) - near) > 1e-6;
         const farChanged = Math.abs((this.camera.far || 0) - far) > 1e-6;
@@ -2207,24 +2515,40 @@ export class Viewer {
             const camWidth = Math.max(1e-6, (maxX - minX));
             const camHeight = Math.max(1e-6, (maxY - minY));
 
-            // Compute target zoom for orthographic camera using current frustum and viewport aspect.
-            const { width, height } = this._getContainerSize();
-            const aspect = Math.max(1e-6, width / height);
-            const v = this.viewSize; // current half-height before zoom scaling
-            const halfW = camWidth / 2 * Math.max(1, margin);
-            const halfH = camHeight / 2 * Math.max(1, margin);
-            const maxZoomByHeight = v / halfH;
-            const maxZoomByWidth = (v * aspect) / halfW;
-            const targetZoom = Math.min(maxZoomByHeight, maxZoomByWidth);
-            const currentZoom = this.camera.zoom || 1;
-            const sizeFactor = Math.max(1e-6, targetZoom / currentZoom);
-
             // Compute world center of the box
             const center = box.getCenter(new THREE.Vector3());
+            if (this.camera.isOrthographicCamera) {
+                // Compute target zoom for orthographic camera using current frustum and viewport aspect.
+                const { width, height } = this._getContainerSize();
+                const aspect = Math.max(1e-6, width / height);
+                const v = this.viewSize; // current half-height before zoom scaling
+                const halfW = camWidth / 2 * Math.max(1, margin);
+                const halfH = camHeight / 2 * Math.max(1, margin);
+                const maxZoomByHeight = v / halfH;
+                const maxZoomByWidth = (v * aspect) / halfW;
+                const targetZoom = Math.min(maxZoomByHeight, maxZoomByWidth);
+                const currentZoom = this.camera.zoom || 1;
+                const sizeFactor = Math.max(1e-6, targetZoom / currentZoom);
 
-            // Perform pan+zoom via ArcballControls only
-            try { c.updateMatrixState && c.updateMatrixState(); } catch { }
-            c.focus(center, sizeFactor);
+                // Perform pan+zoom via ArcballControls only
+                try { c.updateMatrixState && c.updateMatrixState(); } catch { }
+                c.focus(center, sizeFactor);
+            } else if (this.camera.isPerspectiveCamera) {
+                const fovRad = THREE.MathUtils.degToRad(this.camera.fov || 50);
+                const vertical = Math.max(1e-6, camHeight * Math.max(1, margin));
+                const horizontal = Math.max(1e-6, camWidth * Math.max(1, margin));
+                const distByHeight = (vertical * 0.5) / Math.max(1e-6, Math.tan(fovRad * 0.5));
+                const hFov = 2 * Math.atan(Math.tan(fovRad * 0.5) * Math.max(1e-6, this.camera.aspect || 1));
+                const distByWidth = (horizontal * 0.5) / Math.max(1e-6, Math.tan(hFov * 0.5));
+                const targetDistance = Math.max(distByHeight, distByWidth, 1e-3);
+                const viewDir = this.camera.position.clone().sub(c.target || center);
+                if (viewDir.lengthSq() < 1e-12) viewDir.set(1, 1, 1);
+                viewDir.normalize();
+                this.camera.position.copy(center).addScaledVector(viewDir, targetDistance);
+                if (c.target) c.target.copy(center);
+                this.camera.lookAt(center);
+                try { c.updateMatrixState && c.updateMatrixState(); } catch { }
+            }
 
             // Sync and render
             try { c.update && c.update(); } catch { }
@@ -3383,11 +3707,22 @@ export class Viewer {
     _stopComponentTransformSession() {
         const session = this._componentTransformSession;
         if (!session) return;
-        const { controls, helper, target, changeHandler, dragHandler, objectChangeHandler, globalState } = session;
+        const {
+            controls,
+            helper,
+            target,
+            changeHandler,
+            dragHandler,
+            objectChangeHandler,
+            cameraChangeHandler,
+            cameraChangeSource,
+            globalState
+        } = session;
 
         try { controls?.removeEventListener('change', changeHandler); } catch { }
         try { controls?.removeEventListener('dragging-changed', dragHandler); } catch { }
         try { controls?.removeEventListener('objectChange', objectChangeHandler); } catch { }
+        try { cameraChangeSource?.removeEventListener?.('change', cameraChangeHandler); } catch { }
 
         try { controls?.detach?.(); } catch { }
 
@@ -3583,6 +3918,8 @@ export class Viewer {
                 else controls.updateMatrixWorld(true);
             } catch { }
         };
+        const cameraChangeHandler = () => { updateForCamera(); };
+        try { this.controls?.addEventListener?.('change', cameraChangeHandler); } catch { }
 
         const globalState = {
             controls,
@@ -3603,6 +3940,8 @@ export class Viewer {
             changeHandler,
             dragHandler,
             objectChangeHandler,
+            cameraChangeHandler,
+            cameraChangeSource: this.controls || null,
             globalState,
             mode: sessionMode,
         };
@@ -4509,7 +4848,7 @@ export class Viewer {
 
         // Update orthographic frustum for new aspect
         const aspect = width / height || 1;
-        if (this.camera.isOrthographicCamera) {
+        if (this.camera?.isOrthographicCamera) {
             const spanYRaw = Number.isFinite(this.camera.top) && Number.isFinite(this.camera.bottom)
                 ? this.camera.top - this.camera.bottom
                 : (this.viewSize * 2);
@@ -4527,14 +4866,10 @@ export class Viewer {
             this.camera.bottom = centerY - halfHeight * signY;
             this.camera.left = centerX - halfWidth;
             this.camera.right = centerX + halfWidth;
-        } else {
-            const v = this.viewSize;
-            this.camera.left = -v * aspect;
-            this.camera.right = v * aspect;
-            this.camera.top = v;
-            this.camera.bottom = -v;
+        } else if (this.camera?.isPerspectiveCamera) {
+            this.camera.aspect = aspect;
         }
-        this.camera.updateProjectionMatrix();
+        this.camera?.updateProjectionMatrix?.();
 
         // Optional: let controls know something changed
         if (this.controls && typeof this.controls.update === 'function') {
@@ -4584,9 +4919,13 @@ export class Viewer {
             const wppY = (camera.top - camera.bottom) / (height * zoom);
             return Math.max(wppX, wppY);
         }
-        const dist = camera.position.length();
-        const fovRad = (camera.fov * Math.PI) / 180;
-        return (2 * Math.tan(fovRad / 2) * dist) / height;
+        const target = this.controls?.target;
+        const dist = (target && camera?.position?.distanceTo?.(target))
+            || camera?.position?.length?.()
+            || 1;
+        const fovRad = ((camera?.fov || 50) * Math.PI) / 180;
+        const zoom = (typeof camera?.zoom === 'number' && camera.zoom > 0) ? camera.zoom : 1;
+        return (2 * Math.tan(fovRad / 2) * dist) / (height * zoom);
     }
 
     _updateOverlayDashSpacing(width, height) {

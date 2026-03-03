@@ -12,6 +12,8 @@
 //
 import * as THREE from 'three';
 
+const DEFAULT_GIZMO_SIZE_MULTIPLIER = 2;
+
 export class CombinedTransformControls extends THREE.Object3D {
   constructor(camera, domElement) {
     super();
@@ -23,7 +25,8 @@ export class CombinedTransformControls extends THREE.Object3D {
     this.mode = 'translate'; // kept for compatibility; both gizmos are active
     this.showX = true; this.showY = true; this.showZ = true;
     this.isTransformGizmo = true; // used by PartHistory cleanup logic
-    this._sizeMultiplier = 2; // larger default on‑screen size
+    this._defaultSizeMultiplier = DEFAULT_GIZMO_SIZE_MULTIPLIER;
+    this._sizeMultiplier = this._defaultSizeMultiplier;
     this.renderOrder = 50000; // Render on top of all other geometry
 
     this.target = null; // Object3D we drive
@@ -60,6 +63,20 @@ export class CombinedTransformControls extends THREE.Object3D {
   getMode() { return this.mode; }
   setMode(mode) { this.mode = String(mode || 'translate'); }
   setSize(s) { this._sizeMultiplier = Number(s) || 1; this.update(); }
+  resetSize() { this.setSize(this._defaultSizeMultiplier); }
+  setCamera(camera, { resetSize = false, refresh = true } = {}) {
+    if (camera) this.camera = camera;
+    if (resetSize) this._sizeMultiplier = this._defaultSizeMultiplier;
+    if (refresh) this.update();
+  }
+  setDomElement(domElement) {
+    if (this.domElement === domElement) return;
+    try { this.domElement?.removeEventListener('pointerdown', this._onPointerDown); } catch {}
+    this.domElement = domElement || null;
+    if (this.domElement) {
+      this.domElement.addEventListener('pointerdown', this._onPointerDown, { passive: false });
+    }
+  }
 
   attach(object) {
     this.target = object || null;

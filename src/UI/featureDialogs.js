@@ -52,6 +52,7 @@ export class SchemaForm {
         viewer: null,
         group: null,
         controlsChangeHandler: null,
+        controlsChangeSource: null,
         captureHandlers: null,
         stepId: null,
         valueAdapter: null,
@@ -81,8 +82,9 @@ export class SchemaForm {
             }
         } catch (_) { }
         try {
-            if (s && s.viewer && s.viewer.controls && s.controlsChangeHandler && typeof s.viewer.controls.removeEventListener === 'function') {
-                s.viewer.controls.removeEventListener('change', s.controlsChangeHandler);
+            const controlsSource = s?.controlsChangeSource || s?.viewer?.controls || null;
+            if (controlsSource && s.controlsChangeHandler && typeof controlsSource.removeEventListener === 'function') {
+                controlsSource.removeEventListener('change', s.controlsChangeHandler);
             }
         } catch (_) { }
         try {
@@ -112,6 +114,7 @@ export class SchemaForm {
             group: null,
             captureHandlers: null,
             controlsChangeHandler: null,
+            controlsChangeSource: null,
             valueAdapter: null,
             baseTransform: null,
         };
@@ -1890,6 +1893,7 @@ export class SchemaForm {
             group: tc.__fallbackGroup || (tc && tc.isObject3D ? tc : null),
             captureHandlers: null,
             controlsChangeHandler: updateForCamera,
+            controlsChangeSource: viewer?.controls || null,
             valueAdapter: adapter || null,
             baseTransform: base,
         };
