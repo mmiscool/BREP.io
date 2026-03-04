@@ -108,6 +108,7 @@ export function renderReferenceSelectionField({ ui, key, def, id, controlWrap, v
             ev.preventDefault?.();
             writeRawValue(null);
             inputEl.value = '';
+            try { inputEl.__lastReferenceSelectionMeta = null; } catch (_) { }
             updateSingleDisplay(null);
             emitChange(null);
             try { ui._syncActiveReferenceSelectionHighlight(inputEl, def); } catch (_) { }
@@ -147,8 +148,35 @@ export function renderReferenceSelectionField({ ui, key, def, id, controlWrap, v
         inputEl.addEventListener('change', () => {
             updateSingleDisplay(inputEl.value);
             const normalized = normalizeReferenceName(inputEl.value);
-            writeRawValue(normalized);
-            emitChange(normalized);
+            let nextValue = normalized;
+            try {
+                const meta = inputEl.__lastReferenceSelectionMeta;
+                if (meta && typeof meta === 'object') {
+                    const metaName = normalizeReferenceName(meta);
+                    if (metaName && metaName === normalized) {
+                        const next = { ...meta, name: metaName };
+                        if (Array.isArray(next.pickPoint) && next.pickPoint.length >= 3) {
+                            next.pickPoint = [
+                                Number(next.pickPoint[0]) || 0,
+                                Number(next.pickPoint[1]) || 0,
+                                Number(next.pickPoint[2]) || 0,
+                            ];
+                        } else {
+                            delete next.pickPoint;
+                        }
+                        if (Number.isFinite(next.faceIndex) && Number(next.faceIndex) >= 0) {
+                            next.faceIndex = Math.floor(Number(next.faceIndex));
+                        } else {
+                            delete next.faceIndex;
+                        }
+                        nextValue = next;
+                    } else {
+                        inputEl.__lastReferenceSelectionMeta = null;
+                    }
+                }
+            } catch (_) { /* ignore metadata conversion errors */ }
+            writeRawValue(nextValue);
+            emitChange(nextValue);
             try { ui._syncActiveReferenceSelectionHighlight(inputEl, def); } catch (_) { }
         });
     }

@@ -28,6 +28,10 @@ import {
     test_fillet_edge_degenerate_segment,
 } from './test_fillet_edge_degenerate_segment.js';
 import {
+    afterRun_fillet_preserves_original_face_names,
+    test_fillet_preserves_original_face_names,
+} from './test_fillet_preserves_original_face_names.js';
+import {
     afterRun_fillet_corner_bridge,
     test_fillet_corner_bridge,
 } from './test_fillet_corner_bridge.js';
@@ -239,6 +243,14 @@ export const testFunctions = [
     {
         test: test_fillet_edge_degenerate_segment,
         afterRun: afterRun_fillet_edge_degenerate_segment,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_fillet_preserves_original_face_names,
+        afterRun: afterRun_fillet_preserves_original_face_names,
         printArtifacts: false,
         exportFaces: false,
         exportSolids: false,

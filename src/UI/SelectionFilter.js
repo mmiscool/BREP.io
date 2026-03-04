@@ -256,14 +256,14 @@ export class SelectionFilter {
             SelectionFilter._installOnClickWatcher(target);
             if (typeof target.onClick === 'function') return;
             SelectionFilter._withSilentOnClick(target, () => {
-                target.onClick = () => {
+                target.onClick = (pointerEvent) => {
                     try {
                         if (target.type === SelectionFilter.SOLID && target.parent && target.parent.type === SelectionFilter.COMPONENT) {
-                            const handledByParent = SelectionFilter.toggleSelection(target.parent);
-                            if (!handledByParent) SelectionFilter.toggleSelection(target);
+                            const handledByParent = SelectionFilter.toggleSelection(target.parent, { pointerEvent });
+                            if (!handledByParent) SelectionFilter.toggleSelection(target, { pointerEvent });
                             return;
                         }
-                        SelectionFilter.toggleSelection(target);
+                        SelectionFilter.toggleSelection(target, { pointerEvent });
                     } catch (error) {
                         if (debugMode) {
                             try { console.warn('[SelectionFilter] toggleSelection failed:', error); } catch (_) { /* ignore */ }
@@ -465,7 +465,51 @@ export class SelectionFilter {
         return true;
     }
 
-    static #handleReferenceSelection(objectToToggleSelectionOn) {
+    static #captureReferenceSelectionMeta(targetObj, pointerEvent) {
+        try {
+            const type = String(targetObj?.type || '').toUpperCase();
+            if (type !== SelectionFilter.FACE) return null;
+            if (!pointerEvent) return null;
+            const viewer = SelectionFilter.viewer;
+            if (!viewer || !viewer.camera || !viewer.renderer) return null;
+
+            const getNDC = () => {
+                if (typeof viewer._getPointerNDC === 'function') return viewer._getPointerNDC(pointerEvent);
+                const canvas = viewer?.renderer?.domElement;
+                if (!canvas || !canvas.getBoundingClientRect) return null;
+                const rect = canvas.getBoundingClientRect();
+                const x = (pointerEvent.clientX - rect.left) / rect.width;
+                const y = (pointerEvent.clientY - rect.top) / rect.height;
+                return { x: x * 2 - 1, y: -(y * 2 - 1) };
+            };
+
+            const ndc = getNDC();
+            const raycaster = viewer.raycaster;
+            if (!ndc || !raycaster || typeof raycaster.setFromCamera !== 'function') return null;
+
+            raycaster.setFromCamera(ndc, viewer.camera);
+            const hits = (typeof viewer._withDoubleSidedPicking === 'function')
+                ? (viewer._withDoubleSidedPicking(() => raycaster.intersectObject(targetObj, true)) || [])
+                : (raycaster.intersectObject(targetObj, true) || []);
+            if (!Array.isArray(hits) || hits.length === 0) return null;
+            const hit = hits[0];
+            if (!hit) return null;
+
+            const meta = { name: targetObj?.name || null };
+            const fi = Number(hit.faceIndex);
+            if (Number.isFinite(fi) && fi >= 0) meta.faceIndex = Math.floor(fi);
+            const p = hit.point;
+            if (p && Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z)) {
+                meta.pickPoint = [p.x, p.y, p.z];
+            }
+            if (!meta.name && !Object.prototype.hasOwnProperty.call(meta, 'faceIndex') && !Array.isArray(meta.pickPoint)) return null;
+            return meta;
+        } catch {
+            return null;
+        }
+    }
+
+    static #handleReferenceSelection(objectToToggleSelectionOn, context = {}) {
         try {
             let activeRefInput = document.querySelector('[active-reference-selection="true"],[active-reference-selection=true]');
             if (!activeRefInput) {
@@ -573,6 +617,11 @@ export class SelectionFilter {
             }
             if (!targetObj) return false;
 
+            let pickMeta = null;
+            try {
+                pickMeta = SelectionFilter.#captureReferenceSelectionMeta(targetObj, context?.pointerEvent);
+            } catch (_) { /* ignore metadata capture failures */ }
+
             try {
                 if (activeRefInput && typeof activeRefInput.__captureReferencePreview === 'function') {
                     activeRefInput.__captureReferencePreview(targetObj);
@@ -581,6 +630,13 @@ export class SelectionFilter {
 
             const objType = targetObj.type;
             const objectName = targetObj.name || `${objType}(${targetObj.position?.x || 0},${targetObj.position?.y || 0},${targetObj.position?.z || 0})`;
+            try {
+                if (pickMeta && pickMeta.name === objectName) {
+                    activeRefInput.__lastReferenceSelectionMeta = pickMeta;
+                } else {
+                    activeRefInput.__lastReferenceSelectionMeta = null;
+                }
+            } catch (_) { /* ignore */ }
 
             const snapshotSelections = (inputEl) => {
                 const data = inputEl?.dataset || {};
@@ -655,10 +711,10 @@ export class SelectionFilter {
         return parentSelectedAction;
     }
 
-    static toggleSelection(objectToToggleSelectionOn) {
+    static toggleSelection(objectToToggleSelectionOn, context = {}) {
         const type = objectToToggleSelectionOn.type;
         if (!type) throw new Error("Object to toggle selection on must have a type.");
-        if (SelectionFilter.#handleReferenceSelection(objectToToggleSelectionOn)) return true;
+        if (SelectionFilter.#handleReferenceSelection(objectToToggleSelectionOn, context)) return true;
         return SelectionFilter.#toggleStandardSelection(objectToToggleSelectionOn);
     }
 

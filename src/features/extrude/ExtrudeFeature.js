@@ -1,6 +1,188 @@
 import { BREP } from "../../BREP/BREP.js";
 import { selectionHasSketch } from "../selectionUtils.js";
 
+function readFacePickMeta(faceObj) {
+  const meta = faceObj?.userData?.__lastReferencePickMeta;
+  if (!meta || typeof meta !== 'object') return null;
+  const faceIndexRaw = Number(meta.faceIndex);
+  const faceIndex = (Number.isFinite(faceIndexRaw) && faceIndexRaw >= 0)
+    ? Math.floor(faceIndexRaw)
+    : null;
+  let pickPoint = null;
+  if (Array.isArray(meta.pickPoint) && meta.pickPoint.length >= 3) {
+    const x = Number(meta.pickPoint[0]);
+    const y = Number(meta.pickPoint[1]);
+    const z = Number(meta.pickPoint[2]);
+    if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+      pickPoint = [x, y, z];
+    }
+  }
+  if (faceIndex === null && !pickPoint) return null;
+  return { faceIndex, pickPoint };
+}
+
+function isolatePickedFaceIsland(faceObj) {
+  if (!faceObj || faceObj.type !== 'FACE' || !faceObj.geometry) return faceObj;
+  const pickMeta = readFacePickMeta(faceObj);
+  if (!pickMeta) return faceObj;
+
+  const geom = faceObj.geometry;
+  const posAttr = geom.getAttribute?.('position');
+  if (!posAttr || posAttr.count < 3) return faceObj;
+  const idxAttr = geom.getIndex?.();
+  const triCount = idxAttr ? ((idxAttr.count / 3) | 0) : ((posAttr.count / 3) | 0);
+  if (triCount <= 1) return faceObj;
+
+  const THREE = BREP.THREE;
+  const mat = faceObj.matrixWorld || null;
+  const v = new THREE.Vector3();
+  const world = new Array(posAttr.count);
+  for (let i = 0; i < posAttr.count; i++) {
+    v.set(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
+    if (mat && typeof v.applyMatrix4 === 'function') v.applyMatrix4(mat);
+    world[i] = [v.x, v.y, v.z];
+  }
+
+  const keyOf = (p) => `${Number(p[0]).toFixed(7)},${Number(p[1]).toFixed(7)},${Number(p[2]).toFixed(7)}`;
+  const canonMap = new Map();
+  const origToCanon = new Int32Array(posAttr.count);
+  for (let i = 0; i < posAttr.count; i++) {
+    const k = keyOf(world[i]);
+    let ci = canonMap.get(k);
+    if (ci === undefined) { ci = canonMap.size; canonMap.set(k, ci); }
+    origToCanon[i] = ci;
+  }
+
+  const triVerts = new Array(triCount);
+  for (let t = 0; t < triCount; t++) {
+    if (idxAttr) {
+      triVerts[t] = [
+        idxAttr.getX(t * 3 + 0) >>> 0,
+        idxAttr.getX(t * 3 + 1) >>> 0,
+        idxAttr.getX(t * 3 + 2) >>> 0,
+      ];
+    } else {
+      triVerts[t] = [t * 3 + 0, t * 3 + 1, t * 3 + 2];
+    }
+  }
+
+  const canonCount = Math.max(1, canonMap.size);
+  const stride = canonCount + 1;
+  const edgeKey = (a, b) => {
+    const A = a | 0;
+    const B = b | 0;
+    return A < B ? (A * stride + B) : (B * stride + A);
+  };
+
+  const edgeToTris = new Map();
+  for (let t = 0; t < triCount; t++) {
+    const tri = triVerts[t];
+    const a = origToCanon[tri[0]] | 0;
+    const b = origToCanon[tri[1]] | 0;
+    const c = origToCanon[tri[2]] | 0;
+    for (const [u, w] of [[a, b], [b, c], [c, a]]) {
+      const k = edgeKey(u, w);
+      let arr = edgeToTris.get(k);
+      if (!arr) { arr = []; edgeToTris.set(k, arr); }
+      arr.push(t);
+    }
+  }
+
+  const adj = new Array(triCount);
+  for (let t = 0; t < triCount; t++) adj[t] = [];
+  for (const list of edgeToTris.values()) {
+    if (!list || list.length < 2) continue;
+    const root = list[0] | 0;
+    for (let i = 1; i < list.length; i++) {
+      const n = list[i] | 0;
+      if (n === root) continue;
+      adj[root].push(n);
+      adj[n].push(root);
+    }
+  }
+
+  const compId = new Int32Array(triCount).fill(-1);
+  let compCount = 0;
+  const stack = [];
+  for (let seed = 0; seed < triCount; seed++) {
+    if (compId[seed] !== -1) continue;
+    compId[seed] = compCount;
+    stack.length = 0;
+    stack.push(seed);
+    while (stack.length) {
+      const t = stack.pop() | 0;
+      for (const n of adj[t]) {
+        if (compId[n] !== -1) continue;
+        compId[n] = compCount;
+        stack.push(n);
+      }
+    }
+    compCount++;
+  }
+  if (compCount <= 1) return faceObj;
+
+  let chosenComp = 0;
+  if (Number.isFinite(pickMeta.faceIndex) && pickMeta.faceIndex >= 0 && pickMeta.faceIndex < triCount) {
+    chosenComp = compId[pickMeta.faceIndex] | 0;
+  } else if (Array.isArray(pickMeta.pickPoint) && pickMeta.pickPoint.length >= 3) {
+    const px = pickMeta.pickPoint[0], py = pickMeta.pickPoint[1], pz = pickMeta.pickPoint[2];
+    const bestByComp = new Array(compCount).fill(Infinity);
+    for (let t = 0; t < triCount; t++) {
+      const tri = triVerts[t];
+      const p0 = world[tri[0]];
+      const p1 = world[tri[1]];
+      const p2 = world[tri[2]];
+      const cx = (p0[0] + p1[0] + p2[0]) / 3;
+      const cy = (p0[1] + p1[1] + p2[1]) / 3;
+      const cz = (p0[2] + p1[2] + p2[2]) / 3;
+      const dx = cx - px;
+      const dy = cy - py;
+      const dz = cz - pz;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      const c = compId[t] | 0;
+      if (d2 < bestByComp[c]) bestByComp[c] = d2;
+    }
+    let best = Infinity;
+    for (let c = 0; c < compCount; c++) {
+      if (bestByComp[c] < best) {
+        best = bestByComp[c];
+        chosenComp = c;
+      }
+    }
+  }
+  if (!(chosenComp >= 0 && chosenComp < compCount)) return faceObj;
+
+  const triPositions = [];
+  for (let t = 0; t < triCount; t++) {
+    if ((compId[t] | 0) !== chosenComp) continue;
+    const tri = triVerts[t];
+    const a = world[tri[0]];
+    const b = world[tri[1]];
+    const c = world[tri[2]];
+    triPositions.push(
+      a[0], a[1], a[2],
+      b[0], b[1], b[2],
+      c[0], c[1], c[2],
+    );
+  }
+  if (triPositions.length < 9) return faceObj;
+
+  const islandGeom = new THREE.BufferGeometry();
+  islandGeom.setAttribute('position', new THREE.Float32BufferAttribute(triPositions, 3));
+  islandGeom.computeVertexNormals();
+  islandGeom.computeBoundingBox();
+  islandGeom.computeBoundingSphere();
+
+  const islandFace = new BREP.Face(islandGeom);
+  islandFace.name = faceObj.name;
+  islandFace.userData = {
+    ...(faceObj.userData || {}),
+    __isIsolatedProfileIsland: true,
+  };
+  islandFace.edges = [];
+  return islandFace;
+}
+
 const inputParamsSchema = {
   id: {
     type: "string",
@@ -81,6 +263,10 @@ export class ExtrudeFeature {
     if (consumeSketch && faceObj && faceObj.type === 'FACE' && faceObj.parent && faceObj.parent.type === 'SKETCH') {
       removed.push(faceObj.parent);
     }
+
+    try {
+      faceObj = isolatePickedFaceIsland(faceObj);
+    } catch (_) { /* best effort: fallback to full face */ }
 
 
 

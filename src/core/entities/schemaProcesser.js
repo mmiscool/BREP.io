@@ -18,6 +18,42 @@ function evaluateNumber(expressionsEvaluator, value) {
   return Number.isFinite(fallback) ? fallback : 0;
 }
 
+function resolveReferenceSelectionValue(rawValue, getObjectByName) {
+    if (!rawValue) return null;
+    if (typeof rawValue === 'object') {
+        if (rawValue.isObject3D) return rawValue;
+        const refName = (typeof rawValue.name === 'string' && rawValue.name.trim())
+            ? rawValue.name.trim()
+            : (typeof rawValue.id === 'string' && rawValue.id.trim())
+                ? rawValue.id.trim()
+                : (typeof rawValue.selectionName === 'string' && rawValue.selectionName.trim())
+                    ? rawValue.selectionName.trim()
+                    : null;
+        if (!refName) return null;
+        const resolved = getObjectByName(refName);
+        if (!resolved) return null;
+        try {
+            const pick = Array.isArray(rawValue.pickPoint) && rawValue.pickPoint.length >= 3
+                ? [Number(rawValue.pickPoint[0]) || 0, Number(rawValue.pickPoint[1]) || 0, Number(rawValue.pickPoint[2]) || 0]
+                : null;
+            const faceIndex = Number(rawValue.faceIndex);
+            if (pick || (Number.isFinite(faceIndex) && faceIndex >= 0)) {
+                resolved.userData = resolved.userData || {};
+                resolved.userData.__lastReferencePickMeta = {
+                    name: String(refName),
+                    ...(pick ? { pickPoint: pick } : {}),
+                    ...(Number.isFinite(faceIndex) && faceIndex >= 0 ? { faceIndex: Math.floor(faceIndex) } : {}),
+                };
+            }
+        } catch {
+            /* ignore metadata propagation errors */
+        }
+        return resolved;
+    }
+    const obj = getObjectByName(String(rawValue));
+    return obj || null;
+}
+
 export async function sanitizeInputParams(schema, inputParams, expressionsEvaluator, getObjectByName) {
 
     let sanitized = {};
@@ -34,17 +70,14 @@ export async function sanitizeInputParams(schema, inputParams, expressionsEvalua
                 if (Array.isArray(val)) {
                     const arr = [];
                     for (const it of val) {
-                        if (!it) continue;
-                        if (typeof it === 'object') { arr.push(it); continue; }
-                        const obj = getObjectByName(String(it));
+                        const obj = resolveReferenceSelectionValue(it, getObjectByName);
                         if (obj) arr.push(obj);
                     }
                     sanitized[key] = arr;
                 } else {
                     if (!val) { sanitized[key] = []; }
-                    else if (typeof val === 'object') { sanitized[key] = [val]; }
                     else {
-                        const obj = getObjectByName(String(val));
+                        const obj = resolveReferenceSelectionValue(val, getObjectByName);
                         sanitized[key] = obj ? [obj] : [];
                     }
                 }

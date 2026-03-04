@@ -204,6 +204,78 @@ function collectFaceVertices(tris) {
     return verts;
 }
 
+function point3ArrayFromAny(point) {
+    if (Array.isArray(point) && point.length >= 3) {
+        const x = Number(point[0]);
+        const y = Number(point[1]);
+        const z = Number(point[2]);
+        if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) return [x, y, z];
+        return null;
+    }
+    if (point && typeof point === 'object') {
+        const x = Number(point.x);
+        const y = Number(point.y);
+        const z = Number(point.z);
+        if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) return [x, y, z];
+    }
+    return null;
+}
+
+function pushUniquePoint3Array(target, point, eps2 = 1e-14) {
+    if (!Array.isArray(target)) return;
+    const p = point3ArrayFromAny(point);
+    if (!p) return;
+    const px = p[0], py = p[1], pz = p[2];
+    for (let i = 0; i < target.length; i++) {
+        const q = target[i];
+        const dx = px - q[0];
+        const dy = py - q[1];
+        const dz = pz - q[2];
+        if (((dx * dx) + (dy * dy) + (dz * dz)) <= eps2) return;
+    }
+    target.push([px, py, pz]);
+}
+
+function collectUniqueFacePointArrays(solid, faceName, eps = 1e-7) {
+    if (!solid || typeof solid.getFace !== 'function' || !faceName) return [];
+    const tris = solid.getFace(faceName);
+    if (!Array.isArray(tris) || tris.length === 0) return [];
+    const out = [];
+    const tol = Math.max(1e-12, Math.abs(Number(eps) || 1e-7));
+    const eps2 = tol * tol;
+    for (const tri of tris) {
+        pushUniquePoint3Array(out, tri?.p1, eps2);
+        pushUniquePoint3Array(out, tri?.p2, eps2);
+        pushUniquePoint3Array(out, tri?.p3, eps2);
+    }
+    return out;
+}
+
+function captureOpenTubeCapPointsForPath(pathPoints, radius, resolution, probeName) {
+    const pts = Array.isArray(pathPoints) ? pathPoints.map(point3ArrayFromAny).filter(Boolean) : [];
+    if (pts.length < 2) return { start: [], end: [] };
+    const name = String(probeName || 'FILLET_TUBE_CAP_CAPTURE');
+    let probeTube = null;
+    try {
+        probeTube = new Tube({
+            points: pts,
+            radius: Number(radius) || 0,
+            innerRadius: 0,
+            resolution: Number.isFinite(Number(resolution)) ? Math.max(8, Math.floor(Number(resolution))) : 16,
+            selfUnion: true,
+            name,
+        });
+        return {
+            start: collectUniqueFacePointArrays(probeTube, `${name}_CapStart`, 1e-7),
+            end: collectUniqueFacePointArrays(probeTube, `${name}_CapEnd`, 1e-7),
+        };
+    } catch {
+        return { start: [], end: [] };
+    } finally {
+        try { probeTube?.free?.(); } catch { }
+    }
+}
+
 function sanitizeFilletInputPolyline(polylineLocal, tolerance = 1e-9) {
     const src = Array.isArray(polylineLocal) ? polylineLocal : [];
     if (src.length === 0) return [];
@@ -1442,7 +1514,17 @@ export function attachFilletCenterlineAuxEdge(solid, edgeObj, radius = 1, sideMo
 
 
 // Functional API: builds fillet tube and wedge and returns them.
-export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debug = false, name = 'fillet', inflate = 0.1, resolution = 32, showTangentOverlays = false } = {}) {
+export function filletSolid({
+    edgeToFillet,
+    radius = 1,
+    sideMode = 'INSET',
+    debug = false,
+    name = 'fillet',
+    inflate = 0.1,
+    nudgeFaceDistance = 0.0001,
+    resolution = 32,
+    showTangentOverlays = false
+} = {}) {
     try {
         // Validate inputs
         if (!edgeToFillet) {
@@ -1459,6 +1541,9 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
         const tubeResolution = (Number.isFinite(Number(resolution)) && Number(resolution) > 0)
             ? Math.max(8, Math.floor(Number(resolution)))
             : 32;
+        const faceNudgeDistance = Number.isFinite(Number(nudgeFaceDistance))
+            ? Number(nudgeFaceDistance)
+            : 0.0001;
         const logDebug = (...args) => { if (debug) console.log(...args); };
         logDebug(`🔧 Starting fillet operation: edge=${edgeToFillet?.name || 'unnamed'}, radius=${radiusUsed}, side=${side}`);
 
@@ -1813,6 +1898,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
 
         // Validate spacing/variation for the path we will actually use for the tube
         const tubePathOriginal = Array.isArray(centerline) ? centerline : [];
+        let tubeCapPointsBeforeNudge = { start: [], end: [] };
         if (tubePathOriginal.length < 2) {
             console.error('Insufficient centerline points for tube generation');
             // Return debug information even on centerline failure
@@ -1827,6 +1913,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                 edgeWedge: edgeWedgeCopy || [],
                 tangentASeam: tangentASnap || [],
                 tangentBSeam: tangentBSnap || [],
+                tubeCapPointsBeforeNudge,
                 error: 'Insufficient centerline points for tube generation'
             };
         }
@@ -1851,6 +1938,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                 edgeWedge: edgeWedgeCopy || [],
                 tangentASeam: tangentASnap || [],
                 tangentBSeam: tangentBSnap || [],
+                tubeCapPointsBeforeNudge,
                 error: 'Degenerate centerline: all points are identical'
             };
             }
@@ -1886,6 +1974,16 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                 logDebug('Non-closed loop detected: preparing tube centerline...');
                 // For non-closed loops: extend the start and end segments of the centerline polyline for tube only
                 if (tubePoints.length >= 2) {
+                    try {
+                        tubeCapPointsBeforeNudge = captureOpenTubeCapPointsForPath(
+                            tubePoints,
+                            radiusUsed,
+                            tubeResolution,
+                            `${name}_TUBE_PRE_NUDGE_CAPTURE`,
+                        );
+                    } catch {
+                        tubeCapPointsBeforeNudge = { start: [], end: [] };
+                    }
                     logDebug('Non-closed loop: Extending tube centerline segments...');
                     const extensionDistance = 0.1;
 
@@ -1999,6 +2097,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                 edgeWedge: edgeWedgeCopy || [],
                 tangentASeam: tangentASnap || [],
                 tangentBSeam: tangentBSnap || [],
+                tubeCapPointsBeforeNudge,
                 error: `Tube generation failed: ${tubeError?.message || tubeError}`
             };
         }
@@ -2076,6 +2175,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                         edgeWedge: edgeWedgeCopy || [],
                         tangentASeam: tangentASnap || [],
                         tangentBSeam: tangentBSnap || [],
+                        tubeCapPointsBeforeNudge,
                         error: 'No valid triangles could be created for wedge solid - all were degenerate'
                     };
                 }
@@ -2093,6 +2193,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                     edgeWedge: edgeWedgeCopy || [],
                     tangentASeam: tangentASnap || [],
                     tangentBSeam: tangentBSnap || [],
+                    tubeCapPointsBeforeNudge,
                     error: `Wedge triangle creation failed: ${wedgeError?.message || wedgeError}`
                 };
             }
@@ -2212,6 +2313,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                         edgeWedge: edgeWedgeCopy || [],
                         tangentASeam: tangentASnap || [],
                         tangentBSeam: tangentBSnap || [],
+                        tubeCapPointsBeforeNudge,
                         error: 'No valid triangles could be created for non-closed wedge solid - all were degenerate'
                     };
                 }
@@ -2229,6 +2331,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                     edgeWedge: edgeWedgeCopy || [],
                     tangentASeam: tangentASnap || [],
                     tangentBSeam: tangentBSnap || [],
+                    tubeCapPointsBeforeNudge,
                     error: `Non-closed wedge triangle creation failed: ${wedgeError?.message || wedgeError}`
                 };
             }
@@ -2251,18 +2354,23 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
             try { wedgeSolid.visualize(); } catch { }
         }
 
-        wedgeSolid.pushFace(`${name}_FACE_A`, 0.0001);
-        wedgeSolid.pushFace(`${name}_FACE_B`, 0.0001);
+        if (Math.abs(faceNudgeDistance) > 1e-12) {
+            wedgeSolid.pushFace(`${name}_FACE_A`, faceNudgeDistance);
+            wedgeSolid.pushFace(`${name}_FACE_B`, faceNudgeDistance);
+        }
 
         // Apply end cap offset for INSET fillets using pushFace method
         if (sidePolicy.applyOpenEndCapPush && !closedLoop) {
             logDebug('Applying end cap offset to INSET fillet using pushFace...');
             try {
-                // Push both end caps outward by 0.001
-                wedgeSolid.pushFace(`${name}_END_CAP_1`, 0.0001);
-                wedgeSolid.pushFace(`${name}_END_CAP_2`, 0.0001);
+                if (Math.abs(faceNudgeDistance) > 1e-12) {
+                    wedgeSolid.pushFace(`${name}_END_CAP_1`, faceNudgeDistance);
+                    wedgeSolid.pushFace(`${name}_END_CAP_2`, faceNudgeDistance);
+                    logDebug('End cap offset applied successfully');
+                } else {
+                    logDebug('Skipping end cap offset because nudgeFaceDistance is 0.');
+                }
                 if (debug) wedgeSolid.visualize();
-                logDebug('End cap offset applied successfully');
             } catch (pushError) {
                 console.warn('Failed to apply end cap offset:', pushError?.message || pushError);
             }
@@ -2307,6 +2415,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                 edgeWedge: edgeWedgeCopy || [],
                 tangentASeam: tangentASnap || [],
                 tangentBSeam: tangentBSnap || [],
+                tubeCapPointsBeforeNudge,
             };
         } catch (booleanError) {
             console.error('Boolean operation failed:', booleanError?.message || booleanError);
@@ -2322,6 +2431,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
                 edgeWedge: edgeWedgeCopy || [],
                 tangentASeam: tangentASnap || [],
                 tangentBSeam: tangentBSnap || [],
+                tubeCapPointsBeforeNudge,
                 error: `Boolean operation failed: ${booleanError?.message || booleanError}`
             };
         }
@@ -2339,6 +2449,7 @@ export function filletSolid({ edgeToFillet, radius = 1, sideMode = 'INSET', debu
             edgeWedge: [],
             tangentASeam: [],
             tangentBSeam: [],
+            tubeCapPointsBeforeNudge: { start: [], end: [] },
             error: `Fillet operation failed: ${globalError?.message || globalError}`
         };
     }
