@@ -10,6 +10,7 @@
    - `docs/assembly-constraints` (assembly constraints)
    - `docs/MODELING.png`, `docs/SKETCH.png`, `docs/PMI.png`
    - `docs/features/image-to-face-2D_dialog.png`, `docs/features/image-to-face-3D_dialog.png`
+   - `docs/features/NURBS_Face_Solid_cage_editor.png`
    - Full-page documentation captures use a fixed viewport (`1200x760`) for consistent, smaller image size.
 
 For the schema that drives these dialogs (field types, defaults, and selection filters), see [Input Params Schema](./input-params-schema.md).

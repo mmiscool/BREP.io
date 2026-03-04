@@ -2904,6 +2904,8 @@ export class Viewer {
         if (this._splineMode) {
             if (!event) return collectAll ? { hit: null, target: null, candidates: [] } : { hit: null, target: null };
             const ndc = this._getPointerNDC(event);
+            try { this.camera.updateMatrixWorld(true); } catch { /* ignore */ }
+            try { this.camera.updateProjectionMatrix?.(); } catch { /* ignore */ }
             this.raycaster.setFromCamera(ndc, this.camera);
             // Set up raycaster params for vertex picking
             try {
@@ -2911,21 +2913,59 @@ export class Viewer {
                 const wpp = this._worldPerPixel(this.camera, rect.width, rect.height);
                 this.raycaster.params.Points = this.raycaster.params.Points || {};
                 this.raycaster.params.Points.threshold = Math.max(0.05, wpp * 6);
+                this.raycaster.params.Line = this.raycaster.params.Line || {};
+                this.raycaster.params.Line.threshold = Math.max(0.05, wpp * 6);
+                const dpr = (window.devicePixelRatio || 1);
+                this.raycaster.params.Line2 = this.raycaster.params.Line2 || {};
+                this.raycaster.params.Line2.threshold = Math.max(1, 2 * dpr);
+            } catch { }
+            // Keep spline-mode ray origin behavior consistent with normal picking.
+            try {
+                const ray = this.raycaster.ray;
+                const dir = ray.direction.clone().normalize();
+                const span = Math.max(
+                    1,
+                    Math.abs(this.camera.far || 0),
+                    Math.abs(this.camera.near || 0),
+                    this.viewSize * 40
+                );
+                ray.origin.addScaledVector(dir, -span);
             } catch { }
 
             // Only intersect spline vertices
             const intersects = this._withDoubleSidedPicking(() => this.raycaster.intersectObjects(this.scene.children, true));
-
+            const splineCandidates = [];
+            const splineCategory = (obj) => {
+                const ud = obj?.userData || {};
+                // Prioritize control-point balls over quad regions; keep cage lines lowest.
+                if (ud.isSplineVertex) return 0;
+                if (ud.nurbsCageQuad) return 1;
+                if (ud.nurbsCageSegment) return 2;
+                return 3;
+            };
             for (const it of intersects) {
                 if (!it || !it.object) continue;
-
-                // Check if this is a spline vertex by looking at userData
-                if (it.object.userData?.isSplineVertex || it.object.userData?.isSplineWeight) {
-                    const target = it.object;
-                    if (typeof target.onClick === 'function') {
-                        return { hit: it, target };
-                    }
-                }
+                if (!(it.object.userData?.isSplineVertex || it.object.userData?.isSplineWeight)) continue;
+                const target = it.object;
+                if (typeof target.onClick !== 'function') continue;
+                splineCandidates.push({
+                    hit: it,
+                    target,
+                    category: splineCategory(target),
+                    distance: Number.isFinite(it.distance) ? it.distance : Infinity,
+                });
+            }
+            if (splineCandidates.length) {
+                splineCandidates.sort((a, b) => {
+                    if (a.category !== b.category) return a.category - b.category;
+                    const d = a.distance - b.distance;
+                    if (Math.abs(d) > 1e-7) return d;
+                    const ap = a.target?.userData?.isSplineVertex ? 0 : 1;
+                    const bp = b.target?.userData?.isSplineVertex ? 0 : 1;
+                    return ap - bp;
+                });
+                const best = splineCandidates[0];
+                return { hit: best.hit, target: best.target };
             }
             return collectAll ? { hit: null, target: null, candidates: [] } : { hit: null, target: null };
         }

@@ -363,6 +363,16 @@ export class SelectionState {
             if (!force) return;
             SelectionState._clearHover(target);
         }
+        const hoverBase = ud.__hoverMaterial || null;
+        if (hoverBase) {
+            const hoverColor = SelectionState.hoverColor;
+            const hoverMat = SelectionState._cloneMaterialWithColor(hoverBase, hoverColor);
+            ud.__hoverOrigMat = SelectionState.getBaseMaterial(target, rootType) || target.material || null;
+            ud.__hoverMatApplied = true;
+            ud.__hoverMat = hoverMat;
+            if (hoverMat) SelectionState._assignMaterial(target, hoverMat);
+            return;
+        }
         const base = SelectionState.getBaseMaterial(target, rootType);
         if (!base) return;
         const hoverColor = SelectionState.hoverColor;

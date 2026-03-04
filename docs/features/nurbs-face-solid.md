@@ -2,24 +2,39 @@
 
 Status: Implemented
 
-NURBS Face Solid creates its own base solid (a sphere), then deforms that solid with a 3D control cage.
+## Screenshots
+![NURBS Face Solid feature dialog](NURBS_Face_Solid_dialog.png)
+![NURBS Face Solid cage editor](NURBS_Face_Solid_cage_editor.png)
+
+NURBS Face Solid creates its own base primitive volume, then deforms it with an interactive 3D control cage.
 
 ## Inputs
-- `radius` – initial sphere radius.
-- `resolution` – initial sphere segment resolution.
+- `basePrimitive` – starting primitive (`CUBE`, `SPHERE`, `CYLINDER`, `TORUS`).
+- `volumeSize` – base primitive size.
+- `volumeDensity` – base primitive tessellation density.
 - `cageDivisionsU/V/W` – cage resolution along each axis.
-- `cagePadding` – default margin around the generated sphere when creating/resetting the cage.
-- `cageEditor` – viewport cage editor with draggable control points.
+- `cagePadding` – default margin around the generated bounds when creating/resetting the cage.
+- `cageEditor` – viewport cage editor widget (Edit/Reset/Apply + display and transform options).
 - `boolean.operation` / `boolean.targets` – optional CSG with existing solids.
 
 ## Behaviour
-- Generates a sphere mesh internally (no source face/solid selection needed).
-- Generates (or restores) a control cage around the sphere bounds and stores it in feature `persistentData`.
-- Uses only boundary cage points (no internal manipulators) and interpolates interior lattice control values.
-- Applies free-form deformation (Bernstein/FFD lattice) so moving cage points reshapes the final mesh.
+- Generates the selected base primitive internally (no source solid selection required).
+- Generates (or restores) a control cage around the primitive bounds and stores it in feature `persistentData`.
+- Applies free-form deformation (FFD lattice) so cage edits reshape the final mesh.
 - Rebuilds the deformed mesh live while cage points are edited.
-- Resamples cage points when `cageDivisionsU/V/W` change so shape edits are preserved instead of reset.
-- Preserves cage edits when base sphere `radius`/`resolution` are changed.
-- Supports multi-point cage selection with Shift/Ctrl/Cmd-click and group transforms.
+- Preserves cage point positions when `basePrimitive` or `volumeDensity` are changed.
+- Keeps control points screen-size stable while zooming.
+
+## Cage Editor
+- `Edit Cage` activates viewport editing.
+- Control points render as spherical handles.
+- Single-click toggles a control point selection on/off.
+- Clicking a cage line selects both endpoints for that line.
+- Clicking a cage quad region selects all 4 corner points for that quad.
+- Multi-selected points move together with the transform gizmo.
+- `Allow X/Y/Z Direction` toggles gizmo translation axes.
+- `Symmetry X/Y/Z` mirrors edits across enabled axes.
+- `Show Edges` / `Show Control Points` toggles cage overlays.
+- `Reset` rebuilds the cage around current primitive bounds.
+- `Apply` commits the current cage state and reruns the feature.
 - `Escape` clears cage point selection.
-- Reuses spline-mode viewport picking for cage points to provide direct 3D manipulation.

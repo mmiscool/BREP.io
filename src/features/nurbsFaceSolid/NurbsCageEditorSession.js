@@ -3,6 +3,7 @@ import { BREP } from "../../BREP/BREP.js";
 import { CombinedTransformControls } from "../../UI/controls/CombinedTransformControls.js";
 import {
   buildCageSegments,
+  cageIndex,
   cageIdFromIndex,
   cloneCageData,
   sanitizeCageDivisions,
@@ -10,12 +11,29 @@ import {
 
 const noop = () => { };
 const CAGE_POINT_SELECTED_COLOR = 0xff5a00;
+const CAGE_POINT_RADIUS_MIN = 0.08;
+const CAGE_POINT_RADIUS_SCALE = 0.012;
+const CAGE_POINT_SCREEN_RADIUS_PX = 8;
+const CAGE_QUAD_IDLE_OPACITY = 0;
+const CAGE_QUAD_FILL_OPACITY = 0.14;
+const CAGE_QUAD_INSET_BALL_RADII = 1.0;
+const CAGE_QUAD_MIN_INSET_UV = 0.01;
+const CAGE_QUAD_MAX_INSET_UV = 0.45;
+const CAGE_QUAD_CORNER_RADIUS_RATIO = 0.85;
+const CAGE_QUAD_CORNER_STEPS = 5;
+const _tmpRendererSize = new THREE.Vector2();
+const _tmpWorldPoint = new THREE.Vector3();
+const _tmpCameraDir = new THREE.Vector3();
+const _tmpCameraToPoint = new THREE.Vector3();
 const DEFAULT_DISPLAY_OPTIONS = Object.freeze({
   showEdges: true,
   showControlPoints: true,
   allowX: true,
   allowY: true,
   allowZ: true,
+  symmetryX: false,
+  symmetryY: false,
+  symmetryZ: false,
   cageColor: 0x70d6ff,
 });
 
@@ -32,6 +50,7 @@ function normalizeColor(value, fallback = DEFAULT_DISPLAY_OPTIONS.cageColor) {
 
 function normalizeDisplayOptions(rawOptions) {
   const raw = (rawOptions && typeof rawOptions === "object") ? rawOptions : null;
+  const legacySymmetry = typeof raw?.symmetryMode === "boolean" ? raw.symmetryMode : false;
   return {
     showEdges: typeof raw?.showEdges === "boolean" ? raw.showEdges : DEFAULT_DISPLAY_OPTIONS.showEdges,
     showControlPoints: typeof raw?.showControlPoints === "boolean"
@@ -40,8 +59,72 @@ function normalizeDisplayOptions(rawOptions) {
     allowX: typeof raw?.allowX === "boolean" ? raw.allowX : DEFAULT_DISPLAY_OPTIONS.allowX,
     allowY: typeof raw?.allowY === "boolean" ? raw.allowY : DEFAULT_DISPLAY_OPTIONS.allowY,
     allowZ: typeof raw?.allowZ === "boolean" ? raw.allowZ : DEFAULT_DISPLAY_OPTIONS.allowZ,
+    symmetryX: typeof raw?.symmetryX === "boolean"
+      ? raw.symmetryX
+      : (legacySymmetry ? true : DEFAULT_DISPLAY_OPTIONS.symmetryX),
+    symmetryY: typeof raw?.symmetryY === "boolean"
+      ? raw.symmetryY
+      : (legacySymmetry ? true : DEFAULT_DISPLAY_OPTIONS.symmetryY),
+    symmetryZ: typeof raw?.symmetryZ === "boolean"
+      ? raw.symmetryZ
+      : (legacySymmetry ? true : DEFAULT_DISPLAY_OPTIONS.symmetryZ),
     cageColor: normalizeColor(raw?.cageColor, DEFAULT_DISPLAY_OPTIONS.cageColor),
   };
+}
+
+function buildRoundedInsetUvLoop(insetUInput, insetVInput) {
+  const insetU = Math.max(CAGE_QUAD_MIN_INSET_UV, Math.min(CAGE_QUAD_MAX_INSET_UV, Number(insetUInput) || 0));
+  const insetV = Math.max(CAGE_QUAD_MIN_INSET_UV, Math.min(CAGE_QUAD_MAX_INSET_UV, Number(insetVInput) || 0));
+  const left = insetU;
+  const right = 1 - insetU;
+  const bottom = insetV;
+  const top = 1 - insetV;
+  const maxRadius = Math.max(0, Math.min((right - left) * 0.5, (top - bottom) * 0.5));
+  const targetRadius = Math.min(insetU, insetV) * CAGE_QUAD_CORNER_RADIUS_RATIO;
+  const radius = Math.max(0, Math.min(targetRadius, maxRadius));
+  if (radius <= 1e-6) {
+    return [
+      [left, bottom],
+      [right, bottom],
+      [right, top],
+      [left, top],
+    ];
+  }
+
+  const steps = Math.max(1, Math.floor(CAGE_QUAD_CORNER_STEPS));
+  const loop = [];
+  const addPoint = (u, v) => {
+    const prev = loop[loop.length - 1];
+    if (prev && Math.abs(prev[0] - u) < 1e-9 && Math.abs(prev[1] - v) < 1e-9) return;
+    loop.push([u, v]);
+  };
+  const addArc = (cx, cy, startAngle, endAngle) => {
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      const angle = startAngle + (endAngle - startAngle) * t;
+      addPoint(
+        cx + Math.cos(angle) * radius,
+        cy + Math.sin(angle) * radius,
+      );
+    }
+  };
+
+  addPoint(left + radius, bottom);
+  addPoint(right - radius, bottom);
+  addArc(right - radius, bottom + radius, -Math.PI / 2, 0);
+  addPoint(right, top - radius);
+  addArc(right - radius, top - radius, 0, Math.PI / 2);
+  addPoint(left + radius, top);
+  addArc(left + radius, top - radius, Math.PI / 2, Math.PI);
+  addPoint(left, bottom + radius);
+  addArc(left + radius, bottom + radius, Math.PI, (Math.PI * 3) / 2);
+
+  const first = loop[0];
+  const last = loop[loop.length - 1];
+  if (first && last && Math.abs(first[0] - last[0]) < 1e-9 && Math.abs(first[1] - last[1]) < 1e-9) {
+    loop.pop();
+  }
+  return loop;
 }
 
 export class NurbsCageEditorSession {
@@ -64,6 +147,8 @@ export class NurbsCageEditorSession {
     this._selectedIds = new Set();
     this._pointEntries = new Map();
     this._lineSegments = [];
+    this._linePickObjects = [];
+    this._quadPickObjects = [];
     this._multiMoveAnchor = {
       id: null,
       x: 0,
@@ -82,6 +167,8 @@ export class NurbsCageEditorSession {
     this._controlListeners = null;
     this._controlsListener = null;
     this._pointMaterials = null;
+    this._pointGeometry = null;
+    this._pointGeometryRadius = 0;
     this._displayOptions = normalizeDisplayOptions(options.displayOptions);
   }
 
@@ -153,11 +240,14 @@ export class NurbsCageEditorSession {
     this._destroyPreviewGroup();
     this._pointEntries.clear();
     this._lineSegments = [];
+    this._linePickObjects = [];
+    this._quadPickObjects = [];
     this._selectedIds.clear();
     this._selectedId = null;
     this._clearMultiMoveAnchor();
     this._active = false;
     this._disposePointMaterials();
+    this._disposePointGeometry();
   }
 
   setCageData(cageData, options = {}) {
@@ -287,21 +377,21 @@ export class NurbsCageEditorSession {
 
   _ensurePointMaterials() {
     if (!this._pointMaterials?.base || !this._pointMaterials?.selected) {
-      const base = new THREE.PointsMaterial({
+      const base = new THREE.MeshStandardMaterial({
         color: this._displayOptions.cageColor,
-        size: 7,
-        sizeAttenuation: false,
         transparent: true,
         opacity: 1,
+        roughness: 0.35,
+        metalness: 0.05,
         depthTest: false,
         depthWrite: false,
       });
-      const selected = new THREE.PointsMaterial({
+      const selected = new THREE.MeshStandardMaterial({
         color: CAGE_POINT_SELECTED_COLOR,
-        size: 10,
-        sizeAttenuation: false,
         transparent: true,
         opacity: 1,
+        roughness: 0.25,
+        metalness: 0.1,
         depthTest: false,
         depthWrite: false,
       });
@@ -316,6 +406,20 @@ export class NurbsCageEditorSession {
     try { mats.base?.dispose?.(); } catch { }
     try { mats.selected?.dispose?.(); } catch { }
     this._pointMaterials = null;
+  }
+
+  _ensurePointGeometry(radius) {
+    const safeRadius = Math.max(CAGE_POINT_RADIUS_MIN, Number(radius) || CAGE_POINT_RADIUS_MIN);
+    if (this._pointGeometry && Math.abs(this._pointGeometryRadius - safeRadius) < 1e-9) return;
+    this._disposePointGeometry();
+    this._pointGeometry = new THREE.SphereGeometry(safeRadius, 14, 10);
+    this._pointGeometryRadius = safeRadius;
+  }
+
+  _disposePointGeometry() {
+    try { this._pointGeometry?.dispose?.(); } catch { }
+    this._pointGeometry = null;
+    this._pointGeometryRadius = 0;
   }
 
   _buildPreviewGroup() {
@@ -343,6 +447,7 @@ export class NurbsCageEditorSession {
         this._previewGroup.remove(child);
         try { child.geometry?.dispose?.(); } catch { }
         try { child.material?.dispose?.(); } catch { }
+        try { child.userData?.__hoverMaterial?.dispose?.(); } catch { }
       }
     } catch { }
     try {
@@ -400,6 +505,8 @@ export class NurbsCageEditorSession {
     if (!this.viewer?.controls || typeof this.viewer.controls.addEventListener !== "function") return;
     this._controlsListener = () => {
       try { this._control?.update?.(); } catch { }
+      this._updatePointHandleScales();
+      this._updateQuadPickGeometry();
     };
     try { this.viewer.controls.addEventListener("change", this._controlsListener); } catch { }
     try { this.viewer.controls.addEventListener("end", this._controlsListener); } catch { }
@@ -419,8 +526,11 @@ export class NurbsCageEditorSession {
       this._previewGroup.remove(child);
       try { child.geometry?.dispose?.(); } catch { }
       try { child.material?.dispose?.(); } catch { }
+      try { child.userData?.__hoverMaterial?.dispose?.(); } catch { }
     }
     this._pointEntries.clear();
+    this._linePickObjects = [];
+    this._quadPickObjects = [];
 
     const dims = sanitizeCageDivisions(this._cageData.dims);
     this._lineSegments = buildCageSegments(dims);
@@ -439,7 +549,119 @@ export class NurbsCageEditorSession {
     this._lineObject.userData.excludeFromFit = true;
     this._previewGroup.add(this._lineObject);
 
+    // Create one pickable line object per segment so a line click can select both endpoints.
+    for (const seg of this._lineSegments) {
+      const linePickGeom = new THREE.BufferGeometry();
+      linePickGeom.setAttribute("position", new THREE.Float32BufferAttribute([
+        0, 0, 0, 0, 0, 0,
+      ], 3));
+      const linePickMat = new THREE.LineBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.001,
+        depthTest: false,
+        depthWrite: false,
+      });
+      const linePick = new THREE.LineSegments(linePickGeom, linePickMat);
+      const idA = cageIdFromIndex(seg[0], dims);
+      const idB = cageIdFromIndex(seg[1], dims);
+      linePick.userData = linePick.userData || {};
+      linePick.userData.excludeFromFit = true;
+      linePick.userData.isSplineWeight = true;
+      linePick.userData.nurbsCageSegment = [...seg];
+      linePick.renderOrder = 9999;
+      linePick.onClick = () => {
+        if (!idA || !idB) return;
+        const ids = [...this._selectedIds, idA, idB];
+        this.selectObjects(ids, {
+          primaryId: this._selectedId || idB,
+        });
+      };
+      this._linePickObjects.push(linePick);
+      this._previewGroup.add(linePick);
+    }
+
+    const quadDefs = this._buildSurfaceQuadPickDefs(dims);
+    for (const def of quadDefs) {
+      const quadGeom = new THREE.BufferGeometry();
+      quadGeom.setAttribute("position", new THREE.Float32BufferAttribute([], 3));
+      const quadMat = new THREE.MeshBasicMaterial({
+        color: this._displayOptions.cageColor,
+        transparent: true,
+        opacity: CAGE_QUAD_IDLE_OPACITY,
+        depthTest: false,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const quadHoverMat = new THREE.MeshBasicMaterial({
+        color: this._displayOptions.cageColor,
+        transparent: true,
+        opacity: CAGE_QUAD_FILL_OPACITY,
+        depthTest: false,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const quadPick = new THREE.Mesh(quadGeom, quadMat);
+      quadPick.type = "FACE";
+      quadPick.userData = quadPick.userData || {};
+      quadPick.userData.excludeFromFit = true;
+      quadPick.userData.isSplineWeight = true;
+      quadPick.userData.nurbsCageQuad = def.name;
+      quadPick.userData.__baseMaterial = quadMat;
+      quadPick.userData.__hoverMaterial = quadHoverMat;
+      // Force two-sided hit testing for cage quads regardless of current hover/base material state.
+      quadPick.raycast = function raycastQuadBothSides(raycaster, intersects) {
+        const material = this.material;
+        if (!material) return;
+        if (Array.isArray(material)) {
+          const prevSides = material.map((m) => m?.side);
+          try {
+            for (const m of material) {
+              if (m && typeof m.side !== "undefined") m.side = THREE.DoubleSide;
+            }
+            THREE.Mesh.prototype.raycast.call(this, raycaster, intersects);
+          } finally {
+            for (let i = 0; i < material.length; i++) {
+              const m = material[i];
+              if (m && typeof m.side !== "undefined") m.side = prevSides[i];
+            }
+          }
+          return;
+        }
+        const prevSide = material.side;
+        try {
+          material.side = THREE.DoubleSide;
+          THREE.Mesh.prototype.raycast.call(this, raycaster, intersects);
+        } finally {
+          material.side = prevSide;
+        }
+      };
+      quadPick.renderOrder = 9998;
+      quadPick.onClick = () => {
+        if (!def.ids.length) return;
+        const nextIds = [...this._selectedIds, ...def.ids];
+        this.selectObjects(nextIds, {
+          primaryId: this._selectedId || def.ids[def.ids.length - 1],
+        });
+      };
+      this._quadPickObjects.push({
+        mesh: quadPick,
+        corners: def.corners,
+        ids: def.ids,
+      });
+      this._previewGroup.add(quadPick);
+    }
+
     const points = Array.isArray(this._cageData.points) ? this._cageData.points : [];
+    const bounds = new THREE.Box3();
+    for (const point of points) {
+      if (!Array.isArray(point) || point.length < 3) continue;
+      bounds.expandByPoint(new THREE.Vector3(point[0], point[1], point[2]));
+    }
+    const ext = bounds.getSize(new THREE.Vector3());
+    const maxExtent = Math.max(ext.x || 0, ext.y || 0, ext.z || 0, 1);
+    this._ensurePointGeometry(maxExtent * CAGE_POINT_RADIUS_SCALE);
+
     for (let index = 0; index < points.length; index++) {
       const id = cageIdFromIndex(index, dims);
       if (!id) continue;
@@ -448,28 +670,41 @@ export class NurbsCageEditorSession {
       vertex.userData = vertex.userData || {};
       vertex.userData.nurbsCagePointId = id;
       vertex.userData.isSplineVertex = true;
-      vertex.onClick = (event) => {
-        const additive = !!(event?.shiftKey || event?.ctrlKey || event?.metaKey);
+      vertex.onClick = () => {
         this.selectObject(id, {
-          additive,
-          toggle: additive,
+          additive: true,
+          toggle: true,
         });
       };
 
+      let pointObject = null;
       if (vertex._point) {
         vertex._point.userData = vertex._point.userData || {};
         vertex._point.userData.nurbsCagePointId = id;
         vertex._point.userData.isSplineVertex = true;
         vertex._point.onClick = vertex.onClick;
         vertex._point.renderOrder = 10002;
-        if (this._pointMaterials?.base) vertex._point.material = this._pointMaterials.base;
+        vertex._point.visible = false;
+      }
+
+      if (this._pointGeometry && this._pointMaterials?.base) {
+        const handle = new THREE.Mesh(this._pointGeometry, this._pointMaterials.base);
+        handle.userData = handle.userData || {};
+        handle.userData.nurbsCagePointId = id;
+        handle.userData.isSplineVertex = true;
+        handle.onClick = vertex.onClick;
+        handle.renderOrder = 30003;
+        vertex.add(handle);
+        pointObject = handle;
       }
 
       this._previewGroup.add(vertex);
-      this._pointEntries.set(id, { index, vertex });
+      this._pointEntries.set(id, { index, vertex, pointObject });
     }
 
     this._updateLineGeometry();
+    this._updatePointHandleScales();
+    this._updateQuadPickGeometry();
     this._applyDisplayOptions();
     this._updateSelectionVisuals();
     this._attachControlToSelection();
@@ -479,15 +714,371 @@ export class NurbsCageEditorSession {
     if (!this._lineObject || !this._cageData) return;
     const points = Array.isArray(this._cageData.points) ? this._cageData.points : [];
     const positions = [];
-    for (const seg of this._lineSegments) {
+    for (let i = 0; i < this._lineSegments.length; i++) {
+      const seg = this._lineSegments[i];
       const a = points[seg[0]];
       const b = points[seg[1]];
       if (!Array.isArray(a) || !Array.isArray(b)) continue;
       positions.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+
+      const linePick = this._linePickObjects[i];
+      if (linePick?.geometry) {
+        const pickAttr = new THREE.Float32BufferAttribute([
+          a[0], a[1], a[2],
+          b[0], b[1], b[2],
+        ], 3);
+        linePick.geometry.setAttribute("position", pickAttr);
+        linePick.geometry.computeBoundingSphere();
+      }
     }
     const attr = new THREE.Float32BufferAttribute(positions, 3);
     this._lineObject.geometry.setAttribute("position", attr);
     this._lineObject.geometry.computeBoundingSphere();
+  }
+
+  _buildSurfaceQuadPickDefs(dimsInput) {
+    const dims = sanitizeCageDivisions(dimsInput);
+    const [nx, ny, nz] = dims;
+    const out = [];
+
+    const pushQuad = (name, coordsA, coordsB, coordsC, coordsD) => {
+      const ia = cageIndex(coordsA[0], coordsA[1], coordsA[2], dims);
+      const ib = cageIndex(coordsB[0], coordsB[1], coordsB[2], dims);
+      const ic = cageIndex(coordsC[0], coordsC[1], coordsC[2], dims);
+      const id = cageIndex(coordsD[0], coordsD[1], coordsD[2], dims);
+      if (ia < 0 || ib < 0 || ic < 0 || id < 0) return;
+      const ids = Array.from(new Set([
+        cageIdFromIndex(ia, dims),
+        cageIdFromIndex(ib, dims),
+        cageIdFromIndex(ic, dims),
+        cageIdFromIndex(id, dims),
+      ].filter(Boolean)));
+      if (ids.length !== 4) return;
+      out.push({
+        name,
+        corners: [ia, ib, ic, id],
+        ids,
+      });
+    };
+
+    for (const i of [0, nx - 1]) {
+      for (let j = 0; j < ny - 1; j++) {
+        for (let k = 0; k < nz - 1; k++) {
+          pushQuad(
+            `quad:i=${i}:j=${j}:k=${k}`,
+            [i, j, k],
+            [i, j + 1, k],
+            [i, j + 1, k + 1],
+            [i, j, k + 1],
+          );
+        }
+      }
+    }
+
+    for (const j of [0, ny - 1]) {
+      for (let i = 0; i < nx - 1; i++) {
+        for (let k = 0; k < nz - 1; k++) {
+          pushQuad(
+            `quad:j=${j}:i=${i}:k=${k}`,
+            [i, j, k],
+            [i + 1, j, k],
+            [i + 1, j, k + 1],
+            [i, j, k + 1],
+          );
+        }
+      }
+    }
+
+    for (const k of [0, nz - 1]) {
+      for (let i = 0; i < nx - 1; i++) {
+        for (let j = 0; j < ny - 1; j++) {
+          pushQuad(
+            `quad:k=${k}:i=${i}:j=${j}`,
+            [i, j, k],
+            [i + 1, j, k],
+            [i + 1, j + 1, k],
+            [i, j + 1, k],
+          );
+        }
+      }
+    }
+
+    return out;
+  }
+
+  _updateQuadPickGeometry() {
+    if (!this._cageData || !this._quadPickObjects.length) return;
+    const points = Array.isArray(this._cageData.points) ? this._cageData.points : [];
+    const dims = sanitizeCageDivisions(this._cageData.dims);
+    const radiusFromCornerIndex = (cornerIndex) => {
+      const id = cageIdFromIndex(cornerIndex, dims);
+      const entry = id ? this._pointEntries.get(id) : null;
+      const scale = Number(entry?.pointObject?.scale?.x);
+      const factor = (Number.isFinite(scale) && scale > 0) ? scale : 1;
+      const radius = (Number.isFinite(this._pointGeometryRadius) && this._pointGeometryRadius > 0)
+        ? (this._pointGeometryRadius * factor)
+        : CAGE_POINT_RADIUS_MIN;
+      return Math.max(1e-6, radius);
+    };
+    const dist = (p, q) => {
+      const dx = (Number(p?.[0]) || 0) - (Number(q?.[0]) || 0);
+      const dy = (Number(p?.[1]) || 0) - (Number(q?.[1]) || 0);
+      const dz = (Number(p?.[2]) || 0) - (Number(q?.[2]) || 0);
+      return Math.sqrt((dx * dx) + (dy * dy) + (dz * dz));
+    };
+    for (const quad of this._quadPickObjects) {
+      const mesh = quad?.mesh;
+      const corners = Array.isArray(quad?.corners) ? quad.corners : null;
+      if (!mesh?.geometry || !corners || corners.length !== 4) continue;
+      const a = points[corners[0]];
+      const b = points[corners[1]];
+      const c = points[corners[2]];
+      const d = points[corners[3]];
+      if (!Array.isArray(a) || !Array.isArray(b) || !Array.isArray(c) || !Array.isArray(d)) continue;
+      const desiredInset = CAGE_QUAD_INSET_BALL_RADII * (
+        radiusFromCornerIndex(corners[0])
+        + radiusFromCornerIndex(corners[1])
+        + radiusFromCornerIndex(corners[2])
+        + radiusFromCornerIndex(corners[3])
+      ) * 0.25;
+      const uLen = Math.max(1e-6, 0.5 * (dist(a, b) + dist(d, c)));
+      const vLen = Math.max(1e-6, 0.5 * (dist(a, d) + dist(b, c)));
+      const insetU = Math.max(CAGE_QUAD_MIN_INSET_UV, Math.min(CAGE_QUAD_MAX_INSET_UV, desiredInset / uLen));
+      const insetV = Math.max(CAGE_QUAD_MIN_INSET_UV, Math.min(CAGE_QUAD_MAX_INSET_UV, desiredInset / vLen));
+      const uvLoop = buildRoundedInsetUvLoop(insetU, insetV);
+      const sample = (u, v) => {
+        const iu = 1 - u;
+        const iv = 1 - v;
+        return [
+          a[0] * iu * iv + b[0] * u * iv + c[0] * u * v + d[0] * iu * v,
+          a[1] * iu * iv + b[1] * u * iv + c[1] * u * v + d[1] * iu * v,
+          a[2] * iu * iv + b[2] * u * iv + c[2] * u * v + d[2] * iu * v,
+        ];
+      };
+      const center = sample(0.5, 0.5);
+      const positions = [];
+      for (let i = 0; i < uvLoop.length; i++) {
+        const uv0 = uvLoop[i];
+        const uv1 = uvLoop[(i + 1) % uvLoop.length];
+        const p0 = sample(uv0[0], uv0[1]);
+        const p1 = sample(uv1[0], uv1[1]);
+        positions.push(
+          center[0], center[1], center[2],
+          p0[0], p0[1], p0[2],
+          p1[0], p1[1], p1[2],
+        );
+      }
+      mesh.geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+      mesh.geometry.computeBoundingSphere();
+    }
+  }
+
+  _coordsFromPointId(id) {
+    if (typeof id !== "string") return null;
+    const match = /^cp:(\d+):(\d+):(\d+)$/.exec(id.trim());
+    if (!match) return null;
+    return [
+      Number(match[1]),
+      Number(match[2]),
+      Number(match[3]),
+    ];
+  }
+
+  _getSymmetryCenter() {
+    const baseMin = this._cageData?.baseBounds?.min;
+    const baseMax = this._cageData?.baseBounds?.max;
+    if (Array.isArray(baseMin) && Array.isArray(baseMax) && baseMin.length >= 3 && baseMax.length >= 3) {
+      const x0 = Number(baseMin[0]);
+      const y0 = Number(baseMin[1]);
+      const z0 = Number(baseMin[2]);
+      const x1 = Number(baseMax[0]);
+      const y1 = Number(baseMax[1]);
+      const z1 = Number(baseMax[2]);
+      if ([x0, y0, z0, x1, y1, z1].every((value) => Number.isFinite(value))) {
+        return [
+          0.5 * (x0 + x1),
+          0.5 * (y0 + y1),
+          0.5 * (z0 + z1),
+        ];
+      }
+    }
+
+    const points = Array.isArray(this._cageData?.points) ? this._cageData.points : [];
+    let minX = Infinity;
+    let minY = Infinity;
+    let minZ = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let maxZ = -Infinity;
+    for (const point of points) {
+      if (!Array.isArray(point) || point.length < 3) continue;
+      const x = Number(point[0]);
+      const y = Number(point[1]);
+      const z = Number(point[2]);
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (z < minZ) minZ = z;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+      if (z > maxZ) maxZ = z;
+    }
+    if (![minX, minY, minZ, maxX, maxY, maxZ].every((value) => Number.isFinite(value))) return null;
+    return [
+      0.5 * (minX + maxX),
+      0.5 * (minY + maxY),
+      0.5 * (minZ + maxZ),
+    ];
+  }
+
+  _applySymmetryFromSources(sourceIdsInput) {
+    const symX = !!this._displayOptions?.symmetryX;
+    const symY = !!this._displayOptions?.symmetryY;
+    const symZ = !!this._displayOptions?.symmetryZ;
+    if ((!symX && !symY && !symZ) || !this._cageData) return;
+    const dims = sanitizeCageDivisions(this._cageData.dims);
+    const [nx, ny, nz] = dims;
+    const center = this._getSymmetryCenter();
+    if (!center) return;
+
+    const sourceIds = Array.isArray(sourceIdsInput) ? sourceIdsInput : Array.from(sourceIdsInput || []);
+    const sourceIdSet = new Set();
+    const sources = [];
+    for (const rawId of sourceIds) {
+      const id = String(rawId ?? "");
+      if (!id || sourceIdSet.has(id)) continue;
+      const coords = this._coordsFromPointId(id);
+      const entry = this._pointEntries.get(id);
+      if (!coords || !entry?.vertex) continue;
+      sourceIdSet.add(id);
+      sources.push({
+        id,
+        coords,
+        pos: [
+          entry.vertex.position.x,
+          entry.vertex.position.y,
+          entry.vertex.position.z,
+        ],
+      });
+    }
+    if (!sources.length) return;
+
+    for (const source of sources) {
+      const i = source.coords[0];
+      const j = source.coords[1];
+      const k = source.coords[2];
+      const mi = nx - 1 - i;
+      const mj = ny - 1 - j;
+      const mk = nz - 1 - k;
+
+      const iOpts = (!symX || mi === i)
+        ? [{ value: i, reflect: false }]
+        : [{ value: i, reflect: false }, { value: mi, reflect: true }];
+      const jOpts = (!symY || mj === j)
+        ? [{ value: j, reflect: false }]
+        : [{ value: j, reflect: false }, { value: mj, reflect: true }];
+      const kOpts = (!symZ || mk === k)
+        ? [{ value: k, reflect: false }]
+        : [{ value: k, reflect: false }, { value: mk, reflect: true }];
+
+      for (const io of iOpts) {
+        for (const jo of jOpts) {
+          for (const ko of kOpts) {
+            if (!io.reflect && !jo.reflect && !ko.reflect) continue;
+            const targetIndex = cageIndex(io.value, jo.value, ko.value, dims);
+            if (targetIndex < 0) continue;
+            const targetId = cageIdFromIndex(targetIndex, dims);
+            if (!targetId || sourceIdSet.has(targetId)) continue;
+
+            const targetEntry = this._pointEntries.get(targetId);
+            if (!targetEntry?.vertex) continue;
+            const tx = io.reflect ? ((2 * center[0]) - source.pos[0]) : source.pos[0];
+            const ty = jo.reflect ? ((2 * center[1]) - source.pos[1]) : source.pos[1];
+            const tz = ko.reflect ? ((2 * center[2]) - source.pos[2]) : source.pos[2];
+
+            targetEntry.vertex.position.set(tx, ty, tz);
+            const targetPoint = this._cageData.points?.[targetEntry.index];
+            if (Array.isArray(targetPoint) && targetPoint.length >= 3) {
+              targetPoint[0] = tx;
+              targetPoint[1] = ty;
+              targetPoint[2] = tz;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  _worldUnitsPerPixelAt(worldPoint) {
+    const camera = this.viewer?.camera;
+    const renderer = this.viewer?.renderer;
+    if (!camera || !renderer) return 0;
+
+    let width = 0;
+    let height = 0;
+    try {
+      renderer.getSize?.(_tmpRendererSize);
+      width = _tmpRendererSize.x || renderer.domElement?.clientWidth || 0;
+      height = _tmpRendererSize.y || renderer.domElement?.clientHeight || 0;
+    } catch {
+      width = renderer?.domElement?.clientWidth || 0;
+      height = renderer?.domElement?.clientHeight || 0;
+    }
+    if (!width || !height) return 0;
+
+    if (camera.isOrthographicCamera) {
+      const zoom = (typeof camera.zoom === "number" && camera.zoom > 0) ? camera.zoom : 1;
+      const wppX = (camera.right - camera.left) / (width * zoom);
+      const wppY = (camera.top - camera.bottom) / (height * zoom);
+      return Math.max(wppX, wppY);
+    }
+
+    if (camera.isPerspectiveCamera) {
+      let distance = 0;
+      if (worldPoint?.isVector3) {
+        try {
+          camera.getWorldDirection(_tmpCameraDir);
+          _tmpCameraToPoint.copy(worldPoint).sub(camera.position);
+          distance = Math.abs(_tmpCameraToPoint.dot(_tmpCameraDir));
+        } catch {
+          distance = 0;
+        }
+      }
+      if (!Number.isFinite(distance) || distance <= 1e-6) {
+        try {
+          if (typeof this.viewer?._worldPerPixel === "function") {
+            return this.viewer._worldPerPixel(camera, width, height);
+          }
+        } catch { }
+        distance = camera?.position?.length?.() || 1;
+      }
+      const fovRad = ((camera.fov || 50) * Math.PI) / 180;
+      const zoom = (typeof camera.zoom === "number" && camera.zoom > 0) ? camera.zoom : 1;
+      return (2 * Math.tan(fovRad / 2) * distance) / (height * zoom);
+    }
+
+    try {
+      if (typeof this.viewer?._worldPerPixel === "function") {
+        return this.viewer._worldPerPixel(camera, width, height);
+      }
+    } catch { }
+    return 0;
+  }
+
+  _updatePointHandleScales() {
+    if (!this._pointEntries.size || !this._pointGeometryRadius) return;
+    for (const entry of this._pointEntries.values()) {
+      const handle = entry?.pointObject;
+      const vertex = entry?.vertex;
+      if (!handle || !vertex) continue;
+      try { vertex.getWorldPosition(_tmpWorldPoint); } catch { _tmpWorldPoint.copy(vertex.position); }
+      const wpp = this._worldUnitsPerPixelAt(_tmpWorldPoint);
+      if (!Number.isFinite(wpp) || wpp <= 0) continue;
+      const targetRadius = Math.max(1e-6, wpp * CAGE_POINT_SCREEN_RADIUS_PX);
+      const nextScale = targetRadius / this._pointGeometryRadius;
+      if (!Number.isFinite(nextScale) || nextScale <= 0) continue;
+      handle.scale.setScalar(nextScale);
+    }
   }
 
   _updateSelectionVisuals() {
@@ -497,9 +1088,13 @@ export class NurbsCageEditorSession {
       const isSelected = this._selectedIds.has(id);
       entry.vertex.selected = isSelected;
       entry.vertex.visible = showPoints;
-      const pointObject = entry.vertex._point;
+      const pointObject = entry.pointObject || entry.vertex._point;
       if (pointObject && this._pointMaterials) {
-        pointObject.material = isSelected ? this._pointMaterials.selected : this._pointMaterials.base;
+        const nextMat = isSelected ? this._pointMaterials.selected : this._pointMaterials.base;
+        pointObject.material = nextMat;
+        pointObject.userData = pointObject.userData || {};
+        // Keep hover restore in sync with selected/unselected cage-ball state.
+        pointObject.userData.__baseMaterial = nextMat;
         pointObject.visible = showPoints;
       }
     }
@@ -534,6 +1129,26 @@ export class NurbsCageEditorSession {
       this._lineObject.visible = !!options.showEdges;
       try { this._lineObject.material?.color?.setHex?.(options.cageColor); } catch { }
     }
+    for (const linePick of this._linePickObjects) {
+      if (!linePick) continue;
+      linePick.visible = !!options.showEdges;
+    }
+    for (const quad of this._quadPickObjects) {
+      if (!quad?.mesh) continue;
+      quad.mesh.visible = !!options.showEdges;
+      const baseMat = quad.mesh?.userData?.__baseMaterial || quad.mesh?.material;
+      if (baseMat) {
+        try { baseMat.color?.setHex?.(options.cageColor); } catch { }
+        try { baseMat.opacity = CAGE_QUAD_IDLE_OPACITY; } catch { }
+        quad.mesh.userData = quad.mesh.userData || {};
+        quad.mesh.userData.__baseMaterial = baseMat;
+      }
+      const hoverMat = quad.mesh?.userData?.__hoverMaterial || null;
+      if (hoverMat) {
+        try { hoverMat.color?.setHex?.(options.cageColor); } catch { }
+        try { hoverMat.opacity = CAGE_QUAD_FILL_OPACITY; } catch { }
+      }
+    }
 
     this._ensurePointMaterials();
     this._updateSelectionVisuals();
@@ -560,6 +1175,7 @@ export class NurbsCageEditorSession {
     point[0] = pos.x;
     point[1] = pos.y;
     point[2] = pos.z;
+    const movedIds = new Set([this._selectedId]);
 
     if (this._selectedIds.size > 1 && this._multiMoveAnchor.valid && this._multiMoveAnchor.id === this._selectedId) {
       const prevMat = new THREE.Matrix4().compose(
@@ -596,10 +1212,14 @@ export class NurbsCageEditorSession {
         selectedPoint[0] = selectedPos.x;
         selectedPoint[1] = selectedPos.y;
         selectedPoint[2] = selectedPos.z;
+        movedIds.add(id);
       }
     }
+    this._applySymmetryFromSources(movedIds);
     this._captureMultiMoveAnchorFromEntry(this._selectedId, entry);
     this._updateLineGeometry();
+    this._updatePointHandleScales();
+    this._updateQuadPickGeometry();
     this._notifyCageChange("transform");
     this._renderOnce();
   }

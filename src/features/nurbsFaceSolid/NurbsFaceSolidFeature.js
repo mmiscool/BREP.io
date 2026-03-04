@@ -19,10 +19,16 @@ const inputParamsSchema = {
     default_value: null,
     hint: "Unique identifier for the NURBS face solid feature",
   },
+  basePrimitive: {
+    type: "options",
+    default_value: "CUBE",
+    options: ["CUBE", "SPHERE", "CYLINDER", "TORUS"],
+    hint: "Base primitive used to initialize the deformable volume",
+  },
   volumeSize: {
     type: "number",
     default_value: 10,
-    hint: "Starting cube size",
+    hint: "Starting primitive size",
   },
   volumeDensity: {
     type: "number",
@@ -64,12 +70,16 @@ const inputParamsSchema = {
 
 const DEFAULT_VOLUME_SIZE = 10;
 const DEFAULT_VOLUME_DENSITY = 20;
+const DEFAULT_BASE_PRIMITIVE = "CUBE";
 const DEFAULT_EDITOR_OPTIONS = Object.freeze({
   showEdges: true,
   showControlPoints: true,
   allowX: true,
   allowY: true,
   allowZ: true,
+  symmetryX: false,
+  symmetryY: false,
+  symmetryZ: false,
   cageColor: "#70d6ff",
 });
 
@@ -124,18 +134,43 @@ function readPaddingFromFeature(feature) {
 
 function normalizeEditorOptions(rawOptions) {
   const raw = (rawOptions && typeof rawOptions === "object") ? rawOptions : null;
+  const legacySymmetry = normalizeBoolean(raw?.symmetryMode, false);
   return {
     showEdges: normalizeBoolean(raw?.showEdges, DEFAULT_EDITOR_OPTIONS.showEdges),
     showControlPoints: normalizeBoolean(raw?.showControlPoints, DEFAULT_EDITOR_OPTIONS.showControlPoints),
     allowX: normalizeBoolean(raw?.allowX, DEFAULT_EDITOR_OPTIONS.allowX),
     allowY: normalizeBoolean(raw?.allowY, DEFAULT_EDITOR_OPTIONS.allowY),
     allowZ: normalizeBoolean(raw?.allowZ, DEFAULT_EDITOR_OPTIONS.allowZ),
+    symmetryX: normalizeBoolean(
+      raw?.symmetryX,
+      legacySymmetry ? true : DEFAULT_EDITOR_OPTIONS.symmetryX,
+    ),
+    symmetryY: normalizeBoolean(
+      raw?.symmetryY,
+      legacySymmetry ? true : DEFAULT_EDITOR_OPTIONS.symmetryY,
+    ),
+    symmetryZ: normalizeBoolean(
+      raw?.symmetryZ,
+      legacySymmetry ? true : DEFAULT_EDITOR_OPTIONS.symmetryZ,
+    ),
     cageColor: normalizeHexColor(raw?.cageColor, DEFAULT_EDITOR_OPTIONS.cageColor),
   };
 }
 
 function readEditorOptionsFromFeature(feature) {
   return normalizeEditorOptions(feature?.persistentData?.editorOptions);
+}
+
+function normalizeBasePrimitive(value) {
+  const token = String(value ?? "").trim().toUpperCase();
+  if (token === "SPHERE") return "SPHERE";
+  if (token === "CYLINDER") return "CYLINDER";
+  if (token === "TORUS") return "TORUS";
+  return DEFAULT_BASE_PRIMITIVE;
+}
+
+function readBasePrimitive(feature) {
+  return normalizeBasePrimitive(feature?.inputParams?.basePrimitive);
 }
 
 function readVolumeParams(feature) {
@@ -226,6 +261,234 @@ function buildCubeSource(feature) {
   }
 }
 
+function buildSphereSource(feature) {
+  const { size, density } = readVolumeParams(feature);
+  const radius = Math.max(1e-6, size * 0.5);
+  const resolution = Math.max(8, Math.min(128, density | 0));
+  const sphere = new BREP.Sphere({
+    r: radius,
+    resolution,
+    name: "__NURBS_CAGE_BASE__",
+  });
+  let mesh = null;
+  try {
+    mesh = sphere.getMesh();
+    const vp = mesh?.vertProperties;
+    const tv = mesh?.triVerts;
+    if (!vp || !tv || vp.length < 9 || tv.length < 3) return null;
+
+    const vertices = [];
+    for (let i = 0; i < vp.length; i += 3) {
+      vertices.push([vp[i + 0], vp[i + 1], vp[i + 2]]);
+    }
+
+    const triangles = [];
+    const triCount = (tv.length / 3) | 0;
+    for (let t = 0; t < triCount; t++) {
+      const i0 = tv[t * 3 + 0] >>> 0;
+      const i1 = tv[t * 3 + 1] >>> 0;
+      const i2 = tv[t * 3 + 2] >>> 0;
+      if (i0 === i1 || i1 === i2 || i2 === i0) continue;
+      triangles.push([i0, i1, i2]);
+    }
+
+    const bounds = computeBoundsFromPoints(vertices);
+    const sourceSignature = `sphere:${radius}:${resolution}:${vertices.length}:${triangles.length}`;
+    return {
+      shape: "sphere",
+      size,
+      density: resolution,
+      vertices,
+      triangles,
+      bounds,
+      sourceSignature,
+    };
+  } catch (error) {
+    console.warn("[NURBS] Failed to build sphere source:", error?.message || error);
+    return null;
+  } finally {
+    try { mesh?.delete?.(); } catch { }
+    try { sphere?.free?.(); } catch { }
+    try { sphere?.delete?.(); } catch { }
+  }
+}
+
+function buildCylinderSource(feature) {
+  const { size, density } = readVolumeParams(feature);
+  const height = Math.max(1e-6, size);
+  const radius = Math.max(1e-6, size * 0.35);
+  const aroundSteps = Math.max(8, Math.min(128, density | 0));
+  const heightSteps = Math.max(4, Math.min(128, density | 0));
+  const radialSteps = Math.max(3, Math.min(64, Math.floor((density | 0) * 0.5)));
+  const halfHeight = height * 0.5;
+  const vertices = [];
+  const triangles = [];
+
+  const addVertex = (x, y, z) => {
+    vertices.push([x, y, z]);
+    return vertices.length - 1;
+  };
+  const addTriangle = (a, b, c) => {
+    if (a === b || b === c || c === a) return;
+    triangles.push([a, b, c]);
+  };
+  const pointOnRing = (r, angle) => [Math.cos(angle) * r, Math.sin(angle) * r];
+
+  try {
+    // Side wall grid with vertical subdivision to avoid long triangles.
+    const sideRings = [];
+    for (let h = 0; h <= heightSteps; h++) {
+      const v = h / heightSteps;
+      const y = -halfHeight + (height * v);
+      const ring = [];
+      for (let a = 0; a < aroundSteps; a++) {
+        const angle = (Math.PI * 2 * a) / aroundSteps;
+        const [x, z] = pointOnRing(radius, angle);
+        ring.push(addVertex(x, y, z));
+      }
+      sideRings.push(ring);
+    }
+
+    for (let h = 0; h < heightSteps; h++) {
+      const lower = sideRings[h];
+      const upper = sideRings[h + 1];
+      for (let a = 0; a < aroundSteps; a++) {
+        const next = (a + 1) % aroundSteps;
+        const i00 = lower[a];
+        const i01 = lower[next];
+        const i10 = upper[a];
+        const i11 = upper[next];
+        addTriangle(i00, i10, i11);
+        addTriangle(i00, i11, i01);
+      }
+    }
+
+    const stitchCap = (outerRing, y) => {
+      let prevRing = outerRing;
+      for (let rs = radialSteps - 1; rs >= 1; rs--) {
+        const r = radius * (rs / radialSteps);
+        const ring = [];
+        for (let a = 0; a < aroundSteps; a++) {
+          const angle = (Math.PI * 2 * a) / aroundSteps;
+          const [x, z] = pointOnRing(r, angle);
+          ring.push(addVertex(x, y, z));
+        }
+        for (let a = 0; a < aroundSteps; a++) {
+          const next = (a + 1) % aroundSteps;
+          const o0 = prevRing[a];
+          const o1 = prevRing[next];
+          const i0 = ring[a];
+          const i1 = ring[next];
+          addTriangle(o0, o1, i1);
+          addTriangle(o0, i1, i0);
+        }
+        prevRing = ring;
+      }
+
+      const center = addVertex(0, y, 0);
+      for (let a = 0; a < aroundSteps; a++) {
+        const next = (a + 1) % aroundSteps;
+        addTriangle(prevRing[a], prevRing[next], center);
+      }
+    };
+
+    const bottomOuter = sideRings[0];
+    const topOuter = sideRings[sideRings.length - 1];
+    stitchCap(topOuter, halfHeight);
+    stitchCap(bottomOuter, -halfHeight);
+
+    if (!vertices.length || !triangles.length) return null;
+    const bounds = {
+      min: [-radius, -halfHeight, -radius],
+      max: [radius, halfHeight, radius],
+    };
+    const sourceSignature = `cylinder:${radius}:${height}:${aroundSteps}:${heightSteps}:${radialSteps}:${vertices.length}:${triangles.length}`;
+    return {
+      shape: "cylinder",
+      size,
+      density: aroundSteps,
+      vertices,
+      triangles,
+      bounds,
+      sourceSignature,
+    };
+  } catch (error) {
+    console.warn("[NURBS] Failed to build cylinder source:", error?.message || error);
+    return null;
+  }
+}
+
+function buildTorusSource(feature) {
+  const { size, density } = readVolumeParams(feature);
+  const majorRadius = Math.max(1e-6, size * 0.32);
+  const minorRadius = Math.max(1e-6, size * 0.18);
+  const resolution = Math.max(12, Math.min(128, Math.floor(density * 1.5)));
+  const torus = new BREP.Torus({
+    mR: majorRadius,
+    tR: minorRadius,
+    resolution,
+    arcDegrees: 360,
+    name: "__NURBS_CAGE_BASE__",
+  });
+  let mesh = null;
+  try {
+    mesh = torus.getMesh();
+    const vp = mesh?.vertProperties;
+    const tv = mesh?.triVerts;
+    if (!vp || !tv || vp.length < 9 || tv.length < 3) return null;
+
+    const vertices = [];
+    for (let i = 0; i < vp.length; i += 3) {
+      vertices.push([vp[i + 0], vp[i + 1], vp[i + 2]]);
+    }
+
+    const triangles = [];
+    const triCount = (tv.length / 3) | 0;
+    for (let t = 0; t < triCount; t++) {
+      const i0 = tv[t * 3 + 0] >>> 0;
+      const i1 = tv[t * 3 + 1] >>> 0;
+      const i2 = tv[t * 3 + 2] >>> 0;
+      if (i0 === i1 || i1 === i2 || i2 === i0) continue;
+      triangles.push([i0, i1, i2]);
+    }
+
+    const bounds = computeBoundsFromPoints(vertices);
+    const sourceSignature = `torus:${majorRadius}:${minorRadius}:${resolution}:${vertices.length}:${triangles.length}`;
+    return {
+      shape: "torus",
+      size,
+      density: resolution,
+      vertices,
+      triangles,
+      bounds,
+      sourceSignature,
+    };
+  } catch (error) {
+    console.warn("[NURBS] Failed to build torus source:", error?.message || error);
+    return null;
+  } finally {
+    try { mesh?.delete?.(); } catch { }
+    try { torus?.free?.(); } catch { }
+    try { torus?.delete?.(); } catch { }
+  }
+}
+
+function buildSource(feature) {
+  const primitive = readBasePrimitive(feature);
+  if (primitive === "TORUS") return buildTorusSource(feature);
+  if (primitive === "CYLINDER") return buildCylinderSource(feature);
+  if (primitive === "SPHERE") return buildSphereSource(feature);
+  return buildCubeSource(feature);
+}
+
+function readCageForSource(feature, _source) {
+  const raw = feature?.persistentData?.cage || null;
+  if (!raw) return null;
+  // Keep existing control-point positions even when base primitive or source density changes.
+  // normalizeCageData will refresh sourceSignature while preserving valid points.
+  return raw;
+}
+
 function markFeatureDirtyWithCage(feature, cage) {
   if (!feature) return;
   feature.lastRunInputParams = {};
@@ -286,8 +549,8 @@ function applyEditorVisualsToSolid(solid, editorOptions) {
 function buildCageCandidateForWidget(feature) {
   const divisions = readDivisionsFromFeature(feature);
   const padding = readPaddingFromFeature(feature);
-  const source = buildCubeSource(feature);
-  return normalizeCageData(feature?.persistentData?.cage, {
+  const source = buildSource(feature);
+  return normalizeCageData(readCageForSource(feature, source), {
     divisions,
     padding,
     bounds: source?.bounds,
@@ -373,6 +636,9 @@ function renderCageEditorWidget({ ui, key, controlWrap, row }) {
   const allowXInput = addToggleControl("Allow X Direction");
   const allowYInput = addToggleControl("Allow Y Direction");
   const allowZInput = addToggleControl("Allow Z Direction");
+  const symmetryXInput = addToggleControl("Symmetry X");
+  const symmetryYInput = addToggleControl("Symmetry Y");
+  const symmetryZInput = addToggleControl("Symmetry Z");
 
   host.appendChild(displayWrap);
 
@@ -412,7 +678,7 @@ function renderCageEditorWidget({ ui, key, controlWrap, row }) {
   host.appendChild(selectedWrap);
 
   const hint = document.createElement("div");
-  hint.textContent = "Drag cage points in the viewport. Shift/Ctrl/Cmd-click adds to selection; Esc clears selection.";
+  hint.textContent = "Click points to toggle selection; click a cage line to select both endpoints; click a cage quad to select its 4 corners (hover highlights quads); Esc clears selection.";
   hint.style.fontSize = "11px";
   hint.style.opacity = "0.65";
   host.appendChild(hint);
@@ -476,6 +742,9 @@ function renderCageEditorWidget({ ui, key, controlWrap, row }) {
     allowXInput.checked = !!options.allowX;
     allowYInput.checked = !!options.allowY;
     allowZInput.checked = !!options.allowZ;
+    symmetryXInput.checked = !!options.symmetryX;
+    symmetryYInput.checked = !!options.symmetryY;
+    symmetryZInput.checked = !!options.symmetryZ;
     colorInput.value = normalizeHexColor(options.cageColor, DEFAULT_EDITOR_OPTIONS.cageColor);
   };
 
@@ -641,7 +910,7 @@ function renderCageEditorWidget({ ui, key, controlWrap, row }) {
   resetBtn.addEventListener("click", () => {
     const feature = getFeatureRef();
     if (!feature) return;
-    const source = buildCubeSource(feature);
+    const source = buildSource(feature);
     state.cage = normalizeCageData(null, {
       divisions: readDivisionsFromFeature(feature),
       padding: readPaddingFromFeature(feature),
@@ -681,6 +950,15 @@ function renderCageEditorWidget({ ui, key, controlWrap, row }) {
   allowZInput.addEventListener("change", () => updateEditorOptions({
     allowZ: !!allowZInput.checked,
   }, "allow-z"));
+  symmetryXInput.addEventListener("change", () => updateEditorOptions({
+    symmetryX: !!symmetryXInput.checked,
+  }, "symmetry-x"));
+  symmetryYInput.addEventListener("change", () => updateEditorOptions({
+    symmetryY: !!symmetryYInput.checked,
+  }, "symmetry-y"));
+  symmetryZInput.addEventListener("change", () => updateEditorOptions({
+    symmetryZ: !!symmetryZInput.checked,
+  }, "symmetry-z"));
   colorInput.addEventListener("input", () => updateEditorOptions({
     cageColor: normalizeHexColor(colorInput.value, DEFAULT_EDITOR_OPTIONS.cageColor),
   }, "cage-color"));
@@ -751,13 +1029,13 @@ export class NurbsFaceSolidFeature {
     const featureName = this.inputParams?.featureID || "NURBS_FACE_SOLID";
     const divisions = readDivisionsFromFeature(this);
     const padding = readPaddingFromFeature(this);
-    const source = buildCubeSource(this);
+    const source = buildSource(this);
     if (!source) {
       console.warn("[NURBS] Failed to build source mesh.");
       return { added: [], removed: [] };
     }
 
-    const cage = normalizeCageData(this.persistentData?.cage, {
+    const cage = normalizeCageData(readCageForSource(this, source), {
       divisions,
       padding,
       bounds: source.bounds,
@@ -792,6 +1070,7 @@ export class NurbsFaceSolidFeature {
 
     solid.userData = solid.userData || {};
     solid.userData.nurbsFaceSolid = {
+      basePrimitive: readBasePrimitive(this),
       baseShape: source.shape || "cube",
       baseSize: source.size,
       baseDensity: source.density,

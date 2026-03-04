@@ -8,6 +8,7 @@ import { chromium } from 'playwright';
 import { prepareModelingScreenshot } from './capture/docsShots/modelingScreenshot.js';
 import { prepareSketchScreenshot } from './capture/docsShots/sketchScreenshot.js';
 import { preparePmiScreenshot } from './capture/docsShots/pmiScreenshot.js';
+import { prepareNurbsCageScreenshot } from './capture/docsShots/nurbsCageScreenshot.js';
 
 const require = createRequire(import.meta.url);
 const DEFAULT_BASE_URL = process.env.CAPTURE_BASE_URL || 'http://127.0.0.1:5173';
@@ -56,8 +57,13 @@ const DOC_SHOTS = [
     label: 'Image to Face 3D result',
     relativePath: join('docs', 'features', 'image-to-face-3D_dialog.png'),
   },
+  {
+    id: 'nurbs-cage-editor',
+    label: 'NURBS cage editor',
+    relativePath: join('docs', 'features', 'NURBS_Face_Solid_cage_editor.png'),
+  },
 ];
-const FEATURE_DOC_SHOT_IDS = new Set(['image-to-face-2d', 'image-to-face-3d']);
+const FEATURE_DOC_SHOT_IDS = new Set(['image-to-face-2d', 'image-to-face-3d', 'nurbs-cage-editor']);
 const DEFAULT_TARGETS = [
   {
     id: 'features',
@@ -588,6 +594,10 @@ async function prepareDocsShot(page, shotId, context = {}) {
       openEditor: false,
       imageDataUrl: context.imageToFaceDataUrl || '',
     });
+    return;
+  }
+  if (shotId === 'nurbs-cage-editor') {
+    await prepareNurbsCageScreenshot(page);
     return;
   }
   throw new Error(`Unknown docs shot id "${shotId}"`);
