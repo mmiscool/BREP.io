@@ -53,8 +53,8 @@
     "monaco-editor": "^0.55.1",
     "pngjs": "^7.0.0",
     "tess2": "^1.0.0",
-    "three": "^0.183.1",
-    "three-mesh-bvh": "^0.9.8"
+    "three": "^0.183.2",
+    "three-mesh-bvh": "^0.9.9"
   },
   "description": "",
   "repository": {
