@@ -687,8 +687,6 @@ export class Solid extends THREE.Group {
      * @param {number} [options.inflate=0.1] tube inflation for cutting/union
      * @param {number} [options.resolution=32] tube resolution (segments around circumference)
      * @param {boolean} [options.showTangentOverlays=false] overlay tangency polylines on the helper tube for debugging/PMI
-     * @param {boolean} [options.patchFilletEndCaps=false] enable three-face tip cleanup and end-cap patching
-     * @param {boolean} [options.smoothGeneratedEdges=false] apply endpoint-constrained smoothing on generated fillet edges
      * @param {boolean} [options.debug=false] enable builder debug aids
      * @param {string} [options.featureID='FILLET'] name prefix for generated solids
      * @param {number} [options.cleanupTinyFaceIslandsArea=0.001] area threshold for face-island relabeling (<= 0 disables)

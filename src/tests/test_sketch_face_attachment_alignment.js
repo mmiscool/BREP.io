@@ -113,8 +113,6 @@ export async function test_sketch_face_attachment_alignment(partHistory) {
     resolution: 32,
     inflate: 0.1,
     direction: 'AUTO',
-    patchFilletEndCaps: true,
-    smoothGeneratedEdges: false,
     cleanupTinyFaceIslandsArea: 0.01,
     debug: 'NONE',
     showTangentOverlays: false,
