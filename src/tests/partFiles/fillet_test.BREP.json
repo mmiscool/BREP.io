@@ -1362,9 +1362,6 @@
         "resolution": 32,
         "inflate": "0.2",
         "direction": "AUTO",
-        "patchFilletEndCaps": true,
-        "smoothGeneratedEdges": false,
-        "cleanupTinyFaceIslandsArea": 0.01,
         "debug": "NONE",
         "showTangentOverlays": false,
         "__open": true
@@ -1404,8 +1401,7 @@
           "insetEntries": 1,
           "outsetEntries": 0
         },
-        "usedSheetMetalPath": false,
-        "smoothGeneratedEdges": false
+        "usedSheetMetalPath": false
       },
       "timestamp": 1772167118468
     }

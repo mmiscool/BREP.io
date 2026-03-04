@@ -689,7 +689,6 @@ export class Solid extends THREE.Group {
      * @param {boolean} [options.showTangentOverlays=false] overlay tangency polylines on the helper tube for debugging/PMI
      * @param {boolean} [options.debug=false] enable builder debug aids
      * @param {string} [options.featureID='FILLET'] name prefix for generated solids
-     * @param {number} [options.cleanupTinyFaceIslandsArea=0.001] area threshold for face-island relabeling (<= 0 disables)
      * @returns {Promise<Solid>}
      */
     fillet(options = {}) {

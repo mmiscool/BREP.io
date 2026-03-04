@@ -555,10 +555,8 @@
         "inflate": 0.1,
         "direction": "INSET",
         "showTangentOverlays": false,
-        "cleanupTinyFaceIslandsArea": 0.01,
         "debug": false,
-        "__open": true,
-        "patchFilletEndCaps": true
+        "__open": true
       },
       "persistentData": {
         "__refPreviewSnapshots": {

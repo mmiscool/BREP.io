@@ -311,7 +311,6 @@
         "inflate": 0.1,
         "direction": "INSET",
         "showTangentOverlays": true,
-        "cleanupTinyFaceIslandsArea": 0.01,
         "debug": false,
         "__open": false
       },

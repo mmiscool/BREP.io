@@ -56,12 +56,6 @@ const inputParamsSchema = {
         default_value: "AUTO",
         hint: "AUTO classifies each selected edge as inside/outside and applies subtract/union automatically.",
     },
-    cleanupTinyFaceIslandsArea: {
-        type: "number",
-        step: 0.001,
-        default_value: 0.01,
-        hint: "Relabel tiny disconnected face islands below this area threshold (<= 0 disables).",
-    },
     debug: {
         type: "options",
         options: [
@@ -255,7 +249,6 @@ export class FilletFeature {
             inflate: this.inputParams?.inflate,
             nudgeFaceDistance: this.inputParams?.nudgeFaceDistance,
             showTangentOverlays: this.inputParams?.showTangentOverlays,
-            cleanupTinyFaceIslandsArea: this.inputParams?.cleanupTinyFaceIslandsArea,
             debug: debugEnabled,
             debugMode,
             debugSolidsLevel: configuredDebugLevel,
@@ -351,7 +344,6 @@ export class FilletFeature {
             debugSolidsLevel: configuredDebugLevel,
             debugShowCombinedBeforeTarget,
             showTangentOverlays: !!this.inputParams.showTangentOverlays,
-            cleanupTinyFaceIslandsArea: this.inputParams?.cleanupTinyFaceIslandsArea,
         });
         const collectDebugSolids = (res) => {
             const out = [];
