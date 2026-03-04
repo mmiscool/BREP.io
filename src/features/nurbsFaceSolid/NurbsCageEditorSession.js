@@ -9,8 +9,40 @@ import {
 } from "./nurbsFaceSolidUtils.js";
 
 const noop = () => { };
-const CAGE_POINT_BASE_COLOR = 0x6dff3d;
 const CAGE_POINT_SELECTED_COLOR = 0xff5a00;
+const DEFAULT_DISPLAY_OPTIONS = Object.freeze({
+  showEdges: true,
+  showControlPoints: true,
+  allowX: true,
+  allowY: true,
+  allowZ: true,
+  cageColor: 0x70d6ff,
+});
+
+function normalizeColor(value, fallback = DEFAULT_DISPLAY_OPTIONS.cageColor) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.min(0xffffff, Math.floor(value)));
+  }
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  const normalized = trimmed.startsWith("#") ? trimmed.slice(1) : trimmed;
+  if (!/^[\da-fA-F]{6}$/.test(normalized)) return fallback;
+  return parseInt(normalized, 16);
+}
+
+function normalizeDisplayOptions(rawOptions) {
+  const raw = (rawOptions && typeof rawOptions === "object") ? rawOptions : null;
+  return {
+    showEdges: typeof raw?.showEdges === "boolean" ? raw.showEdges : DEFAULT_DISPLAY_OPTIONS.showEdges,
+    showControlPoints: typeof raw?.showControlPoints === "boolean"
+      ? raw.showControlPoints
+      : DEFAULT_DISPLAY_OPTIONS.showControlPoints,
+    allowX: typeof raw?.allowX === "boolean" ? raw.allowX : DEFAULT_DISPLAY_OPTIONS.allowX,
+    allowY: typeof raw?.allowY === "boolean" ? raw.allowY : DEFAULT_DISPLAY_OPTIONS.allowY,
+    allowZ: typeof raw?.allowZ === "boolean" ? raw.allowZ : DEFAULT_DISPLAY_OPTIONS.allowZ,
+    cageColor: normalizeColor(raw?.cageColor, DEFAULT_DISPLAY_OPTIONS.cageColor),
+  };
+}
 
 export class NurbsCageEditorSession {
   constructor(viewer, featureID, options = {}) {
@@ -50,6 +82,7 @@ export class NurbsCageEditorSession {
     this._controlListeners = null;
     this._controlsListener = null;
     this._pointMaterials = null;
+    this._displayOptions = normalizeDisplayOptions(options.displayOptions);
   }
 
   isActive() {
@@ -72,9 +105,26 @@ export class NurbsCageEditorSession {
     this._featureRef = featureRef || null;
   }
 
+  getDisplayOptions() {
+    return { ...this._displayOptions };
+  }
+
+  setDisplayOptions(options = {}) {
+    this._displayOptions = normalizeDisplayOptions({
+      ...this._displayOptions,
+      ...(options || {}),
+    });
+    this._applyDisplayOptions();
+    this._renderOnce();
+  }
+
   activate(initialCage, options = {}) {
     if (!this.viewer?.scene || !this.viewer?.camera || !this.viewer?.renderer) return false;
     if (this._active) this.dispose();
+    this._displayOptions = normalizeDisplayOptions({
+      ...this._displayOptions,
+      ...(options?.displayOptions || {}),
+    });
     this._ensurePointMaterials();
 
     this._featureRef = options.featureRef ?? this._featureRef ?? null;
@@ -236,26 +286,28 @@ export class NurbsCageEditorSession {
   }
 
   _ensurePointMaterials() {
-    if (this._pointMaterials?.base && this._pointMaterials?.selected) return;
-    const base = new THREE.PointsMaterial({
-      color: CAGE_POINT_BASE_COLOR,
-      size: 7,
-      sizeAttenuation: false,
-      transparent: true,
-      opacity: 1,
-      depthTest: false,
-      depthWrite: false,
-    });
-    const selected = new THREE.PointsMaterial({
-      color: CAGE_POINT_SELECTED_COLOR,
-      size: 10,
-      sizeAttenuation: false,
-      transparent: true,
-      opacity: 1,
-      depthTest: false,
-      depthWrite: false,
-    });
-    this._pointMaterials = { base, selected };
+    if (!this._pointMaterials?.base || !this._pointMaterials?.selected) {
+      const base = new THREE.PointsMaterial({
+        color: this._displayOptions.cageColor,
+        size: 7,
+        sizeAttenuation: false,
+        transparent: true,
+        opacity: 1,
+        depthTest: false,
+        depthWrite: false,
+      });
+      const selected = new THREE.PointsMaterial({
+        color: CAGE_POINT_SELECTED_COLOR,
+        size: 10,
+        sizeAttenuation: false,
+        transparent: true,
+        opacity: 1,
+        depthTest: false,
+        depthWrite: false,
+      });
+      this._pointMaterials = { base, selected };
+    }
+    try { this._pointMaterials.base.color.setHex(this._displayOptions.cageColor); } catch { }
   }
 
   _disposePointMaterials() {
@@ -311,9 +363,9 @@ export class NurbsCageEditorSession {
     );
     control.name = `NurbsCageControl:${this.featureID || ""}`;
     control.setMode("translate");
-    control.showX = true;
-    control.showY = true;
-    control.showZ = true;
+    control.showX = !!this._displayOptions.allowX;
+    control.showY = !!this._displayOptions.allowY;
+    control.showZ = !!this._displayOptions.allowZ;
     control.enabled = false;
     control.visible = false;
     control.userData = control.userData || {};
@@ -418,6 +470,7 @@ export class NurbsCageEditorSession {
     }
 
     this._updateLineGeometry();
+    this._applyDisplayOptions();
     this._updateSelectionVisuals();
     this._attachControlToSelection();
   }
@@ -438,20 +491,23 @@ export class NurbsCageEditorSession {
   }
 
   _updateSelectionVisuals() {
+    const showPoints = !!this._displayOptions.showControlPoints;
     for (const [id, entry] of this._pointEntries.entries()) {
       if (!entry?.vertex) continue;
       const isSelected = this._selectedIds.has(id);
       entry.vertex.selected = isSelected;
+      entry.vertex.visible = showPoints;
       const pointObject = entry.vertex._point;
       if (pointObject && this._pointMaterials) {
         pointObject.material = isSelected ? this._pointMaterials.selected : this._pointMaterials.base;
+        pointObject.visible = showPoints;
       }
     }
   }
 
   _attachControlToSelection() {
     if (!this._control) return;
-    if (!this._selectedId) {
+    if (!this._selectedId || !this._displayOptions.showControlPoints) {
       this._control.detach?.();
       this._control.enabled = false;
       this._control.visible = false;
@@ -468,6 +524,27 @@ export class NurbsCageEditorSession {
     this._control.visible = true;
     this._captureMultiMoveAnchorFromEntry(this._selectedId, entry);
     this._control.update?.();
+  }
+
+  _applyDisplayOptions() {
+    const options = normalizeDisplayOptions(this._displayOptions);
+    this._displayOptions = options;
+
+    if (this._lineObject) {
+      this._lineObject.visible = !!options.showEdges;
+      try { this._lineObject.material?.color?.setHex?.(options.cageColor); } catch { }
+    }
+
+    this._ensurePointMaterials();
+    this._updateSelectionVisuals();
+
+    if (this._control) {
+      this._control.showX = !!options.allowX;
+      this._control.showY = !!options.allowY;
+      this._control.showZ = !!options.allowZ;
+      this._attachControlToSelection();
+      this._control.update?.();
+    }
   }
 
   _handleControlChange() {
