@@ -87,6 +87,37 @@ function collectFaceVertices(tris) {
     return verts;
 }
 
+function createFilletResultPayload({
+    tube = null,
+    wedge = null,
+    finalSolid = null,
+    centerline = [],
+    tangentA = [],
+    tangentB = [],
+    edge = [],
+    edgeWedge = [],
+    tangentASeam = [],
+    tangentBSeam = [],
+    tubeCapPointsBeforeNudge = { start: [], end: [] },
+    error = null,
+} = {}) {
+    const out = {
+        tube,
+        wedge,
+        finalSolid,
+        centerline,
+        tangentA,
+        tangentB,
+        edge,
+        edgeWedge,
+        tangentASeam,
+        tangentBSeam,
+        tubeCapPointsBeforeNudge,
+    };
+    if (error != null) out.error = String(error);
+    return out;
+}
+
 function point3ArrayFromAny(point) {
     if (Array.isArray(point) && point.length >= 3) {
         const x = Number(point[0]);
@@ -167,7 +198,7 @@ function sanitizeFilletInputPolyline(polylineLocal, tolerance = 1e-9) {
         ? Math.max(1e-12, Math.abs(tolerance))
         : 1e-9;
     const tol2 = tol * tol;
-    const out = [];
+    const parsed = [];
 
     for (let i = 0; i < src.length; i++) {
         const pt = src[i];
@@ -176,6 +207,16 @@ function sanitizeFilletInputPolyline(polylineLocal, tolerance = 1e-9) {
         const y = Number(pt[1]);
         const z = Number(pt[2]);
         if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+        parsed.push([x, y, z]);
+    }
+    if (parsed.length === 0) return [];
+
+    const out = [];
+    for (let i = 0; i < parsed.length; i++) {
+        const pt = parsed[i];
+        const x = pt[0];
+        const y = pt[1];
+        const z = pt[2];
 
         if (out.length > 0) {
             const prev = out[out.length - 1];
@@ -186,7 +227,43 @@ function sanitizeFilletInputPolyline(polylineLocal, tolerance = 1e-9) {
         }
         out.push([x, y, z]);
     }
-    return out;
+    if (out.length < 3) return out;
+
+    // Second pass: strip micro-segments relative to the edge scale so cleanup
+    // does not flip behavior based on fillet radius.
+    let totalLen = 0;
+    let maxSegLen = 0;
+    for (let i = 1; i < out.length; i++) {
+        const a = out[i - 1];
+        const b = out[i];
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+        if (!Number.isFinite(len) || len <= 0) continue;
+        totalLen += len;
+        if (len > maxSegLen) maxSegLen = len;
+    }
+    const adaptiveTol = Math.max(
+        tol,
+        totalLen * 1e-7,
+        maxSegLen * 1e-6,
+    );
+    const adaptiveTol2 = adaptiveTol * adaptiveTol;
+    if (adaptiveTol2 <= tol2) return out;
+
+    const refined = [];
+    for (let i = 0; i < out.length; i++) {
+        const p = out[i];
+        if (refined.length === 0) {
+            refined.push(p);
+            continue;
+        }
+        const prev = refined[refined.length - 1];
+        const dx = p[0] - prev[0];
+        const dy = p[1] - prev[1];
+        const dz = p[2] - prev[2];
+        if (((dx * dx) + (dy * dy) + (dz * dz)) <= adaptiveTol2) continue;
+        refined.push(p);
+    }
+    return refined.length >= 2 ? refined : out;
 }
 
 function computeProjectionRange(verts, dir) {
@@ -1146,7 +1223,7 @@ function fixPolylineWinding(centerline, tangentA, tangentB, expectedRadius = nul
         if (!Array.isArray(centerline) || !Array.isArray(tangentA) || !Array.isArray(tangentB)) {
             return { centerlineReversed: false, tangentAReversed: false, tangentBReversed: false };
         }
-        const isValidPoint = (p) => !!p && isFinite(p.x) && isFinite(p.y) && isFinite(p.z);
+        const isValidPoint = isFiniteFilletPoint;
         const n = Math.min(centerline.length, tangentA.length, tangentB.length);
         if (n < 3) {
             return { centerlineReversed: false, tangentAReversed: false, tangentBReversed: false };
@@ -1458,9 +1535,9 @@ export function filletSolid({
         }
 
         const centerline = Array.isArray(res?.points) ? res.points : [];
-        let tangentA = Array.isArray(res?.tangentA) ? res.tangentA : [];
-        let tangentB = Array.isArray(res?.tangentB) ? res.tangentB : [];
-        let edgePts = Array.isArray(res?.edge) ? res.edge : [];
+        const tangentA = Array.isArray(res?.tangentA) ? res.tangentA : [];
+        const tangentB = Array.isArray(res?.tangentB) ? res.tangentB : [];
+        const edgePts = Array.isArray(res?.edge) ? res.edge : [];
         const closedLoop = !!res?.closedLoop;
 
         if (debug) {
@@ -1500,11 +1577,11 @@ export function filletSolid({
         }
         const tangentASnap = tangentACopy.map(pt => ({ x: pt.x, y: pt.y, z: pt.z }));
         const tangentBSnap = tangentBCopy.map(pt => ({ x: pt.x, y: pt.y, z: pt.z }));
-        let edgeCopy = edgePts.map(pt => ({ x: pt.x, y: pt.y, z: pt.z }));
+        const edgeCopy = edgePts.map(pt => ({ x: pt.x, y: pt.y, z: pt.z }));
         // Working copy of the original edge points used for wedge construction.
         // Kept separate from `edgeCopy` so we can apply small insets/offsets without
         // disturbing other consumers that rely on the original edge sampling.
-        let edgeWedgeCopy = edgeCopy.map(pt => ({ x: pt.x, y: pt.y, z: pt.z }));
+        const edgeWedgeCopy = edgeCopy.map(pt => ({ x: pt.x, y: pt.y, z: pt.z }));
 
         if (debug && centerlineCopy.length >= 2) {
             visualizeCenterlineDebug(name, centerlineCopy, closedLoop, {
@@ -1716,23 +1793,28 @@ export function filletSolid({
         // Validate spacing/variation for the path we will actually use for the tube
         const tubePathOriginal = Array.isArray(centerline) ? centerline : [];
         let tubeCapPointsBeforeNudge = { start: [], end: [] };
+        const buildResult = ({
+            tube = null,
+            wedge = null,
+            finalSolid = null,
+            error = null,
+        } = {}) => createFilletResultPayload({
+            tube,
+            wedge,
+            finalSolid,
+            centerline: centerlineCopy,
+            tangentA: tangentACopy,
+            tangentB: tangentBCopy,
+            edge: edgeCopy,
+            edgeWedge: edgeWedgeCopy,
+            tangentASeam: tangentASnap,
+            tangentBSeam: tangentBSnap,
+            tubeCapPointsBeforeNudge,
+            error,
+        });
         if (tubePathOriginal.length < 2) {
             console.error('Insufficient centerline points for tube generation');
-            // Return debug information even on centerline failure
-            return {
-                tube: null,
-                wedge: null,
-                finalSolid: null,
-                centerline: centerlineCopy || [],
-                tangentA: tangentACopy || [],
-                tangentB: tangentBCopy || [],
-                edge: edgeCopy || [],
-                edgeWedge: edgeWedgeCopy || [],
-                tangentASeam: tangentASnap || [],
-                tangentBSeam: tangentBSnap || [],
-                tubeCapPointsBeforeNudge,
-                error: 'Insufficient centerline points for tube generation'
-            };
+            return buildResult({ error: 'Insufficient centerline points for tube generation' });
         }
         {
             const firstPt = tubePathOriginal[0];
@@ -1743,21 +1825,7 @@ export function filletSolid({
             );
             if (!hasVariation) {
                 console.error('Degenerate centerline: all points are identical');
-                // Return debug information even on centerline failure
-            return {
-                tube: null,
-                wedge: null,
-                finalSolid: null,
-                centerline: centerlineCopy || [],
-                tangentA: tangentACopy || [],
-                tangentB: tangentBCopy || [],
-                edge: edgeCopy || [],
-                edgeWedge: edgeWedgeCopy || [],
-                tangentASeam: tangentASnap || [],
-                tangentBSeam: tangentBSnap || [],
-                tubeCapPointsBeforeNudge,
-                error: 'Degenerate centerline: all points are identical'
-            };
+                return buildResult({ error: 'Degenerate centerline: all points are identical' });
             }
             const minSpacing = radiusUsed * 0.01;
             for (let i = 1; i < tubePathOriginal.length; i++) {
@@ -1900,23 +1968,12 @@ export function filletSolid({
         } catch (tubeError) {
             console.error('Tube creation failed:', tubeError?.message || tubeError);
 
-            // Return debug information even on tube failure
             const debugWedge = new Solid();
             debugWedge.name = `${name}_FAILED_TUBE_DEBUG`;
-            return {
-                tube: null,
+            return buildResult({
                 wedge: debugWedge,
-                finalSolid: null,
-                centerline: centerlineCopy,
-                tangentA: tangentACopy,
-                tangentB: tangentBCopy,
-                edge: edgeCopy || [],
-                edgeWedge: edgeWedgeCopy || [],
-                tangentASeam: tangentASnap || [],
-                tangentBSeam: tangentBSnap || [],
-                tubeCapPointsBeforeNudge,
-                error: `Tube generation failed: ${tubeError?.message || tubeError}`
-            };
+                error: `Tube generation failed: ${tubeError?.message || tubeError}`,
+            });
         }
 
 
@@ -1931,6 +1988,26 @@ export function filletSolid({
                 const minTriangleArea = radiusUsed * radiusUsed * 1e-8;
                 let validTriangles = 0;
                 let skippedTriangles = 0;
+                const isValidTriangle = (p1, p2, p3) => {
+                    const v1 = { x: p2.x - p1.x, y: p2.y - p1.y, z: p2.z - p1.z };
+                    const v2 = { x: p3.x - p1.x, y: p3.y - p1.y, z: p3.z - p1.z };
+                    const cross = {
+                        x: v1.y * v2.z - v1.z * v2.y,
+                        y: v1.z * v2.x - v1.x * v2.z,
+                        z: v1.x * v2.y - v1.y * v2.x
+                    };
+                    const area = 0.5 * Math.sqrt(cross.x * cross.x + cross.y * cross.y + cross.z * cross.z);
+                    return area > minTriangleArea;
+                };
+                const isValidPoint = isFiniteFilletPoint;
+                const addTriangleWithValidation = (groupName, p1, p2, p3) => {
+                    if (!isValidPoint(p1) || !isValidPoint(p2) || !isValidPoint(p3)) {
+                        console.warn(`Invalid points detected - p1:(${p1.x},${p1.y},${p1.z}) p2:(${p2.x},${p2.y},${p2.z}) p3:(${p3.x},${p3.y},${p3.z})`);
+                        return false;
+                    }
+                    wedgeSolid.addTriangle(groupName, [p1.x, p1.y, p1.z], [p2.x, p2.y, p2.z], [p3.x, p3.y, p3.z]);
+                    return true;
+                };
                 for (let i = 0; i < centerlineCopy.length - 1; i++) {
                     const c1 = centerlineCopy[i];
                     const c2 = centerlineCopy[i + 1];
@@ -1938,27 +2015,6 @@ export function filletSolid({
                     const tA2 = tangentACopy[i + 1];
                     const tB1 = tangentBCopy[i];
                     const tB2 = tangentBCopy[i + 1];
-
-                    const isValidTriangle = (p1, p2, p3) => {
-                        const v1 = { x: p2.x - p1.x, y: p2.y - p1.y, z: p2.z - p1.z };
-                        const v2 = { x: p3.x - p1.x, y: p3.y - p1.y, z: p3.z - p1.z };
-                        const cross = {
-                            x: v1.y * v2.z - v1.z * v2.y,
-                            y: v1.z * v2.x - v1.x * v2.z,
-                            z: v1.x * v2.y - v1.y * v2.x
-                        };
-                        const area = 0.5 * Math.sqrt(cross.x * cross.x + cross.y * cross.y + cross.z * cross.z);
-                        return area > minTriangleArea;
-                    };
-                    const isValidPoint = (p) => isFinite(p.x) && isFinite(p.y) && isFinite(p.z);
-                    const addTriangleWithValidation = (groupName, p1, p2, p3) => {
-                        if (!isValidPoint(p1) || !isValidPoint(p2) || !isValidPoint(p3)) {
-                            console.warn(`Invalid points detected - p1:(${p1.x},${p1.y},${p1.z}) p2:(${p2.x},${p2.y},${p2.z}) p3:(${p3.x},${p3.y},${p3.z})`);
-                            return false;
-                        }
-                        wedgeSolid.addTriangle(groupName, [p1.x, p1.y, p1.z], [p2.x, p2.y, p2.z], [p3.x, p3.y, p3.z]);
-                        return true;
-                    };
 
                     // Tangent A side
                     if (isValidTriangle(c1, tA1, c2) && addTriangleWithValidation(`${name}_WEDGE_A`, c1, tA1, c2)) validTriangles++; else skippedTriangles++;
@@ -1980,39 +2036,19 @@ export function filletSolid({
                 logDebug(`Wedge triangles added successfully (closed loop): ${validTriangles} valid, ${skippedTriangles} skipped`);
                 if (validTriangles === 0) {
                     console.error('No valid triangles could be created for wedge solid - all were degenerate');
-                    // Return debug information even on wedge failure
-                    return {
+                    return buildResult({
                         tube: filletTube,
                         wedge: wedgeSolid,
-                        finalSolid: null,
-                        centerline: centerlineCopy,
-                        tangentA: tangentACopy,
-                        tangentB: tangentBCopy,
-                        edge: edgeCopy || [],
-                        edgeWedge: edgeWedgeCopy || [],
-                        tangentASeam: tangentASnap || [],
-                        tangentBSeam: tangentBSnap || [],
-                        tubeCapPointsBeforeNudge,
-                        error: 'No valid triangles could be created for wedge solid - all were degenerate'
-                    };
+                        error: 'No valid triangles could be created for wedge solid - all were degenerate',
+                    });
                 }
             } catch (wedgeError) {
                 console.error('Failed to create wedge triangles (closed loop):', wedgeError?.message || wedgeError);
-                // Return debug information even on wedge error
-                return {
+                return buildResult({
                     tube: filletTube,
                     wedge: wedgeSolid,
-                    finalSolid: null,
-                    centerline: centerlineCopy,
-                    tangentA: tangentACopy,
-                    tangentB: tangentBCopy,
-                    edge: edgeCopy || [],
-                    edgeWedge: edgeWedgeCopy || [],
-                    tangentASeam: tangentASnap || [],
-                    tangentBSeam: tangentBSnap || [],
-                    tubeCapPointsBeforeNudge,
-                    error: `Wedge triangle creation failed: ${wedgeError?.message || wedgeError}`
-                };
+                    error: `Wedge triangle creation failed: ${wedgeError?.message || wedgeError}`,
+                });
             }
         } else {
             // NON-CLOSED LOOP PATH - specialized handling for open edges
@@ -2033,7 +2069,7 @@ export function filletSolid({
                     const area = 0.5 * Math.sqrt(cross.x * cross.x + cross.y * cross.y + cross.z * cross.z);
                     return area > minTriangleArea;
                 };
-                const isValidPoint = (p) => isFinite(p.x) && isFinite(p.y) && isFinite(p.z);
+                const isValidPoint = isFiniteFilletPoint;
                 const addTriangleWithValidation = (groupName, p1, p2, p3) => {
                     if (!isValidPoint(p1) || !isValidPoint(p2) || !isValidPoint(p3)) {
                         console.warn(`Invalid points detected - p1:(${p1.x},${p1.y},${p1.z}) p2:(${p2.x},${p2.y},${p2.z}) p3:(${p3.x},${p3.y},${p3.z})`);
@@ -2086,14 +2122,9 @@ export function filletSolid({
                     const firstE = edgeWedgeCopy[0];
 
                     if (firstE && isValidPoint(firstC) && isValidPoint(firstTA) && isValidPoint(firstTB) && isValidPoint(firstE)) {
-                        let endCapFirstC = firstC;
-                        let endCapFirstTA = firstTA;
-                        let endCapFirstTB = firstTB;
-                        let endCapFirstE = firstE;
-
                         // Create triangular fan from centerline to form end cap
-                        if (isValidTriangle(endCapFirstC, endCapFirstTB, endCapFirstTA) && addTriangleWithValidation(`${name}_END_CAP_1`, endCapFirstC, endCapFirstTB, endCapFirstTA)) validTriangles++; else skippedTriangles++;
-                        if (isValidTriangle(endCapFirstTA, endCapFirstTB, endCapFirstE) && addTriangleWithValidation(`${name}_END_CAP_1`, endCapFirstTA, endCapFirstTB, endCapFirstE)) validTriangles++; else skippedTriangles++;
+                        if (isValidTriangle(firstC, firstTB, firstTA) && addTriangleWithValidation(`${name}_END_CAP_1`, firstC, firstTB, firstTA)) validTriangles++; else skippedTriangles++;
+                        if (isValidTriangle(firstTA, firstTB, firstE) && addTriangleWithValidation(`${name}_END_CAP_1`, firstTA, firstTB, firstE)) validTriangles++; else skippedTriangles++;
                     }
 
                     // Last end cap
@@ -2104,53 +2135,28 @@ export function filletSolid({
                     const lastE = edgeWedgeCopy[lastIndex];
 
                     if (lastE && isValidPoint(lastC) && isValidPoint(lastTA) && isValidPoint(lastTB) && isValidPoint(lastE)) {
-                        let endCapLastC = lastC;
-                        let endCapLastTA = lastTA;
-                        let endCapLastTB = lastTB;
-                        let endCapLastE = lastE;
-
                         // Create triangular fan from centerline to form end cap (reversed winding for proper normal)
-                        if (isValidTriangle(endCapLastC, endCapLastTA, endCapLastTB) && addTriangleWithValidation(`${name}_END_CAP_2`, endCapLastC, endCapLastTA, endCapLastTB)) validTriangles++; else skippedTriangles++;
-                        if (isValidTriangle(endCapLastTA, endCapLastE, endCapLastTB) && addTriangleWithValidation(`${name}_END_CAP_2`, endCapLastTA, endCapLastE, endCapLastTB)) validTriangles++; else skippedTriangles++;
+                        if (isValidTriangle(lastC, lastTA, lastTB) && addTriangleWithValidation(`${name}_END_CAP_2`, lastC, lastTA, lastTB)) validTriangles++; else skippedTriangles++;
+                        if (isValidTriangle(lastTA, lastE, lastTB) && addTriangleWithValidation(`${name}_END_CAP_2`, lastTA, lastE, lastTB)) validTriangles++; else skippedTriangles++;
                     }
                 }
 
                 logDebug(`Wedge triangles added successfully (non-closed loop): ${validTriangles} valid, ${skippedTriangles} skipped`);
                 if (validTriangles === 0) {
                     console.error('No valid triangles could be created for non-closed wedge solid - all were degenerate');
-                    // Return debug information even on wedge failure
-                    return {
+                    return buildResult({
                         tube: filletTube,
                         wedge: wedgeSolid,
-                        finalSolid: null,
-                        centerline: centerlineCopy,
-                        tangentA: tangentACopy,
-                        tangentB: tangentBCopy,
-                        edge: edgeCopy || [],
-                        edgeWedge: edgeWedgeCopy || [],
-                        tangentASeam: tangentASnap || [],
-                        tangentBSeam: tangentBSnap || [],
-                        tubeCapPointsBeforeNudge,
-                        error: 'No valid triangles could be created for non-closed wedge solid - all were degenerate'
-                    };
+                        error: 'No valid triangles could be created for non-closed wedge solid - all were degenerate',
+                    });
                 }
             } catch (wedgeError) {
                 console.error('Failed to create wedge triangles (non-closed loop):', wedgeError?.message || wedgeError);
-                // Return debug information even on wedge error
-                return {
+                return buildResult({
                     tube: filletTube,
                     wedge: wedgeSolid,
-                    finalSolid: null,
-                    centerline: centerlineCopy,
-                    tangentA: tangentACopy,
-                    tangentB: tangentBCopy,
-                    edge: edgeCopy || [],
-                    edgeWedge: edgeWedgeCopy || [],
-                    tangentASeam: tangentASnap || [],
-                    tangentBSeam: tangentBSnap || [],
-                    tubeCapPointsBeforeNudge,
-                    error: `Non-closed wedge triangle creation failed: ${wedgeError?.message || wedgeError}`
-                };
+                    error: `Non-closed wedge triangle creation failed: ${wedgeError?.message || wedgeError}`,
+                });
             }
         }
 
@@ -2221,53 +2227,23 @@ export function filletSolid({
             }
             logDebug('Final fillet solid created by subtracting tube from wedge', finalSolid);
 
-            return {
+            return buildResult({
                 tube: filletTube,
                 wedge: wedgeSolid,
                 finalSolid,
-                centerline: centerlineCopy,
-                tangentA: tangentACopy,
-                tangentB: tangentBCopy,
-                edge: edgeCopy || [],
-                edgeWedge: edgeWedgeCopy || [],
-                tangentASeam: tangentASnap || [],
-                tangentBSeam: tangentBSnap || [],
-                tubeCapPointsBeforeNudge,
-            };
+            });
         } catch (booleanError) {
             console.error('Boolean operation failed:', booleanError?.message || booleanError);
-            // Return debug information even on boolean failure
-            return {
+            return buildResult({
                 tube: filletTube,
                 wedge: wedgeSolid,
-                finalSolid: null,
-                centerline: centerlineCopy,
-                tangentA: tangentACopy,
-                tangentB: tangentBCopy,
-                edge: edgeCopy || [],
-                edgeWedge: edgeWedgeCopy || [],
-                tangentASeam: tangentASnap || [],
-                tangentBSeam: tangentBSnap || [],
-                tubeCapPointsBeforeNudge,
-                error: `Boolean operation failed: ${booleanError?.message || booleanError}`
-            };
+                error: `Boolean operation failed: ${booleanError?.message || booleanError}`,
+            });
         }
     } catch (globalError) {
         console.error('Fillet operation failed completely:', globalError?.message || globalError);
-        // Return minimal debug information even on complete failure
-        return {
-            tube: null,
-            wedge: null,
-            finalSolid: null,
-            centerline: [],
-            tangentA: [],
-            tangentB: [],
-            edge: [],
-            edgeWedge: [],
-            tangentASeam: [],
-            tangentBSeam: [],
-            tubeCapPointsBeforeNudge: { start: [], end: [] },
-            error: `Fillet operation failed: ${globalError?.message || globalError}`
-        };
+        return createFilletResultPayload({
+            error: `Fillet operation failed: ${globalError?.message || globalError}`,
+        });
     }
 }

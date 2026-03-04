@@ -26,13 +26,41 @@ export async function afterRun_fillet_edge_degenerate_segment(partHistory) {
     : partHistory.getObjectByName(String(rawEdge));
   if (!edgeObj) throw new Error(`Fillet source edge not found: ${String(rawEdge)}`);
 
-  const radius = Number(filletFeature.inputParams?.radius) || 1;
-  const res = computeFilletCenterline(edgeObj, radius, "INSET");
-  if (!Array.isArray(res.points) || !Array.isArray(res.edge)) {
-    throw new Error("computeFilletCenterline should provide point arrays.");
+  const radii = [0.5, 0.675, 1.0];
+  const results = radii.map((radius) => ({ radius, res: computeFilletCenterline(edgeObj, radius, "INSET") }));
+
+  for (const { radius, res } of results) {
+    if (!Array.isArray(res.points) || !Array.isArray(res.edge)) {
+      throw new Error(`computeFilletCenterline should provide point arrays (radius=${radius}).`);
+    }
+    if (res.points.length < 2) {
+      throw new Error(`computeFilletCenterline should produce at least 2 points (radius=${radius}).`);
+    }
+
+    let minSeg = Infinity;
+    let maxSeg = 0;
+    for (let i = 1; i < res.points.length; i++) {
+      const a = res.points[i - 1];
+      const b = res.points[i];
+      const d = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
+      if (d < minSeg) minSeg = d;
+      if (d > maxSeg) maxSeg = d;
+    }
+    // Degenerate micro-segments in the source edge should be sanitized out for all radii.
+    if (Number.isFinite(minSeg) && Number.isFinite(maxSeg) && maxSeg > 0 && minSeg < (maxSeg * 1e-5)) {
+      throw new Error(
+        `Fillet centerline contains a degenerate segment at radius=${radius}: minSeg=${minSeg}, maxSeg=${maxSeg}`,
+      );
+    }
+  }
+
+  const pointCounts = results.map(({ res }) => res.points.length);
+  const allSameCount = pointCounts.every((count) => count === pointCounts[0]);
+  if (!allSameCount) {
+    throw new Error(`Degenerate-edge sampling changed with radius: pointCounts=${JSON.stringify(pointCounts)}`);
   }
 
   console.log(
-    `✓ Fillet degenerate-edge tangent test passed: points=${res.points.length}, edgeSamples=${res.edge.length}`,
+    `✓ Fillet degenerate-edge tangent test passed: radii=${radii.join(", ")}, points=${pointCounts.join(",")}`,
   );
 }
