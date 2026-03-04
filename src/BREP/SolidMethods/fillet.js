@@ -6,6 +6,19 @@ import { createQuantizer } from '../../utils/geometryTolerance.js';
 import { buildPointInsideTester } from '../utils/pointInsideTester.js';
 import { Manifold } from '../SolidShared.js';
 
+const __SEEN_FACE_NAME_MUTATION_BREAKS = new Set();
+function breakOnFaceNameMutation(faceName, reason = 'face_name_mutation', once = false) {
+  const key = String(faceName || '').trim();
+  if (!key) return;
+  if (once) {
+    const dedupeKey = `${reason}:${key}`;
+    if (__SEEN_FACE_NAME_MUTATION_BREAKS.has(dedupeKey)) return;
+    __SEEN_FACE_NAME_MUTATION_BREAKS.add(dedupeKey);
+  }
+  // eslint-disable-next-line no-debugger
+  debugger;
+}
+
 function createFaceTrianglesAccessor(solid) {
   const cache = new Map();
   let lastFaceIndexRef = solid?._faceIndex || null;
@@ -600,6 +613,7 @@ function createHullSolidFromPoints(points, SolidClass, faceName, pointRadius = 1
       hull = Manifold.hull(seeds);
     }
     if (!hull) return null;
+    breakOnFaceNameMutation(faceName || 'CORNER_WEDGE_BRIDGE', 'createHullSolidFromPoints._fromManifold');
     const solid = SolidClass._fromManifold(hull, new Map([[0, faceName || 'CORNER_WEDGE_BRIDGE']]));
     try { solid.name = faceName || 'CORNER_WEDGE_BRIDGE'; } catch { }
     return solid;
@@ -700,6 +714,170 @@ function resolveBridgeEntryEdgeName(entry, fallback = 'EDGE') {
   return filletName || fallback;
 }
 
+function buildEdgeDerivedSideWallFaceName(entry, featureID = 'FILLET') {
+  const edgeRawName = resolveBridgeEntryEdgeName(entry, `${featureID}_EDGE`);
+  const edgeToken = sanitizeFaceNameToken(edgeRawName, 'EDGE');
+  const edgeTokenShort = (edgeToken.length > 48) ? edgeToken.slice(0, 48) : edgeToken;
+  const edgeHash = stableStringHash32(edgeRawName).toString(16).slice(-8).padStart(8, '0');
+  return `${featureID}_FILLET_SIDEWALL_${edgeTokenShort}_${edgeHash}`;
+}
+
+function computeFilletEntryEndpointAdjacency(entries, endpointTol = 1e-5) {
+  const out = new Map();
+  const list = (Array.isArray(entries) ? entries : []).filter((entry) => (
+    !!entry
+    && !!entry.edgeObj
+    && !!entry.filletSolid
+    && !entry.cornerBridge
+  ));
+  for (const entry of list) out.set(entry, { start: false, end: false });
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      const entryA = list[i];
+      const entryB = list[j];
+      const shared = resolveSharedEndpointInfo(entryA, entryB, endpointTol);
+      if (!shared) continue;
+      const aAdj = out.get(entryA);
+      const bAdj = out.get(entryB);
+      if (aAdj) {
+        if ((shared.aEndIndex | 0) === 0) aAdj.start = true;
+        else aAdj.end = true;
+      }
+      if (bAdj) {
+        if ((shared.bEndIndex | 0) === 0) bAdj.start = true;
+        else bAdj.end = true;
+      }
+    }
+  }
+  return out;
+}
+
+function mergeEntrySideWallFaces({
+  entry = null,
+  featureID = 'FILLET',
+  includeStartCap = false,
+  includeEndCap = false,
+} = {}) {
+  const solid = entry?.filletSolid;
+  const filletName = entry?.filletName;
+  if (!solid || typeof solid.getFaceNames !== 'function' || typeof solid.renameFace !== 'function') {
+    return { mergedFaceName: null, mergedCount: 0, mergedFaces: [] };
+  }
+  if (!filletName || typeof filletName !== 'string') {
+    return { mergedFaceName: null, mergedCount: 0, mergedFaces: [] };
+  }
+
+  const names = solid.getFaceNames();
+  const faceSet = new Set((Array.isArray(names) ? names : []).filter((name) => typeof name === 'string'));
+  const sideCandidates = [
+    `${filletName}_SURFACE_CA`,
+    `${filletName}_SURFACE_CB`,
+    `${filletName}_FACE_A`,
+    `${filletName}_FACE_B`,
+    `${filletName}_WEDGE_A`,
+    `${filletName}_WEDGE_B`,
+    `${filletName}_SIDE_A`,
+    `${filletName}_SIDE_B`,
+  ];
+  if (includeStartCap) sideCandidates.push(`${filletName}_END_CAP_1`);
+  if (includeEndCap) sideCandidates.push(`${filletName}_END_CAP_2`);
+
+  const candidates = sideCandidates.filter((name) => faceSet.has(name));
+  if (candidates.length === 0) {
+    return { mergedFaceName: null, mergedCount: 0, mergedFaces: [] };
+  }
+
+  const tubeOuterFaceName = `${filletName}_TUBE_Outer`;
+  const targetFaceName = faceSet.has(tubeOuterFaceName)
+    ? tubeOuterFaceName
+    : buildEdgeDerivedSideWallFaceName(entry, featureID);
+  if (faceSet.has(targetFaceName) && !candidates.includes(targetFaceName)) {
+    candidates.unshift(targetFaceName);
+  }
+
+  const mergedFaces = [];
+  for (const oldName of candidates) {
+    if (!oldName || oldName === targetFaceName) continue;
+    breakOnFaceNameMutation(targetFaceName, 'mergeEntrySideWallFaces.target', true);
+    breakOnFaceNameMutation(oldName, 'mergeEntrySideWallFaces.source');
+    solid.renameFace(oldName, targetFaceName);
+    mergedFaces.push(oldName);
+  }
+
+  const edgeReference = resolveBridgeEntryEdgeName(entry, `${featureID}_EDGE`);
+  solid.setFaceMetadata(targetFaceName, {
+    filletMergedSideWall: true,
+    filletSideWall: true,
+    filletSideWallEdge: edgeReference,
+    filletSideWallIncludesStartCap: !!includeStartCap,
+    filletSideWallIncludesEndCap: !!includeEndCap,
+  });
+
+  return {
+    mergedFaceName: targetFaceName,
+    mergedCount: mergedFaces.length + (faceSet.has(targetFaceName) ? 0 : 1),
+    mergedFaces,
+  };
+}
+
+function mergeFilletEntrySideWallsByEdge({
+  entries = [],
+  featureID = 'FILLET',
+  endpointTol = 1e-5,
+  debug = false,
+} = {}) {
+  const list = (Array.isArray(entries) ? entries : []).filter((entry) => (
+    !!entry
+    && !!entry.edgeObj
+    && !!entry.filletSolid
+    && !entry.cornerBridge
+  ));
+  if (list.length === 0) {
+    return { processedEntries: 0, mergedEntries: 0, mergedFaces: 0 };
+  }
+
+  const adjacency = computeFilletEntryEndpointAdjacency(list, endpointTol);
+  let mergedEntries = 0;
+  let mergedFaces = 0;
+
+  for (const entry of list) {
+    const adj = adjacency.get(entry) || { start: false, end: false };
+    const result = mergeEntrySideWallFaces({
+      entry,
+      featureID,
+      includeStartCap: !!adj.start,
+      includeEndCap: !!adj.end,
+    });
+    if (result?.mergedFaceName) {
+      mergedEntries += 1;
+      mergedFaces += Number(result.mergedFaces?.length || 0);
+      entry.sideWallFaceName = result.mergedFaceName;
+      entry.sideWallMergedFaces = Array.isArray(result.mergedFaces) ? result.mergedFaces.slice() : [];
+      entry.sideWallAdjacency = { start: !!adj.start, end: !!adj.end };
+      if (Array.isArray(entry.mergeCandidates) && !entry.mergeCandidates.includes(result.mergedFaceName)) {
+        entry.mergeCandidates.push(result.mergedFaceName);
+      }
+      if (debug) {
+        console.log('[Solid.fillet] Merged fillet side-wall faces.', {
+          featureID,
+          filletName: entry.filletName,
+          edge: resolveBridgeEntryEdgeName(entry, null),
+          sideWallFaceName: result.mergedFaceName,
+          mergedFaces: result.mergedFaces,
+          includeStartCap: !!adj.start,
+          includeEndCap: !!adj.end,
+        });
+      }
+    }
+  }
+
+  return {
+    processedEntries: list.length,
+    mergedEntries,
+    mergedFaces,
+  };
+}
+
 function buildDeterministicBridgeName(featureID, edgeNameA, edgeNameB, label = 'BRIDGE') {
   const rawA = String(edgeNameA == null ? 'EDGE_A' : edgeNameA);
   const rawB = String(edgeNameB == null ? 'EDGE_B' : edgeNameB);
@@ -738,6 +916,7 @@ function collapseSolidToSingleFaceName(solid, faceName = 'FILLET_CORNER_BRIDGE')
       solid._manifold.delete();
     }
   } catch { }
+  breakOnFaceNameMutation(unifiedName, 'collapseSolidToSingleFaceName.unified');
   solid._manifold = null;
   solid._triIDs = new Array(triCount).fill(unifiedID);
   solid._idToFaceName = new Map([[unifiedID, unifiedName]]);
@@ -913,6 +1092,7 @@ function relabelDisconnectedFaceComponents({
   const names = components.map((_, idx) => makeUniqueName(preferredNames[idx], idx));
   if (components.length === 1) {
     if (names[0] !== sourceFaceName) {
+      breakOnFaceNameMutation(names[0], 'relabelDisconnectedFaceComponents.single_component');
       faceToId.delete(sourceFaceName);
       faceToId.set(names[0], sourceID);
       idToFace.set(sourceID, names[0]);
@@ -940,6 +1120,7 @@ function relabelDisconnectedFaceComponents({
   const metadataMap = solid._faceMetadata instanceof Map ? solid._faceMetadata : null;
   const sourceMeta = metadataMap ? metadataMap.get(sourceFaceName) : undefined;
 
+  breakOnFaceNameMutation(names[0], 'relabelDisconnectedFaceComponents.primary_component');
   faceToId.delete(sourceFaceName);
   faceToId.set(names[0], sourceID);
   idToFace.set(sourceID, names[0]);
@@ -955,6 +1136,7 @@ function relabelDisconnectedFaceComponents({
     const newID = nextID;
     nextID += 1;
     for (const triIdx of comp.tris) ids[triIdx] = newID >>> 0;
+    breakOnFaceNameMutation(names[i], 'relabelDisconnectedFaceComponents.additional_component');
     idToFace.set(newID, names[i]);
     faceToId.set(names[i], newID);
     if (metadataMap && sourceMeta !== undefined) {
@@ -1649,7 +1831,13 @@ export async function fillet(opts = {}) {
   };
 
   for (const e of unique) {
-    const name = `${featureID}_FILLET_${idx++}`;
+    const edgeRawName = (typeof e?.name === 'string' && e.name.trim().length > 0)
+      ? e.name.trim()
+      : `EDGE_${idx}`;
+    const edgeToken = sanitizeFaceNameToken(edgeRawName, `EDGE_${idx}`);
+    const edgeTokenShort = (edgeToken.length > 48) ? edgeToken.slice(0, 48) : edgeToken;
+    const edgeHash = stableStringHash32(edgeRawName).toString(16).slice(-8).padStart(8, '0');
+    const name = `${featureID}_FILLET_${edgeTokenShort}_${edgeHash}_${idx++}`;
     let edgeDirection = fallbackDirection;
     let directionReason = autoDirection ? 'fallback' : 'explicit';
     let directionDetail = null;
@@ -1791,6 +1979,29 @@ export async function fillet(opts = {}) {
   if (filletEntries.length === 0) {
     console.error('[Solid.fillet] All edge fillets failed; returning clone.', { featureID, edgeCount: unique.length });
     return buildFallbackResult();
+  }
+  try {
+    const sideWallEndpointTol = Math.max(
+      1e-6,
+      Math.min(1e-3, deriveSolidToleranceFromVerts(this, 1e-5)),
+    );
+    const sideWallMergeStats = mergeFilletEntrySideWallsByEdge({
+      entries: filletEntries,
+      featureID,
+      endpointTol: sideWallEndpointTol,
+      debug,
+    });
+    if (debug && sideWallMergeStats.mergedEntries > 0) {
+      console.log('[Solid.fillet] Merged per-edge fillet side walls.', {
+        featureID,
+        ...sideWallMergeStats,
+      });
+    }
+  } catch (err) {
+    console.warn('[Solid.fillet] Failed to merge per-edge fillet side walls; continuing.', {
+      featureID,
+      error: err?.message || err,
+    });
   }
   for (const entry of filletEntries) {
     getBooleanGroupForDirection(entry?.edgeDirection).entries.push(entry);

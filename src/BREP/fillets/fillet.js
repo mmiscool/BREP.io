@@ -1812,6 +1812,20 @@ export function filletSolid({
             tubeCapPointsBeforeNudge,
             error,
         });
+        // Debug helper: pause whenever a face name is assigned/changed.
+        // `once` can be used to avoid breaking repeatedly for the same name in tight loops.
+        const seenFaceNameAssignments = new Set();
+        const breakOnFaceNameSet = (faceName, reason = 'face_name_set', once = false) => {
+            const key = String(faceName || '').trim();
+            if (!key) return;
+            if (once) {
+                const dedupeKey = `${reason}:${key}`;
+                if (seenFaceNameAssignments.has(dedupeKey)) return;
+                seenFaceNameAssignments.add(dedupeKey);
+            }
+            // eslint-disable-next-line no-debugger
+            debugger;
+        };
         if (tubePathOriginal.length < 2) {
             console.error('Insufficient centerline points for tube generation');
             return buildResult({ error: 'Insufficient centerline points for tube generation' });
@@ -1933,6 +1947,7 @@ export function filletSolid({
                 };
                 if (requestedRadius !== radiusUsed) overrideMeta.requestedRadius = requestedRadius;
                 if (edgeToFillet?.name) overrideMeta.edgeReference = edgeToFillet.name;
+                breakOnFaceNameSet(faceTag, 'filletTube.setFaceMetadata');
                 filletTube.setFaceMetadata(faceTag, overrideMeta);
 
                 if (showTangentOverlays) {
@@ -1952,6 +1967,7 @@ export function filletSolid({
                         const tris = filletTube.getFace(capName);
                         const area = computeFaceAreaFromTriangles(tris);
                         if (area > 0) {
+                            breakOnFaceNameSet(capName, 'filletTube.setFaceMetadata.cap');
                             filletTube.setFaceMetadata(capName, {
                                 filletSourceArea: area,
                                 filletRoundFace: roundFaceName,
@@ -2005,6 +2021,7 @@ export function filletSolid({
                         console.warn(`Invalid points detected - p1:(${p1.x},${p1.y},${p1.z}) p2:(${p2.x},${p2.y},${p2.z}) p3:(${p3.x},${p3.y},${p3.z})`);
                         return false;
                     }
+                    breakOnFaceNameSet(groupName, 'wedgeSolid.addTriangle.closed', true);
                     wedgeSolid.addTriangle(groupName, [p1.x, p1.y, p1.z], [p2.x, p2.y, p2.z], [p3.x, p3.y, p3.z]);
                     return true;
                 };
@@ -2075,6 +2092,7 @@ export function filletSolid({
                         console.warn(`Invalid points detected - p1:(${p1.x},${p1.y},${p1.z}) p2:(${p2.x},${p2.y},${p2.z}) p3:(${p3.x},${p3.y},${p3.z})`);
                         return false;
                     }
+                    breakOnFaceNameSet(groupName, 'wedgeSolid.addTriangle.open', true);
                     wedgeSolid.addTriangle(groupName, [p1.x, p1.y, p1.z], [p2.x, p2.y, p2.z], [p3.x, p3.y, p3.z]);
                     return true;
                 };
@@ -2205,6 +2223,7 @@ export function filletSolid({
             const tris = wedgeSolid.getFace(faceName);
             const area = computeFaceAreaFromTriangles(tris);
             if (area > 0) {
+                breakOnFaceNameSet(faceName, 'wedgeSolid.setFaceMetadata');
                 wedgeSolid.setFaceMetadata(faceName, {
                     filletSourceArea: area,
                     filletRoundFace: roundFaceName,

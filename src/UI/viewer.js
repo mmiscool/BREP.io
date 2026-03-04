@@ -179,9 +179,12 @@ function ensureSelectionPickerStyles() {
 
 function ensureSidebarResizerStyles() {
     if (typeof document === 'undefined') return;
-    if (document.getElementById('sidebar-resizer-styles')) return;
-    const style = document.createElement('style');
-    style.id = 'sidebar-resizer-styles';
+    let style = document.getElementById('sidebar-resizer-styles');
+    if (!style) {
+        style = document.createElement('style');
+        style.id = 'sidebar-resizer-styles';
+        document.head.appendChild(style);
+    }
     style.textContent = `
         #sidebar-resizer {
             position: fixed;
@@ -208,7 +211,6 @@ function ensureSidebarResizerStyles() {
             opacity: 0.9;
         }
     `;
-    document.head.appendChild(style);
 }
 
 function ensureSidebarDockStyles() {
@@ -347,6 +349,7 @@ class SidebarDockController {
         resizer.title = 'Drag to resize sidebar';
         resizer.setAttribute('aria-hidden', 'true');
         resizer.style.width = `${handleWidth}px`;
+        resizer.style.cursor = 'ew-resize';
         document.body.appendChild(resizer);
         this._resizer = resizer;
         v._sidebarResizer = resizer;
