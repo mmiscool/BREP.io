@@ -2937,10 +2937,10 @@ export class Viewer {
             const splineCandidates = [];
             const splineCategory = (obj) => {
                 const ud = obj?.userData || {};
-                // Prioritize control-point balls over quad regions; keep cage lines lowest.
+                // Prioritize control-point balls first, then cage lines, then cage quads.
                 if (ud.isSplineVertex) return 0;
-                if (ud.nurbsCageQuad) return 1;
-                if (ud.nurbsCageSegment) return 2;
+                if (ud.nurbsCageSegment) return 1;
+                if (ud.nurbsCageQuad) return 2;
                 return 3;
             };
             for (const it of intersects) {

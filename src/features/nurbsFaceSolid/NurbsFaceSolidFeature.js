@@ -678,7 +678,7 @@ function renderCageEditorWidget({ ui, key, controlWrap, row }) {
   host.appendChild(selectedWrap);
 
   const hint = document.createElement("div");
-  hint.textContent = "Click points to toggle selection; click a cage line to select both endpoints; click a cage quad to select its 4 corners (hover highlights quads); Esc clears selection.";
+  hint.textContent = "Click points to toggle selection; clicking a cage line cycles endpoints -> face-line points -> full loop points; click a cage quad to select its 4 corners (hover highlights quads); Esc clears selection.";
   hint.style.fontSize = "11px";
   hint.style.opacity = "0.65";
   host.appendChild(hint);

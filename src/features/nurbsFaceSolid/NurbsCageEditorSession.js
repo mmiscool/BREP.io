@@ -1,8 +1,10 @@
 import * as THREE from "three";
+import { LineMaterial, LineSegments2, LineSegmentsGeometry } from "three/examples/jsm/Addons.js";
 import { BREP } from "../../BREP/BREP.js";
 import { CombinedTransformControls } from "../../UI/controls/CombinedTransformControls.js";
 import {
   buildCageSegments,
+  cageCoordsFromIndex,
   cageIndex,
   cageIdFromIndex,
   cloneCageData,
@@ -21,6 +23,7 @@ const CAGE_QUAD_MIN_INSET_UV = 0.01;
 const CAGE_QUAD_MAX_INSET_UV = 0.45;
 const CAGE_QUAD_CORNER_RADIUS_RATIO = 0.85;
 const CAGE_QUAD_CORNER_STEPS = 5;
+const CAGE_EDGE_LINE_WIDTH_PX = 2.5;
 const _tmpRendererSize = new THREE.Vector2();
 const _tmpWorldPoint = new THREE.Vector3();
 const _tmpCameraDir = new THREE.Vector3();
@@ -145,6 +148,9 @@ export class NurbsCageEditorSession {
     this._active = false;
     this._selectedId = null;
     this._selectedIds = new Set();
+    this._selectedSegmentKeys = new Set();
+    this._segmentFaceChoiceByKey = new Map();
+    this._segmentMetaByKey = new Map();
     this._pointEntries = new Map();
     this._lineSegments = [];
     this._linePickObjects = [];
@@ -244,6 +250,9 @@ export class NurbsCageEditorSession {
     this._quadPickObjects = [];
     this._selectedIds.clear();
     this._selectedId = null;
+    this._selectedSegmentKeys.clear();
+    this._segmentFaceChoiceByKey.clear();
+    this._segmentMetaByKey.clear();
     this._clearMultiMoveAnchor();
     this._active = false;
     this._disposePointMaterials();
@@ -275,7 +284,13 @@ export class NurbsCageEditorSession {
   }
 
   selectObject(id, options = {}) {
-    const { silent = false, additive = false, toggle = false } = options;
+    const {
+      silent = false,
+      additive = false,
+      toggle = false,
+      preserveSegmentSelection = false,
+    } = options;
+    if (!preserveSegmentSelection) this._clearSegmentSelectionState();
     const nextId = id == null ? null : String(id);
     if (nextId && !this._pointEntries.has(nextId)) return;
     if (!nextId) {
@@ -309,7 +324,12 @@ export class NurbsCageEditorSession {
   }
 
   selectObjects(ids, options = {}) {
-    const { primaryId = null, silent = false } = options;
+    const {
+      primaryId = null,
+      silent = false,
+      preserveSegmentSelection = false,
+    } = options;
+    if (!preserveSegmentSelection) this._clearSegmentSelectionState();
     const raw = Array.isArray(ids) ? ids : [];
     const valid = [];
     const seen = new Set();
@@ -321,7 +341,7 @@ export class NurbsCageEditorSession {
       valid.push(id);
     }
     if (!valid.length) {
-      this.selectObject(null, { silent });
+      this.selectObject(null, { silent, preserveSegmentSelection });
       return;
     }
     this._selectedIds = new Set(valid);
@@ -343,6 +363,250 @@ export class NurbsCageEditorSession {
     const dims = sanitizeCageDivisions(this._cageData?.dims);
     if (!dims.length) return null;
     return cageIdFromIndex(0, dims);
+  }
+
+  _clearSegmentSelectionState() {
+    this._selectedSegmentKeys.clear();
+    this._segmentFaceChoiceByKey.clear();
+  }
+
+  _segmentKeyFromIndices(indexA, indexB) {
+    const a = Number(indexA);
+    const b = Number(indexB);
+    if (!Number.isInteger(a) || !Number.isInteger(b)) return null;
+    return (a <= b) ? `${a}:${b}` : `${b}:${a}`;
+  }
+
+  _buildSegmentMeta(segment, dimsInput, idA = null, idB = null) {
+    if (!Array.isArray(segment) || segment.length < 2) return null;
+    const dims = sanitizeCageDivisions(dimsInput);
+    const ia = Number(segment[0]);
+    const ib = Number(segment[1]);
+    if (!Number.isInteger(ia) || !Number.isInteger(ib)) return null;
+    const key = this._segmentKeyFromIndices(ia, ib);
+    if (!key) return null;
+
+    const coordsA = cageCoordsFromIndex(ia, dims);
+    const coordsB = cageCoordsFromIndex(ib, dims);
+    const pointIds = [];
+    if (idA) pointIds.push(String(idA));
+    if (idB && String(idB) !== String(idA)) pointIds.push(String(idB));
+
+    let axis = -1;
+    const fixed = coordsA ? [...coordsA] : null;
+    if (coordsA && coordsB) {
+      for (let dim = 0; dim < 3; dim++) {
+        if (coordsA[dim] !== coordsB[dim]) {
+          axis = dim;
+          break;
+        }
+      }
+    }
+
+    const faces = [];
+    if (axis >= 0 && fixed) {
+      for (let dim = 0; dim < 3; dim++) {
+        if (dim === axis) continue;
+        const value = fixed[dim];
+        const max = dims[dim] - 1;
+        if (value === 0 || value === max) faces.push({ dim, value });
+      }
+    }
+
+    return {
+      key,
+      seg: [ia, ib],
+      pointIds,
+      axis,
+      fixed,
+      faces,
+    };
+  }
+
+  _collectPointIdsForSegmentKeys(keysInput) {
+    const keys = Array.isArray(keysInput) ? keysInput : Array.from(keysInput || []);
+    const out = new Set();
+    for (const key of keys) {
+      const meta = this._segmentMetaByKey.get(String(key));
+      if (!meta?.pointIds?.length) continue;
+      for (const id of meta.pointIds) {
+        if (id) out.add(String(id));
+      }
+    }
+    return out;
+  }
+
+  _collectSegmentKeysForFace(axis, faceDim, faceValue) {
+    if (!Number.isInteger(axis) || axis < 0) return [];
+    const out = [];
+    for (const [key, meta] of this._segmentMetaByKey.entries()) {
+      if (!meta || meta.axis !== axis || !Array.isArray(meta.fixed)) continue;
+      if (meta.fixed[faceDim] !== faceValue) continue;
+      out.push(key);
+    }
+    return out;
+  }
+
+  _collectSegmentKeysForAxis(axis) {
+    if (!Number.isInteger(axis) || axis < 0) return [];
+    const out = [];
+    for (const [key, meta] of this._segmentMetaByKey.entries()) {
+      if (meta?.axis === axis) out.push(key);
+    }
+    return out;
+  }
+
+  _collectSegmentKeysForLine(axis, fixedDimA, fixedValueA, fixedDimB, fixedValueB) {
+    if (!Number.isInteger(axis) || axis < 0) return [];
+    const out = [];
+    for (const [key, meta] of this._segmentMetaByKey.entries()) {
+      if (!meta || meta.axis !== axis || !Array.isArray(meta.fixed)) continue;
+      if (meta.fixed[fixedDimA] !== fixedValueA) continue;
+      if (meta.fixed[fixedDimB] !== fixedValueB) continue;
+      out.push(key);
+    }
+    return out;
+  }
+
+  _collectSegmentKeysForLoop(axis, loopDim, loopValue) {
+    if (!Number.isInteger(axis) || axis < 0 || !Number.isInteger(loopDim) || loopDim < 0 || loopDim > 2) return [];
+    const out = [];
+    for (const [key, meta] of this._segmentMetaByKey.entries()) {
+      if (!meta || meta.axis !== axis || !Array.isArray(meta.fixed)) continue;
+      if (meta.fixed[loopDim] !== loopValue) continue;
+      out.push(key);
+    }
+    return out;
+  }
+
+  _areAllSegmentKeysSelected(keysInput) {
+    const keys = Array.isArray(keysInput) ? keysInput : Array.from(keysInput || []);
+    if (!keys.length) return false;
+    for (const key of keys) {
+      if (!this._selectedSegmentKeys.has(String(key))) return false;
+    }
+    return true;
+  }
+
+  _chooseFaceForSegment(meta) {
+    if (!meta?.faces?.length) return null;
+    if (meta.faces.length === 1) {
+      this._segmentFaceChoiceByKey.set(meta.key, { ...meta.faces[0] });
+      return meta.faces[0];
+    }
+
+    const previous = this._segmentFaceChoiceByKey.get(meta.key);
+    if (previous && meta.faces.some((f) => f.dim === previous.dim && f.value === previous.value)) {
+      return previous;
+    }
+
+    let best = meta.faces[0];
+    let bestScore = -1;
+    for (const face of meta.faces) {
+      const keys = this._collectSegmentKeysForFace(meta.axis, face.dim, face.value);
+      let score = 0;
+      for (const key of keys) {
+        if (this._selectedSegmentKeys.has(key)) score += 1;
+      }
+      const betterScore = score > bestScore;
+      const tieBreak = (
+        score === bestScore
+        && (face.dim < best.dim || (face.dim === best.dim && face.value < best.value))
+      );
+      if (betterScore || tieBreak) {
+        best = face;
+        bestScore = score;
+      }
+    }
+    this._segmentFaceChoiceByKey.set(meta.key, { ...best });
+    return best;
+  }
+
+  _applySegmentSelectionDelta({ addKeys = [], removeKeys = [], primaryId = null } = {}) {
+    const add = Array.from(new Set((Array.isArray(addKeys) ? addKeys : []).map((k) => String(k || "")).filter(Boolean)));
+    const remove = Array.from(new Set((Array.isArray(removeKeys) ? removeKeys : []).map((k) => String(k || "")).filter(Boolean)));
+
+    for (const key of remove) {
+      this._selectedSegmentKeys.delete(key);
+      this._segmentFaceChoiceByKey.delete(key);
+    }
+    for (const key of add) this._selectedSegmentKeys.add(key);
+
+    const requiredPoints = this._collectPointIdsForSegmentKeys(this._selectedSegmentKeys);
+    const removedPoints = this._collectPointIdsForSegmentKeys(remove);
+    const next = new Set(this._selectedIds);
+    for (const id of requiredPoints) next.add(id);
+    for (const id of removedPoints) {
+      if (!requiredPoints.has(id)) next.delete(id);
+    }
+
+    if (!next.size) {
+      this.selectObject(null, { preserveSegmentSelection: true });
+      return;
+    }
+
+    const all = Array.from(next);
+    const wantedPrimary = (primaryId != null) ? String(primaryId) : null;
+    const chosenPrimary = (wantedPrimary && next.has(wantedPrimary))
+      ? wantedPrimary
+      : ((this._selectedId && next.has(this._selectedId)) ? this._selectedId : all[all.length - 1]);
+    this.selectObjects(all, {
+      primaryId: chosenPrimary,
+      preserveSegmentSelection: true,
+    });
+  }
+
+  _handleLineSegmentClick(segment, idA, idB) {
+    if (!Array.isArray(segment) || segment.length < 2 || !this._cageData) return;
+    const dims = sanitizeCageDivisions(this._cageData.dims);
+    const meta = this._buildSegmentMeta(segment, dims, idA, idB);
+    if (!meta) return;
+    this._segmentMetaByKey.set(meta.key, meta);
+
+    const hasSegment = this._selectedSegmentKeys.has(meta.key);
+    const face = this._chooseFaceForSegment(meta);
+    const nonAxisDims = [0, 1, 2].filter((dim) => dim !== meta.axis);
+    if (nonAxisDims.length !== 2 || !Array.isArray(meta.fixed)) return;
+
+    const lineKeys = this._collectSegmentKeysForLine(
+      meta.axis,
+      nonAxisDims[0],
+      meta.fixed[nonAxisDims[0]],
+      nonAxisDims[1],
+      meta.fixed[nonAxisDims[1]],
+    );
+    const lineTargetKeys = lineKeys.length ? lineKeys : [meta.key];
+
+    let loopKeys = this._collectSegmentKeysForAxis(meta.axis);
+    if (face && Number.isInteger(face.dim)) {
+      const loopDim = nonAxisDims.find((dim) => dim !== face.dim);
+      if (Number.isInteger(loopDim)) {
+        const candidate = this._collectSegmentKeysForLoop(meta.axis, loopDim, meta.fixed[loopDim]);
+        if (candidate.length) loopKeys = candidate;
+      }
+    }
+
+    if (!hasSegment) {
+      this._applySegmentSelectionDelta({
+        addKeys: [meta.key],
+        primaryId: idB || idA || this._selectedId,
+      });
+      return;
+    }
+    if (!this._areAllSegmentKeysSelected(lineTargetKeys)) {
+      this._applySegmentSelectionDelta({
+        addKeys: lineTargetKeys,
+        primaryId: idB || idA || this._selectedId,
+      });
+      return;
+    }
+    if (!this._areAllSegmentKeysSelected(loopKeys)) {
+      this._applySegmentSelectionDelta({
+        addKeys: loopKeys,
+        primaryId: idB || idA || this._selectedId,
+      });
+      return;
+    }
   }
 
   _clearMultiMoveAnchor() {
@@ -531,25 +795,34 @@ export class NurbsCageEditorSession {
     this._pointEntries.clear();
     this._linePickObjects = [];
     this._quadPickObjects = [];
+    this._segmentMetaByKey.clear();
+    this._clearSegmentSelectionState();
 
     const dims = sanitizeCageDivisions(this._cageData.dims);
     this._lineSegments = buildCageSegments(dims);
 
-    const lineGeom = new THREE.BufferGeometry();
-    const lineMat = new THREE.LineBasicMaterial({
+    const lineGeom = new LineSegmentsGeometry();
+    const lineMat = new LineMaterial({
       color: 0x70d6ff,
+      linewidth: CAGE_EDGE_LINE_WIDTH_PX,
       transparent: true,
       opacity: 0.8,
+      dashed: false,
+      worldUnits: false,
       depthTest: false,
       depthWrite: false,
     });
-    this._lineObject = new THREE.LineSegments(lineGeom, lineMat);
+    try {
+      const rect = this.viewer?.renderer?.domElement?.getBoundingClientRect?.();
+      if (rect?.width > 0 && rect?.height > 0) lineMat.resolution?.set?.(rect.width, rect.height);
+    } catch { }
+    this._lineObject = new LineSegments2(lineGeom, lineMat);
     this._lineObject.renderOrder = 10000;
     this._lineObject.userData = this._lineObject.userData || {};
     this._lineObject.userData.excludeFromFit = true;
     this._previewGroup.add(this._lineObject);
 
-    // Create one pickable line object per segment so a line click can select both endpoints.
+    // Create one pickable line object per segment so repeated clicks can cycle segment/face/loop selection.
     for (const seg of this._lineSegments) {
       const linePickGeom = new THREE.BufferGeometry();
       linePickGeom.setAttribute("position", new THREE.Float32BufferAttribute([
@@ -562,20 +835,30 @@ export class NurbsCageEditorSession {
         depthTest: false,
         depthWrite: false,
       });
+      const linePickHoverMat = new THREE.LineBasicMaterial({
+        color: this._displayOptions.cageColor,
+        transparent: true,
+        opacity: 0.95,
+        depthTest: false,
+        depthWrite: false,
+      });
       const linePick = new THREE.LineSegments(linePickGeom, linePickMat);
+      linePick.type = "EDGE";
       const idA = cageIdFromIndex(seg[0], dims);
       const idB = cageIdFromIndex(seg[1], dims);
+      const segMeta = this._buildSegmentMeta(seg, dims, idA, idB);
       linePick.userData = linePick.userData || {};
       linePick.userData.excludeFromFit = true;
       linePick.userData.isSplineWeight = true;
       linePick.userData.nurbsCageSegment = [...seg];
-      linePick.renderOrder = 9999;
+      linePick.userData.nurbsCageSegmentKey = segMeta?.key || null;
+      linePick.userData.__baseMaterial = linePickMat;
+      linePick.userData.__hoverMaterial = linePickHoverMat;
+      linePick.renderOrder = 10001;
+      if (segMeta?.key) this._segmentMetaByKey.set(segMeta.key, segMeta);
       linePick.onClick = () => {
         if (!idA || !idB) return;
-        const ids = [...this._selectedIds, idA, idB];
-        this.selectObjects(ids, {
-          primaryId: this._selectedId || idB,
-        });
+        this._handleLineSegmentClick(seg, idA, idB);
       };
       this._linePickObjects.push(linePick);
       this._previewGroup.add(linePick);
@@ -731,9 +1014,9 @@ export class NurbsCageEditorSession {
         linePick.geometry.computeBoundingSphere();
       }
     }
-    const attr = new THREE.Float32BufferAttribute(positions, 3);
-    this._lineObject.geometry.setAttribute("position", attr);
-    this._lineObject.geometry.computeBoundingSphere();
+    this._lineObject.geometry.setPositions(positions);
+    this._lineObject.geometry.computeBoundingSphere?.();
+    this._lineObject.computeLineDistances?.();
   }
 
   _buildSurfaceQuadPickDefs(dimsInput) {
