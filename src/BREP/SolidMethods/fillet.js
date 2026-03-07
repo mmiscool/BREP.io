@@ -16,7 +16,6 @@ function breakOnFaceNameMutation(faceName, reason = 'face_name_mutation', once =
     __SEEN_FACE_NAME_MUTATION_BREAKS.add(dedupeKey);
   }
   // eslint-disable-next-line no-debugger
-  debugger;
 }
 
 function createFaceTrianglesAccessor(solid) {

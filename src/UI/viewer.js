@@ -35,6 +35,8 @@ import { PMIViewsWidget } from './pmi/PMIViewsWidget.js';
 import { SceneListing } from './SceneListing.js';
 import { SelectionFilter } from './SelectionFilter.js';
 import { SelectionState } from './SelectionState.js';
+import { Sheet2DEditorWindow } from './sheets/Sheet2DEditorWindow.js';
+import { Sheet2DWidget } from './sheets/Sheet2DWidget.js';
 import { SketchMode3D } from './sketcher/SketchMode3D.js';
 import { maybeStartStartupTour } from './startupTour.js';
 import { navigateHomeWithGuard } from './toolbarButtons/homeButton.js';
@@ -1549,6 +1551,10 @@ export class Viewer {
             const pmiViewsSection = await this.accordion.addSection("PMI Views");
             pmiViewsSection.uiElement.appendChild(this.pmiViewsWidget.uiElement);
 
+            this.sheet2DWidget = new Sheet2DWidget(this, { readOnly: true });
+            const sheetsSection = await this.accordion.addSection("2D Sheets");
+            sheetsSection.uiElement.appendChild(this.sheet2DWidget.uiElement);
+
             this.cadMaterialsUi = await new CADmaterialWidget(this);
             const displaySection = await this.accordion.addSection("Display Settings");
             await displaySection.uiElement.appendChild(this.cadMaterialsUi.uiElement);
@@ -1557,6 +1563,7 @@ export class Viewer {
             await this.accordion.collapseAll();
             await this.accordion.expandSection("Scene Manager");
             await this.accordion.expandSection("PMI Views");
+            await this.accordion.expandSection("2D Sheets");
 
             this._refreshAssemblyConstraintsPanelVisibility();
             this._syncSidebarHomeBannerHeight();
@@ -1590,6 +1597,10 @@ export class Viewer {
         this.pmiViewsWidget = new PMIViewsWidget(this);
         const pmiViewsSection = await this.accordion.addSection("PMI Views");
         pmiViewsSection.uiElement.appendChild(this.pmiViewsWidget.uiElement);
+
+        this.sheet2DWidget = new Sheet2DWidget(this);
+        const sheetsSection = await this.accordion.addSection("2D Sheets");
+        sheetsSection.uiElement.appendChild(this.sheet2DWidget.uiElement);
 
         // CADmaterials (Settings panel)
         this.cadMaterialsUi = await new CADmaterialWidget(this);
@@ -1675,6 +1686,13 @@ export class Viewer {
                 this.pmiViewsWidget.refreshFromHistory?.();
                 this.pmiViewsWidget._renderList?.();
             }
+        } catch { }
+        try {
+            if (this.sheet2DWidget) {
+                this.sheet2DWidget.refreshFromHistory?.();
+                this.sheet2DWidget._renderList?.();
+            }
+            this._sheet2DEditorWindow?.refreshFromHistory?.();
         } catch { }
         try { this.historyWidget?.render?.(); } catch { }
     }
@@ -1774,6 +1792,9 @@ export class Viewer {
         cancelAnimationFrame(this._raf);
         try { this.endPMIPreviewMode(); } catch { }
         try { this._stopComponentTransformSession(); } catch { }
+        try { this.sheet2DWidget?.dispose?.(); } catch { }
+        try { this._sheet2DEditorWindow?.dispose?.(); } catch { }
+        this._sheet2DEditorWindow = null;
         safe(() => this._sidebarDockController?.dispose());
         this._sidebarDockController = null;
         safe(() => this._sidebarHomeBannerRO?.disconnect?.());
@@ -1994,6 +2015,33 @@ export class Viewer {
         // Robustly restore core UI similar to endSketchMode
         try { this._setSidebarAutoHideSuspended(false); } catch { }
         try { if (this.controls) this.controls.enabled = true; } catch { }
+    }
+
+    openSheet2DEditor(sheetId = null) {
+        const manager = this.partHistory?.sheet2DManager;
+        if (!manager) return;
+        let targetId = sheetId ? String(sheetId) : "";
+        if (!targetId) {
+            const first = manager.getSheets?.()?.[0] || null;
+            if (first?.id) targetId = String(first.id);
+        }
+        if (!targetId) {
+            const created = manager.createSheet?.({
+                name: "Instruction Sheet 1",
+                sizeKey: "A",
+                orientation: "landscape",
+                elements: [],
+            }) || null;
+            if (created?.id) targetId = String(created.id);
+        }
+        if (!this._sheet2DEditorWindow) {
+            this._sheet2DEditorWindow = new Sheet2DEditorWindow(this);
+        }
+        this._sheet2DEditorWindow.open(targetId || null);
+    }
+
+    closeSheet2DEditor() {
+        try { this._sheet2DEditorWindow?.close?.(); } catch { }
     }
 
     render() {

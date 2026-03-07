@@ -14,6 +14,7 @@ import { createTestsButton } from './testsButton.js';
 import { createScriptRunnerButton } from './scriptRunnerButton.js';
 import { createHistoryTestSnippetButton } from './historyTestSnippetButton.js';
 import { createSelectionStateButton } from './selectionStateButton.js';
+import { createSheetEditorButton } from './sheetEditorButton.js';
 import { createSheetMetalFlatExportButton } from './sheetMetalFlatExportButton.js';
 import { createSheetMetalDebugButton } from './sheetMetalDebugButton.js';
 import { createHomeButton } from './homeButton.js';
@@ -43,6 +44,7 @@ export function registerDefaultToolbarButtons(viewer) {
     createImportButton,
     createExportButton,
     createShareButton,
+    createSheetEditorButton,
     createSheetMetalFlatExportButton,
   ];
 

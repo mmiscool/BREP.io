@@ -1824,7 +1824,7 @@ export function filletSolid({
                 seenFaceNameAssignments.add(dedupeKey);
             }
             // eslint-disable-next-line no-debugger
-            debugger;
+            
         };
         if (tubePathOriginal.length < 2) {
             console.error('Insufficient centerline points for tube generation');

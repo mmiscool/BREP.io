@@ -10,6 +10,7 @@ import { AssemblyConstraintRegistry } from './assemblyConstraints/AssemblyConstr
 import { AssemblyComponentFeature } from './features/assemblyComponent/AssemblyComponentFeature.js';
 import { MetadataManager } from './metadataManager.js';
 import { PMIViewsManager } from './pmi/PMIViewsManager.js';
+import { Sheet2DManager } from './sheets/Sheet2DManager.js';
 import { base64ToUint8Array, getComponentRecord } from './services/componentLibrary.js';
 import { deepClone } from './utils/deepClone.js';
 
@@ -57,10 +58,13 @@ export class PartHistory {
     this.assemblyConstraintRegistry = new AssemblyConstraintRegistry();
     this.assemblyConstraintHistory = new AssemblyConstraintHistory(this, this.assemblyConstraintRegistry);
     this.callbacks = {};
+    this._modelRevision = 0;
+    this._modelChangeListeners = new Set();
     this.currentHistoryStepId = null;
     this.runningFeatureId = null;
     this.expressions = "//Examples:\nx = 10 + 6; \ny = x * 2;";
     this.pmiViewsManager = new PMIViewsManager(this);
+    this.sheet2DManager = new Sheet2DManager(this);
     this.metadataManager = new MetadataManager
     this._historyUndo = {
       undoStack: [],
@@ -354,6 +358,34 @@ export class PartHistory {
     return PartHistory.evaluateExpression(this.expressions, equation);
   }
 
+  getModelRevision() {
+    return Number.isInteger(this._modelRevision) ? this._modelRevision : 0;
+  }
+
+  addModelChangeListener(listener) {
+    if (typeof listener !== 'function') return () => {};
+    this._modelChangeListeners.add(listener);
+    return () => {
+      try { this._modelChangeListeners.delete(listener); } catch { /* ignore */ }
+    };
+  }
+
+  removeModelChangeListener(listener) {
+    if (typeof listener !== 'function') return;
+    try { this._modelChangeListeners.delete(listener); } catch { /* ignore */ }
+  }
+
+  markModelChanged(reason = 'update') {
+    const nextRevision = this.getModelRevision() + 1;
+    this._modelRevision = nextRevision;
+    if (!this._modelChangeListeners || this._modelChangeListeners.size === 0) return nextRevision;
+    const detail = { reason, partHistory: this, revision: nextRevision };
+    for (const listener of Array.from(this._modelChangeListeners)) {
+      try { listener(nextRevision, detail); } catch { /* ignore listener errors */ }
+    }
+    return nextRevision;
+  }
+
 
 
   getObjectByName(name) {
@@ -367,6 +399,7 @@ export class PartHistory {
     this.features = [];
     this.idCounter = 0;
     this.pmiViewsManager.reset();
+    this.sheet2DManager.reset();
     this.expressions = "//Examples:\nx = 10 + 6; \ny = x * 2;";
     // Reset MetadataManager
     this.metadataManager = new MetadataManager();
@@ -388,6 +421,8 @@ export class PartHistory {
       try { await this.callbacks.afterReset(); } catch { /* ignore */ }
     }
 
+    this.markModelChanged('reset');
+
     this.resetHistoryUndo();
     await this._commitHistorySnapshot({ force: true });
 
@@ -403,6 +438,7 @@ export class PartHistory {
   async runHistory() {
     const whatStepToStopAt = this.currentHistoryStepId;
     const hiddenVisibilityState = this.#captureHiddenVisibilityState();
+    let modelChanged = false;
 
     this.#setFeatureRunningState(null);
     try {
@@ -568,6 +604,7 @@ export class PartHistory {
 
             feature.lastRun = { ok: true, startedAt: t0, endedAt: t1, durationMs: dur, error: null };
             feature.dirty = false;
+            modelChanged = true;
           } catch (e) {
             const t1 = nowMs();
             const dur = Math.max(0, Math.round(t1 - t0));
@@ -615,6 +652,10 @@ export class PartHistory {
 
       if (this.callbacks.afterRunHistory) {
         try { await this.callbacks.afterRunHistory(); } catch { /* ignore */ }
+      }
+
+      if (modelChanged) {
+        this.markModelChanged('runHistory');
       }
 
       return this;
@@ -1015,12 +1056,14 @@ export class PartHistory {
       timestamp: f.timestamp || null,
     }));
     const pmiViews = this.pmiViewsManager.toSerializable();
+    const sheets2D = this.sheet2DManager.toSerializable();
 
     return JSON.stringify({
       features,
       idCounter: this.idCounter,
       expressions: this.expressions,
       pmiViews,
+      sheets2D,
       metadata: this.metadataManager.metadata,
       assemblyConstraints: constraintsSnapshot.constraints,
       assemblyConstraintIdCounter: constraintsSnapshot.idCounter,
@@ -1042,6 +1085,7 @@ export class PartHistory {
     this.idCounter = importData.idCounter;
     this.expressions = importData.expressions || "";
     this.pmiViewsManager.setViews(importData.pmiViews || []);
+    this.sheet2DManager.setSheets(importData.sheets2D || []);
     this.metadataManager.metadata = importData.metadata || {};
 
     if (this.assemblyConstraintHistory) {

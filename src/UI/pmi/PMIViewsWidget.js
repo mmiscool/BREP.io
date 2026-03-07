@@ -886,16 +886,51 @@ export class PMIViewsWidget {
   _withViewCubeHidden(fn) {
     const cube = this.viewer?.viewCube || null;
     if (!cube) return fn();
-    const prevRender = cube.render;
-    const prevVisible = cube.scene?.visible;
+    this._viewCubeHideDepth = Math.max(0, Number(this._viewCubeHideDepth) || 0);
+    this._viewCubeHideState = this._viewCubeHideState || null;
     return (async () => {
+      this._viewCubeHideDepth += 1;
       try {
-        if (cube.scene) cube.scene.visible = false;
-        cube.render = () => {};
+        if (this._viewCubeHideDepth === 1) {
+          this._viewCubeHideState = {
+            cube,
+            render: cube.render,
+            visible: cube.scene?.visible,
+            toggleButtonVisibility: this.viewer?._cameraProjectionToggleButton?.style?.visibility ?? "",
+            toggleButtonPointerEvents: this.viewer?._cameraProjectionToggleButton?.style?.pointerEvents ?? "",
+          };
+          if (cube.scene) cube.scene.visible = false;
+          cube.render = () => {};
+          if (this.viewer?._cameraProjectionToggleButton?.style) {
+            this.viewer._cameraProjectionToggleButton.style.visibility = "hidden";
+            this.viewer._cameraProjectionToggleButton.style.pointerEvents = "none";
+          }
+        }
         return await fn();
       } finally {
-        cube.render = prevRender;
-        if (cube.scene && prevVisible !== undefined) cube.scene.visible = prevVisible;
+        this._viewCubeHideDepth = Math.max(0, this._viewCubeHideDepth - 1);
+        if (this._viewCubeHideDepth === 0) {
+          const state = this._viewCubeHideState;
+          this._viewCubeHideState = null;
+          const targetCube = state?.cube || cube;
+          try {
+            if (targetCube) targetCube.render = state?.render || targetCube.render;
+          } catch { /* ignore restore errors */ }
+          try {
+            if (targetCube?.scene && state && state.visible !== undefined) {
+              targetCube.scene.visible = state.visible;
+            }
+          } catch { /* ignore restore errors */ }
+          try {
+            const toggleButton = this.viewer?._cameraProjectionToggleButton || null;
+            if (toggleButton?.style) {
+              toggleButton.style.visibility = state?.toggleButtonVisibility ?? "";
+              toggleButton.style.pointerEvents = state?.toggleButtonPointerEvents ?? "";
+            }
+            this.viewer?._positionCameraProjectionToggle?.();
+          } catch { /* ignore restore errors */ }
+          try { this.viewer?.render?.(); } catch { /* ignore restore render errors */ }
+        }
       }
     })();
   }
