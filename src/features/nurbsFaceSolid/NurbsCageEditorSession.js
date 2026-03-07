@@ -149,8 +149,10 @@ export class NurbsCageEditorSession {
     this._selectedId = null;
     this._selectedIds = new Set();
     this._selectedSegmentKeys = new Set();
+    this._selectedQuadKeys = new Set();
     this._segmentFaceChoiceByKey = new Map();
     this._segmentMetaByKey = new Map();
+    this._quadMetaByKey = new Map();
     this._pointEntries = new Map();
     this._lineSegments = [];
     this._linePickObjects = [];
@@ -251,8 +253,10 @@ export class NurbsCageEditorSession {
     this._selectedIds.clear();
     this._selectedId = null;
     this._selectedSegmentKeys.clear();
+    this._selectedQuadKeys.clear();
     this._segmentFaceChoiceByKey.clear();
     this._segmentMetaByKey.clear();
+    this._quadMetaByKey.clear();
     this._clearMultiMoveAnchor();
     this._active = false;
     this._disposePointMaterials();
@@ -289,8 +293,10 @@ export class NurbsCageEditorSession {
       additive = false,
       toggle = false,
       preserveSegmentSelection = false,
+      preserveQuadSelection = false,
     } = options;
     if (!preserveSegmentSelection) this._clearSegmentSelectionState();
+    if (!preserveQuadSelection) this._clearQuadSelectionState();
     const nextId = id == null ? null : String(id);
     if (nextId && !this._pointEntries.has(nextId)) return;
     if (!nextId) {
@@ -328,8 +334,10 @@ export class NurbsCageEditorSession {
       primaryId = null,
       silent = false,
       preserveSegmentSelection = false,
+      preserveQuadSelection = false,
     } = options;
     if (!preserveSegmentSelection) this._clearSegmentSelectionState();
+    if (!preserveQuadSelection) this._clearQuadSelectionState();
     const raw = Array.isArray(ids) ? ids : [];
     const valid = [];
     const seen = new Set();
@@ -341,7 +349,11 @@ export class NurbsCageEditorSession {
       valid.push(id);
     }
     if (!valid.length) {
-      this.selectObject(null, { silent, preserveSegmentSelection });
+      this.selectObject(null, {
+        silent,
+        preserveSegmentSelection,
+        preserveQuadSelection,
+      });
       return;
     }
     this._selectedIds = new Set(valid);
@@ -368,6 +380,10 @@ export class NurbsCageEditorSession {
   _clearSegmentSelectionState() {
     this._selectedSegmentKeys.clear();
     this._segmentFaceChoiceByKey.clear();
+  }
+
+  _clearQuadSelectionState() {
+    this._selectedQuadKeys.clear();
   }
 
   _segmentKeyFromIndices(indexA, indexB) {
@@ -434,6 +450,93 @@ export class NurbsCageEditorSession {
       }
     }
     return out;
+  }
+
+  _collectPointIdsForQuadKeys(keysInput) {
+    const keys = Array.isArray(keysInput) ? keysInput : Array.from(keysInput || []);
+    const out = new Set();
+    for (const key of keys) {
+      const meta = this._quadMetaByKey.get(String(key));
+      const ids = Array.isArray(meta?.ids) ? meta.ids : [];
+      for (const id of ids) {
+        if (id) out.add(String(id));
+      }
+    }
+    return out;
+  }
+
+  _collectQuadKeysForFace(faceDim, faceValue) {
+    const out = [];
+    for (const [key, meta] of this._quadMetaByKey.entries()) {
+      if (!meta) continue;
+      if (meta.faceDim !== faceDim) continue;
+      if (meta.faceValue !== faceValue) continue;
+      out.push(key);
+    }
+    return out;
+  }
+
+  _areAllQuadKeysSelected(keysInput) {
+    const keys = Array.isArray(keysInput) ? keysInput : Array.from(keysInput || []);
+    if (!keys.length) return false;
+    for (const key of keys) {
+      if (!this._selectedQuadKeys.has(String(key))) return false;
+    }
+    return true;
+  }
+
+  _applyQuadSelectionDelta({ addKeys = [], primaryId = null } = {}) {
+    const add = Array.from(new Set((Array.isArray(addKeys) ? addKeys : []).map((k) => String(k || "")).filter(Boolean)));
+    for (const key of add) this._selectedQuadKeys.add(key);
+
+    const requiredPoints = this._collectPointIdsForQuadKeys(this._selectedQuadKeys);
+    const next = new Set(this._selectedIds);
+    for (const id of requiredPoints) next.add(id);
+
+    if (!next.size) {
+      this.selectObject(null, { preserveQuadSelection: true });
+      return;
+    }
+
+    const all = Array.from(next);
+    const wantedPrimary = (primaryId != null) ? String(primaryId) : null;
+    const chosenPrimary = (wantedPrimary && next.has(wantedPrimary))
+      ? wantedPrimary
+      : ((this._selectedId && next.has(this._selectedId)) ? this._selectedId : all[all.length - 1]);
+    this.selectObjects(all, {
+      primaryId: chosenPrimary,
+      preserveQuadSelection: true,
+    });
+  }
+
+  _handleQuadClick({ quadKey, ids, faceDim, faceValue, primaryId = null } = {}) {
+    const key = quadKey ? String(quadKey) : null;
+    const quadIds = Array.isArray(ids) ? ids.map((id) => String(id || "")).filter(Boolean) : [];
+    if (!key || !quadIds.length) return;
+    if (!this._quadMetaByKey.has(key)) {
+      this._quadMetaByKey.set(key, {
+        key,
+        ids: quadIds,
+        faceDim,
+        faceValue,
+      });
+    }
+
+    if (!this._selectedQuadKeys.has(key)) {
+      this._applyQuadSelectionDelta({
+        addKeys: [key],
+        primaryId: primaryId || quadIds[quadIds.length - 1] || this._selectedId,
+      });
+      return;
+    }
+
+    const faceKeys = this._collectQuadKeysForFace(faceDim, faceValue);
+    if (!this._areAllQuadKeysSelected(faceKeys)) {
+      this._applyQuadSelectionDelta({
+        addKeys: faceKeys,
+        primaryId: primaryId || quadIds[quadIds.length - 1] || this._selectedId,
+      });
+    }
   }
 
   _collectSegmentKeysForFace(axis, faceDim, faceValue) {
@@ -796,7 +899,9 @@ export class NurbsCageEditorSession {
     this._linePickObjects = [];
     this._quadPickObjects = [];
     this._segmentMetaByKey.clear();
+    this._quadMetaByKey.clear();
     this._clearSegmentSelectionState();
+    this._clearQuadSelectionState();
 
     const dims = sanitizeCageDivisions(this._cageData.dims);
     this._lineSegments = buildCageSegments(dims);
@@ -890,6 +995,7 @@ export class NurbsCageEditorSession {
       quadPick.userData.excludeFromFit = true;
       quadPick.userData.isSplineWeight = true;
       quadPick.userData.nurbsCageQuad = def.name;
+      quadPick.userData.nurbsCageQuadKey = def.key || def.name;
       quadPick.userData.__baseMaterial = quadMat;
       quadPick.userData.__hoverMaterial = quadHoverMat;
       // Force two-sided hit testing for cage quads regardless of current hover/base material state.
@@ -920,17 +1026,31 @@ export class NurbsCageEditorSession {
         }
       };
       quadPick.renderOrder = 9998;
+      if (def.key) {
+        this._quadMetaByKey.set(def.key, {
+          key: def.key,
+          ids: Array.isArray(def.ids) ? [...def.ids] : [],
+          faceDim: def.faceDim,
+          faceValue: def.faceValue,
+        });
+      }
       quadPick.onClick = () => {
-        if (!def.ids.length) return;
-        const nextIds = [...this._selectedIds, ...def.ids];
-        this.selectObjects(nextIds, {
+        if (!def.ids?.length) return;
+        this._handleQuadClick({
+          quadKey: def.key || def.name,
+          ids: def.ids,
+          faceDim: def.faceDim,
+          faceValue: def.faceValue,
           primaryId: this._selectedId || def.ids[def.ids.length - 1],
         });
       };
       this._quadPickObjects.push({
+        key: def.key || def.name,
         mesh: quadPick,
         corners: def.corners,
         ids: def.ids,
+        faceDim: def.faceDim,
+        faceValue: def.faceValue,
       });
       this._previewGroup.add(quadPick);
     }
@@ -1024,7 +1144,7 @@ export class NurbsCageEditorSession {
     const [nx, ny, nz] = dims;
     const out = [];
 
-    const pushQuad = (name, coordsA, coordsB, coordsC, coordsD) => {
+    const pushQuad = (name, faceDim, faceValue, coordsA, coordsB, coordsC, coordsD) => {
       const ia = cageIndex(coordsA[0], coordsA[1], coordsA[2], dims);
       const ib = cageIndex(coordsB[0], coordsB[1], coordsB[2], dims);
       const ic = cageIndex(coordsC[0], coordsC[1], coordsC[2], dims);
@@ -1038,7 +1158,10 @@ export class NurbsCageEditorSession {
       ].filter(Boolean)));
       if (ids.length !== 4) return;
       out.push({
+        key: name,
         name,
+        faceDim,
+        faceValue,
         corners: [ia, ib, ic, id],
         ids,
       });
@@ -1049,6 +1172,8 @@ export class NurbsCageEditorSession {
         for (let k = 0; k < nz - 1; k++) {
           pushQuad(
             `quad:i=${i}:j=${j}:k=${k}`,
+            0,
+            i,
             [i, j, k],
             [i, j + 1, k],
             [i, j + 1, k + 1],
@@ -1063,6 +1188,8 @@ export class NurbsCageEditorSession {
         for (let k = 0; k < nz - 1; k++) {
           pushQuad(
             `quad:j=${j}:i=${i}:k=${k}`,
+            1,
+            j,
             [i, j, k],
             [i + 1, j, k],
             [i + 1, j, k + 1],
@@ -1077,6 +1204,8 @@ export class NurbsCageEditorSession {
         for (let j = 0; j < ny - 1; j++) {
           pushQuad(
             `quad:k=${k}:i=${i}:j=${j}`,
+            2,
+            k,
             [i, j, k],
             [i + 1, j, k],
             [i + 1, j + 1, k],
@@ -1214,15 +1343,54 @@ export class NurbsCageEditorSession {
     ];
   }
 
-  _applySymmetryFromSources(sourceIdsInput) {
+  _getSymmetryCenterPlaneMidIndices(dimsInput, symFlagsInput = null) {
+    const dims = sanitizeCageDivisions(dimsInput || this._cageData?.dims);
+    const symFlags = (Array.isArray(symFlagsInput) && symFlagsInput.length >= 3)
+      ? symFlagsInput
+      : [
+        !!this._displayOptions?.symmetryX,
+        !!this._displayOptions?.symmetryY,
+        !!this._displayOptions?.symmetryZ,
+      ];
+    const mids = [null, null, null];
+    for (let axis = 0; axis < 3; axis++) {
+      if (!symFlags[axis]) continue;
+      const count = Number(dims[axis]);
+      if (!Number.isInteger(count) || count < 1 || (count % 2) !== 1) continue;
+      mids[axis] = Math.floor((count - 1) * 0.5);
+    }
+    return mids;
+  }
+
+  _clampPositionToSymmetryCenterPlane(coordsInput, position, center, centerPlaneMids) {
+    if (!Array.isArray(coordsInput) || coordsInput.length < 3) return;
+    if (!position || !Array.isArray(center) || center.length < 3) return;
+    if (!Array.isArray(centerPlaneMids) || centerPlaneMids.length < 3) return;
+    if (centerPlaneMids[0] != null && coordsInput[0] === centerPlaneMids[0] && Number.isFinite(center[0])) {
+      position.x = center[0];
+    }
+    if (centerPlaneMids[1] != null && coordsInput[1] === centerPlaneMids[1] && Number.isFinite(center[1])) {
+      position.y = center[1];
+    }
+    if (centerPlaneMids[2] != null && coordsInput[2] === centerPlaneMids[2] && Number.isFinite(center[2])) {
+      position.z = center[2];
+    }
+  }
+
+  _applySymmetryFromSources(sourceIdsInput, options = {}) {
     const symX = !!this._displayOptions?.symmetryX;
     const symY = !!this._displayOptions?.symmetryY;
     const symZ = !!this._displayOptions?.symmetryZ;
     if ((!symX && !symY && !symZ) || !this._cageData) return;
-    const dims = sanitizeCageDivisions(this._cageData.dims);
+    const dims = sanitizeCageDivisions(options?.dims || this._cageData.dims);
     const [nx, ny, nz] = dims;
-    const center = this._getSymmetryCenter();
+    const center = (Array.isArray(options?.center) && options.center.length >= 3)
+      ? options.center
+      : this._getSymmetryCenter();
     if (!center) return;
+    const centerPlaneMids = (Array.isArray(options?.centerPlaneMids) && options.centerPlaneMids.length >= 3)
+      ? options.centerPlaneMids
+      : this._getSymmetryCenterPlaneMidIndices(dims, [symX, symY, symZ]);
 
     const sourceIds = Array.isArray(sourceIdsInput) ? sourceIdsInput : Array.from(sourceIdsInput || []);
     const sourceIdSet = new Set();
@@ -1233,15 +1401,31 @@ export class NurbsCageEditorSession {
       const coords = this._coordsFromPointId(id);
       const entry = this._pointEntries.get(id);
       if (!coords || !entry?.vertex) continue;
+      const sourcePos = {
+        x: entry.vertex.position.x,
+        y: entry.vertex.position.y,
+        z: entry.vertex.position.z,
+      };
+      this._clampPositionToSymmetryCenterPlane(coords, sourcePos, center, centerPlaneMids);
+      const sourceNeedsSnap = (
+        Math.abs(sourcePos.x - entry.vertex.position.x) > 1e-9
+        || Math.abs(sourcePos.y - entry.vertex.position.y) > 1e-9
+        || Math.abs(sourcePos.z - entry.vertex.position.z) > 1e-9
+      );
+      if (sourceNeedsSnap) {
+        entry.vertex.position.set(sourcePos.x, sourcePos.y, sourcePos.z);
+        const sourcePoint = this._cageData.points?.[entry.index];
+        if (Array.isArray(sourcePoint) && sourcePoint.length >= 3) {
+          sourcePoint[0] = sourcePos.x;
+          sourcePoint[1] = sourcePos.y;
+          sourcePoint[2] = sourcePos.z;
+        }
+      }
       sourceIdSet.add(id);
       sources.push({
         id,
         coords,
-        pos: [
-          entry.vertex.position.x,
-          entry.vertex.position.y,
-          entry.vertex.position.z,
-        ],
+        pos: [sourcePos.x, sourcePos.y, sourcePos.z],
       });
     }
     if (!sources.length) return;
@@ -1275,9 +1459,12 @@ export class NurbsCageEditorSession {
 
             const targetEntry = this._pointEntries.get(targetId);
             if (!targetEntry?.vertex) continue;
-            const tx = io.reflect ? ((2 * center[0]) - source.pos[0]) : source.pos[0];
-            const ty = jo.reflect ? ((2 * center[1]) - source.pos[1]) : source.pos[1];
-            const tz = ko.reflect ? ((2 * center[2]) - source.pos[2]) : source.pos[2];
+            let tx = io.reflect ? ((2 * center[0]) - source.pos[0]) : source.pos[0];
+            let ty = jo.reflect ? ((2 * center[1]) - source.pos[1]) : source.pos[1];
+            let tz = ko.reflect ? ((2 * center[2]) - source.pos[2]) : source.pos[2];
+            if (centerPlaneMids[0] != null && io.value === centerPlaneMids[0]) tx = center[0];
+            if (centerPlaneMids[1] != null && jo.value === centerPlaneMids[1]) ty = center[1];
+            if (centerPlaneMids[2] != null && ko.value === centerPlaneMids[2]) tz = center[2];
 
             targetEntry.vertex.position.set(tx, ty, tz);
             const targetPoint = this._cageData.points?.[targetEntry.index];
@@ -1449,12 +1636,24 @@ export class NurbsCageEditorSession {
     if (!this._selectedId || !this._cageData) return;
     const entry = this._pointEntries.get(this._selectedId);
     if (!entry?.vertex) return;
+    const dims = sanitizeCageDivisions(this._cageData.dims);
+    const symmetryCenter = this._getSymmetryCenter();
+    const centerPlaneMids = symmetryCenter
+      ? this._getSymmetryCenterPlaneMidIndices(dims)
+      : [null, null, null];
     const pointIndex = entry.index;
     const point = this._cageData.points?.[pointIndex];
     if (!Array.isArray(point)) return;
 
     const pos = entry.vertex.position;
     const quat = entry.vertex.quaternion;
+    this._clampPositionToSymmetryCenterPlane(
+      this._coordsFromPointId(this._selectedId),
+      pos,
+      symmetryCenter,
+      centerPlaneMids,
+    );
+    entry.vertex.position.copy(pos);
     point[0] = pos.x;
     point[1] = pos.y;
     point[2] = pos.z;
@@ -1491,6 +1690,12 @@ export class NurbsCageEditorSession {
         const selectedPoint = this._cageData.points?.[selectedEntry.index];
         if (!Array.isArray(selectedPoint)) continue;
         const selectedPos = selectedEntry.vertex.position.clone().applyMatrix4(deltaMat);
+        this._clampPositionToSymmetryCenterPlane(
+          this._coordsFromPointId(id),
+          selectedPos,
+          symmetryCenter,
+          centerPlaneMids,
+        );
         selectedEntry.vertex.position.copy(selectedPos);
         selectedPoint[0] = selectedPos.x;
         selectedPoint[1] = selectedPos.y;
@@ -1498,7 +1703,14 @@ export class NurbsCageEditorSession {
         movedIds.add(id);
       }
     }
-    this._applySymmetryFromSources(movedIds);
+    const symmetryApplyOptions = {
+      dims,
+    };
+    if (symmetryCenter) {
+      symmetryApplyOptions.center = symmetryCenter;
+      symmetryApplyOptions.centerPlaneMids = centerPlaneMids;
+    }
+    this._applySymmetryFromSources(movedIds, symmetryApplyOptions);
     this._captureMultiMoveAnchorFromEntry(this._selectedId, entry);
     this._updateLineGeometry();
     this._updatePointHandleScales();
