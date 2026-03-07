@@ -795,6 +795,7 @@ export class Viewer {
         this._splineMode = null;
         this._pmiPreviewMode = null;
         this._imageEditorActive = false;
+        this._sheet2DEditorActive = false;
         this._cameraMoving = false;
         this._sceneBoundsCache = null;
         this._lastPointerEvent = null;
@@ -3748,6 +3749,7 @@ export class Viewer {
 
     _onKeyDown(event) {
         if (this._disposed) return;
+        if (this._sheet2DEditorActive) return;
         const target = event?.target || null;
         const tag = target?.tagName ? String(target.tagName).toLowerCase() : '';
         const isEditable = !!(

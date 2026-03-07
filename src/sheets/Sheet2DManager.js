@@ -36,6 +36,23 @@ function normalizeTextAlign(value, fallback = "left") {
   return "left";
 }
 
+function normalizeVerticalAlign(value, fallback = "top") {
+  const key = String(value || fallback).trim().toLowerCase();
+  if (key === "center") return "middle";
+  if (key === "bottom") return "bottom";
+  return key === "middle" ? "middle" : "top";
+}
+
+function normalizePmiAnchor(value, fallback = "c") {
+  const key = String(value || fallback).trim().toLowerCase();
+  return ["nw", "n", "ne", "w", "c", "e", "sw", "s", "se"].includes(key) ? key : fallback;
+}
+
+function normalizePmiLabelPosition(value, fallback = "bottom") {
+  const key = String(value || fallback).trim().toLowerCase();
+  return ["top", "bottom", "none"].includes(key) ? key : fallback;
+}
+
 function normalizeElementType(value) {
   const token = String(value ?? "").trim().toLowerCase();
   if (token === "rect") return "rect";
@@ -350,7 +367,13 @@ export class Sheet2DManager {
         pmiImageRevision: type === "pmiInset" ? (Number.isInteger(source.pmiImageRevision) ? source.pmiImageRevision : 0) : undefined,
         pmiModelRevision: type === "pmiInset" ? (Number.isInteger(source.pmiModelRevision) ? source.pmiModelRevision : -1) : undefined,
         pmiImageCaptureKey: type === "pmiInset" ? sanitizeText(source.pmiImageCaptureKey, "") : undefined,
-        showTitle: type === "pmiInset" ? source.showTitle !== false : undefined,
+        showTitle: type === "pmiInset"
+          ? normalizePmiLabelPosition(source.pmiLabelPosition, source.showTitle !== false ? "bottom" : "none") !== "none"
+          : undefined,
+        pmiLabelPosition: type === "pmiInset"
+          ? normalizePmiLabelPosition(source.pmiLabelPosition, source.showTitle !== false ? "bottom" : "none")
+          : undefined,
+        pmiAnchor: type === "pmiInset" ? normalizePmiAnchor(source.pmiAnchor, "c") : undefined,
         text: (type === "rect" || type === "ellipse") ? sanitizeText(source.text, "") : undefined,
         fontSize: (type === "rect" || type === "ellipse")
           ? clamp(toFiniteNumber(source.fontSize, 0.28), 0.08, 3)
@@ -364,6 +387,9 @@ export class Sheet2DManager {
         fontStyle: (type === "rect" || type === "ellipse") ? fontStyle : undefined,
         textAlign: (type === "rect" || type === "ellipse")
           ? normalizeTextAlign(source.textAlign || source.textAnchor, "center")
+          : undefined,
+        verticalAlign: (type === "rect" || type === "ellipse")
+          ? normalizeVerticalAlign(source.verticalAlign || source.verticalAnchor, "middle")
           : undefined,
         color: (type === "rect" || type === "ellipse")
           ? sanitizeColor(source.color, sanitizeColor(source.textColor, "#0f172a"))
@@ -386,6 +412,7 @@ export class Sheet2DManager {
       fontWeight: /^\d{3}$/.test(fontWeight) ? fontWeight : (fontWeight === "bold" ? "700" : "400"),
       fontStyle,
       textAlign,
+      verticalAlign: normalizeVerticalAlign(source.verticalAlign || source.verticalAnchor, "top"),
       color: sanitizeColor(source.color, sanitizeColor(source.textColor, sanitizeColor(source.fill, "#111111"))),
     };
   }

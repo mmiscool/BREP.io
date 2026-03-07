@@ -1,4 +1,4 @@
-import { FloatingWindow } from "../FloatingWindow.js";
+import brepHomeBannerUrl from "../../assets/brand/brep-home-banner.svg";
 import { captureCameraSnapshot } from "../pmi/annUtils.js";
 import { listSheetSizes } from "../../sheets/sheetStandards.js";
 
@@ -9,6 +9,104 @@ const MIN_ELEMENT_IN = 0.05;
 const MIN_MEDIA_SCALE = 1;
 const MAX_MEDIA_SCALE = 10;
 const PMI_TITLE_HEIGHT_IN = 0.3;
+const STAGE_VIEWPORT_PADDING_PX = 10;
+const FIT_VIEWPORT_PADDING_PX = 6;
+const FIT_SAFETY_INSET_PX = 2;
+const STROKE_WIDTH_OPTIONS_PX = [0, 1, 2, 3, 4, 8, 12, 16, 24];
+const LINE_STYLE_OPTIONS = [
+  { value: "solid", label: "Solid" },
+  { value: "dotted", label: "Dotted" },
+  { value: "dashed", label: "Dashed" },
+  { value: "dashDot", label: "Dash Dot" },
+  { value: "longDash", label: "Long Dash" },
+  { value: "dashDotDot", label: "Dash Dot Dot" },
+];
+const PMI_ANCHOR_OPTIONS = [
+  { value: "nw", label: "Top Left" },
+  { value: "n", label: "Top" },
+  { value: "ne", label: "Top Right" },
+  { value: "w", label: "Left" },
+  { value: "c", label: "Center" },
+  { value: "e", label: "Right" },
+  { value: "sw", label: "Bottom Left" },
+  { value: "s", label: "Bottom" },
+  { value: "se", label: "Bottom Right" },
+];
+const PMI_LABEL_POSITION_OPTIONS = [
+  { value: "top", label: "Top" },
+  { value: "bottom", label: "Bottom" },
+  { value: "none", label: "None" },
+];
+const TOOLBAR_COLOR_SWATCHS = ["#111111", "#ffffff", "#ef4444", "#f59e0b", "#22c55e", "#3b82f6", "#8b5cf6", "#ec4899"];
+
+function iconSvg(content, { viewBox = "0 0 24 24" } = {}) {
+  return `<svg viewBox="${viewBox}" aria-hidden="true" focusable="false">${content}</svg>`;
+}
+
+const TOOLBAR_ICON_SVGS = {
+  fillColor: iconSvg(`
+    <path d="M7 13l6-6 4 4-6 6H7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+    <path d="M15.5 4.5l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M18.2 17.2c1.2 0 2.2.9 2.2 2.1 0 1.3-1 2.2-2.2 2.2-1.3 0-2.2-.9-2.2-2.2 0-.5.2-1 .5-1.4l1.7-2.2 1.7 2.2c.2.4.3.8.3 1.3z" fill="currentColor"/>
+  `),
+  strokeColor: iconSvg(`
+    <path d="M6 17l7.8-7.8 4 4L10 21H6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+    <path d="M13 6l2-2 5 5-2 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+  `),
+  textColor: iconSvg(`
+    <path d="M8 17l3.7-10h.6L16 17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M9.4 13h5.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M5.5 20.25h13" fill="none" stroke="#ec4899" stroke-width="2.6" stroke-linecap="round"/>
+  `),
+  lineWeight: iconSvg(`
+    <path d="M4 7h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M4 12h16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+    <path d="M4 17h16" fill="none" stroke="currentColor" stroke-width="4.6" stroke-linecap="round"/>
+  `),
+  lineStyle: iconSvg(`
+    <path d="M4 7h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M4 12h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="2.2 2.6"/>
+    <path d="M4 17h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="6 2.6"/>
+  `),
+  bold: iconSvg(`
+    <text x="12" y="17" text-anchor="middle" font-size="16" font-weight="700" font-family="Arial, Helvetica, sans-serif" fill="currentColor">B</text>
+  `),
+  italic: iconSvg(`
+    <text x="12" y="17" text-anchor="middle" font-size="16" font-style="italic" font-family="Georgia, serif" fill="currentColor">I</text>
+  `),
+  underline: iconSvg(`
+    <text x="12" y="16.5" text-anchor="middle" font-size="15" font-family="Arial, Helvetica, sans-serif" fill="currentColor">U</text>
+    <path d="M6.5 20h11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+  `),
+  textAlignMenu: iconSvg(`
+    <path d="M7 7h10M9 11h6M7 15h10M8 19h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M4 5.5v13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".55"/>
+    <path d="M20 5.5v13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".55"/>
+  `),
+  alignLeft: iconSvg(`
+    <path d="M5 6v12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M8 7h10M8 11h7M8 15h10M8 19h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+  `),
+  alignCenter: iconSvg(`
+    <path d="M7 7h10M8.5 11h7M7 15h10M9 19h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+  `),
+  alignRight: iconSvg(`
+    <path d="M19 6v12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M6 7h10M9 11h7M6 15h10M8 19h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+  `),
+  valignTop: iconSvg(`
+    <path d="M5 5h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M7 9h10M8.5 13h7M7 17h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+  `),
+  valignMiddle: iconSvg(`
+    <path d="M7 8h10M8.5 12h7M7 16h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="1.6 2.4"/>
+  `),
+  valignBottom: iconSvg(`
+    <path d="M7 7h10M8.5 11h7M7 15h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M5 19h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+  `),
+};
 
 function toFiniteNumber(value, fallback = 0) {
   const num = Number(value);
@@ -69,13 +167,17 @@ function defaultTextElement(xIn, yIn) {
     fill: "transparent",
     stroke: "#000000",
     strokeWidth: 0.01,
+    lineStyle: "solid",
     text: "Double-click to edit",
     fontSize: 0.34,
     fontFamily: "Arial, Helvetica, sans-serif",
     fontWeight: "400",
     fontStyle: "normal",
+    textDecoration: "none",
     textAlign: "left",
+    verticalAlign: "top",
     color: "#111111",
+    strokeEnabled: false,
   };
 }
 
@@ -93,13 +195,16 @@ function defaultRectElement(xIn, yIn) {
     fill: "#8bc4ff",
     stroke: "#1d4ed8",
     strokeWidth: 0.01,
+    lineStyle: "solid",
     cornerRadius: 0.08,
     text: "",
     fontSize: 0.28,
     fontFamily: "Arial, Helvetica, sans-serif",
     fontWeight: "600",
     fontStyle: "normal",
+    textDecoration: "none",
     textAlign: "center",
+    verticalAlign: "middle",
     color: "#0f172a",
   };
 }
@@ -118,12 +223,15 @@ function defaultEllipseElement(xIn, yIn) {
     fill: "#ffd166",
     stroke: "#c78c00",
     strokeWidth: 0.01,
+    lineStyle: "solid",
     text: "",
     fontSize: 0.28,
     fontFamily: "Arial, Helvetica, sans-serif",
     fontWeight: "600",
     fontStyle: "normal",
+    textDecoration: "none",
     textAlign: "center",
+    verticalAlign: "middle",
     color: "#0f172a",
   };
 }
@@ -142,6 +250,7 @@ function defaultImageElement(xIn, yIn, src = "") {
     fill: "#ffffff",
     stroke: "#94a3b8",
     strokeWidth: 0.01,
+    lineStyle: "solid",
     src: String(src || ""),
     mediaScale: 1,
     mediaOffsetX: 0,
@@ -163,15 +272,18 @@ function defaultPmiInsetElement(xIn, yIn, pmiViewIndex = -1, pmiViewName = "PMI 
     fill: "transparent",
     stroke: "#334155",
     strokeWidth: 0.01,
+    lineStyle: "solid",
     pmiViewIndex: Number.isInteger(pmiViewIndex) ? pmiViewIndex : -1,
     pmiViewName: String(pmiViewName || "PMI View"),
     showTitle: true,
+    pmiLabelPosition: "bottom",
     mediaScale: 1,
     mediaOffsetX: 0,
     mediaOffsetY: 0,
     pmiImageRevision: 0,
     pmiModelRevision: -1,
     pmiImageCaptureKey: "",
+    pmiAnchor: "c",
   };
 }
 
@@ -201,6 +313,11 @@ function elementSupportsText(element) {
 
 function elementSupportsMediaCrop(element) {
   const type = String(element?.type || "");
+  return type === "image";
+}
+
+function elementUsesLockedAspectMedia(element) {
+  const type = String(element?.type || "");
   return type === "image" || type === "pmiInset";
 }
 
@@ -226,8 +343,9 @@ export class Sheet2DEditorWindow {
   constructor(viewer) {
     this.viewer = viewer || null;
 
-    this.window = null;
+    this.overlay = null;
     this.root = null;
+    this._previousBodyOverflow = "";
 
     this.sheetId = null;
     this.sheetDraft = null;
@@ -237,6 +355,10 @@ export class Sheet2DEditorWindow {
     this.zoom = DEFAULT_ZOOM;
     this._appliedZoom = DEFAULT_ZOOM;
     this._zoomMode = "fit";
+    this._stagePanX = 0;
+    this._stagePanY = 0;
+    this._appliedStagePanX = 0;
+    this._appliedStagePanY = 0;
     this.showGrid = false;
 
     this._dragState = null;
@@ -262,6 +384,9 @@ export class Sheet2DEditorWindow {
     this._stageResizeObserver = null;
 
     this._contextMenu = null;
+    this._toolbarPopover = null;
+    this._toolbarPopoverKind = "";
+    this._toolbarPopoverAnchor = null;
     this._boundPointerMove = (event) => this._onGlobalPointerMove(event);
     this._boundPointerUp = (event) => this._onGlobalPointerUp(event);
     this._boundGlobalPointerDown = (event) => this._onGlobalPointerDown(event);
@@ -272,12 +397,19 @@ export class Sheet2DEditorWindow {
     this._ensureWindow();
     if (!this.root) return;
 
-    if (this.window?.root) this.window.root.style.display = "";
+    if (this.overlay && !document.body.contains(this.overlay)) {
+      document.body.appendChild(this.overlay);
+    }
+    try {
+      this._previousBodyOverflow = document.body.style.overflow || "";
+      document.body.style.overflow = "hidden";
+    } catch { }
+    if (this.overlay) this.overlay.style.display = "block";
     this.root.style.display = "grid";
-    this.window?.bringToFront?.();
 
     this._bindGlobalEvents();
     this._bindManagerListeners();
+    try { if (this.viewer) this.viewer._sheet2DEditorActive = true; } catch { }
 
     const manager = this._getManager();
     if (!manager) return;
@@ -307,11 +439,16 @@ export class Sheet2DEditorWindow {
     this._cropModeElementId = null;
     this._closePmiPicker();
     this._hideContextMenu();
+    this._closeToolbarPopover();
     this.root.style.display = "none";
-    if (this.window?.root) this.window.root.style.display = "none";
+    if (this.overlay) this.overlay.style.display = "none";
     this._unbindGlobalEvents();
     this._unbindManagerListeners();
     this._disposeUnusedPmiViewports(new Set());
+    try { if (this.viewer) this.viewer._sheet2DEditorActive = false; } catch { }
+    try {
+      document.body.style.overflow = this._previousBodyOverflow || "";
+    } catch { }
   }
 
   dispose() {
@@ -319,14 +456,23 @@ export class Sheet2DEditorWindow {
     this._cropModeElementId = null;
     this._closePmiPicker();
     this._hideContextMenu();
+    this._closeToolbarPopover();
     this._unbindGlobalEvents();
     this._unbindManagerListeners();
     this._disposeAllPmiViewports();
     try { this._stageResizeObserver?.disconnect?.(); } catch { }
     this._stageResizeObserver = null;
-    try { this.window?.destroy?.(); } catch { }
-    this.window = null;
+    try {
+      if (this.overlay?.parentNode) {
+        this.overlay.parentNode.removeChild(this.overlay);
+      }
+    } catch { }
+    this.overlay = null;
     this.root = null;
+    try { if (this.viewer) this.viewer._sheet2DEditorActive = false; } catch { }
+    try {
+      document.body.style.overflow = this._previousBodyOverflow || "";
+    } catch { }
   }
 
   refreshFromHistory() {
@@ -502,29 +648,74 @@ export class Sheet2DEditorWindow {
     return clamp(toFiniteNumber(this._appliedZoom, this.zoom), 0.1, 4);
   }
 
+  _getStageViewportMetrics() {
+    const viewport = this._stageCenter || this._stageWrap || null;
+    return {
+      width: Math.max(1, toFiniteNumber(viewport?.clientWidth, 0)),
+      height: Math.max(1, toFiniteNumber(viewport?.clientHeight, 0)),
+    };
+  }
+
   _computeFitZoom(sheet = this.sheetDraft) {
-    const stageWrap = this._stageWrap;
-    if (!sheet || !stageWrap) return clamp(toFiniteNumber(this.zoom, DEFAULT_ZOOM), 0.1, 4);
+    if (!sheet) return clamp(toFiniteNumber(this.zoom, DEFAULT_ZOOM), 0.1, 4);
 
     const ppi = Math.max(1, toFiniteNumber(sheet.pxPerInch, 96));
     const widthPx = Math.max(100, toFiniteNumber(sheet.widthIn, 11) * ppi);
     const heightPx = Math.max(100, toFiniteNumber(sheet.heightIn, 8.5) * ppi);
-    const computed = typeof window !== "undefined" && window.getComputedStyle
-      ? window.getComputedStyle(stageWrap)
-      : null;
-    const padX = toFiniteNumber(computed?.paddingLeft, 0) + toFiniteNumber(computed?.paddingRight, 0);
-    const padY = toFiniteNumber(computed?.paddingTop, 0) + toFiniteNumber(computed?.paddingBottom, 0);
-    const fitViewportPadding = 24;
-    const safetyInset = 2;
+    const viewport = this._getStageViewportMetrics();
     const availableWidth = Math.max(
       1,
-      toFiniteNumber(stageWrap.clientWidth, 0) - padX - (fitViewportPadding * 2) - safetyInset,
+      viewport.width - (FIT_VIEWPORT_PADDING_PX * 2) - FIT_SAFETY_INSET_PX,
     );
     const availableHeight = Math.max(
       1,
-      toFiniteNumber(stageWrap.clientHeight, 0) - padY - (fitViewportPadding * 2) - safetyInset,
+      viewport.height - (FIT_VIEWPORT_PADDING_PX * 2) - FIT_SAFETY_INSET_PX,
     );
     return clamp(Math.min(availableWidth / widthPx, availableHeight / heightPx), 0.1, 4);
+  }
+
+  _computeFitStagePan(sheet = this.sheetDraft, zoom = this._computeFitZoom(sheet)) {
+    if (!sheet) {
+      return { x: 0, y: 0 };
+    }
+    const ppi = Math.max(1, toFiniteNumber(sheet.pxPerInch, 96));
+    const widthPx = Math.max(100, toFiniteNumber(sheet.widthIn, 11) * ppi);
+    const heightPx = Math.max(100, toFiniteNumber(sheet.heightIn, 8.5) * ppi);
+    const viewport = this._getStageViewportMetrics();
+    return {
+      x: Math.round((viewport.width - (widthPx * zoom)) * 0.5),
+      y: Math.round((viewport.height - (heightPx * zoom)) * 0.5),
+    };
+  }
+
+  _getStageWorldRect() {
+    return this._stageShell?.getBoundingClientRect?.() || this._slideCanvas?.getBoundingClientRect?.() || null;
+  }
+
+  _ensureManualStageView() {
+    if (this._zoomMode !== "fit") return;
+    this._zoomMode = "manual";
+    this.zoom = this._getStageZoom();
+    this._stagePanX = toFiniteNumber(this._appliedStagePanX, 0);
+    this._stagePanY = toFiniteNumber(this._appliedStagePanY, 0);
+    this._syncZoomControl();
+  }
+
+  _setManualZoomAroundClientPoint(nextZoom, clientX, clientY) {
+    const viewport = this._stageCenter || this._stageWrap || null;
+    if (!viewport) return;
+
+    this._ensureManualStageView();
+    const viewportRect = viewport.getBoundingClientRect();
+    const currentZoom = this._getStageZoom();
+    const localX = clientX - viewportRect.left;
+    const localY = clientY - viewportRect.top;
+    const worldX = (localX - this._appliedStagePanX) / currentZoom;
+    const worldY = (localY - this._appliedStagePanY) / currentZoom;
+
+    this.zoom = clamp(toFiniteNumber(nextZoom, currentZoom), 0.1, 4);
+    this._stagePanX = localX - (worldX * this.zoom);
+    this._stagePanY = localY - (worldY * this.zoom);
   }
 
   _syncZoomControl() {
@@ -534,24 +725,38 @@ export class Sheet2DEditorWindow {
         : "Fit";
     }
     if (!this._zoomSelect) return;
-    this._zoomSelect.value = this._zoomMode === "fit" ? "fit" : String(this.zoom);
+    if (this._zoomMode === "fit") {
+      if (this._manualZoomOption?.parentNode === this._zoomSelect) {
+        this._manualZoomOption.remove();
+      }
+      this._zoomSelect.value = "fit";
+      return;
+    }
+
+    const exactValue = String(this.zoom);
+    const hasPreset = Array.from(this._zoomSelect.options).some((option) => option.value === exactValue);
+    if (!hasPreset) {
+      if (!this._manualZoomOption) {
+        this._manualZoomOption = document.createElement("option");
+      }
+      this._manualZoomOption.value = exactValue;
+      this._manualZoomOption.textContent = `${Math.round(this.zoom * 100)}%`;
+      if (this._manualZoomOption.parentNode !== this._zoomSelect) {
+        this._zoomSelect.appendChild(this._manualZoomOption);
+      }
+    } else if (this._manualZoomOption?.parentNode === this._zoomSelect) {
+      this._manualZoomOption.remove();
+    }
+    this._zoomSelect.value = exactValue;
   }
 
   _ensureWindow() {
     if (this.root) return;
     this._ensureStyles();
 
-    const fw = new FloatingWindow({
-      title: "2D Sheets Editor",
-      width: 1420,
-      height: 900,
-      minWidth: 980,
-      minHeight: 640,
-      right: 12,
-      top: 52,
-      shaded: false,
-      onClose: () => this.close(),
-    });
+    const overlay = document.createElement("div");
+    overlay.className = "sheet-slides-overlay";
+    overlay.style.display = "none";
 
     const root = document.createElement("div");
     root.className = "sheet-slides-root";
@@ -562,7 +767,27 @@ export class Sheet2DEditorWindow {
 
     const brand = document.createElement("div");
     brand.className = "sheet-slides-brand";
-    brand.textContent = "Sheets Studio";
+
+    const brandLogo = document.createElement("img");
+    brandLogo.className = "sheet-slides-brand-logo";
+    brandLogo.src = brepHomeBannerUrl;
+    brandLogo.alt = "BREP.io";
+    brand.appendChild(brandLogo);
+
+    const brandText = document.createElement("div");
+    brandText.className = "sheet-slides-brand-text";
+
+    const brandTitle = document.createElement("div");
+    brandTitle.className = "sheet-slides-brand-title";
+    brandTitle.textContent = "Sheets Studio";
+    brandText.appendChild(brandTitle);
+
+    const subtitle = document.createElement("div");
+    subtitle.className = "sheet-slides-subtitle";
+    subtitle.textContent = "2D sheet editor";
+    brandText.appendChild(subtitle);
+
+    brand.appendChild(brandText);
     topbar.appendChild(brand);
 
     const fileInput = document.createElement("input");
@@ -580,10 +805,86 @@ export class Sheet2DEditorWindow {
 
     const insertPmiBtn = this._makeToolbarButton("Insert PMI", () => this._openPmiPicker(), "primary");
 
-    const frontBtn = this._makeToolbarButton("Front", () => this._bringSelectedToFront());
-    const backBtn = this._makeToolbarButton("Back", () => this._sendSelectedToBack());
-    const duplicateElementBtn = this._makeToolbarButton("Duplicate", () => this._duplicateSelectedElement());
-    const deleteElementBtn = this._makeToolbarButton("Delete", () => this._deleteSelectedElement(), "danger");
+    const selectionStyleGroup = this._toolbarGroup([], false);
+    selectionStyleGroup.classList.add("sheet-slides-selection-group");
+
+    const toolbarFillButton = this._makeToolbarIconButton("fillColor", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this._toggleToolbarPopover("fillColor", toolbarFillButton);
+    }, { title: "Background color" });
+    toolbarFillButton.classList.add("sheet-slides-toolbar-menu-btn");
+
+    const toolbarStrokeButton = this._makeToolbarIconButton("strokeColor", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this._toggleToolbarPopover("strokeColor", toolbarStrokeButton);
+    }, { title: "Border color" });
+    toolbarStrokeButton.classList.add("sheet-slides-toolbar-menu-btn");
+
+    const toolbarStrokeWidthButton = this._makeToolbarIconButton("lineWeight", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this._toggleToolbarPopover("strokeWidth", toolbarStrokeWidthButton);
+    }, { title: "Line weight" });
+    toolbarStrokeWidthButton.classList.add("sheet-slides-toolbar-menu-btn");
+
+    const toolbarLineStyleButton = this._makeToolbarIconButton("lineStyle", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this._toggleToolbarPopover("lineStyle", toolbarLineStyleButton);
+    }, { title: "Line style" });
+    toolbarLineStyleButton.classList.add("sheet-slides-toolbar-menu-btn");
+
+    selectionStyleGroup.appendChild(toolbarFillButton);
+    selectionStyleGroup.appendChild(toolbarStrokeButton);
+    selectionStyleGroup.appendChild(toolbarStrokeWidthButton);
+    selectionStyleGroup.appendChild(toolbarLineStyleButton);
+
+    const selectionTextGroup = this._toolbarGroup([], false);
+    selectionTextGroup.classList.add("sheet-slides-selection-group");
+
+    const toolbarFontFamilyInput = this._buildFontFamilySelect((value) => this._setSelectedTextField("fontFamily", value));
+    toolbarFontFamilyInput.classList.add("sheet-slides-toolbar-font-family");
+    const toolbarFontSizeDecrementBtn = this._makeToolbarButton("A-", () => this._adjustSelectedFontSize(-1), "small");
+    toolbarFontSizeDecrementBtn.title = "Decrease font size";
+    const toolbarFontSizeInput = this._buildNumberInput((value) => this._setSelectedTextField("fontSize", value), {
+      step: 1,
+      min: 6,
+      max: 400,
+    });
+    toolbarFontSizeInput.classList.add("sheet-slides-toolbar-number");
+    const toolbarFontSizeIncrementBtn = this._makeToolbarButton("A+", () => this._adjustSelectedFontSize(1), "small");
+    toolbarFontSizeIncrementBtn.title = "Increase font size";
+
+    const toolbarTextColorButton = this._makeToolbarIconButton("textColor", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this._toggleToolbarPopover("textColor", toolbarTextColorButton);
+    }, { title: "Text color" });
+    toolbarTextColorButton.classList.add("sheet-slides-toolbar-menu-btn");
+
+    const toolbarBoldBtn = this._makeToolbarIconButton("bold", () => this._toggleTextWeight(), { title: "Bold" });
+    const toolbarItalicBtn = this._makeToolbarIconButton("italic", () => this._toggleTextItalic(), { title: "Italic" });
+    const toolbarUnderlineBtn = this._makeToolbarIconButton("underline", () => this._toggleTextUnderline(), { title: "Underline" });
+    toolbarItalicBtn.classList.add("sheet-slides-toolbar-italic");
+
+    const toolbarAlignmentButton = this._makeToolbarIconButton("textAlignMenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this._toggleToolbarPopover("textAlign", toolbarAlignmentButton);
+    }, { title: "Text alignment" });
+    toolbarAlignmentButton.classList.add("sheet-slides-toolbar-menu-btn");
+
+    selectionTextGroup.appendChild(toolbarFontFamilyInput);
+    selectionTextGroup.appendChild(toolbarFontSizeDecrementBtn);
+    selectionTextGroup.appendChild(toolbarFontSizeInput);
+    selectionTextGroup.appendChild(toolbarFontSizeIncrementBtn);
+    selectionTextGroup.appendChild(toolbarBoldBtn);
+    selectionTextGroup.appendChild(toolbarItalicBtn);
+    selectionTextGroup.appendChild(toolbarUnderlineBtn);
+    selectionTextGroup.appendChild(toolbarTextColorButton);
+    selectionTextGroup.appendChild(toolbarAlignmentButton);
 
     const zoomSelect = document.createElement("select");
     zoomSelect.className = "sheet-slides-control";
@@ -600,6 +901,10 @@ export class Sheet2DEditorWindow {
       if (zoomSelect.value === "fit") {
         this._zoomMode = "fit";
       } else {
+        if (this._zoomMode === "fit") {
+          this._stagePanX = toFiniteNumber(this._appliedStagePanX, 0);
+          this._stagePanY = toFiniteNumber(this._appliedStagePanY, 0);
+        }
         this._zoomMode = "manual";
         this.zoom = clamp(toFiniteNumber(zoomSelect.value, 1), 0.1, 4);
       }
@@ -615,8 +920,35 @@ export class Sheet2DEditorWindow {
     });
 
     topbar.appendChild(this._toolbarGroup([addTextBtn, addRectBtn, addEllipseBtn, addImageBtn, insertPmiBtn]));
-    topbar.appendChild(this._toolbarGroup([frontBtn, backBtn, duplicateElementBtn, deleteElementBtn]));
+    topbar.appendChild(selectionStyleGroup);
+    topbar.appendChild(selectionTextGroup);
     topbar.appendChild(this._toolbarGroup([zoomSelect, gridBtn], true));
+
+    const topbarSpacer = document.createElement("div");
+    topbarSpacer.className = "sheet-slides-topbar-spacer";
+    topbar.appendChild(topbarSpacer);
+
+    const finishBtn = this._makeToolbarButton("Finish", () => this.close(), "primary");
+    finishBtn.title = "Exit the 2D sheet editor";
+    finishBtn.classList.add("sheet-slides-finish-btn");
+    this._finishBtn = finishBtn;
+    topbar.appendChild(finishBtn);
+
+    this._toolbarSelectionStyleGroup = selectionStyleGroup;
+    this._toolbarSelectionTextGroup = selectionTextGroup;
+    this._toolbarFillButton = toolbarFillButton;
+    this._toolbarStrokeButton = toolbarStrokeButton;
+    this._toolbarStrokeWidthButton = toolbarStrokeWidthButton;
+    this._toolbarLineStyleButton = toolbarLineStyleButton;
+    this._toolbarTextColorButton = toolbarTextColorButton;
+    this._toolbarFontFamilyInput = toolbarFontFamilyInput;
+    this._toolbarFontSizeInput = toolbarFontSizeInput;
+    this._toolbarFontSizeDecrementBtn = toolbarFontSizeDecrementBtn;
+    this._toolbarFontSizeIncrementBtn = toolbarFontSizeIncrementBtn;
+    this._toolbarBoldBtn = toolbarBoldBtn;
+    this._toolbarItalicBtn = toolbarItalicBtn;
+    this._toolbarUnderlineBtn = toolbarUnderlineBtn;
+    this._toolbarAlignmentButton = toolbarAlignmentButton;
 
     const sidebar = document.createElement("aside");
     sidebar.className = "sheet-slides-sidebar";
@@ -640,10 +972,14 @@ export class Sheet2DEditorWindow {
 
     const stageWrap = document.createElement("main");
     stageWrap.className = "sheet-slides-stage-wrap";
+    stageWrap.addEventListener("pointerdown", (event) => this._onStagePointerDown(event));
+    stageWrap.addEventListener("contextmenu", (event) => this._onStageContextMenu(event));
+    stageWrap.addEventListener("wheel", (event) => this._onStageWheel(event), { passive: false });
     this._stageWrap = stageWrap;
 
     const stageCenter = document.createElement("div");
     stageCenter.className = "sheet-slides-stage-center";
+    this._stageCenter = stageCenter;
 
     const stageShell = document.createElement("div");
     stageShell.className = "sheet-slides-stage-shell";
@@ -753,6 +1089,19 @@ export class Sheet2DEditorWindow {
       (value) => this._setSelectedStyleField("fill", value),
       () => this._resetSelectedFill(),
     );
+    const {
+      wrap: strokeControl,
+      input: strokeInput,
+      reset: strokeResetBtn,
+    } = this._buildColorControl(
+      (value) => this._setSelectedStyleField("stroke", value),
+      () => this._resetSelectedStroke(),
+    );
+    const strokeWidthInput = this._buildNumberInput((value) => this._setSelectedStyleField("strokeWidth", value), {
+      step: 1,
+      min: 0,
+      max: 64,
+    });
 
     const opacityInput = this._buildNumberInput((value) => this._setSelectedStyleField("opacity", value), {
       step: 0.05,
@@ -768,6 +1117,9 @@ export class Sheet2DEditorWindow {
     this._rotInput = rotInput;
     this._fillInput = fillInput;
     this._fillResetBtn = fillResetBtn;
+    this._strokeInput = strokeInput;
+    this._strokeResetBtn = strokeResetBtn;
+    this._strokeWidthInput = strokeWidthInput;
     this._opacityInput = opacityInput;
     this._zInput = zInput;
 
@@ -776,9 +1128,13 @@ export class Sheet2DEditorWindow {
     elementPanel.appendChild(this._makeField("W", wInput));
     elementPanel.appendChild(this._makeField("H", hInput));
     elementPanel.appendChild(this._makeField("Rotation", rotInput));
-    const fillField = this._makeField("Fill", fillControl);
+    const fillField = this._makeField("Background", fillControl);
     this._fillField = fillField;
     elementPanel.appendChild(fillField);
+    const strokeField = this._makeField("Border", strokeControl);
+    this._strokeField = strokeField;
+    elementPanel.appendChild(strokeField);
+    elementPanel.appendChild(this._makeField("Border W", strokeWidthInput));
     elementPanel.appendChild(this._makeField("Opacity", opacityInput));
     elementPanel.appendChild(this._makeField("Layer", zInput));
 
@@ -791,26 +1147,22 @@ export class Sheet2DEditorWindow {
     textInput.rows = 3;
     textInput.addEventListener("change", () => this._setSelectedTextField("text", textInput.value));
 
-    const fontFamilyInput = document.createElement("select");
-    fontFamilyInput.className = "sheet-slides-control";
-    [
-      ["Arial, Helvetica, sans-serif", "Sans"],
-      ["Georgia, serif", "Serif"],
-      ["'Courier New', monospace", "Mono"],
-      ["Impact, Haettenschweiler, sans-serif", "Display"],
-    ].forEach(([value, label]) => {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = label;
-      fontFamilyInput.appendChild(option);
-    });
-    fontFamilyInput.addEventListener("change", () => this._setSelectedTextField("fontFamily", fontFamilyInput.value));
+    const fontFamilyInput = this._buildFontFamilySelect((value) => this._setSelectedTextField("fontFamily", value));
 
     const fontSizeInput = this._buildNumberInput((value) => this._setSelectedTextField("fontSize", value), {
       step: 1,
       min: 6,
       max: 400,
     });
+    const fontSizeDecrementBtn = this._makeToolbarButton("A-", () => this._adjustSelectedFontSize(-1), "small");
+    fontSizeDecrementBtn.title = "Decrease font size";
+    const fontSizeIncrementBtn = this._makeToolbarButton("A+", () => this._adjustSelectedFontSize(1), "small");
+    fontSizeIncrementBtn.title = "Increase font size";
+    const fontSizeControl = document.createElement("div");
+    fontSizeControl.className = "sheet-slides-font-size-row";
+    fontSizeControl.appendChild(fontSizeDecrementBtn);
+    fontSizeControl.appendChild(fontSizeInput);
+    fontSizeControl.appendChild(fontSizeIncrementBtn);
 
     const {
       wrap: textColorControl,
@@ -821,35 +1173,49 @@ export class Sheet2DEditorWindow {
       () => this._resetSelectedTextColor(),
     );
 
-    const textAlignInput = document.createElement("select");
-    textAlignInput.className = "sheet-slides-control";
+    const textAlignWrap = document.createElement("div");
+    textAlignWrap.className = "sheet-slides-segmented-row";
+    const textAlignButtons = {};
     [["left", "Left"], ["center", "Center"], ["right", "Right"]].forEach(([value, label]) => {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = label;
-      textAlignInput.appendChild(option);
+      const button = this._makeToolbarButton(label, () => this._setSelectedTextField("textAlign", value), "small");
+      textAlignButtons[value] = button;
+      textAlignWrap.appendChild(button);
     });
-    textAlignInput.addEventListener("change", () => this._setSelectedTextField("textAlign", textAlignInput.value));
+
+    const verticalAlignWrap = document.createElement("div");
+    verticalAlignWrap.className = "sheet-slides-segmented-row";
+    const verticalAlignButtons = {};
+    [["top", "Top"], ["middle", "Middle"], ["bottom", "Bottom"]].forEach(([value, label]) => {
+      const button = this._makeToolbarButton(label, () => this._setSelectedTextField("verticalAlign", value), "small");
+      verticalAlignButtons[value] = button;
+      verticalAlignWrap.appendChild(button);
+    });
 
     const boldBtn = this._makeToolbarButton("Bold", () => this._toggleTextWeight(), "small");
     const italicBtn = this._makeToolbarButton("Italic", () => this._toggleTextItalic(), "small");
+    const underlineBtn = this._makeToolbarButton("Underline", () => this._toggleTextUnderline(), "small");
 
     this._textInput = textInput;
     this._fontFamilyInput = fontFamilyInput;
     this._fontSizeInput = fontSizeInput;
+    this._fontSizeDecrementBtn = fontSizeDecrementBtn;
+    this._fontSizeIncrementBtn = fontSizeIncrementBtn;
     this._textColorInput = textColorInput;
     this._textColorResetBtn = textColorResetBtn;
-    this._textAlignInput = textAlignInput;
+    this._textAlignButtons = textAlignButtons;
+    this._verticalAlignButtons = verticalAlignButtons;
     this._boldBtn = boldBtn;
     this._italicBtn = italicBtn;
+    this._underlineBtn = underlineBtn;
     this._textPanel = textPanel;
 
     textPanel.appendChild(this._makeField("Content", textInput));
     textPanel.appendChild(this._makeField("Font", fontFamilyInput));
-    textPanel.appendChild(this._makeField("Size", fontSizeInput));
-    textPanel.appendChild(this._makeField("Color", textColorControl));
-    textPanel.appendChild(this._makeField("Align", textAlignInput));
-    textPanel.appendChild(this._toolbarGroup([boldBtn, italicBtn], true));
+    textPanel.appendChild(this._makeField("Size", fontSizeControl));
+    textPanel.appendChild(this._makeField("Text", textColorControl));
+    textPanel.appendChild(this._makeField("Align H", textAlignWrap));
+    textPanel.appendChild(this._makeField("Align V", verticalAlignWrap));
+    textPanel.appendChild(this._toolbarGroup([boldBtn, italicBtn, underlineBtn], true));
 
     const cropPanel = document.createElement("div");
     cropPanel.className = "sheet-slides-panel";
@@ -875,14 +1241,10 @@ export class Sheet2DEditorWindow {
     const pmiNameValue = document.createElement("div");
     pmiNameValue.className = "sheet-slides-readonly";
 
-    const showTitleInput = document.createElement("input");
-    showTitleInput.type = "checkbox";
-    showTitleInput.addEventListener("change", () => this._setSelectedPMIField("showTitle", showTitleInput.checked));
-
-    const showTitleWrap = document.createElement("div");
-    showTitleWrap.className = "sheet-slides-checkbox";
-    showTitleWrap.appendChild(showTitleInput);
-    showTitleWrap.appendChild(document.createTextNode("Show title"));
+    const pmiLabelPositionInput = this._buildSelect(
+      PMI_LABEL_POSITION_OPTIONS,
+      (value) => this._setSelectedPMIField("labelPosition", value),
+    );
 
     const showBgInput = document.createElement("input");
     showBgInput.type = "checkbox";
@@ -902,15 +1264,22 @@ export class Sheet2DEditorWindow {
       () => this._resetSelectedPMIBackground(),
     );
 
+    const pmiAnchorInput = this._buildSelect(
+      PMI_ANCHOR_OPTIONS,
+      (value) => this._setSelectedPMIField("anchor", value),
+    );
+
     this._pmiPanel = pmiPanel;
     this._pmiNameValue = pmiNameValue;
-    this._showTitleInput = showTitleInput;
+    this._pmiLabelPositionInput = pmiLabelPositionInput;
     this._showPmiBackgroundInput = showBgInput;
     this._pmiBgInput = pmiBgInput;
     this._pmiBgResetBtn = pmiBgResetBtn;
+    this._pmiAnchorInput = pmiAnchorInput;
 
     pmiPanel.appendChild(this._makeField("View Name", pmiNameValue));
-    pmiPanel.appendChild(this._makeField("Title", showTitleWrap));
+    pmiPanel.appendChild(this._makeField("Anchor", pmiAnchorInput));
+    pmiPanel.appendChild(this._makeField("Label", pmiLabelPositionInput));
     pmiPanel.appendChild(this._makeField("Backdrop", showBgWrap));
     pmiPanel.appendChild(this._makeField("BG Color", pmiBgControl));
 
@@ -954,9 +1323,34 @@ export class Sheet2DEditorWindow {
       this._sendSelectedToBack();
     });
 
+    const duplicateItem = document.createElement("button");
+    duplicateItem.type = "button";
+    duplicateItem.className = "sheet-slides-context-menu-item";
+    duplicateItem.textContent = "Duplicate";
+    duplicateItem.addEventListener("click", () => {
+      this._hideContextMenu();
+      this._duplicateSelectedElement();
+    });
+
+    const deleteItem = document.createElement("button");
+    deleteItem.type = "button";
+    deleteItem.className = "sheet-slides-context-menu-item danger";
+    deleteItem.textContent = "Delete";
+    deleteItem.addEventListener("click", () => {
+      this._hideContextMenu();
+      this._deleteSelectedElement();
+    });
+
     contextMenu.appendChild(bringToFrontItem);
     contextMenu.appendChild(sendToBackItem);
+    contextMenu.appendChild(duplicateItem);
+    contextMenu.appendChild(deleteItem);
     this._contextMenu = contextMenu;
+
+    const toolbarPopover = document.createElement("div");
+    toolbarPopover.className = "sheet-slides-toolbar-popover";
+    toolbarPopover.style.display = "none";
+    this._toolbarPopover = toolbarPopover;
 
     const pmiPicker = document.createElement("div");
     pmiPicker.className = "sheet-slides-modal-overlay";
@@ -998,11 +1392,13 @@ export class Sheet2DEditorWindow {
     root.appendChild(inspector);
     root.appendChild(status);
     root.appendChild(contextMenu);
+    root.appendChild(toolbarPopover);
     root.appendChild(pmiPicker);
 
-    fw.content.appendChild(root);
+    overlay.appendChild(root);
+    document.body.appendChild(overlay);
 
-    this.window = fw;
+    this.overlay = overlay;
     this.root = root;
 
     this._refreshPmiViews();
@@ -1015,6 +1411,50 @@ export class Sheet2DEditorWindow {
     button.textContent = label;
     button.addEventListener("click", onClick);
     return button;
+  }
+
+  _makeToolbarIconButton(iconKey, onClick, { title = "", variant = "" } = {}) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `sheet-slides-btn sheet-slides-icon-btn ${variant}`.trim();
+    button.innerHTML = TOOLBAR_ICON_SVGS[iconKey] || "";
+    if (title) {
+      button.title = title;
+      button.setAttribute("aria-label", title);
+    }
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  _buildFontFamilySelect(onChange) {
+    const select = document.createElement("select");
+    select.className = "sheet-slides-control";
+    [
+      ["Arial, Helvetica, sans-serif", "Sans"],
+      ["Georgia, serif", "Serif"],
+      ["'Courier New', monospace", "Mono"],
+      ["Impact, Haettenschweiler, sans-serif", "Display"],
+    ].forEach(([value, label]) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      select.appendChild(option);
+    });
+    select.addEventListener("change", () => onChange(select.value));
+    return select;
+  }
+
+  _buildSelect(options, onChange) {
+    const select = document.createElement("select");
+    select.className = "sheet-slides-control";
+    for (const optionConfig of Array.isArray(options) ? options : []) {
+      const option = document.createElement("option");
+      option.value = String(optionConfig?.value ?? "");
+      option.textContent = String(optionConfig?.label ?? option.value);
+      select.appendChild(option);
+    }
+    select.addEventListener("change", () => onChange(select.value));
+    return select;
   }
 
   _toolbarGroup(children, noDivider = false) {
@@ -1062,6 +1502,201 @@ export class Sheet2DEditorWindow {
     return { wrap, input, reset };
   }
 
+  _toggleToolbarPopover(kind, anchor) {
+    if (!anchor || !kind) return;
+    if (this._toolbarPopoverKind === kind && this._toolbarPopoverAnchor === anchor) {
+      this._closeToolbarPopover();
+      return;
+    }
+    this._toolbarPopoverKind = String(kind);
+    this._toolbarPopoverAnchor = anchor;
+    this._renderToolbarPopover();
+  }
+
+  _closeToolbarPopover() {
+    this._toolbarPopoverKind = "";
+    this._toolbarPopoverAnchor = null;
+    if (this._toolbarPopover) this._toolbarPopover.style.display = "none";
+  }
+
+  _renderToolbarPopover() {
+    const popover = this._toolbarPopover;
+    const root = this.root;
+    const anchor = this._toolbarPopoverAnchor;
+    const kind = this._toolbarPopoverKind;
+    const selected = this._getSelectedElement();
+    if (!popover || !root || !anchor || !kind || !selected) {
+      this._closeToolbarPopover();
+      return;
+    }
+
+    popover.textContent = "";
+    popover.className = "sheet-slides-toolbar-popover";
+    const title = document.createElement("div");
+    title.className = "sheet-slides-toolbar-popover-title";
+    popover.appendChild(title);
+
+    const body = document.createElement("div");
+    body.className = "sheet-slides-toolbar-popover-body";
+    popover.appendChild(body);
+
+    if (kind === "fillColor" || kind === "strokeColor" || kind === "textColor") {
+      title.textContent = kind === "fillColor" ? "Background color" : (kind === "strokeColor" ? "Border color" : "Text color");
+      const colorInput = document.createElement("input");
+      colorInput.type = "color";
+      colorInput.className = "sheet-slides-toolbar-popover-color";
+      const currentColor = kind === "fillColor"
+        ? normalizeHex(selected.fill, normalizeHex(this._defaultFillForElement(selected), "#000000"))
+        : (kind === "strokeColor"
+          ? normalizeHex(selected.stroke, this._defaultStrokeForElement(selected))
+          : normalizeHex(selected.color, this._defaultTextColorForElement(selected)));
+      colorInput.value = currentColor;
+      colorInput.addEventListener("input", () => {
+        if (kind === "fillColor") this._setSelectedStyleField("fill", colorInput.value);
+        else if (kind === "strokeColor") this._setSelectedStyleField("stroke", colorInput.value);
+        else this._setSelectedTextField("color", colorInput.value);
+      });
+      body.appendChild(colorInput);
+
+      const swatches = document.createElement("div");
+      swatches.className = "sheet-slides-toolbar-swatch-grid";
+      for (const swatchColor of TOOLBAR_COLOR_SWATCHS) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "sheet-slides-toolbar-swatch";
+        button.style.background = swatchColor;
+        button.title = swatchColor;
+        button.setAttribute("aria-label", `Use color ${swatchColor}`);
+        button.addEventListener("click", () => {
+          if (kind === "fillColor") this._setSelectedStyleField("fill", swatchColor);
+          else if (kind === "strokeColor") this._setSelectedStyleField("stroke", swatchColor);
+          else this._setSelectedTextField("color", swatchColor);
+          this._closeToolbarPopover();
+        });
+        swatches.appendChild(button);
+      }
+      body.appendChild(swatches);
+    } else if (kind === "strokeWidth") {
+      title.textContent = "Line weight";
+      const list = document.createElement("div");
+      list.className = "sheet-slides-toolbar-option-list";
+      const currentPx = selected.type === "text" && !this._isTextBorderEnabled(selected)
+        ? 0
+        : Math.round(toFiniteNumber(selected.strokeWidth, this._defaultStrokeWidthForElement(selected)) * this._pxPerIn());
+      for (const value of STROKE_WIDTH_OPTIONS_PX) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `sheet-slides-toolbar-option${value === currentPx ? " active" : ""}`;
+        button.textContent = `${value}px`;
+        button.addEventListener("click", () => {
+          this._setSelectedStyleField("strokeWidth", value);
+          this._closeToolbarPopover();
+        });
+        list.appendChild(button);
+      }
+      body.appendChild(list);
+    } else if (kind === "lineStyle") {
+      title.textContent = "Line style";
+      const list = document.createElement("div");
+      list.className = "sheet-slides-toolbar-option-list";
+      const currentStyle = this._getLineStyleValue(selected);
+      for (const option of LINE_STYLE_OPTIONS) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `sheet-slides-toolbar-option sheet-slides-toolbar-style-option${option.value === currentStyle ? " active" : ""}`;
+        button.innerHTML = this._createLineStylePreviewSvg(option.value);
+        button.title = option.label;
+        button.setAttribute("aria-label", option.label);
+        button.addEventListener("click", () => {
+          this._setSelectedStyleField("lineStyle", option.value);
+          this._closeToolbarPopover();
+        });
+        list.appendChild(button);
+      }
+      body.appendChild(list);
+    } else if (kind === "textAlign") {
+      title.textContent = "Text alignment";
+
+      const textAlign = this._getTextAlignValue(selected);
+      const verticalAlign = this._getTextVerticalAlignValue(selected);
+      const sections = [
+        {
+          title: "Horizontal",
+          field: "textAlign",
+          current: textAlign,
+          options: [
+            { value: "left", label: "Align left", iconKey: "alignLeft" },
+            { value: "center", label: "Align center", iconKey: "alignCenter" },
+            { value: "right", label: "Align right", iconKey: "alignRight" },
+          ],
+        },
+        {
+          title: "Vertical",
+          field: "verticalAlign",
+          current: verticalAlign,
+          options: [
+            { value: "top", label: "Align top", iconKey: "valignTop" },
+            { value: "middle", label: "Align middle", iconKey: "valignMiddle" },
+            { value: "bottom", label: "Align bottom", iconKey: "valignBottom" },
+          ],
+        },
+      ];
+
+      for (const sectionConfig of sections) {
+        const section = document.createElement("div");
+        section.className = "sheet-slides-toolbar-popover-section";
+
+        const sectionTitle = document.createElement("div");
+        sectionTitle.className = "sheet-slides-toolbar-popover-section-title";
+        sectionTitle.textContent = sectionConfig.title;
+        section.appendChild(sectionTitle);
+
+        const list = document.createElement("div");
+        list.className = "sheet-slides-toolbar-icon-grid";
+        for (const option of sectionConfig.options) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = `sheet-slides-toolbar-option sheet-slides-icon-btn${option.value === sectionConfig.current ? " active" : ""}`;
+          button.innerHTML = TOOLBAR_ICON_SVGS[option.iconKey] || "";
+          button.title = option.label;
+          button.setAttribute("aria-label", option.label);
+          button.addEventListener("click", () => {
+            this._setSelectedTextField(sectionConfig.field, option.value);
+            this._closeToolbarPopover();
+          });
+          list.appendChild(button);
+        }
+        section.appendChild(list);
+        body.appendChild(section);
+      }
+    }
+
+    popover.style.display = "block";
+    const rootRect = root.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    const popoverWidth = Math.max(180, popover.offsetWidth);
+    const popoverHeight = Math.max(72, popover.offsetHeight);
+    const left = clamp(
+      Math.round(anchorRect.left - rootRect.left),
+      8,
+      Math.max(8, rootRect.width - popoverWidth - 8),
+    );
+    const top = clamp(
+      Math.round(anchorRect.bottom - rootRect.top + 8),
+      8,
+      Math.max(8, rootRect.height - popoverHeight - 8),
+    );
+    popover.style.left = `${left}px`;
+    popover.style.top = `${top}px`;
+  }
+
+  _createLineStylePreviewSvg(styleValue) {
+    const dashArray = this._getStrokeDashArray(styleValue, 2);
+    return iconSvg(`
+      <path d="M2 12h20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"${dashArray ? ` stroke-dasharray="${dashArray}"` : ""}/>
+    `);
+  }
+
   _defaultSheetBackground() {
     return "#ffffff";
   }
@@ -1090,10 +1725,74 @@ export class Sheet2DEditorWindow {
     return "#000000";
   }
 
+  _defaultStrokeForElement(element) {
+    const type = String(element?.type || "");
+    if (type === "text") return "#000000";
+    if (type === "rect") return "#1d4ed8";
+    if (type === "ellipse") return "#c78c00";
+    if (type === "image") return "#94a3b8";
+    if (type === "pmiInset") return "#334155";
+    if (type === "line") return "#0f172a";
+    return "#000000";
+  }
+
+  _defaultStrokeWidthForElement(element) {
+    const type = String(element?.type || "");
+    if (type === "text") return 0;
+    if (type === "line") return 0.02;
+    if (type === "rect" || type === "ellipse" || type === "image" || type === "pmiInset") return 0.01;
+    return 0.01;
+  }
+
+  _defaultLineStyleForElement(_element) {
+    return "solid";
+  }
+
   _defaultTextColorForElement(element) {
     const type = String(element?.type || "");
     if (type === "rect" || type === "ellipse") return "#0f172a";
     return "#111111";
+  }
+
+  _getTextAlignValue(element) {
+    const fallbackAlign = element?.type === "text" ? "left" : "center";
+    const value = String(element?.textAlign || fallbackAlign);
+    return ["left", "center", "right"].includes(value) ? value : fallbackAlign;
+  }
+
+  _getTextVerticalAlignValue(element) {
+    const fallbackAlign = element?.type === "text" ? "top" : "middle";
+    const value = String(element?.verticalAlign || fallbackAlign);
+    return ["top", "middle", "bottom"].includes(value) ? value : fallbackAlign;
+  }
+
+  _getLineStyleValue(element) {
+    const value = String(element?.lineStyle || this._defaultLineStyleForElement(element));
+    return LINE_STYLE_OPTIONS.some((entry) => entry.value === value) ? value : "solid";
+  }
+
+  _isTextBorderEnabled(element) {
+    if (!element || element.type !== "text") return true;
+    if (typeof element.strokeEnabled === "boolean") return element.strokeEnabled;
+    return false;
+  }
+
+  _getStrokeDashArray(styleValue, strokeWidthPx) {
+    const unit = Math.max(1, toFiniteNumber(strokeWidthPx, 1));
+    switch (styleValue) {
+      case "dotted":
+        return `${unit} ${unit * 2.6}`;
+      case "dashed":
+        return `${unit * 5} ${unit * 3}`;
+      case "dashDot":
+        return `${unit * 5} ${unit * 2.5} ${unit} ${unit * 2.5}`;
+      case "longDash":
+        return `${unit * 8} ${unit * 3}`;
+      case "dashDotDot":
+        return `${unit * 5} ${unit * 2.3} ${unit} ${unit * 2.2} ${unit} ${unit * 2.3}`;
+      default:
+        return "";
+    }
   }
 
   _setSheetBackground(rawValue) {
@@ -1186,7 +1885,7 @@ export class Sheet2DEditorWindow {
     if (this._pendingPmiPreviewCaptures.has(captureKey)) return;
 
     const promise = this._pmiImageCaptureQueue
-      .then(() => this._capturePmiViewImage(view, viewIndex, { fill: "transparent", pmiViewName: String(view?.viewName || view?.name || "") }))
+      .then(() => this._capturePmiViewImage(view, viewIndex))
       .then((dataUrl) => {
         if (!dataUrl) return null;
         this._pmiImageCache.set(captureKey, dataUrl);
@@ -1270,6 +1969,12 @@ export class Sheet2DEditorWindow {
   }
 
   _onGlobalPointerDown(event) {
+    if (this._toolbarPopover?.style.display !== "none") {
+      const insideToolbarPopover = event?.target?.closest?.(".sheet-slides-toolbar-popover, .sheet-slides-toolbar-menu-btn");
+      if (!insideToolbarPopover) {
+        this._closeToolbarPopover();
+      }
+    }
     if (this._contextMenu && this._contextMenu.style.display !== "none") {
       if (!event?.target?.closest?.(".sheet-slides-context-menu")) {
         this._hideContextMenu();
@@ -1332,8 +2037,63 @@ export class Sheet2DEditorWindow {
     return this._mediaMetadataCache.get(src) || null;
   }
 
+  _getPmiLabelPosition(element) {
+    if (element?.type !== "pmiInset") return "none";
+    const value = String(element?.pmiLabelPosition || "").trim().toLowerCase();
+    if (value === "top" || value === "bottom" || value === "none") return value;
+    return element?.showTitle !== false ? "bottom" : "none";
+  }
+
   _getPmiTitleHeightIn(element) {
-    return element?.type === "pmiInset" && element?.showTitle !== false ? PMI_TITLE_HEIGHT_IN : 0;
+    return this._getPmiLabelPosition(element) === "none" ? 0 : PMI_TITLE_HEIGHT_IN;
+  }
+
+  _getSuggestedPmiInsetSize(metadata = null, showLabel = true) {
+    const pageWidth = Math.max(0.1, toFiniteNumber(this.sheetDraft?.widthIn, 11));
+    const pageHeight = Math.max(0.1, toFiniteNumber(this.sheetDraft?.heightIn, 8.5));
+    const captionHeight = showLabel ? PMI_TITLE_HEIGHT_IN : 0;
+    const maxFrameWidth = Math.max(1.8, pageWidth * 0.28);
+    const maxFrameHeight = Math.max(1.4, (pageHeight * 0.34) - captionHeight);
+
+    const naturalWidth = toFiniteNumber(metadata?.width, 0);
+    const naturalHeight = toFiniteNumber(metadata?.height, 0);
+    if (naturalWidth > 0 && naturalHeight > 0) {
+      const fit = Math.min(maxFrameWidth / naturalWidth, maxFrameHeight / naturalHeight);
+      const frameWidth = Math.max(MIN_ELEMENT_IN, naturalWidth * fit);
+      const frameHeight = Math.max(MIN_ELEMENT_IN, naturalHeight * fit);
+      return {
+        frameWidth,
+        frameHeight,
+        outerHeight: frameHeight + captionHeight,
+      };
+    }
+
+    const frameWidth = Math.max(MIN_ELEMENT_IN, Math.min(3, maxFrameWidth));
+    const frameHeight = Math.max(MIN_ELEMENT_IN, Math.min(2, maxFrameHeight));
+    return {
+      frameWidth,
+      frameHeight,
+      outerHeight: frameHeight + captionHeight,
+    };
+  }
+
+  _getPmiAnchorValue(element) {
+    const value = String(element?.pmiAnchor || "c");
+    return PMI_ANCHOR_OPTIONS.some((option) => option.value === value) ? value : "c";
+  }
+
+  _getAnchorFractions(anchor) {
+    switch (String(anchor || "c")) {
+      case "nw": return { x: 0, y: 0 };
+      case "n": return { x: 0.5, y: 0 };
+      case "ne": return { x: 1, y: 0 };
+      case "w": return { x: 0, y: 0.5 };
+      case "e": return { x: 1, y: 0.5 };
+      case "sw": return { x: 0, y: 1 };
+      case "s": return { x: 0.5, y: 1 };
+      case "se": return { x: 1, y: 1 };
+      default: return { x: 0.5, y: 0.5 };
+    }
   }
 
   _getMediaFrameBox(element) {
@@ -1343,7 +2103,29 @@ export class Sheet2DEditorWindow {
     const outerH = Math.max(MIN_ELEMENT_IN, toFiniteNumber(element?.h, 1));
     const captionHeight = this._getPmiTitleHeightIn(element);
     const h = Math.max(MIN_ELEMENT_IN, outerH - captionHeight);
-    return { x, y, w, h, outerH, captionHeight };
+    const labelPosition = this._getPmiLabelPosition(element);
+    return {
+      x,
+      y: y + (labelPosition === "top" ? captionHeight : 0),
+      w,
+      h,
+      outerH,
+      captionHeight,
+      labelPosition,
+    };
+  }
+
+  _getPmiViewStateSignature(view = null) {
+    try {
+      const target = view && typeof view === "object" ? view : null;
+      return JSON.stringify({
+        camera: target?.camera || null,
+        annotations: Array.isArray(target?.annotations) ? target.annotations : [],
+        viewSettings: target?.viewSettings || target?.settings || null,
+      }) || "null";
+    } catch {
+      return "unserializable";
+    }
   }
 
   _getMediaLayout(element, frameWidth, frameHeight, metadata = null) {
@@ -1351,6 +2133,25 @@ export class Sheet2DEditorWindow {
     const safeFrameHeight = Math.max(MIN_ELEMENT_IN, toFiniteNumber(frameHeight, 1));
     const naturalWidth = Math.max(1, toFiniteNumber(metadata?.width, safeFrameWidth));
     const naturalHeight = Math.max(1, toFiniteNumber(metadata?.height, safeFrameHeight));
+    if (String(element?.type || "") === "pmiInset") {
+      const fit = Math.min(safeFrameWidth / naturalWidth, safeFrameHeight / naturalHeight);
+      const renderWidth = naturalWidth * fit;
+      const renderHeight = naturalHeight * fit;
+      return {
+        naturalWidth,
+        naturalHeight,
+        baseWidth: renderWidth,
+        baseHeight: renderHeight,
+        scale: 1,
+        renderWidth,
+        renderHeight,
+        extraX: 0,
+        extraY: 0,
+        left: (safeFrameWidth - renderWidth) * 0.5,
+        top: (safeFrameHeight - renderHeight) * 0.5,
+      };
+    }
+
     const fit = Math.max(safeFrameWidth / naturalWidth, safeFrameHeight / naturalHeight);
     const baseWidth = naturalWidth * fit;
     const baseHeight = naturalHeight * fit;
@@ -1465,6 +2266,76 @@ export class Sheet2DEditorWindow {
     this._renderSidebarOnly();
     this._renderStageOnly();
     this._renderInspector();
+  }
+
+  _renderSelectionToolbar() {
+    const selected = this._getSelectedElement();
+    const hasElement = !!selected;
+    const supportsText = hasElement && elementSupportsText(selected);
+    const isPMI = hasElement && selected.type === "pmiInset";
+    const isLine = hasElement && selected.type === "line";
+
+    if (this._toolbarSelectionStyleGroup) {
+      this._toolbarSelectionStyleGroup.style.display = hasElement ? "flex" : "none";
+    }
+    if (this._toolbarSelectionTextGroup) {
+      this._toolbarSelectionTextGroup.style.display = supportsText ? "flex" : "none";
+    }
+
+    if (!hasElement) {
+      this._closeToolbarPopover();
+      if (this._toolbarBoldBtn) this._toolbarBoldBtn.classList.remove("primary");
+      if (this._toolbarItalicBtn) this._toolbarItalicBtn.classList.remove("primary");
+      if (this._toolbarUnderlineBtn) this._toolbarUnderlineBtn.classList.remove("primary");
+      if (this._toolbarAlignmentButton) {
+        this._toolbarAlignmentButton.title = "Text alignment";
+        this._toolbarAlignmentButton.setAttribute("aria-label", "Text alignment");
+      }
+      return;
+    }
+
+    if ((!supportsText && (this._toolbarPopoverKind === "textColor" || this._toolbarPopoverKind === "textAlign"))
+      || ((isLine || isPMI) && this._toolbarPopoverKind === "fillColor")) {
+      this._closeToolbarPopover();
+    }
+
+    if (this._toolbarFillButton) this._toolbarFillButton.style.display = (!isLine && !isPMI) ? "" : "none";
+    if (this._toolbarStrokeButton) this._toolbarStrokeButton.style.display = "";
+    if (this._toolbarStrokeWidthButton) this._toolbarStrokeWidthButton.style.display = "";
+    if (this._toolbarLineStyleButton) this._toolbarLineStyleButton.style.display = "";
+
+    if (!supportsText) {
+      if (this._toolbarBoldBtn) this._toolbarBoldBtn.classList.remove("primary");
+      if (this._toolbarItalicBtn) this._toolbarItalicBtn.classList.remove("primary");
+      if (this._toolbarUnderlineBtn) this._toolbarUnderlineBtn.classList.remove("primary");
+      if (this._toolbarAlignmentButton) {
+        this._toolbarAlignmentButton.title = "Text alignment";
+        this._toolbarAlignmentButton.setAttribute("aria-label", "Text alignment");
+      }
+      return;
+    }
+
+    if (this._toolbarFontFamilyInput) {
+      this._toolbarFontFamilyInput.value = String(selected.fontFamily || "Arial, Helvetica, sans-serif");
+    }
+    if (this._toolbarFontSizeInput) {
+      this._toolbarFontSizeInput.value = String(Math.round(toFiniteNumber(selected.fontSize, 0.32) * this._pxPerIn()));
+    }
+    if (this._toolbarBoldBtn) {
+      this._toolbarBoldBtn.classList.toggle("primary", String(selected.fontWeight || "400") === "700");
+    }
+    if (this._toolbarItalicBtn) {
+      this._toolbarItalicBtn.classList.toggle("primary", String(selected.fontStyle || "normal") === "italic");
+    }
+    if (this._toolbarUnderlineBtn) {
+      this._toolbarUnderlineBtn.classList.toggle("primary", String(selected.textDecoration || "none") === "underline");
+    }
+    const textAlign = this._getTextAlignValue(selected);
+    const verticalAlign = this._getTextVerticalAlignValue(selected);
+    if (this._toolbarAlignmentButton) {
+      this._toolbarAlignmentButton.title = `Text alignment (${textAlign}, ${verticalAlign})`;
+      this._toolbarAlignmentButton.setAttribute("aria-label", `Text alignment (${textAlign}, ${verticalAlign})`);
+    }
   }
 
   _renderSidebarOnly() {
@@ -1699,41 +2570,56 @@ export class Sheet2DEditorWindow {
 
         if (el.type === "text") {
           const content = document.createElement("div");
-          content.className = "sheet-slides-inline-text";
-          content.textContent = String(el.text || "");
-          this._applyTextStyles(content, el, ppi);
-          content.style.padding = "4px";
+          content.className = "sheet-slides-element-content";
           content.style.background = toCssColor(el.fill, "transparent");
+          const textBody = document.createElement("div");
+          textBody.className = "sheet-slides-inline-text";
+          const textInner = document.createElement("div");
+          textInner.className = "sheet-slides-inline-text-body";
+          textInner.textContent = String(el.text || "");
+          textBody.appendChild(textInner);
+          this._applyTextStyles(textBody, el, ppi);
+          textBody.style.padding = "4px";
+          content.appendChild(textBody);
           node.appendChild(content);
+          this._appendStrokeOverlay(node, el, wPx, hPx, { shape: "rect", radiusPx: 8 });
         } else if (el.type === "ellipse") {
-          node.style.background = toCssColor(el.fill, "#ffd166");
-          node.style.borderRadius = "999px";
-          node.style.border = `${Math.max(1, toFiniteNumber(el.strokeWidth, 0.01) * ppi)}px solid ${toCssColor(el.stroke, "#c78c00")}`;
+          const content = document.createElement("div");
+          content.className = "sheet-slides-element-content";
+          this._appendShapeSurface(content, el, wPx, hPx, {
+            shape: "ellipse",
+            fillColor: el.fill || this._defaultFillForElement(el),
+          });
           const shapeText = document.createElement("div");
           shapeText.className = "sheet-slides-inline-text sheet-slides-shape-text";
-          shapeText.textContent = String(el.text || "");
+          const textInner = document.createElement("div");
+          textInner.className = "sheet-slides-inline-text-body";
+          textInner.textContent = String(el.text || "");
+          shapeText.appendChild(textInner);
           this._applyTextStyles(shapeText, el, ppi);
-          shapeText.style.justifyContent = el.textAlign === "left"
-            ? "flex-start"
-            : (el.textAlign === "right" ? "flex-end" : "center");
           shapeText.style.padding = "12px";
-          node.appendChild(shapeText);
+          content.appendChild(shapeText);
+          node.appendChild(content);
         } else if (el.type === "rect") {
-          node.style.background = toCssColor(el.fill, "#8bc4ff");
-          node.style.borderRadius = `${Math.max(0, toFiniteNumber(el.cornerRadius, 0.1) * ppi)}px`;
-          node.style.border = `${Math.max(1, toFiniteNumber(el.strokeWidth, 0.01) * ppi)}px solid ${toCssColor(el.stroke, "#1d4ed8")}`;
+          const content = document.createElement("div");
+          content.className = "sheet-slides-element-content";
+          this._appendShapeSurface(content, el, wPx, hPx, {
+            shape: "rect",
+            radiusPx: Math.max(0, toFiniteNumber(el.cornerRadius, 0.1) * ppi),
+            fillColor: el.fill || this._defaultFillForElement(el),
+          });
           const shapeText = document.createElement("div");
           shapeText.className = "sheet-slides-inline-text sheet-slides-shape-text";
-          shapeText.textContent = String(el.text || "");
+          const textInner = document.createElement("div");
+          textInner.className = "sheet-slides-inline-text-body";
+          textInner.textContent = String(el.text || "");
+          shapeText.appendChild(textInner);
           this._applyTextStyles(shapeText, el, ppi);
-          shapeText.style.justifyContent = el.textAlign === "left"
-            ? "flex-start"
-            : (el.textAlign === "right" ? "flex-end" : "center");
           shapeText.style.padding = "8px";
-          node.appendChild(shapeText);
+          content.appendChild(shapeText);
+          node.appendChild(content);
         } else if (el.type === "image") {
           node.style.background = toCssColor(el.fill, "transparent");
-          node.style.border = `${Math.max(1, toFiniteNumber(el.strokeWidth, 0.01) * ppi)}px solid ${toCssColor(el.stroke, "#94a3b8")}`;
           node.style.borderRadius = "8px";
           node.style.overflow = "hidden";
           const mediaFrame = document.createElement("div");
@@ -1748,17 +2634,22 @@ export class Sheet2DEditorWindow {
           this._applyMediaCropStyles(img, el, wPx, hPx);
           mediaFrame.appendChild(img);
           node.appendChild(mediaFrame);
+          this._appendStrokeOverlay(node, el, wPx, hPx, { shape: "rect", radiusPx: 8 });
         } else if (el.type === "pmiInset") {
           const pmiViewName = this._resolvePmiViewDisplayName(el);
-          node.style.background = toCssColor(el.fill, "transparent");
-          node.style.border = `${Math.max(1, toFiniteNumber(el.strokeWidth, 0.01) * ppi)}px solid ${toCssColor(el.stroke, "#334155")}`;
-          node.style.borderRadius = "8px";
-          node.style.overflow = "hidden";
+          const labelPosition = this._getPmiLabelPosition(el);
+          node.style.background = "transparent";
+          node.style.overflow = "visible";
           const captionHeightPx = Math.max(0, this._getPmiTitleHeightIn(el) * ppi);
           const mediaHeightPx = Math.max(1, hPx - captionHeightPx);
+          const frame = document.createElement("div");
+          frame.className = "sheet-slides-pmi-frame";
+          frame.style.height = `${mediaHeightPx}px`;
+          frame.style.top = `${labelPosition === "top" ? captionHeightPx : 0}px`;
+          frame.style.background = toCssColor(el.fill, "transparent");
           const host = document.createElement("div");
           host.className = "sheet-slides-pmi-host";
-          host.style.height = `${mediaHeightPx}px`;
+          host.style.height = "100%";
           if (String(el.src || "").trim()) {
             const img = document.createElement("img");
             img.className = "sheet-slides-media-image sheet-slides-pmi-image";
@@ -1774,14 +2665,16 @@ export class Sheet2DEditorWindow {
             placeholder.textContent = "PMI image unavailable";
             host.appendChild(placeholder);
           }
-          node.appendChild(host);
-          if (el.showTitle !== false) {
+          frame.appendChild(host);
+          node.appendChild(frame);
+          if (labelPosition !== "none") {
             const caption = document.createElement("div");
-            caption.className = "sheet-slides-pmi-caption";
+            caption.className = `sheet-slides-pmi-caption ${labelPosition === "top" ? "is-top" : "is-bottom"}`;
             caption.textContent = pmiViewName;
-            caption.style.height = `${Math.max(0, hPx - mediaHeightPx)}px`;
+            caption.style.height = `${captionHeightPx}px`;
             node.appendChild(caption);
           }
+          this._appendStrokeOverlay(frame, el, wPx, mediaHeightPx, { shape: "rect", radiusPx: 8 });
         } else {
           node.style.background = toCssColor(el.fill, "#8bc4ff");
         }
@@ -1794,19 +2687,22 @@ export class Sheet2DEditorWindow {
   _renderStageOnly() {
     const canvas = this._slideCanvas;
     const stageShell = this._stageShell;
-    if (!canvas) return;
+    if (!canvas || !stageShell) return;
 
     const sheet = this.sheetDraft;
     if (!sheet) {
+      stageShell.textContent = "";
+      stageShell.appendChild(canvas);
       canvas.textContent = "";
       canvas.style.width = "240px";
       canvas.style.height = "160px";
-      canvas.style.transform = "scale(1)";
-      if (stageShell) {
-        stageShell.style.width = "240px";
-        stageShell.style.height = "160px";
-      }
+      canvas.style.transform = "none";
+      stageShell.style.width = "240px";
+      stageShell.style.height = "160px";
+      stageShell.style.transform = "translate(0px, 0px) scale(1)";
       this._appliedZoom = 1;
+      this._appliedStagePanX = 0;
+      this._appliedStagePanY = 0;
       this._syncZoomControl();
       this._disposeUnusedPmiViewports(new Set());
       return;
@@ -1816,6 +2712,8 @@ export class Sheet2DEditorWindow {
     const widthPx = Math.max(100, toFiniteNumber(sheet.widthIn, 11) * ppi);
     const heightPx = Math.max(100, toFiniteNumber(sheet.heightIn, 8.5) * ppi);
 
+    stageShell.textContent = "";
+    stageShell.appendChild(canvas);
     canvas.textContent = "";
     canvas.style.width = `${widthPx}px`;
     canvas.style.height = `${heightPx}px`;
@@ -1823,11 +2721,18 @@ export class Sheet2DEditorWindow {
     this._appliedZoom = this._zoomMode === "fit"
       ? this._computeFitZoom(sheet)
       : clamp(toFiniteNumber(this.zoom, DEFAULT_ZOOM), 0.1, 4);
-    canvas.style.transform = `scale(${this._appliedZoom})`;
-    if (stageShell) {
-      stageShell.style.width = `${Math.max(1, widthPx * this._appliedZoom)}px`;
-      stageShell.style.height = `${Math.max(1, heightPx * this._appliedZoom)}px`;
+    if (this._zoomMode === "fit") {
+      const fitPan = this._computeFitStagePan(sheet, this._appliedZoom);
+      this._appliedStagePanX = fitPan.x;
+      this._appliedStagePanY = fitPan.y;
+    } else {
+      this._appliedStagePanX = toFiniteNumber(this._stagePanX, 0);
+      this._appliedStagePanY = toFiniteNumber(this._stagePanY, 0);
     }
+    canvas.style.transform = "none";
+    stageShell.style.width = `${Math.max(1, widthPx)}px`;
+    stageShell.style.height = `${Math.max(1, heightPx)}px`;
+    stageShell.style.transform = `translate(${this._appliedStagePanX}px, ${this._appliedStagePanY}px) scale(${this._appliedZoom})`;
     canvas.classList.toggle("show-grid", !!this.showGrid);
     this._syncZoomControl();
 
@@ -1842,6 +2747,11 @@ export class Sheet2DEditorWindow {
       const node = this._buildElementNode(element, usedPmiIds);
       if (!node) continue;
       canvas.appendChild(node);
+    }
+
+    const selectedOverlay = this._buildSelectionOverlay(this._getSelectedElement());
+    if (selectedOverlay) {
+      canvas.appendChild(selectedOverlay);
     }
 
     this._disposeUnusedPmiViewports(usedPmiIds);
@@ -1881,9 +2791,9 @@ export class Sheet2DEditorWindow {
 
       const content = document.createElement("div");
       content.className = "sheet-slides-element-content";
-      content.style.background = toCssColor(element.stroke, "#1f2937");
       content.style.width = "100%";
       content.style.height = "100%";
+      this._applyLineStrokeStyles(content, element, Math.max(2, toFiniteNumber(element.strokeWidth, 0.02) * ppi));
       node.appendChild(content);
 
       node.addEventListener("pointerdown", (event) => this._onElementPointerDown(event, element.id));
@@ -1894,7 +2804,9 @@ export class Sheet2DEditorWindow {
     const yPx = toFiniteNumber(element.y, 0) * ppi;
     const wPx = Math.max(1, toFiniteNumber(element.w, 1) * ppi);
     const hPx = Math.max(1, toFiniteNumber(element.h, 1) * ppi);
-    const mediaFrameBox = elementSupportsMediaCrop(element) ? this._getMediaFrameBox(element) : null;
+    const mediaFrameBox = (elementSupportsMediaCrop(element) || element?.type === "pmiInset")
+      ? this._getMediaFrameBox(element)
+      : null;
     const mediaFrameHeightPx = mediaFrameBox ? Math.max(1, mediaFrameBox.h * ppi) : hPx;
 
     node.style.left = `${xPx}px`;
@@ -1907,40 +2819,48 @@ export class Sheet2DEditorWindow {
     content.className = "sheet-slides-element-content";
 
     if (element.type === "text") {
-      content.classList.add("sheet-slides-inline-text");
-      content.textContent = String(element.text || "");
-      this._applyTextStyles(content, element, ppi);
-      content.style.padding = "4px";
       content.style.background = toCssColor(element.fill, "transparent");
+      const textBody = document.createElement("div");
+      textBody.className = "sheet-slides-inline-text";
+      const textInner = document.createElement("div");
+      textInner.className = "sheet-slides-inline-text-body";
+      textInner.textContent = String(element.text || "");
+      textBody.appendChild(textInner);
+      this._applyTextStyles(textBody, element, ppi);
+      textBody.style.padding = "4px";
+      content.appendChild(textBody);
+      this._appendStrokeOverlay(node, element, wPx, hPx, { shape: "rect", radiusPx: 8 });
     } else if (element.type === "rect") {
-      content.style.background = toCssColor(element.fill, "#8bc4ff");
-      content.style.borderRadius = `${Math.max(0, toFiniteNumber(element.cornerRadius, 0.1) * ppi)}px`;
-      content.style.border = `${Math.max(1, toFiniteNumber(element.strokeWidth, 0.01) * ppi)}px solid ${toCssColor(element.stroke, "#1d4ed8")}`;
+      this._appendShapeSurface(content, element, wPx, hPx, {
+        shape: "rect",
+        radiusPx: Math.max(0, toFiniteNumber(element.cornerRadius, 0.1) * ppi),
+        fillColor: element.fill || this._defaultFillForElement(element),
+      });
       const shapeText = document.createElement("div");
       shapeText.className = "sheet-slides-inline-text sheet-slides-shape-text";
-      shapeText.textContent = String(element.text || "");
+      const textInner = document.createElement("div");
+      textInner.className = "sheet-slides-inline-text-body";
+      textInner.textContent = String(element.text || "");
+      shapeText.appendChild(textInner);
       this._applyTextStyles(shapeText, element, ppi);
-      shapeText.style.justifyContent = element.textAlign === "left"
-        ? "flex-start"
-        : (element.textAlign === "right" ? "flex-end" : "center");
       shapeText.style.padding = "8px";
       content.appendChild(shapeText);
     } else if (element.type === "ellipse") {
-      content.style.background = toCssColor(element.fill, "#ffd166");
-      content.style.borderRadius = "999px";
-      content.style.border = `${Math.max(1, toFiniteNumber(element.strokeWidth, 0.01) * ppi)}px solid ${toCssColor(element.stroke, "#c78c00")}`;
+      this._appendShapeSurface(content, element, wPx, hPx, {
+        shape: "ellipse",
+        fillColor: element.fill || this._defaultFillForElement(element),
+      });
       const shapeText = document.createElement("div");
       shapeText.className = "sheet-slides-inline-text sheet-slides-shape-text";
-      shapeText.textContent = String(element.text || "");
+      const textInner = document.createElement("div");
+      textInner.className = "sheet-slides-inline-text-body";
+      textInner.textContent = String(element.text || "");
+      shapeText.appendChild(textInner);
       this._applyTextStyles(shapeText, element, ppi);
-      shapeText.style.justifyContent = element.textAlign === "left"
-        ? "flex-start"
-        : (element.textAlign === "right" ? "flex-end" : "center");
       shapeText.style.padding = "12px";
       content.appendChild(shapeText);
     } else if (element.type === "image") {
       content.style.background = toCssColor(element.fill, "transparent");
-      content.style.border = `${Math.max(1, toFiniteNumber(element.strokeWidth, 0.01) * ppi)}px solid ${toCssColor(element.stroke, "#94a3b8")}`;
       content.style.borderRadius = "8px";
       content.style.overflow = "hidden";
       const mediaFrame = document.createElement("div");
@@ -1957,68 +2877,137 @@ export class Sheet2DEditorWindow {
       this._applyMediaCropStyles(media, element, wPx, hPx);
       mediaFrame.appendChild(media);
       content.appendChild(mediaFrame);
+      this._appendStrokeOverlay(node, element, wPx, hPx, { shape: "rect", radiusPx: 8 });
     } else if (element.type === "pmiInset") {
       const pmiViewName = this._resolvePmiViewDisplayName(element);
-      content.style.background = toCssColor(element.fill, "transparent");
-      content.style.border = `${Math.max(1, toFiniteNumber(element.strokeWidth, 0.01) * ppi)}px solid ${toCssColor(element.stroke, "#334155")}`;
-      content.style.borderRadius = "8px";
-      content.style.overflow = "hidden";
+      const labelPosition = this._getPmiLabelPosition(element);
+      content.style.background = "transparent";
+      content.style.overflow = "visible";
       content.classList.add("sheet-slides-pmi-body");
+      const frame = document.createElement("div");
+      frame.className = "sheet-slides-pmi-frame";
+      frame.style.height = `${mediaFrameHeightPx}px`;
+      frame.style.top = `${labelPosition === "top" ? (hPx - mediaFrameHeightPx) : 0}px`;
+      frame.style.background = toCssColor(element.fill, "transparent");
+      content.appendChild(frame);
       const host = document.createElement("div");
       host.className = "sheet-slides-pmi-host";
       host.dataset.cropTarget = "media";
-      host.style.height = `${mediaFrameHeightPx}px`;
-      content.appendChild(host);
+      host.style.height = "100%";
+      frame.appendChild(host);
 
-      if (element.showTitle !== false) {
+      if (labelPosition !== "none") {
         const footer = document.createElement("div");
-        footer.className = "sheet-slides-pmi-caption";
+        footer.className = `sheet-slides-pmi-caption ${labelPosition === "top" ? "is-top" : "is-bottom"}`;
         footer.textContent = pmiViewName;
         footer.style.height = `${Math.max(0, hPx - mediaFrameHeightPx)}px`;
         content.appendChild(footer);
       }
 
       this._attachPmiViewport(element, host, wPx, mediaFrameHeightPx, usedPmiIds);
+      this._appendStrokeOverlay(frame, element, wPx, mediaFrameHeightPx, { shape: "rect", radiusPx: 8 });
     } else {
       content.style.background = toCssColor(element.fill, "#dbeafe");
     }
 
     node.appendChild(content);
 
-    if (selected && element.type !== "line") {
-      if (cropActive) {
-        const cropOverlay = document.createElement("div");
-        cropOverlay.className = "sheet-slides-crop-overlay";
-        cropOverlay.style.height = `${mediaFrameHeightPx}px`;
-        ["nw", "n", "ne", "e", "se", "s", "sw", "w"].forEach((corner) => {
-          const handle = document.createElement("div");
-          handle.className = `sheet-slides-crop-handle ${corner}`;
-          handle.dataset.cropHandle = corner;
-          cropOverlay.appendChild(handle);
-        });
-        node.appendChild(cropOverlay);
-      } else {
-        ["nw", "ne", "sw", "se"].forEach((corner) => {
-          const handle = document.createElement("div");
-          handle.className = `sheet-slides-handle ${corner}`;
-          handle.dataset.handle = corner;
-          node.appendChild(handle);
-        });
-
-        const rotateLine = document.createElement("div");
-        rotateLine.className = "sheet-slides-rotate-line";
-        node.appendChild(rotateLine);
-
-        const rotateHandle = document.createElement("div");
-        rotateHandle.className = "sheet-slides-rotate-handle";
-        rotateHandle.dataset.handle = "rotate";
-        node.appendChild(rotateHandle);
-      }
-    }
-
     node.addEventListener("pointerdown", (event) => this._onElementPointerDown(event, element.id));
     node.addEventListener("dblclick", (event) => this._onElementDoubleClick(event, element.id));
     return node;
+  }
+
+  _buildSelectionOverlay(element) {
+    if (!element || typeof element !== "object" || element.type === "line") return null;
+
+    const ppi = this._pxPerIn();
+    const targetId = String(element.id || "");
+    const renderedNode = targetId
+      ? Array.from(this._slideCanvas?.querySelectorAll?.(".sheet-slides-element") || [])
+        .find((node) => String(node?.dataset?.id || "") === targetId)
+      : null;
+    const overlay = document.createElement("div");
+    const cropActive = this._isCropModeForElement(element) && elementSupportsMediaCrop(element);
+    const cropSnapshot = cropActive ? this._getMediaInteractionSnapshot(element, renderedNode) : null;
+    const cropFrame = cropSnapshot?.frame || null;
+    const cropMediaRect = cropSnapshot?.mediaRect || null;
+    overlay.className = `sheet-slides-selection-overlay${cropActive ? " crop-active" : ""}`;
+    overlay.dataset.id = targetId;
+    overlay.dataset.type = String(element.type || "");
+    if (cropActive && cropFrame && cropMediaRect) {
+      const mediaLeftPx = cropMediaRect.x * ppi;
+      const mediaTopPx = cropMediaRect.y * ppi;
+      const mediaWidthPx = Math.max(1, cropMediaRect.w * ppi);
+      const mediaHeightPx = Math.max(1, cropMediaRect.h * ppi);
+      const frameCenterXPx = (cropFrame.x + (cropFrame.w * 0.5)) * ppi;
+      const frameCenterYPx = (cropFrame.y + (cropFrame.h * 0.5)) * ppi;
+
+      overlay.style.left = `${mediaLeftPx}px`;
+      overlay.style.top = `${mediaTopPx}px`;
+      overlay.style.width = `${mediaWidthPx}px`;
+      overlay.style.height = `${mediaHeightPx}px`;
+      overlay.style.transform = `rotate(${toFiniteNumber(element.rotationDeg, 0)}deg)`;
+      overlay.style.transformOrigin = `${frameCenterXPx - mediaLeftPx}px ${frameCenterYPx - mediaTopPx}px`;
+      overlay.dataset.cropTarget = "media";
+    } else {
+      overlay.style.left = renderedNode?.style?.left || `${toFiniteNumber(element.x, 0) * ppi}px`;
+      overlay.style.top = renderedNode?.style?.top || `${toFiniteNumber(element.y, 0) * ppi}px`;
+      overlay.style.width = renderedNode?.style?.width || `${Math.max(1, toFiniteNumber(element.w, 1) * ppi)}px`;
+      overlay.style.height = renderedNode?.style?.height || `${Math.max(1, toFiniteNumber(element.h, 1) * ppi)}px`;
+      overlay.style.transform = renderedNode?.style?.transform || `rotate(${toFiniteNumber(element.rotationDeg, 0)}deg)`;
+      overlay.style.transformOrigin = "";
+    }
+    overlay.style.zIndex = "2147483647";
+    overlay.style.setProperty("--sheet-slides-ui-scale", String(1 / this._getStageZoom()));
+    overlay.addEventListener("pointerdown", (event) => this._onElementPointerDown(event, element.id));
+
+    if (cropActive) {
+      const frame = document.createElement("div");
+      frame.className = "sheet-slides-selection-frame";
+      overlay.appendChild(frame);
+
+      const cropLeftPx = (cropFrame && cropMediaRect) ? Math.max(0, (cropFrame.x - cropMediaRect.x) * ppi) : 0;
+      const cropTopPx = (cropFrame && cropMediaRect) ? Math.max(0, (cropFrame.y - cropMediaRect.y) * ppi) : 0;
+      const cropWidthPx = cropFrame ? Math.max(1, cropFrame.w * ppi) : Math.max(1, toFiniteNumber(element.w, 1) * ppi);
+      const cropHeightPx = cropFrame ? Math.max(1, cropFrame.h * ppi) : Math.max(1, toFiniteNumber(element.h, 1) * ppi);
+      const cropOverlay = document.createElement("div");
+      cropOverlay.className = "sheet-slides-crop-overlay";
+      cropOverlay.style.left = `${cropLeftPx}px`;
+      cropOverlay.style.top = `${cropTopPx}px`;
+      cropOverlay.style.width = `${cropWidthPx}px`;
+      cropOverlay.style.height = `${cropHeightPx}px`;
+      cropOverlay.dataset.cropTarget = "media";
+      ["nw", "n", "ne", "e", "se", "s", "sw", "w"].forEach((corner) => {
+        const handle = document.createElement("div");
+        handle.className = `sheet-slides-crop-handle ${corner}`;
+        handle.dataset.cropHandle = corner;
+        cropOverlay.appendChild(handle);
+      });
+      overlay.appendChild(cropOverlay);
+      return overlay;
+    }
+
+    const frame = document.createElement("div");
+    frame.className = "sheet-slides-selection-frame";
+    overlay.appendChild(frame);
+
+    ["nw", "ne", "sw", "se"].forEach((corner) => {
+      const handle = document.createElement("div");
+      handle.className = `sheet-slides-handle ${corner}`;
+      handle.dataset.handle = corner;
+      overlay.appendChild(handle);
+    });
+
+    const rotateLine = document.createElement("div");
+    rotateLine.className = "sheet-slides-rotate-line";
+    overlay.appendChild(rotateLine);
+
+    const rotateHandle = document.createElement("div");
+    rotateHandle.className = "sheet-slides-rotate-handle";
+    rotateHandle.dataset.handle = "rotate";
+    overlay.appendChild(rotateHandle);
+
+    return overlay;
   }
 
   _attachPmiViewport(element, host, widthPx, heightPx, usedPmiIds) {
@@ -2115,25 +3104,139 @@ export class Sheet2DEditorWindow {
     node.style.fontSize = `${Math.max(6, toFiniteNumber(element.fontSize, 0.32) * ppi)}px`;
     node.style.fontWeight = String(element.fontWeight || "400");
     node.style.fontStyle = String(element.fontStyle || "normal");
+    node.style.textDecoration = String(element.textDecoration || "none");
     node.style.color = toCssColor(element.color, "#111111");
-    node.style.textAlign = String(element.textAlign || (element.type === "text" ? "left" : "center"));
+    node.style.textAlign = this._getTextAlignValue(element);
+    node.style.display = "flex";
+    node.style.flexDirection = "column";
+    node.style.justifyContent = this._getTextVerticalAlignValue(element) === "top"
+      ? "flex-start"
+      : (this._getTextVerticalAlignValue(element) === "bottom" ? "flex-end" : "center");
+    node.style.alignItems = "stretch";
+    node.style.width = "100%";
+    node.style.height = "100%";
+    node.style.boxSizing = "border-box";
     node.style.whiteSpace = "pre-wrap";
     node.style.wordBreak = "break-word";
     node.style.lineHeight = "1.2";
+    node.style.overflow = "hidden";
   }
 
-  _getPmiBackdropCacheToken(element) {
-    const backdrop = String(element?.fill || "").trim();
-    return isTransparentColor(backdrop) ? "transparent" : normalizeHex(backdrop, "#ffffff");
+  _applyLineStrokeStyles(node, element, strokeWidthPx) {
+    if (!node || !element) return;
+    const color = toCssColor(element.stroke, "#1f2937");
+    const styleValue = this._getLineStyleValue(element);
+    if (styleValue === "solid") {
+      node.style.background = color;
+      node.style.backgroundImage = "";
+      return;
+    }
+    const dashArray = this._getStrokeDashArray(styleValue, strokeWidthPx).split(/\s+/).map(Number).filter((value) => Number.isFinite(value) && value > 0);
+    const segments = [];
+    let cursor = 0;
+    for (let index = 0; index < dashArray.length; index += 1) {
+      const length = dashArray[index];
+      const next = cursor + length;
+      if (index % 2 === 0) {
+        segments.push(`${color} ${cursor}px ${next}px`);
+      } else {
+        segments.push(`transparent ${cursor}px ${next}px`);
+      }
+      cursor = next;
+    }
+    const total = Math.max(cursor, strokeWidthPx * 4);
+    node.style.background = "transparent";
+    node.style.backgroundImage = `repeating-linear-gradient(to right, ${segments.join(", ")})`;
+    node.style.backgroundSize = `${total}px 100%`;
+    node.style.backgroundRepeat = "repeat-x";
+  }
+
+  _createShapeSurfaceSvg(element, widthPx, heightPx, {
+    shape = "rect",
+    radiusPx = 0,
+    fillColor = null,
+    className = "",
+  } = {}) {
+    if (!element) return null;
+    const strokeWidthPx = element.type === "text" && !this._isTextBorderEnabled(element)
+      ? 0
+      : Math.max(0, toFiniteNumber(element.strokeWidth, this._defaultStrokeWidthForElement(element)) * this._pxPerIn());
+    const hasStroke = strokeWidthPx > 0;
+    const fill = fillColor != null
+      ? toCssColor(fillColor, "transparent")
+      : "none";
+    const strokeColor = hasStroke ? toCssColor(element.stroke, this._defaultStrokeForElement(element)) : "none";
+    const half = hasStroke ? Math.max(0.5, strokeWidthPx * 0.5) : 0;
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", `0 0 ${Math.max(1, widthPx)} ${Math.max(1, heightPx)}`);
+    svg.setAttribute("width", String(Math.max(1, widthPx)));
+    svg.setAttribute("height", String(Math.max(1, heightPx)));
+    if (className) {
+      className.split(/\s+/).filter(Boolean).forEach((name) => svg.classList.add(name));
+    }
+
+    const dashArray = hasStroke ? this._getStrokeDashArray(this._getLineStyleValue(element), strokeWidthPx) : "";
+    let shapeNode = null;
+    if (shape === "ellipse") {
+      shapeNode = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
+      shapeNode.setAttribute("cx", String(widthPx * 0.5));
+      shapeNode.setAttribute("cy", String(heightPx * 0.5));
+      shapeNode.setAttribute("rx", String(Math.max(0, (widthPx * 0.5) - half)));
+      shapeNode.setAttribute("ry", String(Math.max(0, (heightPx * 0.5) - half)));
+    } else {
+      shapeNode = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      shapeNode.setAttribute("x", String(half));
+      shapeNode.setAttribute("y", String(half));
+      shapeNode.setAttribute("width", String(Math.max(0, widthPx - (half * 2))));
+      shapeNode.setAttribute("height", String(Math.max(0, heightPx - (half * 2))));
+      shapeNode.setAttribute("rx", String(Math.max(0, radiusPx - half)));
+      shapeNode.setAttribute("ry", String(Math.max(0, radiusPx - half)));
+    }
+    shapeNode.setAttribute("fill", fill);
+    shapeNode.setAttribute("stroke", strokeColor);
+    if (hasStroke) {
+      shapeNode.setAttribute("stroke-width", String(Math.max(1, strokeWidthPx)));
+      if (dashArray) shapeNode.setAttribute("stroke-dasharray", dashArray);
+    } else {
+      shapeNode.setAttribute("stroke-width", "0");
+    }
+    shapeNode.setAttribute("vector-effect", "non-scaling-stroke");
+    shapeNode.setAttribute("stroke-linecap", "round");
+    shapeNode.setAttribute("stroke-linejoin", "round");
+    svg.appendChild(shapeNode);
+    return svg;
+  }
+
+  _appendShapeSurface(host, element, widthPx, heightPx, options = {}) {
+    if (!host || !element) return;
+    const svg = this._createShapeSurfaceSvg(element, widthPx, heightPx, {
+      ...options,
+      className: `sheet-slides-shape-surface ${options.className || ""}`.trim(),
+    });
+    if (svg) host.appendChild(svg);
+  }
+
+  _appendStrokeOverlay(host, element, widthPx, heightPx, { shape = "rect", radiusPx = 0 } = {}) {
+    if (!host || !element) return;
+    const svg = this._createShapeSurfaceSvg(element, widthPx, heightPx, {
+      shape,
+      radiusPx,
+      fillColor: null,
+      className: "sheet-slides-stroke-overlay",
+    });
+    if (!svg) return;
+    host.appendChild(svg);
   }
 
   _getPmiImageCaptureKey(element, view = this._resolvePmiViewForElement(element), viewIndex = this._resolvePmiViewIndexForElement(element, view)) {
     return [
+      "trim-v2",
       this._getCurrentModelRevision(),
       this._pmiViewRevision,
       Number.isInteger(viewIndex) ? viewIndex : -1,
       String(view?.viewName || view?.name || element?.pmiViewName || "PMI View"),
-      this._getPmiBackdropCacheToken(element),
+      this._getPmiViewStateSignature(view),
     ].join(":");
   }
 
@@ -2150,7 +3253,7 @@ export class Sheet2DEditorWindow {
     }
 
     const task = this._pmiImageCaptureQueue
-      .then(() => this._capturePmiViewImage(view, viewIndex, element))
+      .then(() => this._capturePmiViewImage(view, viewIndex))
       .then((dataUrl) => {
         if (!dataUrl) return null;
         this._pmiImageCache.set(captureKey, dataUrl);
@@ -2182,6 +3285,8 @@ export class Sheet2DEditorWindow {
   _setPmiInsetImageState(element, dataUrl, captureKey = "") {
     if (!element || element.type !== "pmiInset") return false;
     const currentModelRevision = this._getCurrentModelRevision();
+    const previousMetadata = this._getMediaMetadataForElement(element);
+    const hadImageBefore = !!String(element.src || "").trim();
     const sameSrc = String(element.src || "") === String(dataUrl || "");
     const sameName = String(element.pmiViewName || "") === this._resolvePmiViewDisplayName(element);
     const sameRevision = toFiniteNumber(element.pmiImageRevision, -1) === this._pmiViewRevision;
@@ -2194,6 +3299,48 @@ export class Sheet2DEditorWindow {
     element.pmiImageRevision = this._pmiViewRevision;
     element.pmiModelRevision = currentModelRevision;
     element.pmiImageCaptureKey = String(captureKey || "");
+    element.mediaScale = 1;
+    element.mediaOffsetX = 0;
+    element.mediaOffsetY = 0;
+    this._fitPmiInsetFrameToImage(element, dataUrl, hadImageBefore ? previousMetadata : null);
+    return true;
+  }
+
+  _fitPmiInsetFrameToImage(element, src = element?.src, previousMetadata = null) {
+    if (!element || element.type !== "pmiInset") return false;
+    const metadata = this._mediaMetadataCache.get(String(src || "").trim()) || null;
+    const naturalWidth = Math.max(1, toFiniteNumber(metadata?.width, 0));
+    const naturalHeight = Math.max(1, toFiniteNumber(metadata?.height, 0));
+    if (!naturalWidth || !naturalHeight) return false;
+
+    const frame = this._getMediaFrameBox(element);
+    const anchor = this._getPmiAnchorValue(element);
+    const fractions = this._getAnchorFractions(anchor);
+    const anchorX = frame.x + (frame.w * fractions.x);
+    const anchorY = frame.y + (frame.h * fractions.y);
+    const captionHeight = this._getPmiTitleHeightIn(element);
+
+    let nextFrameWidth = frame.w;
+    let nextFrameHeight = frame.h;
+    const previousWidth = Math.max(1, toFiniteNumber(previousMetadata?.width, 0));
+    const previousHeight = Math.max(1, toFiniteNumber(previousMetadata?.height, 0));
+
+    if (previousWidth > 0 && previousHeight > 0) {
+      const scale = Math.min(frame.w / previousWidth, frame.h / previousHeight);
+      nextFrameWidth = Math.max(MIN_ELEMENT_IN, naturalWidth * scale);
+      nextFrameHeight = Math.max(MIN_ELEMENT_IN, naturalHeight * scale);
+    } else {
+      const suggested = this._getSuggestedPmiInsetSize(metadata, this._getPmiLabelPosition(element) !== "none");
+      nextFrameWidth = suggested.frameWidth;
+      nextFrameHeight = suggested.frameHeight;
+    }
+
+    const nextOuterHeight = nextFrameHeight + captionHeight;
+
+    element.w = nextFrameWidth;
+    element.h = nextOuterHeight;
+    element.x = anchorX - (nextFrameWidth * fractions.x);
+    element.y = anchorY - (nextFrameHeight * fractions.y);
     return true;
   }
 
@@ -2240,7 +3387,7 @@ export class Sheet2DEditorWindow {
       let anyChanged = false;
       for (const group of groups.values()) {
         const cached = this._pmiImageCache.get(group.captureKey);
-        const dataUrl = cached || await this._capturePmiViewImage(group.view, group.viewIndex, group.elementSnapshot);
+        const dataUrl = cached || await this._capturePmiViewImage(group.view, group.viewIndex);
         if (!dataUrl) continue;
         this._pmiImageCache.set(group.captureKey, dataUrl);
 
@@ -2293,7 +3440,7 @@ export class Sheet2DEditorWindow {
     }
   }
 
-  async _capturePmiViewImage(view, viewIndex, element = null) {
+  async _capturePmiViewImage(view, viewIndex) {
     const widget = this.viewer?.pmiViewsWidget || null;
     const viewer = this.viewer;
     const camera = viewer?.camera;
@@ -2310,8 +3457,6 @@ export class Sheet2DEditorWindow {
       : (toFiniteNumber(viewer?._clearAlpha, 1));
     const previousAutoClear = renderer.autoClear;
     const previousSceneBackground = viewer?.scene?.background ?? null;
-    const backdrop = toCssColor(element?.fill, "transparent");
-    const useTransparentBackground = isTransparentColor(backdrop);
 
     let dataUrl = null;
     const runCapture = async () => {
@@ -2319,10 +3464,10 @@ export class Sheet2DEditorWindow {
       try {
         try {
           renderer.autoClear = true;
-          if (useTransparentBackground && viewer?.scene) {
+          if (viewer?.scene) {
             viewer.scene.background = null;
           }
-          renderer.setClearColor(useTransparentBackground ? "#000000" : backdrop, useTransparentBackground ? 0 : 1);
+          renderer.setClearColor("#000000", 0);
           renderer.clear?.(true, true, true);
         } catch { }
         widget._applyView?.(view, { index: viewIndex, suppressActive: true });
@@ -2361,7 +3506,101 @@ export class Sheet2DEditorWindow {
       try { widget._restoreViewState?.(originalSnapshot, originalWireframe); } catch { }
     }
 
+    if (dataUrl) {
+      dataUrl = await this._trimTransparentImageDataUrl(dataUrl, 4);
+    }
     return dataUrl;
+  }
+
+  async _trimTransparentImageDataUrl(dataUrl, paddingPx = 0) {
+    const source = String(dataUrl || "").trim();
+    if (!source.startsWith("data:image/")) return source;
+
+    return new Promise((resolve) => {
+      const image = new Image();
+      image.onload = () => {
+        const width = Math.max(1, Math.round(toFiniteNumber(image.naturalWidth, image.width)));
+        const height = Math.max(1, Math.round(toFiniteNumber(image.naturalHeight, image.height)));
+        this._rememberMediaMetadata(source, width, height);
+        if (!width || !height) {
+          resolve(source);
+          return;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context) {
+          resolve(source);
+          return;
+        }
+
+        context.clearRect(0, 0, width, height);
+        context.drawImage(image, 0, 0, width, height);
+
+        let imageData;
+        try {
+          imageData = context.getImageData(0, 0, width, height);
+        } catch {
+          resolve(source);
+          return;
+        }
+
+        const alphaThreshold = 8;
+        const pixels = imageData.data;
+        let minX = width;
+        let minY = height;
+        let maxX = -1;
+        let maxY = -1;
+
+        for (let y = 0; y < height; y += 1) {
+          const rowOffset = y * width * 4;
+          for (let x = 0; x < width; x += 1) {
+            const alpha = pixels[rowOffset + (x * 4) + 3];
+            if (alpha <= alphaThreshold) continue;
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+          }
+        }
+
+        if (maxX < minX || maxY < minY) {
+          resolve(source);
+          return;
+        }
+
+        const padding = Math.max(0, Math.round(toFiniteNumber(paddingPx, 0)));
+        const cropX = Math.max(0, minX - padding);
+        const cropY = Math.max(0, minY - padding);
+        const cropRight = Math.min(width, maxX + 1 + padding);
+        const cropBottom = Math.min(height, maxY + 1 + padding);
+        const cropWidth = Math.max(1, cropRight - cropX);
+        const cropHeight = Math.max(1, cropBottom - cropY);
+
+        if (cropX === 0 && cropY === 0 && cropWidth === width && cropHeight === height) {
+          resolve(source);
+          return;
+        }
+
+        const outputCanvas = document.createElement("canvas");
+        outputCanvas.width = cropWidth;
+        outputCanvas.height = cropHeight;
+        const outputContext = outputCanvas.getContext("2d");
+        if (!outputContext) {
+          resolve(source);
+          return;
+        }
+
+        outputContext.drawImage(canvas, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+        const outputDataUrl = outputCanvas.toDataURL("image/png");
+        this._rememberMediaMetadata(outputDataUrl, cropWidth, cropHeight);
+        resolve(outputDataUrl);
+      };
+      image.onerror = () => resolve(source);
+      image.src = source;
+    });
   }
 
   _disposeUnusedPmiViewports(usedIds) {
@@ -2388,6 +3627,8 @@ export class Sheet2DEditorWindow {
     const isPMI = hasElement && selected.type === "pmiInset";
     const isLine = hasElement && selected.type === "line";
 
+    this._renderSelectionToolbar();
+
     this._sheetNameInput.value = String(sheet?.name || "");
     if (this._sheetSizeInput) this._sheetSizeInput.value = String(sheet?.sizeKey || DEFAULT_SHEET_SIZE_KEY);
     if (this._sheetOrientationInput) this._sheetOrientationInput.value = String(sheet?.orientation || DEFAULT_SHEET_ORIENTATION);
@@ -2413,15 +3654,23 @@ export class Sheet2DEditorWindow {
     this._fillResetBtn.disabled = disable;
     this._opacityInput.disabled = disable;
     this._zInput.disabled = disable;
+    this._strokeInput.disabled = disable || isLine;
+    this._strokeResetBtn.disabled = disable || isLine;
+    this._strokeWidthInput.disabled = disable || isLine;
     this._textColorInput.disabled = !supportsText;
     this._textColorResetBtn.disabled = !supportsText;
+    this._fontSizeInput.disabled = !supportsText;
+    this._fontSizeDecrementBtn.disabled = !supportsText;
+    this._fontSizeIncrementBtn.disabled = !supportsText;
     this._pmiBgInput.disabled = !isPMI;
     this._pmiBgResetBtn.disabled = !isPMI;
-    this._showTitleInput.disabled = !isPMI;
+    if (this._pmiAnchorInput) this._pmiAnchorInput.disabled = !isPMI;
+    if (this._pmiLabelPositionInput) this._pmiLabelPositionInput.disabled = !isPMI;
     this._showPmiBackgroundInput.disabled = !isPMI;
     this._cropToggleBtn.disabled = !supportsCrop;
     this._resetCropBtn.disabled = !supportsCrop;
     this._fillField.style.display = hasElement && (isPMI || isLine) ? "none" : "";
+    this._strokeField.style.display = hasElement ? "" : "none";
 
     if (!hasElement) {
       this._xInput.value = "";
@@ -2430,6 +3679,8 @@ export class Sheet2DEditorWindow {
       this._hInput.value = "";
       this._rotInput.value = "";
       this._fillInput.value = "#000000";
+      this._strokeInput.value = "#000000";
+      this._strokeWidthInput.value = "";
       this._opacityInput.value = "";
       this._zInput.value = "";
       this._textPanel.style.display = "none";
@@ -2439,11 +3690,15 @@ export class Sheet2DEditorWindow {
       this._cropToggleBtn.classList.remove("primary");
       this._cropHint.textContent = "";
       this._pmiNameValue.textContent = "";
-      this._showTitleInput.checked = false;
+      if (this._pmiLabelPositionInput) this._pmiLabelPositionInput.value = "bottom";
       this._showPmiBackgroundInput.checked = false;
       this._pmiBgInput.value = "#ffffff";
       this._pmiBgInput.disabled = true;
       this._pmiBgResetBtn.disabled = true;
+      if (this._pmiAnchorInput) this._pmiAnchorInput.value = "c";
+      Object.values(this._textAlignButtons || {}).forEach((button) => button.classList.remove("primary"));
+      Object.values(this._verticalAlignButtons || {}).forEach((button) => button.classList.remove("primary"));
+      if (this._underlineBtn) this._underlineBtn.classList.remove("primary");
       return;
     }
 
@@ -2456,6 +3711,8 @@ export class Sheet2DEditorWindow {
       this._hInput.value = "";
       this._rotInput.value = "";
       this._fillInput.value = "#000000";
+      this._strokeInput.value = normalizeHex(selected.stroke, this._defaultStrokeForElement(selected));
+      this._strokeWidthInput.value = String(Math.round(toFiniteNumber(selected.strokeWidth, 0.02) * ppi));
       this._opacityInput.value = String(clamp(toFiniteNumber(selected.opacity, 1), 0, 1));
       this._zInput.value = String(Math.round(toFiniteNumber(selected.z, 0)));
       this._wInput.disabled = true;
@@ -2463,10 +3720,14 @@ export class Sheet2DEditorWindow {
       this._rotInput.disabled = true;
       this._fillInput.disabled = true;
       this._fillResetBtn.disabled = true;
+      this._strokeInput.disabled = false;
+      this._strokeResetBtn.disabled = false;
+      this._strokeWidthInput.disabled = false;
       this._textPanel.style.display = "none";
       this._cropPanel.style.display = "none";
       this._pmiPanel.style.display = "none";
       this._fillField.style.display = "none";
+      this._strokeField.style.display = "block";
       return;
     }
 
@@ -2485,6 +3746,11 @@ export class Sheet2DEditorWindow {
       selected.fill,
       selected.type === "pmiInset" ? "#ffffff" : normalizeHex(this._defaultFillForElement(selected), "#000000"),
     );
+    this._strokeInput.value = normalizeHex(selected.stroke, this._defaultStrokeForElement(selected));
+    const strokeWidthPx = selected.type === "text" && !this._isTextBorderEnabled(selected)
+      ? 0
+      : Math.round(toFiniteNumber(selected.strokeWidth, this._defaultStrokeWidthForElement(selected)) * ppi);
+    this._strokeWidthInput.value = String(strokeWidthPx);
     this._opacityInput.value = String(clamp(toFiniteNumber(selected.opacity, 1), 0, 1));
     this._zInput.value = String(Math.round(toFiniteNumber(selected.z, 0)));
 
@@ -2507,9 +3773,23 @@ export class Sheet2DEditorWindow {
       this._fontFamilyInput.value = String(selected.fontFamily || "Arial, Helvetica, sans-serif");
       this._fontSizeInput.value = String(Math.round(toFiniteNumber(selected.fontSize, 0.32) * ppi));
       this._textColorInput.value = normalizeHex(selected.color, this._defaultTextColorForElement(selected));
-      this._textAlignInput.value = String(selected.textAlign || (selected.type === "text" ? "left" : "center"));
+      const textAlign = this._getTextAlignValue(selected);
+      const verticalAlign = this._getTextVerticalAlignValue(selected);
+      Object.entries(this._textAlignButtons || {}).forEach(([value, button]) => {
+        button.classList.toggle("primary", value === textAlign);
+      });
+      Object.entries(this._verticalAlignButtons || {}).forEach(([value, button]) => {
+        button.classList.toggle("primary", value === verticalAlign);
+      });
       this._boldBtn.classList.toggle("primary", String(selected.fontWeight || "400") === "700");
       this._italicBtn.classList.toggle("primary", String(selected.fontStyle || "normal") === "italic");
+      if (this._underlineBtn) {
+        this._underlineBtn.classList.toggle("primary", String(selected.textDecoration || "none") === "underline");
+      }
+    } else {
+      Object.values(this._textAlignButtons || {}).forEach((button) => button.classList.remove("primary"));
+      Object.values(this._verticalAlignButtons || {}).forEach((button) => button.classList.remove("primary"));
+      if (this._underlineBtn) this._underlineBtn.classList.remove("primary");
     }
 
     if (supportsCrop) {
@@ -2523,11 +3803,82 @@ export class Sheet2DEditorWindow {
 
     if (isPMI) {
       this._pmiNameValue.textContent = this._resolvePmiViewDisplayName(selected);
-      this._showTitleInput.checked = selected.showTitle !== false;
+      if (this._pmiAnchorInput) this._pmiAnchorInput.value = this._getPmiAnchorValue(selected);
+      if (this._pmiLabelPositionInput) this._pmiLabelPositionInput.value = this._getPmiLabelPosition(selected);
       this._showPmiBackgroundInput.checked = !isTransparentColor(selected.fill);
       this._pmiBgInput.value = normalizeHex(selected.fill, "#ffffff");
       this._pmiBgInput.disabled = isTransparentColor(selected.fill);
+    } else {
+      if (this._pmiAnchorInput) this._pmiAnchorInput.value = "c";
+      if (this._pmiLabelPositionInput) this._pmiLabelPositionInput.value = "bottom";
     }
+  }
+
+  _onStagePointerDown(event) {
+    if (!this.sheetDraft) return;
+    if (isPointerFromInput(event)) return;
+
+    const elementNode = event?.target?.closest?.(".sheet-slides-element");
+    const isCanvasHit = event.target === this._slideCanvas || event.target?.classList?.contains?.("sheet-slides-grid");
+    const shouldPan = event.button === 1 || (event.button === 2 && !elementNode);
+
+    if (shouldPan) {
+      this._ensureManualStageView();
+      this._dragState = {
+        pointerId: event.pointerId,
+        mode: "stage-pan",
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startPanX: toFiniteNumber(this._appliedStagePanX, 0),
+        startPanY: toFiniteNumber(this._appliedStagePanY, 0),
+        moved: false,
+        captureTarget: this._stageWrap,
+      };
+      this._stageWrap?.classList?.add("is-panning");
+      try { this._stageWrap?.setPointerCapture?.(event.pointerId); } catch { }
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
+    if (event.button !== 0) return;
+    if (elementNode || isCanvasHit) return;
+
+    this._hideContextMenu();
+    this._cropModeElementId = null;
+    this.selectedElementId = null;
+    this._renderStageOnly();
+    this._renderInspector();
+    event.preventDefault();
+  }
+
+  _onStageContextMenu(event) {
+    if (!this.sheetDraft) return;
+    if (isPointerFromInput(event)) return;
+    if (event?.target?.closest?.(".sheet-slides-element")) {
+      this._onCanvasContextMenu(event);
+      return;
+    }
+    this._hideContextMenu();
+    event.preventDefault();
+  }
+
+  _onStageWheel(event) {
+    if (!this.sheetDraft || isPointerFromInput(event)) return;
+    const deltaY = toFiniteNumber(event.deltaY, 0);
+    if (!deltaY) return;
+
+    const currentZoom = this._getStageZoom();
+    const nextZoom = clamp(currentZoom * Math.exp(-deltaY * 0.0015), 0.1, 4);
+    if (Math.abs(nextZoom - currentZoom) < 0.0001) {
+      event.preventDefault();
+      return;
+    }
+
+    this._setManualZoomAroundClientPoint(nextZoom, event.clientX, event.clientY);
+    this._renderStageOnly();
+    this._setStatus(`Zoom ${Math.round(this._getStageZoom() * 100)}%`);
+    event.preventDefault();
   }
 
   _onCanvasPointerDown(event) {
@@ -2547,7 +3898,7 @@ export class Sheet2DEditorWindow {
     if (isPointerFromInput(event)) return;
 
     const elementNode = event?.target?.closest?.(".sheet-slides-element");
-    if (!elementNode || !this._slideCanvas?.contains?.(elementNode)) {
+    if (!elementNode) {
       this._hideContextMenu();
       event.preventDefault();
       return;
@@ -2614,7 +3965,7 @@ export class Sheet2DEditorWindow {
       return;
     }
 
-    const slideRect = this._slideCanvas?.getBoundingClientRect?.();
+    const slideRect = this._getStageWorldRect();
     if (!slideRect) return;
     const point = this._eventToSlidePoint(event, slideRect);
 
@@ -2663,18 +4014,19 @@ export class Sheet2DEditorWindow {
   _beginInlineTextEdit(node, element) {
     if (!node || !element || !elementSupportsText(element)) return;
     const content = node?.querySelector?.(".sheet-slides-inline-text");
-    if (!content) return;
+    const editor = content?.querySelector?.(".sheet-slides-inline-text-body") || content;
+    if (!content || !editor) return;
 
-    content.contentEditable = "true";
-    content.spellcheck = false;
+    editor.contentEditable = "true";
+    editor.spellcheck = false;
     content.classList.add("editing");
-    content.focus();
-    this._placeCaretAtEnd(content);
+    editor.focus();
+    this._placeCaretAtEnd(editor);
 
     const commit = () => {
-      content.contentEditable = "false";
+      editor.contentEditable = "false";
       content.classList.remove("editing");
-      element.text = String(content.textContent || "");
+      element.text = String(editor.innerText || editor.textContent || "").replace(/\r\n?/g, "\n");
       this._commitSheetDraft("text-inline");
       this._renderStageOnly();
       this._renderInspector();
@@ -2682,20 +4034,15 @@ export class Sheet2DEditorWindow {
     };
 
     const onKeyDown = (evt) => {
-      if (evt.key === "Enter" && !evt.shiftKey) {
-        evt.preventDefault();
-        content.blur();
-        return;
-      }
       if (evt.key === "Escape") {
         evt.preventDefault();
-        content.blur();
+        editor.blur();
       }
     };
 
-    content.addEventListener("keydown", onKeyDown);
-    content.addEventListener("blur", () => {
-      content.removeEventListener("keydown", onKeyDown);
+    editor.addEventListener("keydown", onKeyDown);
+    editor.addEventListener("blur", () => {
+      editor.removeEventListener("keydown", onKeyDown);
       commit();
     }, { once: true });
   }
@@ -2703,10 +4050,24 @@ export class Sheet2DEditorWindow {
   _onGlobalPointerMove(event) {
     if (!this._dragState || !this.sheetDraft) return;
 
+    if (this._dragState.mode === "stage-pan") {
+      const dxClient = event.clientX - toFiniteNumber(this._dragState.startClientX, event.clientX);
+      const dyClient = event.clientY - toFiniteNumber(this._dragState.startClientY, event.clientY);
+      if (!this._dragState.moved) {
+        const travel = Math.hypot(dxClient, dyClient);
+        if (travel < 3) return;
+        this._dragState.moved = true;
+      }
+      this._stagePanX = toFiniteNumber(this._dragState.startPanX, 0) + dxClient;
+      this._stagePanY = toFiniteNumber(this._dragState.startPanY, 0) + dyClient;
+      this._renderStageOnly();
+      return;
+    }
+
     const selected = this._getSelectedElement();
     if (!selected) return;
 
-    const slideRect = this._slideCanvas?.getBoundingClientRect?.();
+    const slideRect = this._getStageWorldRect();
     if (!slideRect) return;
 
     const point = this._eventToSlidePoint(event, slideRect);
@@ -2734,7 +4095,14 @@ export class Sheet2DEditorWindow {
         selected.y = toFiniteNumber(source.y, 0) + dy;
       }
     } else if (this._dragState.mode === "resize") {
-      this._resizeElementFromHandle(selected, source, this._dragState.handle, dx, dy, !!event.shiftKey);
+      this._resizeElementFromHandle(
+        selected,
+        source,
+        this._dragState.handle,
+        dx,
+        dy,
+        !!event.shiftKey || elementUsesLockedAspectMedia(selected),
+      );
     } else if (this._dragState.mode === "crop-pan") {
       const frame = this._dragState.mediaSnapshot?.frame;
       const mediaRect = this._dragState.mediaSnapshot?.mediaRect;
@@ -2784,10 +4152,21 @@ export class Sheet2DEditorWindow {
 
   _endDrag(commit = true, pointerId = null) {
     if (!this._dragState) return;
+    const dragState = this._dragState;
     const activePointerId = pointerId ?? this._dragState.pointerId;
     const moved = !!this._dragState.moved;
+    try { dragState.captureTarget?.releasePointerCapture?.(activePointerId); } catch { }
     try { this._slideCanvas?.releasePointerCapture?.(activePointerId); } catch { }
     this._dragState = null;
+    this._stageWrap?.classList?.remove("is-panning");
+    if (dragState.mode === "stage-pan") {
+      if (!moved && activePointerId != null) {
+        this._stagePanX = toFiniteNumber(dragState.startPanX, 0);
+        this._stagePanY = toFiniteNumber(dragState.startPanY, 0);
+        this._renderStageOnly();
+      }
+      return;
+    }
     if (commit && moved) {
       this._commitSheetDraft("drag");
       this._renderStageOnly();
@@ -2818,17 +4197,32 @@ export class Sheet2DEditorWindow {
     }
 
     if (keepAspect) {
-      const ratio = Math.max(1e-6, toFiniteNumber(source.w, 1) / Math.max(MIN_ELEMENT_IN, toFiniteNumber(source.h, 1)));
+      const isMediaElement = elementSupportsMediaCrop(source);
+      const captionHeight = isMediaElement ? this._getPmiTitleHeightIn(source) : 0;
+      const sourceAspectHeight = isMediaElement
+        ? Math.max(MIN_ELEMENT_IN, toFiniteNumber(source.h, 1) - captionHeight)
+        : Math.max(MIN_ELEMENT_IN, toFiniteNumber(source.h, 1));
+      const ratio = Math.max(1e-6, toFiniteNumber(source.w, 1) / sourceAspectHeight);
       if (Math.abs(dx) >= Math.abs(dy)) {
-        h = w / ratio;
+        const nextFrameHeight = Math.max(MIN_ELEMENT_IN, w / ratio);
+        h = isMediaElement ? (nextFrameHeight + captionHeight) : nextFrameHeight;
       } else {
-        w = h * ratio;
+        const nextFrameHeight = isMediaElement
+          ? Math.max(MIN_ELEMENT_IN, h - captionHeight)
+          : Math.max(MIN_ELEMENT_IN, h);
+        w = nextFrameHeight * ratio;
+        if (isMediaElement) h = nextFrameHeight + captionHeight;
       }
+
       if (handle.includes("w")) {
         x = toFiniteNumber(source.x, 0) + (toFiniteNumber(source.w, 1) - w);
+      } else if (!handle.includes("e")) {
+        x = toFiniteNumber(source.x, 0) + ((toFiniteNumber(source.w, 1) - w) * 0.5);
       }
       if (handle.includes("n")) {
         y = toFiniteNumber(source.y, 0) + (toFiniteNumber(source.h, 1) - h);
+      } else if (!handle.includes("s")) {
+        y = toFiniteNumber(source.y, 0) + ((toFiniteNumber(source.h, 1) - h) * 0.5);
       }
     }
 
@@ -2857,6 +4251,12 @@ export class Sheet2DEditorWindow {
     if (event.key === "Escape" && this._contextMenu?.style.display !== "none") {
       event.preventDefault();
       this._hideContextMenu();
+      return;
+    }
+
+    if (event.key === "Escape" && this._toolbarPopover?.style.display !== "none") {
+      event.preventDefault();
+      this._closeToolbarPopover();
       return;
     }
 
@@ -2935,7 +4335,26 @@ export class Sheet2DEditorWindow {
       if (!Number.isFinite(px)) return;
       const inches = px / ppi;
       if (key === "w" || key === "h") {
-        element[key] = Math.max(MIN_ELEMENT_IN, inches);
+        if (elementUsesLockedAspectMedia(element)) {
+          const frameBox = this._getMediaFrameBox(element);
+          const captionHeight = this._getPmiTitleHeightIn(element);
+          const sourceFrameWidth = Math.max(MIN_ELEMENT_IN, toFiniteNumber(frameBox.w, toFiniteNumber(element.w, 1)));
+          const sourceFrameHeight = Math.max(MIN_ELEMENT_IN, toFiniteNumber(frameBox.h, toFiniteNumber(element.h, 1) - captionHeight));
+          const ratio = Math.max(1e-6, sourceFrameWidth / sourceFrameHeight);
+          if (key === "w") {
+            const nextWidth = Math.max(MIN_ELEMENT_IN, inches);
+            const nextFrameHeight = Math.max(MIN_ELEMENT_IN, nextWidth / ratio);
+            element.w = nextWidth;
+            element.h = nextFrameHeight + captionHeight;
+          } else {
+            const nextOuterHeight = Math.max(MIN_ELEMENT_IN, inches);
+            const nextFrameHeight = Math.max(MIN_ELEMENT_IN, nextOuterHeight - captionHeight);
+            element.w = Math.max(MIN_ELEMENT_IN, nextFrameHeight * ratio);
+            element.h = nextFrameHeight + captionHeight;
+          }
+        } else {
+          element[key] = Math.max(MIN_ELEMENT_IN, inches);
+        }
       } else {
         element[key] = inches;
       }
@@ -2955,6 +4374,22 @@ export class Sheet2DEditorWindow {
 
     if (key === "fill") {
       element.fill = String(rawValue || "#000000");
+    } else if (key === "stroke") {
+      element.stroke = String(rawValue || this._defaultStrokeForElement(element));
+      if (element.type === "text") {
+        element.strokeEnabled = true;
+        if (toFiniteNumber(element.strokeWidth, 0) <= 0) {
+          element.strokeWidth = 1 / this._pxPerIn();
+        }
+      }
+    } else if (key === "strokeWidth") {
+      const px = Math.max(0, toFiniteNumber(rawValue, toFiniteNumber(element.strokeWidth, this._defaultStrokeWidthForElement(element)) * this._pxPerIn()));
+      element.strokeWidth = px / this._pxPerIn();
+      if (element.type === "text") {
+        element.strokeEnabled = px > 0;
+      }
+    } else if (key === "lineStyle") {
+      element.lineStyle = this._getLineStyleValue({ ...element, lineStyle: rawValue });
     } else if (key === "opacity") {
       element.opacity = clamp(toFiniteNumber(rawValue, element.opacity ?? 1), 0, 1);
     } else if (key === "z") {
@@ -2977,6 +4412,18 @@ export class Sheet2DEditorWindow {
     this._renderSidebarOnly();
   }
 
+  _resetSelectedStroke() {
+    const element = this._getSelectedElement();
+    if (!element) return;
+    element.stroke = this._defaultStrokeForElement(element);
+    element.strokeWidth = this._defaultStrokeWidthForElement(element);
+    if (element.type === "text") element.strokeEnabled = false;
+    this._commitSheetDraft("style-stroke-reset");
+    this._renderStageOnly();
+    this._renderInspector();
+    this._renderSidebarOnly();
+  }
+
   _setSelectedTextField(key, rawValue) {
     const element = this._getSelectedElement();
     if (!element || !elementSupportsText(element)) return;
@@ -2990,15 +4437,26 @@ export class Sheet2DEditorWindow {
       element.fontFamily = String(rawValue || "Arial, Helvetica, sans-serif");
     } else if (key === "color") {
       element.color = String(rawValue || "#111111");
+    } else if (key === "textDecoration") {
+      element.textDecoration = String(rawValue || "none") === "underline" ? "underline" : "none";
     } else if (key === "textAlign") {
-      const fallbackAlign = element.type === "text" ? "left" : "center";
-      element.textAlign = ["left", "center", "right"].includes(String(rawValue)) ? String(rawValue) : fallbackAlign;
+      element.textAlign = this._getTextAlignValue({ ...element, textAlign: rawValue });
+    } else if (key === "verticalAlign") {
+      element.verticalAlign = this._getTextVerticalAlignValue({ ...element, verticalAlign: rawValue });
     }
 
     this._commitSheetDraft(`text-${key}`);
     this._renderStageOnly();
     this._renderInspector();
     this._renderSidebarOnly();
+  }
+
+  _adjustSelectedFontSize(deltaPx = 0) {
+    const element = this._getSelectedElement();
+    if (!element || !elementSupportsText(element)) return;
+    const currentPx = Math.max(6, Math.round(toFiniteNumber(element.fontSize, 0.32) * this._pxPerIn()));
+    const nextPx = Math.max(6, currentPx + Math.round(toFiniteNumber(deltaPx, 0)));
+    this._setSelectedTextField("fontSize", nextPx);
   }
 
   _resetSelectedTextColor() {
@@ -3026,6 +4484,16 @@ export class Sheet2DEditorWindow {
     if (!element || !elementSupportsText(element)) return;
     element.fontStyle = String(element.fontStyle || "normal") === "italic" ? "normal" : "italic";
     this._commitSheetDraft("text-italic");
+    this._renderStageOnly();
+    this._renderInspector();
+    this._renderSidebarOnly();
+  }
+
+  _toggleTextUnderline() {
+    const element = this._getSelectedElement();
+    if (!element || !elementSupportsText(element)) return;
+    element.textDecoration = String(element.textDecoration || "none") === "underline" ? "none" : "underline";
+    this._commitSheetDraft("text-underline");
     this._renderStageOnly();
     this._renderInspector();
     this._renderSidebarOnly();
@@ -3199,11 +4667,16 @@ export class Sheet2DEditorWindow {
 
     this.sheetDraft.elements = Array.isArray(this.sheetDraft.elements) ? this.sheetDraft.elements : [];
 
-    const ppi = this._pxPerIn();
-    const xIn = Math.max(0, (toFiniteNumber(this.sheetDraft.widthIn, 11) * 0.5) - (180 / ppi));
-    const yIn = Math.max(0, (toFiniteNumber(this.sheetDraft.heightIn, 8.5) * 0.5) - (120 / ppi));
+    const previewKey = this._getPmiPreviewCaptureKey(view, idx);
+    const previewSrc = String(this._pmiImageCache.get(previewKey) || "").trim();
+    const previewMetadata = previewSrc ? (this._mediaMetadataCache.get(previewSrc) || null) : null;
+    const suggested = this._getSuggestedPmiInsetSize(previewMetadata, true);
+    const xIn = Math.max(0, (toFiniteNumber(this.sheetDraft.widthIn, 11) * 0.5) - (suggested.frameWidth * 0.5));
+    const yIn = Math.max(0, (toFiniteNumber(this.sheetDraft.heightIn, 8.5) * 0.5) - (suggested.outerHeight * 0.5));
 
     const inset = defaultPmiInsetElement(xIn, yIn, idx, viewName);
+    inset.w = suggested.frameWidth;
+    inset.h = suggested.outerHeight;
     inset.z = this._nextZ();
     this.sheetDraft.elements.push(inset);
     this.selectedElementId = inset.id;
@@ -3251,15 +4724,32 @@ export class Sheet2DEditorWindow {
     this._renderSidebarOnly();
   }
 
+  _setPmiLabelPosition(element, value) {
+    if (!element || element.type !== "pmiInset") return;
+    const nextPosition = ["top", "bottom", "none"].includes(String(value || "").toLowerCase())
+      ? String(value).toLowerCase()
+      : "bottom";
+    const frame = this._getMediaFrameBox(element);
+    const nextCaptionHeight = nextPosition === "none" ? 0 : PMI_TITLE_HEIGHT_IN;
+    element.pmiLabelPosition = nextPosition;
+    element.showTitle = nextPosition !== "none";
+    element.h = frame.h + nextCaptionHeight;
+    element.y = frame.y - (nextPosition === "top" ? nextCaptionHeight : 0);
+  }
+
   _setSelectedPMIField(key, value) {
     const element = this._getSelectedElement();
     if (!element || element.type !== "pmiInset") return;
-    if (key === "showTitle") {
-      element.showTitle = value !== false;
+    if (key === "labelPosition") {
+      this._setPmiLabelPosition(element, value);
+    } else if (key === "showTitle") {
+      this._setPmiLabelPosition(element, value !== false ? "bottom" : "none");
     } else if (key === "showBackground") {
       element.fill = value ? normalizeHex(element.fill, "#ffffff") : "transparent";
     } else if (key === "backgroundColor") {
       element.fill = String(value || "#ffffff");
+    } else if (key === "anchor") {
+      element.pmiAnchor = this._getPmiAnchorValue({ pmiAnchor: value });
     }
     this._commitSheetDraft(`pmi-${key}`);
     this._renderStageOnly();
@@ -3434,6 +4924,12 @@ export class Sheet2DEditorWindow {
     const style = document.createElement("style");
     style.id = "sheet-slides-editor-styles";
     style.textContent = `
+      .sheet-slides-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 1400;
+        background: #0f1115;
+      }
       .sheet-slides-root {
         width: 100%;
         height: 100%;
@@ -3441,7 +4937,7 @@ export class Sheet2DEditorWindow {
         position: relative;
         display: grid;
         grid-template-columns: 260px 1fr 320px;
-        grid-template-rows: 56px 1fr 30px;
+        grid-template-rows: auto 1fr 30px;
         grid-template-areas:
           "topbar topbar topbar"
           "sidebar stage inspector"
@@ -3453,16 +4949,45 @@ export class Sheet2DEditorWindow {
         grid-area: topbar;
         display: flex;
         align-items: center;
+        flex-wrap: wrap;
+        align-content: center;
         gap: 8px;
         padding: 8px 12px;
         border-bottom: 1px solid #30384d;
         background: linear-gradient(180deg, #151926, #111520);
       }
       .sheet-slides-brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        margin-right: 6px;
+      }
+      .sheet-slides-brand-logo {
+        display: block;
+        width: 116px;
+        max-width: 22vw;
+        height: auto;
+        flex: 0 0 auto;
+      }
+      .sheet-slides-brand-text {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+      .sheet-slides-brand-title {
         font-weight: 700;
         white-space: nowrap;
-        margin-right: 6px;
         letter-spacing: .02em;
+      }
+      .sheet-slides-subtitle {
+        color: #98a2b3;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .sheet-slides-topbar-spacer {
+        flex: 1 1 auto;
+        min-width: 12px;
       }
       .sheet-slides-toolbar-group {
         display: flex;
@@ -3474,6 +4999,131 @@ export class Sheet2DEditorWindow {
       }
       .sheet-slides-toolbar-group.no-divider {
         border-right: 0;
+      }
+      .sheet-slides-selection-group {
+        display: none;
+      }
+      .sheet-slides-toolbar-label {
+        color: #98a2b3;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        white-space: nowrap;
+      }
+      .sheet-slides-toolbar-color {
+        width: 38px;
+        min-width: 38px;
+        padding: 2px;
+      }
+      .sheet-slides-toolbar-number {
+        width: 68px;
+        min-width: 68px;
+      }
+      .sheet-slides-toolbar-font-family {
+        min-width: 120px;
+        max-width: 148px;
+      }
+      .sheet-slides-toolbar-segmented {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(30px, auto));
+        gap: 4px;
+      }
+      .sheet-slides-icon-btn {
+        width: 32px;
+        min-width: 32px;
+        padding: 0;
+        display: inline-grid;
+        place-items: center;
+      }
+      .sheet-slides-icon-btn svg {
+        width: 18px;
+        height: 18px;
+        display: block;
+      }
+      .sheet-slides-toolbar-italic {
+        font-style: italic;
+      }
+      .sheet-slides-toolbar-popover {
+        position: absolute;
+        min-width: 196px;
+        max-width: min(320px, calc(100vw - 24px));
+        padding: 10px;
+        border: 1px solid #30384d;
+        border-radius: 12px;
+        background: rgba(15,17,21,.98);
+        box-shadow: 0 18px 40px rgba(0,0,0,.38);
+        z-index: 85;
+      }
+      .sheet-slides-toolbar-popover-title {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        color: #98a2b3;
+        margin-bottom: 10px;
+      }
+      .sheet-slides-toolbar-popover-body {
+        display: grid;
+        gap: 10px;
+      }
+      .sheet-slides-toolbar-popover-section {
+        display: grid;
+        gap: 6px;
+      }
+      .sheet-slides-toolbar-popover-section-title {
+        font-size: 11px;
+        font-weight: 700;
+        color: #cbd5e1;
+      }
+      .sheet-slides-toolbar-popover-color {
+        width: 100%;
+        min-height: 40px;
+        padding: 2px;
+        border-radius: 10px;
+      }
+      .sheet-slides-toolbar-swatch-grid,
+      .sheet-slides-toolbar-icon-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 6px;
+      }
+      .sheet-slides-toolbar-swatch {
+        width: 100%;
+        aspect-ratio: 1;
+        border: 1px solid rgba(148,163,184,.4);
+        border-radius: 10px;
+        cursor: pointer;
+      }
+      .sheet-slides-toolbar-option-list {
+        display: grid;
+        gap: 6px;
+      }
+      .sheet-slides-toolbar-option {
+        height: 36px;
+        border: 1px solid #30384d;
+        border-radius: 10px;
+        background: #171c28;
+        color: #e8ecf3;
+        cursor: pointer;
+        display: inline-grid;
+        place-items: center;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .sheet-slides-toolbar-option:hover,
+      .sheet-slides-toolbar-swatch:hover {
+        border-color: #60a5fa;
+      }
+      .sheet-slides-toolbar-option.active {
+        border-color: #2d73ff;
+        background: rgba(45,115,255,.16);
+        box-shadow: 0 0 0 1px rgba(45,115,255,.14);
+      }
+      .sheet-slides-toolbar-style-option svg {
+        width: 100%;
+        height: 18px;
       }
       .sheet-slides-btn,
       .sheet-slides-control {
@@ -3498,6 +5148,9 @@ export class Sheet2DEditorWindow {
         border-color: #2d73ff;
         background: linear-gradient(180deg, #2d73ff, #2158c5);
         color: #fff;
+      }
+      .sheet-slides-finish-btn {
+        min-width: 96px;
       }
       .sheet-slides-btn.danger {
         border-color: #7f1d1d;
@@ -3696,27 +5349,40 @@ export class Sheet2DEditorWindow {
       }
       .sheet-slides-stage-wrap {
         grid-area: stage;
-        overflow: auto;
+        overflow: hidden;
         background: radial-gradient(circle at top, rgba(255,255,255,.04), transparent 30%), linear-gradient(180deg, #111520, #0c1018);
-        padding: 24px;
+        padding: ${STAGE_VIEWPORT_PADDING_PX}px;
+        position: relative;
+        min-width: 0;
+        min-height: 0;
+        user-select: none;
+        z-index: 0;
       }
       .sheet-slides-stage-center {
-        min-width: 100%;
-        min-height: 100%;
-        display: grid;
-        place-items: center;
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
       }
       .sheet-slides-stage-shell {
-        position: relative;
-        display: inline-block;
+        position: absolute;
+        left: 0;
+        top: 0;
+        overflow: visible;
+        transform-origin: 0 0;
         user-select: none;
+        will-change: transform;
       }
       .sheet-slides-canvas {
         position: relative;
         border-radius: 10px;
-        overflow: hidden;
+        overflow: visible;
         box-shadow: 0 20px 60px rgba(0,0,0,.45);
         transform-origin: top left;
+      }
+      .sheet-slides-stage-wrap.is-panning,
+      .sheet-slides-stage-wrap.is-panning * {
+        cursor: grabbing !important;
       }
       .sheet-slides-grid {
         position: absolute;
@@ -3746,19 +5412,53 @@ export class Sheet2DEditorWindow {
         border: 2px solid transparent;
         pointer-events: none;
       }
-      .sheet-slides-element.selected::after {
-        border-color: #6ea8fe;
+      .sheet-slides-selection-overlay {
+        position: absolute;
+        transform-origin: center center;
+        min-width: 10px;
+        min-height: 10px;
+        pointer-events: none;
+        --sheet-slides-ui-scale: 1;
+      }
+      .sheet-slides-selection-frame {
+        position: absolute;
+        inset: calc(-1px * var(--sheet-slides-ui-scale));
+        border: calc(2px * var(--sheet-slides-ui-scale)) solid #6ea8fe;
+        pointer-events: none;
       }
       .sheet-slides-element-content {
         width: 100%;
         height: 100%;
         position: relative;
       }
+      .sheet-slides-shape-surface {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+        pointer-events: none;
+        overflow: visible;
+        z-index: 0;
+      }
+      .sheet-slides-stroke-overlay {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+        pointer-events: none;
+        overflow: visible;
+        z-index: 2;
+      }
       .sheet-slides-inline-text {
         width: 100%;
         height: 100%;
         position: relative;
         z-index: 1;
+      }
+      .sheet-slides-inline-text-body {
+        width: 100%;
       }
       .sheet-slides-inline-text.editing {
         outline: 2px solid rgba(110,168,254,.75);
@@ -3768,9 +5468,6 @@ export class Sheet2DEditorWindow {
       .sheet-slides-shape-text {
         position: absolute;
         inset: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
       }
       .sheet-slides-media-frame {
         position: absolute;
@@ -3789,88 +5486,99 @@ export class Sheet2DEditorWindow {
       }
       .sheet-slides-crop-overlay {
         position: absolute;
-        left: 0;
-        top: 0;
-        width: 100%;
-        border: 1px solid #111827;
+        border: calc(1px * var(--sheet-slides-ui-scale)) solid #111827;
         box-sizing: border-box;
+        background: transparent;
+        box-shadow: 0 0 0 99999px rgba(255,255,255,.2);
         z-index: 5;
-        pointer-events: none;
+        pointer-events: auto;
       }
       .sheet-slides-crop-handle {
         position: absolute;
         background: #111827;
-        border: 1px solid #fff;
-        box-shadow: 0 1px 2px rgba(0,0,0,.3);
+        border: calc(1px * var(--sheet-slides-ui-scale)) solid #fff;
+        box-shadow:
+          0 calc(1px * var(--sheet-slides-ui-scale))
+          calc(2px * var(--sheet-slides-ui-scale))
+          rgba(0,0,0,.3);
         z-index: 6;
         pointer-events: auto;
       }
       .sheet-slides-crop-handle.n,
       .sheet-slides-crop-handle.s {
-        width: 16px;
-        height: 8px;
+        width: calc(16px * var(--sheet-slides-ui-scale));
+        height: calc(8px * var(--sheet-slides-ui-scale));
         left: 50%;
-        margin-left: -8px;
+        margin-left: calc(-8px * var(--sheet-slides-ui-scale));
         cursor: ns-resize;
       }
-      .sheet-slides-crop-handle.n { top: -5px; }
-      .sheet-slides-crop-handle.s { bottom: -5px; }
+      .sheet-slides-crop-handle.n { top: calc(-5px * var(--sheet-slides-ui-scale)); }
+      .sheet-slides-crop-handle.s { bottom: calc(-5px * var(--sheet-slides-ui-scale)); }
       .sheet-slides-crop-handle.e,
       .sheet-slides-crop-handle.w {
-        width: 8px;
-        height: 16px;
+        width: calc(8px * var(--sheet-slides-ui-scale));
+        height: calc(16px * var(--sheet-slides-ui-scale));
         top: 50%;
-        margin-top: -8px;
+        margin-top: calc(-8px * var(--sheet-slides-ui-scale));
         cursor: ew-resize;
       }
-      .sheet-slides-crop-handle.w { left: -5px; }
-      .sheet-slides-crop-handle.e { right: -5px; }
+      .sheet-slides-crop-handle.w { left: calc(-5px * var(--sheet-slides-ui-scale)); }
+      .sheet-slides-crop-handle.e { right: calc(-5px * var(--sheet-slides-ui-scale)); }
       .sheet-slides-crop-handle.nw,
       .sheet-slides-crop-handle.ne,
       .sheet-slides-crop-handle.sw,
       .sheet-slides-crop-handle.se {
-        width: 10px;
-        height: 10px;
+        width: calc(10px * var(--sheet-slides-ui-scale));
+        height: calc(10px * var(--sheet-slides-ui-scale));
       }
-      .sheet-slides-crop-handle.nw { left: -5px; top: -5px; cursor: nwse-resize; }
-      .sheet-slides-crop-handle.ne { right: -5px; top: -5px; cursor: nesw-resize; }
-      .sheet-slides-crop-handle.sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
-      .sheet-slides-crop-handle.se { right: -5px; bottom: -5px; cursor: nwse-resize; }
+      .sheet-slides-crop-handle.nw { left: calc(-5px * var(--sheet-slides-ui-scale)); top: calc(-5px * var(--sheet-slides-ui-scale)); cursor: nwse-resize; }
+      .sheet-slides-crop-handle.ne { right: calc(-5px * var(--sheet-slides-ui-scale)); top: calc(-5px * var(--sheet-slides-ui-scale)); cursor: nesw-resize; }
+      .sheet-slides-crop-handle.sw { left: calc(-5px * var(--sheet-slides-ui-scale)); bottom: calc(-5px * var(--sheet-slides-ui-scale)); cursor: nesw-resize; }
+      .sheet-slides-crop-handle.se { right: calc(-5px * var(--sheet-slides-ui-scale)); bottom: calc(-5px * var(--sheet-slides-ui-scale)); cursor: nwse-resize; }
       .sheet-slides-handle {
         position: absolute;
-        width: 12px;
-        height: 12px;
+        width: calc(12px * var(--sheet-slides-ui-scale));
+        height: calc(12px * var(--sheet-slides-ui-scale));
         background: #6ea8fe;
-        border: 2px solid #fff;
+        border: calc(2px * var(--sheet-slides-ui-scale)) solid #fff;
         border-radius: 999px;
         z-index: 4;
-        box-shadow: 0 1px 3px rgba(0,0,0,.4);
+        box-shadow:
+          0 calc(1px * var(--sheet-slides-ui-scale))
+          calc(3px * var(--sheet-slides-ui-scale))
+          rgba(0,0,0,.4);
+        pointer-events: auto;
       }
-      .sheet-slides-handle.nw { left: -6px; top: -6px; cursor: nwse-resize; }
-      .sheet-slides-handle.ne { right: -6px; top: -6px; cursor: nesw-resize; }
-      .sheet-slides-handle.sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
-      .sheet-slides-handle.se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+      .sheet-slides-handle.nw { left: calc(-6px * var(--sheet-slides-ui-scale)); top: calc(-6px * var(--sheet-slides-ui-scale)); cursor: nwse-resize; }
+      .sheet-slides-handle.ne { right: calc(-6px * var(--sheet-slides-ui-scale)); top: calc(-6px * var(--sheet-slides-ui-scale)); cursor: nesw-resize; }
+      .sheet-slides-handle.sw { left: calc(-6px * var(--sheet-slides-ui-scale)); bottom: calc(-6px * var(--sheet-slides-ui-scale)); cursor: nesw-resize; }
+      .sheet-slides-handle.se { right: calc(-6px * var(--sheet-slides-ui-scale)); bottom: calc(-6px * var(--sheet-slides-ui-scale)); cursor: nwse-resize; }
       .sheet-slides-rotate-line {
         position: absolute;
-        width: 2px;
-        height: 18px;
-        top: -18px;
+        width: calc(2px * var(--sheet-slides-ui-scale));
+        height: calc(18px * var(--sheet-slides-ui-scale));
+        top: calc(-18px * var(--sheet-slides-ui-scale));
         left: 50%;
-        transform: translateX(-1px);
+        transform: translateX(calc(-1px * var(--sheet-slides-ui-scale)));
         background: #6ea8fe;
+        pointer-events: none;
       }
       .sheet-slides-rotate-handle {
         position: absolute;
-        top: -34px;
+        top: calc(-34px * var(--sheet-slides-ui-scale));
         left: 50%;
-        width: 14px;
-        height: 14px;
-        margin-left: -7px;
+        width: calc(14px * var(--sheet-slides-ui-scale));
+        height: calc(14px * var(--sheet-slides-ui-scale));
+        margin-left: calc(-7px * var(--sheet-slides-ui-scale));
         border-radius: 999px;
-        border: 2px solid #fff;
+        border: calc(2px * var(--sheet-slides-ui-scale)) solid #fff;
         background: #ffb86b;
         cursor: grab;
-        box-shadow: 0 1px 3px rgba(0,0,0,.4);
+        box-shadow:
+          0 calc(1px * var(--sheet-slides-ui-scale))
+          calc(3px * var(--sheet-slides-ui-scale))
+          rgba(0,0,0,.4);
+        pointer-events: auto;
       }
       .sheet-slides-context-menu {
         position: absolute;
@@ -3898,6 +5606,12 @@ export class Sheet2DEditorWindow {
       }
       .sheet-slides-context-menu-item:hover {
         background: #1b2130;
+      }
+      .sheet-slides-context-menu-item.danger {
+        color: #fecaca;
+      }
+      .sheet-slides-context-menu-item.danger:hover {
+        background: rgba(127,29,29,.32);
       }
       .sheet-slides-modal-overlay {
         position: absolute;
@@ -4016,14 +5730,19 @@ export class Sheet2DEditorWindow {
 
       .sheet-slides-pmi-host {
         position: absolute;
-        left: 0;
-        top: 0;
-        right: 0;
+        inset: 0;
         display: grid;
         place-items: center;
         min-height: 0;
         background: transparent;
         pointer-events: auto;
+        overflow: hidden;
+      }
+      .sheet-slides-pmi-frame {
+        position: absolute;
+        left: 0;
+        right: 0;
+        border-radius: 8px;
         overflow: hidden;
       }
       .sheet-slides-pmi-image {
@@ -4046,17 +5765,28 @@ export class Sheet2DEditorWindow {
         position: absolute;
         left: 0;
         right: 0;
-        bottom: 0;
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 0 8px;
+        box-sizing: border-box;
+        min-height: 0;
+        padding: 2px 8px 6px;
         background: transparent;
         color: #334155;
         font-size: 12px;
         font-weight: 600;
+        line-height: 1.2;
         text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
         pointer-events: none;
+      }
+      .sheet-slides-pmi-caption.is-top {
+        top: 0;
+      }
+      .sheet-slides-pmi-caption.is-bottom {
+        bottom: 0;
       }
 
       .sheet-slides-inspector {
@@ -4116,6 +5846,21 @@ export class Sheet2DEditorWindow {
         padding-top: 6px;
         padding-bottom: 6px;
       }
+      .sheet-slides-font-size-row {
+        display: grid;
+        grid-template-columns: minmax(44px, auto) 1fr minmax(44px, auto);
+        gap: 6px;
+        align-items: center;
+      }
+      .sheet-slides-segmented-row {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+      }
+      .sheet-slides-segmented-row .sheet-slides-btn,
+      .sheet-slides-font-size-row .sheet-slides-btn {
+        padding: 0 8px;
+      }
       .sheet-slides-color-row {
         display: flex;
         align-items: center;
@@ -4150,7 +5895,7 @@ export class Sheet2DEditorWindow {
       @media (max-width: 1200px) {
         .sheet-slides-root {
           grid-template-columns: 240px 1fr;
-          grid-template-rows: 56px 1fr 1fr 30px;
+          grid-template-rows: auto 1fr 1fr 30px;
           grid-template-areas:
             "topbar topbar"
             "sidebar stage"
@@ -4161,13 +5906,34 @@ export class Sheet2DEditorWindow {
       @media (max-width: 780px) {
         .sheet-slides-root {
           grid-template-columns: 1fr;
-          grid-template-rows: 56px minmax(180px, 240px) 1fr minmax(240px, auto) 30px;
+          grid-template-rows: auto minmax(180px, 240px) 1fr minmax(240px, auto) 30px;
           grid-template-areas:
             "topbar"
             "sidebar"
             "stage"
             "inspector"
             "status";
+        }
+        .sheet-slides-topbar {
+          min-height: 56px;
+        }
+        .sheet-slides-toolbar-group {
+          border-right: 0;
+          padding-right: 0;
+        }
+        .sheet-slides-selection-group {
+          width: 100%;
+          overflow-x: auto;
+          padding-bottom: 2px;
+        }
+        .sheet-slides-brand-logo {
+          width: 96px;
+        }
+        .sheet-slides-topbar-spacer {
+          display: none;
+        }
+        .sheet-slides-finish-btn {
+          margin-left: auto;
         }
       }
     `;
