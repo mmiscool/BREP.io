@@ -10,9 +10,28 @@ const require = createRequire(import.meta.url);
 const wasmPath = require.resolve('manifold-3d/manifold.wasm');
 const wasmBase64 = fs.readFileSync(wasmPath, 'base64');
 
+function patchManifoldNodeImports() {
+  return {
+    name: 'patch-manifold-node-imports',
+    transform(code, id) {
+      if (!id.includes('/manifold-3d/manifold.js')) return null;
+
+      return {
+        code: code
+          .replace('await import("module")', 'await import("node:module")')
+          .replaceAll('require("fs")', 'require("node:fs")')
+          .replaceAll('require("path")', 'require("node:path")')
+          .replaceAll('require("url")', 'require("node:url")'),
+        map: null,
+      };
+    },
+  };
+}
+
 export default defineConfig({
+  plugins: [patchManifoldNodeImports()],
   resolve: {
-    conditions: ['node', 'import', 'module', 'default'],
+    conditions: ['browser', 'import', 'module', 'default'],
     alias: {
       '#textToFace/fontUrlLoaders': resolve(__dirname, 'src/features/textToFace/fontUrlLoaders.kernel.js'),
     },

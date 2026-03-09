@@ -1,9 +1,3 @@
-import {
-  listSheetSizes,
-  normalizeSheetOrientation,
-  resolveSheetDimensions,
-} from "../../sheets/sheetStandards.js";
-
 const DEFAULT_SIZE = "A";
 const DEFAULT_ORIENTATION = "landscape";
 
@@ -77,7 +71,6 @@ export class Sheet2DWidget {
       if (this._activeSheetId && !this.sheets.some((sheet) => sheet?.id === this._activeSheetId)) {
         this._activeSheetId = this.sheets[0]?.id || null;
       }
-      this._syncSheetSelect();
       this._renderList();
     });
   }
@@ -103,176 +96,42 @@ export class Sheet2DWidget {
     header.appendChild(title);
 
     if (!this._readOnly) {
-      const openBtn = document.createElement("button");
-      openBtn.className = "sheet2d-btn";
-      openBtn.type = "button";
-      openBtn.textContent = "Open Editor";
-      openBtn.title = "Open the 2D sheet editor";
-      openBtn.addEventListener("click", () => this._openSelectedSheet());
-      header.appendChild(openBtn);
+      const createBtn = document.createElement("button");
+      createBtn.className = "sheet2d-btn sheet2d-btn-primary";
+      createBtn.type = "button";
+      createBtn.textContent = "New Sheet";
+      createBtn.title = "Create a new sheet";
+      createBtn.addEventListener("click", () => this._createSheet());
+      header.appendChild(createBtn);
     }
 
     this.uiElement.appendChild(header);
 
-    if (!this._readOnly) {
-      const createWrap = document.createElement("div");
-      createWrap.className = "sheet2d-create";
-
-      const nameInput = document.createElement("input");
-      nameInput.className = "sheet2d-input";
-      nameInput.type = "text";
-      nameInput.placeholder = "Sheet name";
-      nameInput.value = "Instruction Sheet";
-      this._nameInput = nameInput;
-
-      const sizeSelect = document.createElement("select");
-      sizeSelect.className = "sheet2d-select";
-      for (const size of listSheetSizes()) {
-        const option = document.createElement("option");
-        option.value = size.key;
-        option.textContent = size.label;
-        sizeSelect.appendChild(option);
-      }
-      sizeSelect.value = DEFAULT_SIZE;
-      this._sizeSelect = sizeSelect;
-
-      const orientationSelect = document.createElement("select");
-      orientationSelect.className = "sheet2d-select";
-      const optLandscape = document.createElement("option");
-      optLandscape.value = "landscape";
-      optLandscape.textContent = "Landscape";
-      const optPortrait = document.createElement("option");
-      optPortrait.value = "portrait";
-      optPortrait.textContent = "Portrait";
-      orientationSelect.appendChild(optLandscape);
-      orientationSelect.appendChild(optPortrait);
-      orientationSelect.value = DEFAULT_ORIENTATION;
-      this._orientationSelect = orientationSelect;
-
-      const createBtn = document.createElement("button");
-      createBtn.className = "sheet2d-btn sheet2d-btn-primary";
-      createBtn.type = "button";
-      createBtn.textContent = "Create";
-      createBtn.title = "Create a new sheet";
-      createBtn.addEventListener("click", () => this._createSheetFromInputs());
-
-      const dimsHint = document.createElement("div");
-      dimsHint.className = "sheet2d-hint";
-      this._dimsHint = dimsHint;
-
-      sizeSelect.addEventListener("change", () => this._updateDimsHint());
-      orientationSelect.addEventListener("change", () => this._updateDimsHint());
-
-      createWrap.appendChild(nameInput);
-      createWrap.appendChild(sizeSelect);
-      createWrap.appendChild(orientationSelect);
-      createWrap.appendChild(createBtn);
-      createWrap.appendChild(dimsHint);
-      this.uiElement.appendChild(createWrap);
-      this._updateDimsHint();
-    }
-
-    const selectWrap = document.createElement("div");
-    selectWrap.className = "sheet2d-active";
-    const activeLabel = document.createElement("span");
-    activeLabel.textContent = "Active Sheet";
-    activeLabel.className = "sheet2d-label";
-    const activeSelect = document.createElement("select");
-    activeSelect.className = "sheet2d-select";
-    activeSelect.addEventListener("change", () => {
-      this._activeSheetId = String(activeSelect.value || "").trim() || null;
-      this._renderList();
-    });
-    this._activeSheetSelect = activeSelect;
-    selectWrap.appendChild(activeLabel);
-    selectWrap.appendChild(activeSelect);
-    this.uiElement.appendChild(selectWrap);
-
     this.listEl = document.createElement("div");
     this.listEl.className = "sheet2d-list";
     this.uiElement.appendChild(this.listEl);
-    this._syncSheetSelect();
   }
 
-  _syncSheetSelect() {
-    const select = this._activeSheetSelect;
-    if (!select) return;
-    const previous = this._activeSheetId;
-    select.textContent = "";
-    for (const sheet of this.sheets) {
-      const option = document.createElement("option");
-      option.value = String(sheet?.id || "");
-      option.textContent = String(sheet?.name || option.value);
-      select.appendChild(option);
-    }
-    if (this.sheets.length === 0) {
-      const empty = document.createElement("option");
-      empty.value = "";
-      empty.textContent = "(no sheets)";
-      select.appendChild(empty);
-      select.value = "";
-      this._activeSheetId = null;
-      return;
-    }
-    if (previous && this.sheets.some((sheet) => sheet?.id === previous)) {
-      this._activeSheetId = previous;
-      select.value = previous;
-    } else {
-      this._activeSheetId = String(this.sheets[0]?.id || "");
-      select.value = this._activeSheetId;
-    }
-  }
-
-  _updateDimsHint() {
-    if (!this._dimsHint) return;
-    const sizeKey = String(this._sizeSelect?.value || DEFAULT_SIZE);
-    const orientation = normalizeSheetOrientation(this._orientationSelect?.value || DEFAULT_ORIENTATION);
-    const dims = resolveSheetDimensions(sizeKey, orientation);
-    const text = `${dims.label} • ${dims.widthIn.toFixed(2)} x ${dims.heightIn.toFixed(2)} ${dims.units}`;
-    this._dimsHint.textContent = text.replace(/\.?0+(\s|$)/g, "$1");
-  }
-
-  _createSheetFromInputs() {
+  _createSheet() {
     const manager = this._getManager();
     if (!manager || typeof manager.createSheet !== "function") return;
-    const name = String(this._nameInput?.value || "").trim() || "Sheet";
-    const sizeKey = String(this._sizeSelect?.value || DEFAULT_SIZE);
-    const orientation = normalizeSheetOrientation(this._orientationSelect?.value || DEFAULT_ORIENTATION);
+    const count = Array.isArray(this.sheets) ? this.sheets.length : 0;
     const sheet = manager.createSheet({
-      name,
-      sizeKey,
-      orientation,
+      name: `Instruction Sheet ${count + 1}`,
+      sizeKey: DEFAULT_SIZE,
+      orientation: DEFAULT_ORIENTATION,
+      background: "#ffffff",
       elements: [],
     });
     this._activeSheetId = sheet?.id || this._activeSheetId;
-    this._syncSheetSelect();
     this._renderList();
     this._openSheet(sheet?.id);
-  }
-
-  _openSelectedSheet() {
-    if (this._activeSheetId) {
-      this._openSheet(this._activeSheetId);
-      return;
-    }
-    const manager = this._getManager();
-    if (!manager?.createSheet) return;
-    const created = manager.createSheet({
-      name: "Sheet 1",
-      sizeKey: DEFAULT_SIZE,
-      orientation: DEFAULT_ORIENTATION,
-      elements: [],
-    });
-    this._activeSheetId = created?.id || null;
-    this._syncSheetSelect();
-    this._renderList();
-    this._openSheet(this._activeSheetId);
   }
 
   _openSheet(sheetId) {
     if (!sheetId) return;
     this._activeSheetId = String(sheetId);
-    this._syncSheetSelect();
+    this._renderList();
     try { this.viewer?.openSheet2DEditor?.(this._activeSheetId); } catch { }
   }
 
@@ -327,7 +186,6 @@ export class Sheet2DWidget {
     const copy = manager.duplicateSheet(sheet.id);
     if (copy?.id) {
       this._activeSheetId = copy.id;
-      this._syncSheetSelect();
       this._renderList();
     }
   }
@@ -361,6 +219,10 @@ export class Sheet2DWidget {
       row.className = "sheet2d-row";
       if (sheetId === this._activeSheetId) row.classList.add("active");
       row.draggable = !this._readOnly;
+      row.addEventListener("click", (event) => {
+        if (event?.target?.closest?.(".sheet2d-row-menu-wrap")) return;
+        this._openSheet(sheetId);
+      });
 
       if (!this._readOnly) {
         row.addEventListener("dragstart", (event) => {
@@ -407,7 +269,10 @@ export class Sheet2DWidget {
       nameBtn.className = "sheet2d-name-btn";
       nameBtn.textContent = String(sheet?.name || "Sheet");
       nameBtn.title = "Open in editor";
-      nameBtn.addEventListener("click", () => this._openSheet(sheetId));
+      nameBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this._openSheet(sheetId);
+      });
       textWrap.appendChild(nameBtn);
 
       const meta = document.createElement("div");
@@ -419,13 +284,6 @@ export class Sheet2DWidget {
 
       const actions = document.createElement("div");
       actions.className = "sheet2d-actions";
-
-      const editBtn = document.createElement("button");
-      editBtn.type = "button";
-      editBtn.className = "sheet2d-btn";
-      editBtn.textContent = "Edit";
-      editBtn.addEventListener("click", () => this._openSheet(sheetId));
-      actions.appendChild(editBtn);
 
       if (!this._readOnly) {
         const menuWrap = document.createElement("div");
@@ -503,12 +361,6 @@ export class Sheet2DWidget {
       .sheet2d-widget-root { padding: 8px; display: flex; flex-direction: column; gap: 8px; }
       .sheet2d-widget-header { display: flex; align-items: center; gap: 8px; }
       .sheet2d-widget-title { flex: 1 1 auto; color: #f1f5f9; font-weight: 700; letter-spacing: .2px; }
-      .sheet2d-create { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 6px; align-items: center; }
-      .sheet2d-input, .sheet2d-select {
-        background: #0b0e14; color: #e5e7eb; border: 1px solid #334155; border-radius: 8px;
-        padding: 6px 8px; min-width: 0; outline: none;
-      }
-      .sheet2d-input:focus, .sheet2d-select:focus { border-color: #60a5fa; box-shadow: 0 0 0 2px rgba(96,165,250,.15); }
       .sheet2d-btn {
         background: rgba(255,255,255,.04); color: #f8fafc; border: 1px solid #334155; border-radius: 8px;
         padding: 5px 8px; cursor: pointer; font-size: 12px; font-weight: 600;
@@ -517,13 +369,10 @@ export class Sheet2DWidget {
       .sheet2d-btn.danger { border-color: #7f1d1d; color: #fecaca; }
       .sheet2d-btn.danger:hover { border-color: #ef4444; background: rgba(239,68,68,.18); color: #fff; }
       .sheet2d-btn-primary { border-color: #2563eb; background: rgba(37,99,235,.2); }
-      .sheet2d-hint { grid-column: 1 / -1; color: #93c5fd; font-size: 11px; opacity: .85; }
-      .sheet2d-active { display: grid; grid-template-columns: auto 1fr; gap: 6px; align-items: center; }
-      .sheet2d-label { color: #94a3b8; font-size: 12px; }
       .sheet2d-list { display: flex; flex-direction: column; gap: 6px; }
       .sheet2d-row {
         display: flex; align-items: center; gap: 8px; border: 1px solid #1e293b; border-radius: 8px;
-        background: rgba(15,23,42,.6); padding: 6px 8px;
+        background: rgba(15,23,42,.6); padding: 6px 8px; cursor: pointer;
         position: relative;
       }
       .sheet2d-row.active { border-color: #3b82f6; box-shadow: 0 0 0 1px rgba(59,130,246,.28) inset; }
@@ -576,7 +425,6 @@ export class Sheet2DWidget {
       .sheet2d-row-menu-item.danger { color: #fecaca; }
       .sheet2d-empty { border: 1px dashed #334155; border-radius: 8px; padding: 10px; color: #94a3b8; font-size: 12px; }
       @media (max-width: 640px) {
-        .sheet2d-create { grid-template-columns: 1fr 1fr; }
         .sheet2d-actions { flex-wrap: wrap; justify-content: flex-end; }
       }
     `;

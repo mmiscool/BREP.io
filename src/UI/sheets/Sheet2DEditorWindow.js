@@ -1,4 +1,6 @@
 import brepHomeBannerUrl from "../../assets/brand/brep-home-banner.svg";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 import { captureCameraSnapshot } from "../pmi/annUtils.js";
 import { listSheetSizes } from "../../sheets/sheetStandards.js";
 import {
@@ -23,6 +25,12 @@ import {
 const DEFAULT_SHEET_SIZE_KEY = "A";
 const DEFAULT_SHEET_ORIENTATION = "landscape";
 const DEFAULT_ZOOM = 1;
+const MIN_STAGE_ZOOM = 0.1;
+const MAX_STAGE_ZOOM = 10;
+const POINTS_PER_INCH = 72;
+const PDF_TARGET_DPI = 300;
+const PMI_TITLE_FONT_SIZE_PT = 10;
+const PMI_TITLE_PAD_X_PT = 6;
 const MIN_ELEMENT_IN = 0.05;
 const MIN_MEDIA_SCALE = 1;
 const MAX_MEDIA_SCALE = 10;
@@ -30,7 +38,7 @@ const PMI_TITLE_HEIGHT_IN = 0.3;
 const STAGE_VIEWPORT_PADDING_PX = 10;
 const FIT_VIEWPORT_PADDING_PX = 6;
 const FIT_SAFETY_INSET_PX = 2;
-const STROKE_WIDTH_OPTIONS_PX = [0, 1, 2, 3, 4, 8, 12, 16, 24];
+const STROKE_WIDTH_OPTIONS_PT = [0, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8, 12];
 const TABLE_DEFAULT_ROWS = 3;
 const TABLE_DEFAULT_COLS = 4;
 const TABLE_DEFAULT_COL_WIDTH_IN = 1.05;
@@ -68,6 +76,22 @@ const TOOLBAR_COLOR_SWATCHS = ["#111111", "#ffffff", "#ef4444", "#f59e0b", "#22c
 
 function iconSvg(content, { viewBox = "0 0 24 24" } = {}) {
   return `<svg viewBox="${viewBox}" aria-hidden="true" focusable="false">${content}</svg>`;
+}
+
+function inchesToPoints(value) {
+  return toFiniteNumber(value, 0) * POINTS_PER_INCH;
+}
+
+function pointsToInches(value) {
+  return toFiniteNumber(value, 0) / POINTS_PER_INCH;
+}
+
+function formatPointValue(value) {
+  const rounded = Math.round(toFiniteNumber(value, 0) * 100) / 100;
+  if (Number.isInteger(rounded)) return String(rounded);
+  return String(rounded)
+    .replace(/(\.\d*?[1-9])0+$/u, "$1")
+    .replace(/\.0+$/u, "");
 }
 
 const TOOLBAR_ICON_SVGS = {
@@ -833,7 +857,20 @@ export class Sheet2DEditorWindow {
   }
 
   _getStageZoom() {
-    return clamp(toFiniteNumber(this._appliedZoom, this.zoom), 0.1, 4);
+    return this._clampStageZoom(this._appliedZoom, this.zoom);
+  }
+
+  _clampStageZoom(value, fallback = DEFAULT_ZOOM) {
+    return clamp(toFiniteNumber(value, fallback), MIN_STAGE_ZOOM, MAX_STAGE_ZOOM);
+  }
+
+  _getStageRenderPpi(zoom = this._getStageZoom()) {
+    return Math.max(1, this._pxPerIn() * this._clampStageZoom(zoom, DEFAULT_ZOOM));
+  }
+
+  _getSelectionUiScale(zoom = this._getStageZoom()) {
+    const normalizedZoom = Math.max(1, this._clampStageZoom(zoom, DEFAULT_ZOOM));
+    return clamp(1 + (Math.log2(normalizedZoom) * 0.18), 1, 1.55);
   }
 
   _getStageViewportMetrics() {
@@ -845,7 +882,7 @@ export class Sheet2DEditorWindow {
   }
 
   _computeFitZoom(sheet = this.sheetDraft) {
-    if (!sheet) return clamp(toFiniteNumber(this.zoom, DEFAULT_ZOOM), 0.1, 4);
+    if (!sheet) return this._clampStageZoom(this.zoom, DEFAULT_ZOOM);
 
     const ppi = Math.max(1, toFiniteNumber(sheet.pxPerInch, 96));
     const widthPx = Math.max(100, toFiniteNumber(sheet.widthIn, 11) * ppi);
@@ -859,7 +896,7 @@ export class Sheet2DEditorWindow {
       1,
       viewport.height - (FIT_VIEWPORT_PADDING_PX * 2) - FIT_SAFETY_INSET_PX,
     );
-    return clamp(Math.min(availableWidth / widthPx, availableHeight / heightPx), 0.1, 4);
+    return this._clampStageZoom(Math.min(availableWidth / widthPx, availableHeight / heightPx), DEFAULT_ZOOM);
   }
 
   _computeFitStagePan(sheet = this.sheetDraft, zoom = this._computeFitZoom(sheet)) {
@@ -901,7 +938,7 @@ export class Sheet2DEditorWindow {
     const worldX = (localX - this._appliedStagePanX) / currentZoom;
     const worldY = (localY - this._appliedStagePanY) / currentZoom;
 
-    this.zoom = clamp(toFiniteNumber(nextZoom, currentZoom), 0.1, 4);
+    this.zoom = this._clampStageZoom(nextZoom, currentZoom);
     this._stagePanX = localX - (worldX * this.zoom);
     this._stagePanY = localY - (worldY * this.zoom);
   }
@@ -936,6 +973,14 @@ export class Sheet2DEditorWindow {
       this._manualZoomOption.remove();
     }
     this._zoomSelect.value = exactValue;
+  }
+
+  _syncViewportControls() {
+    this._syncZoomControl();
+    if (this._gridToggleBtn) {
+      this._gridToggleBtn.classList.toggle("active", !!this.showGrid);
+      this._gridToggleBtn.setAttribute("aria-pressed", this.showGrid ? "true" : "false");
+    }
   }
 
   _ensureWindow() {
@@ -1042,9 +1087,10 @@ export class Sheet2DEditorWindow {
     toolbarFontSizeDecrementBtn.title = "Decrease font size";
     const toolbarFontSizeInput = this._buildNumberInput((value) => this._setSelectedTextField("fontSize", value), {
       step: 1,
-      min: 6,
-      max: 400,
+      min: 1,
+      max: 288,
     });
+    toolbarFontSizeInput.title = "Font size (pt)";
     toolbarFontSizeInput.classList.add("sheet-slides-toolbar-number");
     const toolbarFontSizeIncrementBtn = this._makeToolbarButton("A+", () => this._adjustSelectedFontSize(1), "small");
     toolbarFontSizeIncrementBtn.title = "Increase font size";
@@ -1080,7 +1126,7 @@ export class Sheet2DEditorWindow {
 
     const zoomSelect = document.createElement("select");
     zoomSelect.className = "sheet-slides-control";
-    [["fit", "Fit"], ["0.25", "25%"], ["0.5", "50%"], ["0.75", "75%"], ["1", "100%"], ["1.25", "125%"], ["1.5", "150%"]]
+    [["fit", "Fit"], ["0.1", "10%"], ["0.25", "25%"], ["0.5", "50%"], ["0.75", "75%"], ["1", "100%"], ["1.25", "125%"], ["1.5", "150%"], ["2", "200%"], ["3", "300%"], ["4", "400%"], ["5", "500%"], ["6", "600%"], ["8", "800%"], ["10", "1000%"]]
       .forEach(([value, label]) => {
         const opt = document.createElement("option");
         opt.value = value;
@@ -1098,7 +1144,7 @@ export class Sheet2DEditorWindow {
           this._stagePanY = toFiniteNumber(this._appliedStagePanY, 0);
         }
         this._zoomMode = "manual";
-        this.zoom = clamp(toFiniteNumber(zoomSelect.value, 1), 0.1, 4);
+        this.zoom = this._clampStageZoom(zoomSelect.value, DEFAULT_ZOOM);
       }
       this._renderStageOnly();
       const appliedZoom = Math.round(this._getStageZoom() * 100);
@@ -1110,15 +1156,23 @@ export class Sheet2DEditorWindow {
       this.showGrid = !this.showGrid;
       this._renderStageOnly();
     });
+    gridBtn.title = "Toggle grid";
+    this._gridToggleBtn = gridBtn;
 
     topbar.appendChild(this._toolbarGroup([addTextBtn, shapesBtn, addTableBtn, addImageBtn, insertPmiBtn]));
     topbar.appendChild(selectionStyleGroup);
     topbar.appendChild(selectionTextGroup);
-    topbar.appendChild(this._toolbarGroup([zoomSelect, gridBtn], true));
 
     const topbarSpacer = document.createElement("div");
     topbarSpacer.className = "sheet-slides-topbar-spacer";
     topbar.appendChild(topbarSpacer);
+
+    const pdfBtn = this._makeToolbarButton("PDF", () => {
+      void this._exportSheetsToPdf();
+    });
+    pdfBtn.title = "Generate a PDF from all sheets";
+    this._pdfBtn = pdfBtn;
+    topbar.appendChild(pdfBtn);
 
     const finishBtn = this._makeToolbarButton("Finish", () => this.close(), "primary");
     finishBtn.title = "Exit the 2D sheet editor";
@@ -1291,9 +1345,9 @@ export class Sheet2DEditorWindow {
       () => this._resetSelectedStroke(),
     );
     const strokeWidthInput = this._buildNumberInput((value) => this._setSelectedStyleField("strokeWidth", value), {
-      step: 1,
+      step: 0.25,
       min: 0,
-      max: 64,
+      max: 72,
     });
     const cornerRadiusInput = this._buildNumberInput((value) => this._setSelectedStyleField("cornerRadius", value), {
       step: 1,
@@ -1333,7 +1387,7 @@ export class Sheet2DEditorWindow {
     const strokeField = this._makeField("Border", strokeControl);
     this._strokeField = strokeField;
     elementPanel.appendChild(strokeField);
-    elementPanel.appendChild(this._makeField("Border W", strokeWidthInput));
+    elementPanel.appendChild(this._makeField("Border W (pt)", strokeWidthInput));
     const cornerRadiusField = this._makeField("Corner R", cornerRadiusInput);
     this._cornerRadiusField = cornerRadiusField;
     elementPanel.appendChild(cornerRadiusField);
@@ -1358,8 +1412,8 @@ export class Sheet2DEditorWindow {
 
     const fontSizeInput = this._buildNumberInput((value) => this._setSelectedTextField("fontSize", value), {
       step: 1,
-      min: 6,
-      max: 400,
+      min: 1,
+      max: 288,
     });
     const fontSizeDecrementBtn = this._makeToolbarButton("A-", () => this._adjustSelectedFontSize(-1), "small");
     fontSizeDecrementBtn.title = "Decrease font size";
@@ -1424,7 +1478,7 @@ export class Sheet2DEditorWindow {
     this._textContentField = textContentField;
     textPanel.appendChild(textContentField);
     textPanel.appendChild(this._makeField("Font", fontFamilyInput));
-    textPanel.appendChild(this._makeField("Size", fontSizeControl));
+    textPanel.appendChild(this._makeField("Size (pt)", fontSizeControl));
     textPanel.appendChild(this._makeField("Text", textColorControl));
     textPanel.appendChild(this._makeField("Align H", textAlignWrap));
     textPanel.appendChild(this._makeField("Align V", verticalAlignWrap));
@@ -1506,10 +1560,19 @@ export class Sheet2DEditorWindow {
     const status = document.createElement("div");
     status.className = "sheet-slides-status";
     const statusLeft = document.createElement("div");
+    statusLeft.className = "sheet-slides-status-left";
+    const statusCenter = document.createElement("div");
+    statusCenter.className = "sheet-slides-status-center";
+    const statusControls = document.createElement("div");
+    statusControls.className = "sheet-slides-status-controls";
+    statusControls.appendChild(zoomSelect);
+    statusControls.appendChild(gridBtn);
+    statusCenter.appendChild(statusControls);
     const statusRight = document.createElement("div");
-    statusRight.className = "sheet-slides-muted";
+    statusRight.className = "sheet-slides-muted sheet-slides-status-right";
     statusRight.textContent = "Ready";
     status.appendChild(statusLeft);
+    status.appendChild(statusCenter);
     status.appendChild(statusRight);
     this._statusLeft = statusLeft;
     this._statusRight = statusRight;
@@ -1812,14 +1875,14 @@ export class Sheet2DEditorWindow {
       title.textContent = "Line weight";
       const list = document.createElement("div");
       list.className = "sheet-slides-toolbar-option-list";
-      const currentPx = selected.type === "text" && !this._isTextBorderEnabled(selected)
+      const currentPt = selected.type === "text" && !this._isTextBorderEnabled(selected)
         ? 0
-        : Math.round(toFiniteNumber(selected.strokeWidth, this._defaultStrokeWidthForElement(selected)) * this._pxPerIn());
-      for (const value of STROKE_WIDTH_OPTIONS_PX) {
+        : Math.round(inchesToPoints(toFiniteNumber(selected.strokeWidth, this._defaultStrokeWidthForElement(selected))) * 100) / 100;
+      for (const value of STROKE_WIDTH_OPTIONS_PT) {
         const button = document.createElement("button");
         button.type = "button";
-        button.className = `sheet-slides-toolbar-option${value === currentPx ? " active" : ""}`;
-        button.textContent = `${value}px`;
+        button.className = `sheet-slides-toolbar-option${Math.abs(value - currentPt) < 0.001 ? " active" : ""}`;
+        button.textContent = `${formatPointValue(value)}pt`;
         button.addEventListener("click", () => {
           this._setSelectedStyleField("strokeWidth", value);
           this._closeToolbarPopover();
@@ -2656,6 +2719,20 @@ export class Sheet2DEditorWindow {
 
   _getPmiTitleHeightIn(element) {
     return this._getPmiLabelPosition(element) === "none" ? 0 : PMI_TITLE_HEIGHT_IN;
+  }
+
+  _applyPmiCaptionStyles(node, ppi, heightPx = 0) {
+    if (!node) return;
+    const safePpi = Math.max(1, toFiniteNumber(ppi, this._pxPerIn()));
+    const safeHeightPx = Math.max(0, toFiniteNumber(heightPx, 0));
+    const fontSizePx = Math.max(8, Math.min(pointsToInches(PMI_TITLE_FONT_SIZE_PT) * safePpi, safeHeightPx * 0.6 || Infinity));
+    const padXPx = Math.max(2, pointsToInches(PMI_TITLE_PAD_X_PT) * safePpi);
+    node.style.fontSize = `${fontSizePx}px`;
+    node.style.paddingLeft = `${padXPx}px`;
+    node.style.paddingRight = `${padXPx}px`;
+    node.style.paddingTop = "0px";
+    node.style.paddingBottom = "0px";
+    node.style.lineHeight = "1.15";
   }
 
   _getSuggestedPmiInsetSize(metadata = null, showLabel = true) {
@@ -3589,7 +3666,7 @@ export class Sheet2DEditorWindow {
       this._toolbarFontFamilyInput.value = String(textState.fontFamily || "Arial, Helvetica, sans-serif");
     }
     if (this._toolbarFontSizeInput) {
-      this._toolbarFontSizeInput.value = String(Math.round(toFiniteNumber(textState.fontSize, 0.32) * this._pxPerIn()));
+      this._toolbarFontSizeInput.value = String(Math.round(inchesToPoints(toFiniteNumber(textState.fontSize, 0.32))));
     }
     if (this._toolbarBoldBtn) {
       this._toolbarBoldBtn.classList.toggle("primary", String(textState.fontWeight || "400") === "700");
@@ -3910,6 +3987,7 @@ export class Sheet2DEditorWindow {
             caption.className = `sheet-slides-pmi-caption ${labelPosition === "top" ? "is-top" : "is-bottom"}`;
             caption.textContent = pmiViewName;
             caption.style.height = `${captionHeightPx}px`;
+            this._applyPmiCaptionStyles(caption, ppi, captionHeightPx);
             node.appendChild(caption);
           }
           this._appendStrokeOverlay(frame, el, wPx, mediaHeightPx, { shape: "rect", radiusPx: 8 });
@@ -3940,7 +4018,7 @@ export class Sheet2DEditorWindow {
       canvas.style.transform = "none";
       stageShell.style.width = "240px";
       stageShell.style.height = "160px";
-      stageShell.style.transform = "translate(0px, 0px) scale(1)";
+      stageShell.style.transform = "translate(0px, 0px)";
       this._appliedZoom = 1;
       this._appliedStagePanX = 0;
       this._appliedStagePanY = 0;
@@ -3949,19 +4027,16 @@ export class Sheet2DEditorWindow {
       return;
     }
 
-    const ppi = this._pxPerIn();
-    const widthPx = Math.max(100, toFiniteNumber(sheet.widthIn, 11) * ppi);
-    const heightPx = Math.max(100, toFiniteNumber(sheet.heightIn, 8.5) * ppi);
-
     stageShell.textContent = "";
     stageShell.appendChild(canvas);
     canvas.textContent = "";
-    canvas.style.width = `${widthPx}px`;
-    canvas.style.height = `${heightPx}px`;
     canvas.style.background = toCssColor(sheet.background, "#ffffff");
     this._appliedZoom = this._zoomMode === "fit"
       ? this._computeFitZoom(sheet)
-      : clamp(toFiniteNumber(this.zoom, DEFAULT_ZOOM), 0.1, 4);
+      : this._clampStageZoom(this.zoom, DEFAULT_ZOOM);
+    const renderPpi = this._getStageRenderPpi(this._appliedZoom);
+    const renderWidthPx = Math.max(100, toFiniteNumber(sheet.widthIn, 11) * renderPpi);
+    const renderHeightPx = Math.max(100, toFiniteNumber(sheet.heightIn, 8.5) * renderPpi);
     if (this._zoomMode === "fit") {
       const fitPan = this._computeFitStagePan(sheet, this._appliedZoom);
       this._appliedStagePanX = fitPan.x;
@@ -3971,14 +4046,17 @@ export class Sheet2DEditorWindow {
       this._appliedStagePanY = toFiniteNumber(this._stagePanY, 0);
     }
     canvas.style.transform = "none";
-    stageShell.style.width = `${Math.max(1, widthPx)}px`;
-    stageShell.style.height = `${Math.max(1, heightPx)}px`;
-    stageShell.style.transform = `translate(${this._appliedStagePanX}px, ${this._appliedStagePanY}px) scale(${this._appliedZoom})`;
+    canvas.style.width = `${renderWidthPx}px`;
+    canvas.style.height = `${renderHeightPx}px`;
+    stageShell.style.width = `${Math.max(1, renderWidthPx)}px`;
+    stageShell.style.height = `${Math.max(1, renderHeightPx)}px`;
+    stageShell.style.transform = `translate(${this._appliedStagePanX}px, ${this._appliedStagePanY}px)`;
     canvas.classList.toggle("show-grid", !!this.showGrid);
-    this._syncZoomControl();
+    this._syncViewportControls();
 
     const grid = document.createElement("div");
     grid.className = "sheet-slides-grid";
+    grid.style.setProperty("--sheet-slides-grid-step", `${Math.max(8, 40 * this._appliedZoom)}px`);
     canvas.appendChild(grid);
 
     const usedPmiIds = new Set();
@@ -3996,13 +4074,13 @@ export class Sheet2DEditorWindow {
     }
 
     this._disposeUnusedPmiViewports(usedPmiIds);
-    this._statusRight.textContent = `${Math.round(widthPx)} × ${Math.round(heightPx)} px`;
+    this._statusRight.textContent = `${Math.round(renderWidthPx)} × ${Math.round(renderHeightPx)} px @ ${Math.round(this._appliedZoom * 100)}%`;
   }
 
   _buildElementNode(element, usedPmiIds) {
     if (!element || typeof element !== "object") return null;
 
-    const ppi = this._pxPerIn();
+    const ppi = this._getStageRenderPpi();
     const node = document.createElement("div");
     const selected = this._isElementSelected(element.id);
     const cropActive = selected && this._getSelectedElementIds().length === 1 && this._isCropModeForElement(element) && elementSupportsMediaCrop(element);
@@ -4120,6 +4198,7 @@ export class Sheet2DEditorWindow {
         footer.className = `sheet-slides-pmi-caption ${labelPosition === "top" ? "is-top" : "is-bottom"}`;
         footer.textContent = pmiViewName;
         footer.style.height = `${Math.max(0, hPx - mediaFrameHeightPx)}px`;
+        this._applyPmiCaptionStyles(footer, ppi, Math.max(0, hPx - mediaFrameHeightPx));
         content.appendChild(footer);
       }
 
@@ -4141,6 +4220,360 @@ export class Sheet2DEditorWindow {
     node.addEventListener("pointerdown", (event) => this._onElementPointerDown(event, element.id));
     node.addEventListener("dblclick", (event) => this._onElementDoubleClick(event, element.id));
     return node;
+  }
+
+  _annotateExportMediaFrame(frameNode, element, kind = "image") {
+    if (!frameNode) return;
+    frameNode.dataset.exportMediaFrame = "true";
+    frameNode.dataset.exportMediaKind = String(kind || "image");
+    frameNode.dataset.exportMediaScale = String(clamp(toFiniteNumber(element?.mediaScale, 1), MIN_MEDIA_SCALE, MAX_MEDIA_SCALE));
+    frameNode.dataset.exportMediaOffsetX = String(clamp(toFiniteNumber(element?.mediaOffsetX, 0), -1, 1));
+    frameNode.dataset.exportMediaOffsetY = String(clamp(toFiniteNumber(element?.mediaOffsetY, 0), -1, 1));
+  }
+
+  _buildPdfElementNode(element, ppi) {
+    if (!element || typeof element !== "object") return null;
+
+    const node = document.createElement("div");
+    node.className = "sheet-slides-element";
+    node.dataset.id = String(element.id || "");
+    node.dataset.type = String(element.type || "");
+    node.style.opacity = String(clamp(toFiniteNumber(element.opacity, 1), 0, 1));
+    node.style.zIndex = String(toFiniteNumber(element.z, 0));
+
+    if (element.type === "line") {
+      const x1 = toFiniteNumber(element.x, 0) * ppi;
+      const y1 = toFiniteNumber(element.y, 0) * ppi;
+      const x2 = toFiniteNumber(element.x2, element.x) * ppi;
+      const y2 = toFiniteNumber(element.y2, element.y) * ppi;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len = Math.max(1, Math.hypot(dx, dy));
+      const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+      const strokeHeight = Math.max(2, toFiniteNumber(element.strokeWidth, 0.02) * ppi);
+      node.style.left = `${Math.min(x1, x2)}px`;
+      node.style.top = `${Math.min(y1, y2)}px`;
+      node.style.width = `${len}px`;
+      node.style.height = `${strokeHeight}px`;
+      node.style.transformOrigin = "left center";
+      node.style.transform = `rotate(${angle}deg)`;
+
+      const content = document.createElement("div");
+      content.className = "sheet-slides-element-content";
+      content.style.width = "100%";
+      content.style.height = "100%";
+      this._applyLineStrokeStyles(content, element, strokeHeight);
+      node.appendChild(content);
+      return node;
+    }
+
+    const xPx = toFiniteNumber(element.x, 0) * ppi;
+    const yPx = toFiniteNumber(element.y, 0) * ppi;
+    const wPx = Math.max(1, toFiniteNumber(element.w, 1) * ppi);
+    const hPx = Math.max(1, toFiniteNumber(element.h, 1) * ppi);
+    const mediaFrameBox = (elementSupportsMediaCrop(element) || element?.type === "pmiInset")
+      ? this._getMediaFrameBox(element)
+      : null;
+    const mediaFrameHeightPx = mediaFrameBox ? Math.max(1, mediaFrameBox.h * ppi) : hPx;
+
+    node.style.left = `${xPx}px`;
+    node.style.top = `${yPx}px`;
+    node.style.width = `${wPx}px`;
+    node.style.height = `${hPx}px`;
+    node.style.transform = `rotate(${toFiniteNumber(element.rotationDeg, 0)}deg)`;
+
+    const content = document.createElement("div");
+    content.className = "sheet-slides-element-content";
+
+    if (element.type === "text") {
+      content.style.background = toCssColor(element.fill, "transparent");
+      const textBody = document.createElement("div");
+      textBody.className = "sheet-slides-inline-text";
+      const textInner = document.createElement("div");
+      textInner.className = "sheet-slides-inline-text-body";
+      textInner.textContent = String(element.text || "");
+      textBody.appendChild(textInner);
+      this._applyTextStyles(textBody, element, ppi);
+      textBody.style.padding = "4px";
+      content.appendChild(textBody);
+      this._appendStrokeOverlay(node, element, wPx, hPx, { shape: "rect", radiusPx: 8 });
+    } else if (isShapeElementType(element.type)) {
+      const shapeContent = this._buildShapeContentNode(element, wPx, hPx, ppi);
+      if (shapeContent) {
+        while (shapeContent.firstChild) {
+          content.appendChild(shapeContent.firstChild);
+        }
+      }
+    } else if (element.type === "image") {
+      content.style.background = toCssColor(element.fill, "transparent");
+      content.style.borderRadius = "8px";
+      content.style.overflow = "hidden";
+      const mediaFrame = document.createElement("div");
+      mediaFrame.className = "sheet-slides-media-frame";
+      this._annotateExportMediaFrame(mediaFrame, element, "image");
+      mediaFrame.style.background = toCssColor(element.fill, "transparent");
+      const media = document.createElement("img");
+      media.className = "sheet-slides-media-image";
+      media.alt = "";
+      media.draggable = false;
+      media.src = String(element.src || "");
+      this._applyMediaCropStyles(media, element, wPx, hPx);
+      mediaFrame.appendChild(media);
+      content.appendChild(mediaFrame);
+      this._appendStrokeOverlay(node, element, wPx, hPx, { shape: "rect", radiusPx: 8 });
+    } else if (element.type === "pmiInset") {
+      const labelPosition = this._getPmiLabelPosition(element);
+      content.style.background = "transparent";
+      content.style.overflow = "visible";
+      content.classList.add("sheet-slides-pmi-body");
+
+      const frame = document.createElement("div");
+      frame.className = "sheet-slides-pmi-frame";
+      frame.style.height = `${mediaFrameHeightPx}px`;
+      frame.style.top = `${labelPosition === "top" ? (hPx - mediaFrameHeightPx) : 0}px`;
+      frame.style.background = toCssColor(element.fill, "transparent");
+      content.appendChild(frame);
+
+      const host = document.createElement("div");
+      host.className = "sheet-slides-pmi-host";
+      host.style.height = "100%";
+      this._annotateExportMediaFrame(host, element, "pmiInset");
+      frame.appendChild(host);
+
+      const src = String(element.src || "").trim();
+      if (src) {
+        const img = document.createElement("img");
+        img.className = "sheet-slides-media-image sheet-slides-pmi-image";
+        img.alt = this._resolvePmiViewDisplayName(element);
+        img.draggable = false;
+        img.src = src;
+        this._applyMediaCropStyles(img, element, wPx, mediaFrameHeightPx);
+        host.appendChild(img);
+      } else {
+        const placeholder = document.createElement("div");
+        placeholder.className = "sheet-slides-pmi-placeholder";
+        placeholder.textContent = "PMI image unavailable";
+        host.appendChild(placeholder);
+      }
+
+      if (labelPosition !== "none") {
+        const footer = document.createElement("div");
+        footer.className = `sheet-slides-pmi-caption ${labelPosition === "top" ? "is-top" : "is-bottom"}`;
+        footer.textContent = this._resolvePmiViewDisplayName(element);
+        const captionHeightPx = Math.max(0, hPx - mediaFrameHeightPx);
+        footer.style.height = `${captionHeightPx}px`;
+        this._applyPmiCaptionStyles(footer, ppi, captionHeightPx);
+        content.appendChild(footer);
+      }
+
+      this._appendStrokeOverlay(frame, element, wPx, mediaFrameHeightPx, { shape: "rect", radiusPx: 8 });
+    } else if (element.type === "table") {
+      const tableContent = this._buildTableContentNode(element, wPx, hPx, ppi, { interactive: false });
+      if (tableContent) {
+        while (tableContent.firstChild) {
+          content.appendChild(tableContent.firstChild);
+        }
+      }
+    } else {
+      content.style.background = toCssColor(element.fill, "#dbeafe");
+    }
+
+    node.appendChild(content);
+    return node;
+  }
+
+  _buildPdfPageNode(sheet) {
+    if (!sheet || typeof sheet !== "object") return null;
+    const ppi = Math.max(1, toFiniteNumber(sheet.pxPerInch, 96));
+    const widthPx = Math.max(100, toFiniteNumber(sheet.widthIn, 11) * ppi);
+    const heightPx = Math.max(100, toFiniteNumber(sheet.heightIn, 8.5) * ppi);
+
+    const page = document.createElement("section");
+    page.className = "sheet-slides-pdf-page";
+    page.dataset.sheetPpi = String(ppi);
+    page.style.position = "relative";
+    page.style.display = "block";
+    page.style.overflow = "hidden";
+    page.style.background = toCssColor(sheet.background, "#ffffff");
+    page.style.width = `${widthPx}px`;
+    page.style.height = `${heightPx}px`;
+
+    const canvas = document.createElement("div");
+    canvas.className = "sheet-slides-canvas sheet-slides-pdf-canvas";
+    canvas.style.width = `${widthPx}px`;
+    canvas.style.height = `${heightPx}px`;
+    canvas.style.background = toCssColor(sheet.background, "#ffffff");
+    canvas.style.borderRadius = "0";
+    canvas.style.boxShadow = "none";
+    canvas.style.overflow = "hidden";
+    page.appendChild(canvas);
+
+    const elements = sortElements(sheet.elements || []);
+    for (const element of elements) {
+      const node = this._buildPdfElementNode(element, ppi);
+      if (node) canvas.appendChild(node);
+    }
+
+    return page;
+  }
+
+  _getPdfRasterScale(node) {
+    const width = Math.max(1, toFiniteNumber(node?.offsetWidth, 0));
+    const height = Math.max(1, toFiniteNumber(node?.offsetHeight, 0));
+    const area = Math.max(1, width * height);
+    const basePpi = Math.max(1, toFiniteNumber(node?.dataset?.sheetPpi, 96));
+    const targetScale = PDF_TARGET_DPI / basePpi;
+    const maxDimensionScale = 4096 / Math.max(width, height);
+    const maxAreaScale = Math.sqrt(16000000 / area);
+    return clamp(Math.min(targetScale, maxDimensionScale, maxAreaScale), 1, 4);
+  }
+
+  _applyExportMediaLayout(frame) {
+    if (!frame) return;
+    const img = frame.querySelector(".sheet-slides-media-image");
+    if (!img) return;
+    const frameWidth = Math.max(1, toFiniteNumber(frame.clientWidth, 0));
+    const frameHeight = Math.max(1, toFiniteNumber(frame.clientHeight, 0));
+    const metadata = {
+      width: Math.max(1, toFiniteNumber(img.naturalWidth, frameWidth)),
+      height: Math.max(1, toFiniteNumber(img.naturalHeight, frameHeight)),
+    };
+    const kind = String(frame.dataset.exportMediaKind || "image");
+    const layout = this._getMediaLayout({
+      type: kind,
+      mediaScale: toFiniteNumber(frame.dataset.exportMediaScale, 1),
+      mediaOffsetX: toFiniteNumber(frame.dataset.exportMediaOffsetX, 0),
+      mediaOffsetY: toFiniteNumber(frame.dataset.exportMediaOffsetY, 0),
+    }, frameWidth, frameHeight, metadata);
+    img.style.position = "absolute";
+    img.style.left = `${layout.left}px`;
+    img.style.top = `${layout.top}px`;
+    img.style.width = `${layout.renderWidth}px`;
+    img.style.height = `${layout.renderHeight}px`;
+    img.style.maxWidth = "none";
+    img.style.maxHeight = "none";
+    img.style.objectFit = "fill";
+    img.style.objectPosition = "center center";
+    img.style.transform = "none";
+  }
+
+  _applyExportMediaLayouts(root) {
+    for (const frame of root?.querySelectorAll?.('[data-export-media-frame="true"]') || []) {
+      this._applyExportMediaLayout(frame);
+    }
+  }
+
+  async _waitForImagesInNode(root) {
+    const images = Array.from(root?.querySelectorAll?.("img") || []);
+    await Promise.all(images.map((img) => {
+      if (img.complete) return Promise.resolve();
+      return new Promise((resolve) => {
+        img.addEventListener("load", resolve, { once: true });
+        img.addEventListener("error", resolve, { once: true });
+      });
+    }));
+    if (document.fonts?.ready) {
+      try { await document.fonts.ready; } catch { }
+    }
+  }
+
+  async _renderPdfPageCanvas(pageNode, rasterScale) {
+    return html2canvas(pageNode, {
+      backgroundColor: null,
+      scale: rasterScale,
+      useCORS: true,
+      logging: false,
+      foreignObjectRendering: true,
+    });
+  }
+
+  async _exportSheetsToPdf() {
+    this._closeToolbarPopover();
+    this._hideContextMenu();
+    try {
+      if (this.root?.contains?.(document.activeElement) && typeof document.activeElement?.blur === "function") {
+        document.activeElement.blur();
+      }
+    } catch { }
+    await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+
+    try {
+      await this._refreshAllPmiInsetImages();
+    } catch { }
+
+    this._commitSheetDraft("pdf-export");
+    const manager = this._getManager();
+    const sheets = typeof manager?.toSerializable === "function"
+      ? manager.toSerializable()
+      : deepClone(manager?.getSheets?.() || []);
+    if (!Array.isArray(sheets) || sheets.length === 0) {
+      this._setStatus("No sheets available for PDF export");
+      return;
+    }
+
+    const host = document.createElement("div");
+    host.className = "sheet-slides-pdf-host";
+    host.style.position = "fixed";
+    host.style.left = "0";
+    host.style.top = "0";
+    host.style.pointerEvents = "none";
+    host.style.opacity = "1";
+    host.style.zIndex = "1";
+    host.style.display = "block";
+    document.body.appendChild(host);
+
+    try {
+      let doc = null;
+      const baseName = String(this.viewer?.partHistory?.name || "brep-io-sheets")
+        .trim()
+        .replace(/[\\/:*?"<>|]+/g, "_")
+        .replace(/\s+/g, "_")
+        .replace(/_+/g, "_")
+        .replace(/^_+|_+$/g, "") || "brep-io-sheets";
+
+      for (let index = 0; index < sheets.length; index += 1) {
+        const sheet = sheets[index];
+        const pageNode = this._buildPdfPageNode(sheet);
+        if (!pageNode) continue;
+        host.appendChild(pageNode);
+
+        await this._waitForImagesInNode(pageNode);
+        this._applyExportMediaLayouts(pageNode);
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+        const widthIn = Math.max(0.1, toFiniteNumber(sheet?.widthIn, 11));
+        const heightIn = Math.max(0.1, toFiniteNumber(sheet?.heightIn, 8.5));
+        const orientation = widthIn >= heightIn ? "landscape" : "portrait";
+        const rasterScale = this._getPdfRasterScale(pageNode);
+        const canvas = await this._renderPdfPageCanvas(pageNode, rasterScale);
+
+        if (!doc) {
+          doc = new jsPDF({
+            orientation,
+            unit: "in",
+            format: [widthIn, heightIn],
+            compress: true,
+          });
+        } else {
+          doc.addPage([widthIn, heightIn], orientation);
+        }
+        doc.addImage(canvas, "PNG", 0, 0, widthIn, heightIn);
+        host.removeChild(pageNode);
+      }
+
+      if (!doc) {
+        this._setStatus("No sheets available for PDF export");
+        return;
+      }
+
+      doc.save(`${baseName}.pdf`);
+      this._setStatus(`PDF exported for ${sheets.length} sheet${sheets.length === 1 ? "" : "s"}`);
+    } catch (error) {
+      console.error("Failed to export sheets PDF", error);
+      this._setStatus("PDF export failed");
+    } finally {
+      try { host.remove(); } catch { }
+    }
   }
 
   _getElementBoundsIn(element) {
@@ -4194,7 +4627,7 @@ export class Sheet2DEditorWindow {
     if (!element || !this._slideCanvas) return null;
     const node = this._slideCanvas.querySelector(`.sheet-slides-element[data-id="${CSS.escape(String(element.id || ""))}"]`);
     if (!node) {
-      const ppi = this._pxPerIn();
+      const ppi = this._getStageRenderPpi();
       const bounds = this._getElementBoundsIn(element);
       return bounds ? {
         left: bounds.x * ppi,
@@ -4205,12 +4638,11 @@ export class Sheet2DEditorWindow {
     }
     const canvasRect = this._slideCanvas.getBoundingClientRect();
     const nodeRect = node.getBoundingClientRect();
-    const zoom = Math.max(1e-6, this._getStageZoom());
     return {
-      left: (nodeRect.left - canvasRect.left) / zoom,
-      top: (nodeRect.top - canvasRect.top) / zoom,
-      width: Math.max(1, nodeRect.width / zoom),
-      height: Math.max(1, nodeRect.height / zoom),
+      left: nodeRect.left - canvasRect.left,
+      top: nodeRect.top - canvasRect.top,
+      width: Math.max(1, nodeRect.width),
+      height: Math.max(1, nodeRect.height),
     };
   }
 
@@ -4252,7 +4684,7 @@ export class Sheet2DEditorWindow {
       overlay.style.width = `${bounds.width}px`;
       overlay.style.height = `${bounds.height}px`;
       overlay.style.zIndex = "2147483647";
-      overlay.style.setProperty("--sheet-slides-ui-scale", String(1 / this._getStageZoom()));
+      overlay.style.setProperty("--sheet-slides-ui-scale", String(this._getSelectionUiScale()));
       overlay.addEventListener("pointerdown", (event) => this._onSelectionOverlayPointerDown(event));
 
       const frame = document.createElement("div");
@@ -4280,7 +4712,7 @@ export class Sheet2DEditorWindow {
     const [element] = elements;
     if (!element || typeof element !== "object" || element.type === "line") return null;
 
-    const ppi = this._pxPerIn();
+    const ppi = this._getStageRenderPpi();
     const targetId = String(element.id || "");
     const renderedNode = targetId
       ? Array.from(this._slideCanvas?.querySelectorAll?.(".sheet-slides-element") || [])
@@ -4318,7 +4750,7 @@ export class Sheet2DEditorWindow {
       overlay.style.transformOrigin = "";
     }
     overlay.style.zIndex = "2147483647";
-    overlay.style.setProperty("--sheet-slides-ui-scale", String(1 / this._getStageZoom()));
+    overlay.style.setProperty("--sheet-slides-ui-scale", String(this._getSelectionUiScale()));
     overlay.addEventListener("pointerdown", (event) => this._onElementPointerDown(event, element.id));
 
     if (cropActive) {
@@ -4567,12 +4999,17 @@ export class Sheet2DEditorWindow {
     radiusPx = 0,
     fillColor = null,
     className = "",
+    ppi = null,
   } = {}) {
     if (!element) return null;
     const styleValue = this._getLineStyleValue(element);
+    const surfacePpi = Math.max(
+      1,
+      toFiniteNumber(ppi, Math.max(1, widthPx / Math.max(MIN_ELEMENT_IN, toFiniteNumber(element.w, 1)))),
+    );
     const strokeWidthPx = element.type === "text" && !this._isTextBorderEnabled(element)
       ? 0
-      : Math.max(0, toFiniteNumber(element.strokeWidth, this._defaultStrokeWidthForElement(element)) * this._pxPerIn());
+      : Math.max(0, toFiniteNumber(element.strokeWidth, this._defaultStrokeWidthForElement(element)) * surfacePpi);
     const hasStroke = strokeWidthPx > 0 && styleValue !== "none";
     const fill = fillColor != null
       ? toCssColor(fillColor, "transparent")
@@ -4677,6 +5114,7 @@ export class Sheet2DEditorWindow {
     if (!host || !element) return;
     const svg = this._createShapeSurfaceSvg(element, widthPx, heightPx, {
       ...options,
+      ppi: toFiniteNumber(options.ppi, Math.max(1, widthPx / Math.max(MIN_ELEMENT_IN, toFiniteNumber(element.w, 1)))),
       className: `sheet-slides-shape-surface ${options.className || ""}`.trim(),
     });
     if (svg) host.appendChild(svg);
@@ -4688,6 +5126,7 @@ export class Sheet2DEditorWindow {
       shape,
       radiusPx,
       fillColor: null,
+      ppi: Math.max(1, widthPx / Math.max(MIN_ELEMENT_IN, toFiniteNumber(element.w, 1))),
       className: "sheet-slides-stroke-overlay",
     });
     if (!svg) return;
@@ -5192,7 +5631,7 @@ export class Sheet2DEditorWindow {
       this._rotInput.value = "";
       this._fillInput.value = "#000000";
       this._strokeInput.value = normalizeHex(selected.stroke, this._defaultStrokeForElement(selected));
-      this._strokeWidthInput.value = String(Math.round(toFiniteNumber(selected.strokeWidth, 0.02) * ppi));
+      this._strokeWidthInput.value = formatPointValue(inchesToPoints(toFiniteNumber(selected.strokeWidth, 0.02)));
       if (this._cornerRadiusInput) this._cornerRadiusInput.value = "";
       this._opacityInput.value = String(clamp(toFiniteNumber(selected.opacity, 1), 0, 1));
       this._zInput.value = String(Math.round(toFiniteNumber(selected.z, 0)));
@@ -5228,10 +5667,10 @@ export class Sheet2DEditorWindow {
       selected.type === "pmiInset" ? "#ffffff" : normalizeHex(this._defaultFillForElement(selected), "#000000"),
     );
     this._strokeInput.value = normalizeHex(selected.stroke, this._defaultStrokeForElement(selected));
-    const strokeWidthPx = selected.type === "text" && !this._isTextBorderEnabled(selected)
+    const strokeWidthPt = selected.type === "text" && !this._isTextBorderEnabled(selected)
       ? 0
-      : Math.round(toFiniteNumber(selected.strokeWidth, this._defaultStrokeWidthForElement(selected)) * ppi);
-    this._strokeWidthInput.value = String(strokeWidthPx);
+      : (Math.round(inchesToPoints(toFiniteNumber(selected.strokeWidth, this._defaultStrokeWidthForElement(selected))) * 100) / 100);
+    this._strokeWidthInput.value = formatPointValue(strokeWidthPt);
     if (this._cornerRadiusInput) {
       this._cornerRadiusInput.value = isRect
         ? String(Math.round(toFiniteNumber(selected.cornerRadius, 0) * ppi))
@@ -5262,7 +5701,7 @@ export class Sheet2DEditorWindow {
       this._textInput.value = textState.canEditTextContent ? String(textState.text || "") : "";
       if (this._tableTextScopeInput) this._tableTextScopeInput.value = textState.isTable ? textState.scope : "cell";
       this._fontFamilyInput.value = String(textState.fontFamily || "Arial, Helvetica, sans-serif");
-      this._fontSizeInput.value = String(Math.round(toFiniteNumber(textState.fontSize, 0.32) * ppi));
+      this._fontSizeInput.value = String(Math.round(inchesToPoints(toFiniteNumber(textState.fontSize, 0.32))));
       this._textColorInput.value = normalizeHex(textState.color, this._defaultTextColorForElement(selected));
       const textAlign = String(textState.textAlign || "left");
       const verticalAlign = String(textState.verticalAlign || "middle");
@@ -5361,7 +5800,7 @@ export class Sheet2DEditorWindow {
     if (!deltaY) return;
 
     const currentZoom = this._getStageZoom();
-    const nextZoom = clamp(currentZoom * Math.exp(-deltaY * 0.0015), 0.1, 4);
+    const nextZoom = this._clampStageZoom(currentZoom * Math.exp(-deltaY * 0.0015), currentZoom);
     if (Math.abs(nextZoom - currentZoom) < 0.0001) {
       event.preventDefault();
       return;
@@ -6376,14 +6815,14 @@ export class Sheet2DEditorWindow {
       if (element.type === "text") {
         element.strokeEnabled = true;
         if (toFiniteNumber(element.strokeWidth, 0) <= 0) {
-          element.strokeWidth = 1 / this._pxPerIn();
+          element.strokeWidth = 1 / POINTS_PER_INCH;
         }
       }
     } else if (key === "strokeWidth") {
-      const px = Math.max(0, toFiniteNumber(rawValue, toFiniteNumber(element.strokeWidth, this._defaultStrokeWidthForElement(element)) * this._pxPerIn()));
-      element.strokeWidth = px / this._pxPerIn();
+      const points = Math.max(0, toFiniteNumber(rawValue, inchesToPoints(toFiniteNumber(element.strokeWidth, this._defaultStrokeWidthForElement(element)))));
+      element.strokeWidth = pointsToInches(points);
       if (element.type === "text") {
-        element.strokeEnabled = px > 0;
+        element.strokeEnabled = points > 0;
       }
     } else if (key === "cornerRadius") {
       if (element.type !== "rect") return;
@@ -6431,9 +6870,9 @@ export class Sheet2DEditorWindow {
 
   _normalizeSelectedTextFieldValue(key, rawValue, fallbackState = this._getSelectedTextState()) {
     if (key === "fontSize") {
-      const fallbackPx = Math.max(6, Math.round(toFiniteNumber(fallbackState?.fontSize, 0.32) * this._pxPerIn()));
-      const px = toFiniteNumber(rawValue, fallbackPx);
-      return Math.max(0.08, Math.max(6, px) / this._pxPerIn());
+      const fallbackPt = Math.max(6, Math.round(inchesToPoints(toFiniteNumber(fallbackState?.fontSize, 0.32))));
+      const points = toFiniteNumber(rawValue, fallbackPt);
+      return Math.max(0.08, pointsToInches(Math.max(6, points)));
     }
     if (key === "fontFamily") return String(rawValue || "Arial, Helvetica, sans-serif");
     if (key === "color") return String(rawValue || "#111111");
@@ -6542,12 +6981,12 @@ export class Sheet2DEditorWindow {
     this._renderSidebarOnly();
   }
 
-  _adjustSelectedFontSize(deltaPx = 0) {
+  _adjustSelectedFontSize(deltaPt = 0) {
     const textState = this._getSelectedTextState();
     if (!textState) return;
-    const currentPx = Math.max(6, Math.round(toFiniteNumber(textState.fontSize, 0.32) * this._pxPerIn()));
-    const nextPx = Math.max(6, currentPx + Math.round(toFiniteNumber(deltaPx, 0)));
-    this._setSelectedTextField("fontSize", nextPx);
+    const currentPt = Math.max(6, Math.round(inchesToPoints(toFiniteNumber(textState.fontSize, 0.32))));
+    const nextPt = Math.max(6, currentPt + Math.round(toFiniteNumber(deltaPt, 0)));
+    this._setSelectedTextField("fontSize", nextPt);
   }
 
   _resetSelectedTextColor() {
@@ -7506,6 +7945,11 @@ export class Sheet2DEditorWindow {
       .sheet-slides-control:hover {
         border-color: #46516d;
       }
+      .sheet-slides-btn.active {
+        border-color: #2d73ff;
+        background: rgba(45,115,255,.18);
+        color: #fff;
+      }
       .sheet-slides-btn.primary {
         border-color: #2d73ff;
         background: linear-gradient(180deg, #2d73ff, #2158c5);
@@ -7733,7 +8177,6 @@ export class Sheet2DEditorWindow {
         overflow: visible;
         transform-origin: 0 0;
         user-select: none;
-        will-change: transform;
       }
       .sheet-slides-canvas {
         position: relative;
@@ -7755,7 +8198,7 @@ export class Sheet2DEditorWindow {
         background-image:
           linear-gradient(to right, #000 1px, transparent 1px),
           linear-gradient(to bottom, #000 1px, transparent 1px);
-        background-size: 40px 40px;
+        background-size: var(--sheet-slides-grid-step, 40px) var(--sheet-slides-grid-step, 40px);
       }
       .sheet-slides-canvas.show-grid .sheet-slides-grid {
         opacity: .1;
@@ -8233,10 +8676,9 @@ export class Sheet2DEditorWindow {
         justify-content: center;
         box-sizing: border-box;
         min-height: 0;
-        padding: 2px 8px 6px;
+        padding: 0;
         background: transparent;
         color: #334155;
-        font-size: 12px;
         font-weight: 600;
         line-height: 1.2;
         text-align: center;
@@ -8348,11 +8790,45 @@ export class Sheet2DEditorWindow {
         grid-area: status;
         border-top: 1px solid #30384d;
         background: #0d1119;
-        display: flex;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
         align-items: center;
-        justify-content: space-between;
         padding: 0 10px;
         font-size: 12px;
+        gap: 10px;
+      }
+      .sheet-slides-status-left,
+      .sheet-slides-status-right {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .sheet-slides-status-right {
+        justify-self: end;
+      }
+      .sheet-slides-status-center {
+        justify-self: center;
+        min-width: 0;
+      }
+      .sheet-slides-status-controls {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .sheet-slides-status-controls .sheet-slides-btn,
+      .sheet-slides-status-controls .sheet-slides-control {
+        height: 24px;
+        border-radius: 7px;
+        font-size: 12px;
+      }
+      .sheet-slides-status-controls .sheet-slides-btn {
+        padding: 0 10px;
+      }
+      .sheet-slides-status-controls .sheet-slides-control {
+        width: 110px;
+        min-width: 110px;
+        padding: 0 8px;
       }
 
       @media (max-width: 1200px) {
@@ -8397,6 +8873,15 @@ export class Sheet2DEditorWindow {
         }
         .sheet-slides-finish-btn {
           margin-left: auto;
+        }
+        .sheet-slides-status {
+          grid-template-columns: minmax(0, 1fr) auto;
+        }
+        .sheet-slides-status-center {
+          justify-self: end;
+        }
+        .sheet-slides-status-right {
+          display: none;
         }
       }
     `;
