@@ -4,6 +4,7 @@ import {
   normalizeSheetOrientation,
   resolveSheetDimensions,
 } from "./sheetStandards.js";
+import { normalizeTableData } from "./tableUtils.js";
 
 function toFiniteNumber(value, fallback = 0) {
   const num = Number(value);
@@ -53,10 +54,42 @@ function normalizePmiLabelPosition(value, fallback = "bottom") {
   return ["top", "bottom", "none"].includes(key) ? key : fallback;
 }
 
+function normalizeLineStyle(value, fallback = "solid") {
+  const key = String(value || fallback).trim();
+  return ["none", "solid", "dotted", "dashed", "dashDot", "longDash", "dashDotDot"].includes(key)
+    ? key
+    : fallback;
+}
+
+function isShapeElementType(type) {
+  return ["rect", "ellipse", "triangle", "diamond", "pentagon", "hexagon", "parallelogram", "trapezoid"].includes(String(type || ""));
+}
+
+function shapeSupportsAdjustHandle(type) {
+  return ["parallelogram", "trapezoid"].includes(String(type || ""));
+}
+
+function getDefaultShapeAdjust(type) {
+  return shapeSupportsAdjustHandle(type) ? 0.18 : 0;
+}
+
+function clampShapeAdjust(type, value) {
+  return shapeSupportsAdjustHandle(type)
+    ? clamp(toFiniteNumber(value, getDefaultShapeAdjust(type)), 0, 0.45)
+    : 0;
+}
+
 function normalizeElementType(value) {
   const token = String(value ?? "").trim().toLowerCase();
   if (token === "rect") return "rect";
   if (token === "ellipse") return "ellipse";
+  if (token === "triangle") return "triangle";
+  if (token === "diamond") return "diamond";
+  if (token === "pentagon") return "pentagon";
+  if (token === "hexagon") return "hexagon";
+  if (token === "parallelogram") return "parallelogram";
+  if (token === "trapezoid") return "trapezoid";
+  if (token === "table") return "table";
   if (token === "image") return "image";
   if (token === "line") return "line";
   if (token === "pmiinset" || token === "pmi_inset" || token === "pmi" || token === "pmiview") return "pmiInset";
@@ -286,13 +319,20 @@ export class Sheet2DManager {
     const common = {
       id,
       type,
+      groupId: sanitizeText(source.groupId, "").trim() || undefined,
       x: defaultX,
       y: defaultY,
       rotationDeg: toFiniteNumber(source.rotationDeg, 0),
       z: Number.isFinite(Number(fallbackZ)) ? Number(fallbackZ) : index,
-      fill: sanitizeColor(source.fill, (type === "text" || type === "pmiInset") ? "transparent" : "#dbeafe"),
-      stroke: sanitizeColor(source.stroke, "#1d4ed8"),
+      fill: sanitizeColor(
+        source.fill,
+        (type === "text" || type === "pmiInset")
+          ? "transparent"
+          : (type === "table" ? "#ffffff" : "#dbeafe"),
+      ),
+      stroke: sanitizeColor(source.stroke, type === "table" ? "#0f172a" : "#1d4ed8"),
       strokeWidth: clamp(toFiniteNumber(source.strokeWidth, 0.02), 0.002, 1),
+      lineStyle: normalizeLineStyle(source.lineStyle, "solid"),
       opacity: clamp(toFiniteNumber(source.opacity, 1), 0, 1),
     };
 
@@ -340,7 +380,30 @@ export class Sheet2DManager {
       maxY,
     );
 
-    if (type === "rect" || type === "ellipse" || type === "image" || type === "pmiInset") {
+    if (type === "table") {
+      const fontStyle = String(source.fontStyle || (source.italic ? "italic" : "normal")).toLowerCase() === "italic"
+        ? "italic"
+        : "normal";
+      const fontWeight = String(source.fontWeight || (source.bold ? "700" : "400"));
+      return {
+        ...common,
+        x,
+        y,
+        w: clamp(rawW, 0.4, pageWidth * 8),
+        h: clamp(rawH, 0.3, pageHeight * 8),
+        tableData: normalizeTableData(source.tableData, source.rows ?? 3, source.cols ?? 4),
+        fontSize: clamp(toFiniteNumber(source.fontSize, 0.22), 0.08, 3),
+        fontFamily: sanitizeText(source.fontFamily, "Arial, Helvetica, sans-serif"),
+        fontWeight: /^\d{3}$/.test(fontWeight) ? fontWeight : (fontWeight === "bold" ? "700" : "400"),
+        fontStyle,
+        textDecoration: String(source.textDecoration || "none").toLowerCase() === "underline" ? "underline" : "none",
+        textAlign: normalizeTextAlign(source.textAlign || source.textAnchor, "left"),
+        verticalAlign: normalizeVerticalAlign(source.verticalAlign || source.verticalAnchor, "middle"),
+        color: sanitizeColor(source.color, sanitizeColor(source.textColor, "#111111")),
+      };
+    }
+
+    if (isShapeElementType(type) || type === "image" || type === "pmiInset") {
       const fontStyle = String(source.fontStyle || (source.italic ? "italic" : "normal")).toLowerCase() === "italic"
         ? "italic"
         : "normal";
@@ -351,7 +414,12 @@ export class Sheet2DManager {
         y,
         w,
         h,
-        cornerRadius: clamp(toFiniteNumber(source.cornerRadius, type === "rect" ? 0.1 : 0), 0, 2),
+        cornerRadius: clamp(
+          toFiniteNumber(source.cornerRadius, type === "rect" ? 0.1 : 0),
+          0,
+          Math.min(w, h) * 0.5,
+        ),
+        shapeAdjust: clampShapeAdjust(type, source.shapeAdjust),
         src: (type === "image" || type === "pmiInset") ? sanitizeText(source.src, "") : undefined,
         mediaScale: (type === "image" || type === "pmiInset")
           ? clamp(toFiniteNumber(source.mediaScale, 1), 1, 10)
@@ -374,24 +442,24 @@ export class Sheet2DManager {
           ? normalizePmiLabelPosition(source.pmiLabelPosition, source.showTitle !== false ? "bottom" : "none")
           : undefined,
         pmiAnchor: type === "pmiInset" ? normalizePmiAnchor(source.pmiAnchor, "c") : undefined,
-        text: (type === "rect" || type === "ellipse") ? sanitizeText(source.text, "") : undefined,
-        fontSize: (type === "rect" || type === "ellipse")
+        text: isShapeElementType(type) ? sanitizeText(source.text, "") : undefined,
+        fontSize: isShapeElementType(type)
           ? clamp(toFiniteNumber(source.fontSize, 0.28), 0.08, 3)
           : undefined,
-        fontFamily: (type === "rect" || type === "ellipse")
+        fontFamily: isShapeElementType(type)
           ? sanitizeText(source.fontFamily, "Arial, Helvetica, sans-serif")
           : undefined,
-        fontWeight: (type === "rect" || type === "ellipse")
+        fontWeight: isShapeElementType(type)
           ? (/^\d{3}$/.test(fontWeight) ? fontWeight : (fontWeight === "bold" ? "700" : "400"))
           : undefined,
-        fontStyle: (type === "rect" || type === "ellipse") ? fontStyle : undefined,
-        textAlign: (type === "rect" || type === "ellipse")
+        fontStyle: isShapeElementType(type) ? fontStyle : undefined,
+        textAlign: isShapeElementType(type)
           ? normalizeTextAlign(source.textAlign || source.textAnchor, "center")
           : undefined,
-        verticalAlign: (type === "rect" || type === "ellipse")
+        verticalAlign: isShapeElementType(type)
           ? normalizeVerticalAlign(source.verticalAlign || source.verticalAnchor, "middle")
           : undefined,
-        color: (type === "rect" || type === "ellipse")
+        color: isShapeElementType(type)
           ? sanitizeColor(source.color, sanitizeColor(source.textColor, "#0f172a"))
           : undefined,
       };

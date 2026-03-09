@@ -1,6 +1,24 @@
 import brepHomeBannerUrl from "../../assets/brand/brep-home-banner.svg";
 import { captureCameraSnapshot } from "../pmi/annUtils.js";
 import { listSheetSizes } from "../../sheets/sheetStandards.js";
+import {
+  canMergeTableCells,
+  cloneTableData,
+  createTableData,
+  ensureTableSize,
+  getTableCell,
+  getTableColumnCount,
+  getTableRowCount,
+  getTableSelectionRect,
+  insertTableColumn,
+  insertTableRow,
+  mergeTableCells,
+  normalizeTableData,
+  normalizeTableCellStyle,
+  resolveTableCellAnchor,
+  setTableCellText,
+  unmergeTableCell,
+} from "../../sheets/tableUtils.js";
 
 const DEFAULT_SHEET_SIZE_KEY = "A";
 const DEFAULT_SHEET_ORIENTATION = "landscape";
@@ -13,7 +31,14 @@ const STAGE_VIEWPORT_PADDING_PX = 10;
 const FIT_VIEWPORT_PADDING_PX = 6;
 const FIT_SAFETY_INSET_PX = 2;
 const STROKE_WIDTH_OPTIONS_PX = [0, 1, 2, 3, 4, 8, 12, 16, 24];
+const TABLE_DEFAULT_ROWS = 3;
+const TABLE_DEFAULT_COLS = 4;
+const TABLE_DEFAULT_COL_WIDTH_IN = 1.05;
+const TABLE_DEFAULT_ROW_HEIGHT_IN = 0.42;
+const TABLE_MIN_COL_WIDTH_PX = 40;
+const TABLE_CELL_PADDING_PX = 6;
 const LINE_STYLE_OPTIONS = [
+  { value: "none", label: "None" },
   { value: "solid", label: "Solid" },
   { value: "dotted", label: "Dotted" },
   { value: "dashed", label: "Dashed" },
@@ -44,6 +69,58 @@ function iconSvg(content, { viewBox = "0 0 24 24" } = {}) {
 }
 
 const TOOLBAR_ICON_SVGS = {
+  addText: iconSvg(`
+    <path d="M6 7h12M12 7v10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M8 17h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+  `),
+  addShapes: iconSvg(`
+    <rect x="4.5" y="5" width="7" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+    <circle cx="17" cy="8.5" r="3.1" fill="none" stroke="currentColor" stroke-width="1.8"/>
+    <path d="M14.2 17.8l3.1-5.3 3.1 5.3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+  `),
+  addImage: iconSvg(`
+    <rect x="4.5" y="5" width="15" height="14" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.8"/>
+    <circle cx="9" cy="10" r="1.5" fill="currentColor"/>
+    <path d="M6.2 17l4.1-4 2.4 2.3 3.6-4.2 2.2 5.9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  `),
+  addPmi: iconSvg(`
+    <path d="M12 4.8l6.6 3.6v7.2L12 19.2 5.4 15.6V8.4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+    <path d="M12 4.8v7.2m0 0 6.6-3.6M12 12l-6.6-3.6M12 12v7.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  `),
+  addTable: iconSvg(`
+    <rect x="4.5" y="5.5" width="15" height="13" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+    <path d="M4.5 10.2h15M4.5 14.1h15M9.5 5.5v13M14.5 5.5v13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  `),
+  chevronDown: iconSvg(`
+    <path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  `),
+  shapeRect: iconSvg(`
+    <rect x="4.5" y="6" width="15" height="12" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+  `),
+  shapeRoundRect: iconSvg(`
+    <rect x="4.5" y="6" width="15" height="12" rx="4" fill="none" stroke="currentColor" stroke-width="1.8"/>
+  `),
+  shapeEllipse: iconSvg(`
+    <ellipse cx="12" cy="12" rx="7.5" ry="5.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+  `),
+  shapeTriangle: iconSvg(`
+    <path d="M12 5.5l7 13H5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+  `),
+  shapeDiamond: iconSvg(`
+    <path d="M12 4.8l7.2 7.2-7.2 7.2-7.2-7.2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+  `),
+  shapePentagon: iconSvg(`
+    <path d="M12 4.8l6.6 4.8-2.5 8-8.2.1-2.5-8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+  `),
+  shapeHexagon: iconSvg(`
+    <path d="M8 5.2h8l4 6.8-4 6.8H8L4 12z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+  `),
+  shapeParallelogram: iconSvg(`
+    <path d="M8 5.5h10l-2 13H6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+  `),
+  shapeTrapezoid: iconSvg(`
+    <path d="M8 5.5h8l3 13H5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+  `),
   fillColor: iconSvg(`
     <path d="M7 13l6-6 4 4-6 6H7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
     <path d="M15.5 4.5l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
@@ -108,6 +185,19 @@ const TOOLBAR_ICON_SVGS = {
   `),
 };
 
+const SHAPE_INSERT_OPTIONS = [
+  { kind: "rect", label: "Rectangle", iconKey: "shapeRect" },
+  { kind: "roundedRect", label: "Rounded Rect", iconKey: "shapeRoundRect" },
+  { kind: "ellipse", label: "Ellipse", iconKey: "shapeEllipse" },
+  { kind: "triangle", label: "Triangle", iconKey: "shapeTriangle" },
+  { kind: "diamond", label: "Diamond", iconKey: "shapeDiamond" },
+  { kind: "pentagon", label: "Pentagon", iconKey: "shapePentagon" },
+  { kind: "hexagon", label: "Hexagon", iconKey: "shapeHexagon" },
+  { kind: "parallelogram", label: "Parallelogram", iconKey: "shapeParallelogram" },
+  { kind: "trapezoid", label: "Trapezoid", iconKey: "shapeTrapezoid" },
+];
+const MAX_SHAPE_ADJUST_RATIO = 0.45;
+
 function toFiniteNumber(value, fallback = 0) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
@@ -153,6 +243,80 @@ function escapeHtml(text) {
     .replaceAll("'", "&#039;");
 }
 
+function isShapeElementType(type) {
+  return ["rect", "ellipse", "triangle", "diamond", "pentagon", "hexagon", "parallelogram", "trapezoid"].includes(String(type || ""));
+}
+
+function shapeSupportsAdjustHandle(type) {
+  return ["parallelogram", "trapezoid"].includes(String(type || ""));
+}
+
+function getDefaultShapeAdjust(type) {
+  return shapeSupportsAdjustHandle(type) ? 0.18 : 0;
+}
+
+function clampShapeAdjust(type, value) {
+  return shapeSupportsAdjustHandle(type)
+    ? clamp(toFiniteNumber(value, getDefaultShapeAdjust(type)), 0, MAX_SHAPE_ADJUST_RATIO)
+    : 0;
+}
+
+function getShapePalette(type) {
+  switch (String(type || "")) {
+    case "ellipse":
+      return { fill: "#ffd166", stroke: "#c78c00" };
+    case "triangle":
+      return { fill: "#86efac", stroke: "#15803d" };
+    case "diamond":
+      return { fill: "#f9a8d4", stroke: "#be185d" };
+    case "pentagon":
+      return { fill: "#fca5a5", stroke: "#b91c1c" };
+    case "hexagon":
+      return { fill: "#c4b5fd", stroke: "#6d28d9" };
+    case "parallelogram":
+      return { fill: "#fdba74", stroke: "#c2410c" };
+    case "trapezoid":
+      return { fill: "#93c5fd", stroke: "#1d4ed8" };
+    default:
+      return { fill: "#8bc4ff", stroke: "#1d4ed8" };
+  }
+}
+
+function createShapeElement(type, xIn, yIn, {
+  w = 2.2,
+  h = 1.4,
+  cornerRadius = 0,
+  shapeAdjust = undefined,
+} = {}) {
+  const palette = getShapePalette(type);
+  return {
+    id: uid("el"),
+    type: String(type || "rect"),
+    x: xIn,
+    y: yIn,
+    w,
+    h,
+    rotationDeg: 0,
+    z: 1,
+    opacity: 1,
+    fill: palette.fill,
+    stroke: palette.stroke,
+    strokeWidth: 0.01,
+    lineStyle: "solid",
+    cornerRadius,
+    shapeAdjust: clampShapeAdjust(type, shapeAdjust),
+    text: "",
+    fontSize: 0.28,
+    fontFamily: "Arial, Helvetica, sans-serif",
+    fontWeight: "600",
+    fontStyle: "normal",
+    textDecoration: "none",
+    textAlign: "center",
+    verticalAlign: "middle",
+    color: "#0f172a",
+  };
+}
+
 function defaultTextElement(xIn, yIn) {
   return {
     id: uid("el"),
@@ -182,58 +346,35 @@ function defaultTextElement(xIn, yIn) {
 }
 
 function defaultRectElement(xIn, yIn) {
-  return {
-    id: uid("el"),
-    type: "rect",
-    x: xIn,
-    y: yIn,
-    w: 2.2,
-    h: 1.4,
-    rotationDeg: 0,
-    z: 1,
-    opacity: 1,
-    fill: "#8bc4ff",
-    stroke: "#1d4ed8",
-    strokeWidth: 0.01,
-    lineStyle: "solid",
-    cornerRadius: 0.08,
-    text: "",
-    fontSize: 0.28,
-    fontFamily: "Arial, Helvetica, sans-serif",
-    fontWeight: "600",
-    fontStyle: "normal",
-    textDecoration: "none",
-    textAlign: "center",
-    verticalAlign: "middle",
-    color: "#0f172a",
-  };
+  return createShapeElement("rect", xIn, yIn, { w: 2.2, h: 1.4, cornerRadius: 0.08 });
 }
 
 function defaultEllipseElement(xIn, yIn) {
-  return {
-    id: uid("el"),
-    type: "ellipse",
-    x: xIn,
-    y: yIn,
-    w: 2.0,
-    h: 1.25,
-    rotationDeg: 0,
-    z: 1,
-    opacity: 1,
-    fill: "#ffd166",
-    stroke: "#c78c00",
-    strokeWidth: 0.01,
-    lineStyle: "solid",
-    text: "",
-    fontSize: 0.28,
-    fontFamily: "Arial, Helvetica, sans-serif",
-    fontWeight: "600",
-    fontStyle: "normal",
-    textDecoration: "none",
-    textAlign: "center",
-    verticalAlign: "middle",
-    color: "#0f172a",
-  };
+  return createShapeElement("ellipse", xIn, yIn, { w: 2.0, h: 1.25 });
+}
+
+function defaultTriangleElement(xIn, yIn) {
+  return createShapeElement("triangle", xIn, yIn, { w: 2.0, h: 1.7 });
+}
+
+function defaultDiamondElement(xIn, yIn) {
+  return createShapeElement("diamond", xIn, yIn, { w: 1.9, h: 1.9 });
+}
+
+function defaultPentagonElement(xIn, yIn) {
+  return createShapeElement("pentagon", xIn, yIn, { w: 2.0, h: 1.9 });
+}
+
+function defaultHexagonElement(xIn, yIn) {
+  return createShapeElement("hexagon", xIn, yIn, { w: 2.2, h: 1.6 });
+}
+
+function defaultParallelogramElement(xIn, yIn) {
+  return createShapeElement("parallelogram", xIn, yIn, { w: 2.2, h: 1.4, shapeAdjust: 0.18 });
+}
+
+function defaultTrapezoidElement(xIn, yIn) {
+  return createShapeElement("trapezoid", xIn, yIn, { w: 2.2, h: 1.4, shapeAdjust: 0.18 });
 }
 
 function defaultImageElement(xIn, yIn, src = "") {
@@ -255,6 +396,36 @@ function defaultImageElement(xIn, yIn, src = "") {
     mediaScale: 1,
     mediaOffsetX: 0,
     mediaOffsetY: 0,
+  };
+}
+
+function defaultTableElement(xIn, yIn, tableData = createTableData(TABLE_DEFAULT_ROWS, TABLE_DEFAULT_COLS)) {
+  const normalized = normalizeTableData(tableData, TABLE_DEFAULT_ROWS, TABLE_DEFAULT_COLS);
+  const rowCount = Math.max(1, getTableRowCount(normalized, TABLE_DEFAULT_ROWS));
+  const colCount = Math.max(1, getTableColumnCount(normalized, TABLE_DEFAULT_COLS));
+  return {
+    id: uid("el"),
+    type: "table",
+    x: xIn,
+    y: yIn,
+    w: Math.max(2.8, colCount * TABLE_DEFAULT_COL_WIDTH_IN),
+    h: Math.max(1.2, rowCount * TABLE_DEFAULT_ROW_HEIGHT_IN),
+    rotationDeg: 0,
+    z: 1,
+    opacity: 1,
+    fill: "#ffffff",
+    stroke: "#0f172a",
+    strokeWidth: 0.01,
+    lineStyle: "solid",
+    tableData: normalized,
+    fontSize: 0.22,
+    fontFamily: "Arial, Helvetica, sans-serif",
+    fontWeight: "400",
+    fontStyle: "normal",
+    textDecoration: "none",
+    textAlign: "left",
+    verticalAlign: "middle",
+    color: "#111111",
   };
 }
 
@@ -308,7 +479,11 @@ function isTransparentColor(value) {
 
 function elementSupportsText(element) {
   const type = String(element?.type || "");
-  return type === "text" || type === "rect" || type === "ellipse";
+  return type === "text" || isShapeElementType(type) || type === "table";
+}
+
+function isTableElementType(element) {
+  return String(element?.type || "") === "table";
 }
 
 function elementSupportsMediaCrop(element) {
@@ -350,6 +525,7 @@ export class Sheet2DEditorWindow {
     this.sheetId = null;
     this.sheetDraft = null;
     this.selectedElementId = null;
+    this._selectedElementIds = [];
     this._cropModeElementId = null;
 
     this.zoom = DEFAULT_ZOOM;
@@ -384,13 +560,17 @@ export class Sheet2DEditorWindow {
     this._stageResizeObserver = null;
 
     this._contextMenu = null;
+    this._contextMenuState = null;
     this._toolbarPopover = null;
     this._toolbarPopoverKind = "";
     this._toolbarPopoverAnchor = null;
+    this._tableSelection = null;
+    this._tableTextScope = "cell";
     this._boundPointerMove = (event) => this._onGlobalPointerMove(event);
     this._boundPointerUp = (event) => this._onGlobalPointerUp(event);
     this._boundGlobalPointerDown = (event) => this._onGlobalPointerDown(event);
     this._boundKeyDown = (event) => this._onKeyDown(event);
+    this._boundPaste = (event) => this._onPaste(event);
   }
 
   open(sheetId = null) {
@@ -490,7 +670,7 @@ export class Sheet2DEditorWindow {
     if (!sheets.length) {
       this.sheetDraft = null;
       this.sheetId = null;
-      this.selectedElementId = null;
+      this._clearSelection();
       this._renderAll();
       return;
     }
@@ -502,20 +682,15 @@ export class Sheet2DEditorWindow {
     const current = this.sheetId ? manager.getSheetById?.(this.sheetId) : null;
     if (!current) {
       this.sheetDraft = null;
-      this.selectedElementId = null;
+      this._clearSelection();
       this._renderAll();
       return;
     }
 
     this.sheetDraft = deepClone(current);
 
-    const selected = this._getSelectedElement();
-    if (!selected) {
-      this.selectedElementId = null;
-      this._cropModeElementId = null;
-    } else if (String(this._cropModeElementId || "") !== String(selected.id || "")) {
-      this._cropModeElementId = null;
-    }
+    this._setSelectedElementIds(this._getSelectedElementIds(), this.selectedElementId);
+    this._syncTableInteractionState();
 
     this._renderAll();
 
@@ -582,6 +757,7 @@ export class Sheet2DEditorWindow {
     window.addEventListener("pointermove", this._boundPointerMove, true);
     window.addEventListener("pointerup", this._boundPointerUp, true);
     window.addEventListener("keydown", this._boundKeyDown, true);
+    window.addEventListener("paste", this._boundPaste, true);
   }
 
   _unbindGlobalEvents() {
@@ -589,6 +765,7 @@ export class Sheet2DEditorWindow {
     window.removeEventListener("pointermove", this._boundPointerMove, true);
     window.removeEventListener("pointerup", this._boundPointerUp, true);
     window.removeEventListener("keydown", this._boundKeyDown, true);
+    window.removeEventListener("paste", this._boundPaste, true);
   }
 
   _refreshPmiViews({ bumpRevision = false } = {}) {
@@ -798,12 +975,16 @@ export class Sheet2DEditorWindow {
     this._fileInput = fileInput;
     topbar.appendChild(fileInput);
 
-    const addTextBtn = this._makeToolbarButton("Text", () => this._addElement("text"));
-    const addRectBtn = this._makeToolbarButton("Rect", () => this._addElement("rect"));
-    const addEllipseBtn = this._makeToolbarButton("Ellipse", () => this._addElement("ellipse"));
-    const addImageBtn = this._makeToolbarButton("Image", () => this._addImageElement());
+    const addTextBtn = this._makeToolbarActionButton("addText", "Text", () => this._addElement("text"), { iconOnly: true });
+    const shapesBtn = this._makeToolbarActionButton("addShapes", "Shapes", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this._toggleToolbarPopover("insertShape", shapesBtn);
+    }, { menu: true, iconOnly: true });
+    const addTableBtn = this._makeToolbarActionButton("addTable", "Table", () => this._addElement("table"), { iconOnly: true });
+    const addImageBtn = this._makeToolbarActionButton("addImage", "Image", () => this._addImageElement(), { iconOnly: true });
 
-    const insertPmiBtn = this._makeToolbarButton("Insert PMI", () => this._openPmiPicker(), "primary");
+    const insertPmiBtn = this._makeToolbarActionButton("addPmi", "Insert PMI", () => this._openPmiPicker(), { variant: "primary", iconOnly: true });
 
     const selectionStyleGroup = this._toolbarGroup([], false);
     selectionStyleGroup.classList.add("sheet-slides-selection-group");
@@ -919,7 +1100,7 @@ export class Sheet2DEditorWindow {
       this._renderStageOnly();
     });
 
-    topbar.appendChild(this._toolbarGroup([addTextBtn, addRectBtn, addEllipseBtn, addImageBtn, insertPmiBtn]));
+    topbar.appendChild(this._toolbarGroup([addTextBtn, shapesBtn, addTableBtn, addImageBtn, insertPmiBtn]));
     topbar.appendChild(selectionStyleGroup);
     topbar.appendChild(selectionTextGroup);
     topbar.appendChild(this._toolbarGroup([zoomSelect, gridBtn], true));
@@ -949,6 +1130,7 @@ export class Sheet2DEditorWindow {
     this._toolbarItalicBtn = toolbarItalicBtn;
     this._toolbarUnderlineBtn = toolbarUnderlineBtn;
     this._toolbarAlignmentButton = toolbarAlignmentButton;
+    this._shapesBtn = shapesBtn;
 
     const sidebar = document.createElement("aside");
     sidebar.className = "sheet-slides-sidebar";
@@ -1102,6 +1284,11 @@ export class Sheet2DEditorWindow {
       min: 0,
       max: 64,
     });
+    const cornerRadiusInput = this._buildNumberInput((value) => this._setSelectedStyleField("cornerRadius", value), {
+      step: 1,
+      min: 0,
+      max: 400,
+    });
 
     const opacityInput = this._buildNumberInput((value) => this._setSelectedStyleField("opacity", value), {
       step: 0.05,
@@ -1120,6 +1307,7 @@ export class Sheet2DEditorWindow {
     this._strokeInput = strokeInput;
     this._strokeResetBtn = strokeResetBtn;
     this._strokeWidthInput = strokeWidthInput;
+    this._cornerRadiusInput = cornerRadiusInput;
     this._opacityInput = opacityInput;
     this._zInput = zInput;
 
@@ -1135,12 +1323,20 @@ export class Sheet2DEditorWindow {
     this._strokeField = strokeField;
     elementPanel.appendChild(strokeField);
     elementPanel.appendChild(this._makeField("Border W", strokeWidthInput));
+    const cornerRadiusField = this._makeField("Corner R", cornerRadiusInput);
+    this._cornerRadiusField = cornerRadiusField;
+    elementPanel.appendChild(cornerRadiusField);
     elementPanel.appendChild(this._makeField("Opacity", opacityInput));
     elementPanel.appendChild(this._makeField("Layer", zInput));
 
     const textPanel = document.createElement("div");
     textPanel.className = "sheet-slides-panel";
     textPanel.innerHTML = "<h3>Text</h3>";
+
+    const tableTextScopeInput = this._buildSelect([
+      { value: "cell", label: "Selected cells" },
+      { value: "table", label: "Whole table" },
+    ], (value) => this._setTableTextScope(value));
 
     const textInput = document.createElement("textarea");
     textInput.className = "sheet-slides-control";
@@ -1204,12 +1400,18 @@ export class Sheet2DEditorWindow {
     this._textColorResetBtn = textColorResetBtn;
     this._textAlignButtons = textAlignButtons;
     this._verticalAlignButtons = verticalAlignButtons;
+    this._tableTextScopeInput = tableTextScopeInput;
     this._boldBtn = boldBtn;
     this._italicBtn = italicBtn;
     this._underlineBtn = underlineBtn;
     this._textPanel = textPanel;
 
-    textPanel.appendChild(this._makeField("Content", textInput));
+    const tableTextScopeField = this._makeField("Apply", tableTextScopeInput);
+    this._tableTextScopeField = tableTextScopeField;
+    textPanel.appendChild(tableTextScopeField);
+    const textContentField = this._makeField("Content", textInput);
+    this._textContentField = textContentField;
+    textPanel.appendChild(textContentField);
     textPanel.appendChild(this._makeField("Font", fontFamilyInput));
     textPanel.appendChild(this._makeField("Size", fontSizeControl));
     textPanel.appendChild(this._makeField("Text", textColorControl));
@@ -1304,47 +1506,6 @@ export class Sheet2DEditorWindow {
     const contextMenu = document.createElement("div");
     contextMenu.className = "sheet-slides-context-menu";
     contextMenu.style.display = "none";
-
-    const bringToFrontItem = document.createElement("button");
-    bringToFrontItem.type = "button";
-    bringToFrontItem.className = "sheet-slides-context-menu-item";
-    bringToFrontItem.textContent = "Bring to front";
-    bringToFrontItem.addEventListener("click", () => {
-      this._hideContextMenu();
-      this._bringSelectedToFront();
-    });
-
-    const sendToBackItem = document.createElement("button");
-    sendToBackItem.type = "button";
-    sendToBackItem.className = "sheet-slides-context-menu-item";
-    sendToBackItem.textContent = "Send to back";
-    sendToBackItem.addEventListener("click", () => {
-      this._hideContextMenu();
-      this._sendSelectedToBack();
-    });
-
-    const duplicateItem = document.createElement("button");
-    duplicateItem.type = "button";
-    duplicateItem.className = "sheet-slides-context-menu-item";
-    duplicateItem.textContent = "Duplicate";
-    duplicateItem.addEventListener("click", () => {
-      this._hideContextMenu();
-      this._duplicateSelectedElement();
-    });
-
-    const deleteItem = document.createElement("button");
-    deleteItem.type = "button";
-    deleteItem.className = "sheet-slides-context-menu-item danger";
-    deleteItem.textContent = "Delete";
-    deleteItem.addEventListener("click", () => {
-      this._hideContextMenu();
-      this._deleteSelectedElement();
-    });
-
-    contextMenu.appendChild(bringToFrontItem);
-    contextMenu.appendChild(sendToBackItem);
-    contextMenu.appendChild(duplicateItem);
-    contextMenu.appendChild(deleteItem);
     this._contextMenu = contextMenu;
 
     const toolbarPopover = document.createElement("div");
@@ -1422,6 +1583,36 @@ export class Sheet2DEditorWindow {
       button.title = title;
       button.setAttribute("aria-label", title);
     }
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  _makeToolbarActionButton(iconKey, label, onClick, { variant = "", menu = false, iconOnly = false } = {}) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `sheet-slides-btn sheet-slides-toolbar-action-btn ${variant}${menu ? " sheet-slides-toolbar-menu-btn" : ""}${iconOnly ? " icon-only" : ""}`.trim();
+    button.setAttribute("aria-label", label);
+    button.title = label;
+
+    const icon = document.createElement("span");
+    icon.className = "sheet-slides-toolbar-action-icon";
+    icon.innerHTML = TOOLBAR_ICON_SVGS[iconKey] || "";
+    button.appendChild(icon);
+
+    if (!iconOnly) {
+      const text = document.createElement("span");
+      text.className = "sheet-slides-toolbar-action-label";
+      text.textContent = label;
+      button.appendChild(text);
+    }
+
+    if (menu) {
+      const chevron = document.createElement("span");
+      chevron.className = "sheet-slides-toolbar-action-chevron";
+      chevron.innerHTML = TOOLBAR_ICON_SVGS.chevronDown || "";
+      button.appendChild(chevron);
+    }
+
     button.addEventListener("click", onClick);
     return button;
   }
@@ -1525,7 +1716,8 @@ export class Sheet2DEditorWindow {
     const anchor = this._toolbarPopoverAnchor;
     const kind = this._toolbarPopoverKind;
     const selected = this._getSelectedElement();
-    if (!popover || !root || !anchor || !kind || !selected) {
+    const needsSelection = kind !== "insertShape";
+    if (!popover || !root || !anchor || !kind || (needsSelection && !selected)) {
       this._closeToolbarPopover();
       return;
     }
@@ -1540,7 +1732,36 @@ export class Sheet2DEditorWindow {
     body.className = "sheet-slides-toolbar-popover-body";
     popover.appendChild(body);
 
-    if (kind === "fillColor" || kind === "strokeColor" || kind === "textColor") {
+    if (kind === "insertShape") {
+      title.textContent = "Shapes";
+      const grid = document.createElement("div");
+      grid.className = "sheet-slides-toolbar-shape-grid";
+      for (const option of SHAPE_INSERT_OPTIONS) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "sheet-slides-toolbar-shape-option";
+        button.setAttribute("aria-label", option.label);
+        button.title = option.label;
+
+        const icon = document.createElement("span");
+        icon.className = "sheet-slides-toolbar-shape-option-icon";
+        icon.innerHTML = TOOLBAR_ICON_SVGS[option.iconKey] || "";
+        button.appendChild(icon);
+
+        const label = document.createElement("span");
+        label.className = "sheet-slides-toolbar-shape-option-label";
+        label.textContent = option.label;
+        button.appendChild(label);
+
+        button.addEventListener("click", () => {
+          this._addElement(option.kind);
+          this._closeToolbarPopover();
+        });
+
+        grid.appendChild(button);
+      }
+      body.appendChild(grid);
+    } else if (kind === "fillColor" || kind === "strokeColor" || kind === "textColor") {
       title.textContent = kind === "fillColor" ? "Background color" : (kind === "strokeColor" ? "Border color" : "Text color");
       const colorInput = document.createElement("input");
       colorInput.type = "color";
@@ -1691,6 +1912,12 @@ export class Sheet2DEditorWindow {
   }
 
   _createLineStylePreviewSvg(styleValue) {
+    if (styleValue === "none") {
+      return iconSvg(`
+        <path d="M3 12h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".28"/>
+        <path d="M6 18L18 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+      `);
+    }
     const dashArray = this._getStrokeDashArray(styleValue, 2);
     return iconSvg(`
       <path d="M2 12h20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"${dashArray ? ` stroke-dasharray="${dashArray}"` : ""}/>
@@ -1718,8 +1945,8 @@ export class Sheet2DEditorWindow {
   _defaultFillForElement(element) {
     const type = String(element?.type || "");
     if (type === "text") return "transparent";
-    if (type === "rect") return "#8bc4ff";
-    if (type === "ellipse") return "#ffd166";
+    if (isShapeElementType(type)) return getShapePalette(type).fill;
+    if (type === "table") return "#ffffff";
     if (type === "image") return "#ffffff";
     if (type === "pmiInset") return "transparent";
     return "#000000";
@@ -1728,8 +1955,8 @@ export class Sheet2DEditorWindow {
   _defaultStrokeForElement(element) {
     const type = String(element?.type || "");
     if (type === "text") return "#000000";
-    if (type === "rect") return "#1d4ed8";
-    if (type === "ellipse") return "#c78c00";
+    if (isShapeElementType(type)) return getShapePalette(type).stroke;
+    if (type === "table") return "#0f172a";
     if (type === "image") return "#94a3b8";
     if (type === "pmiInset") return "#334155";
     if (type === "line") return "#0f172a";
@@ -1740,7 +1967,7 @@ export class Sheet2DEditorWindow {
     const type = String(element?.type || "");
     if (type === "text") return 0;
     if (type === "line") return 0.02;
-    if (type === "rect" || type === "ellipse" || type === "image" || type === "pmiInset") return 0.01;
+    if (type === "rect" || type === "ellipse" || type === "image" || type === "pmiInset" || type === "table") return 0.01;
     return 0.01;
   }
 
@@ -1750,8 +1977,299 @@ export class Sheet2DEditorWindow {
 
   _defaultTextColorForElement(element) {
     const type = String(element?.type || "");
-    if (type === "rect" || type === "ellipse") return "#0f172a";
+    if (isShapeElementType(type)) return "#0f172a";
     return "#111111";
+  }
+
+  _getShapeRenderOptions(element, ppi) {
+    if (!isShapeElementType(element?.type)) return null;
+    const type = String(element.type || "");
+    const fillColor = element.fill || this._defaultFillForElement(element);
+    switch (type) {
+      case "rect":
+        return {
+          shape: "rect",
+          radiusPx: Math.max(0, toFiniteNumber(element.cornerRadius, 0.1) * ppi),
+          fillColor,
+          textPaddingPx: 8,
+        };
+      case "ellipse":
+        return { shape: "ellipse", fillColor, textPaddingPx: 12 };
+      case "triangle":
+        return { shape: "triangle", fillColor, textPaddingPx: 14 };
+      case "diamond":
+        return { shape: "diamond", fillColor, textPaddingPx: 16 };
+      case "pentagon":
+        return { shape: "pentagon", fillColor, textPaddingPx: 14 };
+      case "hexagon":
+        return { shape: "hexagon", fillColor, textPaddingPx: 14 };
+      case "parallelogram":
+        return { shape: "parallelogram", fillColor, textPaddingPx: 14 };
+      case "trapezoid":
+        return { shape: "trapezoid", fillColor, textPaddingPx: 14 };
+      default:
+        return null;
+    }
+  }
+
+  _buildShapeContentNode(element, widthPx, heightPx, ppi) {
+    const shapeOptions = this._getShapeRenderOptions(element, ppi);
+    if (!shapeOptions) return null;
+    const content = document.createElement("div");
+    content.className = "sheet-slides-element-content";
+    this._appendShapeSurface(content, element, widthPx, heightPx, shapeOptions);
+    const shapeText = document.createElement("div");
+    shapeText.className = "sheet-slides-inline-text sheet-slides-shape-text";
+    const textInner = document.createElement("div");
+    textInner.className = "sheet-slides-inline-text-body";
+    textInner.textContent = String(element.text || "");
+    shapeText.appendChild(textInner);
+    this._applyTextStyles(shapeText, element, ppi);
+    shapeText.style.padding = `${Math.max(0, toFiniteNumber(shapeOptions.textPaddingPx, 8))}px`;
+    content.appendChild(shapeText);
+    return content;
+  }
+
+  _getNormalizedTableData(element) {
+    return normalizeTableData(element?.tableData, TABLE_DEFAULT_ROWS, TABLE_DEFAULT_COLS);
+  }
+
+  _getTableLayoutMetrics(element, widthPx, heightPx, tableData = this._getNormalizedTableData(element)) {
+    const normalized = normalizeTableData(tableData, TABLE_DEFAULT_ROWS, TABLE_DEFAULT_COLS);
+    const rowCount = Math.max(1, getTableRowCount(normalized, TABLE_DEFAULT_ROWS));
+    const colCount = Math.max(1, getTableColumnCount(normalized, TABLE_DEFAULT_COLS));
+    const safeWidth = Math.max(1, toFiniteNumber(widthPx, 1));
+    const safeHeight = Math.max(1, toFiniteNumber(heightPx, 1));
+    const rowStarts = [0];
+    const colStarts = [0];
+    const rowHeights = [];
+    const colWidths = [];
+
+    let rowCursor = 0;
+    for (let row = 0; row < rowCount; row += 1) {
+      const isLast = row === rowCount - 1;
+      const nextHeight = isLast
+        ? Math.max(0, safeHeight - rowCursor)
+        : Math.max(0, safeHeight * toFiniteNumber(normalized.rowFractions?.[row], 1 / rowCount));
+      rowHeights.push(nextHeight);
+      rowCursor += nextHeight;
+      rowStarts.push(rowCursor);
+    }
+
+    let colCursor = 0;
+    for (let col = 0; col < colCount; col += 1) {
+      const isLast = col === colCount - 1;
+      const nextWidth = isLast
+        ? Math.max(0, safeWidth - colCursor)
+        : Math.max(0, safeWidth * toFiniteNumber(normalized.colFractions?.[col], 1 / colCount));
+      colWidths.push(nextWidth);
+      colCursor += nextWidth;
+      colStarts.push(colCursor);
+    }
+
+    return {
+      tableData: normalized,
+      rowCount,
+      colCount,
+      widthPx: safeWidth,
+      heightPx: safeHeight,
+      rowStarts,
+      colStarts,
+      rowHeights,
+      colWidths,
+    };
+  }
+
+  _getTableCellBoundsPx(layout, row, col, cell) {
+    if (!layout || !cell) return null;
+    const rowSpan = Math.max(1, Math.round(toFiniteNumber(cell.rowSpan, 1)));
+    const colSpan = Math.max(1, Math.round(toFiniteNumber(cell.colSpan, 1)));
+    const left = toFiniteNumber(layout.colStarts?.[col], 0);
+    const top = toFiniteNumber(layout.rowStarts?.[row], 0);
+    const right = toFiniteNumber(layout.colStarts?.[col + colSpan], layout.widthPx);
+    const bottom = toFiniteNumber(layout.rowStarts?.[row + rowSpan], layout.heightPx);
+    return {
+      left,
+      top,
+      width: Math.max(0, right - left),
+      height: Math.max(0, bottom - top),
+    };
+  }
+
+  _getTableTextAlignValue(element) {
+    const value = String(element?.textAlign || "left");
+    return ["left", "center", "right"].includes(value) ? value : "left";
+  }
+
+  _getTableVerticalAlignValue(element) {
+    const value = String(element?.verticalAlign || "middle");
+    return ["top", "middle", "bottom"].includes(value) ? value : "middle";
+  }
+
+  _applyTableCellTextStyles(node, element, cell, ppi) {
+    if (!node || !element) return;
+    node.style.fontFamily = this._resolveTableTextStyleValue(element, cell, "fontFamily");
+    node.style.fontSize = `${Math.max(6, toFiniteNumber(this._resolveTableTextStyleValue(element, cell, "fontSize"), 0.22) * ppi)}px`;
+    node.style.fontWeight = this._resolveTableTextStyleValue(element, cell, "fontWeight");
+    node.style.fontStyle = this._resolveTableTextStyleValue(element, cell, "fontStyle");
+    node.style.textDecoration = this._resolveTableTextStyleValue(element, cell, "textDecoration");
+    node.style.color = toCssColor(this._resolveTableTextStyleValue(element, cell, "color"), "#111111");
+    node.style.textAlign = this._resolveTableTextStyleValue(element, cell, "textAlign");
+    node.style.display = "flex";
+    node.style.flexDirection = "column";
+    node.style.justifyContent = this._resolveTableTextStyleValue(element, cell, "verticalAlign") === "top"
+      ? "flex-start"
+      : (this._resolveTableTextStyleValue(element, cell, "verticalAlign") === "bottom" ? "flex-end" : "center");
+    node.style.width = "100%";
+    node.style.height = "100%";
+    node.style.boxSizing = "border-box";
+    node.style.whiteSpace = "pre-wrap";
+    node.style.wordBreak = "break-word";
+    node.style.lineHeight = "1.2";
+    node.style.overflow = "hidden";
+    node.style.padding = `${TABLE_CELL_PADDING_PX}px`;
+  }
+
+  _isTableCellSelected(element, row, col, cell) {
+    if (!isTableElementType(element) || !cell) return false;
+    const rect = this._getActiveTableSelectionRect(element);
+    if (!rect) return false;
+    const cellMaxRow = row + Math.max(1, Math.round(toFiniteNumber(cell.rowSpan, 1))) - 1;
+    const cellMaxCol = col + Math.max(1, Math.round(toFiniteNumber(cell.colSpan, 1))) - 1;
+    return !(cellMaxRow < rect.minRow || row > rect.maxRow || cellMaxCol < rect.minCol || col > rect.maxCol);
+  }
+
+  _createTableSurfaceSvg(element, widthPx, heightPx, layout, ppi = this._pxPerIn()) {
+    if (!element || !layout) return null;
+    const tableData = layout.tableData || this._getNormalizedTableData(element);
+    const rowCount = Math.max(1, layout.rowCount || getTableRowCount(tableData, TABLE_DEFAULT_ROWS));
+    const colCount = Math.max(1, layout.colCount || getTableColumnCount(tableData, TABLE_DEFAULT_COLS));
+    const styleValue = this._getLineStyleValue(element);
+    const strokeWidthPx = Math.max(0, toFiniteNumber(element.strokeWidth, this._defaultStrokeWidthForElement(element)) * Math.max(1, toFiniteNumber(ppi, 96)));
+    const hasStroke = strokeWidthPx > 0 && styleValue !== "none";
+    const dashArray = hasStroke ? this._getStrokeDashArray(styleValue, strokeWidthPx) : "";
+    const strokeColor = hasStroke ? toCssColor(element.stroke, this._defaultStrokeForElement(element)) : "none";
+    const inset = hasStroke ? Math.max(0.5, strokeWidthPx * 0.5) : 0;
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", `0 0 ${Math.max(1, widthPx)} ${Math.max(1, heightPx)}`);
+    svg.setAttribute("width", String(Math.max(1, widthPx)));
+    svg.setAttribute("height", String(Math.max(1, heightPx)));
+    svg.classList.add("sheet-slides-table-surface");
+
+    const fillRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    fillRect.setAttribute("x", "0");
+    fillRect.setAttribute("y", "0");
+    fillRect.setAttribute("width", String(Math.max(1, widthPx)));
+    fillRect.setAttribute("height", String(Math.max(1, heightPx)));
+    fillRect.setAttribute("fill", toCssColor(element.fill, "#ffffff"));
+    fillRect.setAttribute("stroke", "none");
+    svg.appendChild(fillRect);
+
+    if (hasStroke) {
+      const appendLine = (x1, y1, x2, y2) => {
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", String(x1));
+        line.setAttribute("y1", String(y1));
+        line.setAttribute("x2", String(x2));
+        line.setAttribute("y2", String(y2));
+        line.setAttribute("stroke", strokeColor);
+        line.setAttribute("stroke-width", String(Math.max(1, strokeWidthPx)));
+        if (dashArray) line.setAttribute("stroke-dasharray", dashArray);
+        line.setAttribute("vector-effect", "non-scaling-stroke");
+        line.setAttribute("stroke-linecap", "square");
+        svg.appendChild(line);
+      };
+
+      const outer = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      outer.setAttribute("x", String(inset));
+      outer.setAttribute("y", String(inset));
+      outer.setAttribute("width", String(Math.max(0, widthPx - (inset * 2))));
+      outer.setAttribute("height", String(Math.max(0, heightPx - (inset * 2))));
+      outer.setAttribute("fill", "none");
+      outer.setAttribute("stroke", strokeColor);
+      outer.setAttribute("stroke-width", String(Math.max(1, strokeWidthPx)));
+      if (dashArray) outer.setAttribute("stroke-dasharray", dashArray);
+      outer.setAttribute("vector-effect", "non-scaling-stroke");
+      svg.appendChild(outer);
+
+      for (let boundary = 1; boundary < colCount; boundary += 1) {
+        const x = toFiniteNumber(layout.colStarts?.[boundary], 0);
+        for (let row = 0; row < rowCount; row += 1) {
+          const leftAnchor = resolveTableCellAnchor(tableData, row, boundary - 1);
+          const rightAnchor = resolveTableCellAnchor(tableData, row, boundary);
+          if (leftAnchor && rightAnchor && leftAnchor.row === rightAnchor.row && leftAnchor.col === rightAnchor.col) continue;
+          appendLine(
+            x,
+            toFiniteNumber(layout.rowStarts?.[row], 0),
+            x,
+            toFiniteNumber(layout.rowStarts?.[row + 1], heightPx),
+          );
+        }
+      }
+
+      for (let boundary = 1; boundary < rowCount; boundary += 1) {
+        const y = toFiniteNumber(layout.rowStarts?.[boundary], 0);
+        for (let col = 0; col < colCount; col += 1) {
+          const topAnchor = resolveTableCellAnchor(tableData, boundary - 1, col);
+          const bottomAnchor = resolveTableCellAnchor(tableData, boundary, col);
+          if (topAnchor && bottomAnchor && topAnchor.row === bottomAnchor.row && topAnchor.col === bottomAnchor.col) continue;
+          appendLine(
+            toFiniteNumber(layout.colStarts?.[col], 0),
+            y,
+            toFiniteNumber(layout.colStarts?.[col + 1], widthPx),
+            y,
+          );
+        }
+      }
+    }
+
+    return svg;
+  }
+
+  _buildTableContentNode(element, widthPx, heightPx, ppi, { interactive = false } = {}) {
+    if (!isTableElementType(element)) return null;
+    const layout = this._getTableLayoutMetrics(element, widthPx, heightPx);
+    const tableData = layout.tableData;
+    const wrap = document.createElement("div");
+    wrap.className = "sheet-slides-table-wrap";
+    wrap.style.background = toCssColor(element.fill, "#ffffff");
+
+    const surface = this._createTableSurfaceSvg(element, widthPx, heightPx, layout, ppi);
+    if (surface) wrap.appendChild(surface);
+
+    const layer = document.createElement("div");
+    layer.className = "sheet-slides-table-layer";
+    wrap.appendChild(layer);
+
+    for (let row = 0; row < layout.rowCount; row += 1) {
+      for (let col = 0; col < layout.colCount; col += 1) {
+        const cell = getTableCell(tableData, row, col);
+        if (!cell || cell?.mergedInto) continue;
+        const bounds = this._getTableCellBoundsPx(layout, row, col, cell);
+        if (!bounds) continue;
+
+        const cellNode = document.createElement("div");
+        cellNode.className = `sheet-slides-table-cell${interactive && this._isTableCellSelected(element, row, col, cell) ? " is-selected" : ""}`;
+        cellNode.style.left = `${bounds.left}px`;
+        cellNode.style.top = `${bounds.top}px`;
+        cellNode.style.width = `${bounds.width}px`;
+        cellNode.style.height = `${bounds.height}px`;
+        cellNode.dataset.tableCellRow = String(row);
+        cellNode.dataset.tableCellCol = String(col);
+        cellNode.dataset.tableCellRowSpan = String(Math.max(1, Math.round(toFiniteNumber(cell.rowSpan, 1))));
+        cellNode.dataset.tableCellColSpan = String(Math.max(1, Math.round(toFiniteNumber(cell.colSpan, 1))));
+
+        const body = document.createElement("div");
+        body.className = "sheet-slides-table-cell-body";
+        body.textContent = String(cell.text || "");
+        this._applyTableCellTextStyles(body, element, cell, ppi);
+        cellNode.appendChild(body);
+        layer.appendChild(cellNode);
+      }
+    }
+
+    return wrap;
   }
 
   _getTextAlignValue(element) {
@@ -1837,6 +2355,12 @@ export class Sheet2DEditorWindow {
     const root = this.root;
     if (!menu || !root) return;
 
+    this._renderContextMenu();
+    if (!menu.childElementCount) {
+      this._hideContextMenu();
+      return;
+    }
+
     menu.style.display = "grid";
     menu.style.left = "0px";
     menu.style.top = "0px";
@@ -1854,6 +2378,81 @@ export class Sheet2DEditorWindow {
   _hideContextMenu() {
     if (!this._contextMenu) return;
     this._contextMenu.style.display = "none";
+    this._contextMenuState = null;
+  }
+
+  _appendContextMenuItem(menu, label, onClick, { danger = false } = {}) {
+    if (!menu || typeof onClick !== "function") return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `sheet-slides-context-menu-item${danger ? " danger" : ""}`;
+    button.textContent = label;
+    button.addEventListener("click", () => {
+      this._hideContextMenu();
+      onClick();
+    });
+    menu.appendChild(button);
+  }
+
+  _appendContextMenuSeparator(menu) {
+    if (!menu) return;
+    const divider = document.createElement("div");
+    divider.className = "sheet-slides-context-menu-separator";
+    menu.appendChild(divider);
+  }
+
+  _renderContextMenu() {
+    const menu = this._contextMenu;
+    if (!menu) return;
+    menu.textContent = "";
+    const selectedElements = this._getSelectedElements({ sorted: true });
+    if (!selectedElements.length) return;
+    const selected = selectedElements[selectedElements.length - 1] || this._getSelectedElement();
+    const singleSelection = selectedElements.length === 1 ? selected : null;
+
+    const context = this._contextMenuState || { kind: "element", elementId: String(selected?.id || "") };
+    const isTableCellContext = context.kind === "table-cell"
+      && !!singleSelection
+      && String(context.elementId || "") === String(singleSelection.id || "")
+      && isTableElementType(singleSelection);
+    let addedTableItems = false;
+
+    if (isTableCellContext) {
+      this._appendContextMenuItem(menu, "Insert row above", () => this._insertTableRowAt(context.row, "above"));
+      this._appendContextMenuItem(menu, "Insert row below", () => this._insertTableRowAt(context.row, "below"));
+      this._appendContextMenuItem(menu, "Insert column left", () => this._insertTableColumnAt(context.col, "left"));
+      this._appendContextMenuItem(menu, "Insert column right", () => this._insertTableColumnAt(context.col, "right"));
+      addedTableItems = true;
+
+      const selectionRect = this._getActiveTableSelectionRect(selected);
+      if (selectionRect && canMergeTableCells(this._getNormalizedTableData(selected), selectionRect)) {
+        this._appendContextMenuSeparator(menu);
+        this._appendContextMenuItem(menu, "Merge cells", () => this._mergeSelectedTableCells());
+        addedTableItems = true;
+      }
+      if (this._canUnmergeSelectedTableCell()) {
+        if (!selectionRect || !canMergeTableCells(this._getNormalizedTableData(selected), selectionRect)) {
+          this._appendContextMenuSeparator(menu);
+        }
+        this._appendContextMenuItem(menu, "Unmerge cells", () => this._unmergeSelectedTableCell());
+        addedTableItems = true;
+      }
+    }
+
+    if (addedTableItems) this._appendContextMenuSeparator(menu);
+    if (this._canGroupSelectedElements()) {
+      this._appendContextMenuItem(menu, "Group", () => this._groupSelectedElements());
+    }
+    if (this._canUngroupSelectedElements()) {
+      this._appendContextMenuItem(menu, "Ungroup", () => this._ungroupSelectedElements());
+    }
+    if (this._canGroupSelectedElements() || this._canUngroupSelectedElements()) {
+      this._appendContextMenuSeparator(menu);
+    }
+    this._appendContextMenuItem(menu, "Bring to front", () => this._bringSelectedToFront());
+    this._appendContextMenuItem(menu, "Send to back", () => this._sendSelectedToBack());
+    this._appendContextMenuItem(menu, "Duplicate", () => this._duplicateSelectedElement());
+    this._appendContextMenuItem(menu, "Delete", () => this._deleteSelectedElement(), { danger: true });
   }
 
   _openPmiPicker() {
@@ -2262,6 +2861,526 @@ export class Sheet2DEditorWindow {
     };
   }
 
+  _syncTableInteractionState() {
+    const selected = this._getSelectedElement();
+    if (!isTableElementType(selected)) {
+      this._tableSelection = null;
+      return;
+    }
+    if (!this._tableSelection || String(this._tableSelection.elementId || "") !== String(selected.id || "")) return;
+    const tableData = this._getNormalizedTableData(selected);
+    const rowCount = Math.max(1, getTableRowCount(tableData, TABLE_DEFAULT_ROWS));
+    const colCount = Math.max(1, getTableColumnCount(tableData, TABLE_DEFAULT_COLS));
+    const anchor = resolveTableCellAnchor(
+      tableData,
+      clamp(toFiniteNumber(this._tableSelection.anchorRow, 0), 0, rowCount - 1),
+      clamp(toFiniteNumber(this._tableSelection.anchorCol, 0), 0, colCount - 1),
+    );
+    const focus = resolveTableCellAnchor(
+      tableData,
+      clamp(toFiniteNumber(this._tableSelection.focusRow, 0), 0, rowCount - 1),
+      clamp(toFiniteNumber(this._tableSelection.focusCol, 0), 0, colCount - 1),
+    );
+    if (!anchor?.cell || !focus?.cell) {
+      this._tableSelection = null;
+      return;
+    }
+    this._tableSelection = {
+      elementId: String(selected.id || ""),
+      anchorRow: anchor.row,
+      anchorCol: anchor.col,
+      focusRow: focus.row,
+      focusCol: focus.col,
+    };
+  }
+
+  _setTableSelectionForCell(element, row, col, { expand = false } = {}) {
+    if (!isTableElementType(element)) {
+      this._tableSelection = null;
+      return false;
+    }
+    const tableData = this._getNormalizedTableData(element);
+    const anchor = resolveTableCellAnchor(tableData, row, col);
+    if (!anchor?.cell) return false;
+    const previous = this._tableSelection && String(this._tableSelection.elementId || "") === String(element.id || "")
+      ? this._tableSelection
+      : null;
+    this._tableSelection = {
+      elementId: String(element.id || ""),
+      anchorRow: expand && previous ? previous.anchorRow : anchor.row,
+      anchorCol: expand && previous ? previous.anchorCol : anchor.col,
+      focusRow: anchor.row,
+      focusCol: anchor.col,
+    };
+    return true;
+  }
+
+  _getActiveTableSelectionRect(element = this._getSelectedElement()) {
+    if (!isTableElementType(element)) return null;
+    if (String(this.selectedElementId || "") !== String(element.id || "")) return null;
+    if (!this._tableSelection || String(this._tableSelection.elementId || "") !== String(element.id || "")) return null;
+    const tableData = this._getNormalizedTableData(element);
+    const rowCount = Math.max(1, getTableRowCount(tableData, TABLE_DEFAULT_ROWS));
+    const colCount = Math.max(1, getTableColumnCount(tableData, TABLE_DEFAULT_COLS));
+    const rect = getTableSelectionRect(this._tableSelection);
+    if (!rect) return null;
+    return {
+      minRow: clamp(rect.minRow, 0, rowCount - 1),
+      maxRow: clamp(rect.maxRow, 0, rowCount - 1),
+      minCol: clamp(rect.minCol, 0, colCount - 1),
+      maxCol: clamp(rect.maxCol, 0, colCount - 1),
+    };
+  }
+
+  _getPrimarySelectedTableCell() {
+    const element = this._getSelectedElement();
+    if (!isTableElementType(element)) return null;
+    const rect = this._getActiveTableSelectionRect(element);
+    if (!rect) return null;
+    const tableData = this._getNormalizedTableData(element);
+    const anchor = resolveTableCellAnchor(tableData, rect.minRow, rect.minCol);
+    if (!anchor?.cell) return null;
+    return { element, tableData, row: anchor.row, col: anchor.col, cell: anchor.cell };
+  }
+
+  _getTableTextScope() {
+    return this._tableTextScope === "table" ? "table" : "cell";
+  }
+
+  _setTableTextScope(scope) {
+    this._tableTextScope = scope === "table" ? "table" : "cell";
+    this._renderInspector();
+  }
+
+  _getSelectedTableAnchorTargets(element = this._getSelectedElement(), tableData = this._getNormalizedTableData(element)) {
+    if (!isTableElementType(element)) return [];
+    const rect = this._getActiveTableSelectionRect(element);
+    if (!rect) return [];
+    const targets = [];
+    const seen = new Set();
+    for (let row = rect.minRow; row <= rect.maxRow; row += 1) {
+      for (let col = rect.minCol; col <= rect.maxCol; col += 1) {
+        const anchor = resolveTableCellAnchor(tableData, row, col);
+        if (!anchor?.cell) continue;
+        const key = `${anchor.row}:${anchor.col}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        targets.push(anchor);
+      }
+    }
+    return targets;
+  }
+
+  _getTableSelectionState(element = this._getSelectedElement()) {
+    if (!isTableElementType(element)) return null;
+    if (!this._tableSelection || String(this._tableSelection.elementId || "") !== String(element.id || "")) return null;
+    return {
+      elementId: String(element.id || ""),
+      anchorRow: this._tableSelection.anchorRow,
+      anchorCol: this._tableSelection.anchorCol,
+      focusRow: this._tableSelection.focusRow,
+      focusCol: this._tableSelection.focusCol,
+    };
+  }
+
+  _resolveTableTextStyleValue(element, cell, key) {
+    const style = cell?.style && typeof cell.style === "object" ? cell.style : null;
+    if (style && style[key] != null && style[key] !== "") return style[key];
+    if (key === "fontFamily") return String(element?.fontFamily || "Arial, Helvetica, sans-serif");
+    if (key === "fontSize") return Math.max(0.08, toFiniteNumber(element?.fontSize, 0.22));
+    if (key === "fontWeight") return String(element?.fontWeight || "400");
+    if (key === "fontStyle") return String(element?.fontStyle || "normal");
+    if (key === "textDecoration") return String(element?.textDecoration || "none");
+    if (key === "textAlign") return this._getTableTextAlignValue(element);
+    if (key === "verticalAlign") return this._getTableVerticalAlignValue(element);
+    if (key === "color") return String(element?.color || this._defaultTextColorForElement(element));
+    return "";
+  }
+
+  _canEditSelectedTableCellText(element = this._getSelectedElement()) {
+    return this._getSelectedTableAnchorTargets(element).length === 1;
+  }
+
+  _getSelectedTextState() {
+    const element = this._getSelectedElement();
+    if (!element || !elementSupportsText(element)) return null;
+
+    if (!isTableElementType(element)) {
+      return {
+        element,
+        isTable: false,
+        scope: "element",
+        canEditTextContent: true,
+        text: String(element.text || ""),
+        fontFamily: String(element.fontFamily || "Arial, Helvetica, sans-serif"),
+        fontSize: Math.max(0.08, toFiniteNumber(element.fontSize, 0.32)),
+        fontWeight: String(element.fontWeight || "400"),
+        fontStyle: String(element.fontStyle || "normal"),
+        textDecoration: String(element.textDecoration || "none"),
+        textAlign: this._getTextAlignValue(element),
+        verticalAlign: this._getTextVerticalAlignValue(element),
+        color: String(element.color || this._defaultTextColorForElement(element)),
+      };
+    }
+
+    const scope = this._getTableTextScope();
+    const primary = this._getPrimarySelectedTableCell();
+    const styleCell = scope === "cell" ? primary?.cell : null;
+    return {
+      element,
+      isTable: true,
+      scope,
+      canEditTextContent: scope === "cell" && this._canEditSelectedTableCellText(element),
+      text: scope === "cell" && primary?.cell ? String(primary.cell.text || "") : "",
+      fontFamily: this._resolveTableTextStyleValue(element, styleCell, "fontFamily"),
+      fontSize: this._resolveTableTextStyleValue(element, styleCell, "fontSize"),
+      fontWeight: this._resolveTableTextStyleValue(element, styleCell, "fontWeight"),
+      fontStyle: this._resolveTableTextStyleValue(element, styleCell, "fontStyle"),
+      textDecoration: this._resolveTableTextStyleValue(element, styleCell, "textDecoration"),
+      textAlign: this._resolveTableTextStyleValue(element, styleCell, "textAlign"),
+      verticalAlign: this._resolveTableTextStyleValue(element, styleCell, "verticalAlign"),
+      color: this._resolveTableTextStyleValue(element, styleCell, "color"),
+    };
+  }
+
+  _canUnmergeSelectedTableCell() {
+    const current = this._getPrimarySelectedTableCell();
+    return !!current?.cell && (toFiniteNumber(current.cell.rowSpan, 1) > 1 || toFiniteNumber(current.cell.colSpan, 1) > 1);
+  }
+
+  _getSuggestedTableSizeIn(tableData) {
+    const rowCount = Math.max(1, getTableRowCount(tableData, TABLE_DEFAULT_ROWS));
+    const colCount = Math.max(1, getTableColumnCount(tableData, TABLE_DEFAULT_COLS));
+    const sheetWidth = Math.max(1, toFiniteNumber(this.sheetDraft?.widthIn, 11));
+    const sheetHeight = Math.max(1, toFiniteNumber(this.sheetDraft?.heightIn, 8.5));
+    let width = Math.max(1.8, colCount * TABLE_DEFAULT_COL_WIDTH_IN);
+    let height = Math.max(1, rowCount * TABLE_DEFAULT_ROW_HEIGHT_IN);
+    const maxWidth = Math.max(1.8, sheetWidth * 0.7);
+    const maxHeight = Math.max(1, sheetHeight * 0.55);
+    if (width > maxWidth) {
+      const scale = maxWidth / width;
+      width = maxWidth;
+      height *= scale;
+    }
+    if (height > maxHeight) {
+      const scale = maxHeight / height;
+      height = maxHeight;
+      width *= scale;
+    }
+    return { width, height };
+  }
+
+  _commitTableChange(element, nextTableData, reason = "table-edit", nextSelection = null) {
+    if (!isTableElementType(element)) return false;
+    element.tableData = normalizeTableData(nextTableData, TABLE_DEFAULT_ROWS, TABLE_DEFAULT_COLS);
+    if (nextSelection) {
+      this._tableSelection = {
+        elementId: String(element.id || ""),
+        anchorRow: nextSelection.anchorRow,
+        anchorCol: nextSelection.anchorCol,
+        focusRow: nextSelection.focusRow,
+        focusCol: nextSelection.focusCol,
+      };
+    }
+    this._syncTableInteractionState();
+    this._commitSheetDraft(reason);
+    this._syncTableInteractionState();
+    this._renderStageOnly();
+    this._renderInspector();
+    this._renderSidebarOnly();
+    return true;
+  }
+
+  _clearTableMergeConflicts(tableData, rect) {
+    let next = cloneTableData(tableData, TABLE_DEFAULT_ROWS, TABLE_DEFAULT_COLS);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      const rowCount = getTableRowCount(next, TABLE_DEFAULT_ROWS);
+      const colCount = getTableColumnCount(next, TABLE_DEFAULT_COLS);
+      for (let row = 0; row < rowCount && !changed; row += 1) {
+        for (let col = 0; col < colCount; col += 1) {
+          const cell = getTableCell(next, row, col);
+          if (!cell || cell?.mergedInto) continue;
+          const cellRect = {
+            minRow: row,
+            maxRow: row + Math.max(1, Math.round(toFiniteNumber(cell.rowSpan, 1))) - 1,
+            minCol: col,
+            maxCol: col + Math.max(1, Math.round(toFiniteNumber(cell.colSpan, 1))) - 1,
+          };
+          const intersects = !(cellRect.maxRow < rect.minRow
+            || cellRect.minRow > rect.maxRow
+            || cellRect.maxCol < rect.minCol
+            || cellRect.minCol > rect.maxCol);
+          if (intersects && (cellRect.maxRow > cellRect.minRow || cellRect.maxCol > cellRect.minCol)) {
+            next = unmergeTableCell(next, row, col);
+            changed = true;
+            break;
+          }
+        }
+      }
+    }
+    return next;
+  }
+
+  _insertTableRowAt(referenceRow, position = "below") {
+    const current = this._getPrimarySelectedTableCell();
+    if (!current) return;
+    const insertIndex = position === "above"
+      ? clamp(Math.round(toFiniteNumber(referenceRow, current.row)), 0, getTableRowCount(current.tableData, TABLE_DEFAULT_ROWS))
+      : clamp(Math.round(toFiniteNumber(referenceRow, current.row)) + 1, 0, getTableRowCount(current.tableData, TABLE_DEFAULT_ROWS));
+    const nextData = insertTableRow(current.tableData, insertIndex);
+    const selectedCol = clamp(current.col, 0, Math.max(0, getTableColumnCount(nextData, TABLE_DEFAULT_COLS) - 1));
+    this._commitTableChange(current.element, nextData, "table-row-insert", {
+      anchorRow: insertIndex,
+      anchorCol: selectedCol,
+      focusRow: insertIndex,
+      focusCol: selectedCol,
+    });
+  }
+
+  _insertTableColumnAt(referenceCol, position = "right") {
+    const current = this._getPrimarySelectedTableCell();
+    if (!current) return;
+    const insertIndex = position === "left"
+      ? clamp(Math.round(toFiniteNumber(referenceCol, current.col)), 0, getTableColumnCount(current.tableData, TABLE_DEFAULT_COLS))
+      : clamp(Math.round(toFiniteNumber(referenceCol, current.col)) + 1, 0, getTableColumnCount(current.tableData, TABLE_DEFAULT_COLS));
+    const nextData = insertTableColumn(current.tableData, insertIndex);
+    const selectedRow = clamp(current.row, 0, Math.max(0, getTableRowCount(nextData, TABLE_DEFAULT_ROWS) - 1));
+    this._commitTableChange(current.element, nextData, "table-col-insert", {
+      anchorRow: selectedRow,
+      anchorCol: insertIndex,
+      focusRow: selectedRow,
+      focusCol: insertIndex,
+    });
+  }
+
+  _mergeSelectedTableCells() {
+    const element = this._getSelectedElement();
+    if (!isTableElementType(element)) return;
+    const rect = this._getActiveTableSelectionRect(element);
+    if (!rect) return;
+    const nextData = mergeTableCells(this._getNormalizedTableData(element), rect);
+    this._commitTableChange(element, nextData, "table-merge", {
+      anchorRow: rect.minRow,
+      anchorCol: rect.minCol,
+      focusRow: rect.minRow,
+      focusCol: rect.minCol,
+    });
+  }
+
+  _unmergeSelectedTableCell() {
+    const current = this._getPrimarySelectedTableCell();
+    if (!current) return;
+    const nextData = unmergeTableCell(current.tableData, current.row, current.col);
+    this._commitTableChange(current.element, nextData, "table-unmerge", {
+      anchorRow: current.row,
+      anchorCol: current.col,
+      focusRow: current.row,
+      focusCol: current.col,
+    });
+  }
+
+  _parseHtmlClipboardTable(html) {
+    const source = String(html || "").trim();
+    if (!source || typeof DOMParser === "undefined") return null;
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(source, "text/html");
+      const table = doc.querySelector("table");
+      if (!table) return null;
+
+      const rows = [];
+      const occupancy = [];
+      const rowNodes = Array.from(table.querySelectorAll("tr"));
+      for (let rowIndex = 0; rowIndex < rowNodes.length; rowIndex += 1) {
+        const rowNode = rowNodes[rowIndex];
+        rows[rowIndex] = rows[rowIndex] || [];
+        occupancy[rowIndex] = occupancy[rowIndex] || [];
+        let colIndex = 0;
+        const cellNodes = Array.from(rowNode.children).filter((node) => {
+          const tag = String(node?.tagName || "").toUpperCase();
+          return tag === "TD" || tag === "TH";
+        });
+        for (const cellNode of cellNodes) {
+          while (occupancy[rowIndex]?.[colIndex]) colIndex += 1;
+          const rowSpan = Math.max(1, Math.round(toFiniteNumber(cellNode.getAttribute("rowspan"), 1)));
+          const colSpan = Math.max(1, Math.round(toFiniteNumber(cellNode.getAttribute("colspan"), 1)));
+          rows[rowIndex][colIndex] = {
+            text: String(cellNode.textContent || "").replace(/\u00a0/g, " ").replace(/\r\n?/g, "\n").trim(),
+            rowSpan,
+            colSpan,
+            mergedInto: null,
+          };
+          for (let fillRow = rowIndex; fillRow < rowIndex + rowSpan; fillRow += 1) {
+            rows[fillRow] = rows[fillRow] || [];
+            occupancy[fillRow] = occupancy[fillRow] || [];
+            for (let fillCol = colIndex; fillCol < colIndex + colSpan; fillCol += 1) {
+              occupancy[fillRow][fillCol] = true;
+              if (fillRow === rowIndex && fillCol === colIndex) continue;
+              rows[fillRow][fillCol] = {
+                text: "",
+                rowSpan: 1,
+                colSpan: 1,
+                mergedInto: { row: rowIndex, col: colIndex },
+              };
+            }
+          }
+          colIndex += colSpan;
+        }
+      }
+
+      const rowCount = rows.length;
+      const colCount = rows.reduce((max, row) => Math.max(max, Array.isArray(row) ? row.length : 0), 0);
+      if (!rowCount || !colCount) return null;
+      return normalizeTableData({ cells: rows }, rowCount, colCount);
+    } catch {
+      return null;
+    }
+  }
+
+  _parsePlainTextClipboardTable(text, { allowSingleCell = false } = {}) {
+    const source = String(text || "").replace(/\r\n?/g, "\n");
+    if (!source.trim()) return null;
+    const rows = source.split("\n");
+    while (rows.length > 1 && rows[rows.length - 1] === "") rows.pop();
+    const isGridLike = source.includes("\t") || rows.length > 1 || allowSingleCell;
+    if (!isGridLike) return null;
+    const cells = rows.map((row) => row.split("\t").map((value) => ({
+      text: String(value || ""),
+      rowSpan: 1,
+      colSpan: 1,
+      mergedInto: null,
+    })));
+    const rowCount = cells.length;
+    const colCount = cells.reduce((max, row) => Math.max(max, Array.isArray(row) ? row.length : 0), 0);
+    if (!rowCount || !colCount) return null;
+    return normalizeTableData({ cells }, rowCount, colCount);
+  }
+
+  _parseClipboardTable(event, { allowSingleCell = false } = {}) {
+    const clipboard = event?.clipboardData || window.clipboardData || null;
+    if (!clipboard) return null;
+    const html = clipboard.getData?.("text/html") || "";
+    const fromHtml = this._parseHtmlClipboardTable(html);
+    if (fromHtml) return fromHtml;
+    const plain = clipboard.getData?.("text/plain") || "";
+    return this._parsePlainTextClipboardTable(plain, { allowSingleCell });
+  }
+
+  _pasteIntoSelectedTable(pastedTableData) {
+    const element = this._getSelectedElement();
+    if (!isTableElementType(element)) return false;
+    const selectionRect = this._getActiveTableSelectionRect(element);
+    if (!selectionRect) return false;
+    const pasted = normalizeTableData(pastedTableData, TABLE_DEFAULT_ROWS, TABLE_DEFAULT_COLS);
+    const pastedRows = getTableRowCount(pasted, TABLE_DEFAULT_ROWS);
+    const pastedCols = getTableColumnCount(pasted, TABLE_DEFAULT_COLS);
+    const startRow = selectionRect.minRow;
+    const startCol = selectionRect.minCol;
+    const targetRect = {
+      minRow: startRow,
+      maxRow: startRow + pastedRows - 1,
+      minCol: startCol,
+      maxCol: startCol + pastedCols - 1,
+    };
+
+    let next = ensureTableSize(this._getNormalizedTableData(element), targetRect.maxRow + 1, targetRect.maxCol + 1);
+    next = this._clearTableMergeConflicts(next, targetRect);
+
+    for (let row = targetRect.minRow; row <= targetRect.maxRow; row += 1) {
+      for (let col = targetRect.minCol; col <= targetRect.maxCol; col += 1) {
+        next.cells[row][col] = { text: "", rowSpan: 1, colSpan: 1, mergedInto: null };
+      }
+    }
+
+    for (let row = 0; row < pastedRows; row += 1) {
+      for (let col = 0; col < pastedCols; col += 1) {
+        const cell = getTableCell(pasted, row, col);
+        if (!cell || cell?.mergedInto) continue;
+        const targetRow = startRow + row;
+        const targetCol = startCol + col;
+        const rowSpan = Math.max(1, Math.round(toFiniteNumber(cell.rowSpan, 1)));
+        const colSpan = Math.max(1, Math.round(toFiniteNumber(cell.colSpan, 1)));
+        next.cells[targetRow][targetCol] = {
+          text: String(cell.text || ""),
+          rowSpan,
+          colSpan,
+          mergedInto: null,
+        };
+        for (let coverRow = targetRow; coverRow < targetRow + rowSpan; coverRow += 1) {
+          for (let coverCol = targetCol; coverCol < targetCol + colSpan; coverCol += 1) {
+            if (coverRow === targetRow && coverCol === targetCol) continue;
+            next.cells[coverRow][coverCol] = {
+              text: "",
+              rowSpan: 1,
+              colSpan: 1,
+              mergedInto: { row: targetRow, col: targetCol },
+            };
+          }
+        }
+      }
+    }
+
+    this._commitTableChange(element, next, "table-paste", {
+      elementId: String(element.id || ""),
+      anchorRow: startRow,
+      anchorCol: startCol,
+      focusRow: targetRect.maxRow,
+      focusCol: targetRect.maxCol,
+    });
+    return true;
+  }
+
+  _insertTableFromClipboardData(tableData) {
+    if (!this.sheetDraft) return false;
+    const normalized = normalizeTableData(tableData, TABLE_DEFAULT_ROWS, TABLE_DEFAULT_COLS);
+    const suggested = this._getSuggestedTableSizeIn(normalized);
+    const xIn = Math.max(0, (toFiniteNumber(this.sheetDraft.widthIn, 11) * 0.5) - (suggested.width * 0.5));
+    const yIn = Math.max(0, (toFiniteNumber(this.sheetDraft.heightIn, 8.5) * 0.5) - (suggested.height * 0.5));
+    const table = defaultTableElement(xIn, yIn, normalized);
+    table.w = suggested.width;
+    table.h = suggested.height;
+    table.z = this._nextZ();
+    this.sheetDraft.elements = Array.isArray(this.sheetDraft.elements) ? this.sheetDraft.elements : [];
+    this.sheetDraft.elements.push(table);
+    this._setSelectedElementIds([String(table.id || "")], String(table.id || ""));
+    this._tableSelection = {
+      elementId: String(table.id || ""),
+      anchorRow: 0,
+      anchorCol: 0,
+      focusRow: Math.max(0, getTableRowCount(normalized, TABLE_DEFAULT_ROWS) - 1),
+      focusCol: Math.max(0, getTableColumnCount(normalized, TABLE_DEFAULT_COLS) - 1),
+    };
+    this._commitSheetDraft("table-paste-insert");
+    this._syncTableInteractionState();
+    this._renderAll();
+    return true;
+  }
+
+  _onPaste(event) {
+    if (!this.root || this.root.style.display === "none" || !this.sheetDraft) return;
+    const active = document.activeElement;
+    const tag = String(active?.tagName || "").toUpperCase();
+    if (active?.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+    const selected = this._getSelectedElement();
+    const allowSingleCell = isTableElementType(selected) && !!this._getActiveTableSelectionRect(selected);
+    const parsed = this._parseClipboardTable(event, { allowSingleCell });
+    if (!parsed) return;
+
+    if (allowSingleCell) {
+      if (!this._pasteIntoSelectedTable(parsed)) return;
+      this._setStatus("Table pasted");
+    } else {
+      if (!this._insertTableFromClipboardData(parsed)) return;
+      this._setStatus("Table inserted from clipboard");
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
   _renderAll() {
     this._renderSidebarOnly();
     this._renderStageOnly();
@@ -2269,9 +3388,11 @@ export class Sheet2DEditorWindow {
   }
 
   _renderSelectionToolbar() {
-    const selected = this._getSelectedElement();
+    const selectionCount = this._getSelectedElementIds().length;
+    const selected = selectionCount === 1 ? this._getSelectedElement() : null;
     const hasElement = !!selected;
-    const supportsText = hasElement && elementSupportsText(selected);
+    const textState = selectionCount === 1 ? this._getSelectedTextState() : null;
+    const supportsText = !!textState;
     const isPMI = hasElement && selected.type === "pmiInset";
     const isLine = hasElement && selected.type === "line";
 
@@ -2316,22 +3437,22 @@ export class Sheet2DEditorWindow {
     }
 
     if (this._toolbarFontFamilyInput) {
-      this._toolbarFontFamilyInput.value = String(selected.fontFamily || "Arial, Helvetica, sans-serif");
+      this._toolbarFontFamilyInput.value = String(textState.fontFamily || "Arial, Helvetica, sans-serif");
     }
     if (this._toolbarFontSizeInput) {
-      this._toolbarFontSizeInput.value = String(Math.round(toFiniteNumber(selected.fontSize, 0.32) * this._pxPerIn()));
+      this._toolbarFontSizeInput.value = String(Math.round(toFiniteNumber(textState.fontSize, 0.32) * this._pxPerIn()));
     }
     if (this._toolbarBoldBtn) {
-      this._toolbarBoldBtn.classList.toggle("primary", String(selected.fontWeight || "400") === "700");
+      this._toolbarBoldBtn.classList.toggle("primary", String(textState.fontWeight || "400") === "700");
     }
     if (this._toolbarItalicBtn) {
-      this._toolbarItalicBtn.classList.toggle("primary", String(selected.fontStyle || "normal") === "italic");
+      this._toolbarItalicBtn.classList.toggle("primary", String(textState.fontStyle || "normal") === "italic");
     }
     if (this._toolbarUnderlineBtn) {
-      this._toolbarUnderlineBtn.classList.toggle("primary", String(selected.textDecoration || "none") === "underline");
+      this._toolbarUnderlineBtn.classList.toggle("primary", String(textState.textDecoration || "none") === "underline");
     }
-    const textAlign = this._getTextAlignValue(selected);
-    const verticalAlign = this._getTextVerticalAlignValue(selected);
+    const textAlign = String(textState.textAlign || "left");
+    const verticalAlign = String(textState.verticalAlign || "middle");
     if (this._toolbarAlignmentButton) {
       this._toolbarAlignmentButton.title = `Text alignment (${textAlign}, ${verticalAlign})`;
       this._toolbarAlignmentButton.setAttribute("aria-label", `Text alignment (${textAlign}, ${verticalAlign})`);
@@ -2458,7 +3579,7 @@ export class Sheet2DEditorWindow {
 
       card.addEventListener("click", () => {
         this.sheetId = String(sheet?.id || "") || null;
-        this.selectedElementId = null;
+        this._clearSelection();
         this._openSheetMenuId = null;
         this.refreshFromHistory();
       });
@@ -2583,41 +3704,9 @@ export class Sheet2DEditorWindow {
           content.appendChild(textBody);
           node.appendChild(content);
           this._appendStrokeOverlay(node, el, wPx, hPx, { shape: "rect", radiusPx: 8 });
-        } else if (el.type === "ellipse") {
-          const content = document.createElement("div");
-          content.className = "sheet-slides-element-content";
-          this._appendShapeSurface(content, el, wPx, hPx, {
-            shape: "ellipse",
-            fillColor: el.fill || this._defaultFillForElement(el),
-          });
-          const shapeText = document.createElement("div");
-          shapeText.className = "sheet-slides-inline-text sheet-slides-shape-text";
-          const textInner = document.createElement("div");
-          textInner.className = "sheet-slides-inline-text-body";
-          textInner.textContent = String(el.text || "");
-          shapeText.appendChild(textInner);
-          this._applyTextStyles(shapeText, el, ppi);
-          shapeText.style.padding = "12px";
-          content.appendChild(shapeText);
-          node.appendChild(content);
-        } else if (el.type === "rect") {
-          const content = document.createElement("div");
-          content.className = "sheet-slides-element-content";
-          this._appendShapeSurface(content, el, wPx, hPx, {
-            shape: "rect",
-            radiusPx: Math.max(0, toFiniteNumber(el.cornerRadius, 0.1) * ppi),
-            fillColor: el.fill || this._defaultFillForElement(el),
-          });
-          const shapeText = document.createElement("div");
-          shapeText.className = "sheet-slides-inline-text sheet-slides-shape-text";
-          const textInner = document.createElement("div");
-          textInner.className = "sheet-slides-inline-text-body";
-          textInner.textContent = String(el.text || "");
-          shapeText.appendChild(textInner);
-          this._applyTextStyles(shapeText, el, ppi);
-          shapeText.style.padding = "8px";
-          content.appendChild(shapeText);
-          node.appendChild(content);
+        } else if (isShapeElementType(el.type)) {
+          const content = this._buildShapeContentNode(el, wPx, hPx, ppi);
+          if (content) node.appendChild(content);
         } else if (el.type === "image") {
           node.style.background = toCssColor(el.fill, "transparent");
           node.style.borderRadius = "8px";
@@ -2675,6 +3764,9 @@ export class Sheet2DEditorWindow {
             node.appendChild(caption);
           }
           this._appendStrokeOverlay(frame, el, wPx, mediaHeightPx, { shape: "rect", radiusPx: 8 });
+        } else if (el.type === "table") {
+          const tableContent = this._buildTableContentNode(el, wPx, hPx, ppi, { interactive: false });
+          if (tableContent) node.appendChild(tableContent);
         } else {
           node.style.background = toCssColor(el.fill, "#8bc4ff");
         }
@@ -2749,7 +3841,7 @@ export class Sheet2DEditorWindow {
       canvas.appendChild(node);
     }
 
-    const selectedOverlay = this._buildSelectionOverlay(this._getSelectedElement());
+    const selectedOverlay = this._buildSelectionOverlay(this._getSelectedElements());
     if (selectedOverlay) {
       canvas.appendChild(selectedOverlay);
     }
@@ -2763,8 +3855,8 @@ export class Sheet2DEditorWindow {
 
     const ppi = this._pxPerIn();
     const node = document.createElement("div");
-    const selected = String(element.id || "") === String(this.selectedElementId || "");
-    const cropActive = selected && this._isCropModeForElement(element) && elementSupportsMediaCrop(element);
+    const selected = this._isElementSelected(element.id);
+    const cropActive = selected && this._getSelectedElementIds().length === 1 && this._isCropModeForElement(element) && elementSupportsMediaCrop(element);
     node.className = `sheet-slides-element${selected ? " selected" : ""}${cropActive ? " crop-active" : ""}`;
     node.dataset.id = String(element.id || "");
     node.dataset.type = String(element.type || "");
@@ -2830,35 +3922,13 @@ export class Sheet2DEditorWindow {
       textBody.style.padding = "4px";
       content.appendChild(textBody);
       this._appendStrokeOverlay(node, element, wPx, hPx, { shape: "rect", radiusPx: 8 });
-    } else if (element.type === "rect") {
-      this._appendShapeSurface(content, element, wPx, hPx, {
-        shape: "rect",
-        radiusPx: Math.max(0, toFiniteNumber(element.cornerRadius, 0.1) * ppi),
-        fillColor: element.fill || this._defaultFillForElement(element),
-      });
-      const shapeText = document.createElement("div");
-      shapeText.className = "sheet-slides-inline-text sheet-slides-shape-text";
-      const textInner = document.createElement("div");
-      textInner.className = "sheet-slides-inline-text-body";
-      textInner.textContent = String(element.text || "");
-      shapeText.appendChild(textInner);
-      this._applyTextStyles(shapeText, element, ppi);
-      shapeText.style.padding = "8px";
-      content.appendChild(shapeText);
-    } else if (element.type === "ellipse") {
-      this._appendShapeSurface(content, element, wPx, hPx, {
-        shape: "ellipse",
-        fillColor: element.fill || this._defaultFillForElement(element),
-      });
-      const shapeText = document.createElement("div");
-      shapeText.className = "sheet-slides-inline-text sheet-slides-shape-text";
-      const textInner = document.createElement("div");
-      textInner.className = "sheet-slides-inline-text-body";
-      textInner.textContent = String(element.text || "");
-      shapeText.appendChild(textInner);
-      this._applyTextStyles(shapeText, element, ppi);
-      shapeText.style.padding = "12px";
-      content.appendChild(shapeText);
+    } else if (isShapeElementType(element.type)) {
+      const shapeContent = this._buildShapeContentNode(element, wPx, hPx, ppi);
+      if (shapeContent) {
+        while (shapeContent.firstChild) {
+          content.appendChild(shapeContent.firstChild);
+        }
+      }
     } else if (element.type === "image") {
       content.style.background = toCssColor(element.fill, "transparent");
       content.style.borderRadius = "8px";
@@ -2906,6 +3976,13 @@ export class Sheet2DEditorWindow {
 
       this._attachPmiViewport(element, host, wPx, mediaFrameHeightPx, usedPmiIds);
       this._appendStrokeOverlay(frame, element, wPx, mediaFrameHeightPx, { shape: "rect", radiusPx: 8 });
+    } else if (element.type === "table") {
+      const tableContent = this._buildTableContentNode(element, wPx, hPx, ppi, { interactive: true });
+      if (tableContent) {
+        while (tableContent.firstChild) {
+          content.appendChild(tableContent.firstChild);
+        }
+      }
     } else {
       content.style.background = toCssColor(element.fill, "#dbeafe");
     }
@@ -2917,7 +3994,141 @@ export class Sheet2DEditorWindow {
     return node;
   }
 
-  _buildSelectionOverlay(element) {
+  _getElementBoundsIn(element) {
+    if (!element || typeof element !== "object") return null;
+    if (element.type === "line") {
+      const x1 = toFiniteNumber(element.x, 0);
+      const y1 = toFiniteNumber(element.y, 0);
+      const x2 = toFiniteNumber(element.x2, x1);
+      const y2 = toFiniteNumber(element.y2, y1);
+      return {
+        x: Math.min(x1, x2),
+        y: Math.min(y1, y2),
+        w: Math.max(MIN_ELEMENT_IN, Math.abs(x2 - x1)),
+        h: Math.max(MIN_ELEMENT_IN, Math.abs(y2 - y1)),
+      };
+    }
+    return {
+      x: toFiniteNumber(element.x, 0),
+      y: toFiniteNumber(element.y, 0),
+      w: Math.max(MIN_ELEMENT_IN, toFiniteNumber(element.w, 1)),
+      h: Math.max(MIN_ELEMENT_IN, toFiniteNumber(element.h, 1)),
+    };
+  }
+
+  _getSelectionBoundsIn(elements = this._getSelectedElements()) {
+    const entries = Array.isArray(elements) ? elements : [];
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (const element of entries) {
+      const bounds = this._getElementBoundsIn(element);
+      if (!bounds) continue;
+      minX = Math.min(minX, bounds.x);
+      minY = Math.min(minY, bounds.y);
+      maxX = Math.max(maxX, bounds.x + bounds.w);
+      maxY = Math.max(maxY, bounds.y + bounds.h);
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+      return null;
+    }
+    return {
+      x: minX,
+      y: minY,
+      w: Math.max(MIN_ELEMENT_IN, maxX - minX),
+      h: Math.max(MIN_ELEMENT_IN, maxY - minY),
+    };
+  }
+
+  _getRenderedElementBoundsPx(element) {
+    if (!element || !this._slideCanvas) return null;
+    const node = this._slideCanvas.querySelector(`.sheet-slides-element[data-id="${CSS.escape(String(element.id || ""))}"]`);
+    if (!node) {
+      const ppi = this._pxPerIn();
+      const bounds = this._getElementBoundsIn(element);
+      return bounds ? {
+        left: bounds.x * ppi,
+        top: bounds.y * ppi,
+        width: bounds.w * ppi,
+        height: bounds.h * ppi,
+      } : null;
+    }
+    const canvasRect = this._slideCanvas.getBoundingClientRect();
+    const nodeRect = node.getBoundingClientRect();
+    const zoom = Math.max(1e-6, this._getStageZoom());
+    return {
+      left: (nodeRect.left - canvasRect.left) / zoom,
+      top: (nodeRect.top - canvasRect.top) / zoom,
+      width: Math.max(1, nodeRect.width / zoom),
+      height: Math.max(1, nodeRect.height / zoom),
+    };
+  }
+
+  _getSelectionBoundsPx(elements = this._getSelectedElements()) {
+    const entries = Array.isArray(elements) ? elements : [];
+    let minLeft = Number.POSITIVE_INFINITY;
+    let minTop = Number.POSITIVE_INFINITY;
+    let maxRight = Number.NEGATIVE_INFINITY;
+    let maxBottom = Number.NEGATIVE_INFINITY;
+    for (const element of entries) {
+      const bounds = this._getRenderedElementBoundsPx(element);
+      if (!bounds) continue;
+      minLeft = Math.min(minLeft, bounds.left);
+      minTop = Math.min(minTop, bounds.top);
+      maxRight = Math.max(maxRight, bounds.left + bounds.width);
+      maxBottom = Math.max(maxBottom, bounds.top + bounds.height);
+    }
+    if (!Number.isFinite(minLeft) || !Number.isFinite(minTop) || !Number.isFinite(maxRight) || !Number.isFinite(maxBottom)) {
+      return null;
+    }
+    return {
+      left: minLeft,
+      top: minTop,
+      width: Math.max(1, maxRight - minLeft),
+      height: Math.max(1, maxBottom - minTop),
+    };
+  }
+
+  _buildSelectionOverlay(target) {
+    const elements = Array.isArray(target) ? target.filter(Boolean) : [target].filter(Boolean);
+    if (elements.length === 0) return null;
+    if (elements.length > 1) {
+      const bounds = this._getSelectionBoundsPx(elements);
+      if (!bounds) return null;
+      const overlay = document.createElement("div");
+      overlay.className = "sheet-slides-selection-overlay multi";
+      overlay.style.left = `${bounds.left}px`;
+      overlay.style.top = `${bounds.top}px`;
+      overlay.style.width = `${bounds.width}px`;
+      overlay.style.height = `${bounds.height}px`;
+      overlay.style.zIndex = "2147483647";
+      overlay.style.setProperty("--sheet-slides-ui-scale", String(1 / this._getStageZoom()));
+      overlay.addEventListener("pointerdown", (event) => this._onSelectionOverlayPointerDown(event));
+
+      const frame = document.createElement("div");
+      frame.className = "sheet-slides-selection-frame";
+      overlay.appendChild(frame);
+
+      ["nw", "ne", "sw", "se"].forEach((corner) => {
+        const handle = document.createElement("div");
+        handle.className = `sheet-slides-handle ${corner}`;
+        handle.dataset.handle = corner;
+        overlay.appendChild(handle);
+      });
+
+      const rotateLine = document.createElement("div");
+      rotateLine.className = "sheet-slides-rotate-line";
+      overlay.appendChild(rotateLine);
+
+      const rotateHandle = document.createElement("div");
+      rotateHandle.className = "sheet-slides-rotate-handle";
+      rotateHandle.dataset.handle = "rotate";
+      overlay.appendChild(rotateHandle);
+      return overlay;
+    }
+
+    const [element] = elements;
     if (!element || typeof element !== "object" || element.type === "line") return null;
 
     const ppi = this._pxPerIn();
@@ -2990,6 +4201,52 @@ export class Sheet2DEditorWindow {
     const frame = document.createElement("div");
     frame.className = "sheet-slides-selection-frame";
     overlay.appendChild(frame);
+
+    if (element.type === "table") {
+      const widthPx = Math.max(1, toFiniteNumber(element.w, 1) * ppi);
+      const heightPx = Math.max(1, toFiniteNumber(element.h, 1) * ppi);
+      const moveHandle = document.createElement("div");
+      moveHandle.className = "sheet-slides-table-move-handle";
+      moveHandle.dataset.handle = "table-move";
+      moveHandle.title = "Move table";
+      overlay.appendChild(moveHandle);
+      const layout = this._getTableLayoutMetrics(element, widthPx, heightPx);
+      for (let boundary = 1; boundary < layout.colCount; boundary += 1) {
+        const handle = document.createElement("div");
+        handle.className = "sheet-slides-table-col-handle";
+        handle.dataset.handle = "table-col-resize";
+        handle.dataset.tableColBoundary = String(boundary);
+        handle.title = "Resize column";
+        handle.style.left = `${toFiniteNumber(layout.colStarts?.[boundary], 0)}px`;
+        handle.style.height = `${Math.max(1, heightPx)}px`;
+        overlay.appendChild(handle);
+      }
+    } else if (element.type === "rect") {
+      const widthPx = Math.max(1, toFiniteNumber(element.w, 1) * ppi);
+      const heightPx = Math.max(1, toFiniteNumber(element.h, 1) * ppi);
+      const radiusPx = clamp(
+        toFiniteNumber(element.cornerRadius, 0) * ppi,
+        0,
+        Math.min(widthPx, heightPx) * 0.5,
+      );
+      overlay.style.setProperty("--sheet-slides-corner-radius-px", `${radiusPx}px`);
+
+      const cornerRadiusHandle = document.createElement("div");
+      cornerRadiusHandle.className = "sheet-slides-corner-radius-handle";
+      cornerRadiusHandle.dataset.handle = "corner-radius";
+      cornerRadiusHandle.title = "Adjust corner radius";
+      overlay.appendChild(cornerRadiusHandle);
+    } else if (shapeSupportsAdjustHandle(element.type)) {
+      const widthPx = Math.max(1, toFiniteNumber(element.w, 1) * ppi);
+      const adjustPx = clampShapeAdjust(element.type, element.shapeAdjust) * widthPx;
+      overlay.style.setProperty("--sheet-slides-shape-adjust-px", `${adjustPx}px`);
+
+      const shapeAdjustHandle = document.createElement("div");
+      shapeAdjustHandle.className = "sheet-slides-shape-adjust-handle";
+      shapeAdjustHandle.dataset.handle = "shape-adjust";
+      shapeAdjustHandle.title = "Adjust shape";
+      overlay.appendChild(shapeAdjustHandle);
+    }
 
     ["nw", "ne", "sw", "se"].forEach((corner) => {
       const handle = document.createElement("div");
@@ -3126,6 +4383,11 @@ export class Sheet2DEditorWindow {
     if (!node || !element) return;
     const color = toCssColor(element.stroke, "#1f2937");
     const styleValue = this._getLineStyleValue(element);
+    if (styleValue === "none") {
+      node.style.background = "transparent";
+      node.style.backgroundImage = "";
+      return;
+    }
     if (styleValue === "solid") {
       node.style.background = color;
       node.style.backgroundImage = "";
@@ -3158,10 +4420,11 @@ export class Sheet2DEditorWindow {
     className = "",
   } = {}) {
     if (!element) return null;
+    const styleValue = this._getLineStyleValue(element);
     const strokeWidthPx = element.type === "text" && !this._isTextBorderEnabled(element)
       ? 0
       : Math.max(0, toFiniteNumber(element.strokeWidth, this._defaultStrokeWidthForElement(element)) * this._pxPerIn());
-    const hasStroke = strokeWidthPx > 0;
+    const hasStroke = strokeWidthPx > 0 && styleValue !== "none";
     const fill = fillColor != null
       ? toCssColor(fillColor, "transparent")
       : "none";
@@ -3176,22 +4439,75 @@ export class Sheet2DEditorWindow {
       className.split(/\s+/).filter(Boolean).forEach((name) => svg.classList.add(name));
     }
 
-    const dashArray = hasStroke ? this._getStrokeDashArray(this._getLineStyleValue(element), strokeWidthPx) : "";
+    const dashArray = hasStroke ? this._getStrokeDashArray(styleValue, strokeWidthPx) : "";
     let shapeNode = null;
+    const left = half;
+    const top = half;
+    const right = Math.max(left, widthPx - half);
+    const bottom = Math.max(top, heightPx - half);
+    const innerWidth = Math.max(0, right - left);
+    const innerHeight = Math.max(0, bottom - top);
+    const cx = left + (innerWidth * 0.5);
+    const cy = top + (innerHeight * 0.5);
+    const shapeAdjustRatio = clampShapeAdjust(element.type, element.shapeAdjust);
     if (shape === "ellipse") {
       shapeNode = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
       shapeNode.setAttribute("cx", String(widthPx * 0.5));
       shapeNode.setAttribute("cy", String(heightPx * 0.5));
       shapeNode.setAttribute("rx", String(Math.max(0, (widthPx * 0.5) - half)));
       shapeNode.setAttribute("ry", String(Math.max(0, (heightPx * 0.5) - half)));
-    } else {
+    } else if (shape === "rect") {
       shapeNode = document.createElementNS("http://www.w3.org/2000/svg", "rect");
       shapeNode.setAttribute("x", String(half));
       shapeNode.setAttribute("y", String(half));
       shapeNode.setAttribute("width", String(Math.max(0, widthPx - (half * 2))));
       shapeNode.setAttribute("height", String(Math.max(0, heightPx - (half * 2))));
-      shapeNode.setAttribute("rx", String(Math.max(0, radiusPx - half)));
-      shapeNode.setAttribute("ry", String(Math.max(0, radiusPx - half)));
+      const maxRadius = Math.max(0, Math.min(innerWidth, innerHeight) * 0.5);
+      shapeNode.setAttribute("rx", String(Math.min(maxRadius, Math.max(0, radiusPx - half))));
+      shapeNode.setAttribute("ry", String(Math.min(maxRadius, Math.max(0, radiusPx - half))));
+    } else {
+      shapeNode = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+      let points = [];
+      if (shape === "triangle") {
+        points = [[cx, top], [right, bottom], [left, bottom]];
+      } else if (shape === "diamond") {
+        points = [[cx, top], [right, cy], [cx, bottom], [left, cy]];
+      } else if (shape === "pentagon") {
+        const rx = innerWidth * 0.5;
+        const ry = innerHeight * 0.5;
+        for (let index = 0; index < 5; index += 1) {
+          const angle = (-Math.PI / 2) + ((Math.PI * 2 * index) / 5);
+          points.push([cx + (Math.cos(angle) * rx), cy + (Math.sin(angle) * ry)]);
+        }
+      } else if (shape === "hexagon") {
+        points = [
+          [left + (innerWidth * 0.25), top],
+          [right - (innerWidth * 0.25), top],
+          [right, cy],
+          [right - (innerWidth * 0.25), bottom],
+          [left + (innerWidth * 0.25), bottom],
+          [left, cy],
+        ];
+      } else if (shape === "parallelogram") {
+        const skew = innerWidth * shapeAdjustRatio;
+        points = [
+          [left + skew, top],
+          [right, top],
+          [right - skew, bottom],
+          [left, bottom],
+        ];
+      } else if (shape === "trapezoid") {
+        const inset = innerWidth * shapeAdjustRatio;
+        points = [
+          [left + inset, top],
+          [right - inset, top],
+          [right, bottom],
+          [left, bottom],
+        ];
+      } else {
+        points = [[left, top], [right, top], [right, bottom], [left, bottom]];
+      }
+      shapeNode.setAttribute("points", points.map(([x, y]) => `${x},${y}`).join(" "));
     }
     shapeNode.setAttribute("fill", fill);
     shapeNode.setAttribute("stroke", strokeColor);
@@ -3620,12 +4936,16 @@ export class Sheet2DEditorWindow {
 
   _renderInspector() {
     const sheet = this.sheetDraft;
-    const selected = this._getSelectedElement();
+    const selectionCount = this._getSelectedElementIds().length;
+    const selected = selectionCount === 1 ? this._getSelectedElement() : null;
     const hasElement = !!selected;
-    const supportsText = hasElement && elementSupportsText(selected);
+    const textState = selectionCount === 1 ? this._getSelectedTextState() : null;
+    const supportsText = !!textState;
     const supportsCrop = hasElement && elementSupportsMediaCrop(selected);
     const isPMI = hasElement && selected.type === "pmiInset";
     const isLine = hasElement && selected.type === "line";
+    const isRect = hasElement && selected.type === "rect";
+    const isTable = hasElement && isTableElementType(selected);
 
     this._renderSelectionToolbar();
 
@@ -3637,11 +4957,13 @@ export class Sheet2DEditorWindow {
     if (this._sheetOrientationInput) this._sheetOrientationInput.disabled = !sheet;
     this._sheetBgResetBtn.disabled = !sheet;
 
-    this._selectionLabel.textContent = selected
-      ? `${selected.type}${selected.type === "pmiInset" ? ` · ${this._resolvePmiViewDisplayName(selected)}` : ""}`
-      : "No selection";
+    this._selectionLabel.textContent = selectionCount > 1
+      ? `${selectionCount} selected`
+      : (selected
+        ? `${selected.type}${selected.type === "pmiInset" ? ` · ${this._resolvePmiViewDisplayName(selected)}` : ""}`
+        : "No selection");
 
-    if (this._slidePanel) this._slidePanel.style.display = hasElement ? "none" : "block";
+    if (this._slidePanel) this._slidePanel.style.display = selectionCount === 0 ? "block" : "none";
     if (this._elementPanel) this._elementPanel.style.display = hasElement ? "block" : "none";
 
     const disable = !hasElement;
@@ -3657,11 +4979,14 @@ export class Sheet2DEditorWindow {
     this._strokeInput.disabled = disable || isLine;
     this._strokeResetBtn.disabled = disable || isLine;
     this._strokeWidthInput.disabled = disable || isLine;
+    if (this._cornerRadiusInput) this._cornerRadiusInput.disabled = !isRect;
+    this._textInput.disabled = !supportsText || !!(textState?.isTable && !textState.canEditTextContent);
     this._textColorInput.disabled = !supportsText;
     this._textColorResetBtn.disabled = !supportsText;
     this._fontSizeInput.disabled = !supportsText;
     this._fontSizeDecrementBtn.disabled = !supportsText;
     this._fontSizeIncrementBtn.disabled = !supportsText;
+    if (this._tableTextScopeInput) this._tableTextScopeInput.disabled = !isTable;
     this._pmiBgInput.disabled = !isPMI;
     this._pmiBgResetBtn.disabled = !isPMI;
     if (this._pmiAnchorInput) this._pmiAnchorInput.disabled = !isPMI;
@@ -3671,6 +4996,7 @@ export class Sheet2DEditorWindow {
     this._resetCropBtn.disabled = !supportsCrop;
     this._fillField.style.display = hasElement && (isPMI || isLine) ? "none" : "";
     this._strokeField.style.display = hasElement ? "" : "none";
+    if (this._cornerRadiusField) this._cornerRadiusField.style.display = isRect ? "" : "none";
 
     if (!hasElement) {
       this._xInput.value = "";
@@ -3681,9 +5007,12 @@ export class Sheet2DEditorWindow {
       this._fillInput.value = "#000000";
       this._strokeInput.value = "#000000";
       this._strokeWidthInput.value = "";
+      if (this._cornerRadiusInput) this._cornerRadiusInput.value = "";
       this._opacityInput.value = "";
       this._zInput.value = "";
       this._textPanel.style.display = "none";
+      if (this._tableTextScopeField) this._tableTextScopeField.style.display = "none";
+      if (this._textContentField) this._textContentField.style.display = "";
       this._cropPanel.style.display = "none";
       this._pmiPanel.style.display = "none";
       this._cropToggleBtn.textContent = "Crop";
@@ -3695,6 +5024,7 @@ export class Sheet2DEditorWindow {
       this._pmiBgInput.value = "#ffffff";
       this._pmiBgInput.disabled = true;
       this._pmiBgResetBtn.disabled = true;
+      if (this._tableTextScopeInput) this._tableTextScopeInput.value = this._getTableTextScope();
       if (this._pmiAnchorInput) this._pmiAnchorInput.value = "c";
       Object.values(this._textAlignButtons || {}).forEach((button) => button.classList.remove("primary"));
       Object.values(this._verticalAlignButtons || {}).forEach((button) => button.classList.remove("primary"));
@@ -3713,6 +5043,7 @@ export class Sheet2DEditorWindow {
       this._fillInput.value = "#000000";
       this._strokeInput.value = normalizeHex(selected.stroke, this._defaultStrokeForElement(selected));
       this._strokeWidthInput.value = String(Math.round(toFiniteNumber(selected.strokeWidth, 0.02) * ppi));
+      if (this._cornerRadiusInput) this._cornerRadiusInput.value = "";
       this._opacityInput.value = String(clamp(toFiniteNumber(selected.opacity, 1), 0, 1));
       this._zInput.value = String(Math.round(toFiniteNumber(selected.z, 0)));
       this._wInput.disabled = true;
@@ -3751,6 +5082,11 @@ export class Sheet2DEditorWindow {
       ? 0
       : Math.round(toFiniteNumber(selected.strokeWidth, this._defaultStrokeWidthForElement(selected)) * ppi);
     this._strokeWidthInput.value = String(strokeWidthPx);
+    if (this._cornerRadiusInput) {
+      this._cornerRadiusInput.value = isRect
+        ? String(Math.round(toFiniteNumber(selected.cornerRadius, 0) * ppi))
+        : "";
+    }
     this._opacityInput.value = String(clamp(toFiniteNumber(selected.opacity, 1), 0, 1));
     this._zInput.value = String(Math.round(toFiniteNumber(selected.z, 0)));
 
@@ -3760,6 +5096,10 @@ export class Sheet2DEditorWindow {
     }
 
     this._textPanel.style.display = supportsText ? "block" : "none";
+    if (this._tableTextScopeField) this._tableTextScopeField.style.display = isTable ? "" : "none";
+    if (this._textContentField) {
+      this._textContentField.style.display = (isTable && !textState?.canEditTextContent) ? "none" : "";
+    }
     this._cropPanel.style.display = supportsCrop ? "block" : "none";
     this._pmiPanel.style.display = isPMI ? "block" : "none";
     if (!supportsCrop) {
@@ -3769,24 +5109,26 @@ export class Sheet2DEditorWindow {
     }
 
     if (supportsText) {
-      this._textInput.value = String(selected.text || "");
-      this._fontFamilyInput.value = String(selected.fontFamily || "Arial, Helvetica, sans-serif");
-      this._fontSizeInput.value = String(Math.round(toFiniteNumber(selected.fontSize, 0.32) * ppi));
-      this._textColorInput.value = normalizeHex(selected.color, this._defaultTextColorForElement(selected));
-      const textAlign = this._getTextAlignValue(selected);
-      const verticalAlign = this._getTextVerticalAlignValue(selected);
+      this._textInput.value = textState.canEditTextContent ? String(textState.text || "") : "";
+      if (this._tableTextScopeInput) this._tableTextScopeInput.value = textState.isTable ? textState.scope : "cell";
+      this._fontFamilyInput.value = String(textState.fontFamily || "Arial, Helvetica, sans-serif");
+      this._fontSizeInput.value = String(Math.round(toFiniteNumber(textState.fontSize, 0.32) * ppi));
+      this._textColorInput.value = normalizeHex(textState.color, this._defaultTextColorForElement(selected));
+      const textAlign = String(textState.textAlign || "left");
+      const verticalAlign = String(textState.verticalAlign || "middle");
       Object.entries(this._textAlignButtons || {}).forEach(([value, button]) => {
         button.classList.toggle("primary", value === textAlign);
       });
       Object.entries(this._verticalAlignButtons || {}).forEach(([value, button]) => {
         button.classList.toggle("primary", value === verticalAlign);
       });
-      this._boldBtn.classList.toggle("primary", String(selected.fontWeight || "400") === "700");
-      this._italicBtn.classList.toggle("primary", String(selected.fontStyle || "normal") === "italic");
+      this._boldBtn.classList.toggle("primary", String(textState.fontWeight || "400") === "700");
+      this._italicBtn.classList.toggle("primary", String(textState.fontStyle || "normal") === "italic");
       if (this._underlineBtn) {
-        this._underlineBtn.classList.toggle("primary", String(selected.textDecoration || "none") === "underline");
+        this._underlineBtn.classList.toggle("primary", String(textState.textDecoration || "none") === "underline");
       }
     } else {
+      if (this._tableTextScopeInput) this._tableTextScopeInput.value = this._getTableTextScope();
       Object.values(this._textAlignButtons || {}).forEach((button) => button.classList.remove("primary"));
       Object.values(this._verticalAlignButtons || {}).forEach((button) => button.classList.remove("primary"));
       if (this._underlineBtn) this._underlineBtn.classList.remove("primary");
@@ -3846,7 +5188,7 @@ export class Sheet2DEditorWindow {
 
     this._hideContextMenu();
     this._cropModeElementId = null;
-    this.selectedElementId = null;
+    this._clearSelection();
     this._renderStageOnly();
     this._renderInspector();
     event.preventDefault();
@@ -3888,7 +5230,7 @@ export class Sheet2DEditorWindow {
     if (event.target !== this._slideCanvas && !event.target.classList.contains("sheet-slides-grid")) return;
     this._hideContextMenu();
     this._cropModeElementId = null;
-    this.selectedElementId = null;
+    this._clearSelection();
     this._renderStageOnly();
     this._renderInspector();
   }
@@ -3898,6 +5240,7 @@ export class Sheet2DEditorWindow {
     if (isPointerFromInput(event)) return;
 
     const elementNode = event?.target?.closest?.(".sheet-slides-element");
+    const tableCellNode = event?.target?.closest?.("[data-table-cell-row]");
     if (!elementNode) {
       this._hideContextMenu();
       event.preventDefault();
@@ -3912,14 +5255,233 @@ export class Sheet2DEditorWindow {
       return;
     }
 
-    if (this._cropModeElementId && !this._isCropModeForElement(element)) {
-      this._cropModeElementId = null;
+    const elementIdText = String(elementId || "").trim();
+    if (!this._isElementSelected(elementIdText)) {
+      const selectedIds = (isTableElementType(element) && tableCellNode)
+        ? [elementIdText]
+        : this._getGroupedSelectionIds(element);
+      this._setSelectedElementIds(selectedIds, elementIdText);
     }
-    this.selectedElementId = elementId;
+    if (this._getSelectedElementIds().length === 1 && isTableElementType(element) && tableCellNode) {
+      const tableData = this._getNormalizedTableData(element);
+      const row = Math.max(0, Math.round(toFiniteNumber(tableCellNode.dataset.tableCellRow, 0)));
+      const col = Math.max(0, Math.round(toFiniteNumber(tableCellNode.dataset.tableCellCol, 0)));
+      const clickedAnchor = resolveTableCellAnchor(tableData, row, col);
+      const activeRect = this._getActiveTableSelectionRect(element);
+      const clickedInsideSelection = !!activeRect
+        && clickedAnchor
+        && clickedAnchor.row >= activeRect.minRow
+        && clickedAnchor.row <= activeRect.maxRow
+        && clickedAnchor.col >= activeRect.minCol
+        && clickedAnchor.col <= activeRect.maxCol;
+      if (!clickedInsideSelection) {
+        this._setTableSelectionForCell(element, row, col);
+      }
+      this._contextMenuState = {
+        kind: "table-cell",
+        elementId,
+        row: clickedAnchor?.row ?? row,
+        col: clickedAnchor?.col ?? col,
+      };
+    } else {
+      this._contextMenuState = { kind: "element", elementId };
+    }
     this._renderStageOnly();
     this._renderInspector();
     this._showContextMenu(event.clientX, event.clientY);
 
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  _captureSelectionSnapshot(elements = this._getSelectedElements()) {
+    const entries = Array.isArray(elements) ? elements.filter(Boolean) : [];
+    const bounds = this._getSelectionBoundsIn(entries);
+    if (!bounds) return null;
+    return {
+      bounds,
+      items: entries.map((element) => ({
+        id: String(element.id || ""),
+        source: deepClone(element),
+      })),
+    };
+  }
+
+  _resizeBoundsFromHandle(bounds, handle, dx, dy, keepAspect = false) {
+    if (!bounds || !handle) return bounds;
+    let x = toFiniteNumber(bounds.x, 0);
+    let y = toFiniteNumber(bounds.y, 0);
+    let w = Math.max(MIN_ELEMENT_IN, toFiniteNumber(bounds.w, 1));
+    let h = Math.max(MIN_ELEMENT_IN, toFiniteNumber(bounds.h, 1));
+
+    if (handle.includes("e")) w = Math.max(MIN_ELEMENT_IN, w + dx);
+    if (handle.includes("s")) h = Math.max(MIN_ELEMENT_IN, h + dy);
+    if (handle.includes("w")) {
+      w = Math.max(MIN_ELEMENT_IN, w - dx);
+      x = toFiniteNumber(bounds.x, 0) + dx;
+      if (w <= MIN_ELEMENT_IN) x = toFiniteNumber(bounds.x, 0) + (toFiniteNumber(bounds.w, 1) - MIN_ELEMENT_IN);
+    }
+    if (handle.includes("n")) {
+      h = Math.max(MIN_ELEMENT_IN, h - dy);
+      y = toFiniteNumber(bounds.y, 0) + dy;
+      if (h <= MIN_ELEMENT_IN) y = toFiniteNumber(bounds.y, 0) + (toFiniteNumber(bounds.h, 1) - MIN_ELEMENT_IN);
+    }
+
+    if (keepAspect) {
+      const ratio = Math.max(1e-6, toFiniteNumber(bounds.w, 1) / Math.max(MIN_ELEMENT_IN, toFiniteNumber(bounds.h, 1)));
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        h = Math.max(MIN_ELEMENT_IN, w / ratio);
+      } else {
+        w = Math.max(MIN_ELEMENT_IN, h * ratio);
+      }
+
+      if (handle.includes("w")) {
+        x = toFiniteNumber(bounds.x, 0) + (toFiniteNumber(bounds.w, 1) - w);
+      } else if (!handle.includes("e")) {
+        x = toFiniteNumber(bounds.x, 0) + ((toFiniteNumber(bounds.w, 1) - w) * 0.5);
+      }
+      if (handle.includes("n")) {
+        y = toFiniteNumber(bounds.y, 0) + (toFiniteNumber(bounds.h, 1) - h);
+      } else if (!handle.includes("s")) {
+        y = toFiniteNumber(bounds.y, 0) + ((toFiniteNumber(bounds.h, 1) - h) * 0.5);
+      }
+    }
+
+    return { x, y, w, h };
+  }
+
+  _applySelectionMove(snapshot, dx, dy) {
+    if (!snapshot?.items?.length) return;
+    for (const item of snapshot.items) {
+      const element = this._getElementById(item.id);
+      const source = item.source;
+      if (!element || !source) continue;
+      if (element.type === "line") {
+        element.x = toFiniteNumber(source.x, 0) + dx;
+        element.y = toFiniteNumber(source.y, 0) + dy;
+        element.x2 = toFiniteNumber(source.x2, source.x) + dx;
+        element.y2 = toFiniteNumber(source.y2, source.y) + dy;
+      } else {
+        element.x = toFiniteNumber(source.x, 0) + dx;
+        element.y = toFiniteNumber(source.y, 0) + dy;
+      }
+    }
+  }
+
+  _applySelectionResize(snapshot, handle, dx, dy, keepAspect = false) {
+    if (!snapshot?.items?.length || !snapshot?.bounds || !handle) return;
+    const sourceBounds = snapshot.bounds;
+    const nextBounds = this._resizeBoundsFromHandle(sourceBounds, handle, dx, dy, keepAspect);
+    const scaleX = Math.max(1e-6, nextBounds.w / Math.max(MIN_ELEMENT_IN, sourceBounds.w));
+    const scaleY = Math.max(1e-6, nextBounds.h / Math.max(MIN_ELEMENT_IN, sourceBounds.h));
+
+    for (const item of snapshot.items) {
+      const element = this._getElementById(item.id);
+      const source = item.source;
+      if (!element || !source) continue;
+      if (element.type === "line") {
+        element.x = nextBounds.x + ((toFiniteNumber(source.x, 0) - sourceBounds.x) * scaleX);
+        element.y = nextBounds.y + ((toFiniteNumber(source.y, 0) - sourceBounds.y) * scaleY);
+        element.x2 = nextBounds.x + ((toFiniteNumber(source.x2, source.x) - sourceBounds.x) * scaleX);
+        element.y2 = nextBounds.y + ((toFiniteNumber(source.y2, source.y) - sourceBounds.y) * scaleY);
+        continue;
+      }
+
+      element.x = nextBounds.x + ((toFiniteNumber(source.x, 0) - sourceBounds.x) * scaleX);
+      element.y = nextBounds.y + ((toFiniteNumber(source.y, 0) - sourceBounds.y) * scaleY);
+      element.w = Math.max(MIN_ELEMENT_IN, toFiniteNumber(source.w, 1) * scaleX);
+      element.h = Math.max(MIN_ELEMENT_IN, toFiniteNumber(source.h, 1) * scaleY);
+
+      if (element.type === "rect") {
+        element.cornerRadius = clamp(
+          toFiniteNumber(source.cornerRadius, 0) * Math.min(scaleX, scaleY),
+          0,
+          Math.min(element.w, element.h) * 0.5,
+        );
+      } else if (shapeSupportsAdjustHandle(element.type)) {
+        element.shapeAdjust = clampShapeAdjust(element.type, source.shapeAdjust);
+      }
+    }
+  }
+
+  _applySelectionRotation(snapshot, deltaDeg) {
+    if (!snapshot?.items?.length || !snapshot?.bounds) return;
+    const cx = snapshot.bounds.x + (snapshot.bounds.w * 0.5);
+    const cy = snapshot.bounds.y + (snapshot.bounds.h * 0.5);
+    const radians = toFiniteNumber(deltaDeg, 0) * Math.PI / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const rotatePoint = (x, y) => {
+      const ox = x - cx;
+      const oy = y - cy;
+      return {
+        x: cx + (ox * cos) - (oy * sin),
+        y: cy + (ox * sin) + (oy * cos),
+      };
+    };
+
+    for (const item of snapshot.items) {
+      const element = this._getElementById(item.id);
+      const source = item.source;
+      if (!element || !source) continue;
+      if (element.type === "line") {
+        const p1 = rotatePoint(toFiniteNumber(source.x, 0), toFiniteNumber(source.y, 0));
+        const p2 = rotatePoint(toFiniteNumber(source.x2, source.x), toFiniteNumber(source.y2, source.y));
+        element.x = p1.x;
+        element.y = p1.y;
+        element.x2 = p2.x;
+        element.y2 = p2.y;
+        continue;
+      }
+
+      const sourceCenter = {
+        x: toFiniteNumber(source.x, 0) + (Math.max(MIN_ELEMENT_IN, toFiniteNumber(source.w, 1)) * 0.5),
+        y: toFiniteNumber(source.y, 0) + (Math.max(MIN_ELEMENT_IN, toFiniteNumber(source.h, 1)) * 0.5),
+      };
+      const nextCenter = rotatePoint(sourceCenter.x, sourceCenter.y);
+      element.x = nextCenter.x - (Math.max(MIN_ELEMENT_IN, toFiniteNumber(source.w, 1)) * 0.5);
+      element.y = nextCenter.y - (Math.max(MIN_ELEMENT_IN, toFiniteNumber(source.h, 1)) * 0.5);
+      element.rotationDeg = Math.round((toFiniteNumber(source.rotationDeg, 0) + toFiniteNumber(deltaDeg, 0)) * 10) / 10;
+    }
+  }
+
+  _onSelectionOverlayPointerDown(event) {
+    if (!this.sheetDraft) return;
+    if (event.button !== 0) return;
+    if (isPointerFromInput(event)) return;
+
+    const selectedElements = this._getSelectedElements();
+    if (selectedElements.length <= 1) return;
+
+    this._hideContextMenu();
+
+    const slideRect = this._getStageWorldRect();
+    if (!slideRect) return;
+
+    const point = this._eventToSlidePoint(event, slideRect);
+    const handle = String(event?.target?.dataset?.handle || "").trim();
+    const selectionSnapshot = this._captureSelectionSnapshot(selectedElements);
+    if (!selectionSnapshot) return;
+
+    const mode = handle === "rotate"
+      ? "selection-rotate"
+      : (handle ? "selection-resize" : "selection-move");
+    const cx = (selectionSnapshot.bounds.x + (selectionSnapshot.bounds.w * 0.5)) * this._pxPerIn();
+    const cy = (selectionSnapshot.bounds.y + (selectionSnapshot.bounds.h * 0.5)) * this._pxPerIn();
+
+    this._dragState = {
+      pointerId: event.pointerId,
+      mode,
+      handle,
+      startX: point.x,
+      startY: point.y,
+      selectionSnapshot,
+      startAngleRad: Math.atan2(point.y - cy, point.x - cx),
+      moved: false,
+      captureTarget: event.currentTarget,
+    };
+
+    try { event.currentTarget?.setPointerCapture?.(event.pointerId); } catch { }
     event.preventDefault();
     event.stopPropagation();
   }
@@ -3934,29 +5496,84 @@ export class Sheet2DEditorWindow {
     const element = this._getElementById(elementId);
     if (!element) return;
 
-    const previousSelection = String(this.selectedElementId || "");
-    if (this._cropModeElementId && !this._isCropModeForElement(element)) {
-      this._cropModeElementId = null;
-    }
-    this.selectedElementId = String(elementId || "") || null;
-
     const cropHandle = String(event?.target?.dataset?.cropHandle || "").trim();
     const normalHandle = String(event?.target?.dataset?.handle || "").trim();
+    const tableCellNode = event?.target?.closest?.("[data-table-cell-row]");
+    const tableColHandle = event?.target?.closest?.("[data-handle='table-col-resize']");
+    const tableColBoundary = Number(tableColHandle?.dataset?.tableColBoundary);
     const cropTarget = event?.target?.closest?.("[data-crop-target='media']");
-    const cropActive = this._isCropModeForElement(element) && elementSupportsMediaCrop(element);
+    const previousSelectionIds = this._getSelectedElementIds();
+    const previousSelectionKey = previousSelectionIds.slice().sort().join("|");
+    const elementIdText = String(elementId || "").trim();
+    const wasSelected = previousSelectionIds.includes(elementIdText);
+    const tableCellSelection = isTableElementType(element) && !!tableCellNode && !normalHandle;
+    const clickedSelectionIds = tableCellSelection ? [elementIdText] : this._getGroupedSelectionIds(element);
+
+    if (event.shiftKey && !tableCellSelection) {
+      const nextIds = previousSelectionIds.slice();
+      const toggleOff = clickedSelectionIds.every((id) => nextIds.includes(id));
+      if (toggleOff) {
+        const removal = new Set(clickedSelectionIds);
+        this._setSelectedElementIds(nextIds.filter((id) => !removal.has(id)));
+      } else {
+        this._setSelectedElementIds([...nextIds, ...clickedSelectionIds], elementIdText);
+      }
+      this._renderStageOnly();
+      this._renderInspector();
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
+    if (!wasSelected || previousSelectionIds.length <= 1) {
+      this._setSelectedElementIds(clickedSelectionIds, elementIdText);
+    }
+
+    const currentSelectionIds = this._getSelectedElementIds();
+    const selectionChanged = previousSelectionKey !== currentSelectionIds.slice().sort().join("|");
+    const cropActive = currentSelectionIds.length === 1
+      && this._isCropModeForElement(element)
+      && elementSupportsMediaCrop(element);
 
     let mode = null;
     if (cropActive) {
       if (cropHandle) mode = "crop-resize";
       else if (cropTarget) mode = "crop-pan";
+    } else if (currentSelectionIds.length > 1) {
+      mode = "selection-move";
+    } else if (isTableElementType(element) && Number.isInteger(tableColBoundary) && tableColBoundary > 0) {
+      mode = "table-col-resize";
+    } else if (isTableElementType(element) && tableCellNode && !normalHandle) {
+      const row = Math.max(0, Math.round(toFiniteNumber(tableCellNode.dataset.tableCellRow, 0)));
+      const col = Math.max(0, Math.round(toFiniteNumber(tableCellNode.dataset.tableCellCol, 0)));
+      this._setTableSelectionForCell(element, row, col, { expand: !!event.shiftKey });
+      if (selectionChanged) {
+        this._renderStageOnly();
+      } else if (event.shiftKey) {
+        this._renderStageOnly();
+      } else if (!event.shiftKey) {
+        const existing = event.currentTarget?.querySelectorAll?.(".sheet-slides-table-cell.is-selected") || [];
+        for (const node of existing) node.classList.remove("is-selected");
+        tableCellNode.classList.add("is-selected");
+      }
+      this._renderInspector();
+      event.preventDefault();
+      event.stopPropagation();
+      return;
     } else {
       mode = normalHandle === "rotate"
         ? "rotate"
-        : (normalHandle ? "resize" : "move");
+        : (normalHandle === "table-move"
+          ? "move"
+        : (normalHandle === "corner-radius"
+          ? "corner-radius"
+          : (normalHandle === "shape-adjust"
+            ? "shape-adjust"
+            : (normalHandle ? "resize" : "move"))));
     }
 
     if (!mode) {
-      if (previousSelection !== String(this.selectedElementId || "")) {
+      if (selectionChanged) {
         this._renderStageOnly();
       }
       this._renderInspector();
@@ -3974,20 +5591,39 @@ export class Sheet2DEditorWindow {
       : null;
     if (mode?.startsWith("crop") && !mediaSnapshot) return;
 
-    this._dragState = {
-      pointerId: event.pointerId,
-      mode,
-      handle: normalHandle || cropHandle || null,
-      startX: point.x,
-      startY: point.y,
-      snapshot: deepClone(element),
-      shiftKey: !!event.shiftKey,
-      elementId: String(element.id || ""),
-      moved: false,
-      mediaSnapshot,
-    };
+    if (mode === "selection-move") {
+      const selectionSnapshot = this._captureSelectionSnapshot(this._getSelectedElements());
+      if (!selectionSnapshot) return;
+      this._dragState = {
+        pointerId: event.pointerId,
+        mode,
+        handle: null,
+        startX: point.x,
+        startY: point.y,
+        selectionSnapshot,
+        moved: false,
+        captureTarget: event.currentTarget,
+      };
+    } else {
+      this._dragState = {
+        pointerId: event.pointerId,
+        mode,
+        handle: normalHandle || cropHandle || null,
+        startX: point.x,
+        startY: point.y,
+        snapshot: deepClone(element),
+        shiftKey: !!event.shiftKey,
+        elementId: String(element.id || ""),
+        moved: false,
+        mediaSnapshot,
+        tableColBoundary: Number.isInteger(tableColBoundary) ? tableColBoundary : null,
+        captureTarget: event.currentTarget,
+      };
+    }
 
-    if (previousSelection !== String(this.selectedElementId || "")) {
+    try { event.currentTarget?.setPointerCapture?.(event.pointerId); } catch { }
+
+    if (selectionChanged) {
       this._renderStageOnly();
     }
     this._renderInspector();
@@ -3999,8 +5635,17 @@ export class Sheet2DEditorWindow {
   _onElementDoubleClick(event, elementId) {
     const element = this._getElementById(elementId);
     if (!element) return;
-    this.selectedElementId = String(elementId || "") || null;
-    if (elementSupportsMediaCrop(element)) {
+    this._setSelectedElementIds([String(elementId || "")], String(elementId || ""));
+    if (isTableElementType(element)) {
+      const cellNode = event?.target?.closest?.("[data-table-cell-row]");
+      if (cellNode) {
+        const row = Math.max(0, Math.round(toFiniteNumber(cellNode.dataset.tableCellRow, 0)));
+        const col = Math.max(0, Math.round(toFiniteNumber(cellNode.dataset.tableCellCol, 0)));
+        this._setTableSelectionForCell(element, row, col);
+        this._renderInspector();
+        this._beginTableCellEdit(cellNode, element, row, col);
+      }
+    } else if (elementSupportsMediaCrop(element)) {
       this._enterCropMode(elementId);
     } else if (elementSupportsText(element)) {
       this._renderInspector();
@@ -4047,6 +5692,64 @@ export class Sheet2DEditorWindow {
     }, { once: true });
   }
 
+  _beginTableCellEdit(node, element, row, col) {
+    if (!node || !isTableElementType(element)) return;
+    const tableData = this._getNormalizedTableData(element);
+    const anchor = resolveTableCellAnchor(tableData, row, col);
+    if (!anchor?.cell) return;
+
+    const editor = node.querySelector(".sheet-slides-table-cell-body");
+    if (!editor) return;
+
+    const originalText = String(anchor.cell.text || "");
+    editor.contentEditable = "true";
+    editor.spellcheck = false;
+    editor.classList.add("editing");
+    editor.focus();
+    this._placeCaretAtEnd(editor);
+
+    let cancelled = false;
+    const finish = () => {
+      editor.contentEditable = "false";
+      editor.classList.remove("editing");
+      const nextText = cancelled
+        ? originalText
+        : String(editor.innerText || editor.textContent || "").replace(/\r\n?/g, "\n");
+      if (cancelled) {
+        editor.textContent = originalText;
+        this._renderStageOnly();
+        this._renderInspector();
+        return;
+      }
+      if (nextText !== originalText) {
+        const nextData = setTableCellText(this._getNormalizedTableData(element), anchor.row, anchor.col, nextText);
+        this._commitTableChange(element, nextData, "table-cell-text", {
+          anchorRow: anchor.row,
+          anchorCol: anchor.col,
+          focusRow: anchor.row,
+          focusCol: anchor.col,
+        });
+      } else {
+        this._renderStageOnly();
+        this._renderInspector();
+      }
+    };
+
+    const onKeyDown = (evt) => {
+      if (evt.key === "Escape") {
+        evt.preventDefault();
+        cancelled = true;
+        editor.blur();
+      }
+    };
+
+    editor.addEventListener("keydown", onKeyDown);
+    editor.addEventListener("blur", () => {
+      editor.removeEventListener("keydown", onKeyDown);
+      finish();
+    }, { once: true });
+  }
+
   _onGlobalPointerMove(event) {
     if (!this._dragState || !this.sheetDraft) return;
 
@@ -4061,6 +5764,43 @@ export class Sheet2DEditorWindow {
       this._stagePanX = toFiniteNumber(this._dragState.startPanX, 0) + dxClient;
       this._stagePanY = toFiniteNumber(this._dragState.startPanY, 0) + dyClient;
       this._renderStageOnly();
+      return;
+    }
+
+    if (this._dragState.mode === "selection-move"
+      || this._dragState.mode === "selection-resize"
+      || this._dragState.mode === "selection-rotate") {
+      const slideRect = this._getStageWorldRect();
+      if (!slideRect) return;
+
+      const point = this._eventToSlidePoint(event, slideRect);
+      const dxPx = point.x - this._dragState.startX;
+      const dyPx = point.y - this._dragState.startY;
+      if (!this._dragState.moved) {
+        const travel = Math.hypot(dxPx, dyPx);
+        if (travel < 3) return;
+        this._dragState.moved = true;
+      }
+      const ppi = this._pxPerIn();
+      const dx = dxPx / ppi;
+      const dy = dyPx / ppi;
+      const snapshot = this._dragState.selectionSnapshot;
+      if (!snapshot) return;
+
+      if (this._dragState.mode === "selection-move") {
+        this._applySelectionMove(snapshot, dx, dy);
+      } else if (this._dragState.mode === "selection-resize") {
+        this._applySelectionResize(snapshot, this._dragState.handle, dx, dy, !!event.shiftKey);
+      } else if (this._dragState.mode === "selection-rotate") {
+        const cx = (snapshot.bounds.x + (snapshot.bounds.w * 0.5)) * ppi;
+        const cy = (snapshot.bounds.y + (snapshot.bounds.h * 0.5)) * ppi;
+        const angle = Math.atan2(point.y - cy, point.x - cx);
+        const deltaDeg = (angle - toFiniteNumber(this._dragState.startAngleRad, angle)) * 180 / Math.PI;
+        this._applySelectionRotation(snapshot, deltaDeg);
+      }
+
+      this._renderStageOnly();
+      this._renderInspector();
       return;
     }
 
@@ -4094,6 +5834,24 @@ export class Sheet2DEditorWindow {
         selected.x = toFiniteNumber(source.x, 0) + dx;
         selected.y = toFiniteNumber(source.y, 0) + dy;
       }
+    } else if (this._dragState.mode === "corner-radius") {
+      if (selected.type === "rect") {
+        const localPoint = this._slidePointToElementLocalPx(point, source);
+        const maxRadiusPx = Math.max(0, Math.min(localPoint.widthPx, localPoint.heightPx) * 0.5);
+        const nextRadiusPx = clamp(toFiniteNumber(localPoint.x, 0), 0, maxRadiusPx);
+        selected.cornerRadius = nextRadiusPx / ppi;
+      }
+    } else if (this._dragState.mode === "shape-adjust") {
+      if (shapeSupportsAdjustHandle(selected.type)) {
+        const localPoint = this._slidePointToElementLocalPx(point, source);
+        const nextAdjust = clampShapeAdjust(
+          selected.type,
+          toFiniteNumber(localPoint.x, 0) / Math.max(1, localPoint.widthPx),
+        );
+        selected.shapeAdjust = nextAdjust;
+      }
+    } else if (this._dragState.mode === "table-col-resize") {
+      this._resizeTableColumnBoundary(selected, source, this._dragState.tableColBoundary, point);
     } else if (this._dragState.mode === "resize") {
       this._resizeElementFromHandle(
         selected,
@@ -4230,6 +5988,45 @@ export class Sheet2DEditorWindow {
     element.y = y;
     element.w = Math.max(MIN_ELEMENT_IN, w);
     element.h = Math.max(MIN_ELEMENT_IN, h);
+    if (element.type === "rect") {
+      element.cornerRadius = clamp(
+        toFiniteNumber(element.cornerRadius, 0),
+        0,
+        Math.min(element.w, element.h) * 0.5,
+      );
+    } else if (shapeSupportsAdjustHandle(element.type)) {
+      element.shapeAdjust = clampShapeAdjust(element.type, element.shapeAdjust);
+    }
+  }
+
+  _resizeTableColumnBoundary(element, source, boundaryIndex, point) {
+    if (!isTableElementType(element) || !isTableElementType(source)) return;
+    const boundary = Math.round(toFiniteNumber(boundaryIndex, -1));
+    const ppi = this._pxPerIn();
+    const layout = this._getTableLayoutMetrics(
+      source,
+      Math.max(1, toFiniteNumber(source.w, 1) * ppi),
+      Math.max(1, toFiniteNumber(source.h, 1) * ppi),
+      source.tableData,
+    );
+    if (boundary <= 0 || boundary >= layout.colCount) return;
+    const previousEdge = toFiniteNumber(layout.colStarts?.[boundary - 1], 0);
+    const currentEdge = toFiniteNumber(layout.colStarts?.[boundary], 0);
+    const nextEdge = toFiniteNumber(layout.colStarts?.[boundary + 1], currentEdge);
+    const localPoint = this._slidePointToElementLocalPx(point, source);
+    const nextBoundary = clamp(
+      toFiniteNumber(localPoint.x, currentEdge),
+      previousEdge + TABLE_MIN_COL_WIDTH_PX,
+      nextEdge - TABLE_MIN_COL_WIDTH_PX,
+    );
+    const nextTableData = cloneTableData(source.tableData, TABLE_DEFAULT_ROWS, TABLE_DEFAULT_COLS);
+    nextTableData.colFractions[boundary - 1] = Math.max(0.0001, (nextBoundary - previousEdge) / Math.max(1, layout.widthPx));
+    nextTableData.colFractions[boundary] = Math.max(0.0001, (nextEdge - nextBoundary) / Math.max(1, layout.widthPx));
+    const total = nextTableData.colFractions.reduce((sum, value) => sum + Math.max(0, toFiniteNumber(value, 0)), 0);
+    if (total > 0) {
+      nextTableData.colFractions = nextTableData.colFractions.map((value) => Math.max(0.0001, toFiniteNumber(value, 0)) / total);
+    }
+    element.tableData = normalizeTableData(nextTableData, TABLE_DEFAULT_ROWS, TABLE_DEFAULT_COLS);
   }
 
   _onKeyDown(event) {
@@ -4277,6 +6074,13 @@ export class Sheet2DEditorWindow {
       return;
     }
 
+    if ((event.ctrlKey || event.metaKey) && String(event.key || "").toLowerCase() === "g") {
+      event.preventDefault();
+      if (event.shiftKey) this._ungroupSelectedElements();
+      else this._groupSelectedElements();
+      return;
+    }
+
     if (event.key === "Delete" || event.key === "Backspace") {
       event.preventDefault();
       this._deleteSelectedElement();
@@ -4305,17 +6109,19 @@ export class Sheet2DEditorWindow {
   }
 
   _nudgeSelected(dx, dy) {
-    const selected = this._getSelectedElement();
-    if (!selected) return;
+    const selected = this._getSelectedElements();
+    if (!selected.length) return;
 
-    if (selected.type === "line") {
-      selected.x = toFiniteNumber(selected.x, 0) + dx;
-      selected.y = toFiniteNumber(selected.y, 0) + dy;
-      selected.x2 = toFiniteNumber(selected.x2, selected.x) + dx;
-      selected.y2 = toFiniteNumber(selected.y2, selected.y) + dy;
-    } else {
-      selected.x = toFiniteNumber(selected.x, 0) + dx;
-      selected.y = toFiniteNumber(selected.y, 0) + dy;
+    for (const element of selected) {
+      if (element.type === "line") {
+        element.x = toFiniteNumber(element.x, 0) + dx;
+        element.y = toFiniteNumber(element.y, 0) + dy;
+        element.x2 = toFiniteNumber(element.x2, element.x) + dx;
+        element.y2 = toFiniteNumber(element.y2, element.y) + dy;
+      } else {
+        element.x = toFiniteNumber(element.x, 0) + dx;
+        element.y = toFiniteNumber(element.y, 0) + dy;
+      }
     }
 
     this._commitSheetDraft("nudge");
@@ -4362,6 +6168,16 @@ export class Sheet2DEditorWindow {
       element.rotationDeg = toFiniteNumber(rawValue, toFiniteNumber(element.rotationDeg, 0));
     }
 
+    if (element.type === "rect") {
+      element.cornerRadius = clamp(
+        toFiniteNumber(element.cornerRadius, 0),
+        0,
+        Math.min(toFiniteNumber(element.w, 1), toFiniteNumber(element.h, 1)) * 0.5,
+      );
+    } else if (shapeSupportsAdjustHandle(element.type)) {
+      element.shapeAdjust = clampShapeAdjust(element.type, element.shapeAdjust);
+    }
+
     this._commitSheetDraft(`set-${key}`);
     this._renderStageOnly();
     this._renderInspector();
@@ -4388,6 +6204,14 @@ export class Sheet2DEditorWindow {
       if (element.type === "text") {
         element.strokeEnabled = px > 0;
       }
+    } else if (key === "cornerRadius") {
+      if (element.type !== "rect") return;
+      const radiusPx = Math.max(0, toFiniteNumber(rawValue, toFiniteNumber(element.cornerRadius, 0) * this._pxPerIn()));
+      const maxRadiusPx = Math.max(
+        0,
+        Math.min(toFiniteNumber(element.w, 1), toFiniteNumber(element.h, 1)) * this._pxPerIn() * 0.5,
+      );
+      element.cornerRadius = clamp(radiusPx, 0, maxRadiusPx) / this._pxPerIn();
     } else if (key === "lineStyle") {
       element.lineStyle = this._getLineStyleValue({ ...element, lineStyle: rawValue });
     } else if (key === "opacity") {
@@ -4424,25 +6248,111 @@ export class Sheet2DEditorWindow {
     this._renderSidebarOnly();
   }
 
+  _normalizeSelectedTextFieldValue(key, rawValue, fallbackState = this._getSelectedTextState()) {
+    if (key === "fontSize") {
+      const fallbackPx = Math.max(6, Math.round(toFiniteNumber(fallbackState?.fontSize, 0.32) * this._pxPerIn()));
+      const px = toFiniteNumber(rawValue, fallbackPx);
+      return Math.max(0.08, Math.max(6, px) / this._pxPerIn());
+    }
+    if (key === "fontFamily") return String(rawValue || "Arial, Helvetica, sans-serif");
+    if (key === "color") return String(rawValue || "#111111");
+    if (key === "fontWeight") return String(rawValue || "400") === "700" ? "700" : "400";
+    if (key === "fontStyle") return String(rawValue || "normal") === "italic" ? "italic" : "normal";
+    if (key === "textDecoration") return String(rawValue || "none") === "underline" ? "underline" : "none";
+    if (key === "textAlign") return this._getTableTextAlignValue({ textAlign: rawValue });
+    if (key === "verticalAlign") return this._getTableVerticalAlignValue({ verticalAlign: rawValue });
+    if (key === "text") return String(rawValue || "");
+    return rawValue;
+  }
+
+  _setSelectedTableTextField(key, rawValue) {
+    const element = this._getSelectedElement();
+    if (!isTableElementType(element)) return false;
+
+    const scope = this._getTableTextScope();
+    if (scope === "table") {
+      if (key === "text") return false;
+      element[key] = this._normalizeSelectedTextFieldValue(key, rawValue);
+      this._commitSheetDraft(`table-text-${key}`);
+      this._renderStageOnly();
+      this._renderInspector();
+      this._renderSidebarOnly();
+      return true;
+    }
+
+    const nextTableData = cloneTableData(element.tableData, TABLE_DEFAULT_ROWS, TABLE_DEFAULT_COLS);
+    const targets = this._getSelectedTableAnchorTargets(element, nextTableData);
+    const nextSelection = this._getTableSelectionState(element);
+    if (!targets.length) return false;
+
+    if (key === "text") {
+      if (targets.length !== 1) return false;
+      targets[0].cell.text = String(rawValue || "");
+      return this._commitTableChange(element, nextTableData, "table-cell-text", nextSelection);
+    }
+
+    const normalizedValue = this._normalizeSelectedTextFieldValue(key, rawValue);
+    for (const target of targets) {
+      target.cell.style = normalizeTableCellStyle({
+        ...(target.cell.style || {}),
+        [key]: normalizedValue,
+      });
+    }
+    return this._commitTableChange(element, nextTableData, `table-text-${key}`, nextSelection);
+  }
+
+  _resetSelectedTableTextColor() {
+    const element = this._getSelectedElement();
+    if (!isTableElementType(element)) return false;
+
+    if (this._getTableTextScope() === "table") {
+      element.color = this._defaultTextColorForElement(element);
+      this._commitSheetDraft("table-text-color-reset");
+      this._renderStageOnly();
+      this._renderInspector();
+      this._renderSidebarOnly();
+      return true;
+    }
+
+    const nextTableData = cloneTableData(element.tableData, TABLE_DEFAULT_ROWS, TABLE_DEFAULT_COLS);
+    const targets = this._getSelectedTableAnchorTargets(element, nextTableData);
+    const nextSelection = this._getTableSelectionState(element);
+    if (!targets.length) return false;
+    for (const target of targets) {
+      const nextStyle = { ...(target.cell.style || {}) };
+      delete nextStyle.color;
+      target.cell.style = normalizeTableCellStyle(nextStyle);
+    }
+    return this._commitTableChange(element, nextTableData, "table-text-color-reset", nextSelection);
+  }
+
   _setSelectedTextField(key, rawValue) {
     const element = this._getSelectedElement();
     if (!element || !elementSupportsText(element)) return;
 
+    if (isTableElementType(element)) {
+      this._setSelectedTableTextField(key, rawValue);
+      return;
+    }
+
     if (key === "fontSize") {
-      const px = toFiniteNumber(rawValue, toFiniteNumber(element.fontSize, 0.32) * this._pxPerIn());
-      element.fontSize = Math.max(0.08, px / this._pxPerIn());
+      element.fontSize = this._normalizeSelectedTextFieldValue(key, rawValue);
     } else if (key === "text") {
       element.text = String(rawValue || "");
     } else if (key === "fontFamily") {
-      element.fontFamily = String(rawValue || "Arial, Helvetica, sans-serif");
+      element.fontFamily = this._normalizeSelectedTextFieldValue(key, rawValue);
     } else if (key === "color") {
-      element.color = String(rawValue || "#111111");
+      element.color = this._normalizeSelectedTextFieldValue(key, rawValue);
+    } else if (key === "fontWeight") {
+      element.fontWeight = this._normalizeSelectedTextFieldValue(key, rawValue);
+    } else if (key === "fontStyle") {
+      element.fontStyle = this._normalizeSelectedTextFieldValue(key, rawValue);
     } else if (key === "textDecoration") {
-      element.textDecoration = String(rawValue || "none") === "underline" ? "underline" : "none";
+      element.textDecoration = this._normalizeSelectedTextFieldValue(key, rawValue);
     } else if (key === "textAlign") {
-      element.textAlign = this._getTextAlignValue({ ...element, textAlign: rawValue });
+      element.textAlign = this._normalizeSelectedTextFieldValue(key, rawValue);
     } else if (key === "verticalAlign") {
-      element.verticalAlign = this._getTextVerticalAlignValue({ ...element, verticalAlign: rawValue });
+      element.verticalAlign = this._normalizeSelectedTextFieldValue(key, rawValue);
     }
 
     this._commitSheetDraft(`text-${key}`);
@@ -4452,9 +6362,9 @@ export class Sheet2DEditorWindow {
   }
 
   _adjustSelectedFontSize(deltaPx = 0) {
-    const element = this._getSelectedElement();
-    if (!element || !elementSupportsText(element)) return;
-    const currentPx = Math.max(6, Math.round(toFiniteNumber(element.fontSize, 0.32) * this._pxPerIn()));
+    const textState = this._getSelectedTextState();
+    if (!textState) return;
+    const currentPx = Math.max(6, Math.round(toFiniteNumber(textState.fontSize, 0.32) * this._pxPerIn()));
     const nextPx = Math.max(6, currentPx + Math.round(toFiniteNumber(deltaPx, 0)));
     this._setSelectedTextField("fontSize", nextPx);
   }
@@ -4462,6 +6372,10 @@ export class Sheet2DEditorWindow {
   _resetSelectedTextColor() {
     const element = this._getSelectedElement();
     if (!element || !elementSupportsText(element)) return;
+    if (isTableElementType(element)) {
+      this._resetSelectedTableTextColor();
+      return;
+    }
     element.color = this._defaultTextColorForElement(element);
     this._commitSheetDraft("text-color-reset");
     this._renderStageOnly();
@@ -4470,33 +6384,21 @@ export class Sheet2DEditorWindow {
   }
 
   _toggleTextWeight() {
-    const element = this._getSelectedElement();
-    if (!element || !elementSupportsText(element)) return;
-    element.fontWeight = String(element.fontWeight || "400") === "700" ? "400" : "700";
-    this._commitSheetDraft("text-weight");
-    this._renderStageOnly();
-    this._renderInspector();
-    this._renderSidebarOnly();
+    const textState = this._getSelectedTextState();
+    if (!textState) return;
+    this._setSelectedTextField("fontWeight", String(textState.fontWeight || "400") === "700" ? "400" : "700");
   }
 
   _toggleTextItalic() {
-    const element = this._getSelectedElement();
-    if (!element || !elementSupportsText(element)) return;
-    element.fontStyle = String(element.fontStyle || "normal") === "italic" ? "normal" : "italic";
-    this._commitSheetDraft("text-italic");
-    this._renderStageOnly();
-    this._renderInspector();
-    this._renderSidebarOnly();
+    const textState = this._getSelectedTextState();
+    if (!textState) return;
+    this._setSelectedTextField("fontStyle", String(textState.fontStyle || "normal") === "italic" ? "normal" : "italic");
   }
 
   _toggleTextUnderline() {
-    const element = this._getSelectedElement();
-    if (!element || !elementSupportsText(element)) return;
-    element.textDecoration = String(element.textDecoration || "none") === "underline" ? "none" : "underline";
-    this._commitSheetDraft("text-underline");
-    this._renderStageOnly();
-    this._renderInspector();
-    this._renderSidebarOnly();
+    const textState = this._getSelectedTextState();
+    if (!textState) return;
+    this._setSelectedTextField("textDecoration", String(textState.textDecoration || "none") === "underline" ? "none" : "underline");
   }
 
   _addSheet() {
@@ -4509,7 +6411,7 @@ export class Sheet2DEditorWindow {
 
     this._openSheetMenuId = null;
     this.sheetId = String(created.id);
-    this.selectedElementId = null;
+    this._clearSelection();
     this.refreshFromHistory();
     this._setStatus("Sheet added");
   }
@@ -4524,7 +6426,7 @@ export class Sheet2DEditorWindow {
 
     this._openSheetMenuId = null;
     this.sheetId = String(copy.id);
-    this.selectedElementId = null;
+    this._clearSelection();
     this.refreshFromHistory();
     this._setStatus("Sheet duplicated");
   }
@@ -4546,7 +6448,7 @@ export class Sheet2DEditorWindow {
     if (String(this.sheetId || "") === targetId) {
       const next = remaining[Math.min(Math.max(removedIndex, 0), Math.max(0, remaining.length - 1))] || remaining[0] || null;
       this.sheetId = String(next?.id || "") || null;
-      this.selectedElementId = null;
+      this._clearSelection();
     }
     this._openSheetMenuId = null;
     this.refreshFromHistory();
@@ -4571,7 +6473,7 @@ export class Sheet2DEditorWindow {
     manager.setSheets([]);
     const created = manager.createSheet(createOneSheetTemplate("Instruction Sheet 1"));
     this.sheetId = String(created?.id || "") || null;
-    this.selectedElementId = null;
+    this._clearSelection();
     this.refreshFromHistory();
     this._setStatus("New sheets deck created");
   }
@@ -4588,16 +6490,40 @@ export class Sheet2DEditorWindow {
     let element = null;
     if (kind === "text") element = defaultTextElement(cxIn, cyIn);
     else if (kind === "rect") element = defaultRectElement(cxIn, cyIn);
+    else if (kind === "roundedRect") {
+      element = defaultRectElement(cxIn, cyIn);
+      element.cornerRadius = Math.min(element.w, element.h) * 0.22;
+    }
+    else if (kind === "table") {
+      element = defaultTableElement(cxIn, cyIn);
+      const suggested = this._getSuggestedTableSizeIn(element.tableData);
+      element.w = suggested.width;
+      element.h = suggested.height;
+      element.x = Math.max(0, (toFiniteNumber(this.sheetDraft.widthIn, 11) * 0.5) - (suggested.width * 0.5));
+      element.y = Math.max(0, (toFiniteNumber(this.sheetDraft.heightIn, 8.5) * 0.5) - (suggested.height * 0.5));
+    }
     else if (kind === "ellipse") element = defaultEllipseElement(cxIn, cyIn);
+    else if (kind === "triangle") element = defaultTriangleElement(cxIn, cyIn);
+    else if (kind === "diamond") element = defaultDiamondElement(cxIn, cyIn);
+    else if (kind === "pentagon") element = defaultPentagonElement(cxIn, cyIn);
+    else if (kind === "hexagon") element = defaultHexagonElement(cxIn, cyIn);
+    else if (kind === "parallelogram") element = defaultParallelogramElement(cxIn, cyIn);
+    else if (kind === "trapezoid") element = defaultTrapezoidElement(cxIn, cyIn);
     else return;
 
     element.z = this._nextZ();
     this.sheetDraft.elements.push(element);
-    this.selectedElementId = String(element.id || "") || null;
+    this._setSelectedElementIds([String(element.id || "")], String(element.id || ""));
+    this._tableSelection = kind === "table"
+      ? { elementId: String(element.id || ""), anchorRow: 0, anchorCol: 0, focusRow: 0, focusCol: 0 }
+      : null;
 
     this._commitSheetDraft("add-element");
     this._renderAll();
-    this._setStatus(`${kind} added`);
+    const shapeLabel = kind === "table"
+      ? "Table"
+      : (SHAPE_INSERT_OPTIONS.find((entry) => entry.kind === kind)?.label || kind);
+    this._setStatus(`${shapeLabel} added`);
   }
 
   _addImageElement() {
@@ -4629,7 +6555,7 @@ export class Sheet2DEditorWindow {
         image.h = heightIn;
         image.z = this._nextZ();
         this.sheetDraft.elements.push(image);
-        this.selectedElementId = image.id;
+        this._setSelectedElementIds([String(image.id || "")], String(image.id || ""));
 
         this._commitSheetDraft("add-image");
         this._renderAll();
@@ -4679,7 +6605,7 @@ export class Sheet2DEditorWindow {
     inset.h = suggested.outerHeight;
     inset.z = this._nextZ();
     this.sheetDraft.elements.push(inset);
-    this.selectedElementId = inset.id;
+    this._setSelectedElementIds([String(inset.id || "")], String(inset.id || ""));
 
     this._commitSheetDraft("add-pmi-inset");
     this._renderAll();
@@ -4768,19 +6694,20 @@ export class Sheet2DEditorWindow {
   }
 
   _reorderSelectedToEdge(edge) {
-    const selectedId = String(this.selectedElementId || "");
-    if (!selectedId || !this.sheetDraft || !Array.isArray(this.sheetDraft.elements)) return;
+    const selectedIds = this._getSelectedElementIds();
+    if (!selectedIds.length || !this.sheetDraft || !Array.isArray(this.sheetDraft.elements)) return;
 
+    const selectedSet = new Set(selectedIds);
     const ordered = sortElements(this.sheetDraft.elements || []);
-    const selected = ordered.find((entry) => String(entry?.id || "") === selectedId);
-    if (!selected) return;
-    if (edge === "back" && ordered[0] === selected) return;
-    if (edge !== "back" && ordered[ordered.length - 1] === selected) return;
+    const selected = ordered.filter((entry) => selectedSet.has(String(entry?.id || "")));
+    if (!selected.length) return;
+    if (edge === "back" && selected.every((entry, index) => ordered[index] === entry)) return;
+    if (edge !== "back" && selected.every((entry, index) => ordered[ordered.length - selected.length + index] === entry)) return;
 
-    const others = ordered.filter((entry) => String(entry?.id || "") !== selectedId);
+    const others = ordered.filter((entry) => !selectedSet.has(String(entry?.id || "")));
     const nextOrder = edge === "back"
-      ? [selected, ...others]
-      : [...others, selected];
+      ? [...selected, ...others]
+      : [...others, ...selected];
 
     nextOrder.forEach((entry, index) => {
       entry.z = index;
@@ -4803,6 +6730,7 @@ export class Sheet2DEditorWindow {
   }
 
   _adjustZ(delta) {
+    if (this._hasMultipleSelection()) return;
     const element = this._getSelectedElement();
     if (!element) return;
     element.z = Math.round(toFiniteNumber(element.z, 0) + toFiniteNumber(delta, 0));
@@ -4812,50 +6740,102 @@ export class Sheet2DEditorWindow {
     this._renderSidebarOnly();
   }
 
+  _canGroupSelectedElements() {
+    const elements = this._getSelectedElements();
+    if (elements.length < 2) return false;
+    const groupIds = new Set(elements.map((element) => this._getElementGroupId(element)).filter(Boolean));
+    return !(groupIds.size === 1 && elements.every((element) => this._getElementGroupId(element)));
+  }
+
+  _canUngroupSelectedElements() {
+    return this._getSelectedElements().some((element) => this._getElementGroupId(element));
+  }
+
+  _groupSelectedElements() {
+    if (!this.sheetDraft || !this._canGroupSelectedElements()) return;
+    const groupId = uid("grp");
+    for (const element of this._getSelectedElements()) {
+      element.groupId = groupId;
+    }
+    this._commitSheetDraft("group-elements");
+    this._renderStageOnly();
+    this._renderInspector();
+    this._renderSidebarOnly();
+    this._setStatus("Objects grouped");
+  }
+
+  _ungroupSelectedElements() {
+    if (!this.sheetDraft || !this._canUngroupSelectedElements()) return;
+    const targetGroups = new Set(this._getSelectedElements().map((element) => this._getElementGroupId(element)).filter(Boolean));
+    if (!targetGroups.size) return;
+    for (const element of this.sheetDraft.elements || []) {
+      if (targetGroups.has(this._getElementGroupId(element))) {
+        delete element.groupId;
+      }
+    }
+    this._commitSheetDraft("ungroup-elements");
+    this._renderStageOnly();
+    this._renderInspector();
+    this._renderSidebarOnly();
+    this._setStatus("Objects ungrouped");
+  }
+
   _duplicateSelectedElement() {
-    const element = this._getSelectedElement();
-    if (!element || !this.sheetDraft) return;
-
-    const clone = deepClone(element);
-    clone.id = uid("el");
-    clone.z = this._nextZ();
-
+    const elements = this._getSelectedElements({ sorted: true });
+    if (!elements.length || !this.sheetDraft) return;
     const offset = 24 / this._pxPerIn();
-    if (clone.type === "line") {
-      clone.x = toFiniteNumber(clone.x, 0) + offset;
-      clone.y = toFiniteNumber(clone.y, 0) + offset;
-      clone.x2 = toFiniteNumber(clone.x2, clone.x) + offset;
-      clone.y2 = toFiniteNumber(clone.y2, clone.y) + offset;
-    } else {
-      clone.x = toFiniteNumber(clone.x, 0) + offset;
-      clone.y = toFiniteNumber(clone.y, 0) + offset;
+    const nextSelectionIds = [];
+    const nextGroupIds = new Map();
+    let nextZ = this._nextZ();
+    for (const element of elements) {
+      const clone = deepClone(element);
+      clone.id = uid("el");
+      const sourceGroupId = this._getElementGroupId(element);
+      if (sourceGroupId) {
+        if (!nextGroupIds.has(sourceGroupId)) nextGroupIds.set(sourceGroupId, uid("grp"));
+        clone.groupId = nextGroupIds.get(sourceGroupId);
+      } else {
+        delete clone.groupId;
+      }
+      clone.z = nextZ;
+      nextZ += 1;
+      if (clone.type === "line") {
+        clone.x = toFiniteNumber(clone.x, 0) + offset;
+        clone.y = toFiniteNumber(clone.y, 0) + offset;
+        clone.x2 = toFiniteNumber(clone.x2, clone.x) + offset;
+        clone.y2 = toFiniteNumber(clone.y2, clone.y) + offset;
+      } else {
+        clone.x = toFiniteNumber(clone.x, 0) + offset;
+        clone.y = toFiniteNumber(clone.y, 0) + offset;
+      }
+      this.sheetDraft.elements.push(clone);
+      nextSelectionIds.push(clone.id);
     }
 
-    this.sheetDraft.elements.push(clone);
-    this.selectedElementId = clone.id;
-
+    this._setSelectedElementIds(nextSelectionIds, nextSelectionIds[nextSelectionIds.length - 1] || null);
     this._commitSheetDraft("duplicate-element");
     this._renderAll();
-    this._setStatus("Element duplicated");
+    this._setStatus(elements.length > 1 ? "Objects duplicated" : "Element duplicated");
   }
 
   _deleteSelectedElement() {
-    if (!this.sheetDraft || !this.selectedElementId) return;
-
+    const selectedIds = this._getSelectedElementIds();
+    if (!this.sheetDraft || !selectedIds.length) return;
+    const selectedSet = new Set(selectedIds);
     const before = this.sheetDraft.elements?.length || 0;
     this.sheetDraft.elements = (this.sheetDraft.elements || []).filter(
-      (item) => String(item?.id || "") !== String(this.selectedElementId || ""),
+      (item) => !selectedSet.has(String(item?.id || "")),
     );
     if ((this.sheetDraft.elements?.length || 0) === before) return;
 
     this._hideContextMenu();
-    if (this._isCropModeForElement(this.selectedElementId)) {
+    if (selectedIds.some((id) => this._isCropModeForElement(id))) {
       this._cropModeElementId = null;
     }
-    this.selectedElementId = null;
+    this._clearSelection();
     this._commitSheetDraft("delete-element");
     this._renderAll();
-    this._setStatus("Element deleted");
+    this._setStatus(selectedIds.length > 1 ? "Objects deleted" : "Element deleted");
   }
 
   _getElementById(elementId) {
@@ -4864,8 +6844,101 @@ export class Sheet2DEditorWindow {
     return this.sheetDraft.elements.find((item) => String(item?.id || "") === id) || null;
   }
 
+  _getElementGroupId(element) {
+    const groupId = String(element?.groupId || "").trim();
+    return groupId || "";
+  }
+
+  _getGroupedSelectionIds(element) {
+    const target = element && typeof element === "object" ? element : null;
+    const id = String(target?.id || "").trim();
+    if (!id) return [];
+    const groupId = this._getElementGroupId(target);
+    if (!groupId) return [id];
+    return (this.sheetDraft?.elements || [])
+      .map((entry) => (entry && this._getElementGroupId(entry) === groupId ? String(entry.id || "").trim() : ""))
+      .filter(Boolean);
+  }
+
+  _getSelectedElementIds() {
+    const source = Array.isArray(this._selectedElementIds) ? this._selectedElementIds : [];
+    const result = [];
+    const seen = new Set();
+    for (const rawId of source) {
+      const id = String(rawId || "").trim();
+      if (!id || seen.has(id) || !this._getElementById(id)) continue;
+      seen.add(id);
+      result.push(id);
+    }
+    const primaryId = String(this.selectedElementId || "").trim();
+    if (primaryId && !seen.has(primaryId) && this._getElementById(primaryId)) {
+      result.push(primaryId);
+    }
+    return result;
+  }
+
+  _isElementSelected(elementId) {
+    const id = String(elementId || "").trim();
+    return !!id && this._getSelectedElementIds().includes(id);
+  }
+
+  _getSelectedElements({ sorted = false } = {}) {
+    const ids = new Set(this._getSelectedElementIds());
+    const elements = (this.sheetDraft?.elements || []).filter((item) => ids.has(String(item?.id || "")));
+    return sorted ? sortElements(elements) : elements;
+  }
+
+  _hasMultipleSelection() {
+    return this._getSelectedElementIds().length > 1;
+  }
+
+  _setSelectedElementIds(elementIds, primaryId = null) {
+    const seen = new Set();
+    const validIds = [];
+    for (const rawId of Array.isArray(elementIds) ? elementIds : []) {
+      const id = String(rawId || "").trim();
+      if (!id || seen.has(id) || !this._getElementById(id)) continue;
+      seen.add(id);
+      validIds.push(id);
+    }
+
+    let resolvedPrimary = String(primaryId || "").trim();
+    if (!resolvedPrimary || !seen.has(resolvedPrimary)) {
+      resolvedPrimary = validIds[validIds.length - 1] || "";
+    }
+
+    this._selectedElementIds = validIds;
+    this.selectedElementId = resolvedPrimary || null;
+
+    if (validIds.length !== 1) {
+      this._cropModeElementId = null;
+      this._tableSelection = null;
+      return;
+    }
+
+    const selected = this._getSelectedElement();
+    if (!selected || !isTableElementType(selected)) {
+      this._tableSelection = null;
+    } else {
+      this._syncTableInteractionState();
+    }
+    if (this._cropModeElementId && !this._isCropModeForElement(selected)) {
+      this._cropModeElementId = null;
+    }
+  }
+
+  _clearSelection() {
+    this._setSelectedElementIds([], null);
+  }
+
   _getSelectedElement() {
-    return this._getElementById(this.selectedElementId);
+    const primaryId = String(this.selectedElementId || "").trim();
+    if (primaryId) {
+      const primary = this._getElementById(primaryId);
+      if (primary) return primary;
+    }
+    const fallbackId = this._getSelectedElementIds()[0] || "";
+    return this._getElementById(fallbackId);
   }
 
   _nextZ() {
@@ -4894,6 +6967,28 @@ export class Sheet2DEditorWindow {
     return {
       x: (event.clientX - rect.left) / zoom,
       y: (event.clientY - rect.top) / zoom,
+    };
+  }
+
+  _slidePointToElementLocalPx(point, element) {
+    const ppi = this._pxPerIn();
+    const xPx = toFiniteNumber(element?.x, 0) * ppi;
+    const yPx = toFiniteNumber(element?.y, 0) * ppi;
+    const widthPx = Math.max(1, toFiniteNumber(element?.w, 1) * ppi);
+    const heightPx = Math.max(1, toFiniteNumber(element?.h, 1) * ppi);
+    const cx = xPx + (widthPx * 0.5);
+    const cy = yPx + (heightPx * 0.5);
+    const dx = toFiniteNumber(point?.x, cx) - cx;
+    const dy = toFiniteNumber(point?.y, cy) - cy;
+    const radians = (-toFiniteNumber(element?.rotationDeg, 0) * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+
+    return {
+      x: (dx * cos) - (dy * sin) + (widthPx * 0.5),
+      y: (dx * sin) + (dy * cos) + (heightPx * 0.5),
+      widthPx,
+      heightPx,
     };
   }
 
@@ -5041,6 +7136,36 @@ export class Sheet2DEditorWindow {
         height: 18px;
         display: block;
       }
+      .sheet-slides-toolbar-action-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        padding: 0 12px;
+      }
+      .sheet-slides-toolbar-action-btn.icon-only {
+        justify-content: center;
+        min-width: 40px;
+        padding: 0 10px;
+      }
+      .sheet-slides-toolbar-action-icon,
+      .sheet-slides-toolbar-action-chevron {
+        display: inline-grid;
+        place-items: center;
+        flex: 0 0 auto;
+      }
+      .sheet-slides-toolbar-action-icon svg,
+      .sheet-slides-toolbar-action-chevron svg {
+        width: 18px;
+        height: 18px;
+        display: block;
+      }
+      .sheet-slides-toolbar-action-label {
+        white-space: nowrap;
+      }
+      .sheet-slides-toolbar-action-chevron {
+        opacity: .72;
+      }
       .sheet-slides-toolbar-italic {
         font-style: italic;
       }
@@ -5066,6 +7191,43 @@ export class Sheet2DEditorWindow {
       .sheet-slides-toolbar-popover-body {
         display: grid;
         gap: 10px;
+      }
+      .sheet-slides-toolbar-shape-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .sheet-slides-toolbar-shape-option {
+        min-height: 74px;
+        border: 1px solid #30384d;
+        border-radius: 12px;
+        background: #171c28;
+        color: #e8ecf3;
+        cursor: pointer;
+        display: grid;
+        justify-items: center;
+        align-content: center;
+        gap: 8px;
+        padding: 10px 8px;
+        font: inherit;
+      }
+      .sheet-slides-toolbar-shape-option:hover {
+        border-color: #60a5fa;
+      }
+      .sheet-slides-toolbar-shape-option-icon {
+        display: inline-grid;
+        place-items: center;
+      }
+      .sheet-slides-toolbar-shape-option-icon svg {
+        width: 24px;
+        height: 24px;
+        display: block;
+      }
+      .sheet-slides-toolbar-shape-option-label {
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.2;
+        text-align: center;
       }
       .sheet-slides-toolbar-popover-section {
         display: grid;
@@ -5426,6 +7588,16 @@ export class Sheet2DEditorWindow {
         border: calc(2px * var(--sheet-slides-ui-scale)) solid #6ea8fe;
         pointer-events: none;
       }
+      .sheet-slides-table-move-handle {
+        position: absolute;
+        left: calc(12px * var(--sheet-slides-ui-scale));
+        right: calc(12px * var(--sheet-slides-ui-scale));
+        top: calc(-10px * var(--sheet-slides-ui-scale));
+        height: calc(10px * var(--sheet-slides-ui-scale));
+        cursor: move;
+        pointer-events: auto;
+        z-index: 5;
+      }
       .sheet-slides-element-content {
         width: 100%;
         height: 100%;
@@ -5450,6 +7622,43 @@ export class Sheet2DEditorWindow {
         pointer-events: none;
         overflow: visible;
         z-index: 2;
+      }
+      .sheet-slides-table-wrap {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+      }
+      .sheet-slides-table-surface {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+        pointer-events: none;
+        z-index: 0;
+      }
+      .sheet-slides-table-layer {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+      }
+      .sheet-slides-table-cell {
+        position: absolute;
+        box-sizing: border-box;
+        overflow: hidden;
+        isolation: isolate;
+      }
+      .sheet-slides-table-cell.is-selected {
+        background: rgba(110,168,254,.16);
+      }
+      .sheet-slides-table-cell-body {
+        width: 100%;
+        height: 100%;
+      }
+      .sheet-slides-table-cell-body.editing {
+        outline: 2px solid rgba(110,168,254,.85);
+        outline-offset: -2px;
+        background: rgba(255,255,255,.18);
       }
       .sheet-slides-inline-text {
         width: 100%;
@@ -5553,6 +7762,55 @@ export class Sheet2DEditorWindow {
       .sheet-slides-handle.ne { right: calc(-6px * var(--sheet-slides-ui-scale)); top: calc(-6px * var(--sheet-slides-ui-scale)); cursor: nesw-resize; }
       .sheet-slides-handle.sw { left: calc(-6px * var(--sheet-slides-ui-scale)); bottom: calc(-6px * var(--sheet-slides-ui-scale)); cursor: nesw-resize; }
       .sheet-slides-handle.se { right: calc(-6px * var(--sheet-slides-ui-scale)); bottom: calc(-6px * var(--sheet-slides-ui-scale)); cursor: nwse-resize; }
+      .sheet-slides-corner-radius-handle,
+      .sheet-slides-shape-adjust-handle {
+        position: absolute;
+        top: calc(-7px * var(--sheet-slides-ui-scale));
+        width: calc(14px * var(--sheet-slides-ui-scale));
+        height: calc(14px * var(--sheet-slides-ui-scale));
+        background: #f4b400;
+        border: calc(1.5px * var(--sheet-slides-ui-scale)) solid #7c5b00;
+        box-shadow:
+          0 calc(1px * var(--sheet-slides-ui-scale))
+          calc(3px * var(--sheet-slides-ui-scale))
+          rgba(0,0,0,.35);
+        transform: rotate(45deg);
+        transform-origin: center center;
+        cursor: ew-resize;
+        z-index: 5;
+        pointer-events: auto;
+      }
+      .sheet-slides-corner-radius-handle {
+        left: calc(var(--sheet-slides-corner-radius-px, 0px) - (7px * var(--sheet-slides-ui-scale)));
+      }
+      .sheet-slides-shape-adjust-handle {
+        left: calc(var(--sheet-slides-shape-adjust-px, 0px) - (7px * var(--sheet-slides-ui-scale)));
+      }
+      .sheet-slides-table-col-handle {
+        position: absolute;
+        top: 0;
+        width: calc(14px * var(--sheet-slides-ui-scale));
+        transform: translateX(-50%);
+        cursor: ew-resize;
+        z-index: 5;
+        pointer-events: auto;
+      }
+      .sheet-slides-table-col-handle::after {
+        content: "";
+        position: absolute;
+        top: calc(6px * var(--sheet-slides-ui-scale));
+        bottom: calc(6px * var(--sheet-slides-ui-scale));
+        left: 50%;
+        width: calc(4px * var(--sheet-slides-ui-scale));
+        transform: translateX(-50%);
+        border-radius: 999px;
+        background: #6ea8fe;
+        border: calc(1px * var(--sheet-slides-ui-scale)) solid #fff;
+        box-shadow:
+          0 calc(1px * var(--sheet-slides-ui-scale))
+          calc(3px * var(--sheet-slides-ui-scale))
+          rgba(0,0,0,.35);
+      }
       .sheet-slides-rotate-line {
         position: absolute;
         width: calc(2px * var(--sheet-slides-ui-scale));
@@ -5606,6 +7864,11 @@ export class Sheet2DEditorWindow {
       }
       .sheet-slides-context-menu-item:hover {
         background: #1b2130;
+      }
+      .sheet-slides-context-menu-separator {
+        height: 1px;
+        margin: 4px 2px;
+        background: rgba(148,163,184,.18);
       }
       .sheet-slides-context-menu-item.danger {
         color: #fecaca;
