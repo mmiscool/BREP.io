@@ -66,6 +66,7 @@ This page is a quick entry point for implementation and integration docs.
 - [Modeling Mode](./modes/modeling.md)
 - [Sketch Mode](./modes/sketch.md)
 - [PMI Mode](./modes/pmi.md)
+- [2D Sheets Mode](./modes/sheets.md)
 
 ## Feature Docs (Detailed)
 - [Assembly Component](./features/assembly-component.md)

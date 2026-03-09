@@ -9,6 +9,7 @@ import { prepareModelingScreenshot } from './capture/docsShots/modelingScreensho
 import { prepareSketchScreenshot } from './capture/docsShots/sketchScreenshot.js';
 import { preparePmiScreenshot } from './capture/docsShots/pmiScreenshot.js';
 import { prepareNurbsCageScreenshot } from './capture/docsShots/nurbsCageScreenshot.js';
+import { prepareSheetScreenshot } from './capture/docsShots/sheetScreenshot.js';
 
 const require = createRequire(import.meta.url);
 const DEFAULT_BASE_URL = process.env.CAPTURE_BASE_URL || 'http://127.0.0.1:5173';
@@ -46,6 +47,71 @@ const DOC_SHOTS = [
     id: 'pmi-mode',
     label: 'PMI mode',
     relativePath: join('docs', 'PMI.png'),
+  },
+  {
+    id: 'sheets-mode',
+    label: '2D sheets mode',
+    relativePath: join('docs', 'SHEETS.png'),
+  },
+  {
+    id: 'sheets-toolbar-insert',
+    label: '2D sheets insert toolbar',
+    relativePath: join('docs', 'modes', 'sheets-toolbar-insert.png'),
+    selector: '#sheet-doc-capture-target',
+  },
+  {
+    id: 'sheets-toolbar-shapes-menu',
+    label: '2D sheets shapes menu',
+    relativePath: join('docs', 'modes', 'sheets-toolbar-shapes-menu.png'),
+    selector: '#sheet-doc-capture-target',
+  },
+  {
+    id: 'sheets-toolbar-style',
+    label: '2D sheets style toolbar',
+    relativePath: join('docs', 'modes', 'sheets-toolbar-style.png'),
+    selector: '#sheet-doc-capture-target',
+  },
+  {
+    id: 'sheets-toolbar-fill-menu',
+    label: '2D sheets fill menu',
+    relativePath: join('docs', 'modes', 'sheets-toolbar-fill-menu.png'),
+    selector: '#sheet-doc-capture-target',
+  },
+  {
+    id: 'sheets-toolbar-stroke-menu',
+    label: '2D sheets stroke menu',
+    relativePath: join('docs', 'modes', 'sheets-toolbar-stroke-menu.png'),
+    selector: '#sheet-doc-capture-target',
+  },
+  {
+    id: 'sheets-toolbar-line-weight-menu',
+    label: '2D sheets line weight menu',
+    relativePath: join('docs', 'modes', 'sheets-toolbar-line-weight-menu.png'),
+    selector: '#sheet-doc-capture-target',
+  },
+  {
+    id: 'sheets-toolbar-line-style-menu',
+    label: '2D sheets line style menu',
+    relativePath: join('docs', 'modes', 'sheets-toolbar-line-style-menu.png'),
+    selector: '#sheet-doc-capture-target',
+  },
+  {
+    id: 'sheets-toolbar-text',
+    label: '2D sheets text toolbar',
+    relativePath: join('docs', 'modes', 'sheets-toolbar-text.png'),
+    selector: '#sheet-doc-capture-target',
+  },
+  {
+    id: 'sheets-toolbar-text-color-menu',
+    label: '2D sheets text color menu',
+    relativePath: join('docs', 'modes', 'sheets-toolbar-text-color-menu.png'),
+    selector: '#sheet-doc-capture-target',
+  },
+  {
+    id: 'sheets-toolbar-text-align-menu',
+    label: '2D sheets text alignment menu',
+    relativePath: join('docs', 'modes', 'sheets-toolbar-text-align-menu.png'),
+    selector: '#sheet-doc-capture-target',
   },
   {
     id: 'image-to-face-2d',
@@ -503,10 +569,20 @@ async function captureDocsForTarget(page, target) {
 
     const targetPath = resolve(process.cwd(), shot.relativePath);
     await mkdir(dirname(targetPath), { recursive: true });
-    const buffer = await page.screenshot({
-      scale: 'css',
-      animations: 'disabled',
-    });
+    let buffer;
+    if (shot.selector) {
+      const locator = page.locator(String(shot.selector)).first();
+      await locator.waitFor({ state: 'visible', timeout: 15000 });
+      buffer = await locator.screenshot({
+        scale: 'css',
+        animations: 'disabled',
+      });
+    } else {
+      buffer = await page.screenshot({
+        scale: 'css',
+        animations: 'disabled',
+      });
+    }
     const wroteFile = await writeScreenshotIfChanged(targetPath, buffer);
     if (wroteFile) updatedCount += 1;
     console.log(`  • ${shot.label} → ${targetPath}${wroteFile ? ' (updated)' : ' (unchanged)'}`);
@@ -580,6 +656,20 @@ async function prepareDocsShot(page, shotId, context = {}) {
   }
   if (shotId === 'pmi-mode') {
     await preparePmiScreenshot(page, context.pmiFixtureJson || '');
+    return;
+  }
+  if (shotId === 'sheets-mode'
+    || shotId === 'sheets-toolbar-insert'
+    || shotId === 'sheets-toolbar-shapes-menu'
+    || shotId === 'sheets-toolbar-style'
+    || shotId === 'sheets-toolbar-fill-menu'
+    || shotId === 'sheets-toolbar-stroke-menu'
+    || shotId === 'sheets-toolbar-line-weight-menu'
+    || shotId === 'sheets-toolbar-line-style-menu'
+    || shotId === 'sheets-toolbar-text'
+    || shotId === 'sheets-toolbar-text-color-menu'
+    || shotId === 'sheets-toolbar-text-align-menu') {
+    await prepareSheetScreenshot(page, shotId);
     return;
   }
   if (shotId === 'image-to-face-2d') {

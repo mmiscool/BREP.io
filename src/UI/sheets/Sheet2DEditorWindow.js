@@ -37,6 +37,8 @@ const TABLE_DEFAULT_COL_WIDTH_IN = 1.05;
 const TABLE_DEFAULT_ROW_HEIGHT_IN = 0.42;
 const TABLE_MIN_COL_WIDTH_PX = 40;
 const TABLE_CELL_PADDING_PX = 6;
+const SHEET_OBJECT_CLIPBOARD_MIME = "application/x-brep-sheet-elements+json";
+const SHEET_OBJECT_CLIPBOARD_TEXT = "BREP.io sheet objects";
 const LINE_STYLE_OPTIONS = [
   { value: "none", label: "None" },
   { value: "solid", label: "Solid" },
@@ -514,6 +516,8 @@ function sortElements(elements) {
   });
 }
 
+let sheetObjectClipboardPayload = null;
+
 export class Sheet2DEditorWindow {
   constructor(viewer) {
     this.viewer = viewer || null;
@@ -526,6 +530,7 @@ export class Sheet2DEditorWindow {
     this.sheetDraft = null;
     this.selectedElementId = null;
     this._selectedElementIds = [];
+    this._editingGroupId = "";
     this._cropModeElementId = null;
 
     this.zoom = DEFAULT_ZOOM;
@@ -570,6 +575,7 @@ export class Sheet2DEditorWindow {
     this._boundPointerUp = (event) => this._onGlobalPointerUp(event);
     this._boundGlobalPointerDown = (event) => this._onGlobalPointerDown(event);
     this._boundKeyDown = (event) => this._onKeyDown(event);
+    this._boundCopy = (event) => this._onCopy(event);
     this._boundPaste = (event) => this._onPaste(event);
   }
 
@@ -616,6 +622,7 @@ export class Sheet2DEditorWindow {
   close() {
     if (!this.root) return;
     this._endDrag(false);
+    this._editingGroupId = "";
     this._cropModeElementId = null;
     this._closePmiPicker();
     this._hideContextMenu();
@@ -633,6 +640,7 @@ export class Sheet2DEditorWindow {
 
   dispose() {
     this._endDrag(false);
+    this._editingGroupId = "";
     this._cropModeElementId = null;
     this._closePmiPicker();
     this._hideContextMenu();
@@ -690,6 +698,7 @@ export class Sheet2DEditorWindow {
     this.sheetDraft = deepClone(current);
 
     this._setSelectedElementIds(this._getSelectedElementIds(), this.selectedElementId);
+    this._getActiveEditingGroupId();
     this._syncTableInteractionState();
 
     this._renderAll();
@@ -757,6 +766,7 @@ export class Sheet2DEditorWindow {
     window.addEventListener("pointermove", this._boundPointerMove, true);
     window.addEventListener("pointerup", this._boundPointerUp, true);
     window.addEventListener("keydown", this._boundKeyDown, true);
+    window.addEventListener("copy", this._boundCopy, true);
     window.addEventListener("paste", this._boundPaste, true);
   }
 
@@ -765,6 +775,7 @@ export class Sheet2DEditorWindow {
     window.removeEventListener("pointermove", this._boundPointerMove, true);
     window.removeEventListener("pointerup", this._boundPointerUp, true);
     window.removeEventListener("keydown", this._boundKeyDown, true);
+    window.removeEventListener("copy", this._boundCopy, true);
     window.removeEventListener("paste", this._boundPaste, true);
   }
 
@@ -3268,6 +3279,126 @@ export class Sheet2DEditorWindow {
     return this._parsePlainTextClipboardTable(plain, { allowSingleCell });
   }
 
+  _parseClipboardElementPayload(event) {
+    const parsePayload = (raw) => {
+      if (!raw) return null;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed?.type !== "brep-sheet-elements" || !Array.isArray(parsed?.elements) || parsed.elements.length === 0) {
+          return null;
+        }
+        return parsed;
+      } catch {
+        return null;
+      }
+    };
+
+    const clipboard = event?.clipboardData || window.clipboardData || null;
+    const fromCustom = parsePayload(clipboard?.getData?.(SHEET_OBJECT_CLIPBOARD_MIME) || "");
+    if (fromCustom) return fromCustom;
+
+    const plain = String(clipboard?.getData?.("text/plain") || "").trim();
+    if (plain === SHEET_OBJECT_CLIPBOARD_TEXT && sheetObjectClipboardPayload) {
+      return deepClone(sheetObjectClipboardPayload);
+    }
+
+    return null;
+  }
+
+  _serializeSelectedElementsForClipboard() {
+    const elements = this._getSelectedElements({ sorted: true });
+    if (!elements.length) return null;
+    return {
+      type: "brep-sheet-elements",
+      version: 1,
+      sourceSheetId: String(this.sheetId || ""),
+      elements: elements.map((element) => deepClone(element)),
+    };
+  }
+
+  _copySelectedElementsToClipboard(event) {
+    const payload = this._serializeSelectedElementsForClipboard();
+    if (!payload) return false;
+
+    sheetObjectClipboardPayload = deepClone(payload);
+
+    try { event?.clipboardData?.setData?.(SHEET_OBJECT_CLIPBOARD_MIME, JSON.stringify(payload)); } catch { }
+    try { event?.clipboardData?.setData?.("text/plain", SHEET_OBJECT_CLIPBOARD_TEXT); } catch { }
+
+    this._setStatus(payload.elements.length > 1 ? `${payload.elements.length} objects copied` : "Object copied");
+    return true;
+  }
+
+  _pasteClipboardElements(payload) {
+    if (!this.sheetDraft || !Array.isArray(payload?.elements) || payload.elements.length === 0) return false;
+
+    const clones = payload.elements.map((element) => deepClone(element)).filter(Boolean);
+    if (!clones.length) return false;
+
+    const sourceBounds = this._getSelectionBoundsIn(clones);
+    const offsetIn = String(payload?.sourceSheetId || "") === String(this.sheetId || "")
+      ? (24 / this._pxPerIn())
+      : 0;
+    let dx = offsetIn;
+    let dy = offsetIn;
+
+    if (sourceBounds) {
+      const sheetWidth = Math.max(MIN_ELEMENT_IN, toFiniteNumber(this.sheetDraft.widthIn, 11));
+      const sheetHeight = Math.max(MIN_ELEMENT_IN, toFiniteNumber(this.sheetDraft.heightIn, 8.5));
+      const maxLeft = Math.max(0, sheetWidth - Math.min(sheetWidth, sourceBounds.w));
+      const maxTop = Math.max(0, sheetHeight - Math.min(sheetHeight, sourceBounds.h));
+      const targetLeft = clamp(sourceBounds.x + dx, 0, maxLeft);
+      const targetTop = clamp(sourceBounds.y + dy, 0, maxTop);
+      dx = targetLeft - sourceBounds.x;
+      dy = targetTop - sourceBounds.y;
+    }
+
+    this.sheetDraft.elements = Array.isArray(this.sheetDraft.elements) ? this.sheetDraft.elements : [];
+
+    const sourceGroupCounts = new Map();
+    for (const element of clones) {
+      const sourceGroupId = String(element?.groupId || "").trim();
+      if (!sourceGroupId) continue;
+      sourceGroupCounts.set(sourceGroupId, (sourceGroupCounts.get(sourceGroupId) || 0) + 1);
+    }
+
+    const nextSelectionIds = [];
+    const nextGroupIds = new Map();
+    let nextZ = this._nextZ();
+    for (const clone of clones) {
+      const sourceGroupId = String(clone?.groupId || "").trim();
+      clone.id = uid("el");
+      clone.z = nextZ;
+      nextZ += 1;
+
+      if (sourceGroupId && (sourceGroupCounts.get(sourceGroupId) || 0) > 1) {
+        if (!nextGroupIds.has(sourceGroupId)) nextGroupIds.set(sourceGroupId, uid("grp"));
+        clone.groupId = nextGroupIds.get(sourceGroupId);
+      } else {
+        delete clone.groupId;
+      }
+
+      if (clone.type === "line") {
+        clone.x = toFiniteNumber(clone.x, 0) + dx;
+        clone.y = toFiniteNumber(clone.y, 0) + dy;
+        clone.x2 = toFiniteNumber(clone.x2, clone.x) + dx;
+        clone.y2 = toFiniteNumber(clone.y2, clone.y) + dy;
+      } else {
+        clone.x = toFiniteNumber(clone.x, 0) + dx;
+        clone.y = toFiniteNumber(clone.y, 0) + dy;
+      }
+
+      this.sheetDraft.elements.push(clone);
+      nextSelectionIds.push(clone.id);
+    }
+
+    this._setSelectedElementIds(nextSelectionIds, nextSelectionIds[nextSelectionIds.length - 1] || null);
+    this._commitSheetDraft("paste-elements");
+    this._renderAll();
+    this._setStatus(nextSelectionIds.length > 1 ? `${nextSelectionIds.length} objects pasted` : "Object pasted");
+    return true;
+  }
+
   _pasteIntoSelectedTable(pastedTableData) {
     const element = this._getSelectedElement();
     if (!isTableElementType(element)) return false;
@@ -3364,6 +3495,14 @@ export class Sheet2DEditorWindow {
     const tag = String(active?.tagName || "").toUpperCase();
     if (active?.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
+    const elementPayload = this._parseClipboardElementPayload(event);
+    if (elementPayload) {
+      if (!this._pasteClipboardElements(elementPayload)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
     const selected = this._getSelectedElement();
     const allowSingleCell = isTableElementType(selected) && !!this._getActiveTableSelectionRect(selected);
     const parsed = this._parseClipboardTable(event, { allowSingleCell });
@@ -3377,6 +3516,16 @@ export class Sheet2DEditorWindow {
       this._setStatus("Table inserted from clipboard");
     }
 
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  _onCopy(event) {
+    if (!this.root || this.root.style.display === "none" || !this.sheetDraft) return;
+    const active = document.activeElement;
+    const tag = String(active?.tagName || "").toUpperCase();
+    if (active?.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    if (!this._copySelectedElementsToClipboard(event)) return;
     event.preventDefault();
     event.stopPropagation();
   }
@@ -4937,6 +5086,7 @@ export class Sheet2DEditorWindow {
   _renderInspector() {
     const sheet = this.sheetDraft;
     const selectionCount = this._getSelectedElementIds().length;
+    const editingGroup = !!this._getActiveEditingGroupId();
     const selected = selectionCount === 1 ? this._getSelectedElement() : null;
     const hasElement = !!selected;
     const textState = selectionCount === 1 ? this._getSelectedTextState() : null;
@@ -4958,9 +5108,9 @@ export class Sheet2DEditorWindow {
     this._sheetBgResetBtn.disabled = !sheet;
 
     this._selectionLabel.textContent = selectionCount > 1
-      ? `${selectionCount} selected`
+      ? `${selectionCount} selected${editingGroup ? " · editing group" : ""}`
       : (selected
-        ? `${selected.type}${selected.type === "pmiInset" ? ` · ${this._resolvePmiViewDisplayName(selected)}` : ""}`
+        ? `${selected.type}${selected.type === "pmiInset" ? ` · ${this._resolvePmiViewDisplayName(selected)}` : ""}${editingGroup ? " · editing group" : ""}`
         : "No selection");
 
     if (this._slidePanel) this._slidePanel.style.display = selectionCount === 0 ? "block" : "none";
@@ -5255,6 +5405,11 @@ export class Sheet2DEditorWindow {
       return;
     }
 
+    const activeGroupId = this._getActiveEditingGroupId();
+    if (activeGroupId && this._getElementGroupId(element) !== activeGroupId) {
+      this._editingGroupId = "";
+    }
+
     const elementIdText = String(elementId || "").trim();
     if (!this._isElementSelected(elementIdText)) {
       const selectedIds = (isTableElementType(element) && tableCellNode)
@@ -5505,6 +5660,10 @@ export class Sheet2DEditorWindow {
     const previousSelectionIds = this._getSelectedElementIds();
     const previousSelectionKey = previousSelectionIds.slice().sort().join("|");
     const elementIdText = String(elementId || "").trim();
+    const activeGroupId = this._getActiveEditingGroupId();
+    if (activeGroupId && this._getElementGroupId(element) !== activeGroupId) {
+      this._editingGroupId = "";
+    }
     const wasSelected = previousSelectionIds.includes(elementIdText);
     const tableCellSelection = isTableElementType(element) && !!tableCellNode && !normalHandle;
     const clickedSelectionIds = tableCellSelection ? [elementIdText] : this._getGroupedSelectionIds(element);
@@ -5635,6 +5794,19 @@ export class Sheet2DEditorWindow {
   _onElementDoubleClick(event, elementId) {
     const element = this._getElementById(elementId);
     if (!element) return;
+
+    const groupId = this._getElementGroupId(element);
+    if (groupId && this._getActiveEditingGroupId() !== groupId) {
+      this._editingGroupId = groupId;
+      this._setSelectedElementIds([String(elementId || "")], String(elementId || ""));
+      this._renderStageOnly();
+      this._renderInspector();
+      this._setStatus("Editing group");
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
     this._setSelectedElementIds([String(elementId || "")], String(elementId || ""));
     if (isTableElementType(element)) {
       const cellNode = event?.target?.closest?.("[data-table-cell-row]");
@@ -6060,6 +6232,15 @@ export class Sheet2DEditorWindow {
     if (this._cropModeElementId && (event.key === "Escape" || event.key === "Enter")) {
       event.preventDefault();
       this._exitCropMode();
+      return;
+    }
+
+    if (event.key === "Escape" && this._getActiveEditingGroupId()) {
+      event.preventDefault();
+      this._editingGroupId = "";
+      this._renderStageOnly();
+      this._renderInspector();
+      this._setStatus("Exited group edit");
       return;
     }
 
@@ -6786,12 +6967,18 @@ export class Sheet2DEditorWindow {
     const offset = 24 / this._pxPerIn();
     const nextSelectionIds = [];
     const nextGroupIds = new Map();
+    const sourceGroupCounts = new Map();
+    for (const element of elements) {
+      const sourceGroupId = this._getElementGroupId(element);
+      if (!sourceGroupId) continue;
+      sourceGroupCounts.set(sourceGroupId, (sourceGroupCounts.get(sourceGroupId) || 0) + 1);
+    }
     let nextZ = this._nextZ();
     for (const element of elements) {
       const clone = deepClone(element);
       clone.id = uid("el");
       const sourceGroupId = this._getElementGroupId(element);
-      if (sourceGroupId) {
+      if (sourceGroupId && (sourceGroupCounts.get(sourceGroupId) || 0) > 1) {
         if (!nextGroupIds.has(sourceGroupId)) nextGroupIds.set(sourceGroupId, uid("grp"));
         clone.groupId = nextGroupIds.get(sourceGroupId);
       } else {
@@ -6849,12 +7036,24 @@ export class Sheet2DEditorWindow {
     return groupId || "";
   }
 
+  _getActiveEditingGroupId() {
+    const groupId = String(this._editingGroupId || "").trim();
+    if (!groupId) return "";
+    const exists = (this.sheetDraft?.elements || []).some((element) => this._getElementGroupId(element) === groupId);
+    if (!exists) {
+      this._editingGroupId = "";
+      return "";
+    }
+    return groupId;
+  }
+
   _getGroupedSelectionIds(element) {
     const target = element && typeof element === "object" ? element : null;
     const id = String(target?.id || "").trim();
     if (!id) return [];
     const groupId = this._getElementGroupId(target);
     if (!groupId) return [id];
+    if (this._getActiveEditingGroupId() === groupId) return [id];
     return (this.sheetDraft?.elements || [])
       .map((entry) => (entry && this._getElementGroupId(entry) === groupId ? String(entry.id || "").trim() : ""))
       .filter(Boolean);
@@ -6928,6 +7127,7 @@ export class Sheet2DEditorWindow {
   }
 
   _clearSelection() {
+    this._editingGroupId = "";
     this._setSelectedElementIds([], null);
   }
 

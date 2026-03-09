@@ -13,3 +13,4 @@
 - **Export dialog** offers 3MF, STL, OBJ, or BREP JSON output.
 - **Selection Filter** now lives in the toolbar (right side) for quick changes; press Escape to clear selection.
 - **Display Settings → Storage (GitHub)** lets you connect a GitHub repo and store models/settings remotely.
+- **2D Sheets** opens a full-screen sheet-layout mode for text, shapes, tables, images, and PMI view composition. See [2D Sheets Mode](./modes/sheets.md).

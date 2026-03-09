@@ -16,6 +16,7 @@ This project is in active development and APIs may continue to evolve.
 [![Modeling Mode @280](docs/MODELING.png)](docs/modes/modeling.md)
 [![Sketch Mode @280](docs/SKETCH.png)](docs/modes/sketch.md)
 [![PMI Mode @280](docs/PMI.png)](docs/modes/pmi.md)
+[![2D Sheets Mode @280](docs/SHEETS.png)](docs/modes/sheets.md)
 [![Image to Face 2D @280](docs/features/image-to-face-2D_dialog.png)](docs/features/image-to-face.md)
 [![Image to Face 3D @280](docs/features/image-to-face-3D_dialog.png)](docs/features/image-to-face.md)
 
@@ -51,6 +52,7 @@ Mode guides:
 - [Modeling Mode](docs/modes/modeling.md)
 - [Sketch Mode](docs/modes/sketch.md)
 - [PMI Mode](docs/modes/pmi.md)
+- [2D Sheets Mode](docs/modes/sheets.md)
 
 ## Modeling Feature Docs
 
