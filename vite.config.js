@@ -38,6 +38,9 @@ export default defineConfig(() => {
   return {
     // Explicitly set the public directory to ensure generated docs are included
     publicDir: 'public',
+    optimizeDeps: {
+      exclude: ['brep-io-2d-solver'],
+    },
     resolve: {
       alias: {
         '#textToFace/fontUrlLoaders': resolve(root, 'src/features/textToFace/fontUrlLoaders.vite.js'),

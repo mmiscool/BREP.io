@@ -1,4 +1,4 @@
-import { ConstraintSolver } from "../SketchSolver2D.js";
+import { ConstraintSolver, SKETCH_SOLVER_ENGINES } from "../SketchSolver2D.js";
 
 const EPS = 1e-2;
 
@@ -39,6 +39,19 @@ function pointToLineDistance(sketch, lineStartId, lineEndId, pointId) {
     const lenSq = dx * dx + dy * dy;
     if (!(lenSq > 1e-12)) return Math.hypot(p.x - a.x, p.y - a.y);
     return Math.abs(((p.x - a.x) * (-dy) + (p.y - a.y) * dx) / Math.sqrt(lenSq));
+}
+
+function orientedAngleDegrees(sketch, lineAStartId, lineAEndId, lineBStartId, lineBEndId) {
+    const a = getPoint(sketch, lineAStartId);
+    const b = getPoint(sketch, lineAEndId);
+    const c = getPoint(sketch, lineBStartId);
+    const d = getPoint(sketch, lineBEndId);
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const cdx = d.x - c.x;
+    const cdy = d.y - c.y;
+    const angle = Math.atan2((abx * cdy) - (aby * cdx), (abx * cdx) + (aby * cdy)) * 180 / Math.PI;
+    return ((angle % 360) + 360) % 360;
 }
 
 function signedArea(sketch, pointIds) {
@@ -93,9 +106,10 @@ function assertTopologyUnchanged(before, after, contextLabel) {
     assert(beforeSig === afterSig, `${contextLabel}: topology changed`);
 }
 
-function solveSketch(sketch) {
+function solveSketch(sketch, solverEngine = null) {
     const solver = new ConstraintSolver({
         sketch: JSON.parse(JSON.stringify(sketch)),
+        ...(solverEngine ? { solverEngine } : {}),
     });
     solver.solveSketch("full");
     return solver;
@@ -387,4 +401,106 @@ export async function test_sketch_solver_line_to_point_distance_constraint() {
     const p0 = getPoint(after, 0);
     assertNear(p0.x, 0, EPS, "line-to-point distance anchor x moved");
     assertNear(p0.y, 0, EPS, "line-to-point distance anchor y moved");
+}
+
+export async function test_sketch_solver_brep_io_backend_basic_constraints() {
+    const sketch = {
+        points: [
+            { id: 0, x: 0, y: 0, fixed: true },
+            { id: 1, x: 70, y: 18, fixed: false },
+            { id: 2, x: 125, y: 62, fixed: false },
+        ],
+        geometries: [
+            { id: 600, type: "line", points: [0, 1], construction: false },
+            { id: 601, type: "line", points: [1, 2], construction: false },
+        ],
+        constraints: [
+            { id: 0, type: "⏚", points: [0] },
+            { id: 1, type: "━", points: [0, 1] },
+            { id: 2, type: "│", points: [1, 2] },
+            { id: 3, type: "⟺", points: [0, 1], value: 100 },
+            { id: 4, type: "⟺", points: [1, 2], value: 45 },
+        ],
+    };
+
+    const solver = solveSketch(sketch, SKETCH_SOLVER_ENGINES.BREP_IO_2D);
+    assert(solver.getSolverEngine() === SKETCH_SOLVER_ENGINES.BREP_IO_2D, "brep-io engine was not selected");
+
+    const solved = solver.sketchObject;
+    assertNear(getPoint(solved, 0).x, 0, EPS, "brep-io engine moved grounded point x");
+    assertNear(getPoint(solved, 0).y, 0, EPS, "brep-io engine moved grounded point y");
+    assertNear(getPoint(solved, 0).y, getPoint(solved, 1).y, 8e-2, "brep-io engine did not keep line horizontal");
+    assertNear(getPoint(solved, 1).x, getPoint(solved, 2).x, 8e-2, "brep-io engine did not keep line vertical");
+    assertNear(dist(solved, 0, 1), 100, 8e-2, "brep-io engine horizontal segment length mismatch");
+    assertNear(dist(solved, 1, 2), 45, 8e-2, "brep-io engine vertical segment length mismatch");
+}
+
+export async function test_sketch_solver_brep_io_backend_line_to_point_distance() {
+    const sketch = {
+        points: [
+            { id: 0, x: 0, y: 0, fixed: true },
+            { id: 1, x: 120, y: 12, fixed: false },
+            { id: 2, x: 40, y: 24, fixed: false },
+        ],
+        geometries: [
+            { id: 700, type: "line", points: [0, 1], construction: false },
+        ],
+        constraints: [
+            { id: 0, type: "⏚", points: [0] },
+            { id: 1, type: "━", points: [0, 1] },
+            { id: 2, type: "↥", points: [0, 1, 2], value: 55 },
+        ],
+    };
+
+    const solver = solveSketch(sketch, SKETCH_SOLVER_ENGINES.BREP_IO_2D);
+    const solved = solver.sketchObject;
+    assertNear(pointToLineDistance(solved, 0, 1, 2), 55, 8e-2, "brep-io engine line-to-point distance mismatch");
+    assertNear(getPoint(solved, 0).x, 0, EPS, "brep-io engine moved point-line anchor x");
+    assertNear(getPoint(solved, 0).y, 0, EPS, "brep-io engine moved point-line anchor y");
+}
+
+export async function test_sketch_solver_brep_io_equal_distance_reference_segment_stays_put_with_angle() {
+    const sketch = {
+        points: [
+            { id: 0, x: 0, y: 0, fixed: true },
+            { id: 1, x: 100, y: 0, fixed: false },
+            { id: 2, x: 200, y: 0, fixed: false },
+            { id: 3, x: 300, y: 0, fixed: false },
+            { id: 4, x: 300, y: 0, fixed: false },
+            { id: 5, x: 250, y: 86.60254, fixed: false },
+        ],
+        geometries: [
+            { id: 800, type: "line", points: [0, 1], construction: false },
+            { id: 801, type: "line", points: [2, 3], construction: false },
+            { id: 802, type: "line", points: [4, 5], construction: false },
+        ],
+        constraints: [
+            { id: 0, type: "⏚", points: [0] },
+            { id: 1, type: "⟺", points: [0, 1], value: 100 },
+            { id: 2, type: "⇌", points: [0, 1, 2, 3] },
+            { id: 3, type: "⇌", points: [0, 1, 4, 5] },
+            { id: 4, type: "≡", points: [3, 4] },
+            { id: 5, type: "∠", points: [3, 2, 4, 5], value: 60 },
+        ],
+    };
+
+    const solver = solveSketch(sketch, SKETCH_SOLVER_ENGINES.BREP_IO_2D);
+    const before = JSON.parse(JSON.stringify(solver.sketchObject));
+
+    const dragged = getPoint(solver.sketchObject, 5);
+    dragged.x = 230;
+    dragged.y = 100;
+    solver.solveSketch("full");
+
+    const after = solver.sketchObject;
+    assertTopologyUnchanged(before, after, "brep-io equal-distance reference line stability");
+    assertNear(getPoint(after, 0).x, getPoint(before, 0).x, EPS, "brep-io equal-distance reference start x moved");
+    assertNear(getPoint(after, 0).y, getPoint(before, 0).y, EPS, "brep-io equal-distance reference start y moved");
+    assertNear(getPoint(after, 1).x, getPoint(before, 1).x, 8e-2, "brep-io equal-distance reference end x moved");
+    assertNear(getPoint(after, 1).y, getPoint(before, 1).y, 8e-2, "brep-io equal-distance reference end y moved");
+    assertNear(dist(after, 0, 1), 100, 8e-2, "brep-io equal-distance reference length drifted");
+    assertNear(dist(after, 2, 3), 100, 8e-2, "brep-io equal-distance driven segment 1 length mismatch");
+    assertNear(dist(after, 4, 5), 100, 8e-2, "brep-io equal-distance driven segment 2 length mismatch");
+    assert(dist(after, 3, 4) < EPS, "brep-io equal-distance coincident joint broke");
+    assertNear(orientedAngleDegrees(after, 3, 2, 4, 5), 60, 8e-2, "brep-io equal-distance angle mismatch");
 }

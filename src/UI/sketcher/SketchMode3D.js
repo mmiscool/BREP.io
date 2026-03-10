@@ -3,6 +3,11 @@
 import * as THREE from "three";
 import { Line2, LineGeometry, LineMaterial } from "three/examples/jsm/Addons.js";
 import { ConstraintSolver } from "../../features/sketch/sketchSolver2D/ConstraintEngine.js";
+import {
+  DEFAULT_SKETCH_SOLVER_ENGINE,
+  SKETCH_SOLVER_ENGINE_OPTIONS,
+  normalizeSketchSolverEngine,
+} from "../../features/sketch/sketchSolver2D/engines/solverEngines.js";
 import { deepClone } from "../../utils/deepClone.js";
 import { AccordionWidget } from "../AccordionWidget.js";
 import { renderDimensions as dimsRender } from "./dimensions.js";
@@ -156,8 +161,16 @@ export class SketchMode3D {
 
     // Init solver with persisted sketch
     const initialSketch = feature?.persistentData?.sketch || null;
+    const persistedSolverEngine = normalizeSketchSolverEngine(
+      feature?.persistentData?.sketchSolverEngine
+        ?? feature?.persistentData?.sketchSolverBackend
+        ?? feature?.persistentData?.sketchSolverSettings?.engine
+        ?? feature?.persistentData?.sketchSolverSettings?.backend
+        ?? DEFAULT_SKETCH_SOLVER_ENGINE,
+    );
     this._solver = new ConstraintSolver({
       sketch: initialSketch || undefined,
+      solverEngine: persistedSolverEngine,
       getSelectionItems: () => Array.from(this._selection),
       updateCanvas: () => this.#rebuildSketchGraphics(),
       notifyUser: (_m) => {},
@@ -167,6 +180,7 @@ export class SketchMode3D {
 
     // Initialize solver settings
     this._solverSettings = {
+      engine: persistedSolverEngine,
       maxIterations: 500,
       tolerance: 0.00001,
       decimalPlaces: 6,
@@ -486,6 +500,13 @@ export class SketchMode3D {
         : null;
       if (f) {
         f.persistentData = f.persistentData || {};
+        const persistedEngine = this._solver?.getSolverEngine?.()
+          || normalizeSketchSolverEngine(this._solverSettings?.engine);
+        f.persistentData.sketchSolverEngine = persistedEngine;
+        f.persistentData.sketchSolverSettings = {
+          ...(f.persistentData.sketchSolverSettings || {}),
+          engine: persistedEngine,
+        };
         const obj = {};
         for (const [cid, off] of this._dimOffsets.entries()) {
           if (off && typeof off.d === "number") {
@@ -2104,6 +2125,7 @@ export class SketchMode3D {
     // Initialize default solver settings if not already set
     if (!this._solverSettings) {
       this._solverSettings = {
+        engine: this._solver?.getSolverEngine?.() || DEFAULT_SKETCH_SOLVER_ENGINE,
         maxIterations: 500,
         tolerance: 0.00001,
         decimalPlaces: 6,
@@ -2113,6 +2135,42 @@ export class SketchMode3D {
     }
 
     // Create input fields for solver settings
+    const createSelectRow = (label, key, options = []) => {
+      const row = document.createElement("div");
+      row.style.display = "flex";
+      row.style.alignItems = "center";
+      row.style.gap = "6px";
+      row.style.margin = "4px 0";
+      row.style.fontSize = "12px";
+
+      const labelEl = document.createElement("label");
+      labelEl.textContent = label;
+      labelEl.style.color = "#ddd";
+      labelEl.style.flex = "1";
+      labelEl.style.minWidth = "80px";
+      row.appendChild(labelEl);
+
+      const select = document.createElement("select");
+      select.style.background = "#2a3441";
+      select.style.border = "1px solid #364053";
+      select.style.borderRadius = "4px";
+      select.style.color = "#ddd";
+      select.style.padding = "4px 8px";
+      select.style.width = "150px";
+      for (const option of options) {
+        const opt = document.createElement("option");
+        opt.value = option.value;
+        opt.textContent = option.label;
+        select.appendChild(opt);
+      }
+      select.value = normalizeSketchSolverEngine(this._solverSettings[key]);
+      select.onchange = () => {
+        this._solverSettings[key] = normalizeSketchSolverEngine(select.value);
+        this.#applySolverSettings({ reSolve: true });
+      };
+      row.appendChild(select);
+      return row;
+    };
     const createSettingRow = (label, key, type = "number", step = null, min = null, max = null) => {
       const row = document.createElement("div");
       row.style.display = "flex";
@@ -2175,6 +2233,7 @@ export class SketchMode3D {
       return row;
     };
 
+    wrap.appendChild(createSelectRow("Solver Engine:", "engine", SKETCH_SOLVER_ENGINE_OPTIONS));
     wrap.appendChild(createSettingRow("Max Iterations:", "maxIterations", "number", "1", "1", "10000"));
     wrap.appendChild(createSettingRow("Tolerance:", "tolerance", "number", "0.000001", "0.000001", "0.1"));
     wrap.appendChild(createSettingRow("Decimal Places:", "decimalPlaces", "number", "1", "1", "10"));
@@ -2195,6 +2254,7 @@ export class SketchMode3D {
     resetBtn.style.width = "100%";
     resetBtn.onclick = () => {
       this._solverSettings = {
+        engine: DEFAULT_SKETCH_SOLVER_ENGINE,
         maxIterations: 500,
         tolerance: 0.00001,
         decimalPlaces: 6,
@@ -2282,8 +2342,12 @@ export class SketchMode3D {
   }
 
   // Apply solver settings to the actual solver
-  #applySolverSettings() {
+  #applySolverSettings({ reSolve = false } = {}) {
     if (!this._solver || !this._solverSettings) return;
+
+    if (typeof this._solver.setSolverEngine === "function") {
+      this._solver.setSolverEngine(this._solverSettings.engine);
+    }
 
     // Update the solver's default methods
     this._solver.defaultLoops = () => this._solverSettings.maxIterations;
@@ -2299,6 +2363,14 @@ export class SketchMode3D {
       .catch(error => {
         console.warn('Could not update solver tolerance:', error);
       });
+
+    if (reSolve) {
+      try { this._solver.solveSketch("full"); } catch { }
+      try { this.#rebuildSketchGraphics(); } catch { }
+      try { this.#renderDimensions(); } catch { }
+      try { this.#refreshContextBar(); } catch { }
+      try { this.#pushSketchSnapshot(); } catch { }
+    }
   }
 
   // Helper: get current Sketch feature object

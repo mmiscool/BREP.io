@@ -2,6 +2,12 @@
 
 import { constraints } from "./constraintDefinitions.js";
 import { calculateAngle, distance } from "./mathHelpersMod.js";
+import { BrepIoConstraintEngine } from "./engines/BrepIoConstraintEngine.js";
+import {
+    DEFAULT_SKETCH_SOLVER_ENGINE,
+    SKETCH_SOLVER_ENGINES,
+    normalizeSketchSolverEngine,
+} from "./engines/solverEngines.js";
 
 // === Constraint function table ===
 const constraintFunctions = constraints.constraintFunctions;
@@ -129,7 +135,7 @@ class ConstraintEngine {
         const order = [
             "⏛", "━", "│", "⋯",
             "⟺", POINT_LINE_DISTANCE_TYPE, "⇌", "∠", "⟂", "∥",
-            "⇌", "⟺", POINT_LINE_DISTANCE_TYPE, "⇌", "⟺", POINT_LINE_DISTANCE_TYPE, "⏛", "━", "│", // repeated passes for convergence
+            "⇌", "⟺", POINT_LINE_DISTANCE_TYPE, "⇌", "⟺", POINT_LINE_DISTANCE_TYPE, "⏛", "━", "│",
         ];
 
         let prev = JSON.stringify(this.points);
@@ -138,7 +144,7 @@ class ConstraintEngine {
             this._distanceSolvePassToken = `${this._distanceSolveCycleId}:${i}`;
             for (const t of order) {
                 this.processConstraintsOfType(t);
-                this.processConstraintsOfType("≡"); // keep coincident snapping frequently
+                this.processConstraintsOfType("≡");
                 this.processConstraintsOfType("━");
                 this.processConstraintsOfType("|");
                 this.tidyDecimalsOfPoints(decimalsPlaces, false);
@@ -180,7 +186,7 @@ class ConstraintEngine {
                 externalReference: p.externalReference === true
             })),
             geometries: this.geometries,
-            constraints: this.constraints.filter(c => !c.temporary) // drop temporaries
+            constraints: this.constraints.filter(c => !c.temporary)
         };
 
         return JSON.parse(JSON.stringify(updatedSketch));
@@ -222,6 +228,9 @@ export class ConstraintSolver {
             geometries: [],
             constraints: [{ id: 0, type: "⏚", points: [0] }]
         };
+        this._solverEngine = normalizeSketchSolverEngine(
+            opts.solverEngine || opts.engine || opts.solverBackend || opts.backend || DEFAULT_SKETCH_SOLVER_ENGINE
+        );
 
         this._paused = false;
         this._pauseReason = "";
@@ -240,6 +249,15 @@ export class ConstraintSolver {
 
     isPaused() { return !!this._paused; }
 
+    getSolverEngine() {
+        return normalizeSketchSolverEngine(this._solverEngine);
+    }
+
+    setSolverEngine(engine) {
+        this._solverEngine = normalizeSketchSolverEngine(engine);
+        return this._solverEngine;
+    }
+
     // ---------- Core solve ----------
     solveSketch(iterations = null) {
         if (this._paused) {
@@ -252,8 +270,11 @@ export class ConstraintSolver {
             ? this.fullSolve()
             : (iterations == null ? this.defaultLoops() : iterations);
 
-        const engine = new ConstraintEngine(JSON.stringify(this.sketchObject));
-        const solved = engine.solve(iters);
+        const engineId = this.getSolverEngine();
+        const EngineClass = engineId === SKETCH_SOLVER_ENGINES.BREP_IO_2D
+            ? BrepIoConstraintEngine
+            : ConstraintEngine;
+        const solved = new EngineClass(JSON.stringify(this.sketchObject)).solve(iters);
         //console.log(`Solver completed in ${iters} iterations.`);
         //console.log(solved.constraints);
         this.sketchObject = solved;
