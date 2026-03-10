@@ -587,6 +587,7 @@ export class Sheet2DEditorWindow {
     this._pmiImageCaptureQueue = Promise.resolve();
     this._mediaMetadataCache = new Map();
     this._stageResizeObserver = null;
+    this._isExportingPdf = false;
 
     this._contextMenu = null;
     this._contextMenuState = null;
@@ -1621,6 +1622,95 @@ export class Sheet2DEditorWindow {
     this._pmiPickerOverlay = pmiPicker;
     this._pmiPickerBody = pmiPickerBody;
 
+    const pdfProgressOverlay = document.createElement("div");
+    pdfProgressOverlay.className = "sheet-slides-pdf-progress-overlay";
+    pdfProgressOverlay.style.display = "none";
+    pdfProgressOverlay.setAttribute("aria-hidden", "true");
+
+    const pdfProgressCard = document.createElement("div");
+    pdfProgressCard.className = "sheet-slides-pdf-progress-card";
+    pdfProgressCard.addEventListener("click", (event) => event.stopPropagation());
+
+    const pdfProgressCopy = document.createElement("div");
+    pdfProgressCopy.className = "sheet-slides-pdf-progress-copy";
+
+    const pdfProgressEyebrow = document.createElement("div");
+    pdfProgressEyebrow.className = "sheet-slides-pdf-progress-eyebrow";
+    pdfProgressEyebrow.textContent = "PDF Export";
+
+    const pdfProgressTitle = document.createElement("strong");
+    pdfProgressTitle.className = "sheet-slides-pdf-progress-title";
+    pdfProgressTitle.textContent = "Generating PDF";
+
+    const pdfProgressDetail = document.createElement("div");
+    pdfProgressDetail.className = "sheet-slides-pdf-progress-detail";
+    pdfProgressDetail.textContent = "Preparing sheets for export";
+
+    const pdfProgressMeta = document.createElement("div");
+    pdfProgressMeta.className = "sheet-slides-pdf-progress-meta";
+    pdfProgressMeta.textContent = "0 of 0 sheets";
+
+    const pdfProgressTrack = document.createElement("div");
+    pdfProgressTrack.className = "sheet-slides-pdf-progress-track";
+
+    const pdfProgressFill = document.createElement("div");
+    pdfProgressFill.className = "sheet-slides-pdf-progress-fill";
+    pdfProgressFill.style.width = "0%";
+    pdfProgressTrack.appendChild(pdfProgressFill);
+
+    const pdfProgressFooter = document.createElement("div");
+    pdfProgressFooter.className = "sheet-slides-pdf-progress-footer";
+
+    const pdfProgressHint = document.createElement("div");
+    pdfProgressHint.className = "sheet-slides-pdf-progress-hint";
+    pdfProgressHint.textContent = "Please wait while each sheet is rasterized.";
+
+    const pdfProgressPercent = document.createElement("div");
+    pdfProgressPercent.className = "sheet-slides-pdf-progress-percent";
+    pdfProgressPercent.textContent = "0%";
+
+    pdfProgressFooter.appendChild(pdfProgressHint);
+    pdfProgressFooter.appendChild(pdfProgressPercent);
+
+    pdfProgressCopy.appendChild(pdfProgressEyebrow);
+    pdfProgressCopy.appendChild(pdfProgressTitle);
+    pdfProgressCopy.appendChild(pdfProgressDetail);
+    pdfProgressCopy.appendChild(pdfProgressMeta);
+    pdfProgressCopy.appendChild(pdfProgressTrack);
+    pdfProgressCopy.appendChild(pdfProgressFooter);
+
+    const pdfProgressPreviewPanel = document.createElement("div");
+    pdfProgressPreviewPanel.className = "sheet-slides-pdf-progress-preview-panel";
+
+    const pdfProgressPreviewLabel = document.createElement("div");
+    pdfProgressPreviewLabel.className = "sheet-slides-pdf-progress-preview-label";
+    pdfProgressPreviewLabel.textContent = "Current sheet";
+
+    const pdfProgressPreview = document.createElement("div");
+    pdfProgressPreview.className = "sheet-slides-pdf-progress-preview";
+
+    const pdfProgressPreviewEmpty = document.createElement("div");
+    pdfProgressPreviewEmpty.className = "sheet-slides-pdf-progress-preview-empty";
+    pdfProgressPreviewEmpty.textContent = "Preparing preview";
+    pdfProgressPreview.appendChild(pdfProgressPreviewEmpty);
+
+    pdfProgressPreviewPanel.appendChild(pdfProgressPreviewLabel);
+    pdfProgressPreviewPanel.appendChild(pdfProgressPreview);
+
+    pdfProgressCard.appendChild(pdfProgressCopy);
+    pdfProgressCard.appendChild(pdfProgressPreviewPanel);
+    pdfProgressOverlay.appendChild(pdfProgressCard);
+
+    this._pdfProgressOverlay = pdfProgressOverlay;
+    this._pdfProgressTitle = pdfProgressTitle;
+    this._pdfProgressDetail = pdfProgressDetail;
+    this._pdfProgressMeta = pdfProgressMeta;
+    this._pdfProgressFill = pdfProgressFill;
+    this._pdfProgressHint = pdfProgressHint;
+    this._pdfProgressPercent = pdfProgressPercent;
+    this._pdfProgressPreviewLabel = pdfProgressPreviewLabel;
+    this._pdfProgressPreview = pdfProgressPreview;
+
     root.appendChild(topbar);
     root.appendChild(sidebar);
     root.appendChild(stageWrap);
@@ -1629,6 +1719,7 @@ export class Sheet2DEditorWindow {
     root.appendChild(contextMenu);
     root.appendChild(toolbarPopover);
     root.appendChild(pmiPicker);
+    root.appendChild(pdfProgressOverlay);
 
     overlay.appendChild(root);
     document.body.appendChild(overlay);
@@ -4477,6 +4568,106 @@ export class Sheet2DEditorWindow {
     }
   }
 
+  _waitForPaint(frameCount = 1) {
+    const totalFrames = Math.max(1, Math.round(toFiniteNumber(frameCount, 1)));
+    return new Promise((resolve) => {
+      const tick = (remaining) => {
+        requestAnimationFrame(() => {
+          if (remaining <= 1) resolve();
+          else tick(remaining - 1);
+        });
+      };
+      tick(totalFrames);
+    });
+  }
+
+  _setPdfExportBusy(active) {
+    const busy = !!active;
+    this._isExportingPdf = busy;
+    if (this.root) {
+      this.root.setAttribute("aria-busy", busy ? "true" : "false");
+    }
+    if (this._pdfBtn) {
+      this._pdfBtn.disabled = busy;
+    }
+    if (this._pdfProgressOverlay) {
+      this._pdfProgressOverlay.style.display = busy ? "grid" : "none";
+      this._pdfProgressOverlay.setAttribute("aria-hidden", busy ? "false" : "true");
+    }
+  }
+
+  _renderPdfExportPreview(sheet) {
+    const preview = this._pdfProgressPreview;
+    if (!preview) return;
+    preview.textContent = "";
+    if (!sheet) {
+      const placeholder = document.createElement("div");
+      placeholder.className = "sheet-slides-pdf-progress-preview-empty";
+      placeholder.textContent = "Preparing preview";
+      preview.appendChild(placeholder);
+      return;
+    }
+    this._renderMiniSheet(sheet, preview);
+  }
+
+  _setPdfExportProgress({
+    title = "Generating PDF",
+    detail = "",
+    hint = "Please wait while each sheet is rasterized.",
+    completed = 0,
+    total = 0,
+    sheet = null,
+    sheetLabel = "",
+  } = {}) {
+    const safeTotal = Math.max(0, Math.round(toFiniteNumber(total, 0)));
+    const clampedCompleted = clamp(toFiniteNumber(completed, 0), 0, safeTotal || 1);
+    const percent = safeTotal > 0 ? Math.round((clampedCompleted / safeTotal) * 100) : 0;
+    if (this._pdfProgressTitle) this._pdfProgressTitle.textContent = String(title || "Generating PDF");
+    if (this._pdfProgressDetail) this._pdfProgressDetail.textContent = String(detail || "");
+    if (this._pdfProgressMeta) {
+      this._pdfProgressMeta.textContent = safeTotal > 0
+        ? `${Math.min(safeTotal, Math.floor(clampedCompleted) + (clampedCompleted < safeTotal ? 1 : 0))} of ${safeTotal} sheets`
+        : "Preparing sheets";
+    }
+    if (this._pdfProgressHint) this._pdfProgressHint.textContent = String(hint || "");
+    if (this._pdfProgressPercent) this._pdfProgressPercent.textContent = `${percent}%`;
+    if (this._pdfProgressFill) this._pdfProgressFill.style.width = `${percent}%`;
+    if (this._pdfProgressPreviewLabel) {
+      this._pdfProgressPreviewLabel.textContent = sheetLabel || "Current sheet";
+    }
+    this._renderPdfExportPreview(sheet);
+  }
+
+  _resetPdfExportProgress() {
+    this._setPdfExportProgress({
+      title: "Generating PDF",
+      detail: "Preparing sheets for export",
+      hint: "Please wait while each sheet is rasterized.",
+      completed: 0,
+      total: 0,
+      sheet: null,
+      sheetLabel: "Current sheet",
+    });
+  }
+
+  _downloadPdfDocument(doc, filename) {
+    if (!doc) return;
+    const safeName = String(filename || "brep-io-sheets.pdf").trim() || "brep-io-sheets.pdf";
+    const blob = doc.output("blob");
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = safeName;
+    link.rel = "noopener";
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => {
+      try { URL.revokeObjectURL(url); } catch { }
+    }, 30000);
+  }
+
   async _renderPdfPageCanvas(pageNode, rasterScale) {
     return html2canvas(pageNode, {
       backgroundColor: null,
@@ -4488,6 +4679,7 @@ export class Sheet2DEditorWindow {
   }
 
   async _exportSheetsToPdf() {
+    if (this._isExportingPdf) return;
     this._closeToolbarPopover();
     this._hideContextMenu();
     try {
@@ -4495,21 +4687,22 @@ export class Sheet2DEditorWindow {
         document.activeElement.blur();
       }
     } catch { }
-    await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+    await this._waitForPaint();
+
+    this._setPdfExportBusy(true);
+    this._resetPdfExportProgress();
+    await this._waitForPaint(2);
 
     try {
+      this._setPdfExportProgress({
+        detail: "Refreshing PMI views before export",
+        hint: "Updating referenced PMI images",
+        completed: 0,
+        total: 1,
+      });
+      await this._waitForPaint();
       await this._refreshAllPmiInsetImages();
     } catch { }
-
-    this._commitSheetDraft("pdf-export");
-    const manager = this._getManager();
-    const sheets = typeof manager?.toSerializable === "function"
-      ? manager.toSerializable()
-      : deepClone(manager?.getSheets?.() || []);
-    if (!Array.isArray(sheets) || sheets.length === 0) {
-      this._setStatus("No sheets available for PDF export");
-      return;
-    }
 
     const host = document.createElement("div");
     host.className = "sheet-slides-pdf-host";
@@ -4523,6 +4716,26 @@ export class Sheet2DEditorWindow {
     document.body.appendChild(host);
 
     try {
+      this._commitSheetDraft("pdf-export");
+      const manager = this._getManager();
+      const sheets = typeof manager?.toSerializable === "function"
+        ? manager.toSerializable()
+        : deepClone(manager?.getSheets?.() || []);
+      if (!Array.isArray(sheets) || sheets.length === 0) {
+        this._setStatus("No sheets available for PDF export");
+        return;
+      }
+
+      this._setPdfExportProgress({
+        detail: "Building sheet previews",
+        hint: "Preparing pages for PDF export",
+        completed: 0,
+        total: sheets.length,
+        sheet: sheets[0] || null,
+        sheetLabel: String(sheets[0]?.name || "Sheet 1"),
+      });
+      await this._waitForPaint(2);
+
       let doc = null;
       const baseName = String(this.viewer?.partHistory?.name || "brep-io-sheets")
         .trim()
@@ -4539,7 +4752,15 @@ export class Sheet2DEditorWindow {
 
         await this._waitForImagesInNode(pageNode);
         this._applyExportMediaLayouts(pageNode);
-        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        this._setPdfExportProgress({
+          detail: `Rendering sheet ${index + 1} of ${sheets.length}`,
+          hint: "Rasterizing the current sheet",
+          completed: index,
+          total: sheets.length,
+          sheet,
+          sheetLabel: String(sheet?.name || `Sheet ${index + 1}`),
+        });
+        await this._waitForPaint(2);
 
         const widthIn = Math.max(0.1, toFiniteNumber(sheet?.widthIn, 11));
         const heightIn = Math.max(0.1, toFiniteNumber(sheet?.heightIn, 8.5));
@@ -4559,6 +4780,16 @@ export class Sheet2DEditorWindow {
         }
         doc.addImage(canvas, "PNG", 0, 0, widthIn, heightIn);
         host.removeChild(pageNode);
+
+        this._setPdfExportProgress({
+          detail: `Added sheet ${index + 1} of ${sheets.length}`,
+          hint: "Assembling the final PDF document",
+          completed: index + 1,
+          total: sheets.length,
+          sheet,
+          sheetLabel: String(sheet?.name || `Sheet ${index + 1}`),
+        });
+        await this._waitForPaint();
       }
 
       if (!doc) {
@@ -4566,13 +4797,25 @@ export class Sheet2DEditorWindow {
         return;
       }
 
-      doc.save(`${baseName}.pdf`);
+      this._setPdfExportProgress({
+        detail: "Preparing download",
+        hint: "Writing the final PDF file",
+        completed: sheets.length,
+        total: sheets.length,
+        sheet: sheets[sheets.length - 1] || null,
+        sheetLabel: String(sheets[sheets.length - 1]?.name || `Sheet ${sheets.length}`),
+      });
+      await this._waitForPaint();
+
+      this._downloadPdfDocument(doc, `${baseName}.pdf`);
       this._setStatus(`PDF exported for ${sheets.length} sheet${sheets.length === 1 ? "" : "s"}`);
     } catch (error) {
       console.error("Failed to export sheets PDF", error);
       this._setStatus("PDF export failed");
     } finally {
       try { host.remove(); } catch { }
+      this._setPdfExportBusy(false);
+      this._resetPdfExportProgress();
     }
   }
 
@@ -7945,6 +8188,15 @@ export class Sheet2DEditorWindow {
       .sheet-slides-control:hover {
         border-color: #46516d;
       }
+      .sheet-slides-btn:disabled,
+      .sheet-slides-control:disabled {
+        opacity: .58;
+        cursor: not-allowed;
+      }
+      .sheet-slides-btn:disabled:hover,
+      .sheet-slides-control:disabled:hover {
+        border-color: #30384d;
+      }
       .sheet-slides-btn.active {
         border-color: #2d73ff;
         background: rgba(45,115,255,.18);
@@ -8562,6 +8814,122 @@ export class Sheet2DEditorWindow {
       .sheet-slides-modal-close:hover {
         border-color: #46516d;
       }
+      .sheet-slides-pdf-progress-overlay {
+        position: absolute;
+        inset: 0;
+        display: none;
+        place-items: center;
+        padding: 28px;
+        background: rgba(6,10,18,.76);
+        backdrop-filter: blur(4px);
+        z-index: 120;
+      }
+      .sheet-slides-pdf-progress-card {
+        width: min(840px, calc(100vw - 72px));
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 300px;
+        gap: 18px;
+        padding: 22px;
+        border: 1px solid rgba(96,165,250,.24);
+        border-radius: 18px;
+        background:
+          radial-gradient(circle at top, rgba(45,115,255,.12), transparent 42%),
+          linear-gradient(180deg, rgba(19,25,37,.98), rgba(13,18,28,.98));
+        box-shadow: 0 26px 60px rgba(0,0,0,.48);
+      }
+      .sheet-slides-pdf-progress-copy {
+        display: grid;
+        align-content: start;
+        gap: 12px;
+        min-width: 0;
+      }
+      .sheet-slides-pdf-progress-eyebrow {
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+        color: #93c5fd;
+      }
+      .sheet-slides-pdf-progress-title {
+        font-size: 24px;
+        line-height: 1.15;
+        color: #f8fafc;
+      }
+      .sheet-slides-pdf-progress-detail {
+        min-height: 20px;
+        font-size: 14px;
+        color: #e5e7eb;
+      }
+      .sheet-slides-pdf-progress-meta,
+      .sheet-slides-pdf-progress-hint {
+        font-size: 12px;
+        color: #94a3b8;
+      }
+      .sheet-slides-pdf-progress-track {
+        width: 100%;
+        height: 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(96,165,250,.24);
+        background: rgba(15,23,42,.76);
+        overflow: hidden;
+      }
+      .sheet-slides-pdf-progress-fill {
+        height: 100%;
+        width: 0;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #2563eb, #60a5fa);
+        box-shadow: 0 0 18px rgba(96,165,250,.35);
+        transition: width .18s ease;
+      }
+      .sheet-slides-pdf-progress-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .sheet-slides-pdf-progress-percent {
+        min-width: 48px;
+        text-align: right;
+        font-size: 20px;
+        font-weight: 700;
+        color: #f8fafc;
+      }
+      .sheet-slides-pdf-progress-preview-panel {
+        display: grid;
+        gap: 10px;
+        min-width: 0;
+      }
+      .sheet-slides-pdf-progress-preview-label {
+        font-size: 12px;
+        font-weight: 700;
+        color: #cbd5e1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .sheet-slides-pdf-progress-preview {
+        min-height: 220px;
+        border: 1px solid rgba(96,165,250,.2);
+        border-radius: 16px;
+        background:
+          linear-gradient(180deg, rgba(15,23,42,.9), rgba(15,23,42,.72)),
+          radial-gradient(circle at top, rgba(96,165,250,.14), transparent 55%);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+        overflow: hidden;
+        display: grid;
+        place-items: center;
+        padding: 14px;
+      }
+      .sheet-slides-pdf-progress-preview-empty {
+        font-size: 13px;
+        font-weight: 600;
+        color: #94a3b8;
+        text-align: center;
+      }
+      .sheet-slides-pdf-progress-preview .sheet-slides-thumb-sheet {
+        border-radius: 10px;
+        box-shadow: 0 14px 30px rgba(0,0,0,.3);
+      }
       .sheet-slides-pmi-picker-grid {
         padding: 16px;
         overflow: auto;
@@ -8840,6 +9208,12 @@ export class Sheet2DEditorWindow {
             "sidebar stage"
             "inspector inspector"
             "status status";
+        }
+        .sheet-slides-pdf-progress-card {
+          grid-template-columns: 1fr;
+        }
+        .sheet-slides-pdf-progress-preview {
+          min-height: 180px;
         }
       }
       @media (max-width: 780px) {
