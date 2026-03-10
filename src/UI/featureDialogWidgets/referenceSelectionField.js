@@ -49,6 +49,74 @@ export function renderReferenceSelectionField({ ui, key, def, id, controlWrap, v
         }
         ui._emitParamsChange(key, value);
     };
+    const resolveCurrentSelectionNames = () => {
+        const raw = readRawValue();
+        if (Array.isArray(raw)) return normalizeReferenceList(raw);
+        const single = normalizeReferenceName(raw);
+        return single ? [single] : [];
+    };
+    const resolveCurrentSelectionObjects = () => {
+        const scene = ui?.options?.partHistory?.scene || ui?.options?.viewer?.partHistory?.scene || ui?.options?.viewer?.scene || null;
+        const names = resolveCurrentSelectionNames();
+        if (!scene || typeof scene.getObjectByName !== 'function') return [];
+        const out = [];
+        for (const name of names) {
+            if (!name) continue;
+            const obj = scene.getObjectByName(name);
+            if (obj) out.push(obj);
+        }
+        return out;
+    };
+
+    inputEl.__validateReferenceSelection = (candidate, extra = {}) => {
+        const validator = def?.selectionValidator;
+        if (typeof validator !== 'function') return { allowed: true, message: null };
+
+        const featureID = (ui?.params && Object.prototype.hasOwnProperty.call(ui.params, 'featureID'))
+            ? ui.params.featureID
+            : (ui?.params?.id ?? null);
+        const ctx = {
+            ui,
+            key,
+            def,
+            id,
+            inputEl,
+            params: ui?.params || null,
+            featureID,
+            viewer: ui?.options?.viewer || null,
+            partHistory: ui?.options?.partHistory || ui?.options?.viewer?.partHistory || null,
+            currentValue: readRawValue(),
+            currentSelectionNames: resolveCurrentSelectionNames(),
+            currentSelections: resolveCurrentSelectionObjects(),
+            pointerEvent: extra?.pointerEvent,
+            pickMeta: extra?.pickMeta || null,
+        };
+
+        let allowed = true;
+        try {
+            allowed = validator(candidate, ctx) !== false;
+        } catch (error) {
+            console.warn('[ReferenceSelection] selectionValidator threw; blocking selection.', error);
+            allowed = false;
+        }
+        if (allowed) return { allowed: true, message: null };
+
+        let message = null;
+        const messageSource = def?.selectionValidationMessage;
+        if (typeof messageSource === 'function') {
+            try {
+                const resolved = messageSource(candidate, ctx);
+                if (typeof resolved === 'string' && resolved.trim()) message = resolved.trim();
+            } catch (_) { /* ignore */ }
+        } else if (typeof messageSource === 'string' && messageSource.trim()) {
+            message = messageSource.trim();
+        }
+
+        return {
+            allowed: false,
+            message: message || 'Selection not allowed for this field.',
+        };
+    };
 
     const refWrap = document.createElement('div');
     refWrap.className = isMulti ? 'ref-multi-wrap' : 'ref-single-wrap';

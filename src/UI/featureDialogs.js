@@ -13,6 +13,13 @@ const REF_PREVIEW_COLORS = {
     PLANE: '#2eff2e',
     VERTEX: '#00ffff',
 };
+const FEATURE_DIMENSION_TOGGLEABLE_TYPES = new Set(['P.CU', 'P.CY', 'P.CO', 'P.S', 'P.PY', 'P.T', 'E', 'R']);
+
+function supportsTransformDimensionToggle(entry = null, fieldKey = null) {
+    if (String(fieldKey || '') !== 'transform') return false;
+    const type = String(entry?.type || '').trim().toUpperCase();
+    return FEATURE_DIMENSION_TOGGLEABLE_TYPES.has(type);
+}
 
 
 
@@ -45,6 +52,8 @@ export class SchemaForm {
     static __activeXform = {
         owner: null,
         key: null,
+        entryId: null,
+        featureType: null,
         inputEl: null,
         wrapEl: null,
         target: null,
@@ -57,7 +66,19 @@ export class SchemaForm {
         stepId: null,
         valueAdapter: null,
         baseTransform: null,
+        dimensionToggleEnabled: false,
+        displayMode: 'transform',
     };
+    static __notifyActiveTransformStateChanged(reason = 'update') {
+        try {
+            window.dispatchEvent(new CustomEvent('brep-active-transform-state', {
+                detail: {
+                    reason,
+                    state: SchemaForm.__activeXform,
+                },
+            }));
+        } catch (_) { }
+    }
     static __stopGlobalActiveXform() {
         const s = SchemaForm.__activeXform;
         if (!s || !s.controls) return;
@@ -105,6 +126,8 @@ export class SchemaForm {
         SchemaForm.__activeXform = {
             owner: null,
             key: null,
+            entryId: null,
+            featureType: null,
             stepId: null,
             inputEl: null,
             wrapEl: null,
@@ -117,7 +140,10 @@ export class SchemaForm {
             controlsChangeSource: null,
             valueAdapter: null,
             baseTransform: null,
+            dimensionToggleEnabled: false,
+            displayMode: 'transform',
         };
+        SchemaForm.__notifyActiveTransformStateChanged('stop');
     }
 
     static getActiveTransformState() {
@@ -152,6 +178,16 @@ export class SchemaForm {
         if (active && active.owner === this) {
             SchemaForm.__stopGlobalActiveXform();
         }
+    }
+
+    _deactivateOwnedTransformSessionForField(key = null) {
+        const active = SchemaForm.__activeXform;
+        if (!active || active.owner !== this) return false;
+        if (key != null && String(active.key) === String(key)) return false;
+        const val = this.params[active.key];
+        SchemaForm.__stopGlobalActiveXform();
+        this._emitParamsChange(active.key, val);
+        return true;
     }
     /**
      * @param {Object} schema - e.g. { sizeX: {type:'number', default_value:'2*t', hint:'Width formula' }, ... }
@@ -459,6 +495,7 @@ export class SchemaForm {
     }
 
     activateField(key) {
+        try { this._deactivateOwnedTransformSessionForField(key); } catch (_) { }
         const widget = this._widgets.get(key);
         if (widget && typeof widget.activate === 'function') {
             try { widget.activate(); } catch (_) { }
@@ -1626,7 +1663,11 @@ export class SchemaForm {
         const tc = new TCctor(viewer.camera, viewer.renderer.domElement);
         const desiredMode = (inputEl && inputEl.dataset && inputEl.dataset.xformMode) ? String(inputEl.dataset.xformMode) : 'translate';
         const safeMode = (desiredMode === 'scale') ? 'translate' : desiredMode;
+        const featureRef = this.options?.featureRef || null;
+        const dimensionToggleEnabled = supportsTransformDimensionToggle(featureRef, key);
         tc.setMode(safeMode);
+        try { tc.setDimensionToggleEnabled(dimensionToggleEnabled); } catch (_) { }
+        try { tc.setDisplayMode('transform'); } catch (_) { }
         // Newer three.js TransformControls emit mouseDown/mouseUp instead of dragging-changed
         let __lastCommitAt = 0;
         const commitTransform = () => {
@@ -1721,6 +1762,28 @@ export class SchemaForm {
 
         try { tc.addEventListener('mouseDown', () => { try { if (viewer.controls) viewer.controls.enabled = false; } catch (_) { } refreshOverlay(); }); } catch (_) { }
         try { tc.addEventListener('mouseUp', () => { try { if (viewer.controls) viewer.controls.enabled = true; } catch (_) { } commitTransform(); refreshOverlay(); }); } catch (_) { }
+        try {
+            tc.addEventListener('display-mode-changed', (ev) => {
+                const nextMode = (ev?.value === 'dimensions') ? 'dimensions' : 'transform';
+                if (nextMode === 'dimensions') {
+                    try {
+                        const activeState = SchemaForm.__activeXform;
+                        if (activeState?.controls === tc) {
+                            SchemaForm.__stopGlobalActiveXform();
+                            try { viewer.render(); } catch (_) { }
+                            return;
+                        }
+                    } catch (_) { }
+                }
+                try {
+                    const activeState = SchemaForm.__activeXform;
+                    if (activeState?.controls === tc) activeState.displayMode = nextMode;
+                } catch (_) { }
+                try { SchemaForm.__notifyActiveTransformStateChanged('display-mode-changed'); } catch (_) { }
+                refreshOverlay();
+                try { viewer.render(); } catch (_) { }
+            });
+        } catch (_) { }
         // Backward/compat: older builds fire dragging-changed
         try {
             tc.addEventListener('dragging-changed', (ev) => {
@@ -1884,6 +1947,8 @@ export class SchemaForm {
         SchemaForm.__activeXform = {
             owner: this,
             key,
+            entryId: this.options?.featureRef?.inputParams?.featureID || this.options?.featureRef?.inputParams?.id || this.options?.featureRef?.featureID || this.options?.featureRef?.id || null,
+            featureType: this.options?.featureRef?.type || null,
             stepId: adapter && typeof adapter.stepId === 'string' ? adapter.stepId : null,
             inputEl,
             wrapEl,
@@ -1896,7 +1961,10 @@ export class SchemaForm {
             controlsChangeSource: viewer?.controls || null,
             valueAdapter: adapter || null,
             baseTransform: base,
+            dimensionToggleEnabled,
+            displayMode: (typeof tc.getDisplayMode === 'function') ? tc.getDisplayMode() : 'transform',
         };
+        try { SchemaForm.__notifyActiveTransformStateChanged('start'); } catch (_) { }
 
         // Install capture-phase listeners to disable ArcballControls early when pressing gizmo
         try {

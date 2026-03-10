@@ -3,6 +3,11 @@ import { createOrientToFaceButton } from './orientToFaceButton.js';
 import { createInspectorToggleButton } from './inspectorToggleButton.js';
 import { createMetadataButton } from './metadataButton.js';
 import { createToggleSelectionVisibilityButton } from './toggleSelectionVisibilityButton.js';
+import { createEditOwningFeatureButton } from './editOwningFeatureButton.js';
+import {
+  isSingleSelectionOfTypes,
+  resolveOwningFeatureIdForSelection,
+} from '../../utils/selectionOwningFeature.js';
 
 const hasSelection = (items) => Array.isArray(items) && items.length > 0;
 const hasType = (items, types) => {
@@ -124,6 +129,20 @@ export function registerSelectionToolbarButtons(viewer) {
         id: 'selection-action-metadata',
         ...metadataSpec,
         shouldShow: (selection) => hasSelection(selection),
+      });
+    }
+  } catch { }
+
+  try {
+    const editOwningFeatureSpec = createEditOwningFeatureButton(viewer);
+    if (editOwningFeatureSpec) {
+      SelectionFilter.registerSelectionAction({
+        id: 'selection-action-edit-owning-feature',
+        ...editOwningFeatureSpec,
+        shouldShow: (selection) => (
+          isSingleSelectionOfTypes(selection, ['FACE', 'PLANE'])
+          && !!resolveOwningFeatureIdForSelection(selection)
+        ),
       });
     }
   } catch { }

@@ -622,6 +622,45 @@ export class SelectionFilter {
                 pickMeta = SelectionFilter.#captureReferenceSelectionMeta(targetObj, context?.pointerEvent);
             } catch (_) { /* ignore metadata capture failures */ }
 
+            let validation = { allowed: true, message: null };
+            try {
+                if (activeRefInput && typeof activeRefInput.__validateReferenceSelection === 'function') {
+                    const result = activeRefInput.__validateReferenceSelection(targetObj, {
+                        pointerEvent: context?.pointerEvent,
+                        pickMeta,
+                    });
+                    if (result === false) {
+                        validation = { allowed: false, message: null };
+                    } else if (result && typeof result === 'object') {
+                        validation = {
+                            allowed: result.allowed !== false,
+                            message: typeof result.message === 'string' ? result.message : null,
+                        };
+                    }
+                }
+            } catch (error) {
+                validation = { allowed: false, message: null };
+                console.warn('[SelectionFilter] Reference selection validation failed:', error);
+            }
+            if (validation.allowed === false) {
+                const message = (typeof validation.message === 'string' && validation.message.trim())
+                    ? validation.message.trim()
+                    : 'Selection not allowed for this field.';
+                try { activeRefInput.__lastReferenceSelectionMeta = null; } catch (_) { /* ignore */ }
+                try {
+                    const viewer = SelectionFilter.viewer || null;
+                    if (viewer && typeof viewer._toast === 'function') viewer._toast(message, 1600);
+                } catch (_) { /* ignore */ }
+                try {
+                    console.warn('[SelectionFilter] Reference selection rejected.', {
+                        field: activeRefInput?.dataset?.key || null,
+                        target: targetObj?.name || targetObj?.uuid || null,
+                        message,
+                    });
+                } catch (_) { /* ignore */ }
+                return true;
+            }
+
             try {
                 if (activeRefInput && typeof activeRefInput.__captureReferencePreview === 'function') {
                     activeRefInput.__captureReferencePreview(targetObj);

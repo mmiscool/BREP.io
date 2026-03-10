@@ -259,6 +259,38 @@ export class HistoryCollectionWidget {
     if (notify) this._notifyEntryToggle(prevEntry, false);
   }
 
+  revealEntry(id, { focus = true, scroll = true, notify = true } = {}) {
+    if (id == null) return false;
+    const targetId = String(id);
+    const targetInfo = this._findEntryInfoById(targetId);
+    const targetEntry = targetInfo?.entry || null;
+    if (!targetEntry) return false;
+
+    const previousId = this._expandedId != null ? String(this._expandedId) : null;
+    const previousInfo = previousId ? this._findEntryInfoById(previousId) : null;
+    const previousEntry = previousInfo?.entry || null;
+
+    if (this._autoSyncOpenState) {
+      if (previousEntry && previousId !== targetId) this._applyOpenState(previousEntry, false);
+      this._applyOpenState(targetEntry, true);
+    }
+
+    this._expandedId = targetId;
+    if (this._autoFocusOnExpand && focus) {
+      this._pendingFocusEntryId = targetId;
+    }
+    this.render();
+
+    if (notify && previousEntry && previousId !== targetId) {
+      this._notifyEntryToggle(previousEntry, false);
+    }
+    if (notify && previousId !== targetId) {
+      this._notifyEntryToggle(targetEntry, true);
+    }
+    if (scroll) this._deferScrollToEntry(targetId);
+    return true;
+  }
+
   _getEntries() {
     if (!this.history) return [];
     if (Array.isArray(this.history.entries)) return this.history.entries;

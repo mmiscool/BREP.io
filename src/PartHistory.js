@@ -939,6 +939,47 @@ export class PartHistory {
   }
 
 
+  _seedSourceFeatureMetadata(target, featureID) {
+    const normalizedFeatureId = featureID == null ? null : String(featureID);
+    if (!normalizedFeatureId || !target || typeof target !== 'object') return;
+
+    const applyToSolid = (solid) => {
+      if (!solid || typeof solid !== 'object') return;
+      const faceNames = typeof solid.getFaceNames === 'function'
+        ? solid.getFaceNames()
+        : (solid._faceNameToID instanceof Map ? Array.from(solid._faceNameToID.keys()) : []);
+      if (!Array.isArray(faceNames) || faceNames.length === 0 || typeof solid.setFaceMetadata !== 'function') return;
+
+      for (const faceName of faceNames) {
+        if (!faceName) continue;
+        let existing = null;
+        try {
+          existing = typeof solid.getFaceMetadata === 'function' ? solid.getFaceMetadata(faceName) : null;
+        } catch {
+          existing = null;
+        }
+        const existingFeatureId = existing?.sourceFeatureId ?? existing?.sourceFeatureID ?? null;
+        if (existingFeatureId != null && String(existingFeatureId).trim()) continue;
+        try {
+          solid.setFaceMetadata(faceName, { sourceFeatureId: normalizedFeatureId });
+        } catch { /* ignore face provenance seed failures */ }
+      }
+    };
+
+    if (String(target?.type || '').toUpperCase() === 'SOLID') {
+      applyToSolid(target);
+      return;
+    }
+    try {
+      target.traverse?.((node) => {
+        if (String(node?.type || '').toUpperCase() === 'SOLID') {
+          applyToSolid(node);
+        }
+      });
+    } catch { /* ignore traversal failures */ }
+  }
+
+
   async _coerceRunEffects(result, featureType, featureID) {
     if (result == null) return { added: [], removed: [] };
     if (Array.isArray(result)) {
@@ -950,6 +991,7 @@ export class PartHistory {
     // set the owningFeatureID for each item added by this feature
     for (const artifact of added) {
       artifact.owningFeatureID = featureID;
+      this._seedSourceFeatureMetadata(artifact, featureID);
       // Ensure any stale manifold/cache is dropped before visualizing
       try { await artifact.free(); } catch { }
       try { await artifact.visualize(); } catch { }
@@ -974,6 +1016,7 @@ export class PartHistory {
     for (const a of added) {
       if (a && typeof a === 'object') {
         if (a === this.scene) continue;
+        this._seedSourceFeatureMetadata(a, featureID);
         // Free first to force rebuild from latest arrays, then visualize
         try { await a.free(); } catch { }
         try { await a.visualize(); } catch { }

@@ -997,10 +997,12 @@ export class PMIViewsWidget {
             cube,
             render: cube.render,
             visible: cube.scene?.visible,
+            overlayVisible: cube._overlayVisible,
             toggleButtonVisibility: this.viewer?._cameraProjectionToggleButton?.style?.visibility ?? "",
             toggleButtonPointerEvents: this.viewer?._cameraProjectionToggleButton?.style?.pointerEvents ?? "",
           };
           if (cube.scene) cube.scene.visible = false;
+          try { cube.setOverlayVisible?.(false); } catch { /* ignore overlay hide errors */ }
           cube.render = () => {};
           if (this.viewer?._cameraProjectionToggleButton?.style) {
             this.viewer._cameraProjectionToggleButton.style.visibility = "hidden";
@@ -1022,6 +1024,9 @@ export class PMIViewsWidget {
               targetCube.scene.visible = state.visible;
             }
           } catch { /* ignore restore errors */ }
+          try {
+            if (targetCube) targetCube.setOverlayVisible?.(state?.overlayVisible !== false);
+          } catch { /* ignore overlay restore errors */ }
           try {
             const toggleButton = this.viewer?._cameraProjectionToggleButton || null;
             if (toggleButton?.style) {

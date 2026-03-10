@@ -83,6 +83,17 @@ const inputParamsSchema = {
         multiple: false,
         default_value: null,
         hint: "Select the plane or face for the sketch",
+        selectionValidator: (candidate, ctx) => {
+            if (!candidate || candidate.type !== 'FACE') return true;
+            const featureId = String(ctx?.featureID ?? ctx?.params?.featureID ?? ctx?.params?.id ?? '').trim();
+            if (!featureId) return true;
+            const ownProfileFaceName = `${featureId}:PROFILE`;
+            const candidateName = typeof candidate?.name === 'string' ? candidate.name.trim() : '';
+            if (candidateName === ownProfileFaceName) return false;
+            const owningFeatureId = String(candidate?.owningFeatureID ?? candidate?.userData?.sketchFeatureId ?? '').trim();
+            return !owningFeatureId || owningFeatureId !== featureId;
+        },
+        selectionValidationMessage: 'Cannot use this sketch\'s own profile face as its sketch plane.',
     },
     editSketch: {
         type: "button",

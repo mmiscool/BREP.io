@@ -11,6 +11,7 @@ import {
 import { resolveSelectionObject } from '../assembly/constraintSelectionUtils.js';
 import { extractWorldPoint } from '../assembly/constraintPointUtils.js';
 import { computeFaceNormal, computeFaceOrigin } from '../faceUtils.js';
+import { SchemaForm } from '../featureDialogs.js';
 
 const FEATURE_LINE_COLOR = '#bfbfbf';
 const DRAGGABLE_TIP_COLOR = '#f2c14e';
@@ -29,6 +30,7 @@ const LABEL_ARROW_AVOID_MAX_ITERS = 300;
 const FEATURE_ANGLE_RADIUS_PX = 120;
 const FEATURE_ANGLE_MIN_RADIUS_PX = 100;
 const DRAG_FIELD_CHANGE_THROTTLE_MS = 60;
+const SUPPORTED_FEATURE_KEYS = new Set(['P.CU', 'P.CY', 'P.CO', 'P.S', 'P.PY', 'P.T', 'E', 'R']);
 
 function nowMs() {
   if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
@@ -114,6 +116,10 @@ function closestPointOnLine(point, linePoint, lineDir) {
 }
 
 export class FeatureDimensionOverlay {
+  static supportsFeatureKey(key) {
+    return SUPPORTED_FEATURE_KEYS.has(normalizeFeatureType(key));
+  }
+
   constructor({ viewer = null, onFieldChange = null, onFieldFocus = null } = {}) {
     this.viewer = viewer || null;
     this.onFieldChange = typeof onFieldChange === 'function' ? onFieldChange : null;
@@ -125,6 +131,7 @@ export class FeatureDimensionOverlay {
     this._arrowPickMeshes = [];
 
     this._active = null;
+    this._suppressed = false;
     this._dragState = null;
     this._raycaster = new THREE.Raycaster();
     this._lastFieldChangeDispatchAt = 0;
@@ -178,6 +185,7 @@ export class FeatureDimensionOverlay {
 
   clearActive() {
     this._active = null;
+    this._suppressed = false;
     this._labelRecords.clear();
     this._arrowPickMeshes = [];
     this.#cancelQueuedFieldChange();
@@ -189,6 +197,27 @@ export class FeatureDimensionOverlay {
 
   isDragging() {
     return !!this._dragState;
+  }
+
+  setSuppressed(suppressed = false) {
+    const next = !!suppressed;
+    if (this._suppressed === next) return;
+    this._suppressed = next;
+
+    if (next) {
+      this.#endDragSession();
+      this.#cancelQueuedFieldChange();
+      this._labelRecords.clear();
+      this._arrowPickMeshes = [];
+      this.#clearVisuals();
+      try { this._labelOverlay?.clear?.(); } catch { }
+      try { this._labelOverlay?.setVisible?.(false); } catch { }
+      this.#requestRender();
+      return;
+    }
+
+    try { this._labelOverlay?.setVisible?.(!!this._active); } catch { }
+    if (this._active) this.refresh();
   }
 
   setActive({ entryId = null, entry = null, featureClass = null, form = null } = {}) {
@@ -207,7 +236,7 @@ export class FeatureDimensionOverlay {
       featureKey: key,
     };
 
-    try { this._labelOverlay?.setVisible?.(true); } catch { }
+    try { this._labelOverlay?.setVisible?.(!this._suppressed); } catch { }
   }
 
   refresh() {
@@ -218,6 +247,16 @@ export class FeatureDimensionOverlay {
 
     if (!this._group || !this.viewer?.scene) {
       this.clearActive();
+      return;
+    }
+
+    if (this._suppressed) {
+      this._labelRecords.clear();
+      this._arrowPickMeshes = [];
+      this.#clearVisuals();
+      try { this._labelOverlay?.clear?.(); } catch { }
+      try { this._labelOverlay?.setVisible?.(false); } catch { }
+      this.#requestRender();
       return;
     }
 
@@ -302,14 +341,7 @@ export class FeatureDimensionOverlay {
   }
 
   #isSupportedFeatureKey(key) {
-    return key === 'P.CU'
-      || key === 'P.CY'
-      || key === 'P.CO'
-      || key === 'P.S'
-      || key === 'P.PY'
-      || key === 'P.T'
-      || key === 'E'
-      || key === 'R';
+    return FeatureDimensionOverlay.supportsFeatureKey(key);
   }
 
   #buildAnnotations(active) {
@@ -1153,6 +1185,7 @@ export class FeatureDimensionOverlay {
   }
 
   #handleCanvasPointerDown(event) {
+    if (this._suppressed) return;
     if (!this._active || !event || event.button !== 0) return;
     if (!Array.isArray(this._arrowPickMeshes) || this._arrowPickMeshes.length === 0) return;
 
@@ -1161,6 +1194,15 @@ export class FeatureDimensionOverlay {
 
     const meta = this.#arrowMetaFromHit(hit.object);
     if (!meta) return;
+
+    if (meta.draggable === false && this.#activateOrRevealTransformFromDimensionHandle()) {
+      try {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+      } catch { }
+      return;
+    }
 
     const record = this._labelRecords.get(meta.annotationId);
     const annotation = record?.annotation;
@@ -1554,7 +1596,7 @@ export class FeatureDimensionOverlay {
         sphere.userData.excludeFromFit = true;
         sphere.userData.featureDimension = meta;
         try { group.add(sphere); } catch { /* ignore */ }
-        continue;
+        this._arrowPickMeshes.push(sphere);
       }
 
       // Use a larger transparent hit volume to make tip dragging easier.
@@ -1695,6 +1737,34 @@ export class FeatureDimensionOverlay {
       current = current.parent;
     }
     return null;
+  }
+
+  #activateOrRevealTransformFromDimensionHandle() {
+    const active = this._active;
+    if (!active) return false;
+    const form = active.form || null;
+    const transformDef = form?.schema?.transform || null;
+    if (!transformDef || transformDef.type !== 'transform') return false;
+
+    const activeTransform = SchemaForm?.getActiveTransformState?.() || null;
+    if (
+      activeTransform?.controls
+      && activeTransform?.entryId != null
+      && String(activeTransform.entryId) === String(active.entryId)
+    ) {
+      try {
+        if (typeof activeTransform.controls.setDisplayMode === 'function') {
+          activeTransform.controls.setDisplayMode('transform');
+          return true;
+        }
+      } catch { /* ignore */ }
+    }
+
+    try {
+      return form.activateField?.('transform') === true;
+    } catch {
+      return false;
+    }
   }
 
   #intersectPointerWithPlane(event, plane) {

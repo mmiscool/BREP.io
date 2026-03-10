@@ -108,8 +108,8 @@ mode: {
 
 ### reference_selection
 - Required: `type: 'reference_selection'`, `label`, `selectionFilter` (see tokens above)
-- Optional: `default_value`, `hint`, `multiple`, `minSelections`, `maxSelections`, `placeholder`
-- Behavior: single-select shows a button with clear control; multi-select shows chips plus a hidden input. Values are normalized reference names; multi-select stores an array. `minSelections`/`maxSelections` enforce counts when chips render.
+- Optional: `default_value`, `hint`, `multiple`, `minSelections`, `maxSelections`, `placeholder`, `selectionValidator(candidate, ctx)`, `selectionValidationMessage`
+- Behavior: single-select shows a button with clear control; multi-select shows chips plus a hidden input. Values are normalized reference names; multi-select stores an array. `minSelections`/`maxSelections` enforce counts when chips render. When `selectionValidator` is provided it runs before the picked scene object is committed; returning `false` blocks the pick. `ctx` includes the live form state (`params`, `featureID`, `currentValue`, `currentSelectionNames`, `currentSelections`, `viewer`, `partHistory`, `key`, `def`, `inputEl`, and pick metadata when available). `selectionValidationMessage` can be a string or function and is shown when a selection is blocked.
 - Example:
 ```js
 profile: {

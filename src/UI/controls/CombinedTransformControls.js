@@ -23,6 +23,8 @@ export class CombinedTransformControls extends THREE.Object3D {
     this.enabled = true;
     this.dragging = false;
     this.mode = 'translate'; // kept for compatibility; both gizmos are active
+    this.displayMode = 'transform';
+    this.dimensionToggleEnabled = false;
     this.showX = true; this.showY = true; this.showZ = true;
     this.isTransformGizmo = true; // used by PartHistory cleanup logic
     this._defaultSizeMultiplier = DEFAULT_GIZMO_SIZE_MULTIPLIER;
@@ -41,6 +43,7 @@ export class CombinedTransformControls extends THREE.Object3D {
     // Visuals
     this.gizmo = this._buildGizmo();
     this.add(this.gizmo.root);
+    this._updateDisplayModeVisuals();
 
     // Events
     this._onPointerDown = this._handlePointerDown.bind(this);
@@ -62,6 +65,32 @@ export class CombinedTransformControls extends THREE.Object3D {
   getHelper() { return this; }
   getMode() { return this.mode; }
   setMode(mode) { this.mode = String(mode || 'translate'); }
+  getDisplayMode() { return this.displayMode; }
+  setDisplayMode(mode) {
+    const nextMode = (String(mode || 'transform') === 'dimensions' && this.dimensionToggleEnabled)
+      ? 'dimensions'
+      : 'transform';
+    const changed = this.displayMode !== nextMode;
+    this.displayMode = nextMode;
+    this._updateDisplayModeVisuals();
+    if (changed) {
+      this.dispatchEvent({ type: 'display-mode-changed', value: this.displayMode });
+      this.dispatchEvent({ type: 'change' });
+    }
+  }
+  toggleDisplayMode() {
+    if (!this.dimensionToggleEnabled) return this.displayMode;
+    const nextMode = this.displayMode === 'dimensions' ? 'transform' : 'dimensions';
+    this.setDisplayMode(nextMode);
+    return this.displayMode;
+  }
+  setDimensionToggleEnabled(enabled) {
+    this.dimensionToggleEnabled = !!enabled;
+    if (!this.dimensionToggleEnabled && this.displayMode === 'dimensions') {
+      this.displayMode = 'transform';
+    }
+    this._updateDisplayModeVisuals();
+  }
   setSize(s) { this._sizeMultiplier = Number(s) || 1; this.update(); }
   resetSize() { this.setSize(this._defaultSizeMultiplier); }
   setCamera(camera, { resetSize = false, refresh = true } = {}) {
@@ -118,11 +147,13 @@ export class CombinedTransformControls extends THREE.Object3D {
     const mAxis = new THREE.MeshBasicMaterial({ color: 0xbfbfbf, toneMapped: false, depthTest: false, depthWrite: false, transparent: true });
     const mArrow = new THREE.MeshBasicMaterial({ color: 0xf2c14e, toneMapped: false, depthTest: false, depthWrite: false, transparent: true });
     const mDot = new THREE.MeshBasicMaterial({ color: 0xf29e4c, toneMapped: false, depthTest: false, depthWrite: false, transparent: true });
+    const mCenter = new THREE.MeshBasicMaterial({ color: 0xf2c14e, toneMapped: false, depthTest: false, depthWrite: false, transparent: true });
 
     // Geometries (shared)
     const gRod = new THREE.CylinderGeometry(0.03, 0.03, 1.0, 16);
     const gArrow = new THREE.ConeGeometry(0.12, 0.4, 20);
     const gDot = new THREE.SphereGeometry(0.12, 16, 12);
+    const gCenter = new THREE.SphereGeometry(0.16, 18, 14);
 
     // Axis builders
     const axes = [];
@@ -200,7 +231,22 @@ export class CombinedTransformControls extends THREE.Object3D {
     addRotate('Y');
     addRotate('X');
 
-    return { root, picker, labels: axes.map(a => a.spr), rot };
+    const center = new THREE.Mesh(gCenter, mCenter);
+    center.name = 'DisplayModeToggle';
+    center.renderOrder = this.renderOrder;
+    center.userData.handle = { kind: 'toggle-display-mode' };
+    root.add(center);
+
+    return {
+      root,
+      picker,
+      labels: axes.map(a => a.spr),
+      rot,
+      translateGroups: axes.map((axis) => axis.group),
+      rotateGroups: Object.values(rot).map((item) => item.group),
+      center,
+      centerMaterial: mCenter,
+    };
   }
 
   _makeTextSprite(text, color = '#ffffff') {
@@ -279,6 +325,12 @@ export class CombinedTransformControls extends THREE.Object3D {
     if (!hit) return;
     const h = hit.object.userData.handle;
     if (!h || !h.kind) return;
+    if (h.kind === 'toggle-display-mode') {
+      e.preventDefault();
+      e.stopPropagation?.();
+      this.toggleDisplayMode();
+      return;
+    }
     e.preventDefault();
     e.stopPropagation?.();
 
@@ -399,5 +451,24 @@ export class CombinedTransformControls extends THREE.Object3D {
     const p = new THREE.Vector3();
     const hit = this._raycaster.ray.intersectPlane(this._plane, p);
     return hit ? p.clone() : null;
+  }
+
+  _updateDisplayModeVisuals() {
+    const giz = this.gizmo || null;
+    if (!giz) return;
+    const showTransformHandles = !this.dimensionToggleEnabled || this.displayMode === 'transform';
+
+    for (const group of giz.translateGroups || []) {
+      if (group) group.visible = showTransformHandles;
+    }
+    for (const group of giz.rotateGroups || []) {
+      if (group) group.visible = showTransformHandles;
+    }
+    if (giz.center) {
+      giz.center.visible = this.dimensionToggleEnabled;
+    }
+    if (giz.centerMaterial?.color) {
+      giz.centerMaterial.color.setHex(this.displayMode === 'dimensions' ? 0x4ecdc4 : 0xf2c14e);
+    }
   }
 }

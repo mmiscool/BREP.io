@@ -1070,7 +1070,7 @@ export class Viewer {
         btn.style.display = '';
         const gapPx = 10;
         const x = Math.max(10, Math.round(cubeRect.xCss - gapPx));
-        const y = Math.round(cubeRect.yCss + cubeRect.h * 0.5);
+        const y = Math.round(cubeRect.yCss + cubeRect.h - 8);
         btn.style.left = `${x}px`;
         btn.style.top = `${y}px`;
     }
@@ -1224,12 +1224,13 @@ export class Viewer {
             this._ensureCameraProjectionToggle();
             return;
         }
+        try { this.viewCube?.dispose?.(); } catch { /* ignore */ }
         this.viewCube = new ViewCube({
             renderer: this.renderer,
             targetCamera: this.camera,
             controls: this.controls,
-            size: 120,
-            margin: 12,
+            size: 110,
+            margin: 25,
         });
         this._ensureCameraProjectionToggle();
     }
@@ -1266,6 +1267,7 @@ export class Viewer {
         if (nextMode === 'webgl') {
             this._ensureViewCube();
         } else {
+            try { this.viewCube?.dispose?.(); } catch { /* ignore */ }
             this.viewCube = null;
             this._positionCameraProjectionToggle();
         }
@@ -1820,6 +1822,8 @@ export class Viewer {
             }
         } catch { /* ignore */ }
         this._cameraProjectionToggleButton = null;
+        try { this.viewCube?.dispose?.(); } catch { /* ignore */ }
+        this.viewCube = null;
         this.controls?.dispose?.();
         this.renderer?.dispose?.();
         if (this._webglRenderer && this._webglRenderer !== this.renderer) {

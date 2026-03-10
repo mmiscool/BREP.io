@@ -5,6 +5,77 @@
 
 import * as THREE from 'three';
 
+function ensureViewCubeArrowOverlayStyles() {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById('viewcube-arrow-overlay-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'viewcube-arrow-overlay-styles';
+  style.textContent = `
+    .viewcube-arrow-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 5;
+    }
+    .viewcube-arrow-icon {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 42px;
+      height: 34px;
+      transform: translate(-50%, -50%) rotate(var(--icon-rotate, 0deg));
+      transform-origin: center center;
+      color: #d6d9de;
+      display: block;
+      overflow: visible;
+      pointer-events: none;
+      user-select: none;
+      transition: transform 120ms ease, color 120ms ease, opacity 120ms ease;
+      opacity: 0.96;
+      filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.45));
+    }
+    .viewcube-arrow-icon:hover {
+      color: #f2f5f9;
+      opacity: 1;
+    }
+    .viewcube-arrow-icon:active {
+      transform: translate(-50%, -50%) rotate(var(--icon-rotate, 0deg)) scale(0.94);
+    }
+    .viewcube-arrow-icon:focus-within {
+      outline: 2px solid rgba(110, 168, 254, 0.95);
+      outline-offset: 2px;
+    }
+    .viewcube-arrow-icon.is-pan {
+      width: 34px;
+      height: 26px;
+    }
+    .viewcube-arrow-icon.is-roll {
+      width: 50px;
+      height: 32px;
+    }
+    .viewcube-arrow-icon .viewcube-arrow-hit {
+      width: 100%;
+      height: 100%;
+      pointer-events: auto;
+      cursor: pointer;
+      outline: none;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+const PAN_ARROW_VIEWBOX = '0 0 34 26';
+const PAN_ARROW_PATH_D = 'M17 2.4 31.5 23H2.5Z';
+const PAN_ARROW_MARKUP = `<path class="viewcube-arrow-hit" fill="currentColor" stroke="#161a20" stroke-width="1.7" stroke-linejoin="round" d="${PAN_ARROW_PATH_D}" />`;
+
+const ROLL_ARROW_VIEWBOX = '150 60 640 570';
+const ROLL_ARROW_MIRROR_X = 940;
+const ROLL_ARROW_MIRROR_Y = 690;
+const ROLL_ARROW_PATH_D = 'M655 590 c-134 -55 -247 -126 -343 -214 -37 -34 -46 -38 -60 -28 -25 18 -42 25 -48 19 -10 -9 -53 -292 -46 -298 6 -7 258 74 270 86 3 3 -5 17 -19 31 l-24 26 50 45 c67 59 178 128 267 165 103 43 102 41 75 123 -13 39 -30 71 -38 72 -8 1 -45 -11 -84 -27z';
+
+const ROLL_LEFT_MARKUP = `<path class="viewcube-arrow-hit" fill="currentColor" d="${ROLL_ARROW_PATH_D}" transform="translate(0 ${ROLL_ARROW_MIRROR_Y}) scale(1 -1)" />`;
+const ROLL_RIGHT_MARKUP = `<path class="viewcube-arrow-hit" fill="currentColor" d="${ROLL_ARROW_PATH_D}" transform="translate(${ROLL_ARROW_MIRROR_X} ${ROLL_ARROW_MIRROR_Y}) scale(-1 -1)" />`;
+
 export class ViewCube {
   /**
    * @param {Object} opts
@@ -21,6 +92,14 @@ export class ViewCube {
     this.controls = controls;
     this.size = size;
     this.margin = margin;
+    this._overlayVisible = true;
+    this._arrowOverlayRoot = null;
+    this._arrowIcons = new Map();
+    this._arrowIconCleanup = [];
+    this._lastArrowLayoutKey = '';
+
+    ensureViewCubeArrowOverlayStyles();
+    this._ensureArrowOverlay();
 
     // Scene + camera for the cube
     this.scene = new THREE.Scene();
@@ -341,6 +420,12 @@ export class ViewCube {
 
   // Render the view cube using scissor in the bottom-right corner
   render() {
+    this._updateArrowOverlayLayout();
+    if (this.scene?.visible === false) {
+      this._updateArrowOverlayVisibility();
+      return;
+    }
+
     const { xGL, yGL, w, h, width, height } = this._viewportRect();
     const r = this.renderer;
     const prev = {
@@ -430,6 +515,11 @@ export class ViewCube {
 
   clearHover() {
     this._setHoveredObject(null);
+  }
+
+  setOverlayVisible(visible) {
+    this._overlayVisible = visible !== false;
+    this._updateArrowOverlayVisibility();
   }
 
   // Attempt to handle a click; returns true if consumed
@@ -531,5 +621,282 @@ export class ViewCube {
       try { controls.updateMatrixState(); } catch { }
     }
     if (controls) controls.enabled = true;
+  }
+
+  dispose() {
+    this.clearHover();
+    const root = this._arrowOverlayRoot;
+    for (const cleanup of this._arrowIconCleanup) {
+      try { cleanup(); } catch { /* ignore */ }
+    }
+    this._arrowIconCleanup = [];
+    this._arrowIcons.clear();
+    this._lastArrowLayoutKey = '';
+    if (root?.parentNode) {
+      try { root.parentNode.removeChild(root); } catch { /* ignore */ }
+    }
+    this._arrowOverlayRoot = null;
+  }
+
+  _ensureArrowOverlay() {
+    if (typeof document === 'undefined') return null;
+    const host = this.renderer?.domElement?.parentElement;
+    if (!host) return null;
+    if (this._arrowOverlayRoot?.parentElement === host) return this._arrowOverlayRoot;
+
+    this.dispose();
+
+    try {
+      const computed = window.getComputedStyle(host);
+      if (computed?.position === 'static') host.style.position = 'relative';
+    } catch { /* ignore */ }
+
+    const root = document.createElement('div');
+    root.className = 'viewcube-arrow-layer';
+    host.appendChild(root);
+    this._arrowOverlayRoot = root;
+
+    const addIcon = ({ key, title, viewBox, iconMarkup, rotateDeg = 0, className = '', onActivate }) => {
+      const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      icon.setAttribute('class', `viewcube-arrow-icon${className ? ` ${className}` : ''}`);
+      icon.setAttribute('viewBox', viewBox);
+      icon.setAttribute('aria-hidden', 'true');
+      icon.style.setProperty('--icon-rotate', `${rotateDeg}deg`);
+      icon.innerHTML = iconMarkup;
+
+      const hit = icon.querySelector('.viewcube-arrow-hit');
+      if (!hit) {
+        root.appendChild(icon);
+        this._arrowIcons.set(key, icon);
+        return icon;
+      }
+
+      hit.setAttribute('tabindex', '0');
+      hit.setAttribute('role', 'button');
+      hit.setAttribute('aria-label', title);
+
+      const stop = (event) => {
+        try { event.preventDefault(); } catch { /* ignore */ }
+        try { event.stopPropagation(); } catch { /* ignore */ }
+      };
+      const onPointerDown = (event) => {
+        stop(event);
+        this.clearHover();
+      };
+      const onPointerUp = (event) => stop(event);
+      const onClick = (event) => {
+        stop(event);
+        this.clearHover();
+        try { onActivate?.(); } catch { /* ignore */ }
+      };
+      const onPointerEnter = () => this.clearHover();
+      const onKeyDown = (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        stop(event);
+        this.clearHover();
+        try { onActivate?.(); } catch { /* ignore */ }
+      };
+
+      hit.addEventListener('pointerdown', onPointerDown);
+      hit.addEventListener('pointerup', onPointerUp);
+      hit.addEventListener('click', onClick);
+      hit.addEventListener('pointerenter', onPointerEnter);
+      hit.addEventListener('keydown', onKeyDown);
+
+      this._arrowIconCleanup.push(() => {
+        try { hit.removeEventListener('pointerdown', onPointerDown); } catch { /* ignore */ }
+        try { hit.removeEventListener('pointerup', onPointerUp); } catch { /* ignore */ }
+        try { hit.removeEventListener('click', onClick); } catch { /* ignore */ }
+        try { hit.removeEventListener('pointerenter', onPointerEnter); } catch { /* ignore */ }
+        try { hit.removeEventListener('keydown', onKeyDown); } catch { /* ignore */ }
+      });
+
+      root.appendChild(icon);
+      this._arrowIcons.set(key, icon);
+      return icon;
+    };
+
+    addIcon({
+      key: 'pan-up',
+      title: 'Pan up',
+      viewBox: PAN_ARROW_VIEWBOX,
+      iconMarkup: PAN_ARROW_MARKUP,
+      rotateDeg: 0,
+      className: 'is-pan',
+      onActivate: () => this._panCamera(new THREE.Vector2(0, 1)),
+    });
+    addIcon({
+      key: 'pan-right',
+      title: 'Pan right',
+      viewBox: PAN_ARROW_VIEWBOX,
+      iconMarkup: PAN_ARROW_MARKUP,
+      rotateDeg: 90,
+      className: 'is-pan',
+      onActivate: () => this._panCamera(new THREE.Vector2(1, 0)),
+    });
+    addIcon({
+      key: 'pan-down',
+      title: 'Pan down',
+      viewBox: PAN_ARROW_VIEWBOX,
+      iconMarkup: PAN_ARROW_MARKUP,
+      rotateDeg: 180,
+      className: 'is-pan',
+      onActivate: () => this._panCamera(new THREE.Vector2(0, -1)),
+    });
+    addIcon({
+      key: 'pan-left',
+      title: 'Pan left',
+      viewBox: PAN_ARROW_VIEWBOX,
+      iconMarkup: PAN_ARROW_MARKUP,
+      rotateDeg: -90,
+      className: 'is-pan',
+      onActivate: () => this._panCamera(new THREE.Vector2(-1, 0)),
+    });
+    addIcon({
+      key: 'roll-left',
+      title: 'Roll camera counterclockwise',
+      viewBox: ROLL_ARROW_VIEWBOX,
+      iconMarkup: ROLL_LEFT_MARKUP,
+      className: 'is-roll',
+      onActivate: () => this._rollCamera(-1),
+    });
+    addIcon({
+      key: 'roll-right',
+      title: 'Roll camera clockwise',
+      viewBox: ROLL_ARROW_VIEWBOX,
+      iconMarkup: ROLL_RIGHT_MARKUP,
+      className: 'is-roll',
+      onActivate: () => this._rollCamera(1),
+    });
+
+    this._updateArrowOverlayLayout();
+    return root;
+  }
+
+  _updateArrowOverlayVisibility() {
+    const root = this._arrowOverlayRoot;
+    if (!root) return;
+    const visible = this._overlayVisible && this.scene?.visible !== false;
+    root.style.display = visible ? '' : 'none';
+  }
+
+  _updateArrowOverlayLayout() {
+    const root = this._ensureArrowOverlay();
+    if (!root) return;
+    const { xCss, yCss, w, h, width, height } = this._viewportRect();
+    const layoutKey = `${width}:${height}:${xCss}:${yCss}:${w}:${h}`;
+    if (layoutKey === this._lastArrowLayoutKey) {
+      this._updateArrowOverlayVisibility();
+      return;
+    }
+    this._lastArrowLayoutKey = layoutKey;
+
+    root.style.width = `${width}px`;
+    root.style.height = `${height}px`;
+
+    const centerX = xCss + (w * 0.5);
+    const centerY = yCss + (h * 0.5);
+    const size = Math.min(w, h);
+    const verticalPanGap = Math.max(12, size * 0.11);
+    const sideGap = Math.max(8, size * 0.05);
+    const rollY = yCss - Math.max(10, size * 0.09);
+    const positions = {
+      'pan-up': [centerX, yCss - verticalPanGap],
+      'pan-right': [xCss + w + sideGap, centerY],
+      'pan-down': [centerX, yCss + h + verticalPanGap],
+      'pan-left': [xCss - sideGap, centerY],
+      'roll-left': [centerX - size * 0.24, rollY],
+      'roll-right': [centerX + size * 0.24, rollY],
+    };
+
+    for (const [key, position] of Object.entries(positions)) {
+      const icon = this._arrowIcons.get(key);
+      if (!icon) continue;
+      icon.style.left = `${Math.round(position[0])}px`;
+      icon.style.top = `${Math.round(position[1])}px`;
+    }
+
+    this._updateArrowOverlayVisibility();
+  }
+
+  _getPivot() {
+    if (this.controls?.target?.isVector3) return this.controls.target.clone();
+    if (this.controls?._gizmos?.position?.isVector3) return this.controls._gizmos.position.clone();
+    return new THREE.Vector3(0, 0, 0);
+  }
+
+  _syncControlsAfterCameraInteraction(pivot = null) {
+    const controls = this.controls;
+    if (pivot && controls?.target?.isVector3) {
+      try { controls.target.copy(pivot); } catch { /* ignore */ }
+    }
+    try { controls?.update?.(); } catch { /* ignore */ }
+    try { controls?.updateMatrixState?.(); } catch { /* ignore */ }
+    try { controls?.dispatchEvent?.({ type: 'change' }); } catch { /* ignore */ }
+    if (controls) controls.enabled = true;
+  }
+
+  _panCamera(direction) {
+    const cam = this.targetCamera;
+    const dir = direction?.clone?.() || null;
+    if (!cam || !dir) return;
+
+    const el = this.renderer?.domElement;
+    const width = Math.max(1, Number(el?.clientWidth) || 1);
+    const height = Math.max(1, Number(el?.clientHeight) || 1);
+    const pivot = this._getPivot();
+
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion).normalize();
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion).normalize();
+
+    let visibleWidth = 0;
+    let visibleHeight = 0;
+    if (cam.isOrthographicCamera) {
+      const zoom = (Number.isFinite(cam.zoom) && cam.zoom > 0) ? cam.zoom : 1;
+      visibleWidth = Math.abs((cam.right - cam.left) / zoom);
+      visibleHeight = Math.abs((cam.top - cam.bottom) / zoom);
+    } else {
+      const distance = Math.max(1e-6, pivot.distanceTo(cam.position));
+      const aspect = width / height;
+      const effectiveFovDeg = (typeof cam.getEffectiveFOV === 'function')
+        ? cam.getEffectiveFOV()
+        : (Number(cam.fov) || 50);
+      const effectiveFov = THREE.MathUtils.degToRad(effectiveFovDeg);
+      visibleHeight = 2 * distance * Math.tan(effectiveFov * 0.5);
+      visibleWidth = visibleHeight * aspect;
+    }
+
+    // Match a drag-pan gesture: dragging right/up moves the scene right/up, so the camera shifts opposite.
+    const panDelta = new THREE.Vector3();
+    if (dir.x) panDelta.addScaledVector(right, -dir.x * visibleWidth * 0.1);
+    if (dir.y) panDelta.addScaledVector(up, -dir.y * visibleHeight * 0.1);
+    if (panDelta.lengthSq() <= 1e-12) return;
+
+    const nextPivot = pivot.clone().add(panDelta);
+    cam.position.add(panDelta);
+    cam.lookAt(nextPivot);
+    cam.updateMatrixWorld(true);
+
+    this._syncControlsAfterCameraInteraction(nextPivot);
+  }
+
+  _rollCamera(stepDirection) {
+    const cam = this.targetCamera;
+    if (!cam) return;
+
+    const pivot = this._getPivot();
+    const forward = pivot.clone().sub(cam.position);
+    if (forward.lengthSq() <= 1e-12) return;
+
+    forward.normalize();
+    const rollStep = THREE.MathUtils.degToRad(5 * (Number(stepDirection) < 0 ? -1 : 1));
+    const nextUp = cam.up.clone().normalize().applyAxisAngle(forward, rollStep);
+    if (nextUp.lengthSq() <= 1e-12) return;
+
+    cam.up.copy(nextUp.normalize());
+    cam.lookAt(pivot);
+    cam.updateMatrixWorld(true);
+
+    this._syncControlsAfterCameraInteraction(pivot);
   }
 }

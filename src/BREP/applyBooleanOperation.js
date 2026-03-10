@@ -128,6 +128,32 @@ function __booleanDebugLogger(featureID, op, baseSolid, tools) {
   };
 }
 
+function __booleanCloneMetadataValue(value) {
+  if (!value || typeof value !== 'object') return value ?? null;
+  if (Array.isArray(value)) return value.map((entry) => __booleanCloneMetadataValue(entry));
+  return { ...value };
+}
+
+function __booleanCopyFaceMetadataByName(targetSolid, ...sourceSolids) {
+  if (!targetSolid || typeof targetSolid.setFaceMetadata !== 'function') return;
+  for (const source of sourceSolids) {
+    if (!source) continue;
+    const sourceMap = source._faceMetadata instanceof Map ? source._faceMetadata : null;
+    if (!sourceMap || sourceMap.size === 0) continue;
+    for (const [faceName, metadata] of sourceMap.entries()) {
+      const normalizedName = String(faceName || '').trim();
+      if (!normalizedName) continue;
+      const targetHasFace = targetSolid?._faceNameToID instanceof Map
+        ? targetSolid._faceNameToID.has(normalizedName)
+        : false;
+      if (!targetHasFace) continue;
+      try {
+        targetSolid.setFaceMetadata(normalizedName, __booleanCloneMetadataValue(metadata));
+      } catch { /* ignore metadata carry-over failures */ }
+    }
+  }
+}
+
 async function __booleanPostTinyFaceCleanup(solid, debugLog, context = null) {
   if (!solid || typeof solid !== 'object') return solid;
   try {
@@ -393,6 +419,7 @@ function __booleanAttemptRepairSolid(solid, eps, debugLog) {
         try {
           rebuilt.name = solid.name || rebuilt.name;
           rebuilt.owningFeatureID = solid.owningFeatureID || rebuilt.owningFeatureID;
+          __booleanCopyFaceMetadataByName(rebuilt, solid);
         } catch { }
         return rebuilt;
       }
@@ -487,6 +514,7 @@ function __booleanMeshMergeUnion(baseSolid, toolSolid, eps, debugLog) {
       try {
         rebuilt.name = baseSolid?.name || rebuilt.name;
         rebuilt.owningFeatureID = baseSolid?.owningFeatureID || rebuilt.owningFeatureID;
+        __booleanCopyFaceMetadataByName(rebuilt, baseSolid, toolSolid);
       } catch { }
       return rebuilt;
     }

@@ -46,7 +46,6 @@
   "author": "",
   "license": "SEE LICENSE IN LICENSE.md",
   "dependencies": {
-    "@malgorithms/m3": "^0.0.1",
     "@tarikjabiri/dxf": "^2.8.9",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.0",

@@ -1,6 +1,7 @@
 import { SelectionFilter } from './SelectionFilter.js';
 import { HistoryCollectionWidget } from './history/HistoryCollectionWidget.js';
 import { FeatureDimensionOverlay } from './featureDimensions/FeatureDimensionOverlay.js';
+import { SchemaForm } from './featureDialogs.js';
 
 const FALLBACK_INTERVAL_MS = 200;
 const FEATURE_DRAG_RUN_THROTTLE_MS = 120;
@@ -37,6 +38,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
     this._featureDragRunPending = false;
     this._lastHeaderSyncTs = -Infinity;
     this._featureDimensionOverlay = null;
+    this._onActiveTransformStateChange = () => this._syncFeatureDimensionOverlay();
     try {
       this._featureDimensionOverlay = new FeatureDimensionOverlay({
         viewer: this.viewer,
@@ -50,6 +52,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
 
     this.uiElement.classList.add('history-widget');
     this.render();
+    try { window.addEventListener('brep-active-transform-state', this._onActiveTransformStateChange); } catch { /* ignore */ }
     this.#startAutoSyncLoop();
     this.#patchRunHistory();
     this.partHistory?.queueHistorySnapshot?.({ debounceMs: 0, reason: 'init' });
@@ -58,6 +61,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
   dispose() {
     this.#stopAutoSyncLoop();
     this.#cancelFeatureDragRun();
+    try { window.removeEventListener('brep-active-transform-state', this._onActiveTransformStateChange); } catch { /* ignore */ }
     try { this._featureDimensionOverlay?.dispose?.(); } catch { /* ignore */ }
     this._featureDimensionOverlay = null;
     super.dispose();
@@ -546,6 +550,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
     try {
       const expandedId = this._expandedId != null ? String(this._expandedId) : null;
       if (!expandedId) {
+        overlay.setSuppressed(false);
         overlay.clearActive();
         return;
       }
@@ -556,9 +561,20 @@ export class HistoryWidget extends HistoryCollectionWidget {
       const featureClass = this._resolveFeatureClass(entry?.type);
 
       if (!entry || !form || !featureClass) {
+        overlay.setSuppressed(false);
         overlay.clearActive();
         return;
       }
+
+      const activeTransform = SchemaForm?.getActiveTransformState?.() || null;
+      const suppressForTransform = Boolean(
+        activeTransform?.controls
+        && activeTransform?.dimensionToggleEnabled
+        && String(activeTransform?.displayMode || 'transform') === 'transform'
+        && activeTransform?.entryId != null
+        && String(activeTransform.entryId) === expandedId
+        && FeatureDimensionOverlay.supportsFeatureKey(featureClass?.shortName || entry?.type),
+      );
 
       overlay.setActive({
         entryId: expandedId,
@@ -566,6 +582,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
         featureClass,
         form,
       });
+      overlay.setSuppressed(suppressForTransform);
       overlay.refresh();
     } catch (error) {
       console.warn('[HistoryWidget] Feature dimension overlay sync failed:', error);

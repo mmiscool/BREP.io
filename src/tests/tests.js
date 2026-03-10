@@ -8,6 +8,7 @@ import {
     afterRun_boolean_operation_target_name_preserved,
     test_boolean_operation_target_name_preserved,
 } from './test_boolean_operation_target_name.js';
+import { test_boolean_face_metadata_preserved } from './test_boolean_face_metadata_preserved.js';
 import { test_Chamfer } from './test_chamfer.js';
 import {
     test_edge_smooth_constraints_prevent_triangle_foldback,
@@ -20,6 +21,7 @@ import {
     afterRun_extrude_negative_distance_cap_alignment,
     test_extrude_negative_distance_cap_alignment,
 } from './test_extrude_negative_distance.js';
+import { test_face_source_feature_seed } from './test_face_source_feature_seed.js';
 import { test_ExtrudeFace } from './test_extrudeFace.js';
 import { test_Fillet } from './test_fillet.js';
 import { afterRun_fillet_angle, test_fillet_angle } from './test_fillet_angle.js';
@@ -102,6 +104,7 @@ import {
 } from './test_sketch_solver_topology_stability.js';
 import { afterRun_solidMetrics, test_solidMetrics } from './test_solidMetrics.js';
 import { test_stlLoader } from './test_stlLoader.js';
+import { test_selection_owning_feature_resolution } from './test_selection_owning_feature.js';
 import {
     afterRun_smooth_with_subdivision_replaces_source_solid,
     test_smooth_with_subdivision_replaces_source_solid,
@@ -128,10 +131,12 @@ export const testFunctions = [
     { test: test_primitiveCube, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_primitivePyramid, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_primitiveCylinder, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_face_source_feature_seed, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_primitiveCone, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_primitiveTorus, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_primitiveSphere, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_boolean_subtract, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_boolean_face_metadata_preserved, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     {
         test: test_boolean_operation_target_name_preserved,
         afterRun: afterRun_boolean_operation_target_name_preserved,
@@ -278,6 +283,7 @@ export const testFunctions = [
     { test: test_mirror, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_history_features_basic, afterRun: afterRun_history_features_basic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_history_expand_does_not_dirty, afterRun: afterRun_history_expand_does_not_dirty, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_selection_owning_feature_resolution, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_visibility_hidden_state_persistence, afterRun: afterRun_visibility_hidden_state_persistence, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_textToFace, afterRun: afterRun_textToFace, printArtifacts: false, exportFaces: true, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_nonManifold_sm_f18, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
