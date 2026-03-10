@@ -1,7 +1,6 @@
 import brepHomeBannerUrl from "../../assets/brand/brep-home-banner.svg";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
-import { captureCameraSnapshot } from "../pmi/annUtils.js";
 import { listSheetSizes } from "../../sheets/sheetStandards.js";
 import {
   canMergeTableCells,
@@ -2634,7 +2633,7 @@ export class Sheet2DEditorWindow {
 
   _getPmiPreviewCaptureKey(view, viewIndex) {
     return [
-      "picker",
+      "picker-v2",
       this._getCurrentModelRevision(),
       this._pmiViewRevision,
       Number.isInteger(viewIndex) ? viewIndex : -1,
@@ -5407,7 +5406,7 @@ export class Sheet2DEditorWindow {
 
   _getPmiImageCaptureKey(element, view = this._resolvePmiViewForElement(element), viewIndex = this._resolvePmiViewIndexForElement(element, view)) {
     return [
-      "trim-v2",
+      "trim-v3",
       this._getCurrentModelRevision(),
       this._pmiViewRevision,
       Number.isInteger(viewIndex) ? viewIndex : -1,
@@ -5618,68 +5617,13 @@ export class Sheet2DEditorWindow {
 
   async _capturePmiViewImage(view, viewIndex) {
     const widget = this.viewer?.pmiViewsWidget || null;
-    const viewer = this.viewer;
-    const camera = viewer?.camera;
-    const renderer = viewer?.renderer || null;
-    if (!widget || !viewer || !camera || !renderer) return null;
-
-    const originalSnapshot = captureCameraSnapshot(camera, { controls: viewer.controls });
-    const originalWireframe = typeof widget._detectWireframe === "function"
-      ? widget._detectWireframe(viewer.scene)
-      : false;
-    const previousClearColor = viewer?._clearColor?.clone?.() || "#000000";
-    const previousClearAlpha = typeof renderer.getClearAlpha === "function"
-      ? renderer.getClearAlpha()
-      : (toFiniteNumber(viewer?._clearAlpha, 1));
-    const previousAutoClear = renderer.autoClear;
-    const previousSceneBackground = viewer?.scene?.background ?? null;
+    if (!widget || typeof widget.captureViewImageDataUrl !== "function") return null;
 
     let dataUrl = null;
-    const runCapture = async () => {
-      let overlay = null;
-      try {
-        try {
-          renderer.autoClear = true;
-          if (viewer?.scene) {
-            viewer.scene.background = null;
-          }
-          renderer.setClearColor("#000000", 0);
-          renderer.clear?.(true, true, true);
-        } catch { }
-        widget._applyView?.(view, { index: viewIndex, suppressActive: true });
-        overlay = typeof widget._buildExportAnnotations === "function"
-          ? await widget._buildExportAnnotations(view)
-          : { labels: [], cleanup: () => { } };
-        if (typeof widget._renderAndWait === "function") {
-          await widget._renderAndWait(2);
-        } else {
-          viewer.render?.();
-          await new Promise((resolve) => requestAnimationFrame(resolve));
-          viewer.render?.();
-        }
-        if (typeof widget._captureCanvasImage === "function") {
-          dataUrl = await widget._captureCanvasImage(overlay?.labels || []);
-        } else {
-          dataUrl = viewer.renderer?.domElement?.toDataURL?.("image/png") || null;
-        }
-      } finally {
-        try { overlay?.cleanup?.(); } catch { }
-      }
-    };
-
     try {
-      if (typeof widget._withViewCubeHidden === "function") {
-        await widget._withViewCubeHidden(runCapture);
-      } else {
-        await runCapture();
-      }
+      dataUrl = await widget.captureViewImageDataUrl(view, viewIndex);
     } catch {
       dataUrl = null;
-    } finally {
-      try { renderer.autoClear = previousAutoClear; } catch { }
-      try { if (viewer?.scene) viewer.scene.background = previousSceneBackground; } catch { }
-      try { renderer.setClearColor(previousClearColor, previousClearAlpha); } catch { }
-      try { widget._restoreViewState?.(originalSnapshot, originalWireframe); } catch { }
     }
 
     if (dataUrl) {

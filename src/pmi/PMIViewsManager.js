@@ -117,6 +117,15 @@ export class PMIViewsManager {
 
     if (!Array.isArray(view.annotations)) view.annotations = [];
     if (!view.camera || typeof view.camera !== 'object') view.camera = {};
+    if (view.camera.viewport && typeof view.camera.viewport === 'object') {
+      const width = Number(view.camera.viewport.width);
+      const height = Number(view.camera.viewport.height);
+      if (width > 0 && height > 0) {
+        view.camera.viewport = { width, height };
+      } else {
+        delete view.camera.viewport;
+      }
+    }
     if (!view.viewSettings || typeof view.viewSettings !== 'object') view.viewSettings = {};
     if (view.annotationHistory && typeof view.annotationHistory !== 'object') {
       delete view.annotationHistory;

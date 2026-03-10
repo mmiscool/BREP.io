@@ -105,21 +105,12 @@ export class SketchMode3D {
     const refObj = refName ? ph.scene.getObjectByName(refName) : null;
     this._refObj = refObj || null;
 
-    // Compute basis from reference (fallback to world XY), prefer persisted basis
+    // Always prefer the live reference transform when it exists. Persisted basis
+    // is only a fallback when the reference cannot currently be resolved.
     let basis = null;
     const saved = feature?.persistentData?.basis || null;
-    const savedMatchesRef = saved && (saved.refName === refName);
-    if (saved && savedMatchesRef) {
-      basis = {
-        x: new THREE.Vector3().fromArray(saved.x),
-        y: new THREE.Vector3().fromArray(saved.y),
-        z: new THREE.Vector3().fromArray(saved.z),
-        origin: new THREE.Vector3().fromArray(saved.origin),
-      };
-
-    } else {
+    if (refObj) {
       basis = this.#basisFromReference(refObj);
-      // Persist freshly computed basis tagged with refName so future edits reuse it
       try {
         if (feature) {
           feature.persistentData = feature.persistentData || {};
@@ -132,6 +123,15 @@ export class SketchMode3D {
           };
         }
       } catch { }
+    } else if (saved) {
+      basis = {
+        x: new THREE.Vector3().fromArray(saved.x),
+        y: new THREE.Vector3().fromArray(saved.y),
+        z: new THREE.Vector3().fromArray(saved.z),
+        origin: new THREE.Vector3().fromArray(saved.origin),
+      };
+    } else {
+      basis = this.#basisFromReference(null);
     }
 
     // Basis used for projecting points to/from world; also align camera now

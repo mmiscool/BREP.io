@@ -8,6 +8,8 @@ import { AnnotationHistory } from './AnnotationHistory.js';
 import { adjustOrthographicFrustum, applyCameraSnapshot, captureCameraSnapshot } from './annUtils.js';
 
 const UPDATE_CAMERA_TOOLTIP = 'Update this view to match the current camera';
+const PMI_CAPTURE_MIN_LONG_EDGE_PX = 2400;
+const PMI_CAPTURE_MAX_LONG_EDGE_PX = 4096;
 
 export class PMIViewsWidget {
   constructor(viewer, { readOnly = false } = {}) {
@@ -82,6 +84,134 @@ export class PMIViewsWidget {
     const name = typeof view.viewName === 'string' ? view.viewName : (typeof view.name === 'string' ? view.name : '');
     const trimmed = String(name || '').trim();
     return trimmed || fallback;
+  }
+
+  _getViewerViewportMetrics() {
+    const dom = this.viewer?.renderer?.domElement || null;
+    const rect = dom?.getBoundingClientRect?.();
+    const width = Math.max(1, Number(rect?.width) || Number(dom?.clientWidth) || Number(dom?.width) || 1);
+    const height = Math.max(1, Number(rect?.height) || Number(dom?.clientHeight) || Number(dom?.height) || 1);
+    return { width, height };
+  }
+
+  _getSavedViewViewport(view) {
+    const viewport = view?.camera?.viewport;
+    const width = Number(viewport?.width);
+    const height = Number(viewport?.height);
+    if (!(width > 0) || !(height > 0)) return null;
+    return { width, height };
+  }
+
+  _getCaptureViewportMetrics(view) {
+    const source = this._getSavedViewViewport(view) || this._getViewerViewportMetrics();
+    const sourceWidth = Math.max(1, Number(source?.width) || 1);
+    const sourceHeight = Math.max(1, Number(source?.height) || 1);
+    const aspect = sourceWidth / sourceHeight;
+    const sourceLongEdge = Math.max(sourceWidth, sourceHeight);
+    const targetLongEdge = Math.max(
+      PMI_CAPTURE_MIN_LONG_EDGE_PX,
+      Math.min(PMI_CAPTURE_MAX_LONG_EDGE_PX, Math.round(sourceLongEdge)),
+    );
+
+    if (aspect >= 1) {
+      return {
+        width: targetLongEdge,
+        height: Math.max(1, Math.round(targetLongEdge / aspect)),
+      };
+    }
+    return {
+      width: Math.max(1, Math.round(targetLongEdge * aspect)),
+      height: targetLongEdge,
+    };
+  }
+
+  _updateViewportSensitiveRendering(width, height) {
+    const safeWidth = Math.max(1, Number(width) || 1);
+    const safeHeight = Math.max(1, Number(height) || 1);
+    try {
+      const scene = this.viewer?.partHistory?.scene || this.viewer?.scene || null;
+      scene?.traverse?.((obj) => {
+        const material = obj?.material;
+        if (!material) return;
+        const apply = (mat) => {
+          if (mat?.resolution && typeof mat.resolution.set === 'function') {
+            mat.resolution.set(safeWidth, safeHeight);
+          }
+        };
+        if (Array.isArray(material)) material.forEach(apply);
+        else apply(material);
+      });
+    } catch { /* ignore */ }
+    try { this.viewer?._updateOverlayDashSpacing?.(safeWidth, safeHeight); } catch { /* ignore */ }
+  }
+
+  async _withTemporaryCaptureViewport(viewport, fn) {
+    const renderer = this.viewer?.renderer || null;
+    if (!renderer || typeof fn !== 'function') return await fn(viewport);
+
+    const size = typeof renderer.getSize === 'function' ? renderer.getSize(new THREE.Vector2()) : null;
+    const originalWidth = Math.max(1, Number(size?.x) || Number(renderer.domElement?.width) || 1);
+    const originalHeight = Math.max(1, Number(size?.y) || Number(renderer.domElement?.height) || 1);
+    const originalPixelRatio = typeof renderer.getPixelRatio === 'function' ? renderer.getPixelRatio() : 1;
+
+    try {
+      if (typeof renderer.setPixelRatio === 'function') renderer.setPixelRatio(1);
+      renderer.setSize(viewport.width, viewport.height, false);
+      this._updateViewportSensitiveRendering(viewport.width, viewport.height);
+      return await fn(viewport);
+    } finally {
+      try {
+        if (typeof renderer.setPixelRatio === 'function') renderer.setPixelRatio(originalPixelRatio);
+        renderer.setSize(originalWidth, originalHeight, false);
+      } catch { /* ignore restore errors */ }
+      this._updateViewportSensitiveRendering(originalWidth, originalHeight);
+      try { this.viewer?.render?.(); } catch { /* ignore restore render */ }
+    }
+  }
+
+  async captureViewImageDataUrl(view, viewIndex, { hideViewCube = true } = {}) {
+    const viewer = this.viewer;
+    const canvas = viewer?.renderer?.domElement;
+    if (!viewer || !canvas) throw new Error('Viewer is not ready to export images');
+
+    const captureViewport = this._getCaptureViewportMetrics(view);
+    const originalSnapshot = captureCameraSnapshot(viewer.camera, {
+      controls: viewer.controls,
+      viewport: this._getViewerViewportMetrics(),
+    });
+    const originalWireframe = this._detectWireframe(viewer.scene);
+    const previousActive = this._getActiveViewIndex();
+
+    let dataUrl = null;
+    const runCapture = async () => {
+      await this._withTemporaryCaptureViewport(captureViewport, async (activeViewport) => {
+        let overlay = null;
+        try {
+          this._applyView(view, { index: viewIndex, suppressActive: true, viewport: activeViewport });
+          overlay = await this._buildExportAnnotations(view);
+          await this._renderAndWait(2);
+          dataUrl = await this._captureCanvasImage(overlay?.labels || []);
+        } finally {
+          try { overlay?.cleanup?.(); } catch { /* ignore */ }
+        }
+      });
+    };
+
+    try {
+      if (hideViewCube) {
+        await this._withViewCubeHidden(runCapture);
+      } else {
+        await runCapture();
+      }
+    } finally {
+      this._restoreViewState(originalSnapshot, originalWireframe);
+      if (previousActive != null) {
+        this._setActiveViewIndex(previousActive);
+        this._renderList();
+      }
+    }
+
+    return dataUrl;
   }
 
   // ---- UI ----
@@ -362,7 +492,10 @@ export class PMIViewsWidget {
       const v = this.viewer;
       const cam = v?.camera;
       if (!cam) return;
-      const cameraSnap = captureCameraSnapshot(cam, { controls: this.viewer?.controls });
+      const cameraSnap = captureCameraSnapshot(cam, {
+        controls: this.viewer?.controls,
+        viewport: this._getViewerViewportMetrics(),
+      });
       if (!cameraSnap) return;
       const fallbackIndex = Array.isArray(this.views) ? this.views.length : 0;
       const defaultName = `View ${fallbackIndex + 1}`;
@@ -411,39 +544,22 @@ export class PMIViewsWidget {
 
     const captures = [];
     try {
-      await this._withViewCubeHidden(async () => {
-        this._exportingImages = true;
-        const originalSnapshot = captureCameraSnapshot(viewer.camera, { controls: viewer.controls });
-        const originalWireframe = this._detectWireframe(viewer.scene);
-        const previousActive = this._getActiveViewIndex();
-
-        try {
-          for (let i = 0; i < views.length; i++) {
-            const view = views[i];
-            const name = this._resolveViewName(view, i);
-            this._applyView(view, { index: i, suppressActive: true });
-            const overlay = await this._buildExportAnnotations(view);
-            await this._renderAndWait(2);
-            const dataUrl = await this._captureCanvasImage(overlay.labels);
-            if (!dataUrl) {
-              throw new Error(`Failed to capture image for view "${name}"`);
-            }
-            captures.push({ name, dataUrl });
-            try { overlay.cleanup?.(); } catch { }
-          }
-        } finally {
-          this._restoreViewState(originalSnapshot, originalWireframe);
-          if (previousActive != null) {
-            this._setActiveViewIndex(previousActive);
-            this._renderList();
-          }
-          this._exportingImages = false;
+      this._exportingImages = true;
+      for (let i = 0; i < views.length; i++) {
+        const view = views[i];
+        const name = this._resolveViewName(view, i);
+        const dataUrl = await this.captureViewImageDataUrl(view, i);
+        if (!dataUrl) {
+          throw new Error(`Failed to capture image for view "${name}"`);
         }
-      });
+        captures.push({ name, dataUrl });
+      }
     } catch (err) {
       console.error('PMI export failed:', err);
       alert(`Export failed: ${err?.message || err}`);
       return;
+    } finally {
+      this._exportingImages = false;
     }
 
     if (!captures.length) {
@@ -500,35 +616,20 @@ export class PMIViewsWidget {
     if (!viewer || !canvas) throw new Error('Viewer is not ready to export images');
 
     const captures = [];
-    await this._withViewCubeHidden(async () => {
-        this._exportingImages = true;
-        const originalSnapshot = captureCameraSnapshot(viewer.camera, { controls: viewer.controls });
-        const originalWireframe = this._detectWireframe(viewer.scene);
-        const previousActive = this._getActiveViewIndex();
-
-        try {
-          for (let i = 0; i < views.length; i++) {
-            const view = views[i];
-            const name = this._resolveViewName(view, i);
-            this._applyView(view, { index: i, suppressActive: true });
-            const overlay = await this._buildExportAnnotations(view);
-            await this._renderAndWait(2);
-            const dataUrl = await this._captureCanvasImage(overlay.labels);
-            if (!dataUrl) {
-              throw new Error(`Failed to capture image for view "${name}"`);
-            }
-            captures.push({ name, dataUrl });
-            try { overlay.cleanup?.(); } catch { }
-          }
-        } finally {
-          this._restoreViewState(originalSnapshot, originalWireframe);
-          if (previousActive != null) {
-            this._setActiveViewIndex(previousActive);
-            this._renderList();
-          }
-          this._exportingImages = false;
+    this._exportingImages = true;
+    try {
+      for (let i = 0; i < views.length; i++) {
+        const view = views[i];
+        const name = this._resolveViewName(view, i);
+        const dataUrl = await this.captureViewImageDataUrl(view, i);
+        if (!dataUrl) {
+          throw new Error(`Failed to capture image for view "${name}"`);
         }
-      });
+        captures.push({ name, dataUrl });
+      }
+    } finally {
+      this._exportingImages = false;
+    }
     const files = {};
     captures.forEach(({ name, dataUrl }) => {
       const fileName = `${this._safeFileName(name, 'view')}.png`;
@@ -955,20 +1056,15 @@ export class PMIViewsWidget {
     } catch { /* ignore restore errors */ }
   }
 
-  _applyView(view, { index = null, suppressActive = false } = {}) {
+  _applyView(view, { index = null, suppressActive = false, viewport = null } = {}) {
     try {
       const v = this.viewer;
       const cam = v?.camera;
       if (!cam || !view || !view.camera) return;
 
       const ctrls = this.viewer?.controls;
-      const dom = this.viewer?.renderer?.domElement;
-      const rect = dom?.getBoundingClientRect?.();
-      const viewport = {
-        width: rect?.width || dom?.width || 1,
-        height: rect?.height || dom?.height || 1,
-      };
-      const applied = applyCameraSnapshot(cam, view.camera, { controls: ctrls, respectParent: true, syncControls: false, viewport });
+      const resolvedViewport = viewport || this._getViewerViewportMetrics();
+      const applied = applyCameraSnapshot(cam, view.camera, { controls: ctrls, respectParent: true, syncControls: false, viewport: resolvedViewport });
 
       if (!applied) {
         // Fallback for legacy snapshots that somehow failed the structured restore
@@ -994,11 +1090,11 @@ export class PMIViewsWidget {
             }
           } catch { /* ignore */ }
         }
-        adjustOrthographicFrustum(cam, legacy?.projection || null, viewport);
+        adjustOrthographicFrustum(cam, legacy?.projection || null, resolvedViewport);
         cam.updateMatrixWorld(true);
         try { ctrls?.update?.(); } catch {}
       }
-      adjustOrthographicFrustum(cam, view.camera?.projection || null, viewport);
+      adjustOrthographicFrustum(cam, view.camera?.projection || null, resolvedViewport);
       try { ctrls?.updateMatrixState?.(); } catch {}
       // Apply persisted view settings (e.g., wireframe) if present
       try {
@@ -1059,7 +1155,10 @@ export class PMIViewsWidget {
       const camera = this.viewer?.camera;
       if (!camera) return;
       const ctrls = this.viewer?.controls;
-      const snap = captureCameraSnapshot(camera, { controls: ctrls });
+      const snap = captureCameraSnapshot(camera, {
+        controls: ctrls,
+        viewport: this._getViewerViewportMetrics(),
+      });
       if (!snap) return;
 
       let updated = false;

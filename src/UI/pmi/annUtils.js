@@ -30,6 +30,14 @@ function extractVector3(src) {
   return null;
 }
 
+function normalizeViewportMetrics(viewport) {
+  if (!viewport || typeof viewport !== 'object') return null;
+  const width = Number(viewport.width);
+  const height = Number(viewport.height);
+  if (!(width > 0) || !(height > 0)) return null;
+  return { width, height };
+}
+
 function syncArcballControls(camera, controls, targetArray, snapshot, syncControls) {
   if (!controls) return;
 
@@ -174,6 +182,7 @@ function captureProjection(camera) {
     } : { enabled: false };
     return {
       kind: 'perspective',
+      aspect: Number.isFinite(camera.aspect) && camera.aspect > 0 ? camera.aspect : undefined,
       fov: camera.fov,
       near: camera.near,
       far: camera.far,
@@ -196,6 +205,9 @@ function captureProjection(camera) {
     } : { enabled: false };
     return {
       kind: 'orthographic',
+      aspect: Number.isFinite(camera.top - camera.bottom) && Math.abs(camera.top - camera.bottom) > 1e-9
+        ? (camera.right - camera.left) / (camera.top - camera.bottom)
+        : undefined,
       left: camera.left,
       right: camera.right,
       top: camera.top,
@@ -212,6 +224,41 @@ function captureProjection(camera) {
     near: camera.near ?? 0.1,
     far: camera.far ?? 2000,
   };
+}
+
+function fitPerspectiveProjection(camera, projection = null, viewport = null, sourceViewport = null) {
+  try {
+    if (!camera?.isPerspectiveCamera) return;
+    const targetViewport = normalizeViewportMetrics(viewport);
+    if (!targetViewport) return;
+
+    const targetAspect = targetViewport.width / targetViewport.height;
+    if (!(targetAspect > 1e-9)) return;
+    camera.aspect = targetAspect;
+
+    const sourceMetrics = normalizeViewportMetrics(sourceViewport);
+    const sourceAspect = sourceMetrics
+      ? (sourceMetrics.width / sourceMetrics.height)
+      : (Number.isFinite(projection?.aspect) && projection.aspect > 1e-9 ? projection.aspect : null);
+
+    if (!(sourceAspect > 1e-9) || targetAspect >= sourceAspect) return;
+
+    const baseFov = Number.isFinite(projection?.fov) ? projection.fov : camera.fov;
+    const zoom = Number.isFinite(projection?.zoom) && projection.zoom > 0
+      ? projection.zoom
+      : (Number.isFinite(camera.zoom) && camera.zoom > 0 ? camera.zoom : 1);
+    if (!(baseFov > 0) || baseFov >= 179) return;
+
+    const sourceTanY = Math.tan(THREE.MathUtils.degToRad(baseFov) * 0.5) / zoom;
+    const sourceTanX = sourceTanY * sourceAspect;
+    const targetTanY = sourceTanX / targetAspect;
+    if (!(targetTanY > 0)) return;
+
+    const fittedFov = THREE.MathUtils.radToDeg(2 * Math.atan(targetTanY * zoom));
+    if (Number.isFinite(fittedFov) && fittedFov > baseFov) {
+      camera.fov = Math.min(179, fittedFov);
+    }
+  } catch { /* ignore framing errors */ }
 }
 
 function applyProjection(camera, projection, overrideAspect = null) {
@@ -269,12 +316,12 @@ function applyProjection(camera, projection, overrideAspect = null) {
   if (Number.isFinite(projection.zoom)) camera.zoom = projection.zoom;
 }
 
-export function captureCameraSnapshot(camera, { controls = null } = {}) {
+export function captureCameraSnapshot(camera, { controls = null, viewport = null } = {}) {
   if (!camera || !camera.isCamera) return null;
   try { camera.updateMatrixWorld(true); } catch {}
 
   const snapshot = {
-    version: 2,
+    version: 3,
     type: resolveCameraType(camera),
     worldMatrix: camera.matrixWorld?.toArray?.() ?? null,
     projection: captureProjection(camera),
@@ -327,6 +374,11 @@ export function captureCameraSnapshot(camera, { controls = null } = {}) {
     snapshot.userData = safeCloneJSON(camera.userData);
   }
 
+  const viewportMetrics = normalizeViewportMetrics(viewport);
+  if (viewportMetrics) {
+    snapshot.viewport = viewportMetrics;
+  }
+
   return snapshot;
 }
 
@@ -358,6 +410,7 @@ export function applyCameraSnapshot(camera, inputSnapshot, {
     applyProjection(camera, snapshot.projection, overrideAspect);
   } catch {}
 
+  fitPerspectiveProjection(camera, snapshot?.projection, viewport, snapshot?.viewport || null);
   adjustOrthographicFrustum(camera, snapshot?.projection, viewport);
 
   if (typeof snapshot.layers === 'number' && camera.layers) {
@@ -479,26 +532,30 @@ export function adjustOrthographicFrustum(camera, projection = null, viewport = 
     const right = Number.isFinite(proj.right) ? proj.right : camera.right;
 
     const spanY = (Number.isFinite(top) && Number.isFinite(bottom)) ? (top - bottom) : (camera.top - camera.bottom);
+    const spanX = (Number.isFinite(left) && Number.isFinite(right)) ? (right - left) : (camera.right - camera.left);
     if (!Number.isFinite(spanY) || Math.abs(spanY) < 1e-9) return;
+    if (!Number.isFinite(spanX) || Math.abs(spanX) < 1e-9) return;
 
     const centerY = (Number.isFinite(top) && Number.isFinite(bottom)) ? (top + bottom) * 0.5 : (camera.top + camera.bottom) * 0.5;
     const centerX = (Number.isFinite(left) && Number.isFinite(right)) ? (left + right) * 0.5 : (camera.left + camera.right) * 0.5;
 
-    let aspect = (Number.isFinite(left) && Number.isFinite(right)) ? (right - left) / spanY : (camera.right - camera.left) / spanY;
-    const vpW = viewport && Number.isFinite(viewport.width) ? viewport.width : null;
-    const vpH = viewport && Number.isFinite(viewport.height) ? viewport.height : null;
-    if (vpW && vpH && vpH > 0) {
-      aspect = vpW / vpH;
+    const targetViewport = normalizeViewportMetrics(viewport);
+    let aspect = targetViewport ? (targetViewport.width / targetViewport.height) : null;
+    if (!(aspect > 1e-9)) {
+      aspect = Number.isFinite(proj.aspect) && proj.aspect > 1e-9 ? proj.aspect : (spanX / spanY);
     }
     if (!Number.isFinite(aspect) || aspect <= 1e-9) aspect = 1;
 
-    const halfHeight = spanY * 0.5;
-    const halfWidth = halfHeight * aspect;
+    const halfHeight = Math.abs(spanY) * 0.5;
+    const halfWidth = Math.abs(spanX) * 0.5;
+    const fittedHalfWidth = Math.max(halfWidth, halfHeight * aspect);
+    const fittedHalfHeight = Math.max(halfHeight, halfWidth / aspect);
+    const signY = spanY >= 0 ? 1 : -1;
 
-    camera.top = centerY + halfHeight;
-    camera.bottom = centerY - halfHeight;
-    camera.left = centerX - halfWidth;
-    camera.right = centerX + halfWidth;
+    camera.top = centerY + (fittedHalfHeight * signY);
+    camera.bottom = centerY - (fittedHalfHeight * signY);
+    camera.left = centerX - fittedHalfWidth;
+    camera.right = centerX + fittedHalfWidth;
     camera.updateProjectionMatrix();
   } catch {}
 }
