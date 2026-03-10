@@ -92,6 +92,9 @@ import {
     test_sketch_face_attachment_alignment,
 } from './test_sketch_face_attachment_alignment.js';
 import {
+    test_sketch_solver_brep_io_backend_basic_constraints,
+    test_sketch_solver_brep_io_equal_distance_reference_segment_stays_put_with_angle,
+    test_sketch_solver_brep_io_backend_line_to_point_distance,
     test_sketch_solver_distance_slide_large_drop_settles_single_solve,
     test_sketch_solver_line_to_point_distance_constraint,
     test_sketch_solver_topology_coincident_chain,
@@ -220,6 +223,9 @@ export const testFunctions = [
     { test: test_sketch_solver_topology_coincident_chain_multi_step, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_solver_distance_slide_large_drop_settles_single_solve, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_solver_line_to_point_distance_constraint, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sketch_solver_brep_io_backend_basic_constraints, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sketch_solver_brep_io_backend_line_to_point_distance, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sketch_solver_brep_io_equal_distance_reference_segment_stays_put_with_angle, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_offsetShellGrouping, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     {
         test: test_extrude_negative_distance_cap_alignment,

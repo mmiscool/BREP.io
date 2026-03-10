@@ -5,6 +5,12 @@ import { SelectionState } from '../../UI/SelectionState.js';
 import { renderButtonField } from '../../UI/featureDialogWidgets/buttonField.js';
 import { deepClone } from '../../utils/deepClone.js';
 import { ConstraintEngine } from './sketchSolver2D/ConstraintEngine.js';
+import { BrepIoConstraintEngine } from './sketchSolver2D/engines/BrepIoConstraintEngine.js';
+import {
+    DEFAULT_SKETCH_SOLVER_ENGINE,
+    SKETCH_SOLVER_ENGINES,
+    normalizeSketchSolverEngine,
+} from './sketchSolver2D/engines/solverEngines.js';
 const THREE = BREP.THREE;
 
 function hasReferenceValue(value) {
@@ -176,6 +182,16 @@ function normalizeSketchPointAttributes(sketch, externalRefPointIds = null) {
             p.construction = isOrigin || isExternalRef;
         }
     }
+}
+
+function resolveSketchSolverEngine(featureLike) {
+    const rawEngine = featureLike?.persistentData?.sketchSolverEngine
+        ?? featureLike?.persistentData?.sketchSolverBackend
+        ?? featureLike?.persistentData?.sketchSolverSettings?.engine
+        ?? featureLike?.persistentData?.sketchSolverSettings?.backend
+        ?? featureLike?.persistentData?.solverBackend
+        ?? DEFAULT_SKETCH_SOLVER_ENGINE;
+    return normalizeSketchSolverEngine(rawEngine);
 }
 
 function computeObjectWorldCentroid(object) {
@@ -565,6 +581,7 @@ export class SketchFeature {
         let sketch = this.persistentData?.sketch || { points: [{ id:0, x:0, y:0, fixed:true, construction:true, externalReference:false }], geometries: [], constraints: [{ id:0, type:"⏚", points:[0]}] };
         normalizeSketchPointAttributes(sketch, externalRefPointIds);
         this.persistentData = this.persistentData || {};
+        this.persistentData.sketchSolverEngine = resolveSketchSolverEngine(this);
         this.persistentData.lastProfileDiagnostics = null;
         const solveSketchForFeature = (inputSketch, {
             iterations = 500,
@@ -575,8 +592,12 @@ export class SketchFeature {
             let prevSig = null;
             const passCount = Math.max(1, Number(maxPasses) || 1);
             const iters = Math.max(1, Number(iterations) || 500);
+            const solverEngine = resolveSketchSolverEngine(this);
+            const EngineClass = solverEngine === SKETCH_SOLVER_ENGINES.BREP_IO_2D
+                ? BrepIoConstraintEngine
+                : ConstraintEngine;
             for (let pass = 0; pass < passCount; pass++) {
-                const engine = new ConstraintEngine(JSON.stringify(solved));
+                const engine = new EngineClass(JSON.stringify(solved));
                 solved = engine.solve(iters);
                 const pointSig = JSON.stringify(solved?.points || []);
                 const hasConstraintErrors = Array.isArray(solved?.constraints)
