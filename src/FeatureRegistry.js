@@ -35,6 +35,7 @@ import { OffsetShellFeature } from './features/offsetShell/OffsetShellFeature.js
 import { OffsetFaceFeature } from './features/offsetFace/OffsetFaceFeature.js';
 import { NurbsFaceSolidFeature } from './features/nurbsFaceSolid/NurbsFaceSolidFeature.js';
 import { PolygonSolidFeature } from './features/polygonSolid/PolygonSolidFeature.js';
+import { SmoothWithSubdivisionFeature } from './features/smoothWithSubdivision/SmoothWithSubdivisionFeature.js';
 import { SplineFeature } from './features/spline/SplineFeature.js';
 import { SheetMetalTabFeature } from './features/sheetMetal/SheetMetalTabFeature.js';
 import { SheetMetalContourFlangeFeature } from './features/sheetMetal/SheetMetalContourFlangeFeature.js';
@@ -97,6 +98,7 @@ export class FeatureRegistry {
     this.register(OffsetFaceFeature);
     this.register(NurbsFaceSolidFeature);
     this.register(PolygonSolidFeature);
+    this.register(SmoothWithSubdivisionFeature);
     this.register(SheetMetalTabFeature);
     this.register(SheetMetalContourFlangeFeature);
     this.register(SheetMetalFlangeFeature);
@@ -143,6 +145,9 @@ export class FeatureRegistry {
     // Edge smooth spacing variations
     this.aliases.set('EDGE SMOOTH', EdgeSmoothFeature);
     this.aliases.set('EDGESMOOTH', EdgeSmoothFeature);
+    // Smooth With Subdivision spacing variations
+    this.aliases.set('SMOOTHWITHSUBDIVISION', SmoothWithSubdivisionFeature);
+    this.aliases.set('SMOOTH SUBDIVISION', SmoothWithSubdivisionFeature);
   }
 
   register(FeatureClass) {

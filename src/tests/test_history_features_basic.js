@@ -88,6 +88,11 @@ export async function test_history_features_basic(partHistory) {
   remesh.inputParams.mode = "Simplify";
   remesh.inputParams.tolerance = 0.05;
 
+  const smoothSubdivisionBase = await partHistory.newFeature("P.CU");
+  const smoothSubdivision = await partHistory.newFeature("SWS");
+  smoothSubdivision.inputParams.targetSolid = smoothSubdivisionBase.inputParams.featureID;
+  smoothSubdivision.inputParams.subdivisionLoops = 1;
+
   const xformBase = await partHistory.newFeature("P.CU");
   const xform = await partHistory.newFeature("XFORM");
   xform.inputParams.solids = [xformBase.inputParams.featureID];

@@ -103,6 +103,10 @@ import {
 import { afterRun_solidMetrics, test_solidMetrics } from './test_solidMetrics.js';
 import { test_stlLoader } from './test_stlLoader.js';
 import {
+    afterRun_smooth_with_subdivision_replaces_source_solid,
+    test_smooth_with_subdivision_replaces_source_solid,
+} from './test_smooth_with_subdivision.js';
+import {
     afterRun_sweepFace_pathAlign_multi_loop_islands,
     test_SweepFace,
     test_SweepFace_pathAlign_multi_loop_islands,
@@ -264,6 +268,7 @@ export const testFunctions = [
     { test: test_edge_smooth_constraints_prevent_triangle_foldback, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_edge_smooth_whole_solid_selection, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_edge_smooth_face_selection, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_smooth_with_subdivision_replaces_source_solid, afterRun: afterRun_smooth_with_subdivision_replaces_source_solid, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_hole_through, afterRun: afterRun_hole_through, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_countersink, afterRun: afterRun_hole_countersink, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_counterbore, afterRun: afterRun_hole_counterbore, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
