@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import { generateSTEP } from '../../exporters/step.js';
 import { generate3MF } from '../../exporters/threeMF.js';
+import { generateSheetsPdfBytes } from '../sheets/Sheet2DEditorWindow.js';
 
 async function _captureThumbnail(viewer, size = 256) {
   try {
@@ -531,10 +532,22 @@ function _openExportDialog(viewer) {
   stepEdgesWrap.appendChild(document.createTextNode('Export edges as polylines'));
   rowStepEdges.appendChild(labStepEdges); rowStepEdges.appendChild(stepEdgesWrap);
 
+  const row3mfPdf = document.createElement('div'); row3mfPdf.className = 'exp-row';
+  const lab3mfPdf = document.createElement('div'); lab3mfPdf.className = 'exp-label'; lab3mfPdf.textContent = '3MF';
+  const chk3mfPdf = document.createElement('input'); chk3mfPdf.type = 'checkbox'; chk3mfPdf.checked = true;
+  const threeMfPdfWrap = document.createElement('label');
+  threeMfPdfWrap.style.display = 'flex';
+  threeMfPdfWrap.style.alignItems = 'center';
+  threeMfPdfWrap.style.gap = '6px';
+  threeMfPdfWrap.appendChild(chk3mfPdf);
+  threeMfPdfWrap.appendChild(document.createTextNode('Embed 2D sheets PDF'));
+  row3mfPdf.appendChild(lab3mfPdf); row3mfPdf.appendChild(threeMfPdfWrap);
+
   // Toggle unit row visibility based on format
   const updateUnitVisibility = () => {
     const fmt = selFmt.value;
     rowUnit.style.display = (fmt === 'stl' || fmt === '3mf' || fmt === 'obj' || fmt === 'step') ? 'flex' : 'none';
+    row3mfPdf.style.display = (fmt === '3mf') ? 'flex' : 'none';
     rowObjColors.style.display = (fmt === 'obj') ? 'flex' : 'none';
     rowTess.style.display = (fmt === 'step') ? 'flex' : 'none';
     rowStepFaces.style.display = (fmt === 'step') ? 'flex' : 'none';
@@ -586,6 +599,13 @@ function _openExportDialog(viewer) {
             additionalFiles = { ...(additionalFiles || {}), ...viewFiles };
           }
         } catch {}
+        if (chk3mfPdf.checked) {
+          const sheetsPdf = await generateSheetsPdfBytes(viewer);
+          if (sheetsPdf instanceof Uint8Array && sheetsPdf.length) {
+            additionalFiles = { ...(additionalFiles || {}), 'sheets.pdf': sheetsPdf };
+            modelMetadata = { ...(modelMetadata || {}), sheetsPdfPath: '/sheets.pdf' };
+          }
+        }
 
         // Gracefully handle non-manifold solids by skipping them
         const solidsForExport = [];
@@ -731,6 +751,7 @@ function _openExportDialog(viewer) {
   modal.appendChild(rowName);
   modal.appendChild(rowFmt);
   modal.appendChild(rowUnit);
+  modal.appendChild(row3mfPdf);
   modal.appendChild(rowObjColors);
   modal.appendChild(rowTess);
   modal.appendChild(rowStepFaces);

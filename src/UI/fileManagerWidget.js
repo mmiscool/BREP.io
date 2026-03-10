@@ -26,6 +26,7 @@ import {
 } from '../utils/browserStorage.js';
 import { CADmaterials } from './CADmaterials.js';
 import { HISTORY_COLLECTION_REFRESH_EVENT } from './history/HistoryCollectionWidget.js';
+import { generateSheetsPdfBytes } from './sheets/Sheet2DEditorWindow.js';
 import { WorkspaceFileBrowserWidget } from './WorkspaceFileBrowserWidget.js';
 
 const THUMBNAIL_CAPTURE_SIZE = 240;
@@ -964,6 +965,17 @@ export class FileManagerWidget {
         }
       } catch (err) {
         console.error('Failed to embed PMI view images:', err);
+      }
+      try {
+        this._logSaveProgress('Generating 2D sheets PDF...');
+        const sheetsPdf = await generateSheetsPdfBytes(this.viewer);
+        if (sheetsPdf instanceof Uint8Array && sheetsPdf.length) {
+          additionalFiles = { ...(additionalFiles || {}), 'sheets.pdf': sheetsPdf };
+          modelMetadata = { ...(modelMetadata || {}), sheetsPdfPath: '/sheets.pdf' };
+        }
+      } catch (err) {
+        console.error('Failed to embed 2D sheets PDF:', err);
+        throw err;
       }
       // Capture a higher-resolution thumbnail of the current view
       let thumbnail = null;

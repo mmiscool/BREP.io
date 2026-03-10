@@ -4650,10 +4650,10 @@ export class Sheet2DEditorWindow {
     });
   }
 
-  _downloadPdfDocument(doc, filename) {
-    if (!doc) return;
+  _downloadPdfBytes(bytes, filename) {
+    if (!(bytes instanceof Uint8Array) || !bytes.length) return;
     const safeName = String(filename || "brep-io-sheets.pdf").trim() || "brep-io-sheets.pdf";
-    const blob = doc.output("blob");
+    const blob = new Blob([bytes], { type: "application/pdf" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -4678,31 +4678,34 @@ export class Sheet2DEditorWindow {
     });
   }
 
-  async _exportSheetsToPdf() {
-    if (this._isExportingPdf) return;
-    this._closeToolbarPopover();
-    this._hideContextMenu();
-    try {
-      if (this.root?.contains?.(document.activeElement) && typeof document.activeElement?.blur === "function") {
-        document.activeElement.blur();
+  async generatePdfBytes({ onProgress = null } = {}) {
+    this._refreshPmiViews({ bumpRevision: true });
+    const emitProgress = async (payload, frameCount = 1) => {
+      if (typeof onProgress === "function") {
+        try { onProgress(payload); } catch { }
       }
-    } catch { }
-    await this._waitForPaint();
+      await this._waitForPaint(frameCount);
+    };
 
-    this._setPdfExportBusy(true);
-    this._resetPdfExportProgress();
-    await this._waitForPaint(2);
-
+    await emitProgress({
+      detail: "Refreshing PMI views before export",
+      hint: "Updating referenced PMI images",
+      completed: 0,
+      total: 1,
+      sheet: null,
+      sheetLabel: "Current sheet",
+    });
     try {
-      this._setPdfExportProgress({
-        detail: "Refreshing PMI views before export",
-        hint: "Updating referenced PMI images",
-        completed: 0,
-        total: 1,
-      });
-      await this._waitForPaint();
       await this._refreshAllPmiInsetImages();
     } catch { }
+
+    const manager = this._getManager();
+    const sheets = typeof manager?.toSerializable === "function"
+      ? manager.toSerializable()
+      : deepClone(manager?.getSheets?.() || []);
+    if (!Array.isArray(sheets) || sheets.length === 0) {
+      return null;
+    }
 
     const host = document.createElement("div");
     host.className = "sheet-slides-pdf-host";
@@ -4716,34 +4719,16 @@ export class Sheet2DEditorWindow {
     document.body.appendChild(host);
 
     try {
-      this._commitSheetDraft("pdf-export");
-      const manager = this._getManager();
-      const sheets = typeof manager?.toSerializable === "function"
-        ? manager.toSerializable()
-        : deepClone(manager?.getSheets?.() || []);
-      if (!Array.isArray(sheets) || sheets.length === 0) {
-        this._setStatus("No sheets available for PDF export");
-        return;
-      }
-
-      this._setPdfExportProgress({
+      await emitProgress({
         detail: "Building sheet previews",
         hint: "Preparing pages for PDF export",
         completed: 0,
         total: sheets.length,
         sheet: sheets[0] || null,
         sheetLabel: String(sheets[0]?.name || "Sheet 1"),
-      });
-      await this._waitForPaint(2);
+      }, 2);
 
       let doc = null;
-      const baseName = String(this.viewer?.partHistory?.name || "brep-io-sheets")
-        .trim()
-        .replace(/[\\/:*?"<>|]+/g, "_")
-        .replace(/\s+/g, "_")
-        .replace(/_+/g, "_")
-        .replace(/^_+|_+$/g, "") || "brep-io-sheets";
-
       for (let index = 0; index < sheets.length; index += 1) {
         const sheet = sheets[index];
         const pageNode = this._buildPdfPageNode(sheet);
@@ -4752,15 +4737,14 @@ export class Sheet2DEditorWindow {
 
         await this._waitForImagesInNode(pageNode);
         this._applyExportMediaLayouts(pageNode);
-        this._setPdfExportProgress({
+        await emitProgress({
           detail: `Rendering sheet ${index + 1} of ${sheets.length}`,
           hint: "Rasterizing the current sheet",
           completed: index,
           total: sheets.length,
           sheet,
           sheetLabel: String(sheet?.name || `Sheet ${index + 1}`),
-        });
-        await this._waitForPaint(2);
+        }, 2);
 
         const widthIn = Math.max(0.1, toFiniteNumber(sheet?.widthIn, 11));
         const heightIn = Math.max(0.1, toFiniteNumber(sheet?.heightIn, 8.5));
@@ -4781,7 +4765,7 @@ export class Sheet2DEditorWindow {
         doc.addImage(canvas, "PNG", 0, 0, widthIn, heightIn);
         host.removeChild(pageNode);
 
-        this._setPdfExportProgress({
+        await emitProgress({
           detail: `Added sheet ${index + 1} of ${sheets.length}`,
           hint: "Assembling the final PDF document",
           completed: index + 1,
@@ -4789,15 +4773,11 @@ export class Sheet2DEditorWindow {
           sheet,
           sheetLabel: String(sheet?.name || `Sheet ${index + 1}`),
         });
-        await this._waitForPaint();
       }
 
-      if (!doc) {
-        this._setStatus("No sheets available for PDF export");
-        return;
-      }
+      if (!doc) return null;
 
-      this._setPdfExportProgress({
+      await emitProgress({
         detail: "Preparing download",
         hint: "Writing the final PDF file",
         completed: sheets.length,
@@ -4805,15 +4785,64 @@ export class Sheet2DEditorWindow {
         sheet: sheets[sheets.length - 1] || null,
         sheetLabel: String(sheets[sheets.length - 1]?.name || `Sheet ${sheets.length}`),
       });
-      await this._waitForPaint();
 
-      this._downloadPdfDocument(doc, `${baseName}.pdf`);
-      this._setStatus(`PDF exported for ${sheets.length} sheet${sheets.length === 1 ? "" : "s"}`);
+      const pdfBuffer = doc.output("arraybuffer");
+      if (pdfBuffer instanceof ArrayBuffer) {
+        return new Uint8Array(pdfBuffer);
+      }
+      if (ArrayBuffer.isView(pdfBuffer)) {
+        return new Uint8Array(pdfBuffer.buffer.slice(pdfBuffer.byteOffset, pdfBuffer.byteOffset + pdfBuffer.byteLength));
+      }
+      return new Uint8Array();
+    } finally {
+      try { host.remove(); } catch { }
+    }
+  }
+
+  async _preparePdfExportState() {
+    this._closeToolbarPopover();
+    this._hideContextMenu();
+    try {
+      const active = document.activeElement;
+      if (this.root?.contains?.(active) && typeof active?.blur === "function") {
+        active.blur();
+      }
+    } catch { }
+    await this._waitForPaint();
+    this._commitSheetDraft("pdf-export");
+    await this._waitForPaint(2);
+  }
+
+  async _exportSheetsToPdf() {
+    if (this._isExportingPdf) return;
+    await this._preparePdfExportState();
+    this._setPdfExportBusy(true);
+    this._resetPdfExportProgress();
+
+    try {
+      const bytes = await this.generatePdfBytes({
+        onProgress: (payload) => this._setPdfExportProgress(payload),
+      });
+      if (!(bytes instanceof Uint8Array) || !bytes.length) {
+        this._setStatus("No sheets available for PDF export");
+        return;
+      }
+
+      const baseName = String(this.viewer?.partHistory?.name || "brep-io-sheets")
+        .trim()
+        .replace(/[\\/:*?"<>|]+/g, "_")
+        .replace(/\s+/g, "_")
+        .replace(/_+/g, "_")
+        .replace(/^_+|_+$/g, "") || "brep-io-sheets";
+
+      this._downloadPdfBytes(bytes, `${baseName}.pdf`);
+      const manager = this._getManager();
+      const count = manager?.getSheets?.()?.length || 0;
+      this._setStatus(`PDF exported for ${count} sheet${count === 1 ? "" : "s"}`);
     } catch (error) {
       console.error("Failed to export sheets PDF", error);
       this._setStatus("PDF export failed");
     } finally {
-      try { host.remove(); } catch { }
       this._setPdfExportBusy(false);
       this._resetPdfExportProgress();
     }
@@ -9260,5 +9289,24 @@ export class Sheet2DEditorWindow {
       }
     `;
     document.head.appendChild(style);
+  }
+}
+
+export async function generateSheetsPdfBytes(viewer, options = {}) {
+  const candidate = viewer?._sheet2DEditorWindow || null;
+  const active = candidate
+    && candidate.viewer === viewer
+    && typeof candidate.generatePdfBytes === "function"
+    && typeof candidate._preparePdfExportState === "function"
+    ? candidate
+    : null;
+  const exporter = active || new Sheet2DEditorWindow(viewer);
+  try {
+    await exporter._preparePdfExportState();
+    return await exporter.generatePdfBytes(options);
+  } finally {
+    if (!active) {
+      try { exporter.dispose(); } catch { }
+    }
   }
 }

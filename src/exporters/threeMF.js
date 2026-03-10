@@ -639,6 +639,7 @@ function contentTypesXML() {
     '  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
     '  <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>',
     '  <Default Extension="xml" ContentType="application/xml"/>',
+    '  <Default Extension="pdf" ContentType="application/pdf"/>',
     '  <Default Extension="png" ContentType="image/png"/>',
     '  <Default Extension="jpg" ContentType="image/jpeg"/>',
     '  <Default Extension="jpeg" ContentType="image/jpeg"/>',
@@ -647,7 +648,7 @@ function contentTypesXML() {
   ].join('\n');
 }
 
-function rootRelsXML({ thumbnailPath, viewImages } = {}) {
+function rootRelsXML({ thumbnailPath, viewImages, attachments } = {}) {
   const lines = [];
   lines.push('<?xml version="1.0" encoding="UTF-8"?>');
   lines.push('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">');
@@ -658,6 +659,13 @@ function rootRelsXML({ thumbnailPath, viewImages } = {}) {
   if (Array.isArray(viewImages) && viewImages.length) {
     viewImages.forEach((path, idx) => {
       const id = `relView${idx}`;
+      const target = path.startsWith('/') ? path : `/${path}`;
+      lines.push(`  <Relationship Target="${xmlEsc(target)}" Id="${xmlEsc(id)}" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/other"/>`);
+    });
+  }
+  if (Array.isArray(attachments) && attachments.length) {
+    attachments.forEach((path, idx) => {
+      const id = `relAttachment${idx}`;
       const target = path.startsWith('/') ? path : `/${path}`;
       lines.push(`  <Relationship Target="${xmlEsc(target)}" Id="${xmlEsc(id)}" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/other"/>`);
     });
@@ -703,16 +711,26 @@ export async function generate3MF(solids, opts = {}) {
   const extra = opts.additionalFiles && typeof opts.additionalFiles === 'object' ? opts.additionalFiles : null;
   // Root-level relationships (3D model and optional thumbnail)
   const viewRelPaths = [];
+  const attachmentRelPaths = [];
   if (extra) {
     for (const p of Object.keys(extra)) {
-      const lower = p.toLowerCase();
+      const path = String(p || "").replace(/^\/+/, "");
+      const lower = path.toLowerCase();
       if (lower.startsWith('views/') && lower.endsWith('.png')) {
-        const clean = p.startsWith('/') ? p : `/${p}`;
+        const clean = path.startsWith('/') ? path : `/${path}`;
         viewRelPaths.push(clean);
+      }
+      if (lower.endsWith('.pdf')) {
+        const clean = path.startsWith('/') ? path : `/${path}`;
+        attachmentRelPaths.push(clean);
       }
     }
   }
-  zip.folder('_rels').file('.rels', rootRelsXML({ thumbnailPath: thumbPkgRelPath, viewImages: viewRelPaths }));
+  zip.folder('_rels').file('.rels', rootRelsXML({
+    thumbnailPath: thumbPkgRelPath,
+    viewImages: viewRelPaths,
+    attachments: attachmentRelPaths,
+  }));
   if (extra) {
     for (const p of Object.keys(extra)) {
       const path = String(p).replace(/^\/+/, '');

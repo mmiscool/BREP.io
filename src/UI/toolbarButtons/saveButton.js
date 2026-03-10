@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { generate3MF } from '../../exporters/threeMF.js';
 import { localStorage as LS } from '../../idbStorage.js';
+import { generateSheetsPdfBytes } from '../sheets/Sheet2DEditorWindow.js';
 
 const THUMBNAIL_CAPTURE_SIZE = 240;
 
@@ -82,6 +83,11 @@ export function createSaveButton(viewer) {
           additionalFiles = { ...(additionalFiles || {}), ...viewFiles };
         }
       } catch { }
+      const sheetsPdf = await generateSheetsPdfBytes(viewer);
+      if (sheetsPdf instanceof Uint8Array && sheetsPdf.length) {
+        additionalFiles = { ...(additionalFiles || {}), 'sheets.pdf': sheetsPdf };
+        modelMetadata = { ...(modelMetadata || {}), sheetsPdfPath: '/sheets.pdf' };
+      }
 
       const thumbnail = await _captureThumbnail(THUMBNAIL_CAPTURE_SIZE);
       const bytes = await generate3MF([], { unit: 'millimeter', precision: 6, scale: 1, additionalFiles, modelMetadata, thumbnail });
