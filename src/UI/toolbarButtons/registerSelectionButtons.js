@@ -7,6 +7,7 @@ import { createEditOwningFeatureButton } from './editOwningFeatureButton.js';
 import {
   isSingleSelectionOfTypes,
   resolveOwningFeatureIdForSelection,
+  resolveSketchLikeFeatureIdForSelection,
   resolveSplineFeatureIdForSelection,
 } from '../../utils/selectionOwningFeature.js';
 
@@ -42,8 +43,7 @@ const getSingleSelectionComponent = (items, viewer) => {
   return component;
 };
 
-const getSplineFeatureEntry = (selection, viewer) => {
-  const featureId = resolveSplineFeatureIdForSelection(selection);
+const getFeatureEntryById = (featureId, viewer) => {
   if (!featureId) return null;
   const features = Array.isArray(viewer?.partHistory?.features) ? viewer.partHistory.features : [];
   const feature = features.find((item) => {
@@ -51,14 +51,24 @@ const getSplineFeatureEntry = (selection, viewer) => {
     return itemId != null && String(itemId) === String(featureId);
   }) || null;
   if (!feature) return null;
-  const typeKey = String(feature?.constructor?.shortName || feature?.constructor?.type || '').toUpperCase();
-  if (typeKey !== 'SP') return null;
   return { featureId: String(featureId), feature };
 };
 
-const isWireHarnessWorkbenchActive = (viewer) => {
-  const workbenchId = viewer?._getActiveWorkbenchId?.() || viewer?.partHistory?.activeWorkbench || null;
-  return String(workbenchId || '').toUpperCase() === 'WIRE_HARNESS';
+const getSplineFeatureEntry = (selection, viewer) => {
+  const featureId = resolveSplineFeatureIdForSelection(selection);
+  const entry = getFeatureEntryById(featureId, viewer);
+  if (!entry) return null;
+  const typeKey = String(entry.feature?.constructor?.shortName || entry.feature?.constructor?.type || '').toUpperCase();
+  if (typeKey !== 'SP') return null;
+  return entry;
+};
+
+const getSketchLikeFeatureEntry = (selection, viewer) => {
+  const featureId = resolveSketchLikeFeatureIdForSelection(selection);
+  if (!featureId) return null;
+  const entry = getFeatureEntryById(featureId, viewer);
+  if (!entry) return null;
+  return entry;
 };
 
 const revealHistoryEntry = async (viewer, featureId) => {
@@ -195,22 +205,22 @@ export function registerSelectionToolbarButtons(viewer) {
 
   try {
     SelectionFilter.registerSelectionAction({
-      id: 'selection-action-edit-spline',
-      label: 'Edit spline',
-      title: 'Open the selected spline in history for editing',
+      id: 'selection-action-edit-sketch-like-feature',
+      label: 'Edit feature',
+      title: 'Open the selected sketch-like feature in history for editing',
       onClick: async () => {
         const selection = SelectionFilter.getSelectedObjects();
-        const entry = getSplineFeatureEntry(selection, viewer);
+        const entry = getSketchLikeFeatureEntry(selection, viewer);
         if (!entry) {
-          viewer?._toast?.('Select a single spline.');
+          viewer?._toast?.('Select a single sketch-like object.');
           return;
         }
         const revealed = await revealHistoryEntry(viewer, entry.featureId);
         if (!revealed) {
-          viewer?._toast?.(`Spline "${entry.featureId}" is not available in history.`);
+          viewer?._toast?.(`Feature "${entry.featureId}" is not available in history.`);
         }
       },
-      shouldShow: (selection) => isWireHarnessWorkbenchActive(viewer) && !!getSplineFeatureEntry(selection, viewer),
+      shouldShow: (selection) => !!getSketchLikeFeatureEntry(selection, viewer),
     });
   } catch { }
 
@@ -236,7 +246,7 @@ export function registerSelectionToolbarButtons(viewer) {
           viewer?._toast?.(`Unable to delete spline "${entry.featureId}".`);
         }
       },
-      shouldShow: (selection) => isWireHarnessWorkbenchActive(viewer) && !!getSplineFeatureEntry(selection, viewer),
+      shouldShow: (selection) => !!getSplineFeatureEntry(selection, viewer),
     });
   } catch { }
 }

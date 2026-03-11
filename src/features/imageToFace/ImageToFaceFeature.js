@@ -334,6 +334,7 @@ export class ImageToFaceFeature {
     sceneGroup.type = 'SKETCH';
     sceneGroup.onClick = () => { };
     sceneGroup.userData = sceneGroup.userData || {};
+    sceneGroup.userData.sketchFeatureId = featureId;
     sceneGroup.userData.sketchBasis = {
       origin: Array.isArray(basis.origin) ? basis.origin.slice() : [0, 0, 0],
       x: Array.isArray(basis.x) ? basis.x.slice() : [1, 0, 0],

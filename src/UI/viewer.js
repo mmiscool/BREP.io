@@ -1823,8 +1823,8 @@ export class Viewer {
         }
 
         try {
-            const { routes } = await routeWireHarnessConnections(this.partHistory, connections);
-            renderWireHarnessRoutes(scene, routes);
+            const { routes, bundleSegments } = await routeWireHarnessConnections(this.partHistory, connections);
+            renderWireHarnessRoutes(scene, routes, bundleSegments);
             manager.setRouteResults?.(routes);
             try { this.render?.(); } catch { /* ignore */ }
             return routes;

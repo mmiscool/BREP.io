@@ -290,6 +290,7 @@ export class TextToFaceFeature {
     sceneGroup.type = 'SKETCH';
     sceneGroup.onClick = () => { };
     sceneGroup.userData = sceneGroup.userData || {};
+    sceneGroup.userData.sketchFeatureId = featureId;
     sceneGroup.userData.sketchBasis = sketchBasis;
 
     const triPositions = [];

@@ -345,6 +345,7 @@ export class OffsetFaceFeature {
       group.name = groupName;
       group.renderOrder = 1;
       group.userData = group.userData || {};
+      group.userData.sketchFeatureId = featureId;
 
       const offsetFace = new BREP.Face(geom);
       offsetFace.name = `${groupName}:PROFILE`;

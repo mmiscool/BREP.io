@@ -8,23 +8,6 @@ function normalizeNumber(value, fallback = 0) {
   return Number.isFinite(next) ? next : fallback;
 }
 
-function hashColorSeed(text) {
-  const source = String(text || '');
-  let hash = 0;
-  for (let index = 0; index < source.length; index += 1) {
-    hash = ((hash * 33) + source.charCodeAt(index)) >>> 0;
-  }
-  return hash >>> 0;
-}
-
-function colorForRoute(route) {
-  const seed = hashColorSeed(route?.connectionId || route?.connectionName || '');
-  const hue = seed % 360;
-  const color = new THREE.Color();
-  color.setHSL(hue / 360, 0.75, 0.52);
-  return color;
-}
-
 function dedupePoints(points, tolerance = 1e-6) {
   const out = [];
   const toleranceSq = tolerance * tolerance;
@@ -74,15 +57,15 @@ function buildRouteCurve(points) {
   return curve;
 }
 
-function createRouteMesh(route) {
-  const points = dedupePoints(route?.polyline);
+function createBundleMesh(segment) {
+  const points = dedupePoints(segment?.polyline);
   if (points.length < 2) return null;
 
   const curve = buildRouteCurve(points);
   const tubularSegments = Math.max(16, (points.length - 1) * 12);
-  const radius = Math.max(0.01, normalizeNumber(route?.diameter, 1) * 0.5);
+  const radius = Math.max(0.01, normalizeNumber(segment?.diameter, 1) * 0.5);
   const geometry = new THREE.TubeGeometry(curve, tubularSegments, radius, 14, false);
-  const color = colorForRoute(route);
+  const color = new THREE.Color(DEFAULT_ROUTE_COLOR);
   const material = new THREE.MeshStandardMaterial({
     color: color.getStyle(),
     emissive: color.clone().multiplyScalar(0.18),
@@ -94,14 +77,20 @@ function createRouteMesh(route) {
   material.polygonOffsetUnits = -2;
 
   const mesh = new THREE.Mesh(geometry, material);
-  mesh.name = String(route?.connectionName || route?.connectionId || 'Wire Route').trim() || 'Wire Route';
+  mesh.name = String(segment?.featureId || segment?.segmentId || 'Wire Bundle').trim() || 'Wire Bundle';
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   mesh.renderOrder = 5000;
   mesh.userData = {
     isWireHarnessRoute: true,
-    connectionId: route?.connectionId || '',
-    connectionName: route?.connectionName || '',
+    isWireHarnessBundleSegment: true,
+    segmentId: segment?.segmentId || '',
+    featureId: segment?.featureId || '',
+    wireCount: Math.max(0, normalizeNumber(segment?.wireCount, 0)),
+    wireDiameters: Array.isArray(segment?.wireDiameters) ? segment.wireDiameters.slice() : [],
+    connectionIds: Array.isArray(segment?.connectionIds) ? segment.connectionIds.slice() : [],
+    connectionNames: Array.isArray(segment?.connectionNames) ? segment.connectionNames.slice() : [],
+    bundleDiameter: Math.max(0, normalizeNumber(segment?.diameter, 0)),
     color: color.getHexString ? `#${color.getHexString()}` : DEFAULT_ROUTE_COLOR,
   };
   return mesh;
@@ -115,7 +104,7 @@ export function clearWireHarnessRouteGroup(scene) {
   return null;
 }
 
-export function renderWireHarnessRoutes(scene, routes = []) {
+export function renderWireHarnessRoutes(scene, routes = [], bundleSegments = []) {
   if (!scene) return null;
   clearWireHarnessRouteGroup(scene);
 
@@ -126,9 +115,14 @@ export function renderWireHarnessRoutes(scene, routes = []) {
     isWireHarnessRouteGroup: true,
   };
 
-  for (const route of Array.isArray(routes) ? routes : []) {
-    if (!route?.feasible) continue;
-    const mesh = createRouteMesh(route);
+  const segments = Array.isArray(bundleSegments) && bundleSegments.length
+    ? bundleSegments
+    : Array.isArray(routes)
+      ? routes.filter((route) => route?.feasible)
+      : [];
+
+  for (const segment of segments) {
+    const mesh = createBundleMesh(segment);
     if (mesh) group.add(mesh);
   }
 

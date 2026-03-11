@@ -1,4 +1,9 @@
-import { listWireHarnessTerminationEndpoints } from '../../wireHarness/wireHarnessRouting.js';
+import { SelectionFilter } from '../SelectionFilter.js';
+import {
+  buildWireHarnessRoutingPayload,
+  listWireHarnessTerminationEndpoints,
+  resolveWireHarnessConnectionPortRefs,
+} from '../../wireHarness/wireHarnessRouting.js';
 
 function normalizeText(value, fallback = '') {
   const next = String(value == null ? '' : value).trim();
@@ -16,6 +21,11 @@ function formatDistance(value) {
   return distance.toFixed(2).replace(/\.?0+$/, '');
 }
 
+function textWidthCh(value, minimum = 0, padding = 2) {
+  const text = String(value == null ? '' : value);
+  return Math.max(minimum, text.length + padding);
+}
+
 export class WireHarnessConnectionsWidget {
   constructor(viewer, { readOnly = false } = {}) {
     this.viewer = viewer || null;
@@ -25,6 +35,7 @@ export class WireHarnessConnectionsWidget {
     this.connections = [];
     this.routeResults = new Map();
     this.availableEndpoints = [];
+    this._hoveredConnectionId = '';
     this._removeManagerListener = null;
     this._removeModelChangeListener = null;
 
@@ -36,6 +47,7 @@ export class WireHarnessConnectionsWidget {
   }
 
   dispose() {
+    this._clearConnectionHover();
     if (typeof this._removeManagerListener === 'function') {
       try { this._removeManagerListener(); } catch { /* ignore */ }
     }
@@ -102,6 +114,14 @@ export class WireHarnessConnectionsWidget {
       routeBtn.textContent = 'Route';
       routeBtn.title = 'Rebuild all routed wires';
       routeBtn.addEventListener('click', () => {
+        const payload = buildWireHarnessRoutingPayload(
+          this.viewer?.partHistory,
+          this._getManager()?.getConnections?.() || [],
+        );
+        this._openRoutingPayloadWindow({
+          segments: payload?.segments || [],
+          connections: payload?.connections || [],
+        });
         void this.viewer?.refreshWireHarnessRoutes?.({ reason: 'manual-route' });
       });
       actions.appendChild(routeBtn);
@@ -115,9 +135,13 @@ export class WireHarnessConnectionsWidget {
     this.summaryEl.className = 'wire-harness-summary';
     this.uiElement.appendChild(this.summaryEl);
 
+    this.listScrollEl = document.createElement('div');
+    this.listScrollEl.className = 'wire-harness-list-scroll';
+    this.uiElement.appendChild(this.listScrollEl);
+
     this.listEl = document.createElement('div');
     this.listEl.className = 'wire-harness-list';
-    this.uiElement.appendChild(this.listEl);
+    this.listScrollEl.appendChild(this.listEl);
   }
 
   _addConnection() {
@@ -176,6 +200,7 @@ export class WireHarnessConnectionsWidget {
 
   _renderList() {
     if (!this.listEl || !this.summaryEl) return;
+    this._clearConnectionHover();
     this.listEl.textContent = '';
 
     const routedCount = Array.from(this.routeResults.values()).filter((entry) => entry?.feasible).length;
@@ -191,13 +216,24 @@ export class WireHarnessConnectionsWidget {
       return;
     }
 
+    this._applyTableColumnWidths();
+
+    const header = document.createElement('div');
+    header.className = 'wire-harness-table-head';
+    for (const label of ['Wire', 'Length', 'Dia', 'From', 'To', 'Status', 'Actions']) {
+      const cell = document.createElement('div');
+      cell.className = 'wire-harness-head-cell';
+      cell.textContent = label;
+      header.appendChild(cell);
+    }
+    this.listEl.appendChild(header);
+
     for (const connection of this.connections) {
       const result = this.routeResults.get(String(connection?.id || '')) || null;
       const row = document.createElement('div');
-      row.className = 'wire-harness-row';
-
-      const top = document.createElement('div');
-      top.className = 'wire-harness-row-top';
+      row.className = 'wire-harness-row wire-harness-table-row';
+      row.addEventListener('mouseenter', () => this._hoverConnection(connection));
+      row.addEventListener('mouseleave', () => this._clearConnectionHover(connection?.id));
 
       const nameInput = document.createElement('input');
       nameInput.type = 'text';
@@ -208,7 +244,14 @@ export class WireHarnessConnectionsWidget {
       nameInput.addEventListener('change', () => {
         this._updateConnection(connection.id, { name: nameInput.value });
       });
-      top.appendChild(nameInput);
+      row.appendChild(nameInput);
+
+      const lengthValue = document.createElement('div');
+      lengthValue.className = 'wire-harness-cell wire-harness-length';
+      lengthValue.textContent = result?.feasible && formatDistance(result?.distance)
+        ? formatDistance(result.distance)
+        : '—';
+      row.appendChild(lengthValue);
 
       const diameterInput = document.createElement('input');
       diameterInput.type = 'number';
@@ -221,45 +264,24 @@ export class WireHarnessConnectionsWidget {
       diameterInput.addEventListener('change', () => {
         this._updateConnection(connection.id, { diameter: Math.max(0.01, normalizeNumber(diameterInput.value, 1)) });
       });
-      top.appendChild(diameterInput);
-
-      if (!this._readOnly) {
-        const removeBtn = document.createElement('button');
-        removeBtn.type = 'button';
-        removeBtn.className = 'wire-harness-btn wire-harness-btn-danger';
-        removeBtn.textContent = 'Remove';
-        removeBtn.addEventListener('click', () => this._removeConnection(connection.id));
-        top.appendChild(removeBtn);
-      }
-
-      row.appendChild(top);
-
-      const endpoints = document.createElement('div');
-      endpoints.className = 'wire-harness-endpoints';
+      row.appendChild(diameterInput);
 
       const fromSelect = this._buildEndpointSelect(connection?.from, (value) => {
         this._updateConnection(connection.id, { from: value });
       });
       fromSelect.disabled = this._readOnly;
-      endpoints.appendChild(fromSelect);
-
-      const arrow = document.createElement('div');
-      arrow.className = 'wire-harness-arrow';
-      arrow.textContent = '→';
-      endpoints.appendChild(arrow);
+      row.appendChild(fromSelect);
 
       const toSelect = this._buildEndpointSelect(connection?.to, (value) => {
         this._updateConnection(connection.id, { to: value });
       });
       toSelect.disabled = this._readOnly;
-      endpoints.appendChild(toSelect);
-
-      row.appendChild(endpoints);
+      row.appendChild(toSelect);
 
       const status = document.createElement('div');
-      status.className = 'wire-harness-status';
+      status.className = 'wire-harness-status wire-harness-cell';
       if (result?.feasible) {
-        status.textContent = `Routed${formatDistance(result.distance) ? ` | ${formatDistance(result.distance)}` : ''}`;
+        status.textContent = 'Routed';
         status.dataset.state = 'ok';
       } else if (result?.error) {
         status.textContent = result.error;
@@ -270,8 +292,153 @@ export class WireHarnessConnectionsWidget {
       }
       row.appendChild(status);
 
+      const actions = document.createElement('div');
+      actions.className = 'wire-harness-actions-cell';
+      if (!this._readOnly) {
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'wire-harness-btn wire-harness-btn-danger';
+        removeBtn.textContent = 'Remove';
+        removeBtn.addEventListener('click', () => this._removeConnection(connection.id));
+        actions.appendChild(removeBtn);
+      }
+      row.appendChild(actions);
+
       this.listEl.appendChild(row);
     }
+  }
+
+  _applyTableColumnWidths() {
+    if (!this.listEl) return;
+    const results = this.routeResults || new Map();
+    const nameChars = this.connections.reduce(
+      (max, connection) => Math.max(max, textWidthCh(connection?.name, 10, 3)),
+      textWidthCh('Wire', 10, 3),
+    );
+    const lengthChars = this.connections.reduce((max, connection) => {
+      const result = results.get(String(connection?.id || '')) || null;
+      const value = result?.feasible && formatDistance(result?.distance)
+        ? formatDistance(result.distance)
+        : '—';
+      return Math.max(max, textWidthCh(value, 8, 3));
+    }, textWidthCh('Length', 8, 3));
+    const diameterChars = this.connections.reduce(
+      (max, connection) => Math.max(max, textWidthCh(normalizeNumber(connection?.diameter, 1), 5, 3)),
+      textWidthCh('Dia', 5, 3),
+    );
+    const fromChars = this.connections.reduce(
+      (max, connection) => Math.max(max, textWidthCh(connection?.from, 10, 4)),
+      textWidthCh('From', 10, 4),
+    );
+    const toChars = this.connections.reduce(
+      (max, connection) => Math.max(max, textWidthCh(connection?.to, 10, 4)),
+      textWidthCh('To', 10, 4),
+    );
+    const statusChars = this.connections.reduce((max, connection) => {
+      const result = results.get(String(connection?.id || '')) || null;
+      const value = result?.feasible
+        ? 'Routed'
+        : (result?.error || 'Not routed.');
+      return Math.max(max, textWidthCh(value, 12, 3));
+    }, textWidthCh('Status', 12, 3));
+    const actionsChars = this._readOnly ? textWidthCh('Actions', 6, 2) : Math.max(
+      textWidthCh('Actions', 7, 2),
+      textWidthCh('Remove', 7, 4),
+    );
+
+    this.listEl.style.setProperty('--wire-col-name', `${nameChars}ch`);
+    this.listEl.style.setProperty('--wire-col-length', `${lengthChars}ch`);
+    this.listEl.style.setProperty('--wire-col-dia', `${diameterChars}ch`);
+    this.listEl.style.setProperty('--wire-col-from', `${fromChars}ch`);
+    this.listEl.style.setProperty('--wire-col-to', `${toChars}ch`);
+    this.listEl.style.setProperty('--wire-col-status', `${statusChars}ch`);
+    this.listEl.style.setProperty('--wire-col-actions', `${actionsChars}ch`);
+  }
+
+  _hoverConnection(connection) {
+    const connectionId = normalizeText(connection?.id, '');
+    this._hoveredConnectionId = connectionId;
+    const refs = resolveWireHarnessConnectionPortRefs(this.viewer?.partHistory, connection);
+    const scene = this.viewer?.partHistory?.scene || this.viewer?.scene || null;
+    if (!scene || !Array.isArray(refs?.portRefs) || !refs.portRefs.length) {
+      try { SelectionFilter.setHoverObjects([], { ignoreFilter: true }); } catch { /* ignore */ }
+      return;
+    }
+
+    const targets = refs.portRefs
+      .map((ref) => this.viewer?.partHistory?.getObjectByName?.(ref) || scene?.getObjectByName?.(ref) || null)
+      .filter(Boolean);
+
+    try { SelectionFilter.setHoverObjects(targets, { ignoreFilter: true }); } catch { /* ignore */ }
+  }
+
+  _clearConnectionHover(connectionId = '') {
+    const targetId = normalizeText(connectionId, '');
+    if (targetId && targetId !== this._hoveredConnectionId) return;
+    this._hoveredConnectionId = '';
+    try { SelectionFilter.setHoverObjects([], { ignoreFilter: true }); } catch { /* ignore */ }
+  }
+
+  _openRoutingPayloadWindow(payload) {
+    const json = JSON.stringify(payload || { segments: [], connections: [] }, null, 2);
+    const popup = (typeof window !== 'undefined' && typeof window.open === 'function')
+      ? window.open('', '_blank', 'noopener,noreferrer,width=840,height=760')
+      : null;
+    if (popup && popup.document) {
+      try {
+        popup.document.open();
+        popup.document.write(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Wire Harness Routing Payload</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: #0b0e14;
+        color: #e5e7eb;
+        font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
+      h1 {
+        margin: 0 0 8px 0;
+        font-size: 16px;
+      }
+      p {
+        margin: 0 0 12px 0;
+        color: #9ca3af;
+      }
+      textarea {
+        width: 100%;
+        height: calc(100vh - 92px);
+        box-sizing: border-box;
+        border: 1px solid #1f2937;
+        border-radius: 8px;
+        padding: 12px;
+        background: #050816;
+        color: #e5e7eb;
+        resize: none;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Wire Harness Routing Payload</h1>
+    <p>Exact <code>{ "segments": [...], "connections": [...] }</code> data passed into the routing pathfinder.</p>
+    <textarea readonly spellcheck="false">${json.replaceAll('&', '&amp;').replaceAll('<', '&lt;')}</textarea>
+  </body>
+</html>`);
+        popup.document.close();
+        return;
+      } catch { /* ignore popup write failure */ }
+    }
+    try {
+      const area = document.createElement('textarea');
+      area.value = json;
+      document.body.appendChild(area);
+      area.select();
+      area.setSelectionRange(0, area.value.length);
+      area.focus();
+    } catch { /* ignore fallback */ }
   }
 
   _ensureStyles() {
@@ -286,8 +453,6 @@ export class WireHarnessConnectionsWidget {
         gap: 10px;
       }
       .wire-harness-widget-header,
-      .wire-harness-row-top,
-      .wire-harness-endpoints,
       .wire-harness-widget-actions {
         display: flex;
         align-items: center;
@@ -312,19 +477,65 @@ export class WireHarnessConnectionsWidget {
       .wire-harness-status[data-state="error"] {
         color: #fca5a5;
       }
+      .wire-harness-list-scroll {
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding-bottom: 4px;
+      }
       .wire-harness-list {
         display: flex;
         flex-direction: column;
         gap: 8px;
+        width: max-content;
+        min-width: 100%;
+        --wire-col-name: 14ch;
+        --wire-col-length: 10ch;
+        --wire-col-dia: 7ch;
+        --wire-col-from: 14ch;
+        --wire-col-to: 14ch;
+        --wire-col-status: 16ch;
+        --wire-col-actions: 10ch;
+      }
+      .wire-harness-table-head,
+      .wire-harness-table-row {
+        display: grid;
+        grid-template-columns:
+          var(--wire-col-name)
+          var(--wire-col-length)
+          var(--wire-col-dia)
+          var(--wire-col-from)
+          var(--wire-col-to)
+          var(--wire-col-status)
+          var(--wire-col-actions);
+        gap: 8px;
+        align-items: center;
+      }
+      .wire-harness-table-head {
+        padding: 0 10px;
+      }
+      .wire-harness-head-cell {
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #93a4bf;
+        white-space: nowrap;
       }
       .wire-harness-row {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
         padding: 10px;
         border-radius: 8px;
         border: 1px solid #1f2937;
         background: rgba(17, 24, 39, 0.65);
+        transition: border-color 120ms ease, background 120ms ease;
+      }
+      .wire-harness-row:hover {
+        border-color: #60a5fa;
+        background: rgba(37, 99, 235, 0.08);
+      }
+      .wire-harness-cell {
+        min-height: 34px;
+        display: flex;
+        align-items: center;
+        white-space: nowrap;
       }
       .wire-harness-input,
       .wire-harness-select {
@@ -336,13 +547,15 @@ export class WireHarnessConnectionsWidget {
         border: 1px solid #374151;
         background: #0b1220;
         color: #e5e7eb;
+        white-space: nowrap;
       }
-      .wire-harness-name {
-        flex: 1 1 auto;
-      }
-      .wire-harness-diameter {
-        width: 82px;
-        flex: 0 0 82px;
+      .wire-harness-length {
+        justify-content: flex-end;
+        padding: 0 8px;
+        border: 1px solid #1f2937;
+        border-radius: 6px;
+        background: rgba(2, 6, 23, 0.55);
+        color: #e5e7eb;
       }
       .wire-harness-btn {
         border: 1px solid #374151;
@@ -363,10 +576,10 @@ export class WireHarnessConnectionsWidget {
         border-color: #7f1d1d;
         color: #fecaca;
       }
-      .wire-harness-arrow {
-        flex: 0 0 auto;
-        color: #93c5fd;
-        font-weight: 700;
+      .wire-harness-actions-cell {
+        display: flex;
+        justify-content: flex-end;
+        white-space: nowrap;
       }
       .wire-harness-empty {
         padding: 12px;

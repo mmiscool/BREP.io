@@ -6,7 +6,7 @@ import {
   DEFAULT_RESOLUTION,
   normalizeSplineData,
 } from '../features/spline/splineUtils.js';
-import { abSegmentsToDigraph, pointToNode } from './pathFinderLogic/js/sided_ab_graphs/digraph_ab_builder.js';
+import { abSegmentsToDigraph, nodeToPoint, pointToNode } from './pathFinderLogic/js/sided_ab_graphs/digraph_ab_builder.js';
 import {
   findShortestPathForAllPairsAsync,
   simpleArrayToPointPairs,
@@ -105,6 +105,37 @@ function polylineLength(polyline) {
   return total;
 }
 
+function resolveSegmentPortSide(portData, fromPoint, toPoint, fallbackSide = 'A') {
+  const branch = new THREE.Vector3(
+    normalizeNumber(toPoint?.[0], 0) - normalizeNumber(fromPoint?.[0], 0),
+    normalizeNumber(toPoint?.[1], 0) - normalizeNumber(fromPoint?.[1], 0),
+    normalizeNumber(toPoint?.[2], 0) - normalizeNumber(fromPoint?.[2], 0),
+  );
+  const baseDirection = new THREE.Vector3(
+    normalizeNumber(portData?.direction?.[0], 1),
+    normalizeNumber(portData?.direction?.[1], 0),
+    normalizeNumber(portData?.direction?.[2], 0),
+  );
+  if (branch.lengthSq() <= 1e-12 || baseDirection.lengthSq() <= 1e-12) {
+    return normalizePortSide(fallbackSide, portData?.kind);
+  }
+  branch.normalize();
+  baseDirection.normalize();
+  return branch.dot(baseDirection) >= 0 ? 'A' : 'B';
+}
+
+function bundleDiameter(diameters, packingEfficiency = 0.75, safetyFactor = 1.1) {
+  const values = Array.isArray(diameters) ? diameters : [];
+  const sumSquares = values.reduce((sum, value) => {
+    const diameter = Math.max(0, normalizeNumber(value, 0));
+    return sum + (diameter * diameter);
+  }, 0);
+  if (!(sumSquares > 0)) return 0;
+  const efficiency = Math.max(1e-6, normalizeNumber(packingEfficiency, 0.75));
+  const factor = Math.max(1, normalizeNumber(safetyFactor, 1.1));
+  return Math.sqrt(sumSquares / efficiency) * factor;
+}
+
 function reversePolyline(polyline) {
   return dedupePolyline((Array.isArray(polyline) ? polyline : []).slice().reverse());
 }
@@ -184,9 +215,14 @@ function buildSplineSegmentRecord(partHistory, feature, portsByRef) {
     id: segmentId,
     featureId: segmentId,
     firstPoint: getPortPointId(firstPort, firstRef),
-    firstSide: normalizePortSide(firstAttachment?.side, firstPort.kind),
+    firstSide: resolveSegmentPortSide(firstPort, cleanedPolyline[0], cleanedPolyline[1], firstAttachment?.side),
     secondPoint: getPortPointId(lastPort, lastRef),
-    secondSide: normalizePortSide(lastAttachment?.side, lastPort.kind),
+    secondSide: resolveSegmentPortSide(
+      lastPort,
+      cleanedPolyline[cleanedPolyline.length - 1],
+      cleanedPolyline[cleanedPolyline.length - 2],
+      lastAttachment?.side,
+    ),
     firstPortRef: firstRef,
     secondPortRef: lastRef,
     firstLabel: getPortLabel(firstPort, firstRef),
@@ -204,6 +240,82 @@ export function listWireHarnessTerminationEndpoints(partHistory) {
   return collectPortRuntimes(partHistory)
     .filter((port) => String(port?.kind || '').trim().toLowerCase() !== 'waypoint')
     .sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')));
+}
+
+export function resolveWireHarnessConnectionPortRefs(partHistory, connection) {
+  const network = buildWireHarnessNetwork(partHistory);
+  const fromResult = resolveConnectionEndpoint(network, connection?.from);
+  const toResult = resolveConnectionEndpoint(network, connection?.to);
+  const refs = [];
+
+  const pushRef = (port) => {
+    const ref = normalizeText(port?.ref, '');
+    if (ref && !refs.includes(ref)) refs.push(ref);
+  };
+
+  if (fromResult?.ok) pushRef(fromResult.port);
+  if (toResult?.ok) pushRef(toResult.port);
+
+  return {
+    ok: fromResult?.ok && toResult?.ok,
+    fromRef: fromResult?.ok ? normalizeText(fromResult?.port?.ref, '') : '',
+    toRef: toResult?.ok ? normalizeText(toResult?.port?.ref, '') : '',
+    portRefs: refs,
+    errors: [fromResult?.error, toResult?.error].filter(Boolean),
+  };
+}
+
+export function buildWireHarnessRoutingPayload(partHistory, requestedConnections = []) {
+  const network = buildWireHarnessNetwork(partHistory);
+  const connections = Array.isArray(requestedConnections) ? requestedConnections : [];
+  const unresolved = [];
+  const validPairs = [];
+
+  for (const connection of connections) {
+    const connectionId = normalizeText(connection?.id, '');
+    const source = resolveConnectionEndpoint(network, connection?.from);
+    const target = resolveConnectionEndpoint(network, connection?.to);
+    if (!source.ok || !target.ok) {
+      unresolved.push({
+        connectionId,
+        connectionName: normalizeText(connection?.name, connectionId),
+        from: normalizeText(connection?.from, ''),
+        to: normalizeText(connection?.to, ''),
+        error: source.error || target.error || 'Invalid connection endpoints.',
+        diameter: Math.max(0.01, normalizeNumber(connection?.diameter, 1)),
+      });
+      continue;
+    }
+    validPairs.push({
+      id: connectionId,
+      startPoint: source.pointId,
+      endPoint: target.pointId,
+      wireInfo: {
+        diameter: Math.max(0.01, normalizeNumber(connection?.diameter, 1)),
+      },
+    });
+  }
+
+  return {
+    network,
+    segments: (Array.isArray(network?.splineSegments) ? network.splineSegments : []).map((segment) => ({
+      id: normalizeText(segment?.id, ''),
+      firstPoint: normalizeText(segment?.firstPoint, ''),
+      firstSide: normalizePortSide(segment?.firstSide, 'waypoint'),
+      secondPoint: normalizeText(segment?.secondPoint, ''),
+      secondSide: normalizePortSide(segment?.secondSide, 'waypoint'),
+      weight: Math.max(1e-6, normalizeNumber(segment?.weight, 0)),
+    })),
+    connections: validPairs.map((pair) => ({
+      id: normalizeText(pair?.id, ''),
+      startPoint: normalizeText(pair?.startPoint, ''),
+      endPoint: normalizeText(pair?.endPoint, ''),
+      wireInfo: {
+        diameter: Math.max(0.01, normalizeNumber(pair?.wireInfo?.diameter, 1)),
+      },
+    })),
+    unresolved,
+  };
 }
 
 export function buildWireHarnessNetwork(partHistory) {
@@ -296,49 +408,180 @@ function stitchRoutePolyline(route, segmentsById) {
   return dedupePolyline(stitched);
 }
 
-export async function routeWireHarnessConnections(partHistory, connections = []) {
-  const network = buildWireHarnessNetwork(partHistory);
-  const requestedConnections = Array.isArray(connections) ? connections : [];
-  const unresolved = [];
-  const validPairs = [];
+function routeReusesHarnessPoint(route) {
+  if (!route || typeof route !== 'object') return false;
+  if (route.containsDuplicates === true) return true;
+  const nodes = Array.isArray(route?.nodes) ? route.nodes : [];
+  const seen = new Set();
+  for (const node of nodes) {
+    const raw = normalizeText(node, '');
+    if (!raw) continue;
+    const pointId = raw.endsWith('/A') || raw.endsWith('/B')
+      ? raw.slice(0, -2)
+      : raw;
+    if (!pointId) continue;
+    if (seen.has(pointId)) return true;
+    seen.add(pointId);
+  }
+  return false;
+}
 
-  for (const connection of requestedConnections) {
-    const connectionId = normalizeText(connection?.id, '');
-    const source = resolveConnectionEndpoint(network, connection?.from);
-    const target = resolveConnectionEndpoint(network, connection?.to);
-    if (!source.ok || !target.ok) {
-      unresolved.push({
-        connectionId,
-        connectionName: normalizeText(connection?.name, connectionId),
-        feasible: false,
-        error: source.error || target.error || 'Invalid connection endpoints.',
-        distance: null,
-        polyline: [],
-        segmentIds: [],
-      });
-      continue;
+function findShortestNonReusingRoute(digraph, startPoint, endPoint) {
+  const start = normalizeText(startPoint, '');
+  const end = normalizeText(endPoint, '');
+  if (!start || !end) return null;
+
+  const queue = [
+    {
+      currentNode: pointToNode(start, 'A'),
+      distance: 0,
+      nodes: [pointToNode(start, 'A')],
+      segments: [],
+      visitedPoints: new Set([start]),
+    },
+    {
+      currentNode: pointToNode(start, 'B'),
+      distance: 0,
+      nodes: [pointToNode(start, 'B')],
+      segments: [],
+      visitedPoints: new Set([start]),
+    },
+  ];
+  const bestByState = new Map();
+
+  while (queue.length) {
+    queue.sort((a, b) => a.distance - b.distance);
+    const state = queue.shift();
+    if (!state) break;
+
+    const stateKey = `${state.currentNode}|${Array.from(state.visitedPoints).sort().join(',')}`;
+    const bestDistance = bestByState.get(stateKey);
+    if (bestDistance != null && bestDistance < state.distance - 1e-9) continue;
+
+    const currentNode = normalizeText(state.currentNode, '');
+    const currentPoint = nodeToPoint(currentNode);
+    if (currentPoint === end && state.segments.length > 0) {
+      return {
+        feasible: true,
+        startId: state.nodes[0] || pointToNode(start, 'A'),
+        endId: currentNode,
+        segments: state.segments.slice(),
+        nodes: state.nodes.slice(),
+        distance: state.distance,
+        containsDuplicates: false,
+      };
     }
-    validPairs.push({
-      id: connectionId,
-      startPoint: source.pointId,
-      endPoint: target.pointId,
-      wireInfo: {
-        diameter: Math.max(0.01, normalizeNumber(connection?.diameter, 1)),
-      },
+
+    const graphNode = digraph?.getNode?.(currentNode) || null;
+    const edgeCount = Math.max(0, Number(graphNode?.numberOfEdges) || 0);
+    for (let edgeIndex = 0; edgeIndex < edgeCount; edgeIndex += 1) {
+      const nextNode = normalizeText(graphNode?.getNeighbourId?.(edgeIndex), '');
+      if (!nextNode) continue;
+      const nextPoint = nodeToPoint(nextNode);
+      if (!nextPoint) continue;
+      if (state.visitedPoints.has(nextPoint)) continue;
+
+      const nextVisited = new Set(state.visitedPoints);
+      nextVisited.add(nextPoint);
+      const nextDistance = state.distance + Math.max(1e-6, normalizeNumber(graphNode?.getWeight?.(edgeIndex), 0));
+      const nextStateKey = `${nextNode}|${Array.from(nextVisited).sort().join(',')}`;
+      const nextBest = bestByState.get(nextStateKey);
+      if (nextBest != null && nextBest <= nextDistance + 1e-9) continue;
+      bestByState.set(nextStateKey, nextDistance);
+      queue.push({
+        currentNode: nextNode,
+        distance: nextDistance,
+        nodes: state.nodes.concat([nextNode]),
+        segments: state.segments.concat([normalizeText(graphNode?.getEdgeId?.(edgeIndex), '')]),
+        visitedPoints: nextVisited,
+      });
+    }
+  }
+
+  return null;
+}
+
+function buildBundleSegments(network, routes = []) {
+  const segmentsById = new Map(
+    (Array.isArray(network?.splineSegments) ? network.splineSegments : [])
+      .map((segment) => [String(segment?.id || ''), segment]),
+  );
+  const usageBySegment = new Map();
+
+  for (const route of Array.isArray(routes) ? routes : []) {
+    if (!route?.feasible) continue;
+    const routeDiameter = Math.max(0.01, normalizeNumber(route?.diameter, 1));
+    const connectionId = normalizeText(route?.connectionId, '');
+    const connectionName = normalizeText(route?.connectionName, connectionId || 'Wire');
+    for (const rawSegmentId of Array.isArray(route?.segmentIds) ? route.segmentIds : []) {
+      const segmentId = normalizeText(rawSegmentId, '');
+      if (!segmentId || !segmentsById.has(segmentId)) continue;
+      let usage = usageBySegment.get(segmentId);
+      if (!usage) {
+        usage = {
+          segmentId,
+          diameters: [],
+          connectionIds: [],
+          connectionNames: [],
+        };
+        usageBySegment.set(segmentId, usage);
+      }
+      usage.diameters.push(routeDiameter);
+      if (connectionId && !usage.connectionIds.includes(connectionId)) usage.connectionIds.push(connectionId);
+      if (connectionName && !usage.connectionNames.includes(connectionName)) usage.connectionNames.push(connectionName);
+    }
+  }
+
+  const bundleSegments = [];
+  for (const [segmentId, usage] of usageBySegment.entries()) {
+    const segment = segmentsById.get(segmentId);
+    if (!segment) continue;
+    const diameters = usage.diameters.slice();
+    const diameter = Math.max(0.01, bundleDiameter(diameters));
+    bundleSegments.push({
+      segmentId,
+      featureId: normalizeText(segment?.featureId, segmentId),
+      polyline: dedupePolyline(segment?.polyline),
+      length: Math.max(polylineLength(segment?.polyline), 0),
+      diameter,
+      wireCount: diameters.length,
+      wireDiameters: diameters,
+      connectionIds: usage.connectionIds.slice(),
+      connectionNames: usage.connectionNames.slice(),
     });
   }
 
+  return bundleSegments;
+}
+
+export async function routeWireHarnessConnections(partHistory, connections = []) {
+  const requestedConnections = Array.isArray(connections) ? connections : [];
+  const payload = buildWireHarnessRoutingPayload(partHistory, requestedConnections);
+  const network = payload.network;
+  const unresolved = (Array.isArray(payload?.unresolved) ? payload.unresolved : []).map((entry) => ({
+    connectionId: normalizeText(entry?.connectionId, ''),
+    connectionName: normalizeText(entry?.connectionName, normalizeText(entry?.connectionId, 'Wire')),
+    feasible: false,
+    error: normalizeText(entry?.error, 'Invalid connection endpoints.'),
+    distance: null,
+    polyline: [],
+    segmentIds: [],
+  }));
+  const validPairs = Array.isArray(payload?.connections) ? payload.connections.slice() : [];
+
   if (!network.splineSegments.length || !validPairs.length) {
+    const routes = unresolved.concat(validPairs.map((pair) => ({
+      connectionId: pair.id,
+      feasible: false,
+      error: network.splineSegments.length ? 'No valid connections to route.' : 'No harness splines are available for routing.',
+      distance: null,
+      polyline: [],
+      segmentIds: [],
+    })));
     return {
       network,
-      routes: unresolved.concat(validPairs.map((pair) => ({
-        connectionId: pair.id,
-        feasible: false,
-        error: network.splineSegments.length ? 'No valid connections to route.' : 'No harness splines are available for routing.',
-        distance: null,
-        polyline: [],
-        segmentIds: [],
-      }))),
+      routes,
+      bundleSegments: buildBundleSegments(network, routes),
     };
   }
 
@@ -350,25 +593,39 @@ export async function routeWireHarnessConnections(partHistory, connections = [])
   const routes = [];
   for (const pair of pointPairs) {
     const connection = requestedConnections.find((entry) => String(entry?.id || '') === String(pair?.id || '')) || null;
-    const feasible = !!pair?.route?.feasible;
-    const polyline = feasible ? stitchRoutePolyline(pair.route, segmentsById) : [];
+    const rawRoute = pair?.route || null;
+    const feasibleCandidate = !!rawRoute?.feasible;
+    const reusesPoint = routeReusesHarnessPoint(rawRoute);
+    const fallbackRoute = (feasibleCandidate && reusesPoint)
+      ? findShortestNonReusingRoute(digraph, pair?.startPoint, pair?.endPoint)
+      : null;
+    const resolvedRoute = fallbackRoute?.feasible ? fallbackRoute : rawRoute;
+    const finalReusesPoint = routeReusesHarnessPoint(resolvedRoute);
+    const feasible = !!resolvedRoute?.feasible && !finalReusesPoint;
+    const polyline = feasible ? stitchRoutePolyline(resolvedRoute, segmentsById) : [];
+    const error = (reusesPoint && !fallbackRoute?.feasible)
+      ? 'No route found without reusing the same harness port.'
+      : (feasible && polyline.length >= 2 ? '' : 'No route found through the harness network.');
     routes.push({
       connectionId: normalizeText(pair?.id, ''),
       connectionName: normalizeText(connection?.name, normalizeText(pair?.id, 'Wire')),
       feasible: feasible && polyline.length >= 2,
-      error: feasible && polyline.length >= 2 ? '' : 'No route found through the harness network.',
-      distance: Number.isFinite(Number(pair?.route?.distance)) ? Number(pair.route.distance) : null,
+      error: feasible && polyline.length >= 2 ? '' : error,
+      distance: Number.isFinite(Number(resolvedRoute?.distance)) && feasible ? Number(resolvedRoute.distance) : null,
       polyline,
-      segmentIds: Array.isArray(pair?.route?.segments) ? pair.route.segments.slice() : [],
-      nodePath: Array.isArray(pair?.route?.nodes) ? pair.route.nodes.slice() : [],
+      segmentIds: feasible && Array.isArray(resolvedRoute?.segments) ? resolvedRoute.segments.slice() : [],
+      nodePath: Array.isArray(resolvedRoute?.nodes) ? resolvedRoute.nodes.slice() : [],
+      reusesHarnessPoint: finalReusesPoint,
       diameter: Math.max(0.01, normalizeNumber(connection?.diameter, pair?.wireInfo?.diameter || 1)),
       from: normalizeText(connection?.from, ''),
       to: normalizeText(connection?.to, ''),
     });
   }
 
+  const allRoutes = unresolved.concat(routes);
   return {
     network,
-    routes: unresolved.concat(routes),
+    routes: allRoutes,
+    bundleSegments: buildBundleSegments(network, allRoutes),
   };
 }

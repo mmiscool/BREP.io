@@ -13,13 +13,53 @@ function getSelectionTarget(item) {
   return item?.object || item?.target || item || null;
 }
 
+function getLeadingFeatureIdFromName(value) {
+  const rawName = normalizeFeatureId(value);
+  if (!rawName) return null;
+  const prefix = rawName.split(':', 1)[0];
+  return normalizeFeatureId(prefix);
+}
+
 function getFeatureIdFromSplineMetadata(obj) {
   let current = obj || null;
   while (current) {
     const resolved = normalizeFeatureId(current?.userData?.splineFeatureId);
     if (resolved) return resolved;
+    const rawName = normalizeFeatureId(current?.name);
+    if (rawName) {
+      if (rawName.endsWith(':SplineEdge')) {
+        return normalizeFeatureId(rawName.slice(0, -':SplineEdge'.length));
+      }
+      const pointMatch = rawName.match(/^(.*):P\d+$/);
+      if (pointMatch?.[1]) {
+        const pointOwner = normalizeFeatureId(pointMatch[1]);
+        if (pointOwner) return pointOwner;
+      }
+    }
     current = current.parent || null;
   }
+  return null;
+}
+
+function getFeatureIdFromSketchMetadata(obj) {
+  let current = obj || null;
+  while (current) {
+    const direct = normalizeFeatureId(
+      current?.userData?.sketchFeatureId
+      ?? current?.userData?.splineFeatureId
+      ?? current?.owningFeatureID
+      ?? null,
+    );
+    if (direct) return direct;
+
+    if (getObjectType(current) === 'SKETCH') {
+      const sketchId = getLeadingFeatureIdFromName(current?.name);
+      if (sketchId) return sketchId;
+    }
+
+    current = current.parent || null;
+  }
+
   return null;
 }
 
@@ -107,6 +147,20 @@ export function resolveSplineFeatureIdForSelection(selection) {
 
 export function isSingleSplineSelection(selection) {
   return !!resolveSplineFeatureIdForSelection(selection);
+}
+
+export function resolveSketchLikeFeatureIdForObject(obj) {
+  return getFeatureIdFromSketchMetadata(obj);
+}
+
+export function resolveSketchLikeFeatureIdForSelection(selection) {
+  const items = Array.isArray(selection) ? selection : [];
+  if (items.length !== 1) return null;
+  return resolveSketchLikeFeatureIdForObject(getSelectionTarget(items[0]));
+}
+
+export function isSingleSketchLikeSelection(selection) {
+  return !!resolveSketchLikeFeatureIdForSelection(selection);
 }
 
 export function isSingleSelectionOfTypes(selection, allowedTypes = []) {

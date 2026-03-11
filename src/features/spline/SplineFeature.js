@@ -779,6 +779,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
       const attachment = pt?.attachment || null;
       const liveAttachment = getRuntimeAttachmentInfo(attachment);
       const isAttached = !!attachment?.portRef;
+      const attachedSide = attachment?.side === "B" ? "B" : "A";
       const isPendingAttach = state.pendingAttachPointId === pt.id;
       const rowEl = document.createElement("div");
       rowEl.className = "spw-point-row";
@@ -797,7 +798,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
       headerEl.className = 'spw-row-header';
       const title = document.createElement("div");
       title.className = "spw-title";
-      title.textContent = `Point ${index + 1}`;
+      title.textContent = isAttached ? `Point ${index + 1} [${attachedSide}]` : `Point ${index + 1}`;
       headerEl.appendChild(title);
 
       // Actions
@@ -939,7 +940,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
       attachmentSection.className = "spw-section";
       const attachmentTitle = document.createElement("div");
       attachmentTitle.className = "spw-section-title";
-      attachmentTitle.textContent = "Port Attachment";
+      attachmentTitle.textContent = isAttached ? `Port Attachment [${attachedSide}]` : "Port Attachment";
       attachmentSection.appendChild(attachmentTitle);
 
       const attachmentInfo = document.createElement("div");
@@ -949,7 +950,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
         ...liveAttachment,
       });
       attachmentInfo.textContent = isAttached
-        ? `Attached to ${attachmentLabel || attachment.portRef} (${attachment?.side === "B" ? "B" : "A"} side)`
+        ? `Attached to ${attachmentLabel || attachment.portRef} (${attachedSide} side)`
         : (isPendingAttach ? "Select a port in the viewport to link this point." : "No port attached.");
       attachmentSection.appendChild(attachmentInfo);
 
@@ -1631,6 +1632,8 @@ export class SplineFeature {
     sceneGroup.type = "SKETCH";
     sceneGroup.onClick = () => { };
     sceneGroup.renderOrder = 10000;
+    sceneGroup.userData = sceneGroup.userData || {};
+    sceneGroup.userData.splineFeatureId = featureId;
 
     const resolution = Number.isFinite(Number(this.inputParams?.curveResolution))
       ? Math.max(4, Number(this.inputParams.curveResolution))
@@ -1694,6 +1697,8 @@ export class SplineFeature {
     } catch {
       // optional vertices failed; ignore
     }
+
+    try { SelectionFilter.ensureSelectionHandlers(sceneGroup, { deep: true }); } catch { /* ignore */ }
 
     this.persistentData = this.persistentData || {};
     this.persistentData.spline = cloneSplineData(spline);
