@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 const ROUTE_GROUP_NAME = '__WireHarnessRoutes';
-const DEFAULT_ROUTE_COLOR = '#f59e0b';
+const DEFAULT_ROUTE_COLOR = '#8b949e';
 
 function normalizeNumber(value, fallback = 0) {
   const next = Number(value);
@@ -102,6 +102,20 @@ export function clearWireHarnessRouteGroup(scene) {
   if (!existing) return null;
   disposeObjectTree(existing);
   return null;
+}
+
+export function listWireHarnessRouteObjectsForConnection(scene, connectionId) {
+  const targetId = String(connectionId == null ? '' : connectionId).trim();
+  if (!scene?.getObjectByName || !targetId) return [];
+  const group = scene.getObjectByName(ROUTE_GROUP_NAME);
+  if (!group) return [];
+  const matches = [];
+  group.traverse?.((object) => {
+    if (!object?.userData?.isWireHarnessRoute) return;
+    const ids = Array.isArray(object?.userData?.connectionIds) ? object.userData.connectionIds : [];
+    if (ids.some((id) => String(id == null ? '' : id).trim() === targetId)) matches.push(object);
+  });
+  return matches;
 }
 
 export function renderWireHarnessRoutes(scene, routes = [], bundleSegments = []) {

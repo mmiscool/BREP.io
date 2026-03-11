@@ -4,6 +4,7 @@ import {
   listWireHarnessTerminationEndpoints,
   resolveWireHarnessConnectionPortRefs,
 } from '../../wireHarness/wireHarnessRouting.js';
+import { listWireHarnessRouteObjectsForConnection } from '../../wireHarness/wireHarnessRouteRenderer.js';
 
 function normalizeText(value, fallback = '') {
   const next = String(value == null ? '' : value).trim();
@@ -360,14 +361,24 @@ export class WireHarnessConnectionsWidget {
     this._hoveredConnectionId = connectionId;
     const refs = resolveWireHarnessConnectionPortRefs(this.viewer?.partHistory, connection);
     const scene = this.viewer?.partHistory?.scene || this.viewer?.scene || null;
-    if (!scene || !Array.isArray(refs?.portRefs) || !refs.portRefs.length) {
+    if (!scene) {
       try { SelectionFilter.setHoverObjects([], { ignoreFilter: true }); } catch { /* ignore */ }
       return;
     }
 
-    const targets = refs.portRefs
+    const portTargets = (Array.isArray(refs?.portRefs) ? refs.portRefs : [])
       .map((ref) => this.viewer?.partHistory?.getObjectByName?.(ref) || scene?.getObjectByName?.(ref) || null)
       .filter(Boolean);
+    const result = this.routeResults.get(connectionId) || null;
+    const routeTargets = result?.feasible
+      ? listWireHarnessRouteObjectsForConnection(scene, connectionId)
+      : [];
+    const targets = portTargets.concat(routeTargets);
+
+    if (!targets.length) {
+      try { SelectionFilter.setHoverObjects([], { ignoreFilter: true }); } catch { /* ignore */ }
+      return;
+    }
 
     try { SelectionFilter.setHoverObjects(targets, { ignoreFilter: true }); } catch { /* ignore */ }
   }
