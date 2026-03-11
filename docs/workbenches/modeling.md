@@ -1,0 +1,30 @@
+# Modeling Workbench
+
+The Modeling workbench is the default workbench for new parts. It focuses on core solid modeling and general-purpose construction tools.
+
+## Features
+- [Datium](../features/datium.md)
+- [Plane](../features/plane.md)
+- [Primitive Cube](../features/primitive-cube.md)
+- [Primitive Cylinder](../features/primitive-cylinder.md)
+- [Primitive Cone](../features/primitive-cone.md)
+- [Primitive Sphere](../features/primitive-sphere.md)
+- [Primitive Torus](../features/primitive-torus.md)
+- [Primitive Pyramid](../features/primitive-pyramid.md)
+- [Sketch](../features/sketch.md)
+- [Extrude](../features/extrude.md)
+- [Revolve](../features/revolve.md)
+- [Sweep](../features/sweep.md)
+- [Tube](../features/tube.md)
+- [Boolean](../features/boolean.md)
+- [Fillet](../features/fillet.md)
+- [Chamfer](../features/chamfer.md)
+- [Hole](../features/hole.md)
+- [Pattern Linear](../features/pattern-linear.md)
+- [Pattern Radial](../features/pattern-radial.md)
+- [Pattern](../features/pattern.md)
+- [Transform](../features/transform.md)
+- [Mirror](../features/mirror.md)
+- [Text to Face](../features/text-to-face.md)
+- [Helix](../features/helix.md)
+- [Spline](../features/spline.md)

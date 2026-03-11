@@ -10,6 +10,16 @@ It also includes sketch workflows powered by a standalone 2D constraint solver, 
 
 This project is in active development and APIs may continue to evolve.
 
+## Workbenches
+
+- [Modeling Workbench](docs/workbenches/modeling.md)
+- [Import Workbench](docs/workbenches/import.md)
+- [Surfacing Workbench](docs/workbenches/surfacing.md)
+- [Sheet Metal Workbench](docs/workbenches/sheet-metal.md)
+- [Assemblies Workbench](docs/workbenches/assemblies.md)
+- [PMI Workbench](docs/workbenches/pmi.md)
+- [All Workbench](docs/workbenches/all.md)
+
 ## Screenshots
 
 ![Home @280](docs/HOME.png)
