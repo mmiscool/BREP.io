@@ -13,6 +13,16 @@ function getSelectionTarget(item) {
   return item?.object || item?.target || item || null;
 }
 
+function getFeatureIdFromSplineMetadata(obj) {
+  let current = obj || null;
+  while (current) {
+    const resolved = normalizeFeatureId(current?.userData?.splineFeatureId);
+    if (resolved) return resolved;
+    current = current.parent || null;
+  }
+  return null;
+}
+
 function findParentSolid(obj) {
   let current = obj || null;
   while (current) {
@@ -83,6 +93,20 @@ export function resolveOwningFeatureIdForSelection(selection) {
   const items = Array.isArray(selection) ? selection : [];
   if (items.length !== 1) return null;
   return resolveOwningFeatureIdForObject(getSelectionTarget(items[0]));
+}
+
+export function resolveSplineFeatureIdForObject(obj) {
+  return getFeatureIdFromSplineMetadata(obj);
+}
+
+export function resolveSplineFeatureIdForSelection(selection) {
+  const items = Array.isArray(selection) ? selection : [];
+  if (items.length !== 1) return null;
+  return resolveSplineFeatureIdForObject(getSelectionTarget(items[0]));
+}
+
+export function isSingleSplineSelection(selection) {
+  return !!resolveSplineFeatureIdForSelection(selection);
 }
 
 export function isSingleSelectionOfTypes(selection, allowedTypes = []) {

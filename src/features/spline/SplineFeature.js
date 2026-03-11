@@ -1,13 +1,78 @@
 import { LineGeometry } from "three/examples/jsm/Addons.js";
 import { BREP } from "../../BREP/BREP.js";
+import { CADmaterials } from "../../UI/CADmaterials.js";
+import { SelectionFilter } from "../../UI/SelectionFilter.js";
+import { SelectionState } from "../../UI/SelectionState.js";
+import { renderReferenceSelectionField } from "../../UI/featureDialogWidgets/referenceSelectionField.js";
+import { extractPortRuntimeData, findPortOwner } from "../port/portUtils.js";
 import { SplineEditorSession } from "./SplineEditorSession.js";
 import {
   buildHermitePolyline,
+  createResolvedSplineData,
   cloneSplineData,
   DEFAULT_RESOLUTION,
+  getSplineAttachmentPortRefs,
   normalizeSplineData,
 } from "./splineUtils.js";
 const THREE = BREP.THREE;
+
+function createRotationArrayFromDirection(directionArray) {
+  const xAxis = new THREE.Vector3(
+    Number(directionArray?.[0]) || 1,
+    Number(directionArray?.[1]) || 0,
+    Number(directionArray?.[2]) || 0,
+  );
+  if (xAxis.lengthSq() <= 1e-12) {
+    xAxis.set(1, 0, 0);
+  }
+  xAxis.normalize();
+  const upHint = Math.abs(xAxis.dot(new THREE.Vector3(0, 0, 1))) > 0.9
+    ? new THREE.Vector3(0, 1, 0)
+    : new THREE.Vector3(0, 0, 1);
+  let yAxis = new THREE.Vector3().crossVectors(upHint, xAxis).normalize();
+  if (yAxis.lengthSq() <= 1e-12) {
+    yAxis = new THREE.Vector3(0, 1, 0);
+  }
+  const zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize();
+  yAxis = new THREE.Vector3().crossVectors(zAxis, xAxis).normalize();
+  return new THREE.Matrix3().setFromMatrix4(new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis)).elements.slice();
+}
+
+function getPortRuntimeByName(portObjects = [], portRef = "") {
+  const target = String(portRef || "").trim();
+  if (!target) return null;
+  for (const obj of portObjects) {
+    if (!obj || String(obj?.name || "").trim() !== target) continue;
+    const data = extractPortRuntimeData(obj);
+    if (data) return data;
+  }
+  return null;
+}
+
+function normalizePortAttachmentSide(side) {
+  return String(side || "").trim().toUpperCase() === "B" ? "B" : "A";
+}
+
+function resolveSplineForPorts(spline, portObjects = []) {
+  return createResolvedSplineData(spline, (attachment) => {
+    const portData = getPortRuntimeByName(portObjects, attachment?.portRef);
+    if (!portData) return null;
+    const baseDirection = Array.isArray(portData.direction) ? portData.direction.slice(0, 3) : [1, 0, 0];
+    const side = normalizePortAttachmentSide(attachment?.side);
+    const direction = side === "B"
+      ? [-baseDirection[0], -baseDirection[1], -baseDirection[2]]
+      : baseDirection;
+    return {
+      position: portData.point,
+      rotation: createRotationArrayFromDirection(direction),
+      extension: portData.extension,
+      portName: portData.name,
+      portKind: portData.kind,
+      componentInstanceName: portData.componentInstanceName || "",
+      displayName: portData.linkName || portData.name || "",
+    };
+  });
+}
 
 function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
   const normalizeNumber = (value) => {
@@ -18,6 +83,15 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
     const num = Number(value);
     if (!Number.isFinite(num)) return "0";
     return num.toFixed(3).replace(/\.?0+$/, "") || "0";
+  };
+  const formatAttachmentDisplayName = (attachment) => {
+    if (!attachment || typeof attachment !== "object") return "";
+    const explicit = String(attachment.displayName || "").trim();
+    if (explicit) return explicit;
+    const componentName = String(attachment.componentInstanceName || "").trim();
+    const portName = String(attachment.portName || attachment.portRef || "").trim();
+    if (componentName && portName) return `${componentName}-${portName}`;
+    return portName;
   };
   const getFeatureID = () => ui?.params?.featureID != null ? String(ui.params.featureID) : null;
   const getViewer = () => ui?.options?.viewer || null;
@@ -208,6 +282,61 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
       font-size: 12px;
       padding: 6px 0;
     }
+    .spline-widget .spw-section {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .spline-widget .spw-section-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.72);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .spline-widget .spw-ref-row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .spline-widget .spw-ref-row .ref-single-wrap {
+      width: 100%;
+    }
+    .spline-widget .spw-ref-row .ref-single-display {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.04);
+      color: rgba(255, 255, 255, 0.88);
+      padding: 8px 10px;
+      cursor: pointer;
+      text-align: left;
+    }
+    .spline-widget .spw-ref-row .ref-single-display:hover {
+      border-color: rgba(108, 195, 255, 0.5);
+      background: rgba(108, 195, 255, 0.1);
+    }
+    .spline-widget .spw-ref-row .ref-single-wrap.ref-active .ref-single-display {
+      border-color: rgba(108, 195, 255, 0.95);
+      box-shadow: 0 0 0 1px rgba(108, 195, 255, 0.35);
+      background: rgba(108, 195, 255, 0.14);
+    }
+    .spline-widget .spw-ref-row .ref-single-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+    }
+    .spline-widget .spw-ref-row .ref-chip-remove {
+      flex: 0 0 auto;
+      color: rgba(255, 255, 255, 0.72);
+    }
   `;
   host.appendChild(style);
 
@@ -241,6 +370,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
     signature: null,
     pendingFocusId: null,
     pendingFocusNode: null,
+    pendingAttachPointId: null,
     session: null,
     selection: null,
     destroyed: false,
@@ -260,11 +390,128 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
     return cloneSplineData(normalized);
   };
 
+  const syncPortRefsParam = () => {
+    ui.params.portRefs = getSplineAttachmentPortRefs(state.spline);
+  };
+
+  const getResolvedPortObjects = () => {
+    const refs = Array.isArray(ui.params.portRefs) ? ui.params.portRefs : [];
+    const partHistory = getPartHistory();
+    return refs
+      .map((ref) => {
+        if (ref && typeof ref === "object") return ref;
+        const refName = String(ref || "").trim();
+        if (!refName) return null;
+        return partHistory?.getObjectByName?.(refName) || null;
+      })
+      .filter(Boolean);
+  };
+
+  const getSelectedPort = () => {
+    const viewer = getViewer();
+    const scene = viewer?.partHistory?.scene || viewer?.scene || null;
+    const selected = SelectionFilter.getSelectedObjects({ scene });
+    for (const item of selected) {
+      const owner = findPortOwner(item);
+      if (owner) return owner;
+    }
+    return null;
+  };
+
+  const getRuntimeAttachmentInfo = (attachment) => {
+    const portRef = String(attachment?.portRef || "").trim();
+    if (!portRef) return null;
+    const livePort = getPortRuntimeByName(getResolvedPortObjects(), portRef)
+      || extractPortRuntimeData(getPartHistory()?.getObjectByName?.(portRef));
+    if (!livePort) return null;
+    return {
+      portName: String(livePort.name || "").trim(),
+      portKind: String(livePort.kind || "").trim().toLowerCase(),
+      componentInstanceName: String(livePort.componentInstanceName || "").trim(),
+      displayName: String(livePort.linkName || livePort.name || "").trim(),
+    };
+  };
+
+  const findPointIndexById = (pointId) => {
+    const points = Array.isArray(state.spline?.points) ? state.spline.points : [];
+    return points.findIndex((point) => String(point?.id || "") === String(pointId || ""));
+  };
+
+  const clearPendingAttach = () => {
+    state.pendingAttachPointId = null;
+  };
+
+  const isPortReferencePickerActive = () => {
+    try {
+      const active = ui?.constructor?.__activeRefInput || window.__BREP_activeRefInput || null;
+      return !!(active?.dataset?.splinePortPicker === "true");
+    } catch {
+      return false;
+    }
+  };
+
+  const restoreSplineModeIfNeeded = () => {
+    if (isPortReferencePickerActive()) return;
+    const viewer = getViewer();
+    const session = state.session;
+    if (!viewer || !session) return;
+    try {
+      if (typeof session.isActive === "function" && !session.isActive()) return;
+    } catch { /* ignore */ }
+    try { viewer.startSplineMode?.(session); } catch { /* ignore */ }
+  };
+
+  const applyAttachedPortToPoint = (point, portOwner, side = "A") => {
+    if (!point || !portOwner) return false;
+    const portData = extractPortRuntimeData(portOwner);
+    if (!portData) return false;
+    const normalizedKind = String(portData.kind || "").trim().toLowerCase();
+    const normalizedSide = normalizePortAttachmentSide(side);
+    point.attachment = {
+      type: "port",
+      portRef: String(portOwner.name || "").trim(),
+      side: normalizedSide,
+      portName: String(portData.name || "").trim(),
+      portKind: normalizedKind,
+      componentInstanceName: String(portData.componentInstanceName || "").trim(),
+      displayName: String(portData.linkName || portData.name || "").trim(),
+    };
+    point.flipDirection = false;
+    if (Array.isArray(portData.point) && portData.point.length >= 3) {
+      point.position = portData.point.slice(0, 3);
+    }
+    if (Array.isArray(portData.direction) && portData.direction.length >= 3) {
+      const direction = point.attachment.side === "B"
+        ? [-portData.direction[0], -portData.direction[1], -portData.direction[2]]
+        : portData.direction.slice(0, 3);
+      point.rotation = createRotationArrayFromDirection(direction);
+    }
+    if (portData.extension != null) {
+      const extension = Math.max(0, Number(portData.extension) || 0);
+      point.forwardDistance = extension;
+      point.backwardDistance = extension;
+    }
+    return true;
+  };
+
+  const attachPointToPortOwner = (pointId, portOwner, options = {}) => {
+    const { side = "A", reason = "attach-port" } = options;
+    const pointIndex = findPointIndexById(pointId);
+    if (pointIndex < 0) return false;
+    const keyId = `point:${pointId}`;
+    activatePoint(pointId);
+    if (!applyAttachedPortToPoint(state.spline.points[pointIndex], portOwner, side)) return false;
+    clearPendingAttach();
+    commit(reason, { preserveSelection: true, newSelection: keyId });
+    return true;
+  };
+
   const ensureState = () => {
     if (!state.spline) {
       state.spline = loadFromSource();
       state.signature = computeSignature(state.spline);
       ui.params[key] = state.signature;
+      syncPortRefsParam();
     }
   };
 
@@ -319,6 +566,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
 
     try {
       state.spline = cloneSplineData(normalizeSplineData(nextData));
+      syncPortRefsParam();
 
       // CRITICAL FIX: Always update persistent data when spline changes
       // This ensures transform changes are preserved when parameters change
@@ -376,7 +624,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
       // Store desired selection before activation (since activation clears it)
       const desiredSelection = state.selection || (state.spline?.points?.[0] ? `point:${state.spline.points[0].id}` : null);
 
-      session.activate(state.spline, {
+      session.activate(resolveSplineForPorts(state.spline, getResolvedPortObjects()), {
         featureRef: feature,
         previewResolution: preview,
         initialSelection: desiredSelection,
@@ -398,7 +646,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
       if (currentSelection) {
 
 
-        session.setSplineData(state.spline, {
+        session.setSplineData(resolveSplineForPorts(state.spline, getResolvedPortObjects()), {
           preserveSelection: true,
           silent: true,
           reason: "initial-selection"
@@ -503,6 +751,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
       activeSession.selectObject(keyId, { forceRedraw: true });
     }
 
+    restoreSplineModeIfNeeded();
     state.selection = keyId;
     updateSelectionStyles();
   };
@@ -527,6 +776,10 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
     }
     points.forEach((pt, index) => {
       const keyId = `point:${pt.id}`;
+      const attachment = pt?.attachment || null;
+      const liveAttachment = getRuntimeAttachmentInfo(attachment);
+      const isAttached = !!attachment?.portRef;
+      const isPendingAttach = state.pendingAttachPointId === pt.id;
       const rowEl = document.createElement("div");
       rowEl.className = "spw-point-row";
       rowEl.dataset.pointId = String(pt.id);
@@ -565,9 +818,19 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
       flipBtn.type = "button";
       flipBtn.className = "spw-btn";
       flipBtn.textContent = ">|<";
-      flipBtn.title = "Toggle spline direction";
+      flipBtn.title = isAttached
+        ? `Switch attached port side (${attachment?.side === "B" ? "B" : "A"} -> ${attachment?.side === "B" ? "A" : "B"})`
+        : "Toggle spline direction";
       flipBtn.addEventListener("click", () => {
         activatePoint(pt.id);
+        if (isAttached) {
+          const owner = getSelectedPort() || findPortOwner(getPartHistory()?.getObjectByName?.(attachment.portRef));
+          if (!owner) return;
+          const nextSide = attachment?.side === "B" ? "A" : "B";
+          if (!applyAttachedPortToPoint(state.spline.points[index], owner, nextSide)) return;
+          commit("update-port-side", { preserveSelection: true, newSelection: keyId });
+          return;
+        }
         state.spline.points[index].flipDirection = !state.spline.points[index].flipDirection;
         commit("flip-direction");
       });
@@ -642,6 +905,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
       forwardInput.addEventListener("focus", () => {
         forwardInput.select?.();
       });
+      forwardInput.disabled = isAttached;
       forwardWrap.appendChild(forwardInput);
       extensionCoords.appendChild(forwardWrap);
 
@@ -664,11 +928,99 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
       backwardInput.addEventListener("focus", () => {
         backwardInput.select?.();
       });
+      backwardInput.disabled = isAttached;
       backwardWrap.appendChild(backwardInput);
       extensionCoords.appendChild(backwardWrap);
 
       extensionSection.appendChild(extensionCoords);
       rowEl.appendChild(extensionSection);
+
+      const attachmentSection = document.createElement("div");
+      attachmentSection.className = "spw-section";
+      const attachmentTitle = document.createElement("div");
+      attachmentTitle.className = "spw-section-title";
+      attachmentTitle.textContent = "Port Attachment";
+      attachmentSection.appendChild(attachmentTitle);
+
+      const attachmentInfo = document.createElement("div");
+      attachmentInfo.className = "spw-posline";
+      const attachmentLabel = formatAttachmentDisplayName({
+        ...attachment,
+        ...liveAttachment,
+      });
+      attachmentInfo.textContent = isAttached
+        ? `Attached to ${attachmentLabel || attachment.portRef} (${attachment?.side === "B" ? "B" : "A"} side)`
+        : (isPendingAttach ? "Select a port in the viewport to link this point." : "No port attached.");
+      attachmentSection.appendChild(attachmentInfo);
+
+      const attachmentActions = document.createElement("div");
+      attachmentActions.className = "spw-ref-row";
+
+      const refFieldHost = document.createElement("div");
+      attachmentActions.appendChild(refFieldHost);
+      let handlingPortReferenceEmit = false;
+
+      const refField = renderReferenceSelectionField({
+        ui,
+        key: `__point_port_ref__${pt.id}`,
+        id: `spline-port-ref-${String(pt.id).replace(/[^a-zA-Z0-9_-]/g, "_")}`,
+        controlWrap: refFieldHost,
+        def: {
+          type: "reference_selection",
+          multiple: false,
+          selectionFilter: ["DATUM", "EDGE", "VERTEX"],
+          placeholder: "Click then select a port…",
+          selectionValidator: (candidate) => !!findPortOwner(candidate),
+          selectionValidationMessage: "Select a port.",
+        },
+        valueAdapter: {
+          read: () => attachment?.portRef || null,
+          write: () => { },
+          emit: (nextValue) => {
+            if (handlingPortReferenceEmit) return;
+            handlingPortReferenceEmit = true;
+            activatePoint(pt.id);
+            clearPendingAttach();
+            const normalizedRef = String(nextValue || "").trim();
+            try {
+              if (!normalizedRef) {
+                delete state.spline.points[index].attachment;
+                commit("detach-port", { preserveSelection: true, newSelection: keyId });
+                restoreSplineModeIfNeeded();
+                return;
+              }
+              const owner = findPortOwner(getPartHistory()?.getObjectByName?.(normalizedRef));
+              if (!owner) {
+                restoreSplineModeIfNeeded();
+                return;
+              }
+              attachPointToPortOwner(pt.id, owner, { reason: "attach-port-reference" });
+              restoreSplineModeIfNeeded();
+            } finally {
+              queueMicrotask(() => {
+                handlingPortReferenceEmit = false;
+              });
+            }
+          },
+        },
+      });
+
+      const refInput = refField?.inputEl || null;
+      if (refInput) {
+        refInput.dataset.splinePortPicker = "true";
+      }
+      const refWrap = refInput?.closest?.(".ref-single-wrap") || refFieldHost.querySelector?.(".ref-single-wrap") || null;
+      const refButton = refWrap?.querySelector?.(".ref-single-display") || null;
+      const refLabel = refWrap?.querySelector?.(".ref-single-label") || null;
+      if (refButton) {
+        refButton.title = "Click to pick a port from the viewport.";
+      }
+      if (refLabel) {
+        refLabel.textContent = attachmentLabel || "Click then select a port…";
+      }
+
+      attachmentSection.appendChild(attachmentActions);
+      rowEl.appendChild(attachmentSection);
 
       pointList.appendChild(rowEl);
       pointRowMap.set(keyId, rowEl);
@@ -709,6 +1061,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
     if (activeSession && !fromSession) {
       state.selection = activeSession.getSelectedId?.() || state.selection;
     }
+    restoreSplineModeIfNeeded();
 
     renderPointRows();
 
@@ -734,7 +1087,10 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
       : [];
     if (points.length <= 2) return;
 
-    points.splice(index, 1);
+    const [removedPoint] = points.splice(index, 1);
+    if (removedPoint && state.pendingAttachPointId === removedPoint.id) {
+      clearPendingAttach();
+    }
 
     // Determine fallback selection after removal
     let newSelection = null;
@@ -757,6 +1113,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
 
     const normalized = normalizeSplineData(state.spline);
     state.spline = cloneSplineData(normalized);
+    syncPortRefsParam();
 
     state.signature = computeSignature(state.spline);
 
@@ -792,6 +1149,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
     const normalized = normalizeSplineData(state.spline);
     state.spline = cloneSplineData(normalized);
     state.pendingFocusId = focusId;
+    syncPortRefsParam();
 
     // For manual commits (add/remove/reorder points), we do need to update the feature
     // But for transform operations, we rely on preview mode
@@ -837,7 +1195,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
         const session = ensureSession();
         if (session) {
           session.setFeatureRef(feature);
-          session.setSplineData(state.spline, {
+          session.setSplineData(resolveSplineForPorts(state.spline, getResolvedPortObjects()), {
             preserveSelection,
             silent: true,
             reason,
@@ -1094,7 +1452,6 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
   });
 
   ensureState();
-
   // Set up initial selection to first point if no selection exists
   if (!state.selection && state.spline?.points?.length > 0) {
     const firstPoint = state.spline.points[0];
@@ -1142,11 +1499,12 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
           state.spline = next;
           state.signature = nextSig;
           ui.params[key] = state.signature;
+          syncPortRefsParam();
 
           // Only update existing session, don't create new one during refresh
           if (state.session) {
             state.session.setFeatureRef(getFeatureRef());
-            state.session.setSplineData(state.spline, {
+            state.session.setSplineData(resolveSplineForPorts(state.spline, getResolvedPortObjects()), {
               preserveSelection: true,
               silent: true,
             });
@@ -1156,6 +1514,11 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
         } else if (state.session) {
           // Only update existing session
           state.session.setFeatureRef(getFeatureRef());
+          state.session.setSplineData(resolveSplineForPorts(state.spline, getResolvedPortObjects()), {
+            preserveSelection: true,
+            silent: true,
+            reason: "attachment-refresh",
+          });
           renderAll({ fromSession: true });
         }
 
@@ -1179,6 +1542,7 @@ function renderSplinePointsWidget({ ui, key, controlWrap, row }) {
       }
 
       state.destroyed = true;
+      clearPendingAttach();
 
 
 
@@ -1201,6 +1565,13 @@ const inputParamsSchema = {
     type: "number",
     default_value: DEFAULT_RESOLUTION,
     hint: "Samples per segment used to visualize the spline",
+  },
+  portRefs: {
+    type: "reference_selection",
+    selectionFilter: ["DATUM"],
+    multiple: true,
+    default_value: [],
+    hidden: true,
   },
   bendRadius: {
     type: "number",
@@ -1259,6 +1630,7 @@ export class SplineFeature {
     sceneGroup.name = featureId;
     sceneGroup.type = "SKETCH";
     sceneGroup.onClick = () => { };
+    sceneGroup.renderOrder = 10000;
 
     const resolution = Number.isFinite(Number(this.inputParams?.curveResolution))
       ? Math.max(4, Number(this.inputParams.curveResolution))
@@ -1268,7 +1640,9 @@ export class SplineFeature {
       ? Math.max(0.1, Math.min(5.0, Number(this.inputParams.bendRadius)))
       : 1.0;
 
-    const { positions, polyline } = buildHermitePolyline(spline, resolution, bendRadius);
+    const portObjects = Array.isArray(this.inputParams?.portRefs) ? this.inputParams.portRefs : [];
+    const evaluatedSpline = resolveSplineForPorts(spline, portObjects);
+    const { positions, polyline } = buildHermitePolyline(evaluatedSpline, resolution, bendRadius);
 
     if (positions.length >= 6) {
       const geometry = new LineGeometry();
@@ -1276,6 +1650,16 @@ export class SplineFeature {
 
       const edge = new BREP.Edge(geometry);
       edge.name = `${featureId}:SplineEdge`;
+      const edgeMaterial = CADmaterials?.EDGE?.OVERLAY?.clone?.()
+        || CADmaterials?.EDGE?.BASE?.clone?.()
+        || edge.material?.clone?.()
+        || edge.material;
+      try { edgeMaterial.color?.set?.(0xffffff); } catch { }
+      try { edgeMaterial.depthTest = false; } catch { }
+      try { edgeMaterial.depthWrite = false; } catch { }
+      try { edgeMaterial.transparent = true; } catch { }
+      SelectionState.setBaseMaterial(edge, edgeMaterial, { force: true });
+      edge.renderOrder = 10000;
       edge.userData = {
         polylineLocal: polyline.map((p) => [p[0], p[1], p[2]]),
         polylineWorld: true,
@@ -1285,10 +1669,20 @@ export class SplineFeature {
     }
 
     try {
-      const vertices = spline.points.map((pt, idx) => {
+      const vertices = evaluatedSpline.points.map((pt, idx) => {
         const vertex = new BREP.Vertex(pt.position, {
           name: `${featureId}:P${idx}`,
         });
+        const pointMaterial = vertex?._point?.material?.clone?.()
+          || CADmaterials?.VERTEX?.BASE?.clone?.()
+          || null;
+        if (pointMaterial) {
+          try { pointMaterial.depthTest = false; } catch { }
+          try { pointMaterial.depthWrite = false; } catch { }
+          SelectionState.setBaseMaterial(vertex, pointMaterial, { force: true });
+        }
+        try { vertex.renderOrder = 10001; } catch { }
+        try { if (vertex._point) vertex._point.renderOrder = 10001; } catch { }
         vertex.userData = vertex.userData || {};
         vertex.userData.splineFeatureId = featureId;
         vertex.userData.splinePointId = pt.id;
@@ -1299,45 +1693,6 @@ export class SplineFeature {
       }
     } catch {
       // optional vertices failed; ignore
-    }
-
-    try {
-      // Add extension handles as vertices for visualization
-      spline.points.forEach((pt, idx) => {
-        const forwardPos = [
-          pt.position[0] + pt.forwardExtension[0],
-          pt.position[1] + pt.forwardExtension[1],
-          pt.position[2] + pt.forwardExtension[2]
-        ];
-        const backwardPos = [
-          pt.position[0] + pt.backwardExtension[0],
-          pt.position[1] + pt.backwardExtension[1],
-          pt.position[2] + pt.backwardExtension[2]
-        ];
-
-        const forwardVertex = new BREP.Vertex(forwardPos, {
-          name: `${featureId}:F${idx}`,
-        });
-        forwardVertex.userData = {
-          splineFeatureId: featureId,
-          splinePointId: pt.id,
-          extensionType: "forward",
-        };
-
-        const backwardVertex = new BREP.Vertex(backwardPos, {
-          name: `${featureId}:B${idx}`,
-        });
-        backwardVertex.userData = {
-          splineFeatureId: featureId,
-          splinePointId: pt.id,
-          extensionType: "backward",
-        };
-
-        sceneGroup.add(forwardVertex);
-        sceneGroup.add(backwardVertex);
-      });
-    } catch {
-      /* ignore extension vertex creation failure */
     }
 
     this.persistentData = this.persistentData || {};

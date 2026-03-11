@@ -407,6 +407,7 @@ export class SchemaForm {
             const defRaw = this.schema[key];
             const def = (defRaw && typeof defRaw === 'object') ? defRaw : {};
             if (this._excludedKeys.has(key)) continue;
+            if (def.hidden === true) continue;
             if (!(key in this.params)) {
                 const raw = ('default_value' in def) ? def.default_value : this._defaultForType(def.type);
                 this.params[key] = this._cloneDefault(raw);
@@ -422,6 +423,7 @@ export class SchemaForm {
             const defRaw = this.schema[key];
             const def = (defRaw && typeof defRaw === 'object') ? defRaw : {};
             if (this._excludedKeys.has(key)) continue;
+            if (def.hidden === true) continue;
 
             const row = document.createElement('div');
             row.className = 'field-row';

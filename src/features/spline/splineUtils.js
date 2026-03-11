@@ -3,6 +3,25 @@ const THREE = BREP.THREE;
 
 export const DEFAULT_RESOLUTION = 24;
 
+function normalizeAttachment(attachment) {
+  if (!attachment || typeof attachment !== "object") return null;
+  const type = String(attachment.type || "").trim().toLowerCase();
+  if (type !== "port") return null;
+  const portRef = String(attachment.portRef || attachment.ref || "").trim();
+  if (!portRef) return null;
+  const sideRaw = String(attachment.side || "").trim().toUpperCase();
+  const side = sideRaw === "B" ? "B" : "A";
+  return {
+    type: "port",
+    portRef,
+    side,
+    portName: String(attachment.portName || "").trim(),
+    portKind: String(attachment.portKind || "").trim().toLowerCase(),
+    componentInstanceName: String(attachment.componentInstanceName || "").trim(),
+    displayName: String(attachment.displayName || attachment.linkName || "").trim(),
+  };
+}
+
 const ensurePoint = (point, fallbackId, fallbackPosition, _index = 0) => {
   const positionSource = Array.isArray(point?.position)
     ? point.position
@@ -41,6 +60,7 @@ const ensurePoint = (point, fallbackId, fallbackPosition, _index = 0) => {
     forwardDistance,
     backwardDistance,
     flipDirection,
+    attachment: normalizeAttachment(point?.attachment),
   };
 };
 
@@ -79,6 +99,65 @@ export function normalizeSplineData(rawSpline) {
   return {
     points: normalizedPoints,
   };
+}
+
+export function getSplineAttachmentPortRefs(spline) {
+  const pointsData = Array.isArray(spline?.points) ? spline.points : [];
+  const refs = [];
+  for (const point of pointsData) {
+    const portRef = String(point?.attachment?.portRef || "").trim();
+    if (!portRef || refs.includes(portRef)) continue;
+    refs.push(portRef);
+  }
+  return refs;
+}
+
+export function createResolvedSplineData(spline, resolver) {
+  const normalized = normalizeSplineData(cloneSplineData(spline));
+  const resolveAttachment = typeof resolver === "function" ? resolver : () => null;
+  normalized.points = normalized.points.map((point) => {
+    const attachment = normalizeAttachment(point?.attachment);
+    if (!attachment) return point;
+    const resolved = resolveAttachment(attachment, point);
+    if (!resolved || typeof resolved !== "object") return point;
+
+    const nextPoint = {
+      ...point,
+      attachment,
+    };
+
+    if (Array.isArray(resolved.position) && resolved.position.length === 3) {
+      nextPoint.position = [
+        Number(resolved.position[0]) || 0,
+        Number(resolved.position[1]) || 0,
+        Number(resolved.position[2]) || 0,
+      ];
+    }
+    if (Array.isArray(resolved.rotation) && resolved.rotation.length === 9) {
+      nextPoint.rotation = resolved.rotation.slice(0, 9).map((value, index) =>
+        Number.isFinite(Number(value)) ? Number(value) : (index === 0 || index === 4 || index === 8 ? 1 : 0)
+      );
+    }
+    if (resolved.extension != null) {
+      const extension = Math.max(0, Number(resolved.extension) || 0);
+      nextPoint.forwardDistance = extension;
+      nextPoint.backwardDistance = extension;
+    }
+    if (typeof resolved.portName === "string") {
+      nextPoint.attachment.portName = resolved.portName;
+    }
+    if (typeof resolved.portKind === "string") {
+      nextPoint.attachment.portKind = resolved.portKind;
+    }
+    if (typeof resolved.componentInstanceName === "string") {
+      nextPoint.attachment.componentInstanceName = resolved.componentInstanceName;
+    }
+    if (typeof resolved.displayName === "string") {
+      nextPoint.attachment.displayName = resolved.displayName;
+    }
+    return nextPoint;
+  });
+  return normalized;
 }
 
 const hermitePoint = (p0, p1, t0, t1, t) => {

@@ -44,6 +44,9 @@ import { registerDefaultToolbarButtons } from './toolbarButtons/registerDefaultB
 import { registerSelectionToolbarButtons } from './toolbarButtons/registerSelectionButtons.js';
 import { TriangleDebuggerWindow } from './triangleDebuggerWindow.js';
 import { ViewCube } from './ViewCube.js';
+import { WireHarnessConnectionsWidget } from './wireHarness/WireHarnessConnectionsWidget.js';
+import { renderWireHarnessRoutes, clearWireHarnessRouteGroup } from '../wireHarness/wireHarnessRouteRenderer.js';
+import { routeWireHarnessConnections } from '../wireHarness/wireHarnessRouting.js';
 import {
     getActiveWorkbench,
     isSidePanelAllowed,
@@ -1545,12 +1548,14 @@ export class Viewer {
             this.refreshWorkbenchUi();
             this.applyMetadataColors();
             this._axisHelpersDirty = true;
+            void this.refreshWireHarnessRoutes({ reason: 'after-run-history' });
         };
         this.partHistory.callbacks.afterReset = () => {
             this._refreshAssemblyConstraintsPanelVisibility();
             this.refreshWorkbenchUi();
             this.applyMetadataColors();
             this._axisHelpersDirty = true;
+            void this.refreshWireHarnessRoutes({ reason: 'after-reset' });
         };
 
         if (this._viewerOnlyMode) {
@@ -1629,6 +1634,16 @@ export class Viewer {
         const sheetsSection = await this.accordion.addSection("2D Sheets");
         sheetsSection.uiElement.appendChild(this.sheet2DWidget.uiElement);
 
+        this.wireHarnessConnectionsWidget = new WireHarnessConnectionsWidget(this);
+        const wireHarnessSection = await this.accordion.addSection('Wire Harness');
+        wireHarnessSection.uiElement.appendChild(this.wireHarnessConnectionsWidget.uiElement);
+        this._registerWorkbenchPanel({
+            id: 'wireHarnessConnections',
+            title: 'Wire Harness',
+            section: wireHarnessSection,
+            source: 'builtin',
+        });
+
         // CADmaterials (Settings panel)
         this.cadMaterialsUi = await new CADmaterialWidget(this);
         const displaySection = await this.accordion.addSection("Display Settings");
@@ -1681,6 +1696,7 @@ export class Viewer {
             }
         } catch { }
         try { this.refreshWorkbenchUi(); } catch { }
+        void this.refreshWireHarnessRoutes({ reason: 'setup-accordion' });
         this._syncSidebarHomeBannerHeight();
         this._bindSidebarHomeBannerHeightSync();
 
@@ -1780,8 +1796,54 @@ export class Viewer {
             }
             this._sheet2DEditorWindow?.refreshFromHistory?.();
         } catch { }
+        try {
+            if (this.wireHarnessConnectionsWidget) {
+                this.wireHarnessConnectionsWidget.refreshFromHistory?.();
+                this.wireHarnessConnectionsWidget._renderList?.();
+            }
+            void this.refreshWireHarnessRoutes({ reason: 'undo-redo' });
+        } catch { }
         try { this.historyWidget?.render?.(); } catch { }
         try { this.refreshWorkbenchUi(); } catch { }
+    }
+
+    async refreshWireHarnessRoutes(_options = {}) {
+        const scene = this.partHistory?.scene || this.scene || null;
+        const manager = this.partHistory?.wireHarnessManager || null;
+        if (!scene || !manager) {
+            clearWireHarnessRouteGroup(scene);
+            return null;
+        }
+
+        const connections = Array.isArray(manager.getConnections?.()) ? manager.getConnections() : [];
+        if (!connections.length) {
+            clearWireHarnessRouteGroup(scene);
+            manager.setRouteResults?.([]);
+            return null;
+        }
+
+        try {
+            const { routes } = await routeWireHarnessConnections(this.partHistory, connections);
+            renderWireHarnessRoutes(scene, routes);
+            manager.setRouteResults?.(routes);
+            try { this.render?.(); } catch { /* ignore */ }
+            return routes;
+        } catch (error) {
+            console.warn('[Viewer] Failed to refresh wire harness routes:', error);
+            clearWireHarnessRouteGroup(scene);
+            manager.setRouteResults?.(
+                connections.map((connection) => ({
+                    connectionId: String(connection?.id || ''),
+                    connectionName: String(connection?.name || connection?.id || 'Wire'),
+                    feasible: false,
+                    error: error?.message || 'Failed to route wire harness connections.',
+                    distance: null,
+                    polyline: [],
+                    segmentIds: [],
+                })),
+            );
+            return null;
+        }
     }
 
     async _runFeatureHistoryUndoRedo(direction) {
@@ -1929,6 +1991,7 @@ export class Viewer {
         try { this.endPMIPreviewMode(); } catch { }
         try { this._stopComponentTransformSession(); } catch { }
         try { this.sheet2DWidget?.dispose?.(); } catch { }
+        try { this.wireHarnessConnectionsWidget?.dispose?.(); } catch { }
         try { this._sheet2DEditorWindow?.dispose?.(); } catch { }
         this._sheet2DEditorWindow = null;
         safe(() => this._sidebarDockController?.dispose());
@@ -3135,13 +3198,14 @@ export class Viewer {
                 const ud = obj?.userData || {};
                 // Prioritize control-point balls first, then cage lines, then cage quads.
                 if (ud.isSplineVertex) return 0;
+                if (ud.isPortChild) return 1;
                 if (ud.nurbsCageSegment) return 1;
                 if (ud.nurbsCageQuad) return 2;
                 return 3;
             };
             for (const it of intersects) {
                 if (!it || !it.object) continue;
-                if (!(it.object.userData?.isSplineVertex || it.object.userData?.isSplineWeight)) continue;
+                if (!(it.object.userData?.isSplineVertex || it.object.userData?.isSplineWeight || it.object.userData?.isPortChild)) continue;
                 const target = it.object;
                 if (typeof target.onClick !== 'function') continue;
                 splineCandidates.push({

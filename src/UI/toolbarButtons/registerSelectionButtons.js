@@ -7,6 +7,7 @@ import { createEditOwningFeatureButton } from './editOwningFeatureButton.js';
 import {
   isSingleSelectionOfTypes,
   resolveOwningFeatureIdForSelection,
+  resolveSplineFeatureIdForSelection,
 } from '../../utils/selectionOwningFeature.js';
 
 const hasSelection = (items) => Array.isArray(items) && items.length > 0;
@@ -39,6 +40,51 @@ const getSingleSelectionComponent = (items, viewer) => {
     else if (component !== owning) return null;
   }
   return component;
+};
+
+const getSplineFeatureEntry = (selection, viewer) => {
+  const featureId = resolveSplineFeatureIdForSelection(selection);
+  if (!featureId) return null;
+  const features = Array.isArray(viewer?.partHistory?.features) ? viewer.partHistory.features : [];
+  const feature = features.find((item) => {
+    const itemId = item?.inputParams?.featureID ?? item?.inputParams?.id ?? item?.id ?? null;
+    return itemId != null && String(itemId) === String(featureId);
+  }) || null;
+  if (!feature) return null;
+  const typeKey = String(feature?.constructor?.shortName || feature?.constructor?.type || '').toUpperCase();
+  if (typeKey !== 'SP') return null;
+  return { featureId: String(featureId), feature };
+};
+
+const isWireHarnessWorkbenchActive = (viewer) => {
+  const workbenchId = viewer?._getActiveWorkbenchId?.() || viewer?.partHistory?.activeWorkbench || null;
+  return String(workbenchId || '').toUpperCase() === 'WIRE_HARNESS';
+};
+
+const revealHistoryEntry = async (viewer, featureId) => {
+  if (!featureId) return false;
+  try { await viewer?.accordion?.expandSection?.('History'); } catch { /* ignore */ }
+  try {
+    if (viewer?.partHistory) {
+      viewer.partHistory.currentHistoryStepId = String(featureId);
+    }
+  } catch { /* ignore */ }
+  return viewer?.historyWidget?.revealEntry?.(featureId, { focus: true, scroll: true }) === true;
+};
+
+const deleteHistoryEntry = async (viewer, featureId) => {
+  if (!featureId) return false;
+  const historyWidget = viewer?.historyWidget || null;
+  if (historyWidget && typeof historyWidget._deleteEntry === 'function') {
+    historyWidget._deleteEntry(String(featureId));
+    return true;
+  }
+  const partHistory = viewer?.partHistory || null;
+  if (!partHistory) return false;
+  await partHistory.removeFeature?.(String(featureId));
+  await partHistory.runHistory?.();
+  partHistory.queueHistorySnapshot?.({ debounceMs: 0, reason: 'delete' });
+  return true;
 };
 
 export function registerSelectionToolbarButtons(viewer) {
@@ -145,5 +191,52 @@ export function registerSelectionToolbarButtons(viewer) {
         ),
       });
     }
+  } catch { }
+
+  try {
+    SelectionFilter.registerSelectionAction({
+      id: 'selection-action-edit-spline',
+      label: 'Edit spline',
+      title: 'Open the selected spline in history for editing',
+      onClick: async () => {
+        const selection = SelectionFilter.getSelectedObjects();
+        const entry = getSplineFeatureEntry(selection, viewer);
+        if (!entry) {
+          viewer?._toast?.('Select a single spline.');
+          return;
+        }
+        const revealed = await revealHistoryEntry(viewer, entry.featureId);
+        if (!revealed) {
+          viewer?._toast?.(`Spline "${entry.featureId}" is not available in history.`);
+        }
+      },
+      shouldShow: (selection) => isWireHarnessWorkbenchActive(viewer) && !!getSplineFeatureEntry(selection, viewer),
+    });
+  } catch { }
+
+  try {
+    SelectionFilter.registerSelectionAction({
+      id: 'selection-action-delete-spline',
+      label: 'Delete spline',
+      title: 'Delete the selected spline feature',
+      onClick: async () => {
+        const selection = SelectionFilter.getSelectedObjects();
+        const entry = getSplineFeatureEntry(selection, viewer);
+        if (!entry) {
+          viewer?._toast?.('Select a single spline.');
+          return;
+        }
+        try {
+          const scene = viewer?.partHistory?.scene || viewer?.scene || null;
+          if (scene) SelectionFilter.unselectAll(scene);
+          SelectionFilter.clearHover?.();
+        } catch { /* ignore */ }
+        const deleted = await deleteHistoryEntry(viewer, entry.featureId);
+        if (!deleted) {
+          viewer?._toast?.(`Unable to delete spline "${entry.featureId}".`);
+        }
+      },
+      shouldShow: (selection) => isWireHarnessWorkbenchActive(viewer) && !!getSplineFeatureEntry(selection, viewer),
+    });
   } catch { }
 }

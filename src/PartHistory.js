@@ -11,6 +11,7 @@ import { AssemblyComponentFeature } from './features/assemblyComponent/AssemblyC
 import { MetadataManager } from './metadataManager.js';
 import { PMIViewsManager } from './pmi/PMIViewsManager.js';
 import { Sheet2DManager } from './sheets/Sheet2DManager.js';
+import { WireHarnessManager } from './wireHarness/WireHarnessManager.js';
 import { base64ToUint8Array, getComponentRecord } from './services/componentLibrary.js';
 import { deepClone } from './utils/deepClone.js';
 import {
@@ -71,6 +72,7 @@ export class PartHistory {
     this.activeWorkbench = getDefaultWorkbenchForNewPart();
     this.pmiViewsManager = new PMIViewsManager(this);
     this.sheet2DManager = new Sheet2DManager(this);
+    this.wireHarnessManager = new WireHarnessManager(this);
     this.metadataManager = new MetadataManager
     this._historyUndo = {
       undoStack: [],
@@ -406,6 +408,7 @@ export class PartHistory {
     this.idCounter = 0;
     this.pmiViewsManager.reset();
     this.sheet2DManager.reset();
+    this.wireHarnessManager.reset();
     this.expressions = "//Examples:\nx = 10 + 6; \ny = x * 2;";
     this.activeWorkbench = getDefaultWorkbenchForNewPart();
     // Reset MetadataManager
@@ -1107,6 +1110,7 @@ export class PartHistory {
     }));
     const pmiViews = this.pmiViewsManager.toSerializable();
     const sheets2D = this.sheet2DManager.toSerializable();
+    const wireHarness = this.wireHarnessManager.toSerializable();
 
     return JSON.stringify({
       features,
@@ -1115,6 +1119,7 @@ export class PartHistory {
       activeWorkbench: normalizeWorkbenchId(this.activeWorkbench, getDefaultWorkbenchForNewPart()),
       pmiViews,
       sheets2D,
+      wireHarness,
       metadata: this.metadataManager.metadata,
       assemblyConstraints: constraintsSnapshot.constraints,
       assemblyConstraintIdCounter: constraintsSnapshot.idCounter,
@@ -1140,6 +1145,7 @@ export class PartHistory {
       : getLegacyLoadWorkbenchDefault();
     this.pmiViewsManager.setViews(importData.pmiViews || []);
     this.sheet2DManager.setSheets(importData.sheets2D || []);
+    this.wireHarnessManager.setConnections(importData.wireHarness || []);
     this.metadataManager.metadata = importData.metadata || {};
 
     if (this.assemblyConstraintHistory) {
@@ -1520,6 +1526,12 @@ export class PartHistory {
     };
     feature.inputParams.id = await this.generateId(featureType);
     this.#linkFeatureParams(feature);
+    if (FeatureClass === AssemblyComponentFeature) {
+      const defaultInstanceName = String(feature.inputParams.id || '').trim();
+      if (!String(feature.inputParams.instanceName || '').trim()) {
+        feature.inputParams.instanceName = defaultInstanceName;
+      }
+    }
     // console.debug("New feature created:", feature.inputParams.id);
     this.features.push(feature);
     return feature;

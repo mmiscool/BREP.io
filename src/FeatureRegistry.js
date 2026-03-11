@@ -37,6 +37,7 @@ import { NurbsFaceSolidFeature } from './features/nurbsFaceSolid/NurbsFaceSolidF
 import { PolygonSolidFeature } from './features/polygonSolid/PolygonSolidFeature.js';
 import { SmoothWithSubdivisionFeature } from './features/smoothWithSubdivision/SmoothWithSubdivisionFeature.js';
 import { SplineFeature } from './features/spline/SplineFeature.js';
+import { PortFeature } from './features/port/PortFeature.js';
 import { SheetMetalTabFeature } from './features/sheetMetal/SheetMetalTabFeature.js';
 import { SheetMetalContourFlangeFeature } from './features/sheetMetal/SheetMetalContourFlangeFeature.js';
 import { SheetMetalFlangeFeature } from './features/sheetMetal/SheetMetalFlangeFeature.js';
@@ -87,6 +88,7 @@ export class FeatureRegistry {
     this.register(Import3dModelFeature);
     this.register(SketchFeature);
     this.register(SplineFeature);
+    this.register(PortFeature);
     this.register(HelixFeature);
     this.register(ExtrudeFeature);
     this.register(BooleanFeature);

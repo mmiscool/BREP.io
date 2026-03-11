@@ -5,6 +5,7 @@ import { MODELING_WORKBENCH } from './modelingWorkbench.js';
 import { PMI_WORKBENCH } from './pmiWorkbench.js';
 import { SHEET_METAL_WORKBENCH } from './sheetMetalWorkbench.js';
 import { SURFACING_WORKBENCH } from './surfacingWorkbench.js';
+import { WIRE_HARNESS_WORKBENCH } from './wireHarnessWorkbench.js';
 
 export const WORKBENCH_IDS = {
   MODELING: 'MODELING',
@@ -12,6 +13,7 @@ export const WORKBENCH_IDS = {
   SURFACING: 'SURFACING',
   SHEET_METAL: 'SHEET_METAL',
   ASSEMBLIES: 'ASSEMBLIES',
+  WIRE_HARNESS: 'WIRE_HARNESS',
   PMI: 'PMI',
   ALL: 'ALL',
 };
@@ -22,6 +24,7 @@ export const WORKBENCH_LIST = [
   SURFACING_WORKBENCH,
   SHEET_METAL_WORKBENCH,
   ASSEMBLIES_WORKBENCH,
+  WIRE_HARNESS_WORKBENCH,
   PMI_WORKBENCH,
   ALL_WORKBENCH,
 ];

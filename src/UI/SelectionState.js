@@ -352,7 +352,41 @@ export class SelectionState {
                 mat = selMat ?? base;
             }
         } else if (rootType === 'VERTEX') {
-            mat = CADmaterials.VERTEX?.SELECTED ?? base;
+            const selMat = CADmaterials.VERTEX?.SELECTED ?? base;
+            const selColor = SelectionState._resolveColor(selMat?.color ?? selMat?.color?.getHexString?.());
+            if (selColor && base) {
+                const ud = target.userData || (target.userData = {});
+                const prevMat = ud.__selectedMat;
+                const sameBase = ud.__selectedMatBase === base;
+                const sameColor = ud.__selectedColor === selColor;
+                if (prevMat && sameBase && sameColor) {
+                    mat = prevMat;
+                } else {
+                    if (prevMat && prevMat !== base) {
+                        try {
+                            if (Array.isArray(prevMat)) {
+                                for (const m of prevMat) {
+                                    try { if (m && typeof m.dispose === 'function') m.dispose(); } catch { }
+                                }
+                            } else if (typeof prevMat.dispose === 'function') {
+                                prevMat.dispose();
+                            }
+                        } catch { }
+                    }
+                    mat = SelectionState._cloneMaterialWithColor(base, selColor);
+                    try {
+                        if (selMat?.size != null && mat && typeof mat.size !== 'undefined') mat.size = selMat.size;
+                    } catch { }
+                    try {
+                        if (selMat?.sizeAttenuation != null && mat && typeof mat.sizeAttenuation !== 'undefined') mat.sizeAttenuation = selMat.sizeAttenuation;
+                    } catch { }
+                    ud.__selectedMat = mat;
+                    ud.__selectedMatBase = base;
+                    ud.__selectedColor = selColor;
+                }
+            } else {
+                mat = selMat ?? base;
+            }
         }
         if (mat) SelectionState._assignMaterial(target, mat);
     }

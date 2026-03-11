@@ -420,6 +420,7 @@ export class SplineEditorSession {
       transparent: true,
       opacity: 0.85,
       depthTest: false,
+      depthWrite: false,
     });
   }
 
@@ -467,6 +468,9 @@ export class SplineEditorSession {
     const lineMaterial = new THREE.LineBasicMaterial({
       color: 0xffffff,
       linewidth: 2,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
     });
 
     const geometry = new THREE.BufferGeometry();
@@ -476,6 +480,7 @@ export class SplineEditorSession {
     this._line.userData = this._line.userData || {};
     this._line.userData.excludeFromFit = true;
     this._line.renderOrder = 10000;
+    this._line.frustumCulled = false;
     this._previewGroup.add(this._line);
 
     scene.add(this._previewGroup);
@@ -680,11 +685,16 @@ export class SplineEditorSession {
     const lineMaterial = new THREE.LineBasicMaterial({
       color: 0xffffff,
       linewidth: 2,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
     });
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute([], 3));
     this._line = new THREE.Line(geometry, lineMaterial);
     this._line.name = "SplinePreviewLine";
+    this._line.renderOrder = 10000;
+    this._line.frustumCulled = false;
     this._previewGroup.add(this._line);
 
     // Create handles for each point - no separate extension handles
@@ -717,6 +727,15 @@ export class SplineEditorSession {
       const vertex = new BREP.Vertex([position[0], position[1], position[2]], {
         name: `SplineVertex:${pt.id}`,
       });
+      try {
+        if (vertex?._point?.material) {
+          vertex._point.material = vertex._point.material.clone();
+          vertex._point.material.depthTest = false;
+          vertex._point.material.depthWrite = false;
+        }
+      } catch { /* ignore */ }
+      try { vertex.renderOrder = 10001; } catch { /* ignore */ }
+      try { if (vertex._point) vertex._point.renderOrder = 10001; } catch { /* ignore */ }
 
       // Add click handler to the vertex to trigger selection
       vertex.onClick = () => {
@@ -743,13 +762,15 @@ export class SplineEditorSession {
       this._previewGroup.add(vertex);
 
       const entryId = `point:${pt.id}`;
-      const transform = this._createTransformControl(entryId, mesh);
+      const isAttached = !!pt?.attachment?.portRef;
+      const transform = isAttached ? null : this._createTransformControl(entryId, mesh);
       this._objectsById.set(entryId, {
         type: "point",
         mesh,
         vertex, // Store reference to the clickable vertex
         data: pt,
         transform,
+        attached: isAttached,
       });
 
       // Create extension lines for this point
@@ -762,6 +783,7 @@ export class SplineEditorSession {
       forwardLine.name = `SplineForwardLine:${pt.id}`;
       forwardLine.visible = true;
       forwardLine.frustumCulled = false;
+      forwardLine.renderOrder = 10001;
       this._previewGroup.add(forwardLine);
       this._extensionLines.set(forwardKey, forwardLine);
 
@@ -771,6 +793,7 @@ export class SplineEditorSession {
       backwardLine.name = `SplineBackwardLine:${pt.id}`;
       backwardLine.visible = true;
       backwardLine.frustumCulled = false;
+      backwardLine.renderOrder = 10001;
       this._previewGroup.add(backwardLine);
       this._extensionLines.set(backwardKey, backwardLine);
 

@@ -2,6 +2,7 @@ import JSZip from 'jszip';
 import { ThreeMFLoader } from 'three/examples/jsm/loaders/3MFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { BREP } from '../../BREP/BREP.js';
+import { createPortGroupFromDefinition, normalizePortDefinition } from '../port/portUtils.js';
 import { base64ToUint8Array, getComponentRecord } from '../../services/componentLibrary.js';
 
 const THREE = BREP.THREE;
@@ -58,6 +59,12 @@ const inputParamsSchema = {
     dialogTitle: 'Select Component',
     onSelect: handleComponentSelection,
   },
+  instanceName: {
+    type: 'string',
+    default_value: '',
+    label: 'Instance Name',
+    hint: 'Unique name used to identify this component instance in the assembly.',
+  },
   isFixed: {
     type: 'boolean',
     default_value: false,
@@ -82,7 +89,7 @@ export class AssemblyComponentFeature {
     this.persistentData = {};
   }
 
-  async run(_partHistory) {
+  async run(partHistory) {
     try { console.log('[AssemblyComponentFeature] run: begin', { componentName: this.inputParams?.componentName || null, featureID: this.inputParams?.featureID || null }); } catch { }
     const componentData = await this._resolveComponentData();
     if (!componentData || !componentData.bytes || componentData.bytes.length === 0) {
@@ -129,7 +136,8 @@ export class AssemblyComponentFeature {
     const sourceDisplayName = String(componentData.displayName || '').trim()
       || (sourcePath.includes('/') ? sourcePath.split('/').pop() : sourcePath)
       || 'Component';
-    const componentName = `${sourceDisplayName}_${featureId}`;
+    const componentInstanceName = this._ensureComponentInstanceName(featureId);
+    const componentName = componentInstanceName || `${sourceDisplayName}_${featureId}`;
     const component = new BREP.AssemblyComponent({
       name: componentName,
       fixed: !!this.inputParams.isFixed,
@@ -168,6 +176,7 @@ export class AssemblyComponentFeature {
     }
 
     component.userData = component.userData || {};
+    component.userData.componentInstanceName = componentInstanceName;
     component.userData.componentSource = {
       source: String(componentData.source || '').trim().toLowerCase() === 'github' ? 'github' : 'local',
       name: sourcePath || componentData.name || componentName,
@@ -180,6 +189,28 @@ export class AssemblyComponentFeature {
     };
     if (componentData.featureInfo) {
       component.userData.featureInfo = componentData.featureInfo;
+    }
+
+    const ownMetadata = typeof partHistory?.metadataManager?.getOwnMetadata === 'function'
+      ? partHistory.metadataManager.getOwnMetadata(componentName)
+      : {};
+    if (typeof partHistory?.metadataManager?.setMetadataObject === 'function') {
+      partHistory.metadataManager.setMetadataObject(componentName, {
+        ...ownMetadata,
+        componentInstanceName,
+        componentFeatureId: featureId,
+      });
+    }
+
+    const componentPorts = this._extractComponentPorts(componentData.featureInfo, featureId, componentInstanceName);
+    if (componentPorts.length) {
+      for (const portGroup of componentPorts) {
+        if (!portGroup) continue;
+        component.add(portGroup);
+      }
+      component.userData.ports = componentPorts
+        .map((portGroup) => portGroup?.userData?.portData || null)
+        .filter(Boolean);
     }
 
     // Persist canonical payload so reruns do not depend on local storage state.
@@ -198,6 +229,55 @@ export class AssemblyComponentFeature {
 
     try { console.log('[AssemblyComponentFeature] run: complete', { componentName, solids: solids.length }); } catch { }
     return { added: [component], removed: [] };
+  }
+
+  _extractComponentPorts(featureInfo, componentFeatureId = null, componentInstanceName = '') {
+    const historyFeatures = Array.isArray(featureInfo?.history?.features)
+      ? featureInfo.history.features
+      : [];
+    if (!historyFeatures.length) return [];
+
+    const groups = [];
+    for (const entry of historyFeatures) {
+      const entryType = String(entry?.type || '').trim().toUpperCase();
+      if (entryType !== 'PORT') continue;
+      const portSource = entry?.persistentData?.port || null;
+      if (!portSource || typeof portSource !== 'object') continue;
+      const normalized = normalizePortDefinition(portSource, entry?.inputParams?.id || entry?.inputParams?.featureID || 'Port');
+      const sourcePortFeatureId = String(normalized.featureId || entry?.inputParams?.id || '').trim() || 'Port';
+      const assemblyObjectName = this._withFeaturePrefix(componentFeatureId, sourcePortFeatureId, sourcePortFeatureId);
+      const group = createPortGroupFromDefinition({
+        ...normalized,
+        objectName: assemblyObjectName,
+        sourceComponentFeatureId: componentFeatureId || '',
+        sourcePortFeatureId,
+        componentInstanceName,
+      }, {
+        nameOverride: assemblyObjectName,
+      });
+      if (!group) continue;
+      group.userData = group.userData || {};
+      group.userData.portData = {
+        ...(group.userData.portData || {}),
+        objectName: assemblyObjectName,
+        sourceComponentFeatureId: componentFeatureId || '',
+        sourcePortFeatureId,
+        componentInstanceName,
+        linkName: componentInstanceName
+          ? `${componentInstanceName}-${normalized.name}`
+          : normalized.name,
+      };
+      groups.push(group);
+    }
+    return groups;
+  }
+
+  _ensureComponentInstanceName(featureId = null) {
+    this.inputParams = this.inputParams || {};
+    const fallback = String(featureId || this.inputParams?.id || this.inputParams?.featureID || 'Component').trim() || 'Component';
+    const next = String(this.inputParams.instanceName || '').trim() || fallback;
+    this.inputParams.instanceName = next;
+    return next;
   }
 
   async _resolveComponentData() {
