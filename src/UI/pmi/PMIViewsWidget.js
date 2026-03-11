@@ -1193,13 +1193,17 @@ export class PMIViewsWidget {
       try { this._applyView(view, { index }); } catch {}
       return;
     }
+    const wasInPMIWorkbench = this.viewer?._getActiveWorkbenchId?.() === 'PMI';
     try {
       const activePMI = this.viewer?._pmiMode;
       if (activePMI) {
         try {
+          if (wasInPMIWorkbench) this.viewer._suspendWorkbenchReturn = true;
           await activePMI.finish();
         } catch (err) {
           console.warn('PMI Views: failed to finish active PMI session before switching', err);
+        } finally {
+          if (wasInPMIWorkbench) this.viewer._suspendWorkbenchReturn = false;
         }
       }
     } catch (err) {
@@ -1207,7 +1211,7 @@ export class PMIViewsWidget {
     }
 
     try { this._applyView(view, { index }); } catch {}
-    try { this.viewer.startPMIMode?.(view, index, this); } catch {}
+    try { this.viewer.startPMIMode?.(view, index, this, { fromViewClick: true }); } catch {}
   }
 
   // --- Helpers: view settings ---

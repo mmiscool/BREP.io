@@ -1,11 +1,15 @@
 // MainToolbar.js - top toolbar that manages layout and button registration.
 // Button logic is implemented externally and registered via addCustomButton()/viewer.addToolbarButton.
+import { isToolbarButtonAllowed } from '../workbenches/index.js';
 
 export class MainToolbar {
   constructor(viewer) {
     this.viewer = viewer;
     this._rightReserveByKey = new Map();
     this._rightReserveWatchers = new Map();
+    this._buttonRecords = new Map();
+    this._buttonOrder = [];
+    this._buttonSeq = 1;
     // Guard against duplicate toolbars if constructed twice (e.g., hot reloads)
     try {
       const existing = document.getElementById('main-toolbar');
@@ -121,16 +125,58 @@ export class MainToolbar {
   }
 
   // Public: allow plugins to add custom buttons to the left cluster
-  addCustomButton({ label, title, onClick }) {
+  addCustomButton(spec = {}) {
     try {
-      const btn = this._btn(String(label ?? '🔧'), String(title || ''), onClick);
-      const anchor = this._selectionContainer && this._selectionContainer.parentNode === this._left
-        ? this._selectionContainer
-        : null;
-      if (anchor) this._left?.insertBefore(btn, anchor);
-      else this._left?.appendChild(btn);
-      return btn;
+      const id = String(spec.id || `toolbar-button-${this._buttonSeq++}`);
+      const record = {
+        ...this._buttonRecords.get(id),
+        ...spec,
+        id,
+      };
+      if (record.source == null && record.global == null && record.workbenches == null) {
+        record.global = true;
+      }
+      this._buttonRecords.set(id, record);
+      if (!this._buttonOrder.includes(id)) this._buttonOrder.push(id);
+      this.refreshButtons();
+      return record.btn || null;
     } catch { return null; }
+  }
+
+  refreshButtons() {
+    const left = this._left;
+    if (!left) return;
+    const anchor = this._selectionContainer && this._selectionContainer.parentNode === left
+      ? this._selectionContainer
+      : null;
+    const existing = Array.from(left.children);
+    for (const child of existing) {
+      if (anchor && child === anchor) continue;
+      try { left.removeChild(child); } catch { /* ignore */ }
+    }
+
+    const workbenchId = this.viewer?._getActiveWorkbenchId?.() || 'ALL';
+    for (const id of this._buttonOrder) {
+      const record = this._buttonRecords.get(id);
+      if (!record) continue;
+      const visible = isToolbarButtonAllowed(record, workbenchId);
+      if (!visible) continue;
+      if (!record.btn) {
+        record.btn = this._btn(
+          String(record.label ?? '🔧'),
+          String(record.title || ''),
+          record.onClick,
+        );
+      }
+      try {
+        record.btn.textContent = String(record.label ?? '🔧');
+        record.btn.title = String(record.title || record.label || '');
+        record.btn.__mtbOnClick = record.onClick;
+        record.btn.classList.toggle('mtb-icon', String(record.label || '').length <= 2);
+      } catch { /* ignore */ }
+      if (anchor) left.insertBefore(record.btn, anchor);
+      else left.appendChild(record.btn);
+    }
   }
 
   _ensureSelectionContainer() {

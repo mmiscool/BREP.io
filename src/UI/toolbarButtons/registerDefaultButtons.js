@@ -36,32 +36,38 @@ export function registerDefaultToolbarButtons(viewer) {
   const isLocalhost = isLocalhostRuntime();
 
   const creators = [
-    createHomeButton,
-    createNewButton,
-    createSaveButton,
-    createZoomToFitButton,
-    createWireframeToggleButton,
-    createImportButton,
-    createExportButton,
-    createShareButton,
-    createSheetEditorButton,
-    createSheetMetalFlatExportButton,
+    { id: 'home', create: createHomeButton, source: 'builtin' },
+    { id: 'new', create: createNewButton, source: 'builtin' },
+    { id: 'save', create: createSaveButton, source: 'builtin' },
+    { id: 'zoomToFit', create: createZoomToFitButton, source: 'builtin' },
+    { id: 'wireframe', create: createWireframeToggleButton, source: 'builtin' },
+    { id: 'import', create: createImportButton, source: 'builtin' },
+    { id: 'export', create: createExportButton, source: 'builtin' },
+    { id: 'share', create: createShareButton, source: 'builtin' },
+    { id: 'sheetEditor', create: createSheetEditorButton, source: 'builtin' },
+    { id: 'sheetMetalFlatExport', create: createSheetMetalFlatExportButton, source: 'builtin' },
   ];
 
-  if (isLocalhost) creators.push(createSheetMetalDebugButton);
-  creators.push(createAboutButton);
-  if (isLocalhost) creators.push(createTestsButton);
-  creators.push(createHistoryTestSnippetButton);
-  creators.push(createScriptRunnerButton);
-  if (isLocalhost) creators.push(createSelectionStateButton);
-  creators.push(createUndoButton, createRedoButton);
+  if (isLocalhost) creators.push({ id: 'sheetMetalDebug', create: createSheetMetalDebugButton, source: 'builtin' });
+  creators.push({ id: 'about', create: createAboutButton, source: 'builtin' });
+  if (isLocalhost) creators.push({ id: 'tests', create: createTestsButton, source: 'builtin' });
+  creators.push({ id: 'historyTestSnippet', create: createHistoryTestSnippetButton, source: 'builtin' });
+  creators.push({ id: 'scriptRunner', create: createScriptRunnerButton, source: 'builtin' });
+  if (isLocalhost) creators.push({ id: 'selectionState', create: createSelectionStateButton, source: 'builtin' });
+  creators.push(
+    { id: 'undo', create: createUndoButton, source: 'builtin' },
+    { id: 'redo', create: createRedoButton, source: 'builtin' },
+  );
 
-  for (const make of creators) {
+  for (const entry of creators) {
     try {
-      const spec = make(viewer);
+      const spec = entry.create(viewer);
       if (!spec) continue;
-      const { label, title, onClick } = spec;
-      viewer.addToolbarButton(label, title, onClick);
+      viewer.addToolbarButton({
+        ...spec,
+        id: entry.id,
+        source: entry.source || 'builtin',
+      });
     } catch {}
   }
 }

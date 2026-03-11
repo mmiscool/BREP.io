@@ -9,6 +9,7 @@
 //  - https://github.com/USER/REPO/tree/REF/sub/dir
 import { BREP } from "../BREP/BREP.js";
 import { readBrowserStorageValue, writeBrowserStorageValue } from "../utils/browserStorage.js";
+import { registerFeatureWorkbenchMetadata } from "../workbenches/index.js";
 
 
 
@@ -150,15 +151,17 @@ function buildApp(viewer) {
   const app = {
     BREP,
     viewer,
-    registerFeature(FeatureClass) {
+    registerFeature(FeatureClass, options = null) {
       try {
         FeatureClass.fromPlugin = true;
         const baseShort = FeatureClass?.shortName || FeatureClass?.name || 'Feature';
         const baseLong = FeatureClass?.longName || FeatureClass?.name || baseShort;
         FeatureClass.shortName = `🔌${baseShort}`;
         FeatureClass.longName = `🔌 ${baseLong}`;
+        registerFeatureWorkbenchMetadata(FeatureClass, options || {});
 
         viewer?.partHistory?.featureRegistry?.register?.(FeatureClass);
+        viewer?.refreshWorkbenchUi?.();
 
       } catch { }
     },
@@ -171,26 +174,53 @@ function buildApp(viewer) {
         viewer?.annotationRegistry?.register?.(AnnotationHandler);
       } catch {}
     },
-    addToolbarButton(label, title, onClick) {
+    addToolbarButton(labelOrSpec, title, onClick) {
       if (!viewer) return;
-      try { viewer.addToolbarButton(label, title, onClick); } catch { }
+      try {
+        if (labelOrSpec && typeof labelOrSpec === 'object' && !Array.isArray(labelOrSpec)) {
+          viewer.addToolbarButton({
+            ...labelOrSpec,
+            source: labelOrSpec.source || 'plugin',
+          });
+          return;
+        }
+        viewer.addToolbarButton({
+          label: labelOrSpec,
+          title,
+          onClick,
+          source: 'plugin',
+        });
+      } catch { }
     },
-    async addSidePanel(title, content) {
+    async addSidePanel(titleOrSpec, content) {
       try {
         if (typeof viewer?.addPluginSidePanel === 'function') {
-          return await viewer.addPluginSidePanel(title, content);
+          if (titleOrSpec && typeof titleOrSpec === 'object' && !Array.isArray(titleOrSpec)) {
+            return await viewer.addPluginSidePanel({
+              ...titleOrSpec,
+              source: titleOrSpec.source || 'plugin',
+            });
+          }
+          return await viewer.addPluginSidePanel({
+            title: titleOrSpec,
+            content,
+            source: 'plugin',
+          });
         }
         // Fallback: add immediately if helper is unavailable
-        const sec = await viewer?.accordion?.addSection?.(String(title || 'Plugin'));
+        const normalized = (titleOrSpec && typeof titleOrSpec === 'object' && !Array.isArray(titleOrSpec))
+          ? titleOrSpec
+          : { title: titleOrSpec, content };
+        const sec = await viewer?.accordion?.addSection?.(String(normalized.title || 'Plugin'));
         if (!sec) return null;
-        if (typeof content === 'function') {
-          const el = await content();
+        if (typeof normalized.content === 'function') {
+          const el = await normalized.content();
           if (el) sec.uiElement.appendChild(el);
-        } else if (content instanceof HTMLElement) {
-          sec.uiElement.appendChild(content);
-        } else if (content != null) {
+        } else if (normalized.content instanceof HTMLElement) {
+          sec.uiElement.appendChild(normalized.content);
+        } else if (normalized.content != null) {
           const pre = document.createElement('pre');
-          pre.textContent = String(content);
+          pre.textContent = String(normalized.content);
           sec.uiElement.appendChild(pre);
         }
         return sec;

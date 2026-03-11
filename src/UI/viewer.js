@@ -44,6 +44,12 @@ import { registerDefaultToolbarButtons } from './toolbarButtons/registerDefaultB
 import { registerSelectionToolbarButtons } from './toolbarButtons/registerSelectionButtons.js';
 import { TriangleDebuggerWindow } from './triangleDebuggerWindow.js';
 import { ViewCube } from './ViewCube.js';
+import {
+    getActiveWorkbench,
+    isSidePanelAllowed,
+    normalizeWorkbenchId,
+    setActiveWorkbench as setPartActiveWorkbench,
+} from '../workbenches/index.js';
 
 const ASSEMBLY_CONSTRAINTS_TITLE = 'Assembly Constraints';
 const SIDEBAR_HOME_BANNER_HEIGHT_PX = 41;
@@ -622,6 +628,9 @@ export class Viewer {
         this._triangleDebugger = null;
         this._lastInspectorTarget = null;
         this._lastInspectorSolid = null;
+        this._workbenchReturnTarget = null;
+        this._suspendWorkbenchReturn = false;
+        this._workbenchPanelRecords = new Map();
 
 
 
@@ -1533,11 +1542,13 @@ export class Viewer {
         };
         this.partHistory.callbacks.afterRunHistory = () => {
             this._refreshAssemblyConstraintsPanelVisibility();
+            this.refreshWorkbenchUi();
             this.applyMetadataColors();
             this._axisHelpersDirty = true;
         };
         this.partHistory.callbacks.afterReset = () => {
             this._refreshAssemblyConstraintsPanelVisibility();
+            this.refreshWorkbenchUi();
             this.applyMetadataColors();
             this._axisHelpersDirty = true;
         };
@@ -1583,6 +1594,12 @@ export class Viewer {
         this.assemblyConstraintsWidget = new AssemblyConstraintsWidget(this);
         this._assemblyConstraintsSection = await this.accordion.addSection(ASSEMBLY_CONSTRAINTS_TITLE);
         this._assemblyConstraintsSection.uiElement.appendChild(this.assemblyConstraintsWidget.uiElement);
+        this._registerWorkbenchPanel({
+            id: 'assemblyConstraints',
+            title: ASSEMBLY_CONSTRAINTS_TITLE,
+            section: this._assemblyConstraintsSection,
+            source: 'builtin',
+        });
 
         // setup expressions
         this.expressionsManager = await new expressionsManager(this);
@@ -1600,6 +1617,13 @@ export class Viewer {
         this.pmiViewsWidget = new PMIViewsWidget(this);
         const pmiViewsSection = await this.accordion.addSection("PMI Views");
         pmiViewsSection.uiElement.appendChild(this.pmiViewsWidget.uiElement);
+        this._registerWorkbenchPanel({
+            id: 'pmiViews',
+            title: 'PMI Views',
+            section: pmiViewsSection,
+            source: 'builtin',
+            global: true,
+        });
 
         this.sheet2DWidget = new Sheet2DWidget(this);
         const sheetsSection = await this.accordion.addSection("2D Sheets");
@@ -1632,13 +1656,13 @@ export class Viewer {
         await this.accordion.expandSection("Scene Manager");
 
         await this.accordion.expandSection("History");
-        const hasAssemblyComponents = !!this.partHistory?.hasAssemblyComponents?.();
-        if (hasAssemblyComponents) {
+        if (this._getActiveWorkbenchId() === 'ASSEMBLIES') {
             await this.accordion.expandSection(ASSEMBLY_CONSTRAINTS_TITLE);
         }
         await this.accordion.expandSection("PMI Views");
 
         this._refreshAssemblyConstraintsPanelVisibility();
+        this._refreshWorkbenchPanelVisibility();
 
 
         // Mount the main toolbar (layout only; buttons registered externally)
@@ -1656,6 +1680,7 @@ export class Viewer {
                 try { this.mainToolbar.addCustomButton(it); } catch { }
             }
         } catch { }
+        try { this.refreshWorkbenchUi(); } catch { }
         this._syncSidebarHomeBannerHeight();
         this._bindSidebarHomeBannerHeightSync();
 
@@ -1666,10 +1691,68 @@ export class Viewer {
         try { await maybeStartStartupTour(this); } catch { }
     }
 
+    _getActiveWorkbenchId() {
+        return getActiveWorkbench(this.partHistory);
+    }
+
+    setActiveWorkbench(workbenchId, options = {}) {
+        const previous = this._getActiveWorkbenchId();
+        const next = setPartActiveWorkbench(this.partHistory, normalizeWorkbenchId(workbenchId, previous));
+        if (previous === next) return false;
+        if (next !== 'PMI') {
+            this._workbenchReturnTarget = null;
+        }
+        this.refreshWorkbenchUi();
+        if (options.queueHistorySnapshot !== false) {
+            this.partHistory?.queueHistorySnapshot?.({ debounceMs: 0, reason: 'workbench' });
+        }
+        return true;
+    }
+
+    _setWorkbenchReturnTarget(targetWorkbenchId = null) {
+        this._workbenchReturnTarget = targetWorkbenchId
+            ? normalizeWorkbenchId(targetWorkbenchId, null)
+            : null;
+    }
+
+    _restoreWorkbenchAfterPMI() {
+        if (this._suspendWorkbenchReturn) return false;
+        const target = this._workbenchReturnTarget;
+        this._workbenchReturnTarget = null;
+        if (!target) return false;
+        return this.setActiveWorkbench(target, { queueHistorySnapshot: true });
+    }
+
+    refreshWorkbenchUi() {
+        if (this._viewerOnlyMode) return;
+        try { this.historyWidget?.refreshWorkbenchUi?.(); } catch { }
+        try { SelectionFilter.refreshSelectionActions?.(); } catch { }
+        try { this._refreshWorkbenchPanelVisibility(); } catch { }
+        try { this.mainToolbar?.refreshButtons?.(); } catch { }
+    }
+
+    _normalizeToolbarButtonInput(labelOrSpec, title, onClick, fallbackSource = 'plugin') {
+        const source = fallbackSource || 'plugin';
+        if (labelOrSpec && typeof labelOrSpec === 'object' && !Array.isArray(labelOrSpec)) {
+            return {
+                ...labelOrSpec,
+                id: String(labelOrSpec.id || `toolbar-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`),
+                source: labelOrSpec.source || source,
+            };
+        }
+        return {
+            id: `toolbar-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            label: labelOrSpec,
+            title,
+            onClick,
+            source,
+        };
+    }
+
     // Public: allow plugins to add toolbar buttons even before MainToolbar is constructed
-    addToolbarButton(label, title, onClick) {
+    addToolbarButton(labelOrSpec, title, onClick) {
         if (this._viewerOnlyMode) return null;
-        const item = { label, title, onClick };
+        const item = this._normalizeToolbarButtonInput(labelOrSpec, title, onClick, 'plugin');
         if (this.mainToolbar && typeof this.mainToolbar.addCustomButton === 'function') {
             try { return this.mainToolbar.addCustomButton(item); } catch { return null; }
         }
@@ -1698,6 +1781,7 @@ export class Viewer {
             this._sheet2DEditorWindow?.refreshFromHistory?.();
         } catch { }
         try { this.historyWidget?.render?.(); } catch { }
+        try { this.refreshWorkbenchUi(); } catch { }
     }
 
     async _runFeatureHistoryUndoRedo(direction) {
@@ -1713,22 +1797,62 @@ export class Viewer {
         return changed;
     }
 
+    _registerWorkbenchPanel(record = {}) {
+        const id = String(record.id || '').trim();
+        if (!id) return null;
+        const normalized = { ...record, id };
+        this._workbenchPanelRecords.set(id, normalized);
+        return normalized;
+    }
+
+    _refreshWorkbenchPanelVisibility() {
+        if (this._viewerOnlyMode) return;
+        if (!this.accordion) return;
+        const workbenchId = this._getActiveWorkbenchId();
+        for (const record of this._workbenchPanelRecords.values()) {
+            const title = String(record.title || '');
+            if (!title) continue;
+            const visible = isSidePanelAllowed(record, workbenchId);
+            if (visible) this.accordion.showSection?.(title);
+            else this.accordion.hideSection?.(title);
+        }
+    }
+
+    _normalizePluginSidePanelInput(titleOrSpec, content) {
+        if (titleOrSpec && typeof titleOrSpec === 'object' && !Array.isArray(titleOrSpec)) {
+            return {
+                ...titleOrSpec,
+                id: String(titleOrSpec.id || `plugin-panel-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`),
+                title: String(titleOrSpec.title || titleOrSpec.id || 'Plugin'),
+                content: titleOrSpec.content,
+                source: titleOrSpec.source || 'plugin',
+            };
+        }
+        return {
+            id: `plugin-panel-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            title: String(titleOrSpec || 'Plugin'),
+            content,
+            source: 'plugin',
+        };
+    }
+
     // Apply a single queued plugin side panel entry
-    async _applyPluginSidePanel({ title, content }) {
+    async _applyPluginSidePanel(item) {
         if (this._viewerOnlyMode) return null;
         if (!this.accordion || typeof this.accordion.addSection !== 'function') return null;
-        const t = String(title || 'Plugin');
+        const panel = this._normalizePluginSidePanelInput(item);
+        const t = String(panel.title || 'Plugin');
         const sec = await this.accordion.addSection(t);
         if (!sec) return null;
         try {
-            if (typeof content === 'function') {
-                const el = await content();
+            if (typeof panel.content === 'function') {
+                const el = await panel.content();
                 if (el) sec.uiElement.appendChild(el);
-            } else if (content instanceof HTMLElement) {
-                sec.uiElement.appendChild(content);
-            } else if (content != null) {
+            } else if (panel.content instanceof HTMLElement) {
+                sec.uiElement.appendChild(panel.content);
+            } else if (panel.content != null) {
                 const pre = document.createElement('pre');
-                pre.textContent = String(content);
+                pre.textContent = String(panel.content);
                 sec.uiElement.appendChild(pre);
             }
             // Reposition this plugin section to immediately before the Display Settings panel, if present
@@ -1744,13 +1868,19 @@ export class Viewer {
                 }
             } catch { }
         } catch { }
+        this._registerWorkbenchPanel({
+            ...panel,
+            title: t,
+            section: sec,
+        });
+        this._refreshWorkbenchPanelVisibility();
         return sec;
     }
 
     // Public: allow plugins to register side panels; queued until core UI/toolbar are ready
-    async addPluginSidePanel(title, content) {
+    async addPluginSidePanel(titleOrSpec, content) {
         if (this._viewerOnlyMode) return null;
-        const item = { title, content };
+        const item = this._normalizePluginSidePanelInput(titleOrSpec, content);
         if (this._pluginUiReady) {
             try { return await this._applyPluginSidePanel(item); } catch { return null; }
         }
@@ -1762,7 +1892,10 @@ export class Viewer {
     _refreshAssemblyConstraintsPanelVisibility() {
         if (this._viewerOnlyMode) return;
         if (!this.accordion || !this.accordion.uiElement) return;
-        const shouldShow = !!this.partHistory?.hasAssemblyComponents?.();
+        const shouldShow = isSidePanelAllowed({
+            id: 'assemblyConstraints',
+            source: 'builtin',
+        }, this._getActiveWorkbenchId());
         const prevVisible = this._assemblyConstraintsVisible;
         this._assemblyConstraintsVisible = shouldShow;
 
@@ -1976,10 +2109,18 @@ export class Viewer {
         } catch { }
     }
 
-    startPMIMode(viewEntry, viewIndex, widget = this.pmiViewsWidget) {
+    startPMIMode(viewEntry, viewIndex, widget = this.pmiViewsWidget, options = {}) {
         if (this._viewerOnlyMode) return;
         try { this.endPMIPreviewMode(); } catch { }
         const alreadyActive = !!this._pmiMode;
+        const enteredFromViewClick = !!options?.fromViewClick;
+        const currentWorkbench = this._getActiveWorkbenchId();
+        if (enteredFromViewClick && !alreadyActive && currentWorkbench !== 'PMI') {
+            this._setWorkbenchReturnTarget(currentWorkbench);
+            this.setActiveWorkbench('PMI', { queueHistorySnapshot: true });
+        } else if (!enteredFromViewClick && !alreadyActive) {
+            this._setWorkbenchReturnTarget(null);
+        }
         try { this._collapseExpandedDialogsForModeSwitch(); } catch { }
         if (!alreadyActive) {
             try { this.assemblyConstraintsWidget?.onPMIModeEnter?.(); } catch { }
@@ -2000,10 +2141,12 @@ export class Viewer {
     }
 
     onPMIFinished(_updatedView) {
+        this._restoreWorkbenchAfterPMI();
         this.endPMIMode();
     }
 
     onPMICancelled() {
+        this._restoreWorkbenchAfterPMI();
         this.endPMIMode();
     }
 

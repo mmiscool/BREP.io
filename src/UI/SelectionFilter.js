@@ -1,4 +1,8 @@
 import { SelectionState } from "./SelectionState.js";
+import {
+    isContextFamilyEnabled,
+    isFeatureAllowedInWorkbench,
+} from "../workbenches/index.js";
 
 const debugMode = false;
 
@@ -979,12 +983,14 @@ export class SelectionFilter {
 
         const pmimode = viewer?._pmiMode || null;
         const pmiActive = !!pmimode;
+        const activeWorkbench = viewer?._getActiveWorkbenchId?.() || viewer?.partHistory?.activeWorkbench || 'ALL';
         if (!pmiActive) {
             const featureRegistry = viewer?.partHistory?.featureRegistry || null;
             const features = Array.isArray(featureRegistry?.features) ? featureRegistry.features : [];
-            if (!suppressFeatureButtons) {
+            if (!suppressFeatureButtons && isContextFamilyEnabled('features', activeWorkbench)) {
                 for (const FeatureClass of features) {
                     if (!FeatureClass) continue;
+                    if (!isFeatureAllowedInWorkbench(FeatureClass, activeWorkbench)) continue;
                     let result = null;
                     try { result = FeatureClass.showContexButton?.(items); } catch { result = null; }
                     if (!result) continue;
@@ -1005,7 +1011,7 @@ export class SelectionFilter {
             const constraintClasses = typeof constraintRegistry?.listAvailable === 'function'
                 ? constraintRegistry.listAvailable()
                 : (typeof constraintRegistry?.list === 'function' ? constraintRegistry.list() : []);
-            if (Array.isArray(constraintClasses)) {
+            if (Array.isArray(constraintClasses) && isContextFamilyEnabled('assemblyConstraints', activeWorkbench)) {
                 for (const ConstraintClass of constraintClasses) {
                     if (!ConstraintClass) continue;
                     let result = null;

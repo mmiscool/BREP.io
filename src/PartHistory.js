@@ -13,6 +13,11 @@ import { PMIViewsManager } from './pmi/PMIViewsManager.js';
 import { Sheet2DManager } from './sheets/Sheet2DManager.js';
 import { base64ToUint8Array, getComponentRecord } from './services/componentLibrary.js';
 import { deepClone } from './utils/deepClone.js';
+import {
+  getDefaultWorkbenchForNewPart,
+  getLegacyLoadWorkbenchDefault,
+  normalizeWorkbenchId,
+} from './workbenches/index.js';
 
 
 const debug = false;
@@ -63,6 +68,7 @@ export class PartHistory {
     this.currentHistoryStepId = null;
     this.runningFeatureId = null;
     this.expressions = "//Examples:\nx = 10 + 6; \ny = x * 2;";
+    this.activeWorkbench = getDefaultWorkbenchForNewPart();
     this.pmiViewsManager = new PMIViewsManager(this);
     this.sheet2DManager = new Sheet2DManager(this);
     this.metadataManager = new MetadataManager
@@ -401,6 +407,7 @@ export class PartHistory {
     this.pmiViewsManager.reset();
     this.sheet2DManager.reset();
     this.expressions = "//Examples:\nx = 10 + 6; \ny = x * 2;";
+    this.activeWorkbench = getDefaultWorkbenchForNewPart();
     // Reset MetadataManager
     this.metadataManager = new MetadataManager();
     this.currentHistoryStepId = null;
@@ -1105,6 +1112,7 @@ export class PartHistory {
       features,
       idCounter: this.idCounter,
       expressions: this.expressions,
+      activeWorkbench: normalizeWorkbenchId(this.activeWorkbench, getDefaultWorkbenchForNewPart()),
       pmiViews,
       sheets2D,
       metadata: this.metadataManager.metadata,
@@ -1127,6 +1135,9 @@ export class PartHistory {
     this.features = this.#prepareFeatureList(rawFeatures);
     this.idCounter = importData.idCounter;
     this.expressions = importData.expressions || "";
+    this.activeWorkbench = Object.prototype.hasOwnProperty.call(importData, 'activeWorkbench')
+      ? normalizeWorkbenchId(importData.activeWorkbench, getLegacyLoadWorkbenchDefault())
+      : getLegacyLoadWorkbenchDefault();
     this.pmiViewsManager.setViews(importData.pmiViews || []);
     this.sheet2DManager.setSheets(importData.sheets2D || []);
     this.metadataManager.metadata = importData.metadata || {};

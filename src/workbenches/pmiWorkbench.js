@@ -1,0 +1,32 @@
+export const PMI_WORKBENCH = {
+  id: 'PMI',
+  label: 'PMI',
+  featureTypes: [],
+  contextFamilies: {
+    features: false,
+    assemblyConstraints: false,
+    pmiAnnotations: true,
+  },
+  sidePanels: {
+    assemblyConstraints: false,
+    pmiViews: true,
+  },
+  toolbarButtons: [
+    'home',
+    'new',
+    'save',
+    'zoomToFit',
+    'wireframe',
+    'import',
+    'export',
+    'share',
+    'sheetEditor',
+    'about',
+    'historyTestSnippet',
+    'scriptRunner',
+    'undo',
+    'redo',
+    'tests',
+    'selectionState',
+  ],
+};

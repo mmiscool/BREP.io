@@ -2,6 +2,11 @@ import { SelectionFilter } from './SelectionFilter.js';
 import { HistoryCollectionWidget } from './history/HistoryCollectionWidget.js';
 import { FeatureDimensionOverlay } from './featureDimensions/FeatureDimensionOverlay.js';
 import { SchemaForm } from './featureDialogs.js';
+import {
+  getAllowedFeatureClasses,
+  listWorkbenchDefinitions,
+  normalizeWorkbenchId,
+} from '../workbenches/index.js';
 
 const FALLBACK_INTERVAL_MS = 200;
 const FEATURE_DRAG_RUN_THROTTLE_MS = 120;
@@ -38,6 +43,8 @@ export class HistoryWidget extends HistoryCollectionWidget {
     this._featureDragRunPending = false;
     this._lastHeaderSyncTs = -Infinity;
     this._featureDimensionOverlay = null;
+    this._workbenchHeader = null;
+    this._workbenchSelect = null;
     this._onActiveTransformStateChange = () => this._syncFeatureDimensionOverlay();
     try {
       this._featureDimensionOverlay = new FeatureDimensionOverlay({
@@ -51,6 +58,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
     }
 
     this.uiElement.classList.add('history-widget');
+    this._mountWorkbenchHeader();
     this.render();
     try { window.addEventListener('brep-active-transform-state', this._onActiveTransformStateChange); } catch { /* ignore */ }
     this.#startAutoSyncLoop();
@@ -78,8 +86,14 @@ export class HistoryWidget extends HistoryCollectionWidget {
     this._metaEls.clear();
     this._itemEls.clear();
     super.render();
+    this.refreshWorkbenchUi();
     this._syncHeaderState(true);
     this._syncFeatureDimensionOverlay();
+  }
+
+  refreshWorkbenchUi() {
+    this._refreshAddMenu();
+    this._syncWorkbenchHeader();
   }
 
   async _moveEntry(id, delta) {
@@ -117,8 +131,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
 
   _refreshAddMenu() {
     if (!this._addMenu || !this._addBtn) return;
-    const registry = this._getFeatureRegistry();
-    const features = Array.isArray(registry?.features) ? registry.features : [];
+    const features = getAllowedFeatureClasses(this.viewer);
     this._addMenu.textContent = '';
     if (!features.length) {
       this._addBtn.disabled = true;
@@ -172,6 +185,85 @@ export class HistoryWidget extends HistoryCollectionWidget {
   _resolveSchema(entry) {
     const FeatureClass = this._resolveFeatureClass(entry?.type);
     return FeatureClass?.inputParamsSchema || null;
+  }
+
+  _mountWorkbenchHeader() {
+    if (!this._container || this._workbenchHeader) return;
+    const style = document.createElement('style');
+    style.textContent = `
+      .history-workbench-header {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding: 10px 12px 6px;
+      }
+      .history-workbench-copy {
+        display: flex;
+        flex-direction: row;
+        min-width: 0;
+      }
+      .history-workbench-title {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: rgba(226, 232, 240, 0.72);
+      }
+      .history-workbench-select {
+        width: 100%;
+        border-radius: 8px;
+        border: 1px solid rgba(148, 163, 184, 0.28);
+        background: rgba(15, 23, 42, 0.72);
+        color: #f8fafc;
+        padding: 6px 10px;
+        font: inherit;
+      }
+    `;
+    this._shadow.appendChild(style);
+
+    const header = document.createElement('div');
+    header.className = 'history-workbench-header';
+
+    const copy = document.createElement('div');
+    copy.className = 'history-workbench-copy';
+
+    const title = document.createElement('div');
+    title.className = 'history-workbench-title';
+    title.textContent = 'Workbench';
+    copy.appendChild(title);
+
+    const select = document.createElement('select');
+    select.className = 'history-workbench-select';
+    for (const definition of listWorkbenchDefinitions()) {
+      const option = document.createElement('option');
+      option.value = definition.id;
+      option.textContent = definition.label;
+      select.appendChild(option);
+    }
+    select.addEventListener('change', () => {
+      const value = normalizeWorkbenchId(select.value, 'MODELING');
+      this.viewer?.setActiveWorkbench?.(value, { queueHistorySnapshot: true });
+      this._syncWorkbenchHeader();
+    });
+
+    header.appendChild(copy);
+    header.appendChild(select);
+    this._container.insertBefore(header, this._listEl);
+
+    this._workbenchHeader = header;
+    this._workbenchSelect = select;
+    this._syncWorkbenchHeader();
+  }
+
+  _syncWorkbenchHeader() {
+    const current = this.viewer?._getActiveWorkbenchId?.()
+      || normalizeWorkbenchId(this.partHistory?.activeWorkbench, 'ALL');
+    const definitions = listWorkbenchDefinitions();
+    const activeDefinition = definitions.find((definition) => definition.id === current) || definitions[0];
+    if (this._workbenchSelect && this._workbenchSelect.value !== activeDefinition.id) {
+      this._workbenchSelect.value = activeDefinition.id;
+    }
   }
 
   #findEntryInfo(id) {
@@ -234,7 +326,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
     this._syncHeaderState(true);
     this.#refreshOpenForms();
     this._syncFeatureDimensionOverlay();
-    try { this.viewer?._refreshAssemblyConstraintsPanelVisibility?.(); } catch { /* ignore */ }
+    try { this.viewer?.refreshWorkbenchUi?.(); } catch { /* ignore */ }
   }
 
   async #createFeatureEntry(typeStr) {

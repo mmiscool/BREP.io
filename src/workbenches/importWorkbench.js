@@ -1,0 +1,38 @@
+export const IMPORT_WORKBENCH = {
+  id: 'IMPORT',
+  label: 'Import',
+  featureTypes: [
+    'D',
+    'P',
+    'IMPORT3D',
+    'IMAGE',
+    'HEIGHTMAP',
+  ],
+  contextFamilies: {
+    features: true,
+    assemblyConstraints: false,
+    pmiAnnotations: false,
+  },
+  sidePanels: {
+    assemblyConstraints: false,
+    pmiViews: true,
+  },
+  toolbarButtons: [
+    'home',
+    'new',
+    'save',
+    'zoomToFit',
+    'wireframe',
+    'import',
+    'export',
+    'share',
+    'sheetEditor',
+    'about',
+    'historyTestSnippet',
+    'scriptRunner',
+    'undo',
+    'redo',
+    'tests',
+    'selectionState',
+  ],
+};
