@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      '@malgorithms/m3':
-        specifier: ^0.0.1
-        version: 0.0.1
       '@tarikjabiri/dxf':
         specifier: ^2.8.9
         version: 2.8.9
@@ -441,10 +438,6 @@ packages:
 
   '@jscadui/3mf-export@0.5.0':
     resolution: {integrity: sha512-y5vZktqCjyi7wA38zqNlLIdZUIRZoOO9vCjLzwmL4bR0hk7B/Zm1IeffzJPFe1vFc0C1IEv3hm8caDv3doRk9g==}
-
-  '@malgorithms/m3@0.0.1':
-    resolution: {integrity: sha512-ERaN6t+g66ZVYEkJEe/X7te/yDfUbu+SsCaB3QLhgB1sMCLSvTA5bxVYxF9Wrgel2/QAltGRAIl2jsIjdtiyog==}
-    engines: {node: '>=18'}
 
   '@rollup/rollup-android-arm-eabi@4.59.0':
     resolution: {integrity: sha512-upnNBkA6ZH2VKGcBj9Fyl9IGNPULcjXRlg0LLeaioQWueH30p6IXtJEbKAgvyv+mJaMxSm1l6xwDXYjpEMiLMg==}
@@ -1540,10 +1533,6 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.5.5
 
   '@jscadui/3mf-export@0.5.0': {}
-
-  '@malgorithms/m3@0.0.1':
-    dependencies:
-      manifold-3d: 3.3.2
 
   '@rollup/rollup-android-arm-eabi@4.59.0':
     optional: true
