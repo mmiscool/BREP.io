@@ -17,6 +17,7 @@ This project is in active development and APIs may continue to evolve.
 - [Surfacing Workbench](docs/workbenches/surfacing.md)
 - [Sheet Metal Workbench](docs/workbenches/sheet-metal.md)
 - [Assemblies Workbench](docs/workbenches/assemblies.md)
+- [Wire Harness Workbench](docs/workbenches/wire-harness.md)
 - [PMI Workbench](docs/workbenches/pmi.md)
 - [All Workbench](docs/workbenches/all.md)
 

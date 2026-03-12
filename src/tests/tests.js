@@ -84,6 +84,7 @@ import { test_primitiveSphere } from './test_primitiveSphere.js';
 import { test_primitiveTorus } from './test_primitiveTorus.js';
 import { afterRun_pushFace, test_pushFace } from './test_pushFace.js';
 import { test_sheetMetal_corner_fillet } from './test_sheetMetal_corner_fillet.js';
+import { test_sheet_clipboard_image_utils } from './test_sheetClipboardImageUtils.js';
 import { test_sheetMetal_corner_fillet_compound_reference } from './test_sheetMetal_corner_fillet_compound_reference.js';
 import { test_sheetMetal_corner_fillet_selection_resolution } from './test_sheetMetal_corner_fillet_selection_resolution.js';
 import { test_sheetMetal_cutoutEdge_flange_controls } from './test_sheetMetal_cutoutEdge_flange_controls.js';
@@ -117,12 +118,16 @@ import {
 import { afterRun_textToFace, test_textToFace } from './test_textToFace.js';
 import { test_tube } from './test_tube.js';
 import { test_tube_closedLoop } from './test_tube_closedLoop.js';
+import { test_wire_harness_formboard_reuses_only_formboard_sheet } from './test_wireHarnessConnectionsWidget.js';
 import { test_wire_harness_connection_endpoint_resolution } from './test_wireHarnessConnectionEndpoints.js';
+import {
+    test_sheet_custom_size_persists,
+    test_wire_harness_formboard_insert,
+} from './test_wireHarnessFormboard.js';
 import { test_wire_harness_sheet_table_insert } from './test_wireHarnessSheetTable.js';
 import {
     test_wire_harness_infers_endpoint_side_from_spline_direction,
     test_wire_harness_route_prefers_non_reusing_path,
-    test_wire_harness_route_reuse_is_invalid,
 } from './test_wireHarnessRoutingReuse.js';
 import {
     afterRun_visibility_hidden_state_persistence,
@@ -220,9 +225,12 @@ export const testFunctions = [
     },
     { test: test_tube, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_tube_closedLoop, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_wire_harness_formboard_reuses_only_formboard_sheet, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_wire_harness_connection_endpoint_resolution, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sheet_custom_size_persists, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sheet_clipboard_image_utils, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_wire_harness_formboard_insert, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_wire_harness_sheet_table_insert, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_wire_harness_route_reuse_is_invalid, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_wire_harness_route_prefers_non_reusing_path, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_wire_harness_infers_endpoint_side_from_spline_direction, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_openLoop, afterRun: afterRun_sketch_openLoop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

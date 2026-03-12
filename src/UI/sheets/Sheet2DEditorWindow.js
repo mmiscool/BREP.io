@@ -3,6 +3,17 @@ import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import { listSheetSizes } from "../../sheets/sheetStandards.js";
 import {
+  buildWireHarnessFormboardModel,
+  collectWireHarnessFormboardSegmentBranchNodeIds,
+  isWireHarnessFormboardElement,
+} from "../../wireHarness/wireHarnessFormboard.js";
+import {
+  DEFAULT_IMAGE_INSERT_HEIGHT_IN,
+  DEFAULT_IMAGE_INSERT_WIDTH_IN,
+  getDefaultPlacedImageSizeIn,
+  resolveClipboardImageSource,
+} from "./sheetMediaUtils.js";
+import {
   canMergeTableCells,
   cloneTableData,
   createTableData,
@@ -24,7 +35,7 @@ import {
 const DEFAULT_SHEET_SIZE_KEY = "A";
 const DEFAULT_SHEET_ORIENTATION = "landscape";
 const DEFAULT_ZOOM = 1;
-const MIN_STAGE_ZOOM = 0.1;
+const MIN_STAGE_ZOOM = 0.01;
 const MAX_STAGE_ZOOM = 10;
 const POINTS_PER_INCH = 72;
 const PDF_TARGET_DPI = 300;
@@ -46,6 +57,7 @@ const TABLE_MIN_COL_WIDTH_PX = 40;
 const TABLE_CELL_PADDING_PX = 6;
 const SHEET_OBJECT_CLIPBOARD_MIME = "application/x-brep-sheet-elements+json";
 const SHEET_OBJECT_CLIPBOARD_TEXT = "BREP.io sheet objects";
+const MIN_CUSTOM_SHEET_SIZE_IN = 1;
 const LINE_STYLE_OPTIONS = [
   { value: "none", label: "None" },
   { value: "solid", label: "Solid" },
@@ -408,8 +420,8 @@ function defaultImageElement(xIn, yIn, src = "") {
     type: "image",
     x: xIn,
     y: yIn,
-    w: 3.2,
-    h: 2.0,
+    w: DEFAULT_IMAGE_INSERT_WIDTH_IN,
+    h: DEFAULT_IMAGE_INSERT_HEIGHT_IN,
     rotationDeg: 0,
     z: 1,
     opacity: 1,
@@ -555,6 +567,7 @@ export class Sheet2DEditorWindow {
     this._selectedElementIds = [];
     this._editingGroupId = "";
     this._cropModeElementId = null;
+    this._selectedFormboardPivot = null;
 
     this.zoom = DEFAULT_ZOOM;
     this._appliedZoom = DEFAULT_ZOOM;
@@ -736,6 +749,27 @@ export class Sheet2DEditorWindow {
     return this.viewer?.partHistory?.sheet2DManager || null;
   }
 
+  async _triggerMainToolbarSave() {
+    const saveRecord = this.viewer?.mainToolbar?._buttonRecords?.get?.("save") || null;
+    const saveHandler = typeof saveRecord?.onClick === "function"
+      ? saveRecord.onClick
+      : (typeof saveRecord?.btn?.__mtbOnClick === "function" ? saveRecord.btn.__mtbOnClick : null);
+    if (saveHandler) {
+      await saveHandler();
+      return true;
+    }
+
+    try {
+      if (typeof this.viewer?.fileManagerWidget?.saveCurrent === "function") {
+        await this.viewer.fileManagerWidget.saveCurrent();
+        return true;
+      }
+    } catch { }
+
+    this._setStatus("Save unavailable");
+    return false;
+  }
+
   _bindManagerListeners() {
     if (!this._removeSheetListener) {
       const manager = this._getManager();
@@ -866,6 +900,22 @@ export class Sheet2DEditorWindow {
 
   _getStageRenderPpi(zoom = this._getStageZoom()) {
     return Math.max(1, this._pxPerIn() * this._clampStageZoom(zoom, DEFAULT_ZOOM));
+  }
+
+  _getLineRenderMetrics(element, ppi, { interactive = false } = {}) {
+    const baseStrokePx = Math.max(0, toFiniteNumber(element?.strokeWidth, 0.02) * ppi);
+    const exactFormboard = this._isFormboardElement(element);
+    const paintHeightPx = exactFormboard
+      ? Math.max(0.4, baseStrokePx)
+      : Math.max(1, baseStrokePx);
+    const hitHeightPx = interactive
+      ? Math.max(1, paintHeightPx)
+      : paintHeightPx;
+    return {
+      paintHeightPx,
+      hitHeightPx,
+      contentOffsetPx: Math.max(0, (hitHeightPx - paintHeightPx) * 0.5),
+    };
   }
 
   _getSelectionUiScale(zoom = this._getStageZoom()) {
@@ -1126,7 +1176,7 @@ export class Sheet2DEditorWindow {
 
     const zoomSelect = document.createElement("select");
     zoomSelect.className = "sheet-slides-control";
-    [["fit", "Fit"], ["0.1", "10%"], ["0.25", "25%"], ["0.5", "50%"], ["0.75", "75%"], ["1", "100%"], ["1.25", "125%"], ["1.5", "150%"], ["2", "200%"], ["3", "300%"], ["4", "400%"], ["5", "500%"], ["6", "600%"], ["8", "800%"], ["10", "1000%"]]
+    [["fit", "Fit"], ["0.01", "1%"], ["0.02", "2%"], ["0.05", "5%"], ["0.1", "10%"], ["0.25", "25%"], ["0.5", "50%"], ["0.75", "75%"], ["1", "100%"], ["1.25", "125%"], ["1.5", "150%"], ["2", "200%"], ["3", "300%"], ["4", "400%"], ["5", "500%"], ["6", "600%"], ["8", "800%"], ["10", "1000%"]]
       .forEach(([value, label]) => {
         const opt = document.createElement("option");
         opt.value = value;
@@ -1159,7 +1209,13 @@ export class Sheet2DEditorWindow {
     gridBtn.title = "Toggle grid";
     this._gridToggleBtn = gridBtn;
 
-    topbar.appendChild(this._toolbarGroup([addTextBtn, shapesBtn, addTableBtn, addImageBtn, insertPmiBtn]));
+    const saveBtn = this._makeToolbarButton("💾", () => {
+      void this._triggerMainToolbarSave();
+    });
+    saveBtn.title = "Save current model";
+    this._saveBtn = saveBtn;
+
+    topbar.appendChild(this._toolbarGroup([saveBtn, addTextBtn, shapesBtn, addTableBtn, addImageBtn, insertPmiBtn]));
     topbar.appendChild(selectionStyleGroup);
     topbar.appendChild(selectionTextGroup);
 
@@ -1305,6 +1361,22 @@ export class Sheet2DEditorWindow {
     sheetOrientationInput.addEventListener("change", () => this._setSheetFormatField("orientation", sheetOrientationInput.value));
     this._sheetOrientationInput = sheetOrientationInput;
     slidePanel.appendChild(this._makeField("Orientation", sheetOrientationInput));
+
+    const sheetCustomWidthInput = this._buildNumberInput(
+      (value) => this._setSheetFormatField("customWidthIn", value),
+      { step: 0.25, min: MIN_CUSTOM_SHEET_SIZE_IN },
+    );
+    this._sheetCustomWidthInput = sheetCustomWidthInput;
+    this._sheetCustomWidthField = this._makeField("Width (in)", sheetCustomWidthInput);
+    slidePanel.appendChild(this._sheetCustomWidthField);
+
+    const sheetCustomHeightInput = this._buildNumberInput(
+      (value) => this._setSheetFormatField("customHeightIn", value),
+      { step: 0.25, min: MIN_CUSTOM_SHEET_SIZE_IN },
+    );
+    this._sheetCustomHeightInput = sheetCustomHeightInput;
+    this._sheetCustomHeightField = this._makeField("Height (in)", sheetCustomHeightInput);
+    slidePanel.appendChild(this._sheetCustomHeightField);
 
     const {
       wrap: sheetBgControl,
@@ -2095,9 +2167,43 @@ export class Sheet2DEditorWindow {
   _setSheetFormatField(key, rawValue) {
     if (!this.sheetDraft) return;
     if (key === "sizeKey") {
-      this.sheetDraft.sizeKey = String(rawValue || DEFAULT_SHEET_SIZE_KEY);
+      const nextSizeKey = String(rawValue || DEFAULT_SHEET_SIZE_KEY);
+      if (nextSizeKey === "CUSTOM" && String(this.sheetDraft.sizeKey || "") !== "CUSTOM") {
+        this.sheetDraft.customWidthIn = Math.max(
+          MIN_CUSTOM_SHEET_SIZE_IN,
+          toFiniteNumber(this.sheetDraft.widthIn, 11),
+        );
+        this.sheetDraft.customHeightIn = Math.max(
+          MIN_CUSTOM_SHEET_SIZE_IN,
+          toFiniteNumber(this.sheetDraft.heightIn, 8.5),
+        );
+      }
+      this.sheetDraft.sizeKey = nextSizeKey;
     } else if (key === "orientation") {
-      this.sheetDraft.orientation = String(rawValue || DEFAULT_SHEET_ORIENTATION);
+      const nextOrientation = String(rawValue || DEFAULT_SHEET_ORIENTATION);
+      if (String(this.sheetDraft.sizeKey || "") === "CUSTOM") {
+        const currentWidth = Math.max(
+          MIN_CUSTOM_SHEET_SIZE_IN,
+          toFiniteNumber(this.sheetDraft.customWidthIn ?? this.sheetDraft.widthIn, 11),
+        );
+        const currentHeight = Math.max(
+          MIN_CUSTOM_SHEET_SIZE_IN,
+          toFiniteNumber(this.sheetDraft.customHeightIn ?? this.sheetDraft.heightIn, 8.5),
+        );
+        const isLandscape = nextOrientation !== "portrait";
+        this.sheetDraft.customWidthIn = isLandscape
+          ? Math.max(currentWidth, currentHeight)
+          : Math.min(currentWidth, currentHeight);
+        this.sheetDraft.customHeightIn = isLandscape
+          ? Math.min(currentWidth, currentHeight)
+          : Math.max(currentWidth, currentHeight);
+      }
+      this.sheetDraft.orientation = nextOrientation;
+    } else if (key === "customWidthIn" || key === "customHeightIn") {
+      const fallback = key === "customWidthIn"
+        ? (this.sheetDraft.customWidthIn ?? this.sheetDraft.widthIn)
+        : (this.sheetDraft.customHeightIn ?? this.sheetDraft.heightIn);
+      this.sheetDraft[key] = Math.max(MIN_CUSTOM_SHEET_SIZE_IN, toFiniteNumber(rawValue, fallback));
     } else {
       return;
     }
@@ -3181,7 +3287,9 @@ export class Sheet2DEditorWindow {
 
   _getSelectedTextState() {
     const element = this._getSelectedElement();
-    if (!element || !elementSupportsText(element)) return null;
+    if (!element) return null;
+    if (this._isFormboardElement(element)) return this._getSelectedFormboardTextState(element);
+    if (!elementSupportsText(element)) return null;
 
     if (!isTableElementType(element)) {
       return {
@@ -3218,6 +3326,40 @@ export class Sheet2DEditorWindow {
       textAlign: this._resolveTableTextStyleValue(element, styleCell, "textAlign"),
       verticalAlign: this._resolveTableTextStyleValue(element, styleCell, "verticalAlign"),
       color: this._resolveTableTextStyleValue(element, styleCell, "color"),
+    };
+  }
+
+  _getSelectedFormboardTextElements(element = this._getSelectedElement()) {
+    const target = element && this._isFormboardElement(element) ? element : null;
+    const groupId = this._getElementGroupId(target);
+    if (!groupId) return [];
+    return (this.sheetDraft?.elements || []).filter((entry) => (
+      this._getElementGroupId(entry) === groupId
+      && entry?.type === "text"
+      && this._isFormboardElement(entry)
+    ));
+  }
+
+  _getSelectedFormboardTextState(element = this._getSelectedElement()) {
+    const textElements = this._getSelectedFormboardTextElements(element);
+    if (!textElements.length) return null;
+    const sample = textElements[0];
+    return {
+      element,
+      isTable: false,
+      isFormboard: true,
+      scope: "formboard",
+      canEditTextContent: false,
+      text: "",
+      fontFamily: String(sample.fontFamily || "Arial, Helvetica, sans-serif"),
+      fontSize: Math.max(0.08, toFiniteNumber(sample.fontSize, 0.32)),
+      fontWeight: String(sample.fontWeight || "400"),
+      fontStyle: String(sample.fontStyle || "normal"),
+      textDecoration: String(sample.textDecoration || "none"),
+      textAlign: this._getTextAlignValue(sample),
+      verticalAlign: this._getTextVerticalAlignValue(sample),
+      color: String(sample.color || this._defaultTextColorForElement(sample)),
+      targetCount: textElements.length,
     };
   }
 
@@ -3472,6 +3614,23 @@ export class Sheet2DEditorWindow {
     return null;
   }
 
+  _getClipboardImagePayload(event) {
+    const clipboard = event?.clipboardData || window.clipboardData || null;
+    const items = Array.from(clipboard?.items || []);
+    for (const item of items) {
+      const type = String(item?.type || "").trim().toLowerCase();
+      if (!type.startsWith("image/")) continue;
+      const file = typeof item?.getAsFile === "function" ? item.getAsFile() : null;
+      if (file) return { file, type };
+    }
+
+    const src = resolveClipboardImageSource({
+      html: clipboard?.getData?.("text/html") || "",
+      plainText: clipboard?.getData?.("text/plain") || "",
+    });
+    return src ? { src, type: "image/unknown" } : null;
+  }
+
   _serializeSelectedElementsForClipboard() {
     const elements = this._getSelectedElements({ sorted: true });
     if (!elements.length) return null;
@@ -3656,6 +3815,83 @@ export class Sheet2DEditorWindow {
     return true;
   }
 
+  _readBlobAsDataUrl(blob) {
+    if (!(blob instanceof Blob)) return Promise.resolve("");
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => resolve("");
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  _measureImageInsertSizeIn(src) {
+    const source = String(src || "").trim();
+    if (!source) {
+      return Promise.resolve({
+        widthIn: DEFAULT_IMAGE_INSERT_WIDTH_IN,
+        heightIn: DEFAULT_IMAGE_INSERT_HEIGHT_IN,
+      });
+    }
+
+    return new Promise((resolve) => {
+      const finalize = (naturalWidth = 0, naturalHeight = 0) => {
+        if (naturalWidth > 0 && naturalHeight > 0) {
+          this._rememberMediaMetadata(source, naturalWidth, naturalHeight);
+        }
+        resolve(getDefaultPlacedImageSizeIn(naturalWidth, naturalHeight));
+      };
+
+      const probe = new Image();
+      probe.onload = () => finalize(probe.naturalWidth, probe.naturalHeight);
+      probe.onerror = () => finalize();
+      probe.src = source;
+    });
+  }
+
+  async _insertImageElementFromSource(src, {
+    historyLabel = "add-image",
+    statusMessage = "Image added",
+  } = {}) {
+    const source = String(src || "").trim();
+    if (!source || !this.sheetDraft) return false;
+
+    const { widthIn, heightIn } = await this._measureImageInsertSizeIn(source);
+    if (!this.sheetDraft) return false;
+
+    this.sheetDraft.elements = Array.isArray(this.sheetDraft.elements) ? this.sheetDraft.elements : [];
+    const xIn = Math.max(0, (toFiniteNumber(this.sheetDraft.widthIn, 11) * 0.5) - (widthIn * 0.5));
+    const yIn = Math.max(0, (toFiniteNumber(this.sheetDraft.heightIn, 8.5) * 0.5) - (heightIn * 0.5));
+
+    const image = defaultImageElement(xIn, yIn, source);
+    image.w = widthIn;
+    image.h = heightIn;
+    image.z = this._nextZ();
+    this.sheetDraft.elements.push(image);
+    this._setSelectedElementIds([String(image.id || "")], String(image.id || ""));
+
+    this._commitSheetDraft(historyLabel);
+    this._renderAll();
+    this._setStatus(statusMessage);
+    return true;
+  }
+
+  async _pasteClipboardImage(payload) {
+    if (!this.sheetDraft) return false;
+    let src = String(payload?.src || "").trim();
+    if (!src && payload?.file) {
+      src = await this._readBlobAsDataUrl(payload.file);
+    }
+    if (!src) {
+      this._setStatus("Clipboard image unavailable");
+      return false;
+    }
+    return this._insertImageElementFromSource(src, {
+      historyLabel: "paste-image",
+      statusMessage: "Image pasted",
+    });
+  }
+
   _onPaste(event) {
     if (!this.root || this.root.style.display === "none" || !this.sheetDraft) return;
     const active = document.activeElement;
@@ -3667,6 +3903,14 @@ export class Sheet2DEditorWindow {
       if (!this._pasteClipboardElements(elementPayload)) return;
       event.preventDefault();
       event.stopPropagation();
+      return;
+    }
+
+    const imagePayload = this._getClipboardImagePayload(event);
+    if (imagePayload) {
+      event.preventDefault();
+      event.stopPropagation();
+      void this._pasteClipboardImage(imagePayload);
       return;
     }
 
@@ -3709,6 +3953,7 @@ export class Sheet2DEditorWindow {
     const hasElement = !!selected;
     const textState = selectionCount === 1 ? this._getSelectedTextState() : null;
     const supportsText = !!textState;
+    const formboardTextOnly = !!textState?.isFormboard;
     const isPMI = hasElement && selected.type === "pmiInset";
     const isLine = hasElement && selected.type === "line";
 
@@ -3731,7 +3976,7 @@ export class Sheet2DEditorWindow {
       return;
     }
 
-    if ((!supportsText && (this._toolbarPopoverKind === "textColor" || this._toolbarPopoverKind === "textAlign"))
+    if (((!supportsText || formboardTextOnly) && (this._toolbarPopoverKind === "textColor" || this._toolbarPopoverKind === "textAlign"))
       || ((isLine || isPMI) && this._toolbarPopoverKind === "fillColor")) {
       this._closeToolbarPopover();
     }
@@ -3740,6 +3985,18 @@ export class Sheet2DEditorWindow {
     if (this._toolbarStrokeButton) this._toolbarStrokeButton.style.display = "";
     if (this._toolbarStrokeWidthButton) this._toolbarStrokeWidthButton.style.display = "";
     if (this._toolbarLineStyleButton) this._toolbarLineStyleButton.style.display = "";
+    if (this._toolbarFontFamilyInput) {
+      this._toolbarFontFamilyInput.disabled = !supportsText || formboardTextOnly;
+      this._toolbarFontFamilyInput.style.display = formboardTextOnly ? "none" : "";
+    }
+    if (this._toolbarFontSizeInput) this._toolbarFontSizeInput.disabled = !supportsText;
+    if (this._toolbarFontSizeDecrementBtn) this._toolbarFontSizeDecrementBtn.disabled = !supportsText;
+    if (this._toolbarFontSizeIncrementBtn) this._toolbarFontSizeIncrementBtn.disabled = !supportsText;
+    if (this._toolbarTextColorButton) this._toolbarTextColorButton.style.display = formboardTextOnly ? "none" : "";
+    if (this._toolbarBoldBtn) this._toolbarBoldBtn.style.display = formboardTextOnly ? "none" : "";
+    if (this._toolbarItalicBtn) this._toolbarItalicBtn.style.display = formboardTextOnly ? "none" : "";
+    if (this._toolbarUnderlineBtn) this._toolbarUnderlineBtn.style.display = formboardTextOnly ? "none" : "";
+    if (this._toolbarAlignmentButton) this._toolbarAlignmentButton.style.display = formboardTextOnly ? "none" : "";
 
     if (!supportsText) {
       if (this._toolbarBoldBtn) this._toolbarBoldBtn.classList.remove("primary");
@@ -3981,19 +4238,20 @@ export class Sheet2DEditorWindow {
       if (el.type === "line") {
         const x1 = toFiniteNumber(el.x, 0) * ppi;
         const y1 = toFiniteNumber(el.y, 0) * ppi;
-        const x2 = toFiniteNumber(el.x2, el.x) * ppi;
-        const y2 = toFiniteNumber(el.y2, el.y) * ppi;
-        const dx = x2 - x1;
-        const dy = y2 - y1;
-        const len = Math.max(1, Math.hypot(dx, dy));
-        const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-        node.style.left = `${Math.min(x1, x2)}px`;
-        node.style.top = `${Math.min(y1, y2)}px`;
-        node.style.width = `${len}px`;
-        node.style.height = `${Math.max(1, toFiniteNumber(el.strokeWidth, 0.02) * ppi)}px`;
-        node.style.transformOrigin = "left center";
-        node.style.transform = `rotate(${angle}deg)`;
-        node.style.background = toCssColor(el.stroke, "#0f172a");
+      const x2 = toFiniteNumber(el.x2, el.x) * ppi;
+      const y2 = toFiniteNumber(el.y2, el.y) * ppi;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len = Math.max(1, Math.hypot(dx, dy));
+      const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+      const { paintHeightPx } = this._getLineRenderMetrics(el, ppi);
+      node.style.left = `${x1}px`;
+      node.style.top = `${y1 - (paintHeightPx * 0.5)}px`;
+      node.style.width = `${len}px`;
+      node.style.height = `${paintHeightPx}px`;
+      node.style.transformOrigin = "left center";
+      node.style.transform = `rotate(${angle}deg)`;
+      node.style.background = toCssColor(el.stroke, "#0f172a");
       } else {
         const xPx = toFiniteNumber(el.x, 0) * ppi;
         const yPx = toFiniteNumber(el.y, 0) * ppi;
@@ -4191,18 +4449,20 @@ export class Sheet2DEditorWindow {
       const dy = y2 - y1;
       const len = Math.max(1, Math.hypot(dx, dy));
       const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-      node.style.left = `${Math.min(x1, x2)}px`;
-      node.style.top = `${Math.min(y1, y2)}px`;
+      const { paintHeightPx, hitHeightPx, contentOffsetPx } = this._getLineRenderMetrics(element, ppi, { interactive: true });
+      node.style.left = `${x1}px`;
+      node.style.top = `${y1 - (hitHeightPx * 0.5)}px`;
       node.style.width = `${len}px`;
-      node.style.height = `${Math.max(2, toFiniteNumber(element.strokeWidth, 0.02) * ppi)}px`;
+      node.style.height = `${hitHeightPx}px`;
       node.style.transformOrigin = "left center";
       node.style.transform = `rotate(${angle}deg)`;
 
       const content = document.createElement("div");
       content.className = "sheet-slides-element-content";
       content.style.width = "100%";
-      content.style.height = "100%";
-      this._applyLineStrokeStyles(content, element, Math.max(2, toFiniteNumber(element.strokeWidth, 0.02) * ppi));
+      content.style.height = `${paintHeightPx}px`;
+      content.style.marginTop = `${contentOffsetPx}px`;
+      this._applyLineStrokeStyles(content, element, paintHeightPx);
       node.appendChild(content);
 
       node.addEventListener("pointerdown", (event) => this._onElementPointerDown(event, element.id));
@@ -4340,11 +4600,11 @@ export class Sheet2DEditorWindow {
       const dy = y2 - y1;
       const len = Math.max(1, Math.hypot(dx, dy));
       const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-      const strokeHeight = Math.max(2, toFiniteNumber(element.strokeWidth, 0.02) * ppi);
-      node.style.left = `${Math.min(x1, x2)}px`;
-      node.style.top = `${Math.min(y1, y2)}px`;
+      const { paintHeightPx } = this._getLineRenderMetrics(element, ppi);
+      node.style.left = `${x1}px`;
+      node.style.top = `${y1 - (paintHeightPx * 0.5)}px`;
       node.style.width = `${len}px`;
-      node.style.height = `${strokeHeight}px`;
+      node.style.height = `${paintHeightPx}px`;
       node.style.transformOrigin = "left center";
       node.style.transform = `rotate(${angle}deg)`;
 
@@ -4352,7 +4612,7 @@ export class Sheet2DEditorWindow {
       content.className = "sheet-slides-element-content";
       content.style.width = "100%";
       content.style.height = "100%";
-      this._applyLineStrokeStyles(content, element, strokeHeight);
+      this._applyLineStrokeStyles(content, element, paintHeightPx);
       node.appendChild(content);
       return node;
     }
@@ -4948,6 +5208,7 @@ export class Sheet2DEditorWindow {
     if (elements.length > 1) {
       const bounds = this._getSelectionBoundsPx(elements);
       if (!bounds) return null;
+      const lockedFormboardGeometry = this._selectionContainsLockedFormboardGeometry(elements);
       const overlay = document.createElement("div");
       overlay.className = "sheet-slides-selection-overlay multi";
       overlay.style.left = `${bounds.left}px`;
@@ -4962,12 +5223,14 @@ export class Sheet2DEditorWindow {
       frame.className = "sheet-slides-selection-frame";
       overlay.appendChild(frame);
 
-      ["nw", "ne", "sw", "se"].forEach((corner) => {
-        const handle = document.createElement("div");
-        handle.className = `sheet-slides-handle ${corner}`;
-        handle.dataset.handle = corner;
-        overlay.appendChild(handle);
-      });
+      if (!lockedFormboardGeometry) {
+        ["nw", "ne", "sw", "se"].forEach((corner) => {
+          const handle = document.createElement("div");
+          handle.className = `sheet-slides-handle ${corner}`;
+          handle.dataset.handle = corner;
+          overlay.appendChild(handle);
+        });
+      }
 
       const rotateLine = document.createElement("div");
       rotateLine.className = "sheet-slides-rotate-line";
@@ -4981,7 +5244,63 @@ export class Sheet2DEditorWindow {
     }
 
     const [element] = elements;
-    if (!element || typeof element !== "object" || element.type === "line") return null;
+    if (!element || typeof element !== "object") return null;
+    if (this._isFormboardElement(element)) {
+      const groupId = this._getElementGroupId(element);
+      const groupElements = (this.sheetDraft?.elements || []).filter((entry) => this._getElementGroupId(entry) === groupId);
+      const bounds = this._getSelectionBoundsPx(groupElements);
+      const model = buildWireHarnessFormboardModel(groupElements);
+      if (!bounds || !model) return null;
+      const ppi = this._getStageRenderPpi();
+      const activePivotNodeId = String(this._selectedFormboardPivot?.groupId || "") === groupId
+        ? String(this._selectedFormboardPivot?.nodeId || "")
+        : "";
+      const overlay = document.createElement("div");
+      overlay.className = "sheet-slides-selection-overlay formboard-tree";
+      overlay.style.left = `${bounds.left}px`;
+      overlay.style.top = `${bounds.top}px`;
+      overlay.style.width = `${bounds.width}px`;
+      overlay.style.height = `${bounds.height}px`;
+      overlay.style.zIndex = "2147483647";
+      overlay.style.setProperty("--sheet-slides-ui-scale", String(this._getSelectionUiScale()));
+      overlay.addEventListener("pointerdown", (event) => this._onSelectionOverlayPointerDown(event));
+
+      const frame = document.createElement("div");
+      frame.className = "sheet-slides-selection-frame";
+      overlay.appendChild(frame);
+
+      for (const node of model.nodes.values()) {
+        const handle = document.createElement("div");
+        handle.className = `sheet-slides-formboard-pivot-handle${activePivotNodeId === node.id ? " active" : ""}`;
+        handle.dataset.handle = "formboard-node";
+        handle.dataset.nodeId = String(node.id || "");
+        handle.style.left = `${(toFiniteNumber(node.x, 0) * ppi) - bounds.left - 8}px`;
+        handle.style.top = `${(toFiniteNumber(node.y, 0) * ppi) - bounds.top - 8}px`;
+        overlay.appendChild(handle);
+      }
+
+      if (activePivotNodeId) {
+        const adjacentSegments = model.segmentsByNode?.get?.(activePivotNodeId) || [];
+        for (const segment of adjacentSegments) {
+          if (!segment) continue;
+          const otherNodeId = segment.fromNodeId === activePivotNodeId ? segment.toNodeId : segment.fromNodeId;
+          const pivotNode = model.nodes.get(activePivotNodeId);
+          const otherNode = model.nodes.get(otherNodeId);
+          if (!pivotNode || !otherNode) continue;
+          const midX = ((pivotNode.x + otherNode.x) * 0.5) * ppi;
+          const midY = ((pivotNode.y + otherNode.y) * 0.5) * ppi;
+          const handle = document.createElement("div");
+          handle.className = "sheet-slides-formboard-segment-handle";
+          handle.dataset.handle = "formboard-segment";
+          handle.dataset.nodeId = activePivotNodeId;
+          handle.dataset.segmentId = String(segment.id || "");
+          handle.style.left = `${midX - bounds.left - 9}px`;
+          handle.style.top = `${midY - bounds.top - 9}px`;
+          overlay.appendChild(handle);
+        }
+      }
+      return overlay;
+    }
 
     const ppi = this._getStageRenderPpi();
     const targetId = String(element.id || "");
@@ -5023,6 +5342,7 @@ export class Sheet2DEditorWindow {
     overlay.style.zIndex = "2147483647";
     overlay.style.setProperty("--sheet-slides-ui-scale", String(this._getSelectionUiScale()));
     overlay.addEventListener("pointerdown", (event) => this._onElementPointerDown(event, element.id));
+    const lockedFormboardGeometry = this._isFormboardElement(element);
 
     if (cropActive) {
       const frame = document.createElement("div");
@@ -5100,12 +5420,14 @@ export class Sheet2DEditorWindow {
       overlay.appendChild(shapeAdjustHandle);
     }
 
-    ["nw", "ne", "sw", "se"].forEach((corner) => {
-      const handle = document.createElement("div");
-      handle.className = `sheet-slides-handle ${corner}`;
-      handle.dataset.handle = corner;
-      overlay.appendChild(handle);
-    });
+    if (!lockedFormboardGeometry) {
+      ["nw", "ne", "sw", "se"].forEach((corner) => {
+        const handle = document.createElement("div");
+        handle.className = `sheet-slides-handle ${corner}`;
+        handle.dataset.handle = corner;
+        overlay.appendChild(handle);
+      });
+    }
 
     const rotateLine = document.createElement("div");
     rotateLine.className = "sheet-slides-rotate-line";
@@ -5746,20 +6068,36 @@ export class Sheet2DEditorWindow {
     const hasElement = !!selected;
     const textState = selectionCount === 1 ? this._getSelectedTextState() : null;
     const supportsText = !!textState;
+    const supportsFormboardText = !!textState?.isFormboard;
     const supportsCrop = hasElement && elementSupportsMediaCrop(selected);
     const isPMI = hasElement && selected.type === "pmiInset";
     const isLine = hasElement && selected.type === "line";
     const isRect = hasElement && selected.type === "rect";
     const isTable = hasElement && isTableElementType(selected);
+    const isCustomSheet = String(sheet?.sizeKey || "") === "CUSTOM";
 
     this._renderSelectionToolbar();
 
     this._sheetNameInput.value = String(sheet?.name || "");
     if (this._sheetSizeInput) this._sheetSizeInput.value = String(sheet?.sizeKey || DEFAULT_SHEET_SIZE_KEY);
     if (this._sheetOrientationInput) this._sheetOrientationInput.value = String(sheet?.orientation || DEFAULT_SHEET_ORIENTATION);
+    if (this._sheetCustomWidthInput) {
+      this._sheetCustomWidthInput.value = String(
+        Math.max(MIN_CUSTOM_SHEET_SIZE_IN, toFiniteNumber(sheet?.customWidthIn ?? sheet?.widthIn, 11)),
+      );
+    }
+    if (this._sheetCustomHeightInput) {
+      this._sheetCustomHeightInput.value = String(
+        Math.max(MIN_CUSTOM_SHEET_SIZE_IN, toFiniteNumber(sheet?.customHeightIn ?? sheet?.heightIn, 8.5)),
+      );
+    }
     this._sheetBgInput.value = normalizeHex(sheet?.background, this._defaultSheetBackground());
     if (this._sheetSizeInput) this._sheetSizeInput.disabled = !sheet;
     if (this._sheetOrientationInput) this._sheetOrientationInput.disabled = !sheet;
+    if (this._sheetCustomWidthInput) this._sheetCustomWidthInput.disabled = !sheet || !isCustomSheet;
+    if (this._sheetCustomHeightInput) this._sheetCustomHeightInput.disabled = !sheet || !isCustomSheet;
+    if (this._sheetCustomWidthField) this._sheetCustomWidthField.style.display = isCustomSheet ? "flex" : "none";
+    if (this._sheetCustomHeightField) this._sheetCustomHeightField.style.display = isCustomSheet ? "flex" : "none";
     this._sheetBgResetBtn.disabled = !sheet;
 
     this._selectionLabel.textContent = selectionCount > 1
@@ -5785,12 +6123,18 @@ export class Sheet2DEditorWindow {
     this._strokeResetBtn.disabled = disable || isLine;
     this._strokeWidthInput.disabled = disable || isLine;
     if (this._cornerRadiusInput) this._cornerRadiusInput.disabled = !isRect;
-    this._textInput.disabled = !supportsText || !!(textState?.isTable && !textState.canEditTextContent);
-    this._textColorInput.disabled = !supportsText;
-    this._textColorResetBtn.disabled = !supportsText;
+    this._textInput.disabled = !supportsText || supportsFormboardText || !!(textState?.isTable && !textState.canEditTextContent);
+    this._fontFamilyInput.disabled = !supportsText || supportsFormboardText;
+    this._textColorInput.disabled = !supportsText || supportsFormboardText;
+    this._textColorResetBtn.disabled = !supportsText || supportsFormboardText;
     this._fontSizeInput.disabled = !supportsText;
     this._fontSizeDecrementBtn.disabled = !supportsText;
     this._fontSizeIncrementBtn.disabled = !supportsText;
+    if (this._boldBtn) this._boldBtn.disabled = !supportsText || supportsFormboardText;
+    if (this._italicBtn) this._italicBtn.disabled = !supportsText || supportsFormboardText;
+    if (this._underlineBtn) this._underlineBtn.disabled = !supportsText || supportsFormboardText;
+    Object.values(this._textAlignButtons || {}).forEach((button) => { button.disabled = !supportsText || supportsFormboardText; });
+    Object.values(this._verticalAlignButtons || {}).forEach((button) => { button.disabled = !supportsText || supportsFormboardText; });
     if (this._tableTextScopeInput) this._tableTextScopeInput.disabled = !isTable;
     this._pmiBgInput.disabled = !isPMI;
     this._pmiBgResetBtn.disabled = !isPMI;
@@ -5859,11 +6203,24 @@ export class Sheet2DEditorWindow {
       this._strokeInput.disabled = false;
       this._strokeResetBtn.disabled = false;
       this._strokeWidthInput.disabled = false;
-      this._textPanel.style.display = "none";
+      this._textPanel.style.display = supportsFormboardText ? "block" : "none";
       this._cropPanel.style.display = "none";
       this._pmiPanel.style.display = "none";
       this._fillField.style.display = "none";
       this._strokeField.style.display = "block";
+      if (supportsFormboardText) {
+        if (this._tableTextScopeField) this._tableTextScopeField.style.display = "none";
+        if (this._textContentField) this._textContentField.style.display = "none";
+        this._textInput.value = "";
+        this._fontFamilyInput.value = String(textState.fontFamily || "Arial, Helvetica, sans-serif");
+        this._fontSizeInput.value = String(Math.round(inchesToPoints(toFiniteNumber(textState.fontSize, 0.32))));
+        this._textColorInput.value = normalizeHex(textState.color, this._defaultTextColorForElement(selected));
+        Object.values(this._textAlignButtons || {}).forEach((button) => button.classList.remove("primary"));
+        Object.values(this._verticalAlignButtons || {}).forEach((button) => button.classList.remove("primary"));
+        if (this._boldBtn) this._boldBtn.classList.remove("primary");
+        if (this._italicBtn) this._italicBtn.classList.remove("primary");
+        if (this._underlineBtn) this._underlineBtn.classList.remove("primary");
+      }
       return;
     }
 
@@ -5903,7 +6260,7 @@ export class Sheet2DEditorWindow {
     this._textPanel.style.display = supportsText ? "block" : "none";
     if (this._tableTextScopeField) this._tableTextScopeField.style.display = isTable ? "" : "none";
     if (this._textContentField) {
-      this._textContentField.style.display = (isTable && !textState?.canEditTextContent) ? "none" : "";
+      this._textContentField.style.display = (supportsFormboardText || (isTable && !textState?.canEditTextContent)) ? "none" : "";
     }
     this._cropPanel.style.display = supportsCrop ? "block" : "none";
     this._pmiPanel.style.display = isPMI ? "block" : "none";
@@ -6261,6 +6618,49 @@ export class Sheet2DEditorWindow {
     if (isPointerFromInput(event)) return;
 
     const selectedElements = this._getSelectedElements();
+    const handle = String(event?.target?.dataset?.handle || "").trim();
+    if (handle === "formboard-node") {
+      const selectedLine = selectedElements.length === 1 ? selectedElements[0] : null;
+      const groupId = this._getElementGroupId(selectedLine);
+      const nodeId = String(event?.target?.dataset?.nodeId || "").trim();
+      if (!groupId || !nodeId) return;
+      this._selectedFormboardPivot = { groupId, nodeId };
+      this._renderStageOnly();
+      this._setStatus("Pivot selected. Drag a blue midpoint handle to rotate the branch attached to this node.");
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (handle === "formboard-segment") {
+      const selectedLine = selectedElements.length === 1 ? selectedElements[0] : null;
+      const groupId = this._getElementGroupId(selectedLine);
+      const nodeId = String(event?.target?.dataset?.nodeId || "").trim();
+      const segmentId = String(event?.target?.dataset?.segmentId || "").trim();
+      const pivotSnapshot = this._buildFormboardPivotDragSnapshot(groupId, nodeId, segmentId);
+      if (!pivotSnapshot) return;
+      const slideRect = this._getStageWorldRect();
+      if (!slideRect) return;
+      const point = this._eventToSlidePoint(event, slideRect);
+      const pivotNode = pivotSnapshot.model.nodes.get(pivotSnapshot.pivotNodeId);
+      if (!pivotNode) return;
+      const ppi = this._pxPerIn();
+      this._dragState = {
+        pointerId: event.pointerId,
+        mode: "formboard-pivot-rotate",
+        startX: point.x,
+        startY: point.y,
+        formboardSnapshot: pivotSnapshot,
+        startAngleRad: Math.atan2(point.y - (pivotNode.y * ppi), point.x - (pivotNode.x * ppi)),
+        moved: false,
+        captureTarget: event.currentTarget,
+      };
+
+      try { event.currentTarget?.setPointerCapture?.(event.pointerId); } catch { }
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
     if (selectedElements.length <= 1) return;
 
     this._hideContextMenu();
@@ -6269,9 +6669,10 @@ export class Sheet2DEditorWindow {
     if (!slideRect) return;
 
     const point = this._eventToSlidePoint(event, slideRect);
-    const handle = String(event?.target?.dataset?.handle || "").trim();
     const selectionSnapshot = this._captureSelectionSnapshot(selectedElements);
     if (!selectionSnapshot) return;
+    const lockedFormboardGeometry = this._selectionContainsLockedFormboardGeometry(selectedElements);
+    if (lockedFormboardGeometry && handle && handle !== "rotate") return;
 
     const mode = handle === "rotate"
       ? "selection-rotate"
@@ -6386,7 +6787,14 @@ export class Sheet2DEditorWindow {
             : (normalHandle ? "resize" : "move"))));
     }
 
+    if (this._isFormboardElement(element) && currentSelectionIds.length === 1) {
+      mode = null;
+    }
+
     if (!mode) {
+      if (this._isFormboardElement(element) && currentSelectionIds.length === 1) {
+        this._setStatus("Click an orange pivot, then drag a blue midpoint handle to rotate the attached branch. Formboard segment lengths stay locked.");
+      }
       if (selectionChanged) {
         this._renderStageOnly();
       }
@@ -6596,7 +7004,8 @@ export class Sheet2DEditorWindow {
 
     if (this._dragState.mode === "selection-move"
       || this._dragState.mode === "selection-resize"
-      || this._dragState.mode === "selection-rotate") {
+      || this._dragState.mode === "selection-rotate"
+      || this._dragState.mode === "formboard-pivot-rotate") {
       const slideRect = this._getStageWorldRect();
       if (!slideRect) return;
 
@@ -6612,9 +7021,17 @@ export class Sheet2DEditorWindow {
       const dx = dxPx / ppi;
       const dy = dyPx / ppi;
       const snapshot = this._dragState.selectionSnapshot;
-      if (!snapshot) return;
-
-      if (this._dragState.mode === "selection-move") {
+      if (this._dragState.mode === "formboard-pivot-rotate") {
+        const formboardSnapshot = this._dragState.formboardSnapshot;
+        if (!formboardSnapshot) return;
+        const pivotNode = formboardSnapshot.model.nodes.get(formboardSnapshot.pivotNodeId);
+        if (!pivotNode) return;
+        const angle = Math.atan2(point.y - (pivotNode.y * ppi), point.x - (pivotNode.x * ppi));
+        const deltaDeg = (angle - toFiniteNumber(this._dragState.startAngleRad, angle)) * 180 / Math.PI;
+        this._applyFormboardPivotRotation(formboardSnapshot, deltaDeg);
+      } else if (!snapshot) {
+        return;
+      } else if (this._dragState.mode === "selection-move") {
         this._applySelectionMove(snapshot, dx, dy);
       } else if (this._dragState.mode === "selection-resize") {
         this._applySelectionResize(snapshot, this._dragState.handle, dx, dy, !!event.shiftKey);
@@ -7164,7 +7581,24 @@ export class Sheet2DEditorWindow {
 
   _setSelectedTextField(key, rawValue) {
     const element = this._getSelectedElement();
-    if (!element || !elementSupportsText(element)) return;
+    if (!element) return;
+
+    if (this._isFormboardElement(element)) {
+      if (key !== "fontSize") return;
+      const textElements = this._getSelectedFormboardTextElements(element);
+      if (!textElements.length) return;
+      const normalizedFontSize = this._normalizeSelectedTextFieldValue(key, rawValue);
+      for (const textElement of textElements) {
+        textElement.fontSize = normalizedFontSize;
+      }
+      this._commitSheetDraft(`formboard-text-${key}`);
+      this._renderStageOnly();
+      this._renderInspector();
+      this._renderSidebarOnly();
+      return;
+    }
+
+    if (!elementSupportsText(element)) return;
 
     if (isTableElementType(element)) {
       this._setSelectedTableTextField(key, rawValue);
@@ -7375,45 +7809,7 @@ export class Sheet2DEditorWindow {
 
     const file = input?.files?.[0];
     if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const src = String(reader.result || "");
-      if (!src || !this.sheetDraft) return;
-
-      const finalizeInsert = (widthIn = 3.2, heightIn = 2.0) => {
-        this.sheetDraft.elements = Array.isArray(this.sheetDraft.elements) ? this.sheetDraft.elements : [];
-        const xIn = Math.max(0, (toFiniteNumber(this.sheetDraft.widthIn, 11) * 0.5) - (widthIn * 0.5));
-        const yIn = Math.max(0, (toFiniteNumber(this.sheetDraft.heightIn, 8.5) * 0.5) - (heightIn * 0.5));
-
-        const image = defaultImageElement(xIn, yIn, src);
-        image.w = widthIn;
-        image.h = heightIn;
-        image.z = this._nextZ();
-        this.sheetDraft.elements.push(image);
-        this._setSelectedElementIds([String(image.id || "")], String(image.id || ""));
-
-        this._commitSheetDraft("add-image");
-        this._renderAll();
-        this._setStatus("Image added");
-      };
-
-      const probe = new Image();
-      probe.onload = () => {
-        this._rememberMediaMetadata(src, probe.naturalWidth, probe.naturalHeight);
-        const aspect = Math.max(1e-6, toFiniteNumber(probe.naturalWidth, 1) / Math.max(1, toFiniteNumber(probe.naturalHeight, 1)));
-        let widthIn = 3.2;
-        let heightIn = widthIn / aspect;
-        if (heightIn > 2.4) {
-          heightIn = 2.4;
-          widthIn = heightIn * aspect;
-        }
-        finalizeInsert(widthIn, heightIn);
-      };
-      probe.onerror = () => finalizeInsert();
-      probe.src = src;
-    };
-    reader.readAsDataURL(file);
+    void this._readBlobAsDataUrl(file).then((src) => this._insertImageElementFromSource(src));
   }
 
   _insertPmiView(viewIndex) {
@@ -7686,6 +8082,100 @@ export class Sheet2DEditorWindow {
     return this.sheetDraft.elements.find((item) => String(item?.id || "") === id) || null;
   }
 
+  _isFormboardElement(element) {
+    return isWireHarnessFormboardElement(element);
+  }
+
+  _selectionContainsLockedFormboardGeometry(elements = []) {
+    return (Array.isArray(elements) ? elements : []).some((element) => this._isFormboardElement(element));
+  }
+
+  _buildFormboardPivotDragSnapshot(groupId, pivotNodeId, segmentId) {
+    const resolvedGroupId = String(groupId || "").trim();
+    const resolvedPivotNodeId = String(pivotNodeId || "").trim();
+    const resolvedSegmentId = String(segmentId || "").trim();
+    if (!resolvedGroupId || !resolvedPivotNodeId || !resolvedSegmentId) return null;
+    const groupElements = (this.sheetDraft?.elements || []).filter((entry) => this._getElementGroupId(entry) === resolvedGroupId);
+    const model = buildWireHarnessFormboardModel(groupElements);
+    if (!model || !model.nodes?.has?.(resolvedPivotNodeId)) return null;
+
+    const branchNodeIds = collectWireHarnessFormboardSegmentBranchNodeIds(model, resolvedPivotNodeId, resolvedSegmentId);
+    if (!branchNodeIds.size) return null;
+
+    const segmentIds = new Set();
+    for (const segment of model.segments || []) {
+      if (!segment) continue;
+      if (String(segment.id || "") === resolvedSegmentId) {
+        segmentIds.add(String(segment.id || ""));
+        continue;
+      }
+      if (branchNodeIds.has(segment.fromNodeId) && branchNodeIds.has(segment.toNodeId)) {
+        segmentIds.add(String(segment.id || ""));
+      }
+    }
+
+    const elementSnapshots = new Map();
+    for (const groupElement of groupElements) {
+      const id = String(groupElement?.id || "").trim();
+      if (!id) continue;
+      const meta = groupElement?.formboard || {};
+      const kind = String(meta?.kind || "").trim();
+      const include = segmentIds.has(id)
+        || (kind === "segmentLabel" && (segmentIds.has(String(meta?.lineElementId || "")) || branchNodeIds.has(String(meta?.toNodeId || "")) || branchNodeIds.has(String(meta?.fromNodeId || ""))))
+        || (kind === "nodeLabel" && branchNodeIds.has(String(meta?.nodeId || "")));
+      if (!include) continue;
+      elementSnapshots.set(id, deepClone(groupElement));
+    }
+
+    return {
+      groupId: resolvedGroupId,
+      pivotNodeId: resolvedPivotNodeId,
+      segmentId: resolvedSegmentId,
+      elementSnapshots,
+      model,
+    };
+  }
+
+  _applyFormboardPivotRotation(snapshot, deltaDeg) {
+    if (!snapshot?.model?.nodes || !snapshot?.elementSnapshots?.size) return;
+    const pivotNodeId = String(snapshot.pivotNodeId || "").trim();
+    const pivotNode = snapshot.model.nodes.get(pivotNodeId);
+    if (!pivotNode) return;
+
+    const radians = toFiniteNumber(deltaDeg, 0) * Math.PI / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const rotatePoint = (x, y) => {
+      const ox = toFiniteNumber(x, 0) - pivotNode.x;
+      const oy = toFiniteNumber(y, 0) - pivotNode.y;
+      return {
+        x: pivotNode.x + (ox * cos) - (oy * sin),
+        y: pivotNode.y + (ox * sin) + (oy * cos),
+      };
+    };
+
+    for (const [elementId, source] of snapshot.elementSnapshots.entries()) {
+      const element = this._getElementById(elementId);
+      if (!element || !source) continue;
+      if (element.type === "line") {
+        const p1 = rotatePoint(source.x, source.y);
+        const p2 = rotatePoint(source.x2, source.y2);
+        element.x = p1.x;
+        element.y = p1.y;
+        element.x2 = p2.x;
+        element.y2 = p2.y;
+        continue;
+      }
+
+      const center = rotatePoint(
+        toFiniteNumber(source.x, 0) + (Math.max(MIN_ELEMENT_IN, toFiniteNumber(source.w, 1)) * 0.5),
+        toFiniteNumber(source.y, 0) + (Math.max(MIN_ELEMENT_IN, toFiniteNumber(source.h, 1)) * 0.5),
+      );
+      element.x = center.x - (Math.max(MIN_ELEMENT_IN, toFiniteNumber(source.w, 1)) * 0.5);
+      element.y = center.y - (Math.max(MIN_ELEMENT_IN, toFiniteNumber(source.h, 1)) * 0.5);
+    }
+  }
+
   _getElementGroupId(element) {
     const groupId = String(element?.groupId || "").trim();
     return groupId || "";
@@ -7706,6 +8196,7 @@ export class Sheet2DEditorWindow {
     const target = element && typeof element === "object" ? element : null;
     const id = String(target?.id || "").trim();
     if (!id) return [];
+    if (this._isFormboardElement(target)) return [id];
     const groupId = this._getElementGroupId(target);
     if (!groupId) return [id];
     if (this._getActiveEditingGroupId() === groupId) return [id];
@@ -7764,13 +8255,18 @@ export class Sheet2DEditorWindow {
     this._selectedElementIds = validIds;
     this.selectedElementId = resolvedPrimary || null;
 
+    const selected = validIds.length === 1 ? this._getElementById(validIds[0]) : null;
+    const selectedFormboardGroupId = this._isFormboardElement(selected) ? this._getElementGroupId(selected) : "";
+    if (!selectedFormboardGroupId || selectedFormboardGroupId !== String(this._selectedFormboardPivot?.groupId || "")) {
+      this._selectedFormboardPivot = selectedFormboardGroupId ? { groupId: selectedFormboardGroupId, nodeId: "" } : null;
+    }
+
     if (validIds.length !== 1) {
       this._cropModeElementId = null;
       this._tableSelection = null;
       return;
     }
 
-    const selected = this._getSelectedElement();
     if (!selected || !isTableElementType(selected)) {
       this._tableSelection = null;
     } else {
@@ -8630,6 +9126,44 @@ export class Sheet2DEditorWindow {
       .sheet-slides-handle.ne { right: calc(-6px * var(--sheet-slides-ui-scale)); top: calc(-6px * var(--sheet-slides-ui-scale)); cursor: nesw-resize; }
       .sheet-slides-handle.sw { left: calc(-6px * var(--sheet-slides-ui-scale)); bottom: calc(-6px * var(--sheet-slides-ui-scale)); cursor: nesw-resize; }
       .sheet-slides-handle.se { right: calc(-6px * var(--sheet-slides-ui-scale)); bottom: calc(-6px * var(--sheet-slides-ui-scale)); cursor: nwse-resize; }
+      .sheet-slides-selection-overlay.formboard-tree {
+        pointer-events: none;
+      }
+      .sheet-slides-formboard-pivot-handle {
+        position: absolute;
+        width: calc(16px * var(--sheet-slides-ui-scale));
+        height: calc(16px * var(--sheet-slides-ui-scale));
+        border-radius: 999px;
+        background: #f59e0b;
+        border: calc(2px * var(--sheet-slides-ui-scale)) solid #fff7ed;
+        box-shadow:
+          0 calc(1px * var(--sheet-slides-ui-scale))
+          calc(4px * var(--sheet-slides-ui-scale))
+          rgba(0,0,0,.45);
+        cursor: pointer;
+        pointer-events: auto;
+      }
+      .sheet-slides-formboard-pivot-handle.active {
+        background: #f97316;
+        border-color: #ffffff;
+      }
+      .sheet-slides-formboard-segment-handle {
+        position: absolute;
+        width: calc(18px * var(--sheet-slides-ui-scale));
+        height: calc(18px * var(--sheet-slides-ui-scale));
+        border-radius: 999px;
+        background: #60a5fa;
+        border: calc(2px * var(--sheet-slides-ui-scale)) solid #eff6ff;
+        box-shadow:
+          0 calc(1px * var(--sheet-slides-ui-scale))
+          calc(4px * var(--sheet-slides-ui-scale))
+          rgba(0,0,0,.45);
+        cursor: grab;
+        pointer-events: auto;
+      }
+      .sheet-slides-formboard-segment-handle:active {
+        cursor: grabbing;
+      }
       .sheet-slides-corner-radius-handle,
       .sheet-slides-shape-adjust-handle {
         position: absolute;

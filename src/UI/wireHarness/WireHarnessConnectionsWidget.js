@@ -5,6 +5,7 @@ import {
   resolveWireHarnessConnectionPortRefs,
 } from '../../wireHarness/wireHarnessRouting.js';
 import { listWireHarnessRouteObjectsForConnection } from '../../wireHarness/wireHarnessRouteRenderer.js';
+import { insertWireHarnessFormboard } from '../../wireHarness/wireHarnessFormboard.js';
 import { insertWireHarnessConnectionTable } from '../../wireHarness/wireHarnessSheetTable.js';
 
 function normalizeText(value, fallback = '') {
@@ -28,6 +29,22 @@ function textWidthCh(value, minimum = 0, padding = 2) {
   return Math.max(minimum, text.length + padding);
 }
 
+export function findReusableFormboardSheet(sheets = [], preferredSheetId = '') {
+  const requestedId = normalizeText(preferredSheetId, '');
+  const list = Array.isArray(sheets) ? sheets : [];
+  const sheetHasFormboard = (sheet) => (
+    Array.isArray(sheet?.elements)
+    && sheet.elements.some((element) => String(element?.groupId || '').startsWith('wire-harness-formboard:'))
+  );
+
+  if (requestedId) {
+    const requested = list.find((sheet) => String(sheet?.id || '') === requestedId) || null;
+    if (requested?.id && sheetHasFormboard(requested)) return requested;
+  }
+
+  return list.find((sheet) => sheetHasFormboard(sheet)) || null;
+}
+
 export class WireHarnessConnectionsWidget {
   constructor(viewer, { readOnly = false } = {}) {
     this.viewer = viewer || null;
@@ -40,6 +57,7 @@ export class WireHarnessConnectionsWidget {
     this._hoveredConnectionId = '';
     this._routingPayloadOverlay = null;
     this._sheetInsertOverlay = null;
+    this._formboardInsertOverlay = null;
     this._removeManagerListener = null;
     this._removeModelChangeListener = null;
 
@@ -54,6 +72,7 @@ export class WireHarnessConnectionsWidget {
     this._clearConnectionHover();
     this._closeRoutingPayloadWindow();
     this._closeInsertToSheetWindow();
+    this._closeInsertFormboardWindow();
     if (typeof this._removeManagerListener === 'function') {
       try { this._removeManagerListener(); } catch { /* ignore */ }
     }
@@ -132,6 +151,16 @@ export class WireHarnessConnectionsWidget {
       });
       actions.appendChild(routeBtn);
 
+      const unrouteBtn = document.createElement('button');
+      unrouteBtn.type = 'button';
+      unrouteBtn.className = 'wire-harness-btn';
+      unrouteBtn.textContent = 'Unroute';
+      unrouteBtn.title = 'Clear the current routed harness geometry';
+      unrouteBtn.addEventListener('click', () => {
+        void this.viewer?.clearWireHarnessRoutes?.({ reason: 'manual-unroute' });
+      });
+      actions.appendChild(unrouteBtn);
+
       const insertSheetBtn = document.createElement('button');
       insertSheetBtn.type = 'button';
       insertSheetBtn.className = 'wire-harness-btn';
@@ -139,6 +168,14 @@ export class WireHarnessConnectionsWidget {
       insertSheetBtn.title = 'Insert this connection list into a 2D sheet';
       insertSheetBtn.addEventListener('click', () => this._openInsertToSheetWindow());
       actions.appendChild(insertSheetBtn);
+
+      const formboardBtn = document.createElement('button');
+      formboardBtn.type = 'button';
+      formboardBtn.className = 'wire-harness-btn';
+      formboardBtn.textContent = 'Formboard';
+      formboardBtn.title = 'Flatten the harness spline network into a 2D formboard sheet';
+      formboardBtn.addEventListener('click', () => this._insertFormboardIntoSheet());
+      actions.appendChild(formboardBtn);
 
       header.appendChild(actions);
     }
@@ -170,7 +207,7 @@ export class WireHarnessConnectionsWidget {
       diameter: 1,
     });
     this._queuePersistence();
-    void this.viewer?.refreshWireHarnessRoutes?.({ reason: 'add-connection' });
+    void this.viewer?.clearWireHarnessRoutes?.({ reason: 'add-connection' });
   }
 
   _queuePersistence() {
@@ -182,7 +219,7 @@ export class WireHarnessConnectionsWidget {
     if (!manager?.updateConnection) return;
     manager.updateConnection(connectionId, patch);
     this._queuePersistence();
-    void this.viewer?.refreshWireHarnessRoutes?.({ reason: 'update-connection' });
+    void this.viewer?.clearWireHarnessRoutes?.({ reason: 'update-connection' });
   }
 
   _removeConnection(connectionId) {
@@ -190,7 +227,7 @@ export class WireHarnessConnectionsWidget {
     if (!manager?.removeConnection) return;
     manager.removeConnection(connectionId);
     this._queuePersistence();
-    void this.viewer?.refreshWireHarnessRoutes?.({ reason: 'remove-connection' });
+    void this.viewer?.clearWireHarnessRoutes?.({ reason: 'remove-connection' });
   }
 
   _buildEndpointSelect(currentValue, onChange) {
@@ -545,6 +582,32 @@ export class WireHarnessConnectionsWidget {
     try { overlay.remove(); } catch { /* ignore */ }
   }
 
+  _closeInsertFormboardWindow() {
+    const overlay = this._formboardInsertOverlay || null;
+    this._formboardInsertOverlay = null;
+    if (!overlay) return;
+    try { overlay.remove(); } catch { /* ignore */ }
+  }
+
+  _resolveFormboardTargetSheet(preferredSheetId = '') {
+    const manager = this.viewer?.partHistory?.sheet2DManager || null;
+    if (!manager) return null;
+
+    const existingSheets = Array.isArray(manager.getSheets?.()) ? manager.getSheets() : [];
+    const formboardSheet = findReusableFormboardSheet(existingSheets, preferredSheetId);
+    if (formboardSheet?.id) return formboardSheet;
+
+    return manager.createSheet?.({
+      name: `Formboard Sheet ${existingSheets.length + 1}`,
+      sizeKey: 'CUSTOM',
+      orientation: 'landscape',
+      customWidthIn: 36,
+      customHeightIn: 24,
+      background: '#ffffff',
+      elements: [],
+    }) || null;
+  }
+
   _insertConnectionListIntoSheet(preferredSheetId = '') {
     const manager = this.viewer?.partHistory?.sheet2DManager || null;
     if (!manager) return;
@@ -587,6 +650,40 @@ export class WireHarnessConnectionsWidget {
     } catch { /* ignore */ }
 
     this._closeInsertToSheetWindow();
+    try { this.viewer?.openSheet2DEditor?.(targetSheet.id); } catch { /* ignore */ }
+  }
+
+  _insertFormboardIntoSheet(preferredSheetId = '') {
+    const manager = this.viewer?.partHistory?.sheet2DManager || null;
+    if (!manager) return;
+    const targetSheet = this._resolveFormboardTargetSheet(preferredSheetId);
+    if (!targetSheet?.id) return;
+
+    const inserted = insertWireHarnessFormboard(
+      manager,
+      targetSheet.id,
+      this.viewer?.partHistory,
+      {
+        resizeSheetToFit: true,
+      },
+    );
+    if (!inserted?.ok) {
+      try { window.alert(inserted?.error || 'Failed to generate wire harness formboard.'); } catch { /* ignore */ }
+      return;
+    }
+
+    if (Array.isArray(inserted?.warnings) && inserted.warnings.length) {
+      console.warn('[WireHarness] Formboard warnings:', inserted.warnings);
+    }
+
+    try {
+      this.viewer?.partHistory?.queueHistorySnapshot?.({
+        debounceMs: 0,
+        reason: 'wire-harness-formboard',
+      });
+    } catch { /* ignore */ }
+
+    this._closeInsertFormboardWindow();
     try { this.viewer?.openSheet2DEditor?.(targetSheet.id); } catch { /* ignore */ }
   }
 

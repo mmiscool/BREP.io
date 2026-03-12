@@ -1548,14 +1548,14 @@ export class Viewer {
             this.refreshWorkbenchUi();
             this.applyMetadataColors();
             this._axisHelpersDirty = true;
-            void this.refreshWireHarnessRoutes({ reason: 'after-run-history' });
+            void this.clearWireHarnessRoutes({ reason: 'after-run-history' });
         };
         this.partHistory.callbacks.afterReset = () => {
             this._refreshAssemblyConstraintsPanelVisibility();
             this.refreshWorkbenchUi();
             this.applyMetadataColors();
             this._axisHelpersDirty = true;
-            void this.refreshWireHarnessRoutes({ reason: 'after-reset' });
+            void this.clearWireHarnessRoutes({ reason: 'after-reset' });
         };
 
         if (this._viewerOnlyMode) {
@@ -1696,7 +1696,7 @@ export class Viewer {
             }
         } catch { }
         try { this.refreshWorkbenchUi(); } catch { }
-        void this.refreshWireHarnessRoutes({ reason: 'setup-accordion' });
+        void this.clearWireHarnessRoutes({ reason: 'setup-accordion' });
         this._syncSidebarHomeBannerHeight();
         this._bindSidebarHomeBannerHeightSync();
 
@@ -1801,7 +1801,7 @@ export class Viewer {
                 this.wireHarnessConnectionsWidget.refreshFromHistory?.();
                 this.wireHarnessConnectionsWidget._renderList?.();
             }
-            void this.refreshWireHarnessRoutes({ reason: 'undo-redo' });
+            void this.clearWireHarnessRoutes({ reason: 'undo-redo' });
         } catch { }
         try { this.historyWidget?.render?.(); } catch { }
         try { this.refreshWorkbenchUi(); } catch { }
@@ -1844,6 +1844,15 @@ export class Viewer {
             );
             return null;
         }
+    }
+
+    async clearWireHarnessRoutes(_options = {}) {
+        const scene = this.partHistory?.scene || this.scene || null;
+        const manager = this.partHistory?.wireHarnessManager || null;
+        clearWireHarnessRouteGroup(scene);
+        manager?.clearRouteResults?.();
+        try { this.render?.(); } catch { /* ignore */ }
+        return null;
     }
 
     async _runFeatureHistoryUndoRedo(direction) {

@@ -263,7 +263,18 @@ export class Sheet2DManager {
     const source = (rawSheet && typeof rawSheet === "object") ? rawSheet : {};
     const size = getSheetSizeByKey(source.sizeKey);
     const orientation = normalizeSheetOrientation(source.orientation);
-    const dims = resolveSheetDimensions(size.key, orientation);
+    const customWidthIn = Math.max(
+      1,
+      toFiniteNumber(source.customWidthIn ?? source.widthIn, size.widthIn),
+    );
+    const customHeightIn = Math.max(
+      1,
+      toFiniteNumber(source.customHeightIn ?? source.heightIn, size.heightIn),
+    );
+    const dims = resolveSheetDimensions(size.key, orientation, {
+      customWidthIn,
+      customHeightIn,
+    });
     const id = sanitizeText(keepId || source.id || this._generateSheetId(), "").trim() || this._generateSheetId();
     const name = sanitizeText(source.name, "").trim() || `Sheet ${index + 1}`;
 
@@ -287,6 +298,8 @@ export class Sheet2DManager {
       units: dims.units,
       widthIn: dims.widthIn,
       heightIn: dims.heightIn,
+      customWidthIn: dims.key === "CUSTOM" ? dims.widthIn : undefined,
+      customHeightIn: dims.key === "CUSTOM" ? dims.heightIn : undefined,
       widthPx: dims.widthPx,
       heightPx: dims.heightPx,
       pxPerInch: dims.pxPerInch,
@@ -320,6 +333,9 @@ export class Sheet2DManager {
       id,
       type,
       groupId: sanitizeText(source.groupId, "").trim() || undefined,
+      formboard: source.formboard && typeof source.formboard === "object"
+        ? deepClone(source.formboard)
+        : undefined,
       x: defaultX,
       y: defaultY,
       rotationDeg: toFiniteNumber(source.rotationDeg, 0),
