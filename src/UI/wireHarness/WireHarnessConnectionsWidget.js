@@ -1,6 +1,5 @@
 import { SelectionFilter } from '../SelectionFilter.js';
 import {
-  buildWireHarnessRoutingPayload,
   listWireHarnessTerminationEndpoints,
   resolveWireHarnessConnectionPortRefs,
 } from '../../wireHarness/wireHarnessRouting.js';
@@ -55,7 +54,6 @@ export class WireHarnessConnectionsWidget {
     this.routeResults = new Map();
     this.availableEndpoints = [];
     this._hoveredConnectionId = '';
-    this._routingPayloadOverlay = null;
     this._sheetInsertOverlay = null;
     this._formboardInsertOverlay = null;
     this._removeManagerListener = null;
@@ -70,7 +68,6 @@ export class WireHarnessConnectionsWidget {
 
   dispose() {
     this._clearConnectionHover();
-    this._closeRoutingPayloadWindow();
     this._closeInsertToSheetWindow();
     this._closeInsertFormboardWindow();
     if (typeof this._removeManagerListener === 'function') {
@@ -116,10 +113,14 @@ export class WireHarnessConnectionsWidget {
     const header = document.createElement('div');
     header.className = 'wire-harness-widget-header';
 
-    const title = document.createElement('div');
-    title.className = 'wire-harness-widget-title';
-    title.textContent = this._readOnly ? 'Connections' : 'Harness Connections';
-    header.appendChild(title);
+    if (this._readOnly) {
+      const title = document.createElement('div');
+      title.className = 'wire-harness-widget-title';
+      title.textContent = 'Connections';
+      header.appendChild(title);
+    } else {
+      header.classList.add('wire-harness-widget-header-actions-only');
+    }
 
     if (!this._readOnly) {
       const actions = document.createElement('div');
@@ -139,14 +140,6 @@ export class WireHarnessConnectionsWidget {
       routeBtn.textContent = 'Route';
       routeBtn.title = 'Rebuild all routed wires';
       routeBtn.addEventListener('click', () => {
-        const payload = buildWireHarnessRoutingPayload(
-          this.viewer?.partHistory,
-          this._getManager()?.getConnections?.() || [],
-        );
-        this._openRoutingPayloadWindow({
-          segments: payload?.segments || [],
-          connections: payload?.connections || [],
-        });
         void this.viewer?.refreshWireHarnessRoutes?.({ reason: 'manual-route' });
       });
       actions.appendChild(routeBtn);
@@ -271,7 +264,7 @@ export class WireHarnessConnectionsWidget {
 
     const header = document.createElement('div');
     header.className = 'wire-harness-table-head';
-    for (const label of ['Wire', 'Length', 'Dia', 'From', 'To', 'Status', 'Actions']) {
+    for (const label of ['ID', 'Length', 'Dia', 'From', 'To', 'Status', 'Actions']) {
       const cell = document.createElement('div');
       cell.className = 'wire-harness-head-cell';
       cell.textContent = label;
@@ -363,7 +356,7 @@ export class WireHarnessConnectionsWidget {
     const results = this.routeResults || new Map();
     const nameChars = this.connections.reduce(
       (max, connection) => Math.max(max, textWidthCh(connection?.name, 10, 3)),
-      textWidthCh('Wire', 10, 3),
+      textWidthCh('ID', 10, 3),
     );
     const lengthChars = this.connections.reduce((max, connection) => {
       const result = results.get(String(connection?.id || '')) || null;
@@ -437,63 +430,6 @@ export class WireHarnessConnectionsWidget {
     if (targetId && targetId !== this._hoveredConnectionId) return;
     this._hoveredConnectionId = '';
     try { SelectionFilter.setHoverObjects([], { ignoreFilter: true }); } catch { /* ignore */ }
-  }
-
-  _openRoutingPayloadWindow(payload) {
-    this._closeRoutingPayloadWindow();
-    const json = JSON.stringify(payload || { segments: [], connections: [] }, null, 2);
-    const overlay = document.createElement('div');
-    overlay.className = 'wire-harness-modal-overlay';
-    overlay.addEventListener('click', (event) => {
-      if (event.target === overlay) this._closeRoutingPayloadWindow();
-    });
-
-    const modal = document.createElement('div');
-    modal.className = 'wire-harness-modal';
-
-    const title = document.createElement('div');
-    title.className = 'wire-harness-modal-title';
-    title.textContent = 'Wire Harness Routing Payload';
-
-    const hint = document.createElement('div');
-    hint.className = 'wire-harness-modal-hint';
-    hint.textContent = 'Exact { "segments": [...], "connections": [...] } data passed into the routing pathfinder.';
-
-    const text = document.createElement('textarea');
-    text.className = 'wire-harness-modal-text';
-    text.value = json;
-    text.readOnly = true;
-    text.spellcheck = false;
-
-    const actions = document.createElement('div');
-    actions.className = 'wire-harness-modal-actions';
-
-    const closeBtn = document.createElement('button');
-    closeBtn.type = 'button';
-    closeBtn.className = 'wire-harness-btn';
-    closeBtn.textContent = 'Close';
-    closeBtn.addEventListener('click', () => this._closeRoutingPayloadWindow());
-
-    actions.appendChild(closeBtn);
-    modal.appendChild(title);
-    modal.appendChild(hint);
-    modal.appendChild(text);
-    modal.appendChild(actions);
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-    this._routingPayloadOverlay = overlay;
-
-    try {
-      text.focus();
-      text.select();
-    } catch { /* ignore */ }
-  }
-
-  _closeRoutingPayloadWindow() {
-    const overlay = this._routingPayloadOverlay || null;
-    this._routingPayloadOverlay = null;
-    if (!overlay) return;
-    try { overlay.remove(); } catch { /* ignore */ }
   }
 
   _openInsertToSheetWindow() {
@@ -706,6 +642,9 @@ export class WireHarnessConnectionsWidget {
       }
       .wire-harness-widget-header {
         justify-content: space-between;
+      }
+      .wire-harness-widget-header-actions-only {
+        justify-content: flex-end;
       }
       .wire-harness-widget-title {
         font-size: 13px;

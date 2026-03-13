@@ -1146,7 +1146,7 @@ export class PartHistory {
       : getLegacyLoadWorkbenchDefault();
     this.pmiViewsManager.setViews(importData.pmiViews || []);
     this.sheet2DManager.setSheets(importData.sheets2D || []);
-    this.wireHarnessManager.setConnections(importData.wireHarness || []);
+    this.wireHarnessManager.loadSerializable(importData.wireHarness || []);
     this.metadataManager.metadata = importData.metadata || {};
 
     if (this.assemblyConstraintHistory) {

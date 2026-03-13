@@ -141,6 +141,7 @@ import {
     test_wire_harness_route_prefers_non_reusing_path,
 } from './test_wireHarnessRoutingReuse.js';
 import { test_wire_harness_routes_render_as_scene_solids } from './test_wireHarnessRouteGeometry.js';
+import { test_wire_harness_route_results_persist_in_model_json } from './test_wireHarnessPersistence.js';
 import {
     afterRun_visibility_hidden_state_persistence,
     test_visibility_hidden_state_persistence,
@@ -253,6 +254,7 @@ export const testFunctions = [
     { test: test_wire_harness_route_prefers_non_reusing_path, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_wire_harness_infers_endpoint_side_from_spline_direction, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_wire_harness_routes_render_as_scene_solids, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_wire_harness_route_results_persist_in_model_json, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_openLoop, afterRun: afterRun_sketch_openLoop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     {
         test: test_sketch_face_attachment_alignment,

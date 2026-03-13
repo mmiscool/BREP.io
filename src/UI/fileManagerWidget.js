@@ -1115,7 +1115,8 @@ export class FileManagerWidget {
       this.currentBranch = targetBranch;
       this._forceSaveTargetDialog = false;
       this.nameInput.value = modelPath;
-      this._markSavedHistorySnapshot(jsonString || null);
+      const savedSnapshot = await this._refreshSavedHistorySnapshot();
+      if (savedSnapshot === null) this._markSavedHistorySnapshot(jsonString || null);
       this._logSaveProgress('Refreshing list...');
       await this.refreshList();
       this._logSaveProgress('Save complete.');

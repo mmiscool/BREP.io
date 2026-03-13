@@ -554,6 +554,11 @@ function buildBundleSegments(network, routes = []) {
   return bundleSegments;
 }
 
+export function buildWireHarnessBundleSegments(partHistory, routes = []) {
+  const network = buildWireHarnessNetwork(partHistory);
+  return buildBundleSegments(network, routes);
+}
+
 export async function routeWireHarnessConnections(partHistory, connections = []) {
   const requestedConnections = Array.isArray(connections) ? connections : [];
   const payload = buildWireHarnessRoutingPayload(partHistory, requestedConnections);

@@ -46,7 +46,7 @@ import { TriangleDebuggerWindow } from './triangleDebuggerWindow.js';
 import { ViewCube } from './ViewCube.js';
 import { WireHarnessConnectionsWidget } from './wireHarness/WireHarnessConnectionsWidget.js';
 import { renderWireHarnessRoutes, clearWireHarnessRouteGroup } from '../wireHarness/wireHarnessRouteRenderer.js';
-import { routeWireHarnessConnections } from '../wireHarness/wireHarnessRouting.js';
+import { buildWireHarnessBundleSegments, routeWireHarnessConnections } from '../wireHarness/wireHarnessRouting.js';
 import {
     getActiveWorkbench,
     isSidePanelAllowed,
@@ -1548,7 +1548,7 @@ export class Viewer {
             this.refreshWorkbenchUi();
             this.applyMetadataColors();
             this._axisHelpersDirty = true;
-            void this.clearWireHarnessRoutes({ reason: 'after-run-history' });
+            void this._syncWireHarnessRoutesFromHistoryState({ reason: 'after-run-history' });
         };
         this.partHistory.callbacks.afterReset = () => {
             this._refreshAssemblyConstraintsPanelVisibility();
@@ -1801,10 +1801,32 @@ export class Viewer {
                 this.wireHarnessConnectionsWidget.refreshFromHistory?.();
                 this.wireHarnessConnectionsWidget._renderList?.();
             }
-            void this.clearWireHarnessRoutes({ reason: 'undo-redo' });
         } catch { }
         try { this.historyWidget?.render?.(); } catch { }
         try { this.refreshWorkbenchUi(); } catch { }
+    }
+
+    async _syncWireHarnessRoutesFromHistoryState(_options = {}) {
+        const scene = this.partHistory?.scene || this.scene || null;
+        const manager = this.partHistory?.wireHarnessManager || null;
+        if (!scene || !manager) {
+            clearWireHarnessRouteGroup(scene);
+            return null;
+        }
+
+        const pendingRoutes = manager.consumePendingRestoredRouteResults?.();
+        if (Array.isArray(pendingRoutes) && pendingRoutes.length) {
+            const bundleSegments = buildWireHarnessBundleSegments(this.partHistory, pendingRoutes);
+            renderWireHarnessRoutes(scene, pendingRoutes, bundleSegments);
+            manager.setRouteResults?.(pendingRoutes, { preservePendingRestore: true });
+            try { this.render?.(); } catch { /* ignore */ }
+            return pendingRoutes;
+        }
+
+        clearWireHarnessRouteGroup(scene);
+        manager.clearRouteResults?.();
+        try { this.render?.(); } catch { /* ignore */ }
+        return null;
     }
 
     async refreshWireHarnessRoutes(_options = {}) {

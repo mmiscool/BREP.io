@@ -23,17 +23,58 @@ function normalizeConnection(raw, index = 0) {
   };
 }
 
+function normalizePointArray(point) {
+  if (!Array.isArray(point) || point.length < 3) return null;
+  return [
+    toFiniteNumber(point[0], 0),
+    toFiniteNumber(point[1], 0),
+    toFiniteNumber(point[2], 0),
+  ];
+}
+
+function normalizeStringArray(values) {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((value) => normalizeText(value, ''))
+    .filter(Boolean);
+}
+
+function normalizeRouteResult(raw, connectionsById = new Map()) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const connectionId = normalizeText(source.connectionId, '');
+  const connection = connectionsById.get(connectionId) || null;
+  const feasible = !!source.feasible;
+  return {
+    connectionId,
+    connectionName: normalizeText(source.connectionName, connection?.name || connectionId || 'Wire'),
+    feasible,
+    error: normalizeText(source.error, feasible ? '' : 'No route found through the harness network.'),
+    distance: Number.isFinite(Number(source.distance)) ? Number(source.distance) : null,
+    polyline: (Array.isArray(source.polyline) ? source.polyline : [])
+      .map((point) => normalizePointArray(point))
+      .filter(Boolean),
+    segmentIds: normalizeStringArray(source.segmentIds),
+    nodePath: normalizeStringArray(source.nodePath),
+    reusesHarnessPoint: !!source.reusesHarnessPoint,
+    diameter: Math.max(0.01, toFiniteNumber(source.diameter, connection?.diameter || 1)),
+    from: normalizeText(source.from, connection?.from || ''),
+    to: normalizeText(source.to, connection?.to || ''),
+  };
+}
+
 export class WireHarnessManager {
   constructor(partHistory) {
     this.partHistory = partHistory || null;
     this.connections = [];
     this.routeResults = [];
+    this._pendingRestoredRouteResults = null;
     this._listeners = new Set();
   }
 
   reset() {
     this.connections = [];
     this.routeResults = [];
+    this._pendingRestoredRouteResults = null;
     this._emit();
   }
 
@@ -46,6 +87,7 @@ export class WireHarnessManager {
     const list = Array.isArray(rawConnections) ? Array.from(rawConnections) : [];
     this.connections = list;
     this._normalizeConnectionsArray(this.connections);
+    this._pendingRestoredRouteResults = null;
     this._emit();
     return this.connections;
   }
@@ -97,17 +139,27 @@ export class WireHarnessManager {
   }
 
   getRouteResults() {
+    this._normalizeRouteResultsArray(this.routeResults);
     return Array.isArray(this.routeResults) ? this.routeResults : [];
   }
 
-  setRouteResults(results) {
+  setRouteResults(results, options = {}) {
+    const preservePendingRestore = !!options?.preservePendingRestore;
+    const markPendingRestore = !!options?.markPendingRestore;
     this.routeResults = Array.isArray(results) ? results.map((entry) => ({ ...(entry || {}) })) : [];
+    this._normalizeRouteResultsArray(this.routeResults);
+    if (markPendingRestore) {
+      this._pendingRestoredRouteResults = this.routeResults.map((entry) => deepClone(entry));
+    } else if (!preservePendingRestore) {
+      this._pendingRestoredRouteResults = null;
+    }
     this._emit();
     return this.routeResults;
   }
 
-  clearRouteResults() {
+  clearRouteResults(options = {}) {
     this.routeResults = [];
+    if (!options?.preservePendingRestore) this._pendingRestoredRouteResults = null;
     this._emit();
   }
 
@@ -139,7 +191,33 @@ export class WireHarnessManager {
   }
 
   toSerializable() {
-    return this.getConnections().map((connection) => deepClone(connection));
+    return {
+      connections: this.getConnections().map((connection) => deepClone(connection)),
+      routeResults: this.getRouteResults().map((entry) => deepClone(entry)),
+    };
+  }
+
+  loadSerializable(rawState) {
+    const state = (rawState && typeof rawState === 'object' && !Array.isArray(rawState))
+      ? rawState
+      : { connections: rawState, routeResults: [] };
+    this.connections = Array.isArray(state.connections) ? Array.from(state.connections) : [];
+    this._normalizeConnectionsArray(this.connections);
+    this.routeResults = Array.isArray(state.routeResults) ? Array.from(state.routeResults) : [];
+    this._normalizeRouteResultsArray(this.routeResults);
+    this._pendingRestoredRouteResults = this.routeResults.length
+      ? this.routeResults.map((entry) => deepClone(entry))
+      : null;
+    this._emit();
+    return this.toSerializable();
+  }
+
+  consumePendingRestoredRouteResults() {
+    const results = Array.isArray(this._pendingRestoredRouteResults)
+      ? this._pendingRestoredRouteResults.map((entry) => deepClone(entry))
+      : null;
+    this._pendingRestoredRouteResults = null;
+    return results;
   }
 
   _generateConnectionId() {
@@ -156,6 +234,20 @@ export class WireHarnessManager {
     }
     for (let index = 0; index < arrayRef.length; index += 1) {
       arrayRef[index] = normalizeConnection(arrayRef[index], index);
+    }
+    return arrayRef;
+  }
+
+  _normalizeRouteResultsArray(arrayRef) {
+    if (!Array.isArray(arrayRef)) {
+      this.routeResults = [];
+      return this.routeResults;
+    }
+    const connectionsById = new Map(
+      this.getConnections().map((connection) => [String(connection?.id || ''), connection]),
+    );
+    for (let index = 0; index < arrayRef.length; index += 1) {
+      arrayRef[index] = normalizeRouteResult(arrayRef[index], connectionsById);
     }
     return arrayRef;
   }
