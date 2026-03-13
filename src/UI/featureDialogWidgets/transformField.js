@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 import { combineBaseWithDeltaDeg } from '../../utils/xformMath.js';
+import {
+    resolveTransformReferenceName,
+    sanitizeTransformValue,
+} from '../../utils/transformReferenceUtils.js';
+import { renderReferenceSelectionField } from './referenceSelectionField.js';
 
 export function renderTransformField({ ui, key, def, id, controlWrap, valueAdapter = null }) {
     const inputEl = document.createElement('input');
@@ -11,19 +16,7 @@ export function renderTransformField({ ui, key, def, id, controlWrap, valueAdapt
 
     const adapter = (valueAdapter && typeof valueAdapter === 'object') ? valueAdapter : null;
     const activationKey = (adapter && typeof adapter.activationKey === 'string') ? adapter.activationKey : key;
-    const clone3 = (arr, fallback) => {
-        const copy = Array.isArray(arr) ? arr.slice(0, 3) : [];
-        while (copy.length < 3) copy.push(fallback);
-        return copy;
-    };
-    const sanitizeTRS = (raw) => {
-        const obj = (raw && typeof raw === 'object') ? raw : {};
-        return {
-            position: clone3(obj.position, 0),
-            rotationEuler: clone3(obj.rotationEuler, 0),
-            scale: clone3(obj.scale, 1),
-        };
-    };
+    const sanitizeTRS = (raw) => sanitizeTransformValue(raw);
     const readTRS = () => {
         if (adapter && typeof adapter.get === 'function') {
             try { return sanitizeTRS(adapter.get()); } catch (_) { return sanitizeTRS(null); }
@@ -38,14 +31,17 @@ export function renderTransformField({ ui, key, def, id, controlWrap, valueAdapt
                     position: sanitized.position.slice(0, 3),
                     rotationEuler: sanitized.rotationEuler.slice(0, 3),
                     scale: sanitized.scale.slice(0, 3),
+                    ...(sanitized.reference ? { reference: sanitized.reference } : {}),
                 });
             } catch (_) { /* ignore adapter errors */ }
         } else {
-            ui.params[key] = {
+            const next = {
                 position: sanitized.position.slice(0, 3),
                 rotationEuler: sanitized.rotationEuler.slice(0, 3),
                 scale: sanitized.scale.slice(0, 3),
             };
+            if (sanitized.reference) next.reference = sanitized.reference;
+            ui.params[key] = next;
         }
         return sanitized;
     };
@@ -74,7 +70,8 @@ export function renderTransformField({ ui, key, def, id, controlWrap, valueAdapt
         const v = value ? sanitizeTRS(value) : readTRS();
         const p = Array.isArray(v.position) ? v.position : [0, 0, 0];
         const r = Array.isArray(v.rotationEuler) ? v.rotationEuler : [0, 0, 0];
-        info.textContent = `pos(${fmt(p[0])}, ${fmt(p[1])}, ${fmt(p[2])})  rot(${fmt(r[0])}, ${fmt(r[1])}, ${fmt(r[2])})`;
+        const refName = resolveTransformReferenceName(v.reference);
+        info.textContent = `pos(${fmt(p[0])}, ${fmt(p[1])}, ${fmt(p[2])})  rot(${fmt(r[0])}, ${fmt(r[1])}, ${fmt(r[2])})${refName ? `  ref(${refName})` : ''}`;
     };
     updateInfo();
 
@@ -192,6 +189,7 @@ export function renderTransformField({ ui, key, def, id, controlWrap, valueAdapt
     resetBtn.addEventListener('click', () => {
         const cur = getTRS();
         const next = { position: [0, 0, 0], rotationEuler: [0, 0, 0], scale: cur.scale };
+        if (cur.reference) next.reference = cur.reference;
         const updated = setTRS(next, true);
         emitChange(updated);
         const featureID = (ui.params && Object.prototype.hasOwnProperty.call(ui.params, 'featureID'))
@@ -201,6 +199,16 @@ export function renderTransformField({ ui, key, def, id, controlWrap, valueAdapt
     });
     modes.appendChild(resetBtn);
 
+    let transformValueAdapter = null;
+    let activate = null;
+    const restartActiveTransform = () => {
+        const active = ui?.activeTransform;
+        if (!active || active.inputEl !== inputEl || typeof activate !== 'function') return;
+        try { activate(); } catch (_) { return; }
+        const reopen = () => { try { activate(); } catch (_) { } };
+        if (typeof queueMicrotask === 'function') queueMicrotask(reopen);
+        else setTimeout(reopen, 0);
+    };
     const buildTransformAdapter = () => {
         if (!adapter) return null;
         const wrapper = {};
@@ -228,14 +236,90 @@ export function renderTransformField({ ui, key, def, id, controlWrap, valueAdapt
         }
         return wrapper;
     };
-    const transformValueAdapter = buildTransformAdapter();
-    const activate = () => ui._activateTransformWidget({ inputEl, wrapEl: wrap, key: activationKey, def, valueAdapter: transformValueAdapter });
+    transformValueAdapter = buildTransformAdapter();
+    activate = () => ui._activateTransformWidget({ inputEl, wrapEl: wrap, key: activationKey, def, valueAdapter: transformValueAdapter });
     btn.addEventListener('click', activate);
 
     wrap.appendChild(btn);
     const details = document.createElement('div');
     details.className = 'transform-details';
     details.appendChild(modes);
+    if (Array.isArray(def.referenceSelectionFilter) && def.referenceSelectionFilter.length) {
+        const refSection = document.createElement('div');
+        refSection.className = 'transform-reference-section';
+
+        const refLabel = document.createElement('div');
+        refLabel.className = 'transform-label';
+        refLabel.textContent = String(def.referenceLabel || 'Reference');
+        refSection.appendChild(refLabel);
+
+        const refControlWrap = document.createElement('div');
+        refControlWrap.className = 'transform-reference-control';
+        refSection.appendChild(refControlWrap);
+
+        const applyReferenceValue = (nextReference, options = {}) => {
+            const { shouldEmit = false, shouldRestart = false } = options;
+            const current = getTRS();
+            const next = { ...current };
+            if (nextReference) next.reference = nextReference;
+            else delete next.reference;
+            const updated = setTRS(next, true);
+            if (shouldEmit) emitChange(updated);
+            if (shouldRestart) restartActiveTransform();
+        };
+        const referenceAdapter = {
+            read: () => readTRS().reference || null,
+            write: (next) => {
+                const currentReference = readTRS().reference || null;
+                const currentName = resolveTransformReferenceName(currentReference);
+                const nextName = resolveTransformReferenceName(next);
+                if (
+                    typeof next === 'string'
+                    && currentReference
+                    && typeof currentReference === 'object'
+                    && currentName
+                    && currentName === nextName
+                ) {
+                    applyReferenceValue(currentReference);
+                    return;
+                }
+                applyReferenceValue(next);
+            },
+            emit: (value) => {
+                const currentReference = readTRS().reference || null;
+                const currentName = resolveTransformReferenceName(currentReference);
+                const nextName = resolveTransformReferenceName(value);
+                if (
+                    typeof value === 'string'
+                    && currentReference
+                    && typeof currentReference === 'object'
+                    && currentName
+                    && currentName === nextName
+                ) {
+                    applyReferenceValue(currentReference, { shouldEmit: true, shouldRestart: true });
+                    return;
+                }
+                applyReferenceValue(value, { shouldEmit: true, shouldRestart: true });
+            },
+        };
+        renderReferenceSelectionField({
+            ui,
+            key: `${key}.reference`,
+            def: {
+                type: 'reference_selection',
+                label: String(def.referenceLabel || 'Reference'),
+                placeholder: String(def.referencePlaceholder || 'Click then select in scene…'),
+                selectionFilter: def.referenceSelectionFilter.slice(),
+                multiple: false,
+                selectionValidator: def.referenceSelectionValidator,
+                selectionValidationMessage: def.referenceSelectionValidationMessage,
+            },
+            id: `${id}__reference`,
+            controlWrap: refControlWrap,
+            valueAdapter: referenceAdapter,
+        });
+        details.appendChild(refSection);
+    }
     details.appendChild(grid);
     details.appendChild(info);
     wrap.appendChild(details);

@@ -2,6 +2,13 @@ import * as THREE from 'three';
 import { BREP } from '../../BREP/BREP.js';
 import { SelectionFilter } from '../../UI/SelectionFilter.js';
 import { SelectionState } from '../../UI/SelectionState.js';
+import {
+  composeReferencedTransformMatrix,
+  resolveTransformReferenceBase,
+  resolveTransformReferenceName,
+  resolveTransformReferenceObject,
+  sanitizeTransformValue,
+} from '../../utils/transformReferenceUtils.js';
 
 const PORT_COLOR = '#b14cff';
 const PORT_WAYPOINT_COLOR = '#d78cff';
@@ -37,12 +44,7 @@ function normalizeDirectionArray(value, fallback = [1, 0, 0]) {
 }
 
 function cloneTransform(value) {
-  const source = value && typeof value === 'object' ? value : {};
-  return {
-    position: sanitizeVec3(source.position, [0, 0, 0]),
-    rotationEuler: sanitizeVec3(source.rotationEuler, [0, 0, 0]),
-    scale: sanitizeVec3(source.scale, [1, 1, 1]),
-  };
+  return sanitizeTransformValue(value);
 }
 
 export function normalizePortKind(value) {
@@ -101,201 +103,41 @@ export function createRotationArrayFromDirection(directionArray) {
   return new THREE.Matrix3().setFromMatrix4(matrix).elements.slice();
 }
 
-function resolveFaceCenter(refObj) {
-  const origin = new THREE.Vector3();
-  try {
-    const geometry = refObj?.geometry || null;
-    if (geometry) {
-      const sphere = geometry.boundingSphere || (geometry.computeBoundingSphere(), geometry.boundingSphere);
-      if (sphere) {
-        origin.copy(refObj.localToWorld(sphere.center.clone()));
-        return origin;
-      }
-    }
-  } catch { }
-  try { refObj?.getWorldPosition?.(origin); } catch { }
-  return origin;
+function firstReferenceValue(value) {
+  if (Array.isArray(value)) return value[0] || null;
+  return value || null;
 }
 
-function resolveFaceDirection(refObj) {
-  let normal = null;
-  try {
-    if (typeof refObj?.getAverageNormal === 'function') {
-      normal = refObj.getAverageNormal()?.clone?.() || null;
-    }
-  } catch {
-    normal = null;
-  }
-  if (!normal || normal.lengthSq() <= 1e-12) {
-    const quat = new THREE.Quaternion();
-    try { refObj?.getWorldQuaternion?.(quat); } catch { }
-    normal = new THREE.Vector3(0, 0, 1).applyQuaternion(quat);
-  }
-  if (!normal || normal.lengthSq() <= 1e-12) {
-    return new THREE.Vector3(1, 0, 0);
-  }
-  return normal.normalize();
+function basisDirectionFromBase(base) {
+  const quaternion = Array.isArray(base?.quaternion) && base.quaternion.length >= 4
+    ? new THREE.Quaternion(
+      toFiniteNumber(base.quaternion[0], 0),
+      toFiniteNumber(base.quaternion[1], 0),
+      toFiniteNumber(base.quaternion[2], 0),
+      toFiniteNumber(base.quaternion[3], 1),
+    )
+    : new THREE.Quaternion();
+  const direction = new THREE.Vector3(1, 0, 0).applyQuaternion(quaternion);
+  return direction.lengthSq() > 1e-12 ? direction.normalize() : new THREE.Vector3(1, 0, 0);
 }
 
-function resolveEdgePolyline(refObj) {
-  try {
-    if (typeof refObj?.points === 'function') {
-      const pts = refObj.points(true) || [];
-      const vectors = pts
-        .filter((pt) => pt && Number.isFinite(pt.x) && Number.isFinite(pt.y) && Number.isFinite(pt.z))
-        .map((pt) => new THREE.Vector3(pt.x, pt.y, pt.z));
-      if (vectors.length >= 2) return vectors;
-    }
-  } catch { }
-  return [];
-}
-
-function resolveEdgeAnchor(refObj) {
-  const points = resolveEdgePolyline(refObj);
-  if (points.length >= 2) {
-    const segmentLengths = [];
-    let totalLength = 0;
-    for (let index = 0; index < points.length - 1; index += 1) {
-      const length = points[index].distanceTo(points[index + 1]);
-      segmentLengths.push(length);
-      totalLength += length;
-    }
-    if (totalLength > 1e-12) {
-      const half = totalLength * 0.5;
-      let walked = 0;
-      for (let index = 0; index < segmentLengths.length; index += 1) {
-        const length = segmentLengths[index];
-        if (walked + length >= half) {
-          const t = Math.min(1, Math.max(0, (half - walked) / Math.max(length, 1e-12)));
-          const origin = points[index].clone().lerp(points[index + 1], t);
-          const direction = points[index + 1].clone().sub(points[index]).normalize();
-          return { origin, direction };
-        }
-        walked += length;
-      }
-      return {
-        origin: points[points.length - 1].clone(),
-        direction: points[points.length - 1].clone().sub(points[points.length - 2]).normalize(),
-      };
-    }
-  }
-  const origin = new THREE.Vector3();
-  try { refObj?.getWorldPosition?.(origin); } catch { }
-  return { origin, direction: new THREE.Vector3(1, 0, 0) };
-}
-
-function resolveObjectBasis(refObj, options = {}) {
-  const fallbackDirection = new THREE.Vector3(...normalizeDirectionArray(options.fallbackDirection, [1, 0, 0]));
-  if (!refObj || typeof refObj !== 'object') {
-    const yAxis = pickOrthogonalUnit(fallbackDirection);
-    const zAxis = new THREE.Vector3().crossVectors(fallbackDirection, yAxis).normalize();
-    return {
-      origin: new THREE.Vector3(),
-      x: fallbackDirection.clone(),
-      y: yAxis,
-      z: zAxis,
-    };
-  }
-
-  const type = String(refObj.type || '').toUpperCase();
-  if (type === 'FACE') {
-    const x = resolveFaceDirection(refObj);
-    const y = pickOrthogonalUnit(x);
-    const z = new THREE.Vector3().crossVectors(x, y).normalize();
-    return {
-      origin: resolveFaceCenter(refObj),
-      x,
-      y: new THREE.Vector3().crossVectors(z, x).normalize(),
-      z,
-    };
-  }
-
-  if (type === 'EDGE') {
-    const edgeAnchor = resolveEdgeAnchor(refObj);
-    const x = edgeAnchor.direction.lengthSq() > 1e-12 ? edgeAnchor.direction : fallbackDirection.clone();
-    const y = pickOrthogonalUnit(x);
-    const z = new THREE.Vector3().crossVectors(x, y).normalize();
-    return {
-      origin: edgeAnchor.origin,
-      x,
-      y: new THREE.Vector3().crossVectors(z, x).normalize(),
-      z,
-    };
-  }
-
-  if (type === 'VERTEX') {
-    const origin = new THREE.Vector3();
-    try { refObj.getWorldPosition(origin); } catch { }
-    const x = fallbackDirection.clone();
-    const y = pickOrthogonalUnit(x);
-    const z = new THREE.Vector3().crossVectors(x, y).normalize();
-    return {
-      origin,
-      x,
-      y: new THREE.Vector3().crossVectors(z, x).normalize(),
-      z,
-    };
-  }
-
-  const origin = new THREE.Vector3();
-  try { refObj.getWorldPosition(origin); } catch { }
-  const quat = new THREE.Quaternion();
-  try { refObj.getWorldQuaternion(quat); } catch { }
-  let xAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
-  let yAxis = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
-  let zAxis = new THREE.Vector3(0, 0, 1).applyQuaternion(quat);
-
-  if (type === 'PLANE') {
-    xAxis = zAxis.clone();
-    yAxis = pickOrthogonalUnit(xAxis);
-    zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize();
-    yAxis = new THREE.Vector3().crossVectors(zAxis, xAxis).normalize();
-  } else if (type === 'DATUM') {
-    if (xAxis.lengthSq() <= 1e-12) xAxis = fallbackDirection.clone();
-    yAxis = pickOrthogonalUnit(xAxis);
-    zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize();
-    yAxis = new THREE.Vector3().crossVectors(zAxis, xAxis).normalize();
-  }
-
-  if (xAxis.lengthSq() <= 1e-12) xAxis = fallbackDirection.clone();
-  if (yAxis.lengthSq() <= 1e-12) yAxis = pickOrthogonalUnit(xAxis);
-  if (zAxis.lengthSq() <= 1e-12) zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize();
-
-  return {
-    origin,
-    x: xAxis.normalize(),
-    y: yAxis.normalize(),
-    z: zAxis.normalize(),
-  };
-}
-
-export function buildPortDefinitionFromInputs({ featureId, inputParams = {} } = {}) {
+export function buildPortDefinitionFromInputs({ featureId, inputParams = {}, referenceSource = null } = {}) {
   const normalizedFeatureId = normalizeString(featureId, 'Port');
-  const anchor = Array.isArray(inputParams.anchor) ? inputParams.anchor[0] || null : inputParams.anchor || null;
-  const directionRef = Array.isArray(inputParams.directionRef) ? inputParams.directionRef[0] || null : inputParams.directionRef || null;
-  const directionBasis = resolveObjectBasis(directionRef, {
-    fallbackDirection: anchor ? resolveObjectBasis(anchor).x.toArray() : [1, 0, 0],
-  });
-  const anchorBasis = resolveObjectBasis(anchor, {
-    fallbackDirection: directionBasis.x.toArray(),
-  });
+  const legacyAnchor = firstReferenceValue(inputParams.anchor);
+  const directionRef = firstReferenceValue(inputParams.directionRef);
   const transform = cloneTransform(inputParams.transform);
-  const anchorMatrix = new THREE.Matrix4().makeBasis(anchorBasis.x, anchorBasis.y, anchorBasis.z);
-  anchorMatrix.setPosition(anchorBasis.origin);
-
-  const rotationEuler = transform.rotationEuler;
-  const localQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(
-    THREE.MathUtils.degToRad(rotationEuler[0]),
-    THREE.MathUtils.degToRad(rotationEuler[1]),
-    THREE.MathUtils.degToRad(rotationEuler[2]),
-    'XYZ',
-  ));
-  const localMatrix = new THREE.Matrix4().compose(
-    new THREE.Vector3(...transform.position),
-    localQuat,
-    new THREE.Vector3(1, 1, 1),
+  const reference = transform.reference || legacyAnchor || null;
+  const directionBase = resolveTransformReferenceBase(directionRef, referenceSource, { fallbackDirection: [1, 0, 0] }, THREE);
+  const directionBasis = basisDirectionFromBase(directionBase);
+  const transformForCompose = reference && !transform.reference
+    ? { ...transform, reference }
+    : transform;
+  const worldMatrix = composeReferencedTransformMatrix(
+    transformForCompose,
+    referenceSource,
+    { fallbackDirection: directionBasis.toArray() },
+    THREE,
   );
-  const worldMatrix = new THREE.Matrix4().multiplyMatrices(anchorMatrix, localMatrix);
   const worldPosition = new THREE.Vector3();
   const worldQuaternion = new THREE.Quaternion();
   const worldScale = new THREE.Vector3();
@@ -313,9 +155,15 @@ export function buildPortDefinitionFromInputs({ featureId, inputParams = {} } = 
     rotation: createRotationArrayFromDirection([finalDirection.x, finalDirection.y, finalDirection.z]),
     extension: Math.max(0, toFiniteNumber(inputParams.extension, DEFAULT_EXTENSION)),
     displayLength: Math.max(0.1, toFiniteNumber(inputParams.displayLength, DEFAULT_DISPLAY_LENGTH)),
-    anchorName: normalizeString(anchor?.name, ''),
-    directionRefName: normalizeString(directionRef?.name, ''),
-    transform,
+    anchorName: normalizeString(
+      resolveTransformReferenceObject(reference, referenceSource)?.name || resolveTransformReferenceName(reference),
+      '',
+    ),
+    directionRefName: normalizeString(
+      resolveTransformReferenceObject(directionRef, referenceSource)?.name || resolveTransformReferenceName(directionRef),
+      '',
+    ),
+    transform: transformForCompose,
     reverseDirection: !!inputParams.reverseDirection,
     objectName: normalizedFeatureId,
   }, normalizedFeatureId);

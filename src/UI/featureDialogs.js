@@ -7,13 +7,17 @@ import { SelectionFilter } from './SelectionFilter.js';
 import { CombinedTransformControls } from './controls/CombinedTransformControls.js';
 import { getWidgetRenderer } from './featureDialogWidgets/index.js';
 import { normalizeReferenceList, normalizeReferenceName } from './featureDialogWidgets/utils.js';
+import {
+    resolveTransformReferenceBase,
+    sanitizeTransformValue,
+} from '../utils/transformReferenceUtils.js';
 const REF_PREVIEW_COLORS = {
     EDGE: '#ff00ff',
     FACE: '#ffc400',
     PLANE: '#2eff2e',
     VERTEX: '#00ffff',
 };
-const FEATURE_DIMENSION_TOGGLEABLE_TYPES = new Set(['P.CU', 'P.CY', 'P.CO', 'P.S', 'P.PY', 'P.T', 'E', 'R']);
+const FEATURE_DIMENSION_TOGGLEABLE_TYPES = new Set(['P.CU', 'P.CY', 'P.CO', 'P.S', 'P.PY', 'P.T', 'E', 'R', 'PORT']);
 
 function supportsTransformDimensionToggle(entry = null, fieldKey = null) {
     if (String(fieldKey || '') !== 'transform') return false;
@@ -1548,14 +1552,7 @@ export class SchemaForm {
             }
             return fallback;
         };
-        const sanitizeTRS = (value) => {
-            const obj = (value && typeof value === 'object') ? value : {};
-            return {
-                position: ensureArray3(obj.position, 0),
-                rotationEuler: ensureArray3(obj.rotationEuler, 0),
-                scale: ensureArray3(obj.scale, 1),
-            };
-        };
+        const sanitizeTRS = (value) => sanitizeTransformValue(value);
         const sanitizeBase = (value) => {
             const obj = (value && typeof value === 'object') ? value : {};
             const base = {
@@ -1589,11 +1586,38 @@ export class SchemaForm {
             if (Math.abs(d) < 1e-12) return safeNumber(num, 0);
             return safeNumber(num, 0) / d;
         };
-        const readBaseValue = () => {
+        const readBaseValue = (currentTransform = null) => {
             if (adapter && typeof adapter.getBase === 'function') {
-                try { return sanitizeBase(adapter.getBase()); } catch (_) { return sanitizeBase(null); }
+                try {
+                    const base = adapter.getBase();
+                    if (base) return sanitizeBase(base);
+                } catch (_) { /* ignore adapter base errors */ }
             }
-            return sanitizeBase(null);
+            const source = this.options?.partHistory || viewer?.partHistory || this.options?.viewer || viewer || null;
+            const reference = currentTransform?.reference || null;
+            let fallbackDirection = null;
+            const referenceDirectionField = (typeof def?.referenceDirectionField === 'string' && def.referenceDirectionField.trim())
+                ? def.referenceDirectionField.trim()
+                : '';
+            if (referenceDirectionField) {
+                const rawDirectionReference = this.params?.[referenceDirectionField];
+                const directionReference = Array.isArray(rawDirectionReference)
+                    ? (rawDirectionReference[0] || null)
+                    : (rawDirectionReference || null);
+                try {
+                    const directionBase = resolveTransformReferenceBase(directionReference, source);
+                    const directionQuat = new THREE.Quaternion().fromArray(
+                        Array.isArray(directionBase?.quaternion) ? directionBase.quaternion : [0, 0, 0, 1],
+                    );
+                    const direction = new THREE.Vector3(1, 0, 0).applyQuaternion(directionQuat);
+                    if (direction.lengthSq() > 1e-12) fallbackDirection = direction.normalize().toArray();
+                } catch (_) { /* ignore direction reference base errors */ }
+            }
+            return sanitizeBase(resolveTransformReferenceBase(
+                reference,
+                source,
+                fallbackDirection ? { fallbackDirection } : undefined,
+            ));
         };
         const readCurrentValue = () => {
             if (adapter && typeof adapter.get === 'function') {
@@ -1610,8 +1634,8 @@ export class SchemaForm {
             }
             return sanitized;
         };
-        const base = readBaseValue();
         const cur = readCurrentValue();
+        const base = readBaseValue(cur);
         const combineWithBase = (baseTransform, deltaTransform) => {
             const basePos = new THREE.Vector3(
                 safeNumber(baseTransform.position[0], 0),

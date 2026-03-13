@@ -1,5 +1,24 @@
 import { createPortGroupFromDefinition, buildPortDefinitionFromInputs, normalizePortKind } from './portUtils.js';
 
+const DEFAULT_TRANSFORM = { position: [0, 0, 0], rotationEuler: [0, 0, 0], scale: [1, 1, 1] };
+
+function readReferencePickMeta(ref) {
+  const meta = ref?.userData?.__lastReferencePickMeta;
+  if (!meta || typeof meta !== 'object') return null;
+  const next = {};
+  if (Array.isArray(meta.pickPoint) && meta.pickPoint.length >= 3) {
+    const x = Number(meta.pickPoint[0]);
+    const y = Number(meta.pickPoint[1]);
+    const z = Number(meta.pickPoint[2]);
+    if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+      next.pickPoint = [x, y, z];
+    }
+  }
+  const faceIndex = Number(meta.faceIndex);
+  if (Number.isFinite(faceIndex) && faceIndex >= 0) next.faceIndex = Math.floor(faceIndex);
+  return Object.keys(next).length ? next : null;
+}
+
 const inputParamsSchema = {
   id: {
     type: 'string',
@@ -19,26 +38,23 @@ const inputParamsSchema = {
     label: 'Port Type',
     hint: 'Termination ports are cable endpoints. Waypoint ports join spline paths into a network.',
   },
-  anchor: {
-    type: 'reference_selection',
-    selectionFilter: ['FACE', 'EDGE', 'VERTEX', 'PLANE', 'DATUM'],
-    multiple: false,
-    default_value: null,
-    hint: 'Optional geometry or datum used to locate the port.',
-  },
   directionRef: {
     type: 'reference_selection',
     selectionFilter: ['FACE', 'EDGE', 'PLANE', 'DATUM'],
     multiple: false,
     default_value: null,
     label: 'Direction Reference',
-    hint: 'Optional geometry used to define the port direction. Defaults to the anchor direction.',
+    hint: 'Optional geometry used to define the port direction. Defaults to the transform reference direction.',
   },
   transform: {
     type: 'transform',
-    default_value: { position: [0, 0, 0], rotationEuler: [0, 0, 0], scale: [1, 1, 1] },
-    label: 'Local Offset',
-    hint: 'Position and rotate the port relative to its anchor.',
+    default_value: DEFAULT_TRANSFORM,
+    label: 'Placement',
+    hint: 'Pick a start reference, then position and rotate the port relative to that reference.',
+    referenceLabel: 'Start Reference',
+    referencePlaceholder: 'Click then pick a point, edge, face, plane, or datum…',
+    referenceSelectionFilter: ['FACE', 'EDGE', 'VERTEX', 'PLANE', 'DATUM'],
+    referenceDirectionField: 'directionRef',
   },
   reverseDirection: {
     type: 'boolean',
@@ -73,7 +89,19 @@ export class PortFeature {
     });
     const name = ref?.name || ref?.userData?.faceName || null;
     if (!name) return false;
-    return { field: 'anchor', value: name };
+    const reference = {
+      name,
+      type: String(ref?.type || '').toUpperCase(),
+      ...(readReferencePickMeta(ref) || {}),
+    };
+    return {
+      params: {
+        transform: {
+          ...DEFAULT_TRANSFORM,
+          reference,
+        },
+      },
+    };
   }
 
   constructor() {
@@ -81,11 +109,12 @@ export class PortFeature {
     this.persistentData = {};
   }
 
-  async run() {
+  async run(partHistory) {
     const featureId = this.inputParams?.featureID ? String(this.inputParams.featureID) : 'Port';
     const definition = buildPortDefinitionFromInputs({
       featureId,
       inputParams: this.inputParams,
+      referenceSource: partHistory,
     });
     definition.kind = normalizePortKind(this.inputParams?.kind);
 

@@ -514,6 +514,78 @@ function isTransparentColor(value) {
   return false;
 }
 
+let PDF_COLOR_PARSE_CONTEXT = null;
+
+function getPdfColorComponents(value, fallback = "#000000") {
+  const raw = toCssColor(value, fallback);
+  if (isTransparentColor(raw)) return null;
+  const hex = normalizeHex(raw, "");
+  if (hex) {
+    return [
+      parseInt(hex.slice(1, 3), 16),
+      parseInt(hex.slice(3, 5), 16),
+      parseInt(hex.slice(5, 7), 16),
+    ];
+  }
+  const rgbMatch = String(raw).match(/^rgba?\(([^)]+)\)$/i);
+  if (rgbMatch) {
+    const parts = rgbMatch[1].split(",").map((part) => Number.parseFloat(part.trim()));
+    if (parts.length >= 3 && parts.slice(0, 3).every((part) => Number.isFinite(part))) {
+      return parts.slice(0, 3).map((part) => clamp(Math.round(part), 0, 255));
+    }
+  }
+  if (typeof document !== "undefined") {
+    try {
+      PDF_COLOR_PARSE_CONTEXT = PDF_COLOR_PARSE_CONTEXT || document.createElement("canvas").getContext("2d");
+      if (PDF_COLOR_PARSE_CONTEXT) {
+        PDF_COLOR_PARSE_CONTEXT.fillStyle = "#000000";
+        PDF_COLOR_PARSE_CONTEXT.fillStyle = raw;
+        const resolved = String(PDF_COLOR_PARSE_CONTEXT.fillStyle || "");
+        const resolvedHex = normalizeHex(resolved, "");
+        if (resolvedHex) {
+          return [
+            parseInt(resolvedHex.slice(1, 3), 16),
+            parseInt(resolvedHex.slice(3, 5), 16),
+            parseInt(resolvedHex.slice(5, 7), 16),
+          ];
+        }
+        const resolvedRgb = resolved.match(/^rgba?\(([^)]+)\)$/i);
+        if (resolvedRgb) {
+          const parts = resolvedRgb[1].split(",").map((part) => Number.parseFloat(part.trim()));
+          if (parts.length >= 3 && parts.slice(0, 3).every((part) => Number.isFinite(part))) {
+            return parts.slice(0, 3).map((part) => clamp(Math.round(part), 0, 255));
+          }
+        }
+      }
+    } catch { /* ignore color parser failures */ }
+  }
+  return [0, 0, 0];
+}
+
+function rotatePoint(x, y, cx, cy, degrees) {
+  const angle = (toFiniteNumber(degrees, 0) * Math.PI) / 180;
+  if (Math.abs(angle) <= 1e-9) return { x, y };
+  const dx = x - cx;
+  const dy = y - cy;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: cx + (dx * cos) - (dy * sin),
+    y: cy + (dx * sin) + (dy * cos),
+  };
+}
+
+function makeRotatedRectPoints(x, y, w, h, rotationDeg = 0) {
+  const cx = x + (w * 0.5);
+  const cy = y + (h * 0.5);
+  return [
+    rotatePoint(x, y, cx, cy, rotationDeg),
+    rotatePoint(x + w, y, cx, cy, rotationDeg),
+    rotatePoint(x + w, y + h, cx, cy, rotationDeg),
+    rotatePoint(x, y + h, cx, cy, rotationDeg),
+  ];
+}
+
 function elementSupportsText(element) {
   const type = String(element?.type || "");
   return type === "text" || isShapeElementType(type) || type === "table";
@@ -598,6 +670,7 @@ export class Sheet2DEditorWindow {
     this._pmiViewRevision = 0;
     this._pmiImageCaptureQueue = Promise.resolve();
     this._mediaMetadataCache = new Map();
+    this._pdfImageLoadCache = new Map();
     this._stageResizeObserver = null;
     this._isExportingPdf = false;
 
@@ -4872,7 +4945,7 @@ export class Sheet2DEditorWindow {
   _setPdfExportProgress({
     title = "Generating PDF",
     detail = "",
-    hint = "Please wait while each sheet is rasterized.",
+    hint = "Please wait while each sheet is prepared for export.",
     completed = 0,
     total = 0,
     sheet = null,
@@ -4901,7 +4974,7 @@ export class Sheet2DEditorWindow {
     this._setPdfExportProgress({
       title: "Generating PDF",
       detail: "Preparing sheets for export",
-      hint: "Please wait while each sheet is rasterized.",
+      hint: "Preparing sheet geometry for export.",
       completed: 0,
       total: 0,
       sheet: null,
@@ -4935,6 +5008,542 @@ export class Sheet2DEditorWindow {
       logging: false,
       foreignObjectRendering: true,
     });
+  }
+
+  _sheetCanUseVectorPdf(sheet) {
+    const elements = Array.isArray(sheet?.elements) ? sheet.elements : [];
+    return elements.every((element) => this._isVectorPdfElement(element));
+  }
+
+  _isVectorPdfElement(element) {
+    const type = String(element?.type || "");
+    if (type === "image" || type === "pmiInset") {
+      return Math.abs(toFiniteNumber(element?.rotationDeg, 0)) <= 1e-6;
+    }
+    if (type === "line" || type === "text" || isShapeElementType(type)) return true;
+    if (type === "table") {
+      return Math.abs(toFiniteNumber(element?.rotationDeg, 0)) <= 1e-6;
+    }
+    return false;
+  }
+
+  _getPdfPaintMode(hasFill, hasStroke) {
+    if (hasFill && hasStroke) return "DF";
+    if (hasFill) return "F";
+    if (hasStroke) return "S";
+    return null;
+  }
+
+  _getPdfDashPattern(styleValue, strokeWidthIn) {
+    const unit = Math.max(0.001, toFiniteNumber(strokeWidthIn, 0.01));
+    switch (styleValue) {
+      case "dotted":
+        return [unit, unit * 2.6];
+      case "dashed":
+        return [unit * 5, unit * 3];
+      case "dashDot":
+        return [unit * 5, unit * 2.5, unit, unit * 2.5];
+      case "longDash":
+        return [unit * 8, unit * 3];
+      case "dashDotDot":
+        return [unit * 5, unit * 2.3, unit, unit * 2.2, unit, unit * 2.3];
+      default:
+        return [];
+    }
+  }
+
+  _setPdfLineStyle(doc, element) {
+    const styleValue = this._getLineStyleValue(element);
+    const strokeWidthIn = Math.max(0, toFiniteNumber(element?.strokeWidth, this._defaultStrokeWidthForElement(element)));
+    const hasStroke = strokeWidthIn > 0 && styleValue !== "none";
+    if (!hasStroke) {
+      doc.setLineDashPattern([], 0);
+      return { hasStroke: false, strokeWidthIn: 0 };
+    }
+    const strokeColor = getPdfColorComponents(element?.stroke, this._defaultStrokeForElement(element));
+    doc.setLineWidth(Math.max(0.001, strokeWidthIn));
+    if (strokeColor) doc.setDrawColor(...strokeColor);
+    doc.setLineDashPattern(this._getPdfDashPattern(styleValue, strokeWidthIn), 0);
+    return { hasStroke: true, strokeWidthIn };
+  }
+
+  _withPdfGraphicsState(doc, opacity, callback) {
+    if (!doc || typeof callback !== "function") return;
+    doc.saveGraphicsState();
+    try {
+      const safeOpacity = clamp(toFiniteNumber(opacity, 1), 0, 1);
+      if (safeOpacity < 0.999 && typeof doc.setGState === "function" && typeof doc.GState === "function") {
+        doc.setGState(new doc.GState({ opacity: safeOpacity, strokeOpacity: safeOpacity }));
+      }
+      callback();
+    } finally {
+      doc.restoreGraphicsState();
+    }
+  }
+
+  _setPdfTextStyle(doc, textState) {
+    const family = String(textState?.fontFamily || "Arial").toLowerCase();
+    const weight = String(textState?.fontWeight || "400");
+    const style = String(textState?.fontStyle || "normal").toLowerCase();
+    let pdfFamily = "helvetica";
+    if (family.includes("times") || family.includes("serif") || family.includes("georgia")) pdfFamily = "times";
+    else if (family.includes("courier") || family.includes("mono")) pdfFamily = "courier";
+    const bold = weight === "700" || weight === "800" || weight === "900" || weight === "bold";
+    const italic = style === "italic" || style === "oblique";
+    const pdfStyle = bold && italic ? "bolditalic" : (bold ? "bold" : (italic ? "italic" : "normal"));
+    doc.setFont(pdfFamily, pdfStyle);
+    doc.setFontSize(Math.max(6, inchesToPoints(toFiniteNumber(textState?.fontSize, 0.32))));
+    const color = getPdfColorComponents(textState?.color, this._defaultTextColorForElement(textState?.element || null));
+    if (color) doc.setTextColor(...color);
+  }
+
+  _drawPdfClosedPolygon(doc, points, mode) {
+    if (!doc || !Array.isArray(points) || points.length < 2 || !mode) return;
+    const [first, ...rest] = points;
+    const rel = [];
+    let prev = first;
+    for (const point of rest) {
+      rel.push([point.x - prev.x, point.y - prev.y]);
+      prev = point;
+    }
+    doc.lines(rel, first.x, first.y, [1, 1], mode, true);
+  }
+
+  _buildPdfShapePoints(element, x, y, w, h) {
+    const type = String(element?.type || "");
+    const left = x;
+    const top = y;
+    const right = x + w;
+    const bottom = y + h;
+    const cx = x + (w * 0.5);
+    const cy = y + (h * 0.5);
+    const adjust = clampShapeAdjust(type, element?.shapeAdjust);
+    if (type === "ellipse") {
+      const points = [];
+      for (let index = 0; index < 32; index += 1) {
+        const angle = (Math.PI * 2 * index) / 32;
+        points.push({ x: cx + (Math.cos(angle) * w * 0.5), y: cy + (Math.sin(angle) * h * 0.5) });
+      }
+      return points;
+    }
+    let basePoints = [];
+    if (type === "triangle") {
+      basePoints = [{ x: cx, y: top }, { x: right, y: bottom }, { x: left, y: bottom }];
+    } else if (type === "diamond") {
+      basePoints = [{ x: cx, y: top }, { x: right, y: cy }, { x: cx, y: bottom }, { x: left, y: cy }];
+    } else if (type === "pentagon") {
+      for (let index = 0; index < 5; index += 1) {
+        const angle = (-Math.PI / 2) + ((Math.PI * 2 * index) / 5);
+        basePoints.push({ x: cx + (Math.cos(angle) * w * 0.5), y: cy + (Math.sin(angle) * h * 0.5) });
+      }
+    } else if (type === "hexagon") {
+      basePoints = [
+        { x: left + (w * 0.25), y: top },
+        { x: right - (w * 0.25), y: top },
+        { x: right, y: cy },
+        { x: right - (w * 0.25), y: bottom },
+        { x: left + (w * 0.25), y: bottom },
+        { x: left, y: cy },
+      ];
+    } else if (type === "parallelogram") {
+      const skew = w * adjust;
+      basePoints = [
+        { x: left + skew, y: top },
+        { x: right, y: top },
+        { x: right - skew, y: bottom },
+        { x: left, y: bottom },
+      ];
+    } else if (type === "trapezoid") {
+      const inset = w * adjust;
+      basePoints = [
+        { x: left + inset, y: top },
+        { x: right - inset, y: top },
+        { x: right, y: bottom },
+        { x: left, y: bottom },
+      ];
+    } else {
+      basePoints = makeRotatedRectPoints(x, y, w, h, 0);
+    }
+
+    const rotationDeg = toFiniteNumber(element?.rotationDeg, 0);
+    if (Math.abs(rotationDeg) <= 1e-6) return basePoints;
+    return basePoints.map((point) => rotatePoint(point.x, point.y, cx, cy, rotationDeg));
+  }
+
+  _drawPdfTextBlock(doc, element, {
+    x,
+    y,
+    w,
+    h,
+    rotationDeg = 0,
+    paddingX = 4 / 96,
+    paddingY = 4 / 96,
+  } = {}) {
+    const text = String(element?.text || "");
+    if (!text) return;
+    const innerX = x + Math.max(0, paddingX);
+    const innerY = y + Math.max(0, paddingY);
+    const innerW = Math.max(0.05, w - (Math.max(0, paddingX) * 2));
+    const innerH = Math.max(0.05, h - (Math.max(0, paddingY) * 2));
+    this._setPdfTextStyle(doc, { ...element, element });
+    const lineHeightFactor = 1.2;
+    doc.setLineHeightFactor(lineHeightFactor);
+    const lines = doc.splitTextToSize(text, innerW);
+    const fontSizePt = Math.max(6, inchesToPoints(toFiniteNumber(element?.fontSize, 0.32)));
+    const lineHeightIn = pointsToInches(fontSizePt) * lineHeightFactor;
+    const totalHeight = lines.length * lineHeightIn;
+    const align = this._getTextAlignValue(element);
+    const verticalAlign = this._getTextVerticalAlignValue(element);
+    let startY = innerY;
+    if (verticalAlign === "middle") startY = innerY + Math.max(0, (innerH - totalHeight) * 0.5);
+    else if (verticalAlign === "bottom") startY = innerY + Math.max(0, innerH - totalHeight);
+    const anchorX = align === "center"
+      ? innerX + (innerW * 0.5)
+      : (align === "right" ? innerX + innerW : innerX);
+    doc.text(lines, anchorX, startY, {
+      align,
+      baseline: "top",
+      angle: toFiniteNumber(rotationDeg, 0),
+      maxWidth: innerW,
+      lineHeightFactor,
+    });
+  }
+
+  _drawPdfLineElement(doc, element) {
+    this._withPdfGraphicsState(doc, element?.opacity, () => {
+      const { hasStroke } = this._setPdfLineStyle(doc, element);
+      if (!hasStroke) return;
+      const x1 = toFiniteNumber(element?.x, 0);
+      const y1 = toFiniteNumber(element?.y, 0);
+      const x2 = toFiniteNumber(element?.x2, element?.x);
+      const y2 = toFiniteNumber(element?.y2, element?.y);
+      doc.line(x1, y1, x2, y2);
+    });
+  }
+
+  _drawPdfTextElement(doc, element) {
+    this._withPdfGraphicsState(doc, element?.opacity, () => {
+      const x = toFiniteNumber(element?.x, 0);
+      const y = toFiniteNumber(element?.y, 0);
+      const w = Math.max(MIN_ELEMENT_IN, toFiniteNumber(element?.w, 1));
+      const h = Math.max(MIN_ELEMENT_IN, toFiniteNumber(element?.h, 1));
+      const rotationDeg = toFiniteNumber(element?.rotationDeg, 0);
+      const fillColor = isTransparentColor(element?.fill) ? null : getPdfColorComponents(element?.fill, "transparent");
+      const { hasStroke } = this._setPdfLineStyle(doc, element);
+      const shouldStroke = hasStroke && this._isTextBorderEnabled(element);
+      const paintMode = this._getPdfPaintMode(!!fillColor, shouldStroke);
+      if (paintMode) {
+        if (fillColor) doc.setFillColor(...fillColor);
+        if (Math.abs(rotationDeg) <= 1e-6) {
+          doc.rect(x, y, w, h, paintMode);
+        } else {
+          this._drawPdfClosedPolygon(doc, makeRotatedRectPoints(x, y, w, h, rotationDeg), paintMode);
+        }
+      }
+      this._drawPdfTextBlock(doc, element, { x, y, w, h, rotationDeg });
+      doc.setLineDashPattern([], 0);
+    });
+  }
+
+  _drawPdfShapeElement(doc, element) {
+    this._withPdfGraphicsState(doc, element?.opacity, () => {
+      const x = toFiniteNumber(element?.x, 0);
+      const y = toFiniteNumber(element?.y, 0);
+      const w = Math.max(MIN_ELEMENT_IN, toFiniteNumber(element?.w, 1));
+      const h = Math.max(MIN_ELEMENT_IN, toFiniteNumber(element?.h, 1));
+      const rotationDeg = toFiniteNumber(element?.rotationDeg, 0);
+      const options = this._getShapeRenderOptions(element, 96);
+      const fillColor = isTransparentColor(options?.fillColor) ? null : getPdfColorComponents(options?.fillColor, "transparent");
+      const { hasStroke } = this._setPdfLineStyle(doc, element);
+      const paintMode = this._getPdfPaintMode(!!fillColor, hasStroke);
+      if (paintMode) {
+        if (fillColor) doc.setFillColor(...fillColor);
+        if (String(options?.shape || "") === "rect" && Math.abs(rotationDeg) <= 1e-6) {
+          const radiusIn = Math.max(0, toFiniteNumber(element?.cornerRadius, 0.1));
+          if (radiusIn > 0) doc.roundedRect(x, y, w, h, radiusIn, radiusIn, paintMode);
+          else doc.rect(x, y, w, h, paintMode);
+        } else {
+          this._drawPdfClosedPolygon(doc, this._buildPdfShapePoints(element, x, y, w, h), paintMode);
+        }
+      }
+      if (String(element?.text || "").trim()) {
+        this._drawPdfTextBlock(doc, element, {
+          x,
+          y,
+          w,
+          h,
+          rotationDeg,
+          paddingX: Math.max(0, toFiniteNumber(options?.textPaddingPx, 8)) / 96,
+          paddingY: Math.max(0, toFiniteNumber(options?.textPaddingPx, 8)) / 96,
+        });
+      }
+      doc.setLineDashPattern([], 0);
+    });
+  }
+
+  _drawPdfTableElement(doc, element) {
+    this._withPdfGraphicsState(doc, element?.opacity, () => {
+      const x = toFiniteNumber(element?.x, 0);
+      const y = toFiniteNumber(element?.y, 0);
+      const w = Math.max(MIN_ELEMENT_IN, toFiniteNumber(element?.w, 1));
+      const h = Math.max(MIN_ELEMENT_IN, toFiniteNumber(element?.h, 1));
+      const layout = this._getTableLayoutMetrics(element, w, h);
+      const tableData = layout.tableData;
+      const fillColor = isTransparentColor(element?.fill) ? null : getPdfColorComponents(element?.fill, "#ffffff");
+      const { hasStroke, strokeWidthIn } = this._setPdfLineStyle(doc, element);
+      if (fillColor) {
+        doc.setFillColor(...fillColor);
+        doc.rect(x, y, w, h, hasStroke ? "DF" : "F");
+      } else if (hasStroke) {
+        doc.rect(x, y, w, h, "S");
+      }
+
+      if (hasStroke) {
+        for (let boundary = 1; boundary < layout.colCount; boundary += 1) {
+          const colX = x + toFiniteNumber(layout.colStarts?.[boundary], 0);
+          for (let row = 0; row < layout.rowCount; row += 1) {
+            const leftAnchor = resolveTableCellAnchor(tableData, row, boundary - 1);
+            const rightAnchor = resolveTableCellAnchor(tableData, row, boundary);
+            if (leftAnchor && rightAnchor && leftAnchor.row === rightAnchor.row && leftAnchor.col === rightAnchor.col) continue;
+            doc.line(
+              colX,
+              y + toFiniteNumber(layout.rowStarts?.[row], 0),
+              colX,
+              y + toFiniteNumber(layout.rowStarts?.[row + 1], h),
+            );
+          }
+        }
+        for (let boundary = 1; boundary < layout.rowCount; boundary += 1) {
+          const rowY = y + toFiniteNumber(layout.rowStarts?.[boundary], 0);
+          for (let col = 0; col < layout.colCount; col += 1) {
+            const topAnchor = resolveTableCellAnchor(tableData, boundary - 1, col);
+            const bottomAnchor = resolveTableCellAnchor(tableData, boundary, col);
+            if (topAnchor && bottomAnchor && topAnchor.row === bottomAnchor.row && topAnchor.col === bottomAnchor.col) continue;
+            doc.line(
+              x + toFiniteNumber(layout.colStarts?.[col], 0),
+              rowY,
+              x + toFiniteNumber(layout.colStarts?.[col + 1], w),
+              rowY,
+            );
+          }
+        }
+      }
+
+      for (let row = 0; row < layout.rowCount; row += 1) {
+        for (let col = 0; col < layout.colCount; col += 1) {
+          const cell = getTableCell(tableData, row, col);
+          if (!cell || cell?.mergedInto) continue;
+          const bounds = this._getTableCellBoundsPx(layout, row, col, cell);
+          if (!bounds) continue;
+          const cellText = String(cell?.text || "");
+          if (!cellText) continue;
+          this._drawPdfTextBlock(doc, {
+            ...element,
+            element,
+            text: cellText,
+            fontFamily: this._resolveTableTextStyleValue(element, cell, "fontFamily"),
+            fontSize: this._resolveTableTextStyleValue(element, cell, "fontSize"),
+            fontWeight: this._resolveTableTextStyleValue(element, cell, "fontWeight"),
+            fontStyle: this._resolveTableTextStyleValue(element, cell, "fontStyle"),
+            textDecoration: this._resolveTableTextStyleValue(element, cell, "textDecoration"),
+            textAlign: this._resolveTableTextStyleValue(element, cell, "textAlign"),
+            verticalAlign: this._resolveTableTextStyleValue(element, cell, "verticalAlign"),
+            color: this._resolveTableTextStyleValue(element, cell, "color"),
+          }, {
+            x: x + bounds.left,
+            y: y + bounds.top,
+            w: bounds.width,
+            h: bounds.height,
+            rotationDeg: 0,
+            paddingX: TABLE_CELL_PADDING_PX / 96,
+            paddingY: TABLE_CELL_PADDING_PX / 96,
+          });
+        }
+      }
+
+      if (hasStroke && strokeWidthIn > 0) doc.setLineDashPattern([], 0);
+    });
+  }
+
+  async _loadPdfImage(source) {
+    const src = String(source || "").trim();
+    if (!src) return null;
+    let pending = this._pdfImageLoadCache.get(src) || null;
+    if (!pending) {
+      pending = new Promise((resolve) => {
+        const image = new Image();
+        image.crossOrigin = "anonymous";
+        image.onload = () => {
+          const width = Math.max(1, Math.round(toFiniteNumber(image.naturalWidth, image.width)));
+          const height = Math.max(1, Math.round(toFiniteNumber(image.naturalHeight, image.height)));
+          this._rememberMediaMetadata(src, width, height);
+          resolve(image);
+        };
+        image.onerror = () => {
+          this._pdfImageLoadCache.delete(src);
+          resolve(null);
+        };
+        image.src = src;
+      });
+      this._pdfImageLoadCache.set(src, pending);
+    }
+    return pending;
+  }
+
+  _getPdfMediaTileSize(frameWidthIn, frameHeightIn) {
+    const widthPx = Math.max(1, Math.round(frameWidthIn * PDF_TARGET_DPI));
+    const heightPx = Math.max(1, Math.round(frameHeightIn * PDF_TARGET_DPI));
+    const maxDim = 2048;
+    const maxArea = 4_000_000;
+    const scale = clamp(Math.min(
+      maxDim / Math.max(widthPx, heightPx, 1),
+      Math.sqrt(maxArea / Math.max(1, widthPx * heightPx)),
+      1,
+    ), 0.1, 1);
+    return {
+      width: Math.max(1, Math.round(widthPx * scale)),
+      height: Math.max(1, Math.round(heightPx * scale)),
+    };
+  }
+
+  _clipRoundedCanvasRect(context, x, y, width, height, radius) {
+    if (!context) return;
+    const r = Math.max(0, Math.min(radius, width * 0.5, height * 0.5));
+    context.beginPath();
+    if (r <= 0) {
+      context.rect(x, y, width, height);
+    } else {
+      context.moveTo(x + r, y);
+      context.arcTo(x + width, y, x + width, y + height, r);
+      context.arcTo(x + width, y + height, x, y + height, r);
+      context.arcTo(x, y + height, x, y, r);
+      context.arcTo(x, y, x + width, y, r);
+      context.closePath();
+    }
+    context.clip();
+  }
+
+  async _renderPdfMediaTileCanvas(element, frameWidthIn, frameHeightIn, sourceOverride = null) {
+    const src = String(sourceOverride || element?.src || "").trim();
+    if (!src) return null;
+    const image = await this._loadPdfImage(src);
+    if (!image) return null;
+    const metadata = this._getMediaMetadataForElement({ ...element, src }, image) || {
+      width: Math.max(1, toFiniteNumber(image.naturalWidth, image.width)),
+      height: Math.max(1, toFiniteNumber(image.naturalHeight, image.height)),
+    };
+    const layout = this._getMediaLayout({ ...element, src }, frameWidthIn, frameHeightIn, metadata);
+    const size = this._getPdfMediaTileSize(frameWidthIn, frameHeightIn);
+    const canvas = document.createElement("canvas");
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    const scaleX = size.width / Math.max(MIN_ELEMENT_IN, frameWidthIn);
+    const scaleY = size.height / Math.max(MIN_ELEMENT_IN, frameHeightIn);
+    context.clearRect(0, 0, size.width, size.height);
+    context.save();
+    this._clipRoundedCanvasRect(context, 0, 0, size.width, size.height, (8 / 96) * Math.min(scaleX, scaleY));
+    context.drawImage(
+      image,
+      layout.left * scaleX,
+      layout.top * scaleY,
+      layout.renderWidth * scaleX,
+      layout.renderHeight * scaleY,
+    );
+    context.restore();
+    return canvas;
+  }
+
+  _drawPdfFramedRect(doc, x, y, w, h, { fill, stroke, radius = (8 / 96) } = {}) {
+    const paintMode = this._getPdfPaintMode(!!fill, !!stroke);
+    if (!paintMode) return;
+    if (fill) doc.setFillColor(...fill);
+    if (radius > 0) doc.roundedRect(x, y, w, h, radius, radius, paintMode);
+    else doc.rect(x, y, w, h, paintMode);
+  }
+
+  async _drawPdfImageElement(doc, element) {
+    const x = toFiniteNumber(element?.x, 0);
+    const y = toFiniteNumber(element?.y, 0);
+    const w = Math.max(MIN_ELEMENT_IN, toFiniteNumber(element?.w, 1));
+    const h = Math.max(MIN_ELEMENT_IN, toFiniteNumber(element?.h, 1));
+    const fillColor = isTransparentColor(element?.fill) ? null : getPdfColorComponents(element?.fill, "transparent");
+    this._withPdfGraphicsState(doc, element?.opacity, () => {
+      const { hasStroke } = this._setPdfLineStyle(doc, element);
+      this._drawPdfFramedRect(doc, x, y, w, h, { fill: fillColor, stroke: hasStroke });
+      doc.setLineDashPattern([], 0);
+    });
+    const tile = await this._renderPdfMediaTileCanvas(element, w, h);
+    if (!tile) return;
+    this._withPdfGraphicsState(doc, element?.opacity, () => {
+      doc.addImage(tile, "PNG", x, y, w, h);
+    });
+  }
+
+  async _drawPdfPmiElement(doc, element) {
+    const frame = this._getMediaFrameBox(element);
+    if (!frame) return;
+    const frameFill = isTransparentColor(element?.fill) ? null : getPdfColorComponents(element?.fill, "transparent");
+    this._withPdfGraphicsState(doc, element?.opacity, () => {
+      const { hasStroke } = this._setPdfLineStyle(doc, element);
+      this._drawPdfFramedRect(doc, frame.x, frame.y, frame.w, frame.h, { fill: frameFill, stroke: hasStroke });
+      doc.setLineDashPattern([], 0);
+    });
+    const tile = await this._renderPdfMediaTileCanvas(element, frame.w, frame.h);
+    if (tile) {
+      this._withPdfGraphicsState(doc, element?.opacity, () => {
+        doc.addImage(tile, "PNG", frame.x, frame.y, frame.w, frame.h);
+      });
+    }
+    if (this._getPmiLabelPosition(element) !== "none") {
+      const captionHeight = Math.max(0, this._getPmiTitleHeightIn(element));
+      if (captionHeight > 0) {
+        const captionY = frame.labelPosition === "top"
+          ? toFiniteNumber(element?.y, 0)
+          : (frame.y + frame.h);
+        this._drawPdfTextBlock(doc, {
+          ...element,
+          element,
+          text: this._resolvePmiViewDisplayName(element),
+          fontFamily: "Arial, Helvetica, sans-serif",
+          fontSize: pointsToInches(PMI_TITLE_FONT_SIZE_PT),
+          fontWeight: "600",
+          fontStyle: "normal",
+          textDecoration: "none",
+          textAlign: "center",
+          verticalAlign: "middle",
+          color: "#111111",
+        }, {
+          x: toFiniteNumber(element?.x, 0),
+          y: captionY,
+          w: Math.max(MIN_ELEMENT_IN, toFiniteNumber(element?.w, 1)),
+          h: captionHeight,
+          rotationDeg: 0,
+          paddingX: pointsToInches(PMI_TITLE_PAD_X_PT),
+          paddingY: 0,
+        });
+      }
+    }
+  }
+
+  async _drawVectorSheetToPdf(doc, sheet) {
+    const widthIn = Math.max(0.1, toFiniteNumber(sheet?.widthIn, 11));
+    const heightIn = Math.max(0.1, toFiniteNumber(sheet?.heightIn, 8.5));
+    const background = getPdfColorComponents(sheet?.background, "#ffffff");
+    if (background) {
+      doc.setFillColor(...background);
+      doc.rect(0, 0, widthIn, heightIn, "F");
+    }
+    for (const element of sortElements(sheet?.elements || [])) {
+      const type = String(element?.type || "");
+      if (type === "line") this._drawPdfLineElement(doc, element);
+      else if (type === "text") this._drawPdfTextElement(doc, element);
+      else if (isShapeElementType(type)) this._drawPdfShapeElement(doc, element);
+      else if (type === "table") this._drawPdfTableElement(doc, element);
+      else if (type === "image") await this._drawPdfImageElement(doc, element);
+      else if (type === "pmiInset") await this._drawPdfPmiElement(doc, element);
+    }
   }
 
   async generatePdfBytes({ onProgress = null } = {}) {
@@ -4990,26 +5599,21 @@ export class Sheet2DEditorWindow {
       let doc = null;
       for (let index = 0; index < sheets.length; index += 1) {
         const sheet = sheets[index];
-        const pageNode = this._buildPdfPageNode(sheet);
-        if (!pageNode) continue;
-        host.appendChild(pageNode);
+        const widthIn = Math.max(0.1, toFiniteNumber(sheet?.widthIn, 11));
+        const heightIn = Math.max(0.1, toFiniteNumber(sheet?.heightIn, 8.5));
+        const orientation = widthIn >= heightIn ? "landscape" : "portrait";
+        const useVectorPdf = this._sheetCanUseVectorPdf(sheet);
 
-        await this._waitForImagesInNode(pageNode);
-        this._applyExportMediaLayouts(pageNode);
         await emitProgress({
-          detail: `Rendering sheet ${index + 1} of ${sheets.length}`,
-          hint: "Rasterizing the current sheet",
+          detail: `${useVectorPdf ? "Composing" : "Rendering"} sheet ${index + 1} of ${sheets.length}`,
+          hint: useVectorPdf
+            ? "Writing vector geometry directly into the PDF"
+            : "Rasterizing the current sheet",
           completed: index,
           total: sheets.length,
           sheet,
           sheetLabel: String(sheet?.name || `Sheet ${index + 1}`),
         }, 2);
-
-        const widthIn = Math.max(0.1, toFiniteNumber(sheet?.widthIn, 11));
-        const heightIn = Math.max(0.1, toFiniteNumber(sheet?.heightIn, 8.5));
-        const orientation = widthIn >= heightIn ? "landscape" : "portrait";
-        const rasterScale = this._getPdfRasterScale(pageNode);
-        const canvas = await this._renderPdfPageCanvas(pageNode, rasterScale);
 
         if (!doc) {
           doc = new jsPDF({
@@ -5021,12 +5625,26 @@ export class Sheet2DEditorWindow {
         } else {
           doc.addPage([widthIn, heightIn], orientation);
         }
-        doc.addImage(canvas, "PNG", 0, 0, widthIn, heightIn);
-        host.removeChild(pageNode);
+
+        if (useVectorPdf) {
+          await this._drawVectorSheetToPdf(doc, sheet);
+        } else {
+          const pageNode = this._buildPdfPageNode(sheet);
+          if (!pageNode) continue;
+          host.appendChild(pageNode);
+          await this._waitForImagesInNode(pageNode);
+          this._applyExportMediaLayouts(pageNode);
+          const rasterScale = this._getPdfRasterScale(pageNode);
+          const canvas = await this._renderPdfPageCanvas(pageNode, rasterScale);
+          doc.addImage(canvas, "PNG", 0, 0, widthIn, heightIn);
+          host.removeChild(pageNode);
+        }
 
         await emitProgress({
           detail: `Added sheet ${index + 1} of ${sheets.length}`,
-          hint: "Assembling the final PDF document",
+          hint: useVectorPdf
+            ? "Assembling vector page data"
+            : "Assembling the final PDF document",
           completed: index + 1,
           total: sheets.length,
           sheet,

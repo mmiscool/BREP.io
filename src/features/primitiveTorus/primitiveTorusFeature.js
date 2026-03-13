@@ -5,6 +5,7 @@
 // end cap is a rotated clone about +Z by the sweep arc).
 
 import { BREP } from '../../BREP/BREP.js'
+import { composeReferencedTransformMatrix } from '../../utils/transformReferenceUtils.js';
 // no extra imports needed for centerline metadata
 
 const inputParamsSchema = {
@@ -36,7 +37,10 @@ const inputParamsSchema = {
     transform: {
         type: 'transform',
         default_value: { position: [0, 0, 0], rotationEuler: [0, 0, 0], scale: [1, 1, 1] },
-        hint: 'Position, rotation, and scale'
+        referenceSelectionFilter: ['FACE', 'EDGE', 'VERTEX', 'PLANE', 'DATUM'],
+        referenceLabel: 'Start Reference',
+        referencePlaceholder: 'Select point, edge, or face…',
+        hint: 'Select a start reference, then position, rotate, and scale the solid relative to it.'
     },
     boolean: {
         type: 'boolean_operation',
@@ -73,7 +77,7 @@ export class PrimitiveTorusFeature {
         });
         try {
             if (this.inputParams.transform) {
-                torus.bakeTRS(this.inputParams.transform);
+                torus.bakeTransform(composeReferencedTransformMatrix(this.inputParams.transform, partHistory || null, {}, BREP.THREE));
             }
         } catch (_) { }
 
@@ -81,19 +85,7 @@ export class PrimitiveTorusFeature {
         // Choose a length that spans the torus extents and store on the solid.
         const THREE = BREP.THREE;
         try {
-            const p = Array.isArray(this.inputParams?.transform?.position) ? this.inputParams.transform.position : [0, 0, 0];
-            const r = Array.isArray(this.inputParams?.transform?.rotationEuler) ? this.inputParams.transform.rotationEuler : [0, 0, 0];
-            const s = Array.isArray(this.inputParams?.transform?.scale) ? this.inputParams.transform.scale : [1, 1, 1];
-            const pos = new THREE.Vector3(p[0] || 0, p[1] || 0, p[2] || 0);
-            const eul = new THREE.Euler(
-                THREE.MathUtils.degToRad(r[0] || 0),
-                THREE.MathUtils.degToRad(r[1] || 0),
-                THREE.MathUtils.degToRad(r[2] || 0),
-                'XYZ'
-            );
-            const quat = new THREE.Quaternion().setFromEuler(eul);
-            const scl = new THREE.Vector3(s[0] || 1, s[1] || 1, s[2] || 1);
-            const M = new THREE.Matrix4().compose(pos, quat, scl);
+            const M = composeReferencedTransformMatrix(this.inputParams?.transform, partHistory || null, {}, THREE);
 
             const L = 2 * (Math.abs(Number(majorRadius) || 0) + Math.abs(Number(tubeRadius) || 0));
             const a0 = new THREE.Vector3(0, -0.5 * L, 0).applyMatrix4(M);

@@ -12,6 +12,11 @@ import { resolveSelectionObject } from '../assembly/constraintSelectionUtils.js'
 import { extractWorldPoint } from '../assembly/constraintPointUtils.js';
 import { computeFaceNormal, computeFaceOrigin } from '../faceUtils.js';
 import { SchemaForm } from '../featureDialogs.js';
+import { buildPortDefinitionFromInputs } from '../../features/port/portUtils.js';
+import {
+  resolvePortExtensionAnnotationGeometry,
+  supportsFeatureDimensionFeatureKey,
+} from './featureDimensionUtils.js';
 
 const FEATURE_LINE_COLOR = '#bfbfbf';
 const DRAGGABLE_TIP_COLOR = '#f2c14e';
@@ -30,7 +35,6 @@ const LABEL_ARROW_AVOID_MAX_ITERS = 300;
 const FEATURE_ANGLE_RADIUS_PX = 120;
 const FEATURE_ANGLE_MIN_RADIUS_PX = 100;
 const DRAG_FIELD_CHANGE_THROTTLE_MS = 60;
-const SUPPORTED_FEATURE_KEYS = new Set(['P.CU', 'P.CY', 'P.CO', 'P.S', 'P.PY', 'P.T', 'E', 'R']);
 
 function nowMs() {
   if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
@@ -117,7 +121,7 @@ function closestPointOnLine(point, linePoint, lineDir) {
 
 export class FeatureDimensionOverlay {
   static supportsFeatureKey(key) {
-    return SUPPORTED_FEATURE_KEYS.has(normalizeFeatureType(key));
+    return supportsFeatureDimensionFeatureKey(key);
   }
 
   constructor({ viewer = null, onFieldChange = null, onFieldFocus = null } = {}) {
@@ -357,6 +361,7 @@ export class FeatureDimensionOverlay {
       case 'P.T': return this.#buildTorusAnnotations(params, matrix, active.entryId);
       case 'E': return this.#buildExtrudeAnnotations(params, active.entryId);
       case 'R': return this.#buildRevolveAnnotations(params, active.entryId);
+      case 'PORT': return this.#buildPortAnnotations(params, active.entryId, active.entry);
       default: return [];
     }
   }
@@ -530,6 +535,28 @@ export class FeatureDimensionOverlay {
     ].filter(Boolean);
   }
 
+  #buildPortAnnotations(params, entryId, entry = null) {
+    const portDefinition = this.#resolvePortDefinitionFromParams(params, entry);
+    if (!portDefinition) return [];
+
+    const minVisibleLength = Math.max(0.25, screenSizeWorld(this.viewer, 36));
+    const geometry = resolvePortExtensionAnnotationGeometry(portDefinition, minVisibleLength);
+    if (!geometry) return [];
+
+    return [
+      this.#createLinearAnnotation({
+        entryId,
+        fieldKey: 'extension',
+        pointA: geometry.pointA,
+        pointB: geometry.pointB,
+        value: geometry.value,
+        labelPrefix: 'Ext',
+        min: 0,
+        dragPlaneValue: geometry.dragPlaneValue,
+      }),
+    ].filter(Boolean);
+  }
+
   #resolveProfileObject(profileSelection) {
     const scene = this.viewer?.scene || null;
     const profileObject = resolveSelectionObject(scene, profileSelection) || null;
@@ -640,6 +667,46 @@ export class FeatureDimensionOverlay {
     }
 
     return null;
+  }
+
+  #resolvePortDefinitionFromParams(params = {}, entry = null) {
+    const sourceParams = params && typeof params === 'object' ? params : {};
+    const scene = this.viewer?.scene || null;
+    const resolveSelectionValue = (value) => {
+      if (Array.isArray(value)) return value.map((item) => resolveSelectionValue(item));
+      return resolveSelectionObject(scene, value) || value;
+    };
+
+    try {
+      const resolvedParams = {
+        ...sourceParams,
+        transform: (sourceParams.transform && typeof sourceParams.transform === 'object')
+          ? {
+            ...sourceParams.transform,
+            reference: resolveSelectionValue(sourceParams.transform.reference),
+          }
+          : sourceParams.transform,
+        anchor: resolveSelectionValue(sourceParams.anchor),
+        directionRef: resolveSelectionValue(sourceParams.directionRef),
+      };
+      const featureId = String(
+        sourceParams?.featureID
+        || sourceParams?.id
+        || entry?.persistentData?.port?.featureId
+        || entry?.type
+        || 'Port',
+      ).trim() || 'Port';
+      const definition = buildPortDefinitionFromInputs({
+        featureId,
+        inputParams: resolvedParams,
+        referenceSource: this.viewer || scene || null,
+      });
+      if (definition?.point && definition?.direction) return definition;
+    } catch { /* ignore and fall back to runtime snapshot */ }
+
+    const runtimePort = entry?.persistentData?.port;
+    if (!runtimePort || typeof runtimePort !== 'object') return null;
+    return runtimePort;
   }
 
   #objectTypeTag(object) {
@@ -895,6 +962,7 @@ export class FeatureDimensionOverlay {
     labelPrefix = '',
     min = null,
     max = null,
+    dragPlaneValue = null,
   }) {
     if (!pointA || !pointB) return null;
     const direction = pointB.clone().sub(pointA);
@@ -945,6 +1013,7 @@ export class FeatureDimensionOverlay {
         direction: dragDirection,
         min: Number.isFinite(min) ? min : null,
         max: Number.isFinite(max) ? max : null,
+        planeValue: Number.isFinite(dragPlaneValue) ? dragPlaneValue : null,
       },
     };
   }
@@ -1399,7 +1468,10 @@ export class FeatureDimensionOverlay {
         annotation.fieldKey,
         annotation.value,
       );
-      const planePoint = anchor.clone().addScaledVector(direction, value);
+      const planeValue = Number.isFinite(annotation.drag.planeValue)
+        ? annotation.drag.planeValue
+        : value;
+      const planePoint = anchor.clone().addScaledVector(direction, planeValue);
       const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, planePoint);
       const startPoint = this.#intersectPointerWithPlane(pointerDownEvent, plane);
       if (!startPoint) return null;

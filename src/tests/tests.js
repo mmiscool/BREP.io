@@ -124,11 +124,23 @@ import {
     test_sheet_custom_size_persists,
     test_wire_harness_formboard_insert,
 } from './test_wireHarnessFormboard.js';
+import {
+    test_feature_dimension_overlay_supports_port,
+    test_port_extension_annotation_geometry_preserves_extension_value,
+} from './test_featureDimensionOverlay.js';
+import {
+    test_port_definition_uses_transform_reference_and_direction_reference,
+    test_port_definition_uses_transform_reference_without_anchor,
+    test_referenced_transform_matrix_uses_vertex_reference_origin,
+    test_transform_reference_base_uses_face_pick_point,
+    test_transform_reference_sanitize_preserves_metadata,
+} from './test_transformReferenceUtils.js';
 import { test_wire_harness_sheet_table_insert } from './test_wireHarnessSheetTable.js';
 import {
     test_wire_harness_infers_endpoint_side_from_spline_direction,
     test_wire_harness_route_prefers_non_reusing_path,
 } from './test_wireHarnessRoutingReuse.js';
+import { test_wire_harness_routes_render_as_scene_solids } from './test_wireHarnessRouteGeometry.js';
 import {
     afterRun_visibility_hidden_state_persistence,
     test_visibility_hidden_state_persistence,
@@ -147,6 +159,13 @@ export const testFunctions = [
     { test: test_primitiveCone, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_primitiveTorus, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_primitiveSphere, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_feature_dimension_overlay_supports_port, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_port_extension_annotation_geometry_preserves_extension_value, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_transform_reference_sanitize_preserves_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_transform_reference_base_uses_face_pick_point, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_referenced_transform_matrix_uses_vertex_reference_origin, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_port_definition_uses_transform_reference_without_anchor, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_port_definition_uses_transform_reference_and_direction_reference, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_boolean_subtract, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_boolean_face_metadata_preserved, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     {
@@ -233,6 +252,7 @@ export const testFunctions = [
     { test: test_wire_harness_sheet_table_insert, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_wire_harness_route_prefers_non_reusing_path, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_wire_harness_infers_endpoint_side_from_spline_direction, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_wire_harness_routes_render_as_scene_solids, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_openLoop, afterRun: afterRun_sketch_openLoop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     {
         test: test_sketch_face_attachment_alignment,

@@ -1,4 +1,5 @@
 import { deepClone } from '../../utils/deepClone.js';
+import { sanitizeTransformValue } from '../../utils/transformReferenceUtils.js';
 
 function evaluateNumber(expressionsEvaluator, value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -127,7 +128,12 @@ export async function sanitizeInputParams(schema, inputParams, expressionsEvalua
                 const pos = Array.isArray(raw.position) ? raw.position.map(evalOne) : [0, 0, 0];
                 const rot = Array.isArray(raw.rotationEuler) ? raw.rotationEuler.map(evalOne) : [0, 0, 0];
                 const scl = Array.isArray(raw.scale) ? raw.scale.map(evalOne) : [1, 1, 1];
-                sanitized[key] = { position: pos, rotationEuler: rot, scale: scl };
+                sanitized[key] = sanitizeTransformValue({
+                    position: pos,
+                    rotationEuler: rot,
+                    scale: scl,
+                    reference: raw.reference,
+                });
             } else if (schema[key].type === "vec3") {
                 // Evaluate vec3 entries; accept array [x,y,z] or object {x,y,z}
                 const raw = inputParams[key];

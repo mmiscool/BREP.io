@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { BREP } from '../BREP/BREP.js';
 
 const ROUTE_GROUP_NAME = '__WireHarnessRoutes';
 const DEFAULT_ROUTE_COLOR = '#8b949e';
@@ -47,53 +48,87 @@ function disposeObjectTree(object) {
   } else {
     try { material?.dispose?.(); } catch { /* ignore */ }
   }
+  try { object.free?.(); } catch { /* ignore */ }
 }
 
-function buildRouteCurve(points) {
-  const curve = new THREE.CurvePath();
-  for (let index = 0; index < points.length - 1; index += 1) {
-    curve.add(new THREE.LineCurve3(points[index], points[index + 1]));
-  }
-  return curve;
+function tintRouteMaterial(material, color) {
+  const next = material?.clone?.() || material;
+  if (!next) return next;
+  try { next.color?.set?.(color); } catch { /* ignore */ }
+  try {
+    if (next.emissive?.set) {
+      next.emissive.set(color);
+      if (typeof next.emissive.multiplyScalar === 'function') next.emissive.multiplyScalar(0.18);
+    }
+  } catch { /* ignore */ }
+  if (typeof next.roughness === 'number') next.roughness = 0.62;
+  if (typeof next.metalness === 'number') next.metalness = 0.08;
+  if (typeof next.opacity === 'number') next.opacity = 1;
+  if (typeof next.transparent === 'boolean') next.transparent = false;
+  if (typeof next.polygonOffset === 'boolean') next.polygonOffset = true;
+  if (typeof next.polygonOffsetFactor === 'number') next.polygonOffsetFactor = -1;
+  if (typeof next.polygonOffsetUnits === 'number') next.polygonOffsetUnits = -2;
+  return next;
 }
 
-function createBundleMesh(segment) {
+function applyRouteAppearance(solid, color) {
+  if (!solid?.traverse) return;
+  solid.renderOrder = 5000;
+  solid.traverse((object) => {
+    if (!object?.material) return;
+    if (Array.isArray(object.material)) {
+      object.material = object.material.map((entry) => tintRouteMaterial(entry, color));
+    } else {
+      object.material = tintRouteMaterial(object.material, color);
+    }
+    try { object.userData = { ...(object.userData || {}), __defaultMaterial: object.material }; } catch { /* ignore */ }
+    object.renderOrder = 5000;
+  });
+}
+
+function createBundleSolid(segment) {
   const points = dedupePoints(segment?.polyline);
   if (points.length < 2) return null;
 
-  const curve = buildRouteCurve(points);
-  const tubularSegments = Math.max(16, (points.length - 1) * 12);
   const radius = Math.max(0.01, normalizeNumber(segment?.diameter, 1) * 0.5);
-  const geometry = new THREE.TubeGeometry(curve, tubularSegments, radius, 14, false);
   const color = new THREE.Color(DEFAULT_ROUTE_COLOR);
-  const material = new THREE.MeshStandardMaterial({
-    color: color.getStyle(),
-    emissive: color.clone().multiplyScalar(0.18),
-    roughness: 0.62,
-    metalness: 0.08,
+  const solid = new BREP.Tube({
+    points: points.map((point) => [point.x, point.y, point.z]),
+    radius,
+    innerRadius: 0,
+    resolution: 14,
+    closed: false,
+    name: String(segment?.featureId || segment?.segmentId || 'Wire Bundle').trim() || 'Wire Bundle',
+    preferFast: true,
+    autoVisualize: false,
   });
-  material.polygonOffset = true;
-  material.polygonOffsetFactor = -1;
-  material.polygonOffsetUnits = -2;
-
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.name = String(segment?.featureId || segment?.segmentId || 'Wire Bundle').trim() || 'Wire Bundle';
-  mesh.castShadow = false;
-  mesh.receiveShadow = false;
-  mesh.renderOrder = 5000;
-  mesh.userData = {
+  if (!solid || solid.type !== 'SOLID') return null;
+  const triCount = ((solid?._triVerts?.length || 0) / 3) | 0;
+  if (triCount <= 0) return null;
+  solid.visualize({ showEdges: false });
+  applyRouteAppearance(solid, color);
+  solid.castShadow = false;
+  solid.receiveShadow = false;
+  solid.userData = {
+    ...(solid.userData || {}),
     isWireHarnessRoute: true,
     isWireHarnessBundleSegment: true,
     segmentId: segment?.segmentId || '',
     featureId: segment?.featureId || '',
     wireCount: Math.max(0, normalizeNumber(segment?.wireCount, 0)),
-    wireDiameters: Array.isArray(segment?.wireDiameters) ? segment.wireDiameters.slice() : [],
-    connectionIds: Array.isArray(segment?.connectionIds) ? segment.connectionIds.slice() : [],
-    connectionNames: Array.isArray(segment?.connectionNames) ? segment.connectionNames.slice() : [],
+    wireDiameters: Array.isArray(segment?.wireDiameters)
+      ? segment.wireDiameters.slice()
+      : (Number.isFinite(Number(segment?.diameter)) ? [Math.max(0.01, normalizeNumber(segment?.diameter, 1))] : []),
+    connectionIds: Array.isArray(segment?.connectionIds)
+      ? segment.connectionIds.slice()
+      : (segment?.connectionId ? [String(segment.connectionId)] : []),
+    connectionNames: Array.isArray(segment?.connectionNames)
+      ? segment.connectionNames.slice()
+      : (segment?.connectionName ? [String(segment.connectionName)] : []),
     bundleDiameter: Math.max(0, normalizeNumber(segment?.diameter, 0)),
     color: color.getHexString ? `#${color.getHexString()}` : DEFAULT_ROUTE_COLOR,
   };
-  return mesh;
+  return solid;
 }
 
 export function clearWireHarnessRouteGroup(scene) {
@@ -136,8 +171,8 @@ export function renderWireHarnessRoutes(scene, routes = [], bundleSegments = [])
       : [];
 
   for (const segment of segments) {
-    const mesh = createBundleMesh(segment);
-    if (mesh) group.add(mesh);
+    const solid = createBundleSolid(segment);
+    if (solid) group.add(solid);
   }
 
   scene.add(group);

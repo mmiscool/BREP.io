@@ -3,6 +3,7 @@
 // Positioned with its minimum corner at the origin (0,0,0). Dimensions extend +sizeX, +sizeY, +sizeZ along X/Y/Z.
 
 import { BREP } from '../../BREP/BREP.js'
+import { composeReferencedTransformMatrix } from '../../utils/transformReferenceUtils.js';
 
 const inputParamsSchema = {
     id: {
@@ -28,7 +29,10 @@ const inputParamsSchema = {
     transform: {
         type: 'transform',
         default_value: { position: [0, 0, 0], rotationEuler: [0, 0, 0], scale: [1, 1, 1] },
-        hint: 'Position, rotation, and scale'
+        referenceSelectionFilter: ['FACE', 'EDGE', 'VERTEX', 'PLANE', 'DATUM'],
+        referenceLabel: 'Start Reference',
+        referencePlaceholder: 'Select point, edge, or face…',
+        hint: 'Select a start reference, then position, rotate, and scale the solid relative to it.'
     },
     boolean: {
         type: 'boolean_operation',
@@ -59,7 +63,7 @@ export class PrimitiveCubeFeature {
         // Apply transform before visualization so it bakes into geometry arrays
         try {
             if (this.inputParams.transform) {
-                cube.bakeTRS(this.inputParams.transform);
+                cube.bakeTransform(composeReferencedTransformMatrix(this.inputParams.transform, partHistory || null, {}, BREP.THREE));
             }
         } catch (_) { alert("Error applying transform"); }
         cube.visualize();
