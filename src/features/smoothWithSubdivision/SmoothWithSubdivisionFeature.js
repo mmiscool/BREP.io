@@ -1,4 +1,5 @@
 import { BREP } from "../../BREP/BREP.js";
+import { deepClone } from "../../utils/deepClone.js";
 import {
   addTriangleFacingOutward,
   computeBoundsFromPoints,
@@ -33,8 +34,7 @@ function normalizeNumber(value, fallback = 0) {
 
 function normalizeFaceToken(value) {
   const raw = String(value ?? "").trim();
-  if (!raw) return "SURFACE";
-  return raw.replace(/[^A-Za-z0-9:_-]/g, "_") || "SURFACE";
+  return raw || "SURFACE";
 }
 
 function normalizeMeshData(rawMeshData) {
@@ -128,6 +128,24 @@ function buildMeshDataFromSolid(solid) {
     return normalizeMeshData(null);
   } finally {
     try { mesh?.delete?.(); } catch { }
+  }
+}
+
+function copyRetainedFaceMetadata(sourceSolid, targetSolid, faceNames) {
+  if (!sourceSolid || !targetSolid || typeof sourceSolid.getFaceMetadata !== "function" || typeof targetSolid.setFaceMetadata !== "function") {
+    return;
+  }
+  const names = faceNames instanceof Set ? faceNames : new Set(Array.isArray(faceNames) ? faceNames : []);
+  for (const faceName of names) {
+    const normalizedName = String(faceName ?? "").trim();
+    if (!normalizedName) continue;
+    const metadata = sourceSolid.getFaceMetadata(normalizedName);
+    if (!metadata || typeof metadata !== "object" || !Object.keys(metadata).length) continue;
+    try {
+      targetSolid.setFaceMetadata(normalizedName, deepClone(metadata));
+    } catch {
+      /* best effort */
+    }
   }
 }
 
@@ -339,12 +357,11 @@ export class SmoothWithSubdivisionFeature {
     solid.name = outputName;
     try { if (featureID) solid.owningFeatureID = featureID; } catch { }
 
-    const smoothFaceName = `${outputName}:SMOOTH`;
+    const retainedFaceNames = new Set();
     for (let triIndex = 0; triIndex < outputMeshData.triangles.length; triIndex += 1) {
       const tri = outputMeshData.triangles[triIndex];
-      const surfaceFace = subdivisionLoops > 0
-        ? smoothFaceName
-        : `${outputName}:TRI:${triIndex}`;
+      const surfaceFace = normalizeFaceToken(outputMeshData.triangleFaceTokens[triIndex]);
+      retainedFaceNames.add(surfaceFace);
       addTriangleFacingOutward(
         solid,
         surfaceFace,
@@ -354,6 +371,7 @@ export class SmoothWithSubdivisionFeature {
         center,
       );
     }
+    copyRetainedFaceMetadata(targetSolid, solid, retainedFaceNames);
 
     solid.userData = {
       smoothWithSubdivision: {
@@ -363,6 +381,7 @@ export class SmoothWithSubdivisionFeature {
         subdivisionLoops,
         outputVertexCount: outputMeshData.vertices.length,
         outputTriangleCount: outputMeshData.triangles.length,
+        retainedFaceCount: retainedFaceNames.size,
       },
     };
 
