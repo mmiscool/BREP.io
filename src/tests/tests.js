@@ -74,6 +74,10 @@ import {
     test_import3d_planar_extraction_merges_sliver_bridge,
 } from './test_import3dPlanarExtraction.js';
 import { test_mirror } from './test_mirror.js';
+import {
+    afterRun_offsetFace_preserves_individual_edges,
+    test_offsetFace_preserves_individual_edges,
+} from './test_offsetFace_preserves_individual_edges.js';
 import { test_offsetShellGrouping } from './test_offsetShellGrouping.js';
 import { test_plane } from './test_plane.js';
 import { test_primitiveCone } from './test_primitiveCone.js';
@@ -157,6 +161,14 @@ export const testFunctions = [
     { test: test_primitivePyramid, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_primitiveCylinder, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_face_source_feature_seed, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    {
+        test: test_offsetFace_preserves_individual_edges,
+        afterRun: afterRun_offsetFace_preserves_individual_edges,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
     { test: test_primitiveCone, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_primitiveTorus, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_primitiveSphere, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
