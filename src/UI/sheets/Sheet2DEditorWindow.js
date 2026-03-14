@@ -83,6 +83,10 @@ const PMI_LABEL_POSITION_OPTIONS = [
   { value: "bottom", label: "Bottom" },
   { value: "none", label: "None" },
 ];
+const PMI_RENDER_MODE_OPTIONS = [
+  { value: "shaded", label: "Shaded" },
+  { value: "monochrome", label: "Monochrome" },
+];
 const TOOLBAR_COLOR_SWATCHS = ["#111111", "#ffffff", "#ef4444", "#f59e0b", "#22c55e", "#3b82f6", "#8b5cf6", "#ec4899"];
 
 function iconSvg(content, { viewBox = "0 0 24 24" } = {}) {
@@ -103,6 +107,11 @@ function formatPointValue(value) {
   return String(rounded)
     .replace(/(\.\d*?[1-9])0+$/u, "$1")
     .replace(/\.0+$/u, "");
+}
+
+function normalizePmiRenderMode(value, fallback = "shaded") {
+  const key = String(value || fallback).trim().toLowerCase();
+  return ["shaded", "monochrome"].includes(key) ? key : fallback;
 }
 
 const TOOLBAR_ICON_SVGS = {
@@ -491,6 +500,8 @@ function defaultPmiInsetElement(xIn, yIn, pmiViewIndex = -1, pmiViewName = "PMI 
     pmiImageRevision: 0,
     pmiModelRevision: -1,
     pmiImageCaptureKey: "",
+    pmiRenderMode: "shaded",
+    pmiShowCenterLines: false,
     pmiAnchor: "c",
   };
 }
@@ -1658,6 +1669,20 @@ export class Sheet2DEditorWindow {
       (value) => this._setSelectedPMIField("labelPosition", value),
     );
 
+    const pmiRenderModeInput = this._buildSelect(
+      PMI_RENDER_MODE_OPTIONS,
+      (value) => this._setSelectedPMIField("renderMode", value),
+    );
+
+    const showCenterLinesInput = document.createElement("input");
+    showCenterLinesInput.type = "checkbox";
+    showCenterLinesInput.addEventListener("change", () => this._setSelectedPMIField("showCenterLines", showCenterLinesInput.checked));
+
+    const showCenterLinesWrap = document.createElement("div");
+    showCenterLinesWrap.className = "sheet-slides-checkbox";
+    showCenterLinesWrap.appendChild(showCenterLinesInput);
+    showCenterLinesWrap.appendChild(document.createTextNode("Show center lines"));
+
     const showBgInput = document.createElement("input");
     showBgInput.type = "checkbox";
     showBgInput.addEventListener("change", () => this._setSelectedPMIField("showBackground", showBgInput.checked));
@@ -1684,12 +1709,17 @@ export class Sheet2DEditorWindow {
     this._pmiPanel = pmiPanel;
     this._pmiNameValue = pmiNameValue;
     this._pmiLabelPositionInput = pmiLabelPositionInput;
+    this._pmiRenderModeInput = pmiRenderModeInput;
+    this._showPmiCenterLinesInput = showCenterLinesInput;
     this._showPmiBackgroundInput = showBgInput;
     this._pmiBgInput = pmiBgInput;
     this._pmiBgResetBtn = pmiBgResetBtn;
     this._pmiAnchorInput = pmiAnchorInput;
 
     pmiPanel.appendChild(this._makeField("View Name", pmiNameValue));
+    pmiPanel.appendChild(this._makeField("Render", pmiRenderModeInput));
+    this._pmiCenterLinesField = this._makeField("Center Lines", showCenterLinesWrap);
+    pmiPanel.appendChild(this._pmiCenterLinesField);
     pmiPanel.appendChild(this._makeField("Anchor", pmiAnchorInput));
     pmiPanel.appendChild(this._makeField("Label", pmiLabelPositionInput));
     pmiPanel.appendChild(this._makeField("Backdrop", showBgWrap));
@@ -3036,6 +3066,14 @@ export class Sheet2DEditorWindow {
   _getPmiAnchorValue(element) {
     const value = String(element?.pmiAnchor || "c");
     return PMI_ANCHOR_OPTIONS.some((option) => option.value === value) ? value : "c";
+  }
+
+  _getPmiRenderMode(element) {
+    return normalizePmiRenderMode(element?.pmiRenderMode, "shaded");
+  }
+
+  _getPmiShowCenterLines(element) {
+    return element?.pmiShowCenterLines === true;
   }
 
   _getAnchorFractions(anchor) {
@@ -6346,11 +6384,13 @@ export class Sheet2DEditorWindow {
 
   _getPmiImageCaptureKey(element, view = this._resolvePmiViewForElement(element), viewIndex = this._resolvePmiViewIndexForElement(element, view)) {
     return [
-      "trim-v3",
+      "trim-v4",
       this._getCurrentModelRevision(),
       this._pmiViewRevision,
       Number.isInteger(viewIndex) ? viewIndex : -1,
       String(view?.viewName || view?.name || element?.pmiViewName || "PMI View"),
+      this._getPmiRenderMode(element),
+      this._getPmiShowCenterLines(element) ? "centerlines:on" : "centerlines:off",
       this._getPmiViewStateSignature(view),
     ].join(":");
   }
@@ -6368,7 +6408,10 @@ export class Sheet2DEditorWindow {
     }
 
     const task = this._pmiImageCaptureQueue
-      .then(() => this._capturePmiViewImage(view, viewIndex))
+      .then(() => this._capturePmiViewImage(view, viewIndex, {
+        renderMode: this._getPmiRenderMode(element),
+        showCenterLines: this._getPmiShowCenterLines(element),
+      }))
       .then((dataUrl) => {
         if (!dataUrl) return null;
         this._pmiImageCache.set(captureKey, dataUrl);
@@ -6502,7 +6545,10 @@ export class Sheet2DEditorWindow {
       let anyChanged = false;
       for (const group of groups.values()) {
         const cached = this._pmiImageCache.get(group.captureKey);
-        const dataUrl = cached || await this._capturePmiViewImage(group.view, group.viewIndex);
+        const dataUrl = cached || await this._capturePmiViewImage(group.view, group.viewIndex, {
+          renderMode: this._getPmiRenderMode(group.elementSnapshot),
+          showCenterLines: this._getPmiShowCenterLines(group.elementSnapshot),
+        });
         if (!dataUrl) continue;
         this._pmiImageCache.set(group.captureKey, dataUrl);
 
@@ -6555,13 +6601,16 @@ export class Sheet2DEditorWindow {
     }
   }
 
-  async _capturePmiViewImage(view, viewIndex) {
+  async _capturePmiViewImage(view, viewIndex, { renderMode = "shaded", showCenterLines = false } = {}) {
     const widget = this.viewer?.pmiViewsWidget || null;
     if (!widget || typeof widget.captureViewImageDataUrl !== "function") return null;
 
     let dataUrl = null;
     try {
-      dataUrl = await widget.captureViewImageDataUrl(view, viewIndex);
+      dataUrl = await widget.captureViewImageDataUrl(view, viewIndex, {
+        renderMode: normalizePmiRenderMode(renderMode, "shaded"),
+        showCenterLines: !!showCenterLines,
+      });
     } catch {
       dataUrl = null;
     }
@@ -6758,6 +6807,13 @@ export class Sheet2DEditorWindow {
     this._pmiBgResetBtn.disabled = !isPMI;
     if (this._pmiAnchorInput) this._pmiAnchorInput.disabled = !isPMI;
     if (this._pmiLabelPositionInput) this._pmiLabelPositionInput.disabled = !isPMI;
+    if (this._pmiRenderModeInput) this._pmiRenderModeInput.disabled = !isPMI;
+    if (this._showPmiCenterLinesInput) {
+      this._showPmiCenterLinesInput.disabled = !isPMI || this._getPmiRenderMode(selected) !== "monochrome";
+    }
+    if (this._pmiCenterLinesField) {
+      this._pmiCenterLinesField.style.display = isPMI && this._getPmiRenderMode(selected) === "monochrome" ? "" : "none";
+    }
     this._showPmiBackgroundInput.disabled = !isPMI;
     this._cropToggleBtn.disabled = !supportsCrop;
     this._resetCropBtn.disabled = !supportsCrop;
@@ -6787,6 +6843,9 @@ export class Sheet2DEditorWindow {
       this._cropHint.textContent = "";
       this._pmiNameValue.textContent = "";
       if (this._pmiLabelPositionInput) this._pmiLabelPositionInput.value = "bottom";
+      if (this._pmiRenderModeInput) this._pmiRenderModeInput.value = "shaded";
+      if (this._showPmiCenterLinesInput) this._showPmiCenterLinesInput.checked = false;
+      if (this._pmiCenterLinesField) this._pmiCenterLinesField.style.display = "none";
       this._showPmiBackgroundInput.checked = false;
       this._pmiBgInput.value = "#ffffff";
       this._pmiBgInput.disabled = true;
@@ -6927,12 +6986,18 @@ export class Sheet2DEditorWindow {
       this._pmiNameValue.textContent = this._resolvePmiViewDisplayName(selected);
       if (this._pmiAnchorInput) this._pmiAnchorInput.value = this._getPmiAnchorValue(selected);
       if (this._pmiLabelPositionInput) this._pmiLabelPositionInput.value = this._getPmiLabelPosition(selected);
+      if (this._pmiRenderModeInput) this._pmiRenderModeInput.value = this._getPmiRenderMode(selected);
+      if (this._showPmiCenterLinesInput) this._showPmiCenterLinesInput.checked = this._getPmiShowCenterLines(selected);
+      if (this._pmiCenterLinesField) this._pmiCenterLinesField.style.display = this._getPmiRenderMode(selected) === "monochrome" ? "" : "none";
       this._showPmiBackgroundInput.checked = !isTransparentColor(selected.fill);
       this._pmiBgInput.value = normalizeHex(selected.fill, "#ffffff");
       this._pmiBgInput.disabled = isTransparentColor(selected.fill);
     } else {
       if (this._pmiAnchorInput) this._pmiAnchorInput.value = "c";
       if (this._pmiLabelPositionInput) this._pmiLabelPositionInput.value = "bottom";
+      if (this._pmiRenderModeInput) this._pmiRenderModeInput.value = "shaded";
+      if (this._showPmiCenterLinesInput) this._showPmiCenterLinesInput.checked = false;
+      if (this._pmiCenterLinesField) this._pmiCenterLinesField.style.display = "none";
     }
   }
 
@@ -8526,6 +8591,10 @@ export class Sheet2DEditorWindow {
       element.fill = String(value || "#ffffff");
     } else if (key === "anchor") {
       element.pmiAnchor = this._getPmiAnchorValue({ pmiAnchor: value });
+    } else if (key === "renderMode") {
+      element.pmiRenderMode = this._getPmiRenderMode({ pmiRenderMode: value });
+    } else if (key === "showCenterLines") {
+      element.pmiShowCenterLines = value === true;
     }
     this._commitSheetDraft(`pmi-${key}`);
     this._renderStageOnly();

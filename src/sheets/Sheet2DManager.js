@@ -54,6 +54,11 @@ function normalizePmiLabelPosition(value, fallback = "bottom") {
   return ["top", "bottom", "none"].includes(key) ? key : fallback;
 }
 
+function normalizePmiRenderMode(value, fallback = "shaded") {
+  const key = String(value || fallback).trim().toLowerCase();
+  return ["shaded", "monochrome"].includes(key) ? key : fallback;
+}
+
 function normalizeLineStyle(value, fallback = "solid") {
   const key = String(value || fallback).trim();
   return ["none", "solid", "dotted", "dashed", "dashDot", "longDash", "dashDotDot"].includes(key)
@@ -457,6 +462,8 @@ export class Sheet2DManager {
         pmiLabelPosition: type === "pmiInset"
           ? normalizePmiLabelPosition(source.pmiLabelPosition, source.showTitle !== false ? "bottom" : "none")
           : undefined,
+        pmiRenderMode: type === "pmiInset" ? normalizePmiRenderMode(source.pmiRenderMode, "shaded") : undefined,
+        pmiShowCenterLines: type === "pmiInset" ? source.pmiShowCenterLines === true : undefined,
         pmiAnchor: type === "pmiInset" ? normalizePmiAnchor(source.pmiAnchor, "c") : undefined,
         text: isShapeElementType(type) ? sanitizeText(source.text, "") : undefined,
         fontSize: isShapeElementType(type)

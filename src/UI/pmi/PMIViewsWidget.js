@@ -281,11 +281,84 @@ export class PMIViewsWidget {
     });
   }
 
-  _createExportRenderContext(viewport, view = null) {
+  _normalizeExportRenderMode(renderMode, fallback = 'shaded') {
+    const key = String(renderMode || fallback).trim().toLowerCase();
+    return key === 'monochrome' ? 'monochrome' : 'shaded';
+  }
+
+  _isMonochromeExport(renderContext = null) {
+    return this._normalizeExportRenderMode(renderContext?.renderMode, 'shaded') === 'monochrome';
+  }
+
+  _shouldRenderMonochromeCenterLines(renderContext = null) {
+    return this._isMonochromeExport(renderContext) && renderContext?.showCenterLines === true;
+  }
+
+  _createTransparentImageDataUrl(width, height) {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Number(width) || 1);
+    canvas.height = Math.max(1, Number(height) || 1);
+    return canvas.toDataURL('image/png');
+  }
+
+  _applyMonochromeAnnotationStyle(group) {
+    group?.traverse?.((obj) => {
+      const applyMaterial = (material) => {
+        if (!material || typeof material !== 'object') return;
+        try { material.color?.set?.(0x000000); } catch { /* ignore */ }
+        try { material.emissive?.set?.(0x000000); } catch { /* ignore */ }
+        try {
+          if ('toneMapped' in material) material.toneMapped = false;
+        } catch { /* ignore */ }
+        return material;
+      };
+      if (Array.isArray(obj?.material)) {
+        obj.material = obj.material.map((material) => applyMaterial(this._cloneExportMaterial(material)));
+      } else if (obj?.material) {
+        obj.material = applyMaterial(this._cloneExportMaterial(obj.material));
+      }
+    });
+  }
+
+  _applyMonochromeCenterlineStyle(objects = [], renderContext = null) {
+    const viewport = renderContext?.viewport || {};
+    const width = Math.max(1, Number(viewport.width) || 1);
+    const height = Math.max(1, Number(viewport.height) || 1);
+    const applyMaterial = (material) => {
+      const clone = this._cloneExportMaterial(material);
+      if (!clone || typeof clone !== 'object') return clone;
+      try { clone.color?.set?.(0x000000); } catch { /* ignore */ }
+      try { clone.emissive?.set?.(0x000000); } catch { /* ignore */ }
+      try {
+        if ('toneMapped' in clone) clone.toneMapped = false;
+        if ('depthTest' in clone) clone.depthTest = false;
+        if ('depthWrite' in clone) clone.depthWrite = false;
+        if ('transparent' in clone) clone.transparent = true;
+        if ('opacity' in clone) clone.opacity = 1;
+        if ('dashed' in clone) clone.dashed = true;
+        if ('dashSize' in clone && !(Number.isFinite(clone.dashSize) && clone.dashSize > 0)) clone.dashSize = 0.5;
+        if ('gapSize' in clone && !(Number.isFinite(clone.gapSize) && clone.gapSize > 0)) clone.gapSize = 0.5;
+        if (clone.resolution && typeof clone.resolution.set === 'function') clone.resolution.set(width, height);
+      } catch { /* ignore */ }
+      return clone;
+    };
+    for (const obj of objects) {
+      if (!obj) continue;
+      if (Array.isArray(obj.material)) {
+        obj.material = obj.material.map(applyMaterial);
+      } else if (obj.material) {
+        obj.material = applyMaterial(obj.material);
+      }
+    }
+  }
+
+  _createExportRenderContext(viewport, view = null, options = {}) {
     const viewer = this.viewer;
     const sourceScene = viewer?.partHistory?.scene || viewer?.scene || null;
     const scene = this._cloneExportScene(sourceScene);
     if (!viewer || !scene) throw new Error('Viewer scene is not available for PMI export');
+    const renderMode = this._normalizeExportRenderMode(options?.renderMode, 'shaded');
+    const showCenterLines = options?.showCenterLines === true;
 
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -345,6 +418,8 @@ export class PMIViewsWidget {
       camera,
       renderer,
       viewport,
+      renderMode,
+      showCenterLines,
       dispose: () => {
         try {
           if (camera.parent === scene) scene.remove(camera);
@@ -535,6 +610,46 @@ export class PMIViewsWidget {
     return out;
   }
 
+  _collectExportCenterlineObjects(renderContext) {
+    const out = [];
+    const scene = renderContext?.scene || null;
+    if (!scene?.traverse) return out;
+    scene.traverse((obj) => {
+      if (!obj || obj.type !== 'EDGE') return;
+      if (!obj.userData?.auxEdge || !obj.userData?.centerline) return;
+      out.push(obj);
+    });
+    return out;
+  }
+
+  _captureTransparentOverlayDataUrl(renderContext) {
+    const renderer = renderContext?.renderer;
+    const scene = renderContext?.scene;
+    const camera = renderContext?.camera;
+    if (!renderer?.isWebGLRenderer || !scene || !camera) return null;
+
+    const oldTarget = typeof renderer.getRenderTarget === 'function' ? renderer.getRenderTarget() : null;
+    const oldClearColor = new THREE.Color();
+    renderer.getClearColor(oldClearColor);
+    const oldClearAlpha = renderer.getClearAlpha();
+    const oldAutoClear = renderer.autoClear;
+    const oldBackground = scene.background;
+
+    try {
+      scene.background = null;
+      renderer.autoClear = true;
+      renderer.setRenderTarget(oldTarget);
+      renderer.setClearColor(0x000000, 0);
+      renderer.clear(true, true, true);
+      renderer.render(scene, camera);
+      return renderer.domElement.toDataURL('image/png');
+    } finally {
+      scene.background = oldBackground;
+      renderer.setClearColor(oldClearColor, oldClearAlpha);
+      renderer.autoClear = oldAutoClear;
+    }
+  }
+
   _renderExportSolidFaceOutlineEdgeMask(renderContext, edgeMaskTarget, depthMaterial) {
     const renderer = renderContext?.renderer;
     const scene = renderContext?.scene;
@@ -644,6 +759,8 @@ export class PMIViewsWidget {
     if (!renderer?.isWebGLRenderer || !scene || !camera || !viewport) {
       throw new Error('PMI export renderer is not ready');
     }
+    const renderMode = this._normalizeExportRenderMode(renderContext?.renderMode, 'shaded');
+    const isMonochrome = renderMode === 'monochrome';
 
     this._updateViewportSensitiveRendering(viewport.width, viewport.height, viewer);
 
@@ -668,10 +785,14 @@ export class PMIViewsWidget {
       if (!hadParent) scene.add(camera);
 
       if (annotationGroup) annotationGroup.visible = false;
-      renderer.setRenderTarget(oldTarget);
-      renderer.clear?.(true, true, true);
-      renderer.render(scene, camera);
-      renderContext.baseImageDataUrl = renderer.domElement.toDataURL('image/png');
+      if (isMonochrome) {
+        renderContext.baseImageDataUrl = this._createTransparentImageDataUrl(viewport.width, viewport.height);
+      } else {
+        renderer.setRenderTarget(oldTarget);
+        renderer.clear?.(true, true, true);
+        renderer.render(scene, camera);
+        renderContext.baseImageDataUrl = renderer.domElement.toDataURL('image/png');
+      }
 
       try {
         const outputColorSpace = renderer.outputColorSpace;
@@ -685,11 +806,11 @@ export class PMIViewsWidget {
       try { this.viewer?._patchOutlinePassSolidOverlay?.(outlinePass); } catch { /* ignore */ }
 
       outlinePass.downSampleRatio = 1;
-      const edgeColor = CADmaterials?.EDGE?.BASE?.color;
+      const edgeColor = isMonochrome ? new THREE.Color(0x000000) : CADmaterials?.EDGE?.BASE?.color;
       if (edgeColor?.isColor) {
         outlinePass.visibleEdgeColor.copy(edgeColor);
       } else {
-        outlinePass.visibleEdgeColor.set(0x009dff);
+        outlinePass.visibleEdgeColor.set(isMonochrome ? 0x000000 : 0x009dff);
       }
       outlinePass.hiddenEdgeColor.set(0x000000);
       outlinePass.edgeGlow = 0;
@@ -707,7 +828,12 @@ export class PMIViewsWidget {
       outlinePass.setSize(viewport.width, viewport.height);
       outlinePass.renderToScreen = true;
 
-      this._renderExportSolidFaceOutlineEdgeMask(renderContext, edgeMaskTarget, depthMaterial);
+      renderer.setRenderTarget(edgeMaskTarget);
+      renderer.setClearColor(0x000000, 0);
+      renderer.clear(true, true, true);
+      if (!isMonochrome) {
+        this._renderExportSolidFaceOutlineEdgeMask(renderContext, edgeMaskTarget, depthMaterial);
+      }
       renderer.setRenderTarget(outlineReadBuffer);
       renderer.setClearColor(0x000000, 0);
       renderer.clear(true, true, true);
@@ -717,29 +843,21 @@ export class PMIViewsWidget {
       outlinePass.render(renderer, null, outlineReadBuffer, 0, false);
       renderContext.outlineImageDataUrl = renderer.domElement.toDataURL('image/png');
 
-      if (annotationGroup) {
-        const oldClearColor = new THREE.Color();
-        renderer.getClearColor(oldClearColor);
-        const oldClearAlpha = renderer.getClearAlpha();
-        const oldAutoClear = renderer.autoClear;
-        const oldBackground = scene.background;
+      if (this._shouldRenderMonochromeCenterLines(renderContext)) {
+        const centerlineObjects = this._collectExportCenterlineObjects(renderContext);
+        if (centerlineObjects.length) {
+          const centerlineSet = new Set(centerlineObjects);
+          this._restoreSceneVisibility(originalVisibility);
+          this._applyMonochromeCenterlineStyle(centerlineObjects, renderContext);
+          this._applyRenderableVisibility(scene, originalVisibility, (obj) => centerlineSet.has(obj));
+          renderContext.centerlineImageDataUrl = this._captureTransparentOverlayDataUrl(renderContext);
+        }
+      }
 
+      if (annotationGroup) {
         this._restoreSceneVisibility(originalVisibility);
         this._applyRenderableVisibility(scene, originalVisibility, (obj) => this._isObjectWithinGroup(obj, annotationGroup));
-
-        try {
-          scene.background = null;
-          renderer.autoClear = true;
-          renderer.setRenderTarget(oldTarget);
-          renderer.setClearColor(0x000000, 0);
-          renderer.clear(true, true, true);
-          renderer.render(scene, camera);
-          renderContext.annotationImageDataUrl = renderer.domElement.toDataURL('image/png');
-        } finally {
-          scene.background = oldBackground;
-          renderer.setClearColor(oldClearColor, oldClearAlpha);
-          renderer.autoClear = oldAutoClear;
-        }
+        renderContext.annotationImageDataUrl = this._captureTransparentOverlayDataUrl(renderContext);
       }
     } finally {
       try {
@@ -760,13 +878,13 @@ export class PMIViewsWidget {
     }
   }
 
-  async captureViewImageDataUrl(view, viewIndex, { hideViewCube = true } = {}) {
+  async captureViewImageDataUrl(view, viewIndex, { hideViewCube = true, renderMode = 'shaded', showCenterLines = false } = {}) {
     const viewer = this.viewer;
     if (!viewer) throw new Error('Viewer is not ready to export images');
 
     const captureViewport = this._getCaptureViewportMetrics(view);
     const originalWireframe = this._detectWireframe(viewer.scene);
-    const renderContext = this._createExportRenderContext(captureViewport, view);
+    const renderContext = this._createExportRenderContext(captureViewport, view, { renderMode, showCenterLines });
 
     let dataUrl = null;
     const runCapture = async () => {
@@ -1322,6 +1440,10 @@ export class PMIViewsWidget {
       }
     }
 
+    if (this._isMonochromeExport(renderContext)) {
+      this._applyMonochromeAnnotationStyle(group);
+    }
+
     const cleanupFn = () => {
       try { scene.remove(group); } catch { /* ignore */ }
       try {
@@ -1347,6 +1469,7 @@ export class PMIViewsWidget {
     let baseData = renderContext?.baseImageDataUrl || canvas.toDataURL('image/png');
     const overlayLayers = [
       renderContext?.outlineImageDataUrl || null,
+      renderContext?.centerlineImageDataUrl || null,
       renderContext?.annotationImageDataUrl || null,
     ].filter(Boolean);
     if (renderContext?.baseImageDataUrl && overlayLayers.length) {
@@ -1491,6 +1614,7 @@ export class PMIViewsWidget {
   _composeLabelSVG(baseImage, labels, width, height, cssWidth = null, renderContext = null) {
     if (!baseImage) throw new Error('Base image missing for SVG composition');
     const camera = renderContext?.viewer?.camera || this.viewer?.camera;
+    const isMonochrome = this._isMonochromeExport(renderContext);
     const safeCssWidth = Math.max(1, cssWidth || width);
     const dpr = Math.max(1, width / safeCssWidth);
     const paddingX = 8 * dpr;
@@ -1520,8 +1644,10 @@ export class PMIViewsWidget {
     }
 
     const escape = (s) => this._escapeXML(String(s));
-    const rects = layout.map(({ x, y, boxWidth, boxHeight }) =>
-      `<rect x="${x.toFixed(3)}" y="${y.toFixed(3)}" rx="${radius}" ry="${radius}" width="${boxWidth.toFixed(3)}" height="${boxHeight.toFixed(3)}" fill="rgba(17,24,39,0.92)" stroke="#111827" stroke-width="1"/>`).join('');
+    const rects = isMonochrome
+      ? ''
+      : layout.map(({ x, y, boxWidth, boxHeight }) =>
+        `<rect x="${x.toFixed(3)}" y="${y.toFixed(3)}" rx="${radius}" ry="${radius}" width="${boxWidth.toFixed(3)}" height="${boxHeight.toFixed(3)}" fill="rgba(17,24,39,0.92)" stroke="#111827" stroke-width="1"/>`).join('');
 
     const texts = layout.map(({ x, y, lines }) => {
       const parts = [];
@@ -1529,7 +1655,7 @@ export class PMIViewsWidget {
       const textX = x + paddingX;
       lines.forEach((line, idx) => {
         const ty = startY + lineHeight * idx;
-        parts.push(`<text x="${textX.toFixed(3)}" y="${ty.toFixed(3)}" font-family="${escape(fontFamily)}" font-size="${fontSize}" font-weight="700" fill="#ffffff" dominant-baseline="middle">${escape(line)}</text>`);
+        parts.push(`<text x="${textX.toFixed(3)}" y="${ty.toFixed(3)}" font-family="${escape(fontFamily)}" font-size="${fontSize}" font-weight="${isMonochrome ? '600' : '700'}" fill="${isMonochrome ? '#000000' : '#ffffff'}" dominant-baseline="middle">${escape(line)}</text>`);
       });
       return parts.join('');
     }).join('');
