@@ -4,10 +4,9 @@
 // Views are persisted with the PartHistory instance.
 
 import * as THREE from 'three';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { AnnotationHistory } from './AnnotationHistory.js';
+import { CADmaterials } from '../CADmaterials.js';
 import { adjustOrthographicFrustum, applyCameraSnapshot, captureCameraSnapshot } from './annUtils.js';
 
 const UPDATE_CAMERA_TOOLTIP = 'Update this view to match the current camera';
@@ -156,14 +155,24 @@ export class PMIViewsWidget {
     }
   }
 
+  _cameraChildContainsLight(node) {
+    if (!node) return false;
+    if (node.isLight) return true;
+    const children = Array.isArray(node.children) ? node.children : [];
+    return children.some((child) => this._cameraChildContainsLight(child));
+  }
+
   _cloneCameraLightChildren(sourceCamera, targetCamera) {
     if (!sourceCamera || !targetCamera) return;
-    const targetHasLights = Array.isArray(targetCamera.children)
-      && targetCamera.children.some((child) => child?.isLight);
-    if (targetHasLights) return;
-    const children = Array.isArray(sourceCamera.children) ? sourceCamera.children : [];
-    for (const child of children) {
-      if (!child?.isLight) continue;
+    const existingChildren = Array.isArray(targetCamera.children) ? targetCamera.children.slice() : [];
+    for (const child of existingChildren) {
+      if (!this._cameraChildContainsLight(child)) continue;
+      try { targetCamera.remove(child); } catch { /* ignore remove failures */ }
+    }
+
+    const sourceChildren = Array.isArray(sourceCamera.children) ? sourceCamera.children : [];
+    for (const child of sourceChildren) {
+      if (!this._cameraChildContainsLight(child)) continue;
       try { targetCamera.add(child.clone(true)); } catch { /* ignore clone failures */ }
     }
   }
@@ -206,9 +215,76 @@ export class PMIViewsWidget {
     return camera;
   }
 
+  _copyRendererState(sourceRenderer, targetRenderer) {
+    if (!sourceRenderer || !targetRenderer) return;
+    try {
+      if ('outputColorSpace' in sourceRenderer && 'outputColorSpace' in targetRenderer) {
+        targetRenderer.outputColorSpace = sourceRenderer.outputColorSpace;
+      }
+    } catch { /* ignore */ }
+    try {
+      if ('toneMapping' in sourceRenderer && 'toneMapping' in targetRenderer) {
+        targetRenderer.toneMapping = sourceRenderer.toneMapping;
+      }
+      if ('toneMappingExposure' in sourceRenderer && 'toneMappingExposure' in targetRenderer) {
+        targetRenderer.toneMappingExposure = sourceRenderer.toneMappingExposure;
+      }
+    } catch { /* ignore */ }
+    try {
+      if ('sortObjects' in sourceRenderer && 'sortObjects' in targetRenderer) {
+        targetRenderer.sortObjects = sourceRenderer.sortObjects;
+      }
+      if ('autoClear' in sourceRenderer && 'autoClear' in targetRenderer) {
+        targetRenderer.autoClear = sourceRenderer.autoClear;
+      }
+      if ('localClippingEnabled' in sourceRenderer && 'localClippingEnabled' in targetRenderer) {
+        targetRenderer.localClippingEnabled = sourceRenderer.localClippingEnabled;
+      }
+    } catch { /* ignore */ }
+    try {
+      const srcShadowMap = sourceRenderer.shadowMap;
+      const dstShadowMap = targetRenderer.shadowMap;
+      if (srcShadowMap && dstShadowMap) {
+        if ('enabled' in srcShadowMap) dstShadowMap.enabled = srcShadowMap.enabled;
+        if ('autoUpdate' in srcShadowMap) dstShadowMap.autoUpdate = srcShadowMap.autoUpdate;
+        if ('needsUpdate' in srcShadowMap) dstShadowMap.needsUpdate = srcShadowMap.needsUpdate;
+        if ('type' in srcShadowMap) dstShadowMap.type = srcShadowMap.type;
+      }
+    } catch { /* ignore */ }
+  }
+
+  _updateExportCameraLightRig(renderContext) {
+    const sourceRig = this.viewer?._cameraLightRig || null;
+    const camera = renderContext?.camera || null;
+    const viewport = renderContext?.viewport || null;
+    if (!sourceRig || !camera || !viewport) return;
+
+    const pointLights = (Array.isArray(camera.children) ? camera.children : [])
+      .filter((child) => child?.isPointLight);
+    const lightDirections = Array.isArray(sourceRig.lightDirections) ? sourceRig.lightDirections : [];
+    const baseLightRadius = Number(sourceRig.baseLightRadius) || 15;
+    if (!pointLights.length || !lightDirections.length) return;
+
+    const width = Math.max(1, Number(viewport.width) || 1);
+    const height = Math.max(1, Number(viewport.height) || 1);
+    const wpp = this._worldPerPixel(camera, width, height);
+    const screenDiagonal = Math.sqrt(width * width + height * height);
+    const radius = Math.max(baseLightRadius, wpp * screenDiagonal * 1.4);
+
+    pointLights.forEach((light, idx) => {
+      const dir = lightDirections[idx] || lightDirections[lightDirections.length - 1] || [0, 0, 0];
+      light.position.set(
+        Number(dir[0]) * radius,
+        Number(dir[1]) * radius,
+        Number(dir[2]) * radius,
+      );
+    });
+  }
+
   _createExportRenderContext(viewport, view = null) {
     const viewer = this.viewer;
-    const scene = viewer?.partHistory?.scene || viewer?.scene || null;
+    const sourceScene = viewer?.partHistory?.scene || viewer?.scene || null;
+    const scene = this._cloneExportScene(sourceScene);
     if (!viewer || !scene) throw new Error('Viewer scene is not available for PMI export');
 
     const renderer = new THREE.WebGLRenderer({
@@ -218,6 +294,7 @@ export class PMIViewsWidget {
     });
     renderer.setPixelRatio(1);
     renderer.setSize(viewport.width, viewport.height, false);
+    this._copyRendererState(viewer?.renderer || null, renderer);
     const clearColor = viewer?._clearColor instanceof THREE.Color
       ? viewer._clearColor
       : new THREE.Color(0x000000);
@@ -251,8 +328,11 @@ export class PMIViewsWidget {
     });
 
     const camera = this._createExportCamera(view, viewport);
+    const exportPartHistory = viewer?.partHistory
+      ? Object.assign(Object.create(Object.getPrototypeOf(viewer.partHistory)), viewer.partHistory, { scene })
+      : { scene };
     const exportViewer = {
-      partHistory: viewer.partHistory,
+      partHistory: exportPartHistory,
       scene,
       camera,
       renderer,
@@ -269,9 +349,147 @@ export class PMIViewsWidget {
         try {
           if (camera.parent === scene) scene.remove(camera);
         } catch { /* ignore */ }
+        try { this._disposeExportScene(scene); } catch { /* ignore */ }
         try { renderer.dispose(); } catch { /* ignore */ }
       },
     };
+  }
+
+  _cloneExportScene(scene) {
+    if (!scene) return null;
+    try {
+      const clonedScene = this._cloneExportNode(scene, null);
+      try { clonedScene.updateMatrixWorld(true); } catch { /* ignore */ }
+      return clonedScene;
+    } catch (error) {
+      console.warn('PMI export scene clone failed; falling back to live scene', error);
+      return scene;
+    }
+  }
+
+  _cloneExportNode(source, owningSolid = null) {
+    if (!source) return null;
+    if (source.name === '__WORLD_AXES__') return null;
+
+    let target = null;
+    if (source.isScene) {
+      target = new THREE.Scene();
+      target.copy(source, false);
+    } else if (source?.type === 'SOLID') {
+      try {
+        target = source.clone();
+        target.copy?.(source, false);
+      } catch {
+        target = new THREE.Group();
+        target.copy?.(source, false);
+        target.type = 'SOLID';
+      }
+    } else if (typeof source.clone === 'function') {
+      target = source.clone(false);
+    } else {
+      target = new THREE.Object3D();
+      target.copy?.(source, false);
+    }
+
+    const srcUserData = (source.userData && typeof source.userData === 'object') ? source.userData : {};
+    target.userData = { ...srcUserData };
+    target.userData.__pmiExportSourceUuid = source.uuid || null;
+    target.userData.__pmiExportSourceId = Number.isInteger(source.id) ? source.id : null;
+    target.userData.__pmiExportSourceName = String(source.name || '');
+
+    if (source.material) {
+      target.material = this._cloneExportMaterial(source.material);
+    }
+
+    const solidForChildren = source?.type === 'SOLID' ? target : owningSolid;
+    if (target?.type === 'FACE' || target?.type === 'EDGE') {
+      target.parentSolid = solidForChildren || null;
+    }
+
+    if (Array.isArray(target.children) && target.children.length) {
+      for (const child of target.children.slice()) {
+        try { target.remove(child); } catch { /* ignore */ }
+      }
+    }
+
+    const sourceChildren = Array.isArray(source.children) ? source.children : [];
+    for (const sourceChild of sourceChildren) {
+      const targetChild = this._cloneExportNode(sourceChild, solidForChildren);
+      if (!targetChild) continue;
+      target.add(targetChild);
+    }
+
+    if (source?.type === 'SOLID') {
+      this._relinkExportSolidTopology(source, target);
+    }
+    return target;
+  }
+
+  _relinkExportSolidTopology(sourceSolid, targetSolid) {
+    if (!sourceSolid?.traverse || !targetSolid?.traverse) return;
+    const sourceByUuid = new Map();
+    const targetBySourceUuid = new Map();
+
+    sourceSolid.traverse((obj) => {
+      if (!obj?.uuid) return;
+      sourceByUuid.set(obj.uuid, obj);
+    });
+    targetSolid.traverse((obj) => {
+      const sourceUuid = obj?.userData?.__pmiExportSourceUuid;
+      if (!sourceUuid) return;
+      targetBySourceUuid.set(sourceUuid, obj);
+    });
+
+    targetSolid.traverse((obj) => {
+      const sourceUuid = obj?.userData?.__pmiExportSourceUuid;
+      const sourceObj = sourceUuid ? sourceByUuid.get(sourceUuid) : null;
+      if (!sourceObj) return;
+
+      if (obj.type === 'FACE') {
+        obj.parentSolid = targetSolid;
+        obj.edges = Array.isArray(sourceObj.edges)
+          ? sourceObj.edges.map((edge) => targetBySourceUuid.get(edge?.uuid)).filter(Boolean)
+          : [];
+      } else if (obj.type === 'EDGE') {
+        obj.parentSolid = targetSolid;
+        obj.faces = Array.isArray(sourceObj.faces)
+          ? sourceObj.faces.map((face) => targetBySourceUuid.get(face?.uuid)).filter(Boolean)
+          : [];
+      }
+    });
+  }
+
+  _cloneExportMaterial(material) {
+    if (Array.isArray(material)) {
+      return material.map((entry) => this._cloneExportMaterial(entry));
+    }
+    if (!material) return material;
+    try {
+      const clone = material.clone?.() || material;
+      if (clone && typeof clone === 'object') {
+        clone.userData = {
+          ...(clone.userData && typeof clone.userData === 'object' ? clone.userData : {}),
+          __pmiExportClonedMaterial: true,
+        };
+      }
+      return clone;
+    } catch {
+      return material;
+    }
+  }
+
+  _disposeExportScene(scene) {
+    if (!scene?.traverse) return;
+    scene.traverse((obj) => {
+      const material = obj?.material;
+      if (!material) return;
+      const disposeMaterial = (entry) => {
+        if (!entry?.userData?.__pmiExportClonedMaterial) return;
+        try { entry.dispose?.(); } catch { /* ignore */ }
+      };
+      if (Array.isArray(material)) material.forEach(disposeMaterial);
+      else disposeMaterial(material);
+    });
   }
 
   _setDescendantLightVisibility(root, visible) {
@@ -293,11 +511,17 @@ export class PMIViewsWidget {
     }
   }
 
+  _setNonExportCameraLightsVisible(scene, exportCamera, visible) {
+    const prior = [];
+    if (!scene?.traverse) return prior;
+    scene.traverse((obj) => {
+      if (!obj?.isCamera || obj === exportCamera) return;
+      prior.push(...this._setDescendantLightVisibility(obj, visible));
+    });
+    return prior;
+  }
+
   _collectExportFaceOutlineObjects(renderContext) {
-    const viewer = this.viewer;
-    if (viewer && typeof viewer._collectSolidFaceOutlineObjects === 'function') {
-      try { return viewer._collectSolidFaceOutlineObjects(); } catch { /* ignore */ }
-    }
     const out = [];
     const scene = renderContext?.scene || null;
     if (!scene?.traverse) return out;
@@ -376,6 +600,45 @@ export class PMIViewsWidget {
     }
   }
 
+  _snapshotSceneVisibility(scene) {
+    const originalVisibility = new Map();
+    scene?.traverse?.((obj) => {
+      if (obj) originalVisibility.set(obj, obj.visible !== false);
+    });
+    return originalVisibility;
+  }
+
+  _restoreSceneVisibility(originalVisibility) {
+    originalVisibility?.forEach?.((visible, obj) => {
+      if (obj) obj.visible = visible;
+    });
+  }
+
+  _isObjectWithinGroup(obj, group) {
+    let current = obj;
+    while (current) {
+      if (current === group) return true;
+      current = current.parent;
+    }
+    return false;
+  }
+
+  _applyRenderableVisibility(scene, originalVisibility, predicate) {
+    scene?.traverse?.((obj) => {
+      if (!obj) return;
+      const baseVisible = originalVisibility.get(obj) !== false;
+      if (!baseVisible) {
+        obj.visible = false;
+        return;
+      }
+      if (obj.isMesh || obj.isLine || obj.isLine2 || obj.isLineSegments || obj.isLineLoop || obj.isPoints || obj.isSprite) {
+        obj.visible = !!predicate(obj);
+        return;
+      }
+      obj.visible = true;
+    });
+  }
+
   _renderExportScene(renderContext) {
     const { viewer, renderer, scene, camera, viewport } = renderContext || {};
     if (!renderer?.isWebGLRenderer || !scene || !camera || !viewport) {
@@ -384,14 +647,15 @@ export class PMIViewsWidget {
 
     this._updateViewportSensitiveRendering(viewport.width, viewport.height, viewer);
 
-    const liveCamera = this.viewer?.camera || null;
-    const liveLightStates = this._setDescendantLightVisibility(liveCamera, false);
+    const sceneCameraLightStates = this._setNonExportCameraLightsVisible(scene, camera, false);
     const exportLightStates = this._setDescendantLightVisibility(camera, true);
     const hadParent = camera.parent === scene;
+    const oldTarget = typeof renderer.getRenderTarget === 'function' ? renderer.getRenderTarget() : null;
+    const annotationGroup = renderContext?.annotationGroup || null;
+    const originalVisibility = this._snapshotSceneVisibility(scene);
 
-    const composer = new EffectComposer(renderer);
-    const renderPass = new RenderPass(scene, camera);
     const outlinePass = new OutlinePass(new THREE.Vector2(viewport.width, viewport.height), scene, camera, []);
+    const outlineReadBuffer = new THREE.WebGLRenderTarget(viewport.width, viewport.height);
     const edgeMaskTarget = new THREE.WebGLRenderTarget(viewport.width, viewport.height);
     const depthMaterial = new THREE.MeshDepthMaterial();
     depthMaterial.side = THREE.DoubleSide;
@@ -403,48 +667,89 @@ export class PMIViewsWidget {
     try {
       if (!hadParent) scene.add(camera);
 
+      if (annotationGroup) annotationGroup.visible = false;
+      renderer.setRenderTarget(oldTarget);
+      renderer.clear?.(true, true, true);
+      renderer.render(scene, camera);
+      renderContext.baseImageDataUrl = renderer.domElement.toDataURL('image/png');
+
+      try {
+        const outputColorSpace = renderer.outputColorSpace;
+        if (outlineReadBuffer?.texture && outputColorSpace) {
+          outlineReadBuffer.texture.colorSpace = outputColorSpace;
+        }
+      } catch { /* ignore */ }
+
       try { this.viewer?._patchOutlinePassHiddenEdgeAlpha?.(outlinePass); } catch { /* ignore */ }
       try { this.viewer?._patchOutlinePassPerFaceRendering?.(outlinePass); } catch { /* ignore */ }
       try { this.viewer?._patchOutlinePassSolidOverlay?.(outlinePass); } catch { /* ignore */ }
 
       outlinePass.downSampleRatio = 1;
-      const liveOutlinePass = this.viewer?._solidFaceOutlinePass || null;
-      if (liveOutlinePass?.visibleEdgeColor?.isColor) {
-        outlinePass.visibleEdgeColor.copy(liveOutlinePass.visibleEdgeColor);
+      const edgeColor = CADmaterials?.EDGE?.BASE?.color;
+      if (edgeColor?.isColor) {
+        outlinePass.visibleEdgeColor.copy(edgeColor);
       } else {
-        outlinePass.visibleEdgeColor.set(0xffff00);
+        outlinePass.visibleEdgeColor.set(0x009dff);
       }
       outlinePass.hiddenEdgeColor.set(0x000000);
       outlinePass.edgeGlow = 0;
-      outlinePass.edgeThickness = Number.isFinite(liveOutlinePass?.edgeThickness)
-        ? liveOutlinePass.edgeThickness
+      const edgeLineWidth = Number(CADmaterials?.EDGE?.BASE?.linewidth);
+      outlinePass.edgeThickness = Number.isFinite(edgeLineWidth) && edgeLineWidth > 0
+        ? edgeLineWidth * 0.5
         : 1;
-      outlinePass.edgeStrength = Number.isFinite(liveOutlinePass?.edgeStrength)
-        ? liveOutlinePass.edgeStrength
-        : 3;
+      outlinePass.edgeStrength = 3;
       outlinePass.selectedObjects = this._collectExportFaceOutlineObjects(renderContext);
 
       if (outlinePass.overlayMaterial?.uniforms?.edgeMaskTexture) {
         outlinePass.overlayMaterial.uniforms.edgeMaskTexture.value = edgeMaskTarget.texture;
       }
 
-      composer.addPass(renderPass);
-      composer.addPass(outlinePass);
-      if (typeof composer.setPixelRatio === 'function') composer.setPixelRatio(1);
-      composer.setSize(viewport.width, viewport.height);
       outlinePass.setSize(viewport.width, viewport.height);
+      outlinePass.renderToScreen = true;
 
       this._renderExportSolidFaceOutlineEdgeMask(renderContext, edgeMaskTarget, depthMaterial);
-      composer.render();
+      renderer.setRenderTarget(outlineReadBuffer);
+      renderer.setClearColor(0x000000, 0);
+      renderer.clear(true, true, true);
+      renderer.setRenderTarget(null);
+      renderer.setClearColor(0x000000, 0);
+      renderer.clear(true, true, true);
+      outlinePass.render(renderer, null, outlineReadBuffer, 0, false);
+      renderContext.outlineImageDataUrl = renderer.domElement.toDataURL('image/png');
+
+      if (annotationGroup) {
+        const oldClearColor = new THREE.Color();
+        renderer.getClearColor(oldClearColor);
+        const oldClearAlpha = renderer.getClearAlpha();
+        const oldAutoClear = renderer.autoClear;
+        const oldBackground = scene.background;
+
+        this._restoreSceneVisibility(originalVisibility);
+        this._applyRenderableVisibility(scene, originalVisibility, (obj) => this._isObjectWithinGroup(obj, annotationGroup));
+
+        try {
+          scene.background = null;
+          renderer.autoClear = true;
+          renderer.setRenderTarget(oldTarget);
+          renderer.setClearColor(0x000000, 0);
+          renderer.clear(true, true, true);
+          renderer.render(scene, camera);
+          renderContext.annotationImageDataUrl = renderer.domElement.toDataURL('image/png');
+        } finally {
+          scene.background = oldBackground;
+          renderer.setClearColor(oldClearColor, oldClearAlpha);
+          renderer.autoClear = oldAutoClear;
+        }
+      }
     } finally {
       try {
         if (!hadParent && camera.parent === scene) scene.remove(camera);
       } catch { /* ignore */ }
+      this._restoreSceneVisibility(originalVisibility);
       this._restoreLightVisibility(exportLightStates);
-      this._restoreLightVisibility(liveLightStates);
-      try { composer.dispose?.(); } catch { /* ignore */ }
+      this._restoreLightVisibility(sceneCameraLightStates);
       try { outlinePass.dispose?.(); } catch { /* ignore */ }
-      try { renderPass.dispose?.(); } catch { /* ignore */ }
+      try { outlineReadBuffer.dispose?.(); } catch { /* ignore */ }
       try { edgeMaskTarget.dispose?.(); } catch { /* ignore */ }
       try { depthMaterial.dispose?.(); } catch { /* ignore */ }
       this._updateViewportSensitiveRendering(
@@ -944,6 +1249,7 @@ export class PMIViewsWidget {
       adjustOrthographicFrustum(camera, view.camera?.projection || null, viewport);
       try { camera.updateProjectionMatrix?.(); } catch { /* ignore */ }
       try { camera.updateMatrixWorld?.(true); } catch { /* ignore */ }
+      try { this._updateExportCameraLightRig(renderContext); } catch { /* ignore */ }
 
       try {
         const vs = view.viewSettings || {};
@@ -981,6 +1287,9 @@ export class PMIViewsWidget {
     group.name = '__PMI_EXPORT_ANN__';
     group.renderOrder = 9994;
     scene.add(group);
+    if (renderContext && typeof renderContext === 'object') {
+      renderContext.annotationGroup = group;
+    }
 
     const labels = [];
     const ctx = {
@@ -1002,15 +1311,28 @@ export class PMIViewsWidget {
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
       if (!entry || typeof entry.run !== 'function' || entry.enabled === false) continue;
-      await entry.run({ pmimode, group, idx: i, ctx });
-    }
-
-    if (entries.length && labels.length === 0) {
-      throw new Error('Annotation export produced no labels');
+      try {
+        await entry.run({ pmimode, group, idx: i, ctx });
+      } catch (error) {
+        console.warn('PMI export skipped annotation render failure', {
+          view: this._resolveViewName(view, 0),
+          annotationType: entry?.type || entry?.inputParams?.type || 'unknown',
+          error,
+        });
+      }
     }
 
     const cleanupFn = () => {
-      try { scene.remove(group); } catch { }
+      try { scene.remove(group); } catch { /* ignore */ }
+      try {
+        for (let i = group.children.length - 1; i >= 0; i -= 1) {
+          const child = group.children[i];
+          group.remove(child);
+          child.geometry?.dispose?.();
+          if (Array.isArray(child.material)) child.material.forEach((mat) => mat?.dispose?.());
+          else child.material?.dispose?.();
+        }
+      } catch { /* ignore */ }
     };
     return { labels: labels.filter(Boolean), cleanup: cleanupFn };
   }
@@ -1022,7 +1344,18 @@ export class PMIViewsWidget {
     if (!canvas || !camera) throw new Error('Renderer not ready for capture');
     const width = canvas.width || canvas.clientWidth || 1;
     const height = canvas.height || canvas.clientHeight || 1;
-    const baseData = canvas.toDataURL('image/png');
+    let baseData = renderContext?.baseImageDataUrl || canvas.toDataURL('image/png');
+    const overlayLayers = [
+      renderContext?.outlineImageDataUrl || null,
+      renderContext?.annotationImageDataUrl || null,
+    ].filter(Boolean);
+    if (renderContext?.baseImageDataUrl && overlayLayers.length) {
+      try {
+        baseData = await this._composeImageLayers(renderContext.baseImageDataUrl, ...overlayLayers);
+      } catch {
+        baseData = renderContext.baseImageDataUrl;
+      }
+    }
     if (!Array.isArray(labels) || labels.length === 0) return baseData;
 
     const cssWidth = canvas.clientWidth || width;
@@ -1241,6 +1574,40 @@ export class PMIViewsWidget {
     } finally {
       try { URL.revokeObjectURL(url); } catch { }
     }
+  }
+
+  async _composeImageLayers(baseDataUrl, ...overlayDataUrls) {
+    const dataUrls = [baseDataUrl, ...overlayDataUrls.filter(Boolean)];
+    const images = await Promise.all(dataUrls.map((dataUrl) => this._loadImageFromDataUrl(dataUrl)));
+    const [baseImage, ...overlayImages] = images;
+    const width = Math.max(
+      1,
+      ...images.map((image) => image.naturalWidth || image.width || 1),
+    );
+    const height = Math.max(
+      1,
+      ...images.map((image) => image.naturalHeight || image.height || 1),
+    );
+
+    const outputCanvas = document.createElement('canvas');
+    outputCanvas.width = width;
+    outputCanvas.height = height;
+    const outputCtx = outputCanvas.getContext('2d');
+    if (!outputCtx) return baseDataUrl;
+    outputCtx.drawImage(baseImage, 0, 0, width, height);
+    for (const overlayImage of overlayImages) {
+      outputCtx.drawImage(overlayImage, 0, 0, width, height);
+    }
+    return outputCanvas.toDataURL('image/png');
+  }
+
+  _loadImageFromDataUrl(dataUrl) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = (error) => reject(error || new Error('Failed to load image data URL'));
+      img.src = dataUrl;
+    });
   }
 
   _escapeXML(str) {

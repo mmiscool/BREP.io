@@ -312,6 +312,8 @@ function resolveSolidObject(ref, scene) {
   if (typeof info.uuid === 'string') {
     const obj = scene.getObjectByProperty('uuid', info.uuid);
     if (obj) return obj;
+    const bySourceUuid = findExportCloneMatch(scene, (candidate) => candidate?.userData?.__pmiExportSourceUuid === info.uuid);
+    if (bySourceUuid) return bySourceUuid;
   }
 
   if (Number.isInteger(info.id)) {
@@ -321,9 +323,25 @@ function resolveSolidObject(ref, scene) {
     } catch {
       /* ignore */
     }
+    const bySourceId = findExportCloneMatch(scene, (candidate) => candidate?.userData?.__pmiExportSourceId === info.id);
+    if (bySourceId) return bySourceId;
   }
 
   return null;
+}
+
+function findExportCloneMatch(scene, predicate) {
+  if (!scene?.traverse || typeof predicate !== 'function') return null;
+  let match = null;
+  scene.traverse((candidate) => {
+    if (match || !candidate?.isObject3D) return;
+    try {
+      if (predicate(candidate)) match = candidate;
+    } catch {
+      /* ignore */
+    }
+  });
+  return match;
 }
 
 function captureSnapshot(object, _viewer = null) {
