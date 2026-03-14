@@ -326,6 +326,8 @@ export class PMIViewsWidget {
     const viewport = renderContext?.viewport || {};
     const width = Math.max(1, Number(viewport.width) || 1);
     const height = Math.max(1, Number(viewport.height) || 1);
+    const dashSizePx = 10;
+    const gapSizePx = 8;
     const applyMaterial = (material) => {
       const clone = this._cloneExportMaterial(material);
       if (!clone || typeof clone !== 'object') return clone;
@@ -338,8 +340,10 @@ export class PMIViewsWidget {
         if ('transparent' in clone) clone.transparent = true;
         if ('opacity' in clone) clone.opacity = 1;
         if ('dashed' in clone) clone.dashed = true;
-        if ('dashSize' in clone && !(Number.isFinite(clone.dashSize) && clone.dashSize > 0)) clone.dashSize = 0.5;
-        if ('gapSize' in clone && !(Number.isFinite(clone.gapSize) && clone.gapSize > 0)) clone.gapSize = 0.5;
+        if ('dashSize' in clone) clone.dashSize = dashSizePx;
+        if ('gapSize' in clone) clone.gapSize = gapSizePx;
+        if ('dashScale' in clone) clone.dashScale = 1;
+        clone.needsUpdate = true;
         if (clone.resolution && typeof clone.resolution.set === 'function') clone.resolution.set(width, height);
       } catch { /* ignore */ }
       return clone;
@@ -351,6 +355,7 @@ export class PMIViewsWidget {
       } else if (obj.material) {
         obj.material = applyMaterial(obj.material);
       }
+      try { obj.computeLineDistances?.(); } catch { /* ignore */ }
     }
   }
 

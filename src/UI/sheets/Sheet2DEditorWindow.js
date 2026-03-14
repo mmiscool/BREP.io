@@ -5493,6 +5493,507 @@ export class Sheet2DEditorWindow {
     return canvas;
   }
 
+  _isSvgImageDataUrl(source) {
+    return /^data:image\/svg\+xml/i.test(String(source || "").trim());
+  }
+
+  _decodeSvgDataUrl(source) {
+    const src = String(source || "").trim();
+    if (!src) return null;
+    const match = src.match(/^data:image\/svg\+xml(?:;charset=[^;,]+)?(?:;(base64))?,([\s\S]*)$/i);
+    if (!match) return null;
+    const [, base64Flag, payload = ""] = match;
+    try {
+      if (base64Flag) {
+        const decoder = globalThis?.atob;
+        if (typeof decoder !== "function") return null;
+        return decoder(payload);
+      }
+      return decodeURIComponent(payload);
+    } catch {
+      return null;
+    }
+  }
+
+  _parseSvgDataUrl(source) {
+    const markup = this._decodeSvgDataUrl(source);
+    if (!markup || typeof DOMParser === "undefined") return null;
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(markup, "image/svg+xml");
+      if (doc.querySelector("parsererror")) return null;
+      const root = doc.documentElement;
+      if (!root || String(root.tagName || "").toLowerCase() !== "svg") return doc.querySelector("svg");
+      return root;
+    } catch {
+      return null;
+    }
+  }
+
+  _parseSvgNumber(value, fallback = Number.NaN) {
+    const text = String(value ?? "").trim();
+    if (!text) return fallback;
+    const match = text.match(/-?\d*\.?\d+(?:e[-+]?\d+)?/i);
+    if (!match) return fallback;
+    const parsed = Number.parseFloat(match[0]);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  _parseSvgNumberList(value) {
+    return String(value ?? "")
+      .trim()
+      .split(/[\s,]+/u)
+      .map((entry) => Number.parseFloat(entry))
+      .filter((entry) => Number.isFinite(entry));
+  }
+
+  _parseSvgStyleString(value) {
+    const out = {};
+    const parts = String(value || "").split(";");
+    for (const part of parts) {
+      const [rawKey, ...rawValue] = String(part || "").split(":");
+      const key = String(rawKey || "").trim().toLowerCase();
+      if (!key) continue;
+      out[key] = rawValue.join(":").trim();
+    }
+    return out;
+  }
+
+  _getSvgNodeStyle(node, inherited = null) {
+    const style = inherited ? { ...inherited } : {};
+    Object.assign(style, this._parseSvgStyleString(node?.getAttribute?.("style") || ""));
+    const attrNames = [
+      "fill",
+      "fill-opacity",
+      "stroke",
+      "stroke-opacity",
+      "stroke-width",
+      "stroke-dasharray",
+      "stroke-linecap",
+      "stroke-linejoin",
+      "opacity",
+      "font-size",
+      "font-family",
+      "font-weight",
+      "font-style",
+      "text-anchor",
+      "dominant-baseline",
+      "vector-effect",
+    ];
+    for (const name of attrNames) {
+      const value = node?.getAttribute?.(name);
+      if (value != null && String(value).trim() !== "") {
+        style[name] = String(value).trim();
+      }
+    }
+    return style;
+  }
+
+  _parseSvgViewBox(svgNode, metadata = null) {
+    const values = this._parseSvgNumberList(svgNode?.getAttribute?.("viewBox") || "");
+    if (values.length >= 4 && values[2] > 0 && values[3] > 0) {
+      return { x: values[0], y: values[1], width: values[2], height: values[3] };
+    }
+    const width = this._parseSvgNumber(svgNode?.getAttribute?.("width"), toFiniteNumber(metadata?.width, 0));
+    const height = this._parseSvgNumber(svgNode?.getAttribute?.("height"), toFiniteNumber(metadata?.height, 0));
+    if (width > 0 && height > 0) {
+      return { x: 0, y: 0, width, height };
+    }
+    return null;
+  }
+
+  _parseSvgTranslateTransform(value) {
+    const text = String(value || "").trim();
+    if (!text) return { x: 0, y: 0 };
+    const match = text.match(/translate\(\s*(-?\d*\.?\d+(?:e[-+]?\d+)?)\s*(?:[,\s]\s*(-?\d*\.?\d+(?:e[-+]?\d+)?))?\s*\)/i);
+    if (!match) return { x: 0, y: 0 };
+    return {
+      x: Number.parseFloat(match[1]) || 0,
+      y: Number.parseFloat(match[2]) || 0,
+    };
+  }
+
+  _mapSvgPointToPdf(x, y, context) {
+    const viewBox = context?.viewBox || null;
+    if (!viewBox || !(viewBox.width > 0) || !(viewBox.height > 0)) return null;
+    const destX = toFiniteNumber(context?.destX, 0);
+    const destY = toFiniteNumber(context?.destY, 0);
+    const destW = Math.max(MIN_ELEMENT_IN, toFiniteNumber(context?.destW, 1));
+    const destH = Math.max(MIN_ELEMENT_IN, toFiniteNumber(context?.destH, 1));
+    return {
+      x: destX + (((x - viewBox.x) / viewBox.width) * destW),
+      y: destY + (((y - viewBox.y) / viewBox.height) * destH),
+    };
+  }
+
+  _getPdfFontDescriptor(fontFamily = "Arial", fontWeight = "400", fontStyle = "normal") {
+    const family = String(fontFamily || "Arial").toLowerCase();
+    const weight = String(fontWeight || "400").toLowerCase();
+    const style = String(fontStyle || "normal").toLowerCase();
+    let pdfFamily = "helvetica";
+    if (family.includes("times") || family.includes("serif") || family.includes("georgia")) pdfFamily = "times";
+    else if (family.includes("courier") || family.includes("mono")) pdfFamily = "courier";
+    const bold = weight === "700" || weight === "800" || weight === "900" || weight === "bold" || Number.parseInt(weight, 10) >= 600;
+    const italic = style === "italic" || style === "oblique";
+    const pdfStyle = bold && italic ? "bolditalic" : (bold ? "bold" : (italic ? "italic" : "normal"));
+    return { family: pdfFamily, style: pdfStyle };
+  }
+
+  _applyPdfSvgStrokeStyle(doc, style, context) {
+    const strokeColor = getPdfColorComponents(style?.stroke, "transparent");
+    const strokeOpacity = clamp(toFiniteNumber(style?.["stroke-opacity"], 1) * toFiniteNumber(style?.opacity, 1), 0, 1);
+    const hasStroke = !!strokeColor && strokeOpacity > 0;
+    doc.setLineDashPattern([], 0);
+    if (!hasStroke) return { hasStroke: false, strokeOpacity: 0 };
+    const scale = Math.max(1e-6, (Math.abs(toFiniteNumber(context?.scaleX, 1)) + Math.abs(toFiniteNumber(context?.scaleY, 1))) * 0.5);
+    const strokeWidth = Math.max(0.001, this._parseSvgNumber(style?.["stroke-width"], 1) * scale);
+    doc.setDrawColor(...strokeColor);
+    doc.setLineWidth(strokeWidth);
+    const cap = String(style?.["stroke-linecap"] || "").trim().toLowerCase();
+    if (cap) doc.setLineCap(cap);
+    const join = String(style?.["stroke-linejoin"] || "").trim().toLowerCase();
+    if (join) doc.setLineJoin(join);
+    const dashArray = this._parseSvgNumberList(style?.["stroke-dasharray"] || "").map((entry) => Math.abs(entry) * scale).filter((entry) => entry > 1e-6);
+    doc.setLineDashPattern(dashArray, 0);
+    return { hasStroke: true, strokeOpacity };
+  }
+
+  _applyPdfSvgFillStyle(doc, style) {
+    const fillColor = getPdfColorComponents(style?.fill, "transparent");
+    const fillOpacity = clamp(toFiniteNumber(style?.["fill-opacity"], 1) * toFiniteNumber(style?.opacity, 1), 0, 1);
+    const hasFill = !!fillColor && fillOpacity > 0;
+    if (!hasFill) return { hasFill: false, fillOpacity: 0 };
+    doc.setFillColor(...fillColor);
+    return { hasFill: true, fillOpacity };
+  }
+
+  _withPdfSvgNodeOpacity(doc, fillOpacity, strokeOpacity, callback) {
+    if (!doc || typeof callback !== "function") return;
+    const safeFill = clamp(toFiniteNumber(fillOpacity, 1), 0, 1);
+    const safeStroke = clamp(toFiniteNumber(strokeOpacity, 1), 0, 1);
+    doc.saveGraphicsState();
+    try {
+      if ((safeFill < 0.999 || safeStroke < 0.999) && typeof doc.setGState === "function" && typeof doc.GState === "function") {
+        doc.setGState(new doc.GState({ opacity: safeFill, strokeOpacity: safeStroke }));
+      }
+      callback();
+    } finally {
+      doc.restoreGraphicsState();
+    }
+  }
+
+  _parseSvgPathSubpaths(pathData) {
+    const tokens = [];
+    const source = String(pathData || "");
+    const regex = /([MLHVZmlhvz])|(-?\d*\.?\d+(?:e[-+]?\d+)?)/gu;
+    let match;
+    while ((match = regex.exec(source))) {
+      tokens.push(match[1] || match[2]);
+    }
+    if (!tokens.length) return [];
+
+    const isCommand = (token) => /^[MLHVZmlhvz]$/u.test(token);
+    const readNumber = (indexRef) => {
+      const value = Number.parseFloat(tokens[indexRef.index]);
+      indexRef.index += 1;
+      return value;
+    };
+
+    const out = [];
+    const indexRef = { index: 0 };
+    let command = "";
+    let current = { x: 0, y: 0 };
+    let start = null;
+    let subpath = null;
+
+    const pushSubpath = () => {
+      if (subpath && Array.isArray(subpath.points) && subpath.points.length >= 2) {
+        out.push(subpath);
+      }
+      subpath = null;
+    };
+
+    while (indexRef.index < tokens.length) {
+      if (isCommand(tokens[indexRef.index])) {
+        command = tokens[indexRef.index];
+        indexRef.index += 1;
+      } else if (!command) {
+        break;
+      }
+
+      switch (command) {
+        case "M":
+        case "m": {
+          let first = true;
+          while (indexRef.index + 1 < tokens.length && !isCommand(tokens[indexRef.index])) {
+            const xRaw = readNumber(indexRef);
+            const yRaw = readNumber(indexRef);
+            const point = command === "m"
+              ? { x: current.x + xRaw, y: current.y + yRaw }
+              : { x: xRaw, y: yRaw };
+            if (first) {
+              pushSubpath();
+              subpath = { points: [point], closed: false };
+              start = { ...point };
+              first = false;
+            } else if (subpath) {
+              subpath.points.push(point);
+            }
+            current = point;
+            command = command === "m" ? "l" : "L";
+          }
+          break;
+        }
+        case "L":
+        case "l": {
+          if (!subpath) subpath = { points: [{ ...current }], closed: false };
+          while (indexRef.index + 1 <= tokens.length && !isCommand(tokens[indexRef.index])) {
+            if (indexRef.index + 1 >= tokens.length) break;
+            const xRaw = readNumber(indexRef);
+            const yRaw = readNumber(indexRef);
+            const point = command === "l"
+              ? { x: current.x + xRaw, y: current.y + yRaw }
+              : { x: xRaw, y: yRaw };
+            subpath.points.push(point);
+            current = point;
+          }
+          break;
+        }
+        case "H":
+        case "h": {
+          if (!subpath) subpath = { points: [{ ...current }], closed: false };
+          while (indexRef.index < tokens.length && !isCommand(tokens[indexRef.index])) {
+            const xRaw = readNumber(indexRef);
+            const point = command === "h"
+              ? { x: current.x + xRaw, y: current.y }
+              : { x: xRaw, y: current.y };
+            subpath.points.push(point);
+            current = point;
+          }
+          break;
+        }
+        case "V":
+        case "v": {
+          if (!subpath) subpath = { points: [{ ...current }], closed: false };
+          while (indexRef.index < tokens.length && !isCommand(tokens[indexRef.index])) {
+            const yRaw = readNumber(indexRef);
+            const point = command === "v"
+              ? { x: current.x, y: current.y + yRaw }
+              : { x: current.x, y: yRaw };
+            subpath.points.push(point);
+            current = point;
+          }
+          break;
+        }
+        case "Z":
+        case "z": {
+          if (subpath) {
+            subpath.closed = true;
+            pushSubpath();
+          }
+          if (start) current = { ...start };
+          break;
+        }
+        default:
+          indexRef.index = tokens.length;
+          break;
+      }
+    }
+
+    pushSubpath();
+    return out;
+  }
+
+  _drawPdfSvgPathNode(doc, node, style, context) {
+    const pathData = String(node?.getAttribute?.("d") || "");
+    if (!pathData) return;
+    const fill = this._applyPdfSvgFillStyle(doc, style);
+    const stroke = this._applyPdfSvgStrokeStyle(doc, style, context);
+    const mode = this._getPdfPaintMode(fill.hasFill, stroke.hasStroke);
+    if (!mode) return;
+    const subpaths = this._parseSvgPathSubpaths(pathData);
+    if (!subpaths.length) return;
+
+    this._withPdfSvgNodeOpacity(doc, fill.fillOpacity, stroke.strokeOpacity, () => {
+      for (const subpath of subpaths) {
+        const mapped = subpath.points
+          .map((point) => this._mapSvgPointToPdf(
+            point.x + toFiniteNumber(context?.translateX, 0),
+            point.y + toFiniteNumber(context?.translateY, 0),
+            context,
+          ))
+          .filter(Boolean);
+        if (mapped.length < 2) continue;
+        const [first, ...rest] = mapped;
+        const rel = [];
+        let prev = first;
+        for (const point of rest) {
+          rel.push([point.x - prev.x, point.y - prev.y]);
+          prev = point;
+        }
+        doc.lines(rel, first.x, first.y, [1, 1], mode, subpath.closed || fill.hasFill);
+      }
+    });
+  }
+
+  _drawPdfSvgRectNode(doc, node, style, context) {
+    const x = this._parseSvgNumber(node?.getAttribute?.("x"), 0) + toFiniteNumber(context?.translateX, 0);
+    const y = this._parseSvgNumber(node?.getAttribute?.("y"), 0) + toFiniteNumber(context?.translateY, 0);
+    const width = this._parseSvgNumber(node?.getAttribute?.("width"), 0);
+    const height = this._parseSvgNumber(node?.getAttribute?.("height"), 0);
+    if (!(width > 0) || !(height > 0)) return;
+    const topLeft = this._mapSvgPointToPdf(x, y, context);
+    const bottomRight = this._mapSvgPointToPdf(x + width, y + height, context);
+    if (!topLeft || !bottomRight) return;
+    const fill = this._applyPdfSvgFillStyle(doc, style);
+    const stroke = this._applyPdfSvgStrokeStyle(doc, style, context);
+    const mode = this._getPdfPaintMode(fill.hasFill, stroke.hasStroke);
+    if (!mode) return;
+    const rx = Math.max(0, this._parseSvgNumber(node?.getAttribute?.("rx"), 0) * Math.abs(toFiniteNumber(context?.scaleX, 1)));
+    const ry = Math.max(0, this._parseSvgNumber(node?.getAttribute?.("ry"), 0) * Math.abs(toFiniteNumber(context?.scaleY, 1)));
+    this._withPdfSvgNodeOpacity(doc, fill.fillOpacity, stroke.strokeOpacity, () => {
+      if (rx > 0 || ry > 0) {
+        doc.roundedRect(
+          topLeft.x,
+          topLeft.y,
+          bottomRight.x - topLeft.x,
+          bottomRight.y - topLeft.y,
+          rx,
+          ry || rx,
+          mode,
+        );
+      } else {
+        doc.rect(
+          topLeft.x,
+          topLeft.y,
+          bottomRight.x - topLeft.x,
+          bottomRight.y - topLeft.y,
+          mode,
+        );
+      }
+    });
+  }
+
+  _drawPdfSvgTextNode(doc, node, style, context) {
+    const fillColor = getPdfColorComponents(style?.fill, "#000000");
+    const fillOpacity = clamp(toFiniteNumber(style?.["fill-opacity"], 1) * toFiniteNumber(style?.opacity, 1), 0, 1);
+    if (!fillColor || fillOpacity <= 0) return;
+    const fontSizeSvg = this._parseSvgNumber(style?.["font-size"], 12);
+    const fontSizeIn = Math.max(0.001, fontSizeSvg * Math.abs(toFiniteNumber(context?.scaleY, 1)));
+    const font = this._getPdfFontDescriptor(style?.["font-family"], style?.["font-weight"], style?.["font-style"]);
+    const alignRaw = String(style?.["text-anchor"] || "start").trim().toLowerCase();
+    const align = alignRaw === "middle" ? "center" : (alignRaw === "end" ? "right" : "left");
+    const baselineRaw = String(style?.["dominant-baseline"] || "alphabetic").trim().toLowerCase();
+    const baseline = baselineRaw.includes("middle") ? "middle" : "alphabetic";
+    const segments = [];
+    const tspans = Array.from(node?.querySelectorAll?.(":scope > tspan") || []);
+    if (tspans.length) {
+      for (const tspan of tspans) {
+        const text = String(tspan.textContent || "");
+        if (!text) continue;
+        const x = this._parseSvgNumber(tspan.getAttribute("x"), this._parseSvgNumber(node?.getAttribute?.("x"), 0));
+        const y = this._parseSvgNumber(tspan.getAttribute("y"), this._parseSvgNumber(node?.getAttribute?.("y"), 0));
+        segments.push({ text, x, y });
+      }
+    } else {
+      const text = String(node?.textContent || "");
+      if (text) {
+        segments.push({
+          text,
+          x: this._parseSvgNumber(node?.getAttribute?.("x"), 0),
+          y: this._parseSvgNumber(node?.getAttribute?.("y"), 0),
+        });
+      }
+    }
+    if (!segments.length) return;
+
+    this._withPdfSvgNodeOpacity(doc, fillOpacity, fillOpacity, () => {
+      doc.setFont(font.family, font.style);
+      doc.setFontSize(Math.max(0.1, inchesToPoints(fontSizeIn)));
+      doc.setTextColor(...fillColor);
+      for (const segment of segments) {
+        const point = this._mapSvgPointToPdf(
+          segment.x + toFiniteNumber(context?.translateX, 0),
+          segment.y + toFiniteNumber(context?.translateY, 0),
+          context,
+        );
+        if (!point) continue;
+        doc.text(segment.text, point.x, point.y, { align, baseline });
+      }
+    });
+  }
+
+  _drawPdfSvgNode(doc, node, context, inheritedStyle = null) {
+    if (!doc || !node) return;
+    const tag = String(node.tagName || "").toLowerCase();
+    if (!tag) return;
+    const style = this._getSvgNodeStyle(node, inheritedStyle);
+    const translate = this._parseSvgTranslateTransform(node.getAttribute?.("transform") || "");
+    const nextContext = {
+      ...context,
+      translateX: toFiniteNumber(context?.translateX, 0) + translate.x,
+      translateY: toFiniteNumber(context?.translateY, 0) + translate.y,
+    };
+
+    if (tag === "g" || tag === "svg") {
+      for (const child of Array.from(node.children || [])) {
+        this._drawPdfSvgNode(doc, child, nextContext, style);
+      }
+      return;
+    }
+    if (tag === "path") {
+      this._drawPdfSvgPathNode(doc, node, style, nextContext);
+      return;
+    }
+    if (tag === "rect") {
+      this._drawPdfSvgRectNode(doc, node, style, nextContext);
+      return;
+    }
+    if (tag === "text") {
+      this._drawPdfSvgTextNode(doc, node, style, nextContext);
+    }
+  }
+
+  _drawPdfSvgElement(doc, element, frame) {
+    const src = String(element?.src || "").trim();
+    if (!this._isSvgImageDataUrl(src)) return false;
+    const svgNode = this._parseSvgDataUrl(src);
+    if (!svgNode) return false;
+
+    const metadata = this._getMediaMetadataForElement(element) || {
+      width: Math.max(1, this._parseSvgNumber(svgNode.getAttribute("width"), frame?.w || 1)),
+      height: Math.max(1, this._parseSvgNumber(svgNode.getAttribute("height"), frame?.h || 1)),
+    };
+    const viewBox = this._parseSvgViewBox(svgNode, metadata);
+    if (!viewBox || !(viewBox.width > 0) || !(viewBox.height > 0)) return false;
+
+    const layout = this._getMediaLayout(element, frame.w, frame.h, metadata);
+    const destX = frame.x + toFiniteNumber(layout?.left, 0);
+    const destY = frame.y + toFiniteNumber(layout?.top, 0);
+    const destW = Math.max(MIN_ELEMENT_IN, toFiniteNumber(layout?.renderWidth, frame.w));
+    const destH = Math.max(MIN_ELEMENT_IN, toFiniteNumber(layout?.renderHeight, frame.h));
+    const radius = 8 / 96;
+
+    this._withPdfGraphicsState(doc, element?.opacity, () => {
+      doc.roundedRect(frame.x, frame.y, frame.w, frame.h, radius, radius, null);
+      doc.clip();
+      doc.discardPath();
+      this._drawPdfSvgNode(doc, svgNode, {
+        viewBox,
+        destX,
+        destY,
+        destW,
+        destH,
+        scaleX: destW / viewBox.width,
+        scaleY: destH / viewBox.height,
+        translateX: 0,
+        translateY: 0,
+      });
+    });
+
+    return true;
+  }
+
   _drawPdfFramedRect(doc, x, y, w, h, { fill, stroke, radius = (8 / 96) } = {}) {
     const paintMode = this._getPdfPaintMode(!!fill, !!stroke);
     if (!paintMode) return;
@@ -5528,11 +6029,14 @@ export class Sheet2DEditorWindow {
       this._drawPdfFramedRect(doc, frame.x, frame.y, frame.w, frame.h, { fill: frameFill, stroke: hasStroke });
       doc.setLineDashPattern([], 0);
     });
-    const tile = await this._renderPdfMediaTileCanvas(element, frame.w, frame.h);
-    if (tile) {
-      this._withPdfGraphicsState(doc, element?.opacity, () => {
-        doc.addImage(tile, "PNG", frame.x, frame.y, frame.w, frame.h);
-      });
+    const renderedVector = this._drawPdfSvgElement(doc, element, frame);
+    if (!renderedVector) {
+      const tile = await this._renderPdfMediaTileCanvas(element, frame.w, frame.h);
+      if (tile) {
+        this._withPdfGraphicsState(doc, element?.opacity, () => {
+          doc.addImage(tile, "PNG", frame.x, frame.y, frame.w, frame.h);
+        });
+      }
     }
     if (this._getPmiLabelPosition(element) !== "none") {
       const captionHeight = Math.max(0, this._getPmiTitleHeightIn(element));
