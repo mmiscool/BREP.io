@@ -5,6 +5,9 @@
 
 import * as THREE from 'three';
 import { ArcballControls } from 'three/examples/jsm/controls/ArcballControls.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { SVGRenderer } from 'three/examples/jsm/renderers/SVGRenderer.js';
 // Use custom combined translate+rotate gizmo (drop-in for three/examples TransformControls)
 import brepHomeBannerSvg from '../assets/brand/brep-home-banner.svg?raw';
@@ -700,6 +703,14 @@ export class Viewer {
         this._rendererMode = 'webgl';
         this._svgRenderer = null;
         this._webglRenderer = null;
+        this._webglComposer = null;
+        this._webglComposerRenderer = null;
+        this._renderPass = null;
+        this._solidFaceOutlinePass = null;
+        this._solidFaceOutlineSelection = [];
+        this._solidFaceOutlineEdgeMaskTarget = null;
+        this._solidFaceOutlineDepthMaterial = null;
+        this._forcePostProcessingDepth = 0;
         this.renderer = this._createWebGLRenderer();
         this._webglRenderer = this.renderer;
         this.container.appendChild(this.renderer.domElement);
@@ -813,6 +824,7 @@ export class Viewer {
         this._lastPointerEvent = null;
         this._lastDashWpp = null;
         this._selectionOverlay = null;
+        this._hoverRefreshRaf = null;
         this._cubeActive = false;
         // Inspector panel state
         this._inspectorOpen = false;
@@ -848,6 +860,7 @@ export class Viewer {
         this._loop = this._loop.bind(this);
         this._updateHover = this._updateHover.bind(this);
         this._selectAt = this._selectAt.bind(this);
+        this._onHoverChanged = this._onHoverChanged.bind(this);
         this._onPointerLeave = () => {
             try { SelectionFilter.clearHover(); } catch (_) { }
             try { this.viewCube?.clearHover?.(); } catch (_) { }
@@ -874,6 +887,7 @@ export class Viewer {
         window.addEventListener('resize', this._onResize);
         this._onKeyDown = this._onKeyDown.bind(this);
         window.addEventListener('keydown', this._onKeyDown, { passive: false });
+        window.addEventListener('hover-changed', this._onHoverChanged);
         // Keep camera updates; no picking to sync
         this.controls.addEventListener('change', this._onControlsChange);
 
@@ -905,6 +919,293 @@ export class Viewer {
         renderer.setClearColor(this._clearColor);
         this._applyRendererElementStyles(renderer);
         return renderer;
+    }
+
+    _disposeWebglPostProcessing() {
+        try { this._webglComposer?.dispose?.(); } catch { /* ignore */ }
+        try { this._solidFaceOutlinePass?.dispose?.(); } catch { /* ignore */ }
+        try { this._renderPass?.dispose?.(); } catch { /* ignore */ }
+        try { this._solidFaceOutlineEdgeMaskTarget?.dispose?.(); } catch { /* ignore */ }
+        try { this._solidFaceOutlineDepthMaterial?.dispose?.(); } catch { /* ignore */ }
+        this._webglComposer = null;
+        this._webglComposerRenderer = null;
+        this._renderPass = null;
+        this._solidFaceOutlinePass = null;
+        this._solidFaceOutlineEdgeMaskTarget = null;
+        this._solidFaceOutlineDepthMaterial = null;
+    }
+
+    _patchOutlinePassHiddenEdgeAlpha(outlinePass) {
+        const material = outlinePass?.edgeDetectionMaterial;
+        if (!material || material.userData?.__transparentHiddenEdgesPatched) return;
+        const source = material.fragmentShader || '';
+        const target = 'gl_FragColor = vec4(edgeColor, 1.0) * vec4(d);';
+        if (!source.includes(target)) return;
+        material.fragmentShader = source.replace(
+            target,
+            [
+                'float edgeAlpha = 1.0 - visibilityFactor > 0.001 ? 1.0 : 0.0;',
+                'gl_FragColor = vec4(edgeColor, edgeAlpha) * vec4(d);',
+            ].join('\n\t\t\t\t\t')
+        );
+        material.userData = {
+            ...(material.userData || {}),
+            __transparentHiddenEdgesPatched: true,
+        };
+        material.needsUpdate = true;
+    }
+
+    _patchOutlinePassPerFaceRendering(outlinePass) {
+        if (!outlinePass || outlinePass.userData?.__perFaceRenderingPatched) return;
+        const originalRender = typeof outlinePass.render === 'function'
+            ? outlinePass.render.bind(outlinePass)
+            : null;
+        if (!originalRender) return;
+        outlinePass.render = (renderer, writeBuffer, readBuffer, deltaTime, maskActive) => {
+            const selected = Array.isArray(outlinePass.selectedObjects)
+                ? outlinePass.selectedObjects.filter(Boolean)
+                : [];
+            if (selected.length <= 1) {
+                originalRender(renderer, writeBuffer, readBuffer, deltaTime, maskActive);
+                return;
+            }
+            const priorSelected = outlinePass.selectedObjects;
+            const priorRenderToScreen = outlinePass.renderToScreen;
+            try {
+                for (let index = 0; index < selected.length; index += 1) {
+                    outlinePass.selectedObjects = [selected[index]];
+                    outlinePass.renderToScreen = priorRenderToScreen && index === selected.length - 1;
+                    originalRender(renderer, writeBuffer, readBuffer, deltaTime, maskActive);
+                }
+            } finally {
+                outlinePass.selectedObjects = priorSelected;
+                outlinePass.renderToScreen = priorRenderToScreen;
+            }
+        };
+        outlinePass.userData = {
+            ...(outlinePass.userData || {}),
+            __perFaceRenderingPatched: true,
+        };
+    }
+
+    _patchOutlinePassSolidOverlay(outlinePass) {
+        const material = outlinePass?.overlayMaterial;
+        if (!material || material.userData?.__solidOverlayPatched) return;
+        const source = material.fragmentShader || '';
+        let patched = source;
+        if (!patched.includes('uniform sampler2D edgeMaskTexture;')) {
+            patched = patched.replace(
+                'uniform sampler2D patternTexture;',
+                'uniform sampler2D patternTexture;\n\t\t\t\tuniform sampler2D edgeMaskTexture;'
+            );
+        }
+        patched = patched.replace(
+            /vec4 edgeValue = edgeValue1 \+ edgeValue2 \* edgeGlow;[\s\S]*?gl_FragColor = finalColor;/,
+            [
+                'vec4 edgeValue = edgeValue1 + edgeValue2 * edgeGlow;',
+                'float edgeSignal = max(max(edgeValue.r, edgeValue.g), max(edgeValue.b, edgeValue.a));',
+                'float edgeMask = smoothstep(0.02, 0.08, edgeSignal);',
+                'vec4 realEdgeSample = texture2D(edgeMaskTexture, vUv);',
+                'float realEdgeSignal = max(max(realEdgeSample.r, realEdgeSample.g), max(realEdgeSample.b, realEdgeSample.a));',
+                'float realEdgeMask = 1.0 - smoothstep(0.02, 0.12, realEdgeSignal);',
+                'float finalAlpha = min(1.0, edgeStrength * maskColor.r * edgeMask) * realEdgeMask;',
+                'vec3 finalRgb = edgeSignal > 1e-5 ? (edgeValue.rgb / edgeSignal) : vec3(0.0);',
+                'vec4 finalColor = vec4(finalRgb, finalAlpha);',
+                'if(usePatternTexture)',
+                '\tfinalColor += vec4(vec3(visibilityFactor * (1.0 - maskColor.r) * (1.0 - patternColor.r)), 0.0);',
+                'gl_FragColor = finalColor;'
+            ].join('\n\t\t\t\t\t')
+        );
+        if (patched === source) return;
+        material.uniforms = {
+            ...(material.uniforms || {}),
+            edgeMaskTexture: { value: null },
+        };
+        material.fragmentShader = patched;
+        material.blending = THREE.NormalBlending;
+        material.userData = {
+            ...(material.userData || {}),
+            __solidOverlayPatched: true,
+        };
+        material.needsUpdate = true;
+    }
+
+    _ensureWebglPostProcessing() {
+        if (!this.renderer?.isWebGLRenderer || !this.scene || !this.camera) return;
+        if (!this._webglComposer || this._webglComposerRenderer !== this.renderer) {
+            this._disposeWebglPostProcessing();
+            const { width, height } = this._getContainerSize();
+            const pixelRatio = typeof this.renderer.getPixelRatio === 'function'
+                ? Math.max(1, Number(this.renderer.getPixelRatio()) || 1)
+                : 1;
+            const composer = new EffectComposer(this.renderer);
+            const renderPass = new RenderPass(this.scene, this.camera);
+            const outlinePass = new OutlinePass(new THREE.Vector2(width, height), this.scene, this.camera, []);
+            const edgeMaskTarget = new THREE.WebGLRenderTarget(
+                Math.max(1, Math.round(width * pixelRatio)),
+                Math.max(1, Math.round(height * pixelRatio))
+            );
+            edgeMaskTarget.texture.name = 'Viewer.SolidFaceOutlineEdgeMask';
+            edgeMaskTarget.texture.generateMipmaps = false;
+            const depthMaterial = new THREE.MeshDepthMaterial();
+            depthMaterial.side = THREE.DoubleSide;
+            depthMaterial.colorWrite = false;
+            depthMaterial.depthWrite = true;
+            depthMaterial.depthTest = true;
+            depthMaterial.blending = THREE.NoBlending;
+            outlinePass.downSampleRatio = 1;
+            outlinePass.visibleEdgeColor.set(0xffff00);
+            outlinePass.hiddenEdgeColor.set(0x000000);
+            outlinePass.edgeGlow = 0;
+            outlinePass.edgeThickness = 1;
+            outlinePass.edgeStrength = 3;
+            this._patchOutlinePassHiddenEdgeAlpha(outlinePass);
+            this._patchOutlinePassPerFaceRendering(outlinePass);
+            this._patchOutlinePassSolidOverlay(outlinePass);
+            composer.addPass(renderPass);
+            composer.addPass(outlinePass);
+            if (typeof composer.setPixelRatio === 'function' && typeof this.renderer.getPixelRatio === 'function') {
+                composer.setPixelRatio(this.renderer.getPixelRatio());
+            }
+            composer.setSize(width, height);
+            outlinePass.setSize(width, height);
+            this._webglComposer = composer;
+            this._webglComposerRenderer = this.renderer;
+            this._renderPass = renderPass;
+            this._solidFaceOutlinePass = outlinePass;
+            this._solidFaceOutlineEdgeMaskTarget = edgeMaskTarget;
+            this._solidFaceOutlineDepthMaterial = depthMaterial;
+        }
+        if (this._renderPass) {
+            this._renderPass.scene = this.scene;
+            this._renderPass.camera = this.camera;
+        }
+        if (this._solidFaceOutlinePass) {
+            this._solidFaceOutlinePass.renderScene = this.scene;
+            this._solidFaceOutlinePass.renderCamera = this.camera;
+            if (this._solidFaceOutlinePass.overlayMaterial?.uniforms?.edgeMaskTexture) {
+                this._solidFaceOutlinePass.overlayMaterial.uniforms.edgeMaskTexture.value = this._solidFaceOutlineEdgeMaskTarget?.texture || null;
+            }
+        }
+    }
+
+    _isObjectEffectivelyVisible(obj) {
+        let current = obj;
+        while (current) {
+            if (current.visible === false) return false;
+            current = current.parent;
+        }
+        return true;
+    }
+
+    _collectSolidFaceOutlineObjects() {
+        const out = this._solidFaceOutlineSelection || [];
+        out.length = 0;
+        const scene = this.scene;
+        if (!scene) return out;
+        scene.traverse((obj) => {
+            if (!obj || obj.type !== 'SOLID' || !this._isObjectEffectivelyVisible(obj)) return;
+            const children = Array.isArray(obj.children) ? obj.children : [];
+            for (const child of children) {
+                if (!child || child.type !== 'FACE' || !child.isMesh) continue;
+                if (!this._isObjectEffectivelyVisible(child)) continue;
+                out.push(child);
+            }
+        });
+        return out;
+    }
+
+    _renderSolidFaceOutlineEdgeMask() {
+        this._ensureWebglPostProcessing();
+        const renderer = this.renderer;
+        const scene = this.scene;
+        const camera = this.camera;
+        const target = this._solidFaceOutlineEdgeMaskTarget;
+        const depthMaterial = this._solidFaceOutlineDepthMaterial;
+        if (!renderer?.isWebGLRenderer || !scene || !camera || !target || !depthMaterial) return;
+
+        const originalVisibility = new Map();
+        scene.traverse((obj) => {
+            if (obj) originalVisibility.set(obj, obj.visible !== false);
+        });
+
+        const applyRenderableVisibility = (predicate) => {
+            scene.traverse((obj) => {
+                if (!obj) return;
+                const baseVisible = originalVisibility.get(obj) !== false;
+                if (!baseVisible) {
+                    obj.visible = false;
+                    return;
+                }
+                if (obj.isMesh || obj.isLine || obj.isLine2 || obj.isLineSegments || obj.isLineLoop || obj.isPoints || obj.isSprite) {
+                    obj.visible = !!predicate(obj);
+                    return;
+                }
+                obj.visible = true;
+            });
+        };
+
+        const oldClearColor = new THREE.Color();
+        renderer.getClearColor(oldClearColor);
+        const oldClearAlpha = renderer.getClearAlpha();
+        const oldAutoClear = renderer.autoClear;
+        const oldTarget = typeof renderer.getRenderTarget === 'function' ? renderer.getRenderTarget() : null;
+        const oldBackground = scene.background;
+        const oldOverrideMaterial = scene.overrideMaterial;
+
+        try {
+            scene.background = null;
+            renderer.autoClear = true;
+            renderer.setRenderTarget(target);
+            renderer.setClearColor(0x000000, 0);
+            renderer.clear(true, true, true);
+
+            applyRenderableVisibility((obj) => obj.isMesh);
+            scene.overrideMaterial = depthMaterial;
+            renderer.render(scene, camera);
+
+            applyRenderableVisibility((obj) => {
+                if (obj?.type !== 'EDGE') return false;
+                if (obj.userData?.auxEdge) return false;
+                return obj.material?.depthTest !== false;
+            });
+            scene.overrideMaterial = null;
+            renderer.render(scene, camera);
+        } finally {
+            scene.overrideMaterial = oldOverrideMaterial;
+            scene.background = oldBackground;
+            originalVisibility.forEach((visible, obj) => {
+                if (obj) obj.visible = visible;
+            });
+            renderer.setRenderTarget(oldTarget);
+            renderer.setClearColor(oldClearColor, oldClearAlpha);
+            renderer.autoClear = oldAutoClear;
+        }
+    }
+
+    _syncSolidFaceOutlinePass() {
+        this._ensureWebglPostProcessing();
+        if (!this._solidFaceOutlinePass) return;
+        const edgeColor = CADmaterials?.EDGE?.BASE?.color;
+        if (edgeColor && typeof this._solidFaceOutlinePass.visibleEdgeColor?.copy === 'function') {
+            this._solidFaceOutlinePass.visibleEdgeColor.copy(edgeColor);
+        }
+        const edgeLineWidth = Number(CADmaterials?.EDGE?.BASE?.linewidth);
+        if (Number.isFinite(edgeLineWidth) && edgeLineWidth > 0) {
+            this._solidFaceOutlinePass.edgeThickness = edgeLineWidth * 0.5;
+        }
+        this._solidFaceOutlinePass.selectedObjects = this._collectSolidFaceOutlineObjects();
+    }
+
+    async withForcedPostProcessing(fn) {
+        if (typeof fn !== 'function') return null;
+        this._forcePostProcessingDepth = Math.max(0, Number(this._forcePostProcessingDepth) || 0) + 1;
+        try {
+            return await fn();
+        } finally {
+            this._forcePostProcessingDepth = Math.max(0, (Number(this._forcePostProcessingDepth) || 1) - 1);
+            try { this.render(); } catch { /* ignore */ }
+        }
     }
 
     _applyRendererElementStyles(renderer) {
@@ -975,6 +1276,7 @@ export class Viewer {
             }
         });
         this._updateDepthRange();
+        try { this.render(); } catch { /* ignore */ }
     }
 
     _configureCameraIdleCallbacks() {
@@ -1277,6 +1579,7 @@ export class Viewer {
         this._syncActiveTransformGizmosForCamera({ resetSize: false });
 
         if (nextMode === 'webgl') {
+            this._ensureWebglPostProcessing();
             this._ensureViewCube();
         } else {
             try { this.viewCube?.dispose?.(); } catch { /* ignore */ }
@@ -2019,6 +2322,10 @@ export class Viewer {
         if (this._disposed) return;
         this._disposed = true;
         cancelAnimationFrame(this._raf);
+        if (this._hoverRefreshRaf != null) {
+            cancelAnimationFrame(this._hoverRefreshRaf);
+            this._hoverRefreshRaf = null;
+        }
         try { this.endPMIPreviewMode(); } catch { }
         try { this._stopComponentTransformSession(); } catch { }
         try { this.sheet2DWidget?.dispose?.(); } catch { }
@@ -2041,6 +2348,7 @@ export class Viewer {
         window.removeEventListener('pointerup', this._onPointerUp, { capture: true });
         window.removeEventListener('resize', this._onResize);
         window.removeEventListener('keydown', this._onKeyDown, { passive: false });
+        window.removeEventListener('hover-changed', this._onHoverChanged);
         try {
             const btn = this._cameraProjectionToggleButton;
             if (btn) {
@@ -2052,6 +2360,7 @@ export class Viewer {
         try { this.viewCube?.dispose?.(); } catch { /* ignore */ }
         this.viewCube = null;
         this.controls?.dispose?.();
+        this._disposeWebglPostProcessing();
         this.renderer?.dispose?.();
         if (this._webglRenderer && this._webglRenderer !== this.renderer) {
             try { this._webglRenderer.dispose(); } catch { }
@@ -2099,7 +2408,9 @@ export class Viewer {
             this._setSidebarAutoHideSuspended(false);
             this._setSidebarHoverVisible(false);
         } catch { }
-        this._sketchMode = new SketchMode3D(this, featureID);
+        this._sketchMode = new SketchMode3D(this, featureID, {
+            useFatCurveLines: true,
+        });
         this._sketchMode.open();
 
 
@@ -3099,15 +3410,19 @@ export class Viewer {
     _loop() {
         this._raf = requestAnimationFrame(this._loop);
         this.controls.update();
+        let hasActiveTransformControls = false;
         try {
             const ax = (typeof window !== 'undefined') ? (window.__BREP_activeXform || null) : null;
             const tc = ax && ax.controls;
             if (tc) {
+                hasActiveTransformControls = true;
                 if (typeof tc.update === 'function') tc.update();
                 else tc.updateMatrixWorld(true);
             }
         } catch { }
-        this.render();
+        if (this._cameraMoving || this._sketchMode || hasActiveTransformControls) {
+            this.render();
+        }
     }
 
     // ----------------------------------------
@@ -3555,6 +3870,19 @@ export class Viewer {
         if (triggerOnClick && typeof target.onClick === 'function') {
             try { target.onClick(pointerEvent); } catch { }
         }
+    }
+
+    _scheduleHoverRefresh() {
+        if (this._disposed || this._hoverRefreshRaf != null) return;
+        this._hoverRefreshRaf = requestAnimationFrame(() => {
+            this._hoverRefreshRaf = null;
+            if (this._disposed) return;
+            try { this.render(); } catch { }
+        });
+    }
+
+    _onHoverChanged() {
+        this._scheduleHoverRefresh();
     }
 
     _clearSelectionOverlayTimer() {
@@ -5137,6 +5465,18 @@ export class Viewer {
 
             if (needResize) {
                 this.renderer.setSize(width, height, true);
+            }
+            if (this._webglComposer && this._webglComposerRenderer === this.renderer) {
+                if (typeof this._webglComposer.setPixelRatio === 'function') {
+                    this._webglComposer.setPixelRatio(targetPR);
+                }
+                this._webglComposer.setSize(width, height);
+            }
+            if (this._solidFaceOutlineEdgeMaskTarget && typeof this._solidFaceOutlineEdgeMaskTarget.setSize === 'function') {
+                this._solidFaceOutlineEdgeMaskTarget.setSize(
+                    Math.max(1, Math.round(width * targetPR)),
+                    Math.max(1, Math.round(height * targetPR))
+                );
             }
         } else if (this.renderer && typeof this.renderer.setSize === 'function') {
             this.renderer.setSize(width, height);

@@ -63,13 +63,13 @@ class ScriptRunnerPanel {
 
     const btnRefresh = document.createElement('button');
     btnRefresh.className = 'fw-btn';
-    btnRefresh.textContent = 'Refresh env types';
+    btnRefresh.textContent = 'Refresh env autocomplete';
     btnRefresh.addEventListener('click', () => {
       try {
         this.editorEl?.refreshEnvAutocomplete?.();
-        this._setStatus('env typings refreshed from window.env');
+        this._setStatus('env autocomplete refreshed from window.env');
       } catch {
-        this._setStatus('Unable to refresh env typings');
+        this._setStatus('Unable to refresh env autocomplete');
       }
     });
 
@@ -87,7 +87,7 @@ class ScriptRunnerPanel {
     this.contentRoot = content;
 
     const intro = document.createElement('div');
-    intro.textContent = 'Run ad-hoc JavaScript with Monaco autocomplete for window.env.';
+    intro.textContent = 'Run ad-hoc JavaScript with Monaco highlighting and live window.env autocomplete.';
     intro.style.color = '#aeb6c5';
     intro.style.font = '12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
     intro.style.opacity = '0.9';
@@ -192,8 +192,11 @@ class ScriptRunnerPanel {
     this._setStatus('Running...');
 
     const exec = () => {
+      const runtimeViewer = window.viewer ?? this.viewer ?? null;
+      const runtimeEnv = window.env ?? runtimeViewer;
+      const editorApi = window.monaco;
       const fn = new Function('viewer', 'env', 'monaco', `"use strict";\n${code}`);
-      return fn(this.viewer, window.env, window.monaco);
+      return fn(runtimeViewer, runtimeEnv, editorApi);
     };
 
     try {

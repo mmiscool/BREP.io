@@ -143,6 +143,18 @@ export class MainToolbar {
     } catch { return null; }
   }
 
+  removeCustomButton(id) {
+    const key = String(id || '').trim();
+    if (!key) return false;
+    const record = this._buttonRecords.get(key) || null;
+    if (!record) return false;
+    try { record.btn?.remove?.(); } catch { /* ignore */ }
+    this._buttonRecords.delete(key);
+    this._buttonOrder = this._buttonOrder.filter((entryId) => entryId !== key);
+    this.refreshButtons();
+    return true;
+  }
+
   refreshButtons() {
     const left = this._left;
     if (!left) return;

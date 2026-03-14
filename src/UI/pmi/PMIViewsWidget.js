@@ -4,12 +4,15 @@
 // Views are persisted with the PartHistory instance.
 
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { AnnotationHistory } from './AnnotationHistory.js';
 import { adjustOrthographicFrustum, applyCameraSnapshot, captureCameraSnapshot } from './annUtils.js';
 
 const UPDATE_CAMERA_TOOLTIP = 'Update this view to match the current camera';
-const PMI_CAPTURE_MIN_LONG_EDGE_PX = 2400;
-const PMI_CAPTURE_MAX_LONG_EDGE_PX = 4096;
+const PMI_EXPORT_CAPTURE_WIDTH_PX = 2400;
+const PMI_EXPORT_CAPTURE_HEIGHT_PX = 1800;
 
 export class PMIViewsWidget {
   constructor(viewer, { readOnly = false } = {}) {
@@ -102,34 +105,18 @@ export class PMIViewsWidget {
     return { width, height };
   }
 
-  _getCaptureViewportMetrics(view) {
-    const source = this._getSavedViewViewport(view) || this._getViewerViewportMetrics();
-    const sourceWidth = Math.max(1, Number(source?.width) || 1);
-    const sourceHeight = Math.max(1, Number(source?.height) || 1);
-    const aspect = sourceWidth / sourceHeight;
-    const sourceLongEdge = Math.max(sourceWidth, sourceHeight);
-    const targetLongEdge = Math.max(
-      PMI_CAPTURE_MIN_LONG_EDGE_PX,
-      Math.min(PMI_CAPTURE_MAX_LONG_EDGE_PX, Math.round(sourceLongEdge)),
-    );
-
-    if (aspect >= 1) {
-      return {
-        width: targetLongEdge,
-        height: Math.max(1, Math.round(targetLongEdge / aspect)),
-      };
-    }
+  _getCaptureViewportMetrics(_view) {
     return {
-      width: Math.max(1, Math.round(targetLongEdge * aspect)),
-      height: targetLongEdge,
+      width: PMI_EXPORT_CAPTURE_WIDTH_PX,
+      height: PMI_EXPORT_CAPTURE_HEIGHT_PX,
     };
   }
 
-  _updateViewportSensitiveRendering(width, height) {
+  _updateViewportSensitiveRendering(width, height, viewerContext = this.viewer) {
     const safeWidth = Math.max(1, Number(width) || 1);
     const safeHeight = Math.max(1, Number(height) || 1);
     try {
-      const scene = this.viewer?.partHistory?.scene || this.viewer?.scene || null;
+      const scene = viewerContext?.partHistory?.scene || viewerContext?.scene || null;
       scene?.traverse?.((obj) => {
         const material = obj?.material;
         if (!material) return;
@@ -142,7 +129,7 @@ export class PMIViewsWidget {
         else apply(material);
       });
     } catch { /* ignore */ }
-    try { this.viewer?._updateOverlayDashSpacing?.(safeWidth, safeHeight); } catch { /* ignore */ }
+    try { viewerContext?._updateOverlayDashSpacing?.(safeWidth, safeHeight); } catch { /* ignore */ }
   }
 
   async _withTemporaryCaptureViewport(viewport, fn) {
@@ -169,46 +156,333 @@ export class PMIViewsWidget {
     }
   }
 
-  async captureViewImageDataUrl(view, viewIndex, { hideViewCube = true } = {}) {
+  _cloneCameraLightChildren(sourceCamera, targetCamera) {
+    if (!sourceCamera || !targetCamera) return;
+    const targetHasLights = Array.isArray(targetCamera.children)
+      && targetCamera.children.some((child) => child?.isLight);
+    if (targetHasLights) return;
+    const children = Array.isArray(sourceCamera.children) ? sourceCamera.children : [];
+    for (const child of children) {
+      if (!child?.isLight) continue;
+      try { targetCamera.add(child.clone(true)); } catch { /* ignore clone failures */ }
+    }
+  }
+
+  _createExportCamera(view, viewport) {
+    const sourceCamera = this.viewer?.camera || null;
+    const viewType = String(view?.camera?.type || '');
+    const projectionKind = String(view?.camera?.projection?.kind || '').toLowerCase();
+    let camera = null;
+
+    if ((viewType === 'PerspectiveCamera' || projectionKind === 'perspective') && sourceCamera?.isPerspectiveCamera) {
+      camera = sourceCamera.clone(true);
+    } else if ((viewType === 'OrthographicCamera' || projectionKind === 'orthographic') && sourceCamera?.isOrthographicCamera) {
+      camera = sourceCamera.clone(true);
+    } else if (viewType === 'PerspectiveCamera' || projectionKind === 'perspective') {
+      camera = new THREE.PerspectiveCamera(
+        sourceCamera?.fov || 50,
+        Math.max(1, viewport?.width || 1) / Math.max(1, viewport?.height || 1),
+        sourceCamera?.near || 0.01,
+        sourceCamera?.far || 2000,
+      );
+    } else if (viewType === 'OrthographicCamera' || projectionKind === 'orthographic') {
+      camera = new THREE.OrthographicCamera(
+        -1,
+        1,
+        1,
+        -1,
+        sourceCamera?.near || 0.01,
+        sourceCamera?.far || 2000,
+      );
+    } else if (sourceCamera?.clone) {
+      camera = sourceCamera.clone(true);
+    }
+
+    if (!camera) {
+      camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 2000);
+    }
+
+    this._cloneCameraLightChildren(sourceCamera, camera);
+    return camera;
+  }
+
+  _createExportRenderContext(viewport, view = null) {
     const viewer = this.viewer;
-    const canvas = viewer?.renderer?.domElement;
-    if (!viewer || !canvas) throw new Error('Viewer is not ready to export images');
+    const scene = viewer?.partHistory?.scene || viewer?.scene || null;
+    if (!viewer || !scene) throw new Error('Viewer scene is not available for PMI export');
 
-    const captureViewport = this._getCaptureViewportMetrics(view);
-    const originalSnapshot = captureCameraSnapshot(viewer.camera, {
-      controls: viewer.controls,
-      viewport: this._getViewerViewportMetrics(),
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      preserveDrawingBuffer: true,
     });
-    const originalWireframe = this._detectWireframe(viewer.scene);
-    const previousActive = this._getActiveViewIndex();
+    renderer.setPixelRatio(1);
+    renderer.setSize(viewport.width, viewport.height, false);
+    const clearColor = viewer?._clearColor instanceof THREE.Color
+      ? viewer._clearColor
+      : new THREE.Color(0x000000);
+    const clearAlpha = Number.isFinite(viewer?._clearAlpha) ? viewer._clearAlpha : 1;
+    renderer.setClearColor(clearColor, clearAlpha);
 
-    let dataUrl = null;
-    const runCapture = async () => {
-      await this._withTemporaryCaptureViewport(captureViewport, async (activeViewport) => {
-        let overlay = null;
+    const canvas = renderer.domElement;
+    canvas.style.width = `${viewport.width}px`;
+    canvas.style.height = `${viewport.height}px`;
+    canvas.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: viewport.width,
+      bottom: viewport.height,
+      width: viewport.width,
+      height: viewport.height,
+      toJSON() {
+        return {
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          right: viewport.width,
+          bottom: viewport.height,
+          width: viewport.width,
+          height: viewport.height,
+        };
+      },
+    });
+
+    const camera = this._createExportCamera(view, viewport);
+    const exportViewer = {
+      partHistory: viewer.partHistory,
+      scene,
+      camera,
+      renderer,
+      controls: null,
+    };
+
+    return {
+      viewer: exportViewer,
+      scene,
+      camera,
+      renderer,
+      viewport,
+      dispose: () => {
         try {
-          this._applyView(view, { index: viewIndex, suppressActive: true, viewport: activeViewport });
-          overlay = await this._buildExportAnnotations(view);
-          await this._renderAndWait(2);
-          dataUrl = await this._captureCanvasImage(overlay?.labels || []);
-        } finally {
-          try { overlay?.cleanup?.(); } catch { /* ignore */ }
+          if (camera.parent === scene) scene.remove(camera);
+        } catch { /* ignore */ }
+        try { renderer.dispose(); } catch { /* ignore */ }
+      },
+    };
+  }
+
+  _setDescendantLightVisibility(root, visible) {
+    const prior = [];
+    if (!root?.traverse) return prior;
+    root.traverse((obj) => {
+      if (!obj?.isLight) return;
+      prior.push([obj, obj.visible !== false]);
+      obj.visible = !!visible;
+    });
+    return prior;
+  }
+
+  _restoreLightVisibility(states = []) {
+    for (const entry of states) {
+      const [light, visible] = Array.isArray(entry) ? entry : [];
+      if (!light) continue;
+      try { light.visible = visible; } catch { /* ignore */ }
+    }
+  }
+
+  _collectExportFaceOutlineObjects(renderContext) {
+    const viewer = this.viewer;
+    if (viewer && typeof viewer._collectSolidFaceOutlineObjects === 'function') {
+      try { return viewer._collectSolidFaceOutlineObjects(); } catch { /* ignore */ }
+    }
+    const out = [];
+    const scene = renderContext?.scene || null;
+    if (!scene?.traverse) return out;
+    scene.traverse((obj) => {
+      if (!obj || obj.type !== 'SOLID') return;
+      const children = Array.isArray(obj.children) ? obj.children : [];
+      for (const child of children) {
+        if (child?.type === 'FACE' && child.isMesh) out.push(child);
+      }
+    });
+    return out;
+  }
+
+  _renderExportSolidFaceOutlineEdgeMask(renderContext, edgeMaskTarget, depthMaterial) {
+    const renderer = renderContext?.renderer;
+    const scene = renderContext?.scene;
+    const camera = renderContext?.camera;
+    if (!renderer?.isWebGLRenderer || !scene || !camera || !edgeMaskTarget || !depthMaterial) return;
+
+    const originalVisibility = new Map();
+    scene.traverse((obj) => {
+      if (obj) originalVisibility.set(obj, obj.visible !== false);
+    });
+
+    const applyRenderableVisibility = (predicate) => {
+      scene.traverse((obj) => {
+        if (!obj) return;
+        const baseVisible = originalVisibility.get(obj) !== false;
+        if (!baseVisible) {
+          obj.visible = false;
+          return;
         }
+        if (obj.isMesh || obj.isLine || obj.isLine2 || obj.isLineSegments || obj.isLineLoop || obj.isPoints || obj.isSprite) {
+          obj.visible = !!predicate(obj);
+          return;
+        }
+        obj.visible = true;
       });
     };
 
+    const oldClearColor = new THREE.Color();
+    renderer.getClearColor(oldClearColor);
+    const oldClearAlpha = renderer.getClearAlpha();
+    const oldAutoClear = renderer.autoClear;
+    const oldTarget = typeof renderer.getRenderTarget === 'function' ? renderer.getRenderTarget() : null;
+    const oldBackground = scene.background;
+    const oldOverrideMaterial = scene.overrideMaterial;
+
     try {
-      if (hideViewCube) {
-        await this._withViewCubeHidden(runCapture);
-      } else {
-        await runCapture();
-      }
+      scene.background = null;
+      renderer.autoClear = true;
+      renderer.setRenderTarget(edgeMaskTarget);
+      renderer.setClearColor(0x000000, 0);
+      renderer.clear(true, true, true);
+
+      applyRenderableVisibility((obj) => obj.isMesh);
+      scene.overrideMaterial = depthMaterial;
+      renderer.render(scene, camera);
+
+      applyRenderableVisibility((obj) => {
+        if (obj?.type !== 'EDGE') return false;
+        if (obj.userData?.auxEdge) return false;
+        return obj.material?.depthTest !== false;
+      });
+      scene.overrideMaterial = null;
+      renderer.render(scene, camera);
     } finally {
-      this._restoreViewState(originalSnapshot, originalWireframe);
-      if (previousActive != null) {
-        this._setActiveViewIndex(previousActive);
-        this._renderList();
+      scene.overrideMaterial = oldOverrideMaterial;
+      scene.background = oldBackground;
+      originalVisibility.forEach((visible, obj) => {
+        if (obj) obj.visible = visible;
+      });
+      renderer.setRenderTarget(oldTarget);
+      renderer.setClearColor(oldClearColor, oldClearAlpha);
+      renderer.autoClear = oldAutoClear;
+    }
+  }
+
+  _renderExportScene(renderContext) {
+    const { viewer, renderer, scene, camera, viewport } = renderContext || {};
+    if (!renderer?.isWebGLRenderer || !scene || !camera || !viewport) {
+      throw new Error('PMI export renderer is not ready');
+    }
+
+    this._updateViewportSensitiveRendering(viewport.width, viewport.height, viewer);
+
+    const liveCamera = this.viewer?.camera || null;
+    const liveLightStates = this._setDescendantLightVisibility(liveCamera, false);
+    const exportLightStates = this._setDescendantLightVisibility(camera, true);
+    const hadParent = camera.parent === scene;
+
+    const composer = new EffectComposer(renderer);
+    const renderPass = new RenderPass(scene, camera);
+    const outlinePass = new OutlinePass(new THREE.Vector2(viewport.width, viewport.height), scene, camera, []);
+    const edgeMaskTarget = new THREE.WebGLRenderTarget(viewport.width, viewport.height);
+    const depthMaterial = new THREE.MeshDepthMaterial();
+    depthMaterial.side = THREE.DoubleSide;
+    depthMaterial.colorWrite = false;
+    depthMaterial.depthWrite = true;
+    depthMaterial.depthTest = true;
+    depthMaterial.blending = THREE.NoBlending;
+
+    try {
+      if (!hadParent) scene.add(camera);
+
+      try { this.viewer?._patchOutlinePassHiddenEdgeAlpha?.(outlinePass); } catch { /* ignore */ }
+      try { this.viewer?._patchOutlinePassPerFaceRendering?.(outlinePass); } catch { /* ignore */ }
+      try { this.viewer?._patchOutlinePassSolidOverlay?.(outlinePass); } catch { /* ignore */ }
+
+      outlinePass.downSampleRatio = 1;
+      const liveOutlinePass = this.viewer?._solidFaceOutlinePass || null;
+      if (liveOutlinePass?.visibleEdgeColor?.isColor) {
+        outlinePass.visibleEdgeColor.copy(liveOutlinePass.visibleEdgeColor);
+      } else {
+        outlinePass.visibleEdgeColor.set(0xffff00);
       }
+      outlinePass.hiddenEdgeColor.set(0x000000);
+      outlinePass.edgeGlow = 0;
+      outlinePass.edgeThickness = Number.isFinite(liveOutlinePass?.edgeThickness)
+        ? liveOutlinePass.edgeThickness
+        : 1;
+      outlinePass.edgeStrength = Number.isFinite(liveOutlinePass?.edgeStrength)
+        ? liveOutlinePass.edgeStrength
+        : 3;
+      outlinePass.selectedObjects = this._collectExportFaceOutlineObjects(renderContext);
+
+      if (outlinePass.overlayMaterial?.uniforms?.edgeMaskTexture) {
+        outlinePass.overlayMaterial.uniforms.edgeMaskTexture.value = edgeMaskTarget.texture;
+      }
+
+      composer.addPass(renderPass);
+      composer.addPass(outlinePass);
+      if (typeof composer.setPixelRatio === 'function') composer.setPixelRatio(1);
+      composer.setSize(viewport.width, viewport.height);
+      outlinePass.setSize(viewport.width, viewport.height);
+
+      this._renderExportSolidFaceOutlineEdgeMask(renderContext, edgeMaskTarget, depthMaterial);
+      composer.render();
+    } finally {
+      try {
+        if (!hadParent && camera.parent === scene) scene.remove(camera);
+      } catch { /* ignore */ }
+      this._restoreLightVisibility(exportLightStates);
+      this._restoreLightVisibility(liveLightStates);
+      try { composer.dispose?.(); } catch { /* ignore */ }
+      try { outlinePass.dispose?.(); } catch { /* ignore */ }
+      try { renderPass.dispose?.(); } catch { /* ignore */ }
+      try { edgeMaskTarget.dispose?.(); } catch { /* ignore */ }
+      try { depthMaterial.dispose?.(); } catch { /* ignore */ }
+      this._updateViewportSensitiveRendering(
+        this._getViewerViewportMetrics().width,
+        this._getViewerViewportMetrics().height,
+        this.viewer,
+      );
+    }
+  }
+
+  async captureViewImageDataUrl(view, viewIndex, { hideViewCube = true } = {}) {
+    const viewer = this.viewer;
+    if (!viewer) throw new Error('Viewer is not ready to export images');
+
+    const captureViewport = this._getCaptureViewportMetrics(view);
+    const originalWireframe = this._detectWireframe(viewer.scene);
+    const renderContext = this._createExportRenderContext(captureViewport, view);
+
+    let dataUrl = null;
+    const runCapture = async () => {
+      let overlay = null;
+      try {
+        this._applyViewToRenderContext(view, renderContext, { index: viewIndex });
+        overlay = await this._buildExportAnnotations(view, renderContext);
+        this._renderExportScene(renderContext);
+        dataUrl = await this._captureCanvasImage(overlay?.labels || [], renderContext);
+      } finally {
+        try { overlay?.cleanup?.(); } catch { /* ignore */ }
+      }
+    };
+
+    try {
+      void hideViewCube;
+      await runCapture();
+    } finally {
+      try { this._applyWireframe(viewer?.scene, originalWireframe); } catch { /* ignore */ }
+      try { renderContext.dispose?.(); } catch { /* ignore */ }
+      try { viewer?.render?.(); } catch { /* ignore */ }
     }
 
     return dataUrl;
@@ -536,8 +810,7 @@ export class PMIViewsWidget {
     }
 
     const viewer = this.viewer;
-    const canvas = viewer?.renderer?.domElement;
-    if (!viewer || !canvas) {
+    if (!viewer) {
       alert('Viewer is not ready to export images.');
       return;
     }
@@ -612,8 +885,7 @@ export class PMIViewsWidget {
     if (!views.length) return {};
 
     const viewer = this.viewer;
-    const canvas = viewer?.renderer?.domElement;
-    if (!viewer || !canvas) throw new Error('Viewer is not ready to export images');
+    if (!viewer) throw new Error('Viewer is not ready to export images');
 
     const captures = [];
     this._exportingImages = true;
@@ -639,14 +911,59 @@ export class PMIViewsWidget {
     return files;
   }
 
-  async _buildExportAnnotations(view) {
+  _applyViewToRenderContext(view, renderContext, { index = null } = {}) {
+    try {
+      const targetViewer = renderContext?.viewer || null;
+      const camera = targetViewer?.camera || null;
+      if (!camera || !view?.camera) return;
+
+      const viewport = renderContext?.viewport || this._getCaptureViewportMetrics(view);
+      const applied = applyCameraSnapshot(camera, view.camera, {
+        controls: null,
+        respectParent: false,
+        syncControls: false,
+        viewport,
+      });
+
+      if (!applied) {
+        const legacy = view.camera;
+        if (legacy.position) {
+          camera.position.set(legacy.position.x, legacy.position.y, legacy.position.z);
+        }
+        if (legacy.quaternion) {
+          camera.quaternion.set(legacy.quaternion.x, legacy.quaternion.y, legacy.quaternion.z, legacy.quaternion.w);
+        }
+        if (legacy.up) {
+          camera.up.set(legacy.up.x, legacy.up.y, legacy.up.z);
+        }
+        if (typeof legacy.zoom === 'number' && Number.isFinite(legacy.zoom) && legacy.zoom > 0) {
+          camera.zoom = legacy.zoom;
+        }
+      }
+
+      adjustOrthographicFrustum(camera, view.camera?.projection || null, viewport);
+      try { camera.updateProjectionMatrix?.(); } catch { /* ignore */ }
+      try { camera.updateMatrixWorld?.(true); } catch { /* ignore */ }
+
+      try {
+        const vs = view.viewSettings || {};
+        if (typeof vs.wireframe === 'boolean') {
+          this._applyWireframe(renderContext?.scene, vs.wireframe);
+        }
+      } catch { /* ignore */ }
+
+      void index;
+    } catch { /* ignore */ }
+  }
+
+  async _buildExportAnnotations(view, renderContext = null) {
     const cleanup = () => {};
-    const viewer = this.viewer;
-    const scene = viewer?.partHistory?.scene || viewer?.scene;
-    if (!viewer || !scene) return { labels: [], cleanup };
+    const exportViewer = renderContext?.viewer || this.viewer;
+    const scene = exportViewer?.partHistory?.scene || exportViewer?.scene;
+    if (!exportViewer || !scene) return { labels: [], cleanup };
 
     const pmimode = {
-      viewer,
+      viewer: exportViewer,
       _opts: {
         dimDecimals: 3,
         angleDecimals: 1,
@@ -667,8 +984,8 @@ export class PMIViewsWidget {
 
     const labels = [];
     const ctx = {
-      screenSizeWorld: (px) => this._screenSizeWorld(px),
-      alignNormal: (alignment, ann) => this._alignNormal(alignment, ann),
+      screenSizeWorld: (px) => this._screenSizeWorld(px, renderContext),
+      alignNormal: (alignment, ann) => this._alignNormal(alignment, ann, renderContext),
       formatReferenceLabel: (ann, text) => this._formatReferenceLabel(ann, text),
       updateLabel: (idx, text, worldPos, ann) => {
         if (!worldPos || text == null) return;
@@ -698,9 +1015,10 @@ export class PMIViewsWidget {
     return { labels: labels.filter(Boolean), cleanup: cleanupFn };
   }
 
-  async _captureCanvasImage(labels = []) {
-    const canvas = this.viewer?.renderer?.domElement;
-    const camera = this.viewer?.camera;
+  async _captureCanvasImage(labels = [], renderContext = null) {
+    const exportViewer = renderContext?.viewer || this.viewer;
+    const canvas = exportViewer?.renderer?.domElement;
+    const camera = exportViewer?.camera;
     if (!canvas || !camera) throw new Error('Renderer not ready for capture');
     const width = canvas.width || canvas.clientWidth || 1;
     const height = canvas.height || canvas.clientHeight || 1;
@@ -708,7 +1026,7 @@ export class PMIViewsWidget {
     if (!Array.isArray(labels) || labels.length === 0) return baseData;
 
     const cssWidth = canvas.clientWidth || width;
-    const svgMarkup = this._composeLabelSVG(baseData, labels, width, height, cssWidth);
+    const svgMarkup = this._composeLabelSVG(baseData, labels, width, height, cssWidth, renderContext);
     if (!svgMarkup) throw new Error('Failed to compose SVG for labels');
     const svgPng = await this._svgToPngDataUrl(svgMarkup, width, height);
     if (!svgPng) throw new Error('Failed to convert SVG to PNG');
@@ -774,10 +1092,11 @@ export class PMIViewsWidget {
     ctx.stroke();
   }
 
-  _screenSizeWorld(pixels = 1) {
+  _screenSizeWorld(pixels = 1, renderContext = null) {
     try {
-      const canvasRect = this.viewer?.renderer?.domElement?.getBoundingClientRect?.() || { width: 800, height: 600 };
-      const wpp = this._worldPerPixel(this.viewer?.camera, canvasRect.width, canvasRect.height);
+      const exportViewer = renderContext?.viewer || this.viewer;
+      const canvasRect = exportViewer?.renderer?.domElement?.getBoundingClientRect?.() || { width: 800, height: 600 };
+      const wpp = this._worldPerPixel(exportViewer?.camera, canvasRect.width, canvasRect.height);
       return Math.max(0.0001, wpp * (pixels || 1));
     } catch { return 0.01; }
   }
@@ -799,11 +1118,12 @@ export class PMIViewsWidget {
     } catch { return 1; }
   }
 
-  _alignNormal(alignment, ann) {
+  _alignNormal(alignment, ann, renderContext = null) {
     try {
+      const exportViewer = renderContext?.viewer || this.viewer;
       const name = ann?.planeRefName || ann?.planeRef || '';
       if (name) {
-        const scene = this.viewer?.partHistory?.scene;
+        const scene = exportViewer?.partHistory?.scene || exportViewer?.scene;
         const obj = scene?.getObjectByName(name);
         if (obj) {
           if (obj.type === 'FACE' && typeof obj.getAverageNormal === 'function') {
@@ -822,7 +1142,7 @@ export class PMIViewsWidget {
     if (mode === 'yz') return new THREE.Vector3(1, 0, 0);
     if (mode === 'zx') return new THREE.Vector3(0, 1, 0);
     const n = new THREE.Vector3();
-    try { this.viewer?.camera?.getWorldDirection?.(n); } catch { }
+    try { (renderContext?.viewer?.camera || this.viewer?.camera)?.getWorldDirection?.(n); } catch { }
     return n.lengthSq() ? n : new THREE.Vector3(0, 0, 1);
   }
 
@@ -835,9 +1155,9 @@ export class PMIViewsWidget {
     } catch { return text; }
   }
 
-  _composeLabelSVG(baseImage, labels, width, height, cssWidth = null) {
+  _composeLabelSVG(baseImage, labels, width, height, cssWidth = null, renderContext = null) {
     if (!baseImage) throw new Error('Base image missing for SVG composition');
-    const camera = this.viewer?.camera;
+    const camera = renderContext?.viewer?.camera || this.viewer?.camera;
     const safeCssWidth = Math.max(1, cssWidth || width);
     const dpr = Math.max(1, width / safeCssWidth);
     const paddingX = 8 * dpr;

@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { Line2, LineGeometry, LineMaterial } from "three/examples/jsm/Addons.js";
 import { ConstraintSolver } from "../../features/sketch/sketchSolver2D/ConstraintEngine.js";
 import { deepClone } from "../../utils/deepClone.js";
+import { resolveSelectionObject, scoreObjectForNormal } from "../../utils/selectionResolver.js";
 import { AccordionWidget } from "../AccordionWidget.js";
 import { renderDimensions as dimsRender } from "./dimensions.js";
 import { vectorizeImageData } from "./handDrawToVectors/fuzzydraw.js";
@@ -25,6 +26,8 @@ export class SketchMode3D {
     this._useFatCurveLines = this._opts.useFatCurveLines === true;
     this._ui = null;
     this._lock = null; // { basis:{x,y,z,origin} }
+    this._openRefreshRafs = [];
+    this._openRefreshTimer = null;
     // Editing state
     this._solver = null;
     this._sketchGroup = null;
@@ -89,6 +92,40 @@ export class SketchMode3D {
     };
   }
 
+  #editGroupName() {
+    return `__SKETCH_EDIT_SESSION__:${this.featureID}`;
+  }
+
+  #dimGroupName() {
+    return `__SKETCH_DIMS_SESSION__:${this.featureID}`;
+  }
+
+  #removeStaleSessionGroup(name) {
+    if (!name || !this.viewer?.scene?.getObjectByName) return;
+    try {
+      const existing = this.viewer.scene.getObjectByName(name);
+      if (!existing) return;
+      try {
+        if (existing.userData) existing.userData.preventRemove = false;
+      } catch { }
+      try { existing.parent?.remove?.(existing); } catch { }
+      try { this.viewer.scene.remove(existing); } catch { }
+    } catch { }
+  }
+
+  #ensureSessionGroupsAttached() {
+    const scene = this.viewer?.scene || null;
+    if (!scene) return;
+    if (this._sketchGroup && this._sketchGroup.parent !== scene) {
+      try { this._sketchGroup.parent?.remove?.(this._sketchGroup); } catch { }
+      try { scene.add(this._sketchGroup); } catch { }
+    }
+    if (this._dim3D && this._dim3D.parent !== scene) {
+      try { this._dim3D.parent?.remove?.(this._dim3D); } catch { }
+      try { scene.add(this._dim3D); } catch { }
+    }
+  }
+
   open() {
     const v = this.viewer;
     if (!v) return;
@@ -101,8 +138,8 @@ export class SketchMode3D {
     const feature = Array.isArray(ph?.features)
       ? ph.features.find((f) => f?.inputParams?.featureID === this.featureID)
       : null;
-    const refName = feature?.inputParams?.sketchPlane || null;
-    const refObj = refName ? ph.scene.getObjectByName(refName) : null;
+    const refSelection = feature?.inputParams?.sketchPlane || null;
+    const refObj = this.#resolveSketchReference(ph?.scene, refSelection);
     this._refObj = refObj || null;
 
     // Always prefer the live reference transform when it exists. Persisted basis
@@ -119,7 +156,7 @@ export class SketchMode3D {
             x: [basis.x.x, basis.x.y, basis.x.z],
             y: [basis.y.x, basis.y.y, basis.y.z],
             z: [basis.z.x, basis.z.y, basis.z.z],
-            refName: refName || undefined,
+            refName: refObj?.name || undefined,
           };
         }
       } catch { }
@@ -203,15 +240,30 @@ export class SketchMode3D {
     this.#initSketchUndo();
 
     // Build editing group
+    this.#removeStaleSessionGroup(this.#editGroupName());
     this._sketchGroup = new THREE.Group();
     this._sketchGroup.renderOrder = 9999; // render last
-    this._sketchGroup.name = `__SKETCH_EDIT__:${this.featureID}`;
+    this._sketchGroup.name = this.#editGroupName();
+    this._sketchGroup.type = "SKETCH_EDIT";
+    this._sketchGroup.userData = this._sketchGroup.userData || {};
+    this._sketchGroup.userData.sketchSessionKind = "edit";
+    this._sketchGroup.userData.sketchFeatureId = this.featureID;
+    this._sketchGroup.userData.preventRemove = true;
+    this._sketchGroup.userData.excludeFromFit = true;
     v.scene.add(this._sketchGroup);
     // Dimension 3D group
+    this.#removeStaleSessionGroup(this.#dimGroupName());
     this._dim3D = new THREE.Group();
     this._dim3D.renderOrder = 9998; // just before sketch group
-    this._dim3D.name = `__SKETCH_DIMS__:${this.featureID}`;
+    this._dim3D.name = this.#dimGroupName();
+    this._dim3D.type = "SKETCH_DIMS";
+    this._dim3D.userData = this._dim3D.userData || {};
+    this._dim3D.userData.sketchSessionKind = "dims";
+    this._dim3D.userData.sketchFeatureId = this.featureID;
+    this._dim3D.userData.preventRemove = true;
+    this._dim3D.userData.excludeFromFit = true;
     v.scene.add(this._dim3D);
+    this.#ensureSessionGroupsAttached();
 
     // No special camera layers needed
     this.#rebuildSketchGraphics();
@@ -224,6 +276,11 @@ export class SketchMode3D {
     // Mount label overlay root and initial render
     this.#mountDimRoot();
     this.#renderDimensions();
+
+    this.#scheduleInitialViewportSync({
+      target: pivotLook,
+      distance: currentDist || 20,
+    });
 
     // Keep handles a constant screen size while zooming (no camera relock)
     const tick = () => {
@@ -355,11 +412,17 @@ export class SketchMode3D {
     }
     if (this._sketchGroup && v?.scene) {
       try {
+        if (this._sketchGroup.userData) this._sketchGroup.userData.preventRemove = false;
+      } catch { }
+      try {
         v.scene.remove(this._sketchGroup);
       } catch { }
       this._sketchGroup = null;
     }
     if (this._dim3D && v?.scene) {
+      try {
+        if (this._dim3D.userData) this._dim3D.userData.preventRemove = false;
+      } catch { }
       try {
         v.scene.remove(this._dim3D);
       } catch { }
@@ -388,6 +451,7 @@ export class SketchMode3D {
     }
     this._undoReady = false;
     this._lock = null;
+    this.#cancelInitialViewportSync();
     try {
       cancelAnimationFrame(this._sizeRAF);
     } catch { }
@@ -424,6 +488,11 @@ export class SketchMode3D {
 
     // Restore toolbar buttons
     try {
+      if (Array.isArray(this._toolbarButtonIds) && v?.mainToolbar?.removeCustomButton) {
+        for (const id of this._toolbarButtonIds) {
+          try { v.mainToolbar.removeCustomButton(id); } catch { }
+        }
+      }
       if (Array.isArray(this._toolbarButtons)) {
         for (const btn of this._toolbarButtons) {
           try { btn.remove(); } catch { }
@@ -438,6 +507,7 @@ export class SketchMode3D {
       }
     } catch { }
     this._toolbarButtons = null;
+    this._toolbarButtonIds = null;
     this._toolbarPrevButtons = null;
     this._toolButtons = null;
     this._undoButtons = { undo: null, redo: null };
@@ -1437,6 +1507,85 @@ export class SketchMode3D {
       width: canvas.clientWidth || canvas.width || 1,
       height: canvas.clientHeight || canvas.height || 1,
     };
+  }
+
+  #resolveSketchReference(scene, selection) {
+    const resolved = resolveSelectionObject(scene, selection, {
+      scoreFn: scoreObjectForNormal,
+      arrayMode: "firstResolved",
+      allowObjectPassthrough: true,
+    });
+    if (!resolved) return null;
+    if (resolved.type === "PLANE" || resolved.type === "FACE") return resolved;
+    if (resolved.type === "DATUM") {
+      let candidate = null;
+      try {
+        resolved.traverse((obj) => {
+          if (candidate || !obj) return;
+          if (obj.type === "PLANE" || obj.type === "FACE") candidate = obj;
+        });
+      } catch { }
+      if (candidate) return candidate;
+    }
+    if (resolved.isObject3D) {
+      let candidate = null;
+      try {
+        resolved.traverse((obj) => {
+          if (candidate || !obj) return;
+          if (obj.type === "PLANE" || obj.type === "FACE") candidate = obj;
+        });
+      } catch { }
+      if (candidate) return candidate;
+    }
+    return resolved;
+  }
+
+  #cancelInitialViewportSync() {
+    try {
+      for (const id of this._openRefreshRafs || []) {
+        cancelAnimationFrame(id);
+      }
+    } catch { }
+    this._openRefreshRafs = [];
+    if (this._openRefreshTimer) {
+      try { clearTimeout(this._openRefreshTimer); } catch { }
+      this._openRefreshTimer = null;
+    }
+  }
+
+  #scheduleInitialViewportSync({ target = null, distance = null } = {}) {
+    this.#cancelInitialViewportSync();
+    const run = () => {
+      if (!this.viewer || !this._sketchGroup || !this._lock) return;
+      try { this.#ensureSessionGroupsAttached(); } catch { }
+      try { this.viewer._resizeRendererToDisplaySize?.(); } catch { }
+      try {
+        this.#orientCameraPerpendicularToSketchPlane({
+          target,
+          distance: this._lock?.distance || distance || 20,
+        });
+      } catch { }
+      try { this.#rebuildSketchGraphics(); } catch { }
+      try {
+        const { width, height } = this.#canvasClientSize(this.viewer.renderer.domElement);
+        this.#updateFatLineResolutions(width, height);
+      } catch { }
+      try { this.#renderDimensions(); } catch { }
+      try { this.viewer.render?.(); } catch { }
+    };
+    const frames = 3;
+    for (let i = 0; i < frames; i++) {
+      const rafId = requestAnimationFrame(() => {
+        try { run(); } finally {
+          this._openRefreshRafs = (this._openRefreshRafs || []).filter((id) => id !== rafId);
+        }
+      });
+      this._openRefreshRafs.push(rafId);
+    }
+    this._openRefreshTimer = setTimeout(() => {
+      this._openRefreshTimer = null;
+      run();
+    }, 120);
   }
 
   #hitTestScale(e) {
@@ -2803,6 +2952,7 @@ export class SketchMode3D {
     if (!toolbar || !container) return;
     // Track buttons to reflect active tool
     this._toolButtons = this._toolButtons || new Map();
+    this._toolbarButtonIds = [];
     this._toolbarButtons = [];
     this._toolbarPrevButtons = [];
     for (const child of Array.from(container.children)) {
@@ -2811,7 +2961,9 @@ export class SketchMode3D {
     }
 
     const mk = ({ label, tool, tooltip }) => {
+      const id = `sketch-mode:${this.featureID}:${tool}`;
       const btn = toolbar.addCustomButton({
+        id,
         label,
         title: tooltip,
         onClick: () => { this.#setTool(tool); },
@@ -2822,6 +2974,7 @@ export class SketchMode3D {
       btn.setAttribute("aria-pressed", "false");
       if (label && label.length <= 2) btn.classList.add("mtb-icon");
       this._toolButtons.set(tool, btn);
+      this._toolbarButtonIds.push(id);
       this._toolbarButtons.push(btn);
       return btn;
     };
@@ -2838,8 +2991,10 @@ export class SketchMode3D {
       { label: "🔗", tool: "pickEdges", tooltip: "Link external edge" },
     ];
     buttons.forEach((btn) => mk(btn));
-    const mkAction = ({ label, tooltip, onClick }) => {
+    const mkAction = ({ label, tooltip, onClick, key }) => {
+      const id = `sketch-mode:${this.featureID}:${key}`;
       const btn = toolbar.addCustomButton({
+        id,
         label,
         title: tooltip,
         onClick,
@@ -2847,10 +3002,12 @@ export class SketchMode3D {
       if (!btn) return null;
       if (tooltip) btn.setAttribute("aria-label", tooltip);
       if (label && label.length <= 2) btn.classList.add("mtb-icon");
+      this._toolbarButtonIds.push(id);
       this._toolbarButtons.push(btn);
       return btn;
     };
     mkAction({
+      key: "perp",
       label: "Perp",
       tooltip: "Orient camera perpendicular to sketch plane",
       onClick: () => {
@@ -2861,11 +3018,13 @@ export class SketchMode3D {
       },
     });
     this._undoButtons.undo = mkAction({
+      key: "undo",
       label: "↶",
       tooltip: "Undo (Ctrl+Z)",
       onClick: () => this.undo(),
     });
     this._undoButtons.redo = mkAction({
+      key: "redo",
       label: "↷",
       tooltip: "Redo (Ctrl+Y)",
       onClick: () => this.redo(),
@@ -5008,6 +5167,7 @@ export class SketchMode3D {
   #rebuildSketchGraphics() {
     const grp = this._sketchGroup;
     if (!grp || !this._solver) return;
+    try { this.#ensureSessionGroupsAttached(); } catch { }
     for (let i = grp.children.length - 1; i >= 0; i--) {
       const ch = grp.children[i];
       grp.remove(ch);
@@ -5215,6 +5375,7 @@ export class SketchMode3D {
     this.#renderDimensions();
     this.#applyHoverAndSelectionColors();
     this.#scheduleSketchSnapshot();
+    try { this.viewer?.render?.(); } catch { }
   }
 
   #updateHandleSizes() {
