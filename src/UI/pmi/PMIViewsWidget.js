@@ -5,6 +5,7 @@
 
 import * as THREE from 'three';
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
+import { SVGRenderer } from 'three/examples/jsm/renderers/SVGRenderer.js';
 import { AnnotationHistory } from './AnnotationHistory.js';
 import { CADmaterials } from '../CADmaterials.js';
 import { adjustOrthographicFrustum, applyCameraSnapshot, captureCameraSnapshot } from './annUtils.js';
@@ -12,6 +13,7 @@ import { adjustOrthographicFrustum, applyCameraSnapshot, captureCameraSnapshot }
 const UPDATE_CAMERA_TOOLTIP = 'Update this view to match the current camera';
 const PMI_EXPORT_CAPTURE_WIDTH_PX = 2400;
 const PMI_EXPORT_CAPTURE_HEIGHT_PX = 1800;
+const SVG_NS = 'http://www.w3.org/2000/svg';
 
 export class PMIViewsWidget {
   constructor(viewer, { readOnly = false } = {}) {
@@ -349,6 +351,534 @@ export class PMIViewsWidget {
       } else if (obj.material) {
         obj.material = applyMaterial(obj.material);
       }
+    }
+  }
+
+  _applyMonochromeEdgeStyle(objects = [], renderContext = null) {
+    const viewport = renderContext?.viewport || {};
+    const width = Math.max(1, Number(viewport.width) || 1);
+    const height = Math.max(1, Number(viewport.height) || 1);
+    const applyMaterial = (material) => {
+      const clone = this._cloneExportMaterial(material);
+      if (!clone || typeof clone !== 'object') return clone;
+      try { clone.color?.set?.(0x000000); } catch { /* ignore */ }
+      try { clone.emissive?.set?.(0x000000); } catch { /* ignore */ }
+      try {
+        if ('toneMapped' in clone) clone.toneMapped = false;
+        if ('depthTest' in clone) clone.depthTest = false;
+        if ('depthWrite' in clone) clone.depthWrite = false;
+        if ('transparent' in clone) clone.transparent = true;
+        if ('opacity' in clone) clone.opacity = 1;
+        if (clone.resolution && typeof clone.resolution.set === 'function') clone.resolution.set(width, height);
+      } catch { /* ignore */ }
+      return clone;
+    };
+    for (const obj of objects) {
+      if (!obj) continue;
+      if (Array.isArray(obj.material)) {
+        obj.material = obj.material.map(applyMaterial);
+      } else if (obj.material) {
+        obj.material = applyMaterial(obj.material);
+      }
+    }
+  }
+
+  _buildSvgLineFromLine2(obj) {
+    const geom = obj?.geometry;
+    const start = geom?.attributes?.instanceStart;
+    const end = geom?.attributes?.instanceEnd;
+    let positions = null;
+    if (start && end && Number.isFinite(start.count) && start.count > 0) {
+      const count = Math.min(start.count, end.count);
+      positions = new Float32Array(count * 6);
+      for (let i = 0; i < count; i += 1) {
+        positions[i * 6] = start.getX(i);
+        positions[i * 6 + 1] = start.getY(i);
+        positions[i * 6 + 2] = start.getZ(i);
+        positions[i * 6 + 3] = end.getX(i);
+        positions[i * 6 + 4] = end.getY(i);
+        positions[i * 6 + 5] = end.getZ(i);
+      }
+    } else if (geom?.attributes?.position?.count >= 2) {
+      const pos = geom.attributes.position;
+      const segCount = pos.count - 1;
+      positions = new Float32Array(segCount * 6);
+      for (let i = 0; i < segCount; i += 1) {
+        positions[i * 6] = pos.getX(i);
+        positions[i * 6 + 1] = pos.getY(i);
+        positions[i * 6 + 2] = pos.getZ(i);
+        positions[i * 6 + 3] = pos.getX(i + 1);
+        positions[i * 6 + 4] = pos.getY(i + 1);
+        positions[i * 6 + 5] = pos.getZ(i + 1);
+      }
+    }
+
+    if (!positions || positions.length < 6) return null;
+
+    const material = Array.isArray(obj.material) ? obj.material[0] : obj.material;
+    const geomOut = new THREE.BufferGeometry();
+    geomOut.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+
+    const color = material?.color ? material.color : new THREE.Color('#000000');
+    const opacity = Number.isFinite(material?.opacity) ? material.opacity : 1;
+    const transparent = Boolean(material?.transparent) || opacity < 1;
+    const linewidth = Number.isFinite(material?.linewidth) ? material.linewidth : 1;
+    let matOut = null;
+
+    if (material?.dashed || material?.isLineDashedMaterial) {
+      matOut = new THREE.LineDashedMaterial({
+        color,
+        linewidth,
+        transparent,
+        opacity,
+        dashSize: Number.isFinite(material?.dashSize) ? material.dashSize : 0.5,
+        gapSize: Number.isFinite(material?.gapSize) ? material.gapSize : 0.5,
+      });
+    } else {
+      matOut = new THREE.LineBasicMaterial({
+        color,
+        linewidth,
+        transparent,
+        opacity,
+      });
+    }
+
+    try {
+      if ('depthTest' in matOut) matOut.depthTest = false;
+      if ('depthWrite' in matOut) matOut.depthWrite = false;
+    } catch { /* ignore */ }
+
+    const line = new THREE.LineSegments(geomOut, matOut);
+    line.matrixAutoUpdate = false;
+    try { line.matrix.copy(obj.matrixWorld); } catch { /* ignore */ }
+    try { line.matrixWorld.copy(obj.matrixWorld); } catch { /* ignore */ }
+    line.renderOrder = Number.isFinite(obj?.renderOrder) ? obj.renderOrder : 2;
+    line.visible = true;
+    if (matOut.isLineDashedMaterial) {
+      try { line.computeLineDistances(); } catch { /* ignore */ }
+    }
+    return line;
+  }
+
+  _collectMeshContourSegments(mesh, camera, out = []) {
+    const geom = mesh?.geometry;
+    const posAttr = geom?.attributes?.position;
+    if (!mesh?.isMesh || !posAttr || posAttr.count < 3 || !camera) return out;
+
+    const indexAttr = geom.index;
+    const triCount = indexAttr ? Math.floor(indexAttr.count / 3) : Math.floor(posAttr.count / 3);
+    if (triCount <= 0) return out;
+
+    const edgeMap = new Map();
+    const aLocal = this._svgContourVecA || (this._svgContourVecA = new THREE.Vector3());
+    const bLocal = this._svgContourVecB || (this._svgContourVecB = new THREE.Vector3());
+    const cLocal = this._svgContourVecC || (this._svgContourVecC = new THREE.Vector3());
+    const aWorld = this._svgContourWorldA || (this._svgContourWorldA = new THREE.Vector3());
+    const bWorld = this._svgContourWorldB || (this._svgContourWorldB = new THREE.Vector3());
+    const cWorld = this._svgContourWorldC || (this._svgContourWorldC = new THREE.Vector3());
+    const ab = this._svgContourAb || (this._svgContourAb = new THREE.Vector3());
+    const ac = this._svgContourAc || (this._svgContourAc = new THREE.Vector3());
+    const normal = this._svgContourNormal || (this._svgContourNormal = new THREE.Vector3());
+    const center = this._svgContourCenter || (this._svgContourCenter = new THREE.Vector3());
+    const viewToCamera = this._svgContourView || (this._svgContourView = new THREE.Vector3());
+    const orthoViewToCamera = this._svgContourOrthoView || (this._svgContourOrthoView = new THREE.Vector3());
+    const cameraWorld = this._svgContourCameraWorld || (this._svgContourCameraWorld = new THREE.Vector3());
+    const isOrtho = camera.isOrthographicCamera;
+
+    if (isOrtho) {
+      try { camera.getWorldDirection(orthoViewToCamera); } catch { orthoViewToCamera.set(0, 0, -1); }
+      orthoViewToCamera.multiplyScalar(-1);
+    } else {
+      try { camera.getWorldPosition(cameraWorld); } catch { cameraWorld.copy(camera.position || new THREE.Vector3()); }
+    }
+
+    const quantize = (value) => Number(Number(value).toFixed(6));
+    const nonIndexedKey = (ax, ay, az, bx, by, bz) => {
+      const aKey = `${quantize(ax)},${quantize(ay)},${quantize(az)}`;
+      const bKey = `${quantize(bx)},${quantize(by)},${quantize(bz)}`;
+      return aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
+    };
+    const addEdge = (key, startWorld, endWorld, frontFacing) => {
+      if (!key) return;
+      const entry = edgeMap.get(key) || {
+        ax: startWorld.x,
+        ay: startWorld.y,
+        az: startWorld.z,
+        bx: endWorld.x,
+        by: endWorld.y,
+        bz: endWorld.z,
+        front: false,
+        back: false,
+        count: 0,
+      };
+      entry.count += 1;
+      if (frontFacing) entry.front = true;
+      else entry.back = true;
+      edgeMap.set(key, entry);
+    };
+
+    for (let tri = 0; tri < triCount; tri += 1) {
+      const ia = indexAttr ? indexAttr.getX(tri * 3) : tri * 3;
+      const ib = indexAttr ? indexAttr.getX(tri * 3 + 1) : tri * 3 + 1;
+      const ic = indexAttr ? indexAttr.getX(tri * 3 + 2) : tri * 3 + 2;
+      if (![ia, ib, ic].every((index) => Number.isFinite(index) && index >= 0)) continue;
+
+      aLocal.set(posAttr.getX(ia), posAttr.getY(ia), posAttr.getZ(ia));
+      bLocal.set(posAttr.getX(ib), posAttr.getY(ib), posAttr.getZ(ib));
+      cLocal.set(posAttr.getX(ic), posAttr.getY(ic), posAttr.getZ(ic));
+      aWorld.copy(aLocal).applyMatrix4(mesh.matrixWorld);
+      bWorld.copy(bLocal).applyMatrix4(mesh.matrixWorld);
+      cWorld.copy(cLocal).applyMatrix4(mesh.matrixWorld);
+
+      ab.subVectors(bWorld, aWorld);
+      ac.subVectors(cWorld, aWorld);
+      normal.crossVectors(ab, ac);
+      if (normal.lengthSq() <= 1e-12) continue;
+      normal.normalize();
+
+      if (isOrtho) {
+        viewToCamera.copy(orthoViewToCamera);
+      } else {
+        center.copy(aWorld).add(bWorld).add(cWorld).multiplyScalar(1 / 3);
+        viewToCamera.subVectors(cameraWorld, center);
+        if (viewToCamera.lengthSq() <= 1e-12) continue;
+        viewToCamera.normalize();
+      }
+
+      const frontFacing = normal.dot(viewToCamera) >= 0;
+      addEdge(
+        indexAttr ? (ia < ib ? `${ia}:${ib}` : `${ib}:${ia}`) : nonIndexedKey(aLocal.x, aLocal.y, aLocal.z, bLocal.x, bLocal.y, bLocal.z),
+        aWorld,
+        bWorld,
+        frontFacing,
+      );
+      addEdge(
+        indexAttr ? (ib < ic ? `${ib}:${ic}` : `${ic}:${ib}`) : nonIndexedKey(bLocal.x, bLocal.y, bLocal.z, cLocal.x, cLocal.y, cLocal.z),
+        bWorld,
+        cWorld,
+        frontFacing,
+      );
+      addEdge(
+        indexAttr ? (ic < ia ? `${ic}:${ia}` : `${ia}:${ic}`) : nonIndexedKey(cLocal.x, cLocal.y, cLocal.z, aLocal.x, aLocal.y, aLocal.z),
+        cWorld,
+        aWorld,
+        frontFacing,
+      );
+    }
+
+    for (const entry of edgeMap.values()) {
+      if (entry.count < 2) continue;
+      if (!entry.front || !entry.back) continue;
+      out.push(entry.ax, entry.ay, entry.az, entry.bx, entry.by, entry.bz);
+    }
+    return out;
+  }
+
+  _buildMonochromeSvgContourGroup(renderContext) {
+    const scene = renderContext?.scene || null;
+    const camera = renderContext?.camera || null;
+    if (!scene?.traverse || !camera) return null;
+
+    const positions = [];
+    scene.traverse((obj) => {
+      if (!obj?.visible || !obj.isMesh || obj.type !== 'FACE') return;
+      this._collectMeshContourSegments(obj, camera, positions);
+    });
+    if (positions.length < 6) return null;
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(positions), 3));
+    const lineWidth = Number(CADmaterials?.EDGE?.BASE?.linewidth);
+    const material = new THREE.LineBasicMaterial({
+      color: 0x000000,
+      linewidth: Number.isFinite(lineWidth) && lineWidth > 0 ? lineWidth : 1,
+      transparent: true,
+      opacity: 1,
+    });
+    material.depthTest = false;
+    material.depthWrite = false;
+
+    const line = new THREE.LineSegments(geometry, material);
+    line.renderOrder = 2;
+    const group = new THREE.Group();
+    group.name = '__PMI_MONO_SVG_CONTOURS__';
+    group.userData.__pmiSvgContent = true;
+    group.add(line);
+    return group;
+  }
+
+  _buildLabelLayout(labels, width, height, cssWidth = null, renderContext = null, { svgCentered = false } = {}) {
+    const camera = renderContext?.viewer?.camera || this.viewer?.camera;
+    const isMonochrome = this._isMonochromeExport(renderContext);
+    const safeCssWidth = Math.max(1, cssWidth || width);
+    const dpr = Math.max(1, width / safeCssWidth);
+    const paddingX = 8 * dpr;
+    const paddingY = 6 * dpr;
+    const lineHeight = 18 * dpr;
+    const radius = 8 * dpr;
+    const fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+    const fontSize = 14 * dpr;
+
+    const layout = [];
+    labels.forEach((label) => {
+      if (!label || !label.world || label.text == null) return;
+      const screen = svgCentered
+        ? this._projectWorldToSvgScreen(label.world, camera, { width, height })
+        : this._projectWorldToScreen(label.world, camera, { width, height });
+      if (!screen) return;
+      const lines = String(label.text).split(/\r?\n/);
+      const textWidth = lines.reduce((max, line) => Math.max(max, this._measureTextApprox(line, fontSize, fontFamily)), 0);
+      const boxWidth = textWidth + paddingX * 2;
+      const boxHeight = lines.length * lineHeight + paddingY * 2;
+      const { ox, oy } = this._resolveLabelAnchorOffsets(label.anchor);
+      const x = screen.x - ox * boxWidth;
+      const y = screen.y - oy * boxHeight;
+      layout.push({ x, y, boxWidth, boxHeight, lines });
+    });
+
+    return {
+      dpr,
+      isMonochrome,
+      paddingX,
+      paddingY,
+      lineHeight,
+      radius,
+      fontFamily,
+      fontSize,
+      layout,
+    };
+  }
+
+  _appendSvgLabels(target, labels, width, height, renderContext = null) {
+    if (!target || !Array.isArray(labels) || labels.length === 0) return null;
+    const layoutData = this._buildLabelLayout(labels, width, height, width, renderContext, { svgCentered: true });
+    if (!layoutData.layout.length) return null;
+
+    const labelGroup = document.createElementNS(SVG_NS, 'g');
+    labelGroup.setAttribute('data-pmi-labels', 'true');
+    const {
+      isMonochrome,
+      paddingX,
+      paddingY,
+      lineHeight,
+      radius,
+      fontFamily,
+      fontSize,
+      layout,
+    } = layoutData;
+
+    for (const entry of layout) {
+      if (!isMonochrome) {
+        const rect = document.createElementNS(SVG_NS, 'rect');
+        rect.setAttribute('x', entry.x.toFixed(3));
+        rect.setAttribute('y', entry.y.toFixed(3));
+        rect.setAttribute('rx', String(radius));
+        rect.setAttribute('ry', String(radius));
+        rect.setAttribute('width', entry.boxWidth.toFixed(3));
+        rect.setAttribute('height', entry.boxHeight.toFixed(3));
+        rect.setAttribute('fill', 'rgba(17,24,39,0.92)');
+        rect.setAttribute('stroke', '#111827');
+        rect.setAttribute('stroke-width', '1');
+        labelGroup.appendChild(rect);
+      }
+
+      const text = document.createElementNS(SVG_NS, 'text');
+      text.setAttribute('x', (entry.x + paddingX).toFixed(3));
+      text.setAttribute('font-family', fontFamily);
+      text.setAttribute('font-size', String(fontSize));
+      text.setAttribute('font-weight', isMonochrome ? '600' : '700');
+      text.setAttribute('fill', isMonochrome ? '#000000' : '#ffffff');
+      text.setAttribute('dominant-baseline', 'middle');
+
+      const startY = entry.y + paddingY + lineHeight / 2;
+      entry.lines.forEach((lineText, idx) => {
+        const tspan = document.createElementNS(SVG_NS, 'tspan');
+        tspan.setAttribute('x', (entry.x + paddingX).toFixed(3));
+        tspan.setAttribute('y', (startY + lineHeight * idx).toFixed(3));
+        tspan.textContent = lineText;
+        text.appendChild(tspan);
+      });
+      labelGroup.appendChild(text);
+    }
+
+    target.appendChild(labelGroup);
+    return labelGroup;
+  }
+
+  _applySvgVectorDisplayStyle(svgRoot) {
+    if (!svgRoot?.querySelectorAll) return;
+    svgRoot.setAttribute('xmlns', SVG_NS);
+    svgRoot.setAttribute('shape-rendering', 'geometricPrecision');
+    svgRoot.style.background = 'transparent';
+    const stroked = svgRoot.querySelectorAll('path,line,polyline,polygon,rect,circle,ellipse,text');
+    stroked.forEach((node) => {
+      try { node.setAttribute('vector-effect', 'non-scaling-stroke'); } catch { /* ignore */ }
+      try { node.setAttribute('stroke-linecap', 'round'); } catch { /* ignore */ }
+      try { node.setAttribute('stroke-linejoin', 'round'); } catch { /* ignore */ }
+    });
+  }
+
+  _fitSvgToRenderedContent(svgRoot, contentRoot, viewport, paddingPx = 0) {
+    const fallbackWidth = Math.max(1, Number(viewport?.width) || 1);
+    const fallbackHeight = Math.max(1, Number(viewport?.height) || 1);
+    let bbox = null;
+    let host = null;
+
+    try {
+      if (typeof document === 'undefined' || !document.body || !svgRoot?.getBBox) {
+        throw new Error('SVG measurement DOM is unavailable');
+      }
+      host = document.createElement('div');
+      host.style.position = 'fixed';
+      host.style.left = '-100000px';
+      host.style.top = '-100000px';
+      host.style.width = '0';
+      host.style.height = '0';
+      host.style.opacity = '0';
+      host.style.pointerEvents = 'none';
+      host.style.overflow = 'hidden';
+      document.body.appendChild(host);
+      host.appendChild(svgRoot);
+      bbox = contentRoot?.getBBox?.() || svgRoot.getBBox?.() || null;
+    } catch {
+      bbox = null;
+    } finally {
+      try { host?.remove?.(); } catch { /* ignore */ }
+    }
+
+    const padding = Math.max(0, Number(paddingPx) || 0);
+    const x = Number.isFinite(bbox?.x) ? bbox.x - padding : 0;
+    const y = Number.isFinite(bbox?.y) ? bbox.y - padding : 0;
+    const width = Number.isFinite(bbox?.width) && bbox.width > 0 ? bbox.width + padding * 2 : fallbackWidth;
+    const height = Number.isFinite(bbox?.height) && bbox.height > 0 ? bbox.height + padding * 2 : fallbackHeight;
+    svgRoot.setAttribute('viewBox', `${x} ${y} ${width} ${height}`);
+    svgRoot.setAttribute('width', `${Math.max(1, Math.ceil(width))}`);
+    svgRoot.setAttribute('height', `${Math.max(1, Math.ceil(height))}`);
+  }
+
+  _encodeSvgDataUrl(svgRoot) {
+    if (!svgRoot) return null;
+    svgRoot.setAttribute('xmlns', SVG_NS);
+    const markup = new XMLSerializer().serializeToString(svgRoot);
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}`;
+  }
+
+  async _captureMonochromeSvgDataUrl(labels = [], renderContext = null) {
+    const scene = renderContext?.scene || null;
+    const camera = renderContext?.camera || null;
+    const viewport = renderContext?.viewport || null;
+    if (!scene || !camera || !viewport) {
+      throw new Error('Monochrome SVG export scene is not ready');
+    }
+
+    const svgRenderer = new SVGRenderer();
+    svgRenderer.setQuality?.('high');
+    svgRenderer.setSize(viewport.width, viewport.height);
+    try {
+      svgRenderer.setClearColor?.(new THREE.Color(0xffffff));
+    } catch { /* ignore */ }
+
+    const contourGroup = this._buildMonochromeSvgContourGroup(renderContext);
+    const annotationGroup = renderContext?.annotationGroup || null;
+    const edgeObjects = [];
+    const centerlineObjects = [];
+    scene.traverse((obj) => {
+      if (obj?.type !== 'EDGE') return;
+      if (obj.userData?.auxEdge && obj.userData?.centerline) {
+        centerlineObjects.push(obj);
+        return;
+      }
+      edgeObjects.push(obj);
+    });
+    this._applyMonochromeEdgeStyle(edgeObjects, renderContext);
+    if (centerlineObjects.length) {
+      this._applyMonochromeCenterlineStyle(centerlineObjects, renderContext);
+    }
+
+    const originalVisibility = this._snapshotSceneVisibility(scene);
+    const tempLineGroup = new THREE.Group();
+    tempLineGroup.name = '__PMI_MONO_SVG_LINES__';
+    tempLineGroup.userData.__pmiSvgContent = true;
+    const hiddenFatLines = [];
+    const disposableLines = [];
+    const hadParent = camera.parent === scene;
+
+    try {
+      if (!hadParent) scene.add(camera);
+      if (contourGroup) scene.add(contourGroup);
+      try { scene.updateMatrixWorld(true); } catch { /* ignore */ }
+      try { camera.updateMatrixWorld?.(); } catch { /* ignore */ }
+
+      this._applyRenderableVisibility(scene, originalVisibility, (obj) => {
+        if (annotationGroup && this._isObjectWithinGroup(obj, annotationGroup)) return true;
+        if (contourGroup && this._isObjectWithinGroup(obj, contourGroup)) return true;
+        if (obj?.type === 'EDGE') {
+          if (obj.userData?.auxEdge && obj.userData?.centerline) {
+            return this._shouldRenderMonochromeCenterLines(renderContext);
+          }
+          return true;
+        }
+        return false;
+      });
+
+      scene.traverse((obj) => {
+        if (!obj?.visible) return;
+        if (!obj.isLine2 && !obj.isLineSegments2) return;
+        const svgLine = this._buildSvgLineFromLine2(obj);
+        if (!svgLine) return;
+        hiddenFatLines.push([obj, obj.visible !== false]);
+        obj.visible = false;
+        tempLineGroup.add(svgLine);
+        disposableLines.push(svgLine);
+      });
+      if (tempLineGroup.children.length) {
+        scene.add(tempLineGroup);
+      }
+
+      svgRenderer.render(scene, camera);
+
+      const svgRoot = svgRenderer.domElement.cloneNode(true);
+      svgRoot.removeAttribute('style');
+      svgRoot.setAttribute('width', String(viewport.width));
+      svgRoot.setAttribute('height', String(viewport.height));
+
+      const contentGroup = document.createElementNS(SVG_NS, 'g');
+      while (svgRoot.firstChild) {
+        contentGroup.appendChild(svgRoot.firstChild);
+      }
+      svgRoot.appendChild(contentGroup);
+      this._appendSvgLabels(contentGroup, labels, viewport.width, viewport.height, renderContext);
+      this._applySvgVectorDisplayStyle(svgRoot);
+      this._fitSvgToRenderedContent(svgRoot, contentGroup, viewport, 4);
+      return this._encodeSvgDataUrl(svgRoot);
+    } finally {
+      for (const [obj, wasVisible] of hiddenFatLines) {
+        try { obj.visible = wasVisible; } catch { /* ignore */ }
+      }
+      try {
+        if (tempLineGroup.children.length) scene.remove(tempLineGroup);
+      } catch { /* ignore */ }
+      for (const line of disposableLines) {
+        try { line.geometry?.dispose?.(); } catch { /* ignore */ }
+        try { line.material?.dispose?.(); } catch { /* ignore */ }
+      }
+      try {
+        if (contourGroup) {
+          scene.remove(contourGroup);
+          contourGroup.traverse?.((obj) => {
+            try { obj.geometry?.dispose?.(); } catch { /* ignore */ }
+            if (Array.isArray(obj.material)) {
+              obj.material.forEach((entry) => { try { entry?.dispose?.(); } catch { /* ignore */ } });
+            } else {
+              try { obj.material?.dispose?.(); } catch { /* ignore */ }
+            }
+          });
+        }
+      } catch { /* ignore */ }
+      if (!hadParent) {
+        try { scene.remove(camera); } catch { /* ignore */ }
+      }
+      this._restoreSceneVisibility(originalVisibility);
     }
   }
 
@@ -892,8 +1422,18 @@ export class PMIViewsWidget {
       try {
         this._applyViewToRenderContext(view, renderContext, { index: viewIndex });
         overlay = await this._buildExportAnnotations(view, renderContext);
-        this._renderExportScene(renderContext);
-        dataUrl = await this._captureCanvasImage(overlay?.labels || [], renderContext);
+        if (this._isMonochromeExport(renderContext)) {
+          try {
+            dataUrl = await this._captureMonochromeSvgDataUrl(overlay?.labels || [], renderContext);
+          } catch (error) {
+            console.warn('PMI monochrome SVG export fell back to raster capture', error);
+            this._renderExportScene(renderContext);
+            dataUrl = await this._captureCanvasImage(overlay?.labels || [], renderContext);
+          }
+        } else {
+          this._renderExportScene(renderContext);
+          dataUrl = await this._captureCanvasImage(overlay?.labels || [], renderContext);
+        }
       } finally {
         try { overlay?.cleanup?.(); } catch { /* ignore */ }
       }
@@ -1510,6 +2050,20 @@ export class PMIViewsWidget {
       return {
         x: (v.x * 0.5 + 0.5) * width,
         y: (-v.y * 0.5 + 0.5) * height,
+      };
+    } catch { return null; }
+  }
+
+  _projectWorldToSvgScreen(world, camera, viewport) {
+    try {
+      if (!world || !camera) return null;
+      const { width = 1, height = 1 } = viewport || {};
+      const v = world.clone ? world.clone() : new THREE.Vector3(world.x || 0, world.y || 0, world.z || 0);
+      v.project(camera);
+      if (!Number.isFinite(v.x) || !Number.isFinite(v.y)) return null;
+      return {
+        x: v.x * (width * 0.5),
+        y: -v.y * (height * 0.5),
       };
     } catch { return null; }
   }

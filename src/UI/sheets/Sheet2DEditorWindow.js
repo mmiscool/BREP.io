@@ -6384,7 +6384,7 @@ export class Sheet2DEditorWindow {
 
   _getPmiImageCaptureKey(element, view = this._resolvePmiViewForElement(element), viewIndex = this._resolvePmiViewIndexForElement(element, view)) {
     return [
-      "trim-v4",
+      "trim-v5",
       this._getCurrentModelRevision(),
       this._pmiViewRevision,
       Number.isInteger(viewIndex) ? viewIndex : -1,
@@ -6616,9 +6616,30 @@ export class Sheet2DEditorWindow {
     }
 
     if (dataUrl) {
-      dataUrl = await this._trimTransparentImageDataUrl(dataUrl, 4);
+      const source = String(dataUrl || "").trim();
+      if (source.startsWith("data:image/svg+xml")) {
+        await this._rememberImageDataUrlMetadata(source);
+      } else {
+        dataUrl = await this._trimTransparentImageDataUrl(dataUrl, 4);
+      }
     }
     return dataUrl;
+  }
+
+  async _rememberImageDataUrlMetadata(dataUrl) {
+    const source = String(dataUrl || "").trim();
+    if (!source.startsWith("data:image/")) return false;
+
+    return new Promise((resolve) => {
+      const image = new Image();
+      image.onload = () => {
+        const width = Math.max(1, Math.round(toFiniteNumber(image.naturalWidth, image.width)));
+        const height = Math.max(1, Math.round(toFiniteNumber(image.naturalHeight, image.height)));
+        resolve(this._rememberMediaMetadata(source, width, height));
+      };
+      image.onerror = () => resolve(false);
+      image.src = source;
+    });
   }
 
   async _trimTransparentImageDataUrl(dataUrl, paddingPx = 0) {
