@@ -1865,6 +1865,7 @@ export class Viewer {
             // Viewer-only layout: keep only read-only panels for embedding.
             this.sceneManagerUi = await new SceneListing(this.scene, {
                 onSelection: (obj) => this._applySelectionTarget(obj, { triggerOnClick: false, allowDiagnostics: false }),
+                onRender: () => this.render(),
             });
             const sceneSection = await this.accordion.addSection("Scene Manager");
             await sceneSection.uiElement.appendChild(this.sceneManagerUi.uiElement);
@@ -1917,6 +1918,7 @@ export class Viewer {
         // Setup sceneManagerUi
         this.sceneManagerUi = await new SceneListing(this.scene, {
             onSelection: (obj) => this._applySelectionTarget(obj, { triggerOnClick: false, allowDiagnostics: false }),
+            onRender: () => this.render(),
         });
         const sceneSection = await this.accordion.addSection("Scene Manager");
         await sceneSection.uiElement.appendChild(this.sceneManagerUi.uiElement);
@@ -2379,6 +2381,14 @@ export class Viewer {
     // ----------------------------------------
     // Sketch Mode API
     // ----------------------------------------
+    deactivateSketchPlaneSelection() {
+        try {
+            return SchemaForm.deactivateActiveReferenceSelection?.('sketchPlane', this.partHistory?.scene || this.scene || null) === true;
+        } catch {
+            return false;
+        }
+    }
+
     startSketchMode(featureID) {
         if (this._viewerOnlyMode) return;
         // Hide the sketch in the scene if it exists

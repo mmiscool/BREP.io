@@ -158,6 +158,35 @@ export class SchemaForm {
         return SchemaForm.__activeRefInput;
     }
 
+    static deactivateActiveReferenceSelection(key = null, sceneOverride = null) {
+        const activeInput = SchemaForm.__activeRefInput || window.__BREP_activeRefInput || null;
+        if (!activeInput) return false;
+        if (key != null) {
+            const activeKey = activeInput?.dataset?.key || activeInput?.dataset?.refKey || null;
+            if (activeKey != null && String(activeKey) !== String(key)) return false;
+        }
+        try { activeInput.style.filter = 'none'; } catch (_) { }
+        try { activeInput.removeAttribute('active-reference-selection'); } catch (_) { }
+        try {
+            const wrap = activeInput.closest('.ref-single-wrap, .ref-multi-wrap');
+            if (wrap) wrap.classList.remove('ref-active');
+        } catch (_) { }
+        try {
+            if (typeof activeInput.__refPreviewCleanup === 'function') {
+                activeInput.__refPreviewCleanup();
+            }
+        } catch (_) { }
+        SchemaForm.__activeRefInput = null;
+        try { window.__BREP_activeRefInput = null; } catch (_) { }
+        try { SelectionFilter.clearHover(); } catch (_) { }
+        try {
+            const scene = sceneOverride || SelectionFilter.viewer?.partHistory?.scene || SelectionFilter.viewer?.scene || null;
+            if (scene) SelectionFilter.unselectAll(scene);
+        } catch (_) { }
+        try { SelectionFilter.restoreAllowedSelectionTypes(); } catch (_) { }
+        return true;
+    }
+
     get activeTransform() {
         return SchemaForm.__activeXform;
     }
@@ -508,6 +537,24 @@ export class SchemaForm {
             return true;
         }
         return false;
+    }
+
+    deactivateReferenceSelectionField(key = null) {
+        const active = SchemaForm.__activeRefInput || null;
+        if (!active) return false;
+        const ownsActiveRef = !!(
+            (this._shadow && typeof this._shadow.contains === 'function' && this._shadow.contains(active))
+            || (this.uiElement && typeof this.uiElement.contains === 'function' && this.uiElement.contains(active))
+            || (typeof active.getRootNode === 'function' && active.getRootNode && active.getRootNode() === this._shadow)
+        );
+        if (!ownsActiveRef) return false;
+        if (key != null) {
+            const fieldInput = this._inputs?.get?.(key) || null;
+            if (fieldInput && fieldInput !== active) return false;
+            const activeKey = active?.dataset?.key || active?.dataset?.refKey || null;
+            if (!fieldInput && activeKey != null && String(activeKey) !== String(key)) return false;
+        }
+        return SchemaForm.deactivateActiveReferenceSelection(key, this._getReferenceSelectionScene());
     }
 
     // Focus the first available field in this form (or activate a reference selection when needed).

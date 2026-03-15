@@ -177,10 +177,11 @@ export class SketchMode3D {
     this._lock = { basis, distance: currentDist || 20 };
 
     // Reposition and orient camera to face the sketch plane head-on.
-    this.#orientCameraPerpendicularToSketchPlane({
+    this.#orientCameraPerpendicularToSketchPlaneFinal({
       target: pivotLook,
       distance: currentDist || 20,
     });
+    try { v.deactivateSketchPlaneSelection?.(); } catch { }
 
     // Keep other sketch groups visible so they can be referenced while editing
     this._hiddenSketches = [];
@@ -1560,11 +1561,12 @@ export class SketchMode3D {
       try { this.#ensureSessionGroupsAttached(); } catch { }
       try { this.viewer._resizeRendererToDisplaySize?.(); } catch { }
       try {
-        this.#orientCameraPerpendicularToSketchPlane({
+        this.#orientCameraPerpendicularToSketchPlaneFinal({
           target,
           distance: this._lock?.distance || distance || 20,
         });
       } catch { }
+      try { this.viewer?.deactivateSketchPlaneSelection?.(); } catch { }
       try { this.#rebuildSketchGraphics(); } catch { }
       try {
         const { width, height } = this.#canvasClientSize(this.viewer.renderer.domElement);
@@ -1982,6 +1984,12 @@ export class SketchMode3D {
     return pivot;
   }
 
+  #orientCameraPerpendicularToSketchPlaneFinal({ target = null, distance = null } = {}) {
+    const ok = this.#orientCameraPerpendicularToSketchPlane({ target, distance });
+    if (!ok) return false;
+    return this.#reverseSketchCameraOrientation({ target });
+  }
+
   #orientCameraPerpendicularToSketchPlane({ target = null, distance = null } = {}) {
     const v = this.viewer;
     const cam = v?.camera;
@@ -2039,6 +2047,40 @@ export class SketchMode3D {
       try { v.controls && v.controls.updateMatrixState && v.controls.updateMatrixState(); } catch { /* ignore */ }
       try { v.render && v.render(); } catch { /* ignore */ }
       if (this._lock) this._lock.distance = dist;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  #reverseSketchCameraOrientation({ target = null } = {}) {
+    const v = this.viewer;
+    const cam = v?.camera;
+    const basis = this._lock?.basis;
+    if (!v || !cam || !basis) return false;
+
+    try {
+      const pivotFallback = basis.origin instanceof THREE.Vector3
+        ? basis.origin
+        : new THREE.Vector3();
+      const pivotLook = target instanceof THREE.Vector3
+        ? target.clone()
+        : this.#computeSketchViewTarget(this._refObj, pivotFallback);
+
+      const offset = cam.position.clone().sub(pivotLook);
+      if (offset.lengthSq() < 1e-12) return false;
+
+      cam.position.copy(pivotLook.clone().sub(offset));
+      if (cam.up?.isVector3) cam.up.multiplyScalar(-1);
+      else cam.up = new THREE.Vector3(0, -1, 0);
+      cam.lookAt(pivotLook);
+      cam.updateMatrixWorld(true);
+      try { if (v.controls) v.controls.target.copy(pivotLook); } catch { /* ignore */ }
+      try { v.controls && v.controls._gizmos && v.controls._gizmos.position && v.controls._gizmos.position.copy(pivotLook); } catch { /* ignore */ }
+      try { v.controls && v.controls.update && v.controls.update(); } catch { /* ignore */ }
+      try { v.controls && v.controls._gizmos && v.controls._gizmos.updateMatrixWorld && v.controls._gizmos.updateMatrixWorld(true); } catch { /* ignore */ }
+      try { v.controls && v.controls.updateMatrixState && v.controls.updateMatrixState(); } catch { /* ignore */ }
+      try { v.render && v.render(); } catch { /* ignore */ }
       return true;
     } catch {
       return false;
@@ -2108,7 +2150,6 @@ export class SketchMode3D {
 
     // If FACE, attempt to use its average normal and a stable X axis
     if (obj.type === "FACE" && typeof obj.getAverageNormal === "function") {
-      // Raw normal from face triangles (may be inward)
       let n = obj.getAverageNormal();
       const rawN = n.clone();
       if (n.lengthSq() < 1e-12) n.set(0, 0, 1);
@@ -2118,31 +2159,13 @@ export class SketchMode3D {
       const signedOffset = origin.clone().sub(planePoint).dot(n);
       origin.addScaledVector(n, -signedOffset);
 
-      // Determine solid center if possible
-      let solidCenter = null;
-      try {
-        let solid = obj.parent;
-        while (solid && solid.type !== 'SOLID') solid = solid.parent;
-        if (solid) {
-          const box = new THREE.Box3().setFromObject(solid);
-          if (!box.isEmpty()) solidCenter = box.getCenter(new THREE.Vector3());
-        }
-      } catch { }
-
-      // If we know a center, align normal to point from center -> face (outward)
-      let flipped = false;
-      if (solidCenter) {
-        const toFace = origin.clone().sub(solidCenter).normalize();
-        if (toFace.lengthSq() > 0 && n.dot(toFace) < 0) { n.multiplyScalar(-1); flipped = true; }
-      }
-
       const worldUp = new THREE.Vector3(0, 1, 0);
       const tmp = new THREE.Vector3();
       const zx = Math.abs(n.dot(worldUp)) > 0.9 ? new THREE.Vector3(1, 0, 0) : worldUp; // pick a non-parallel ref
       x.copy(tmp.crossVectors(zx, n).normalize());
       y.copy(tmp.crossVectors(n, x).normalize());
       z.copy(n.clone().normalize());
-      return { x, y, z, origin, rawNormal: rawN, flippedByCenter: flipped, solidCenter };
+      return { x, y, z, origin, rawNormal: rawN };
     }
 
     // For generic Mesh (plane), derive z from its world normal
@@ -3011,7 +3034,7 @@ export class SketchMode3D {
       label: "Perp",
       tooltip: "Orient camera perpendicular to sketch plane",
       onClick: () => {
-        const ok = this.#orientCameraPerpendicularToSketchPlane();
+        const ok = this.#orientCameraPerpendicularToSketchPlaneFinal();
         if (!ok) {
           try { this.viewer?._toast?.("Unable to orient camera to sketch plane."); } catch { }
         }

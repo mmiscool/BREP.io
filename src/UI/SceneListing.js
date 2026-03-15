@@ -9,12 +9,13 @@ const SCENE_TREE_INDENT_STEP_PX = 20;
 export class SceneListing {
     /**
      * @param {THREE.Scene} scene
-     * @param {{autoStart?: boolean, onSelection?: (obj: any) => void}} [options]
+     * @param {{autoStart?: boolean, onSelection?: (obj: any) => void, onRender?: () => void}} [options]
      */
-    constructor(scene, { autoStart = true, onSelection = null } = {}) {
+    constructor(scene, { autoStart = true, onSelection = null, onRender = null } = {}) {
         if (!scene) throw new Error("SceneListing requires a THREE.Scene.");
         this.scene = scene;
         this._onSelection = (typeof onSelection === 'function') ? onSelection : null;
+        this._onRender = (typeof onRender === 'function') ? onRender : null;
 
         // --- UI root ----------------------------------------------------------------
         this.uiElement = document.createElement("div");
@@ -266,6 +267,7 @@ export class SceneListing {
             if (typeof obj.visible !== "undefined") obj.visible = on;
             // Immediate reflect
             this.#syncAttributes();
+            this.#requestRender();
             e.stopPropagation();
         });
 
@@ -469,6 +471,7 @@ export class SceneListing {
             }
         }
         this.#syncAttributes();
+        this.#requestRender();
     }
 
     #labelFor(obj) {
@@ -485,6 +488,11 @@ export class SceneListing {
     #notifySelection(obj) {
         if (!this._onSelection) return;
         try { this._onSelection(obj); } catch { }
+    }
+
+    #requestRender() {
+        if (!this._onRender) return;
+        try { this._onRender(); } catch { }
     }
 
     #applyTypeClass(li, obj) {
