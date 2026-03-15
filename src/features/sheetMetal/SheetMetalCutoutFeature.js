@@ -8,10 +8,10 @@ const inputParamsSchema = {
   },
   sheet: {
     type: "reference_selection",
-    selectionFilter: ["SOLID", "FACE", "EDGE"],
+    selectionFilter: ["SOLID"],
     multiple: false,
     default_value: null,
-    hint: "Target sheet metal solid to cut (you can pick the solid, a face, or an edge).",
+    hint: "Target sheet metal solid to cut.",
   },
   profile: {
     type: "reference_selection",
