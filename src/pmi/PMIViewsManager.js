@@ -127,6 +127,12 @@ export class PMIViewsManager {
       }
     }
     if (!view.viewSettings || typeof view.viewSettings !== 'object') view.viewSettings = {};
+    const textSizePt = Number(view.viewSettings?.pmiTextSizePt);
+    if (Number.isFinite(textSizePt) && textSizePt > 0) {
+      view.viewSettings.pmiTextSizePt = Math.max(1, Math.min(288, textSizePt));
+    } else {
+      delete view.viewSettings.pmiTextSizePt;
+    }
     if (view.annotationHistory && typeof view.annotationHistory !== 'object') {
       delete view.annotationHistory;
     }

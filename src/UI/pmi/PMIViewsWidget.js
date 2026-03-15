@@ -13,6 +13,7 @@ import { adjustOrthographicFrustum, applyCameraSnapshot, captureCameraSnapshot }
 const UPDATE_CAMERA_TOOLTIP = 'Update this view to match the current camera';
 const PMI_EXPORT_CAPTURE_WIDTH_PX = 2400;
 const PMI_EXPORT_CAPTURE_HEIGHT_PX = 1800;
+const DEFAULT_PMI_VIEW_TEXT_SIZE_PT = 12;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 export class PMIViewsWidget {
@@ -111,6 +112,18 @@ export class PMIViewsWidget {
       width: PMI_EXPORT_CAPTURE_WIDTH_PX,
       height: PMI_EXPORT_CAPTURE_HEIGHT_PX,
     };
+  }
+
+  _normalizeViewTextSizePt(value, fallback = DEFAULT_PMI_VIEW_TEXT_SIZE_PT) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return Math.max(1, Math.min(288, numeric));
+    }
+    return fallback;
+  }
+
+  _getViewTextSizePt(view, fallback = DEFAULT_PMI_VIEW_TEXT_SIZE_PT) {
+    return this._normalizeViewTextSizePt((view?.viewSettings || view?.settings)?.pmiTextSizePt, fallback);
   }
 
   _updateViewportSensitiveRendering(width, height, viewerContext = this.viewer) {
@@ -612,17 +625,44 @@ export class PMIViewsWidget {
     return group;
   }
 
+  _resolveSheetPlacementPpi(renderContext = null) {
+    const viewportWidth = Number(renderContext?.viewport?.width);
+    const viewportHeight = Number(renderContext?.viewport?.height);
+    const frameWidthIn = Number(renderContext?.targetFrameWidthIn);
+    const frameHeightIn = Number(renderContext?.targetFrameHeightIn);
+    if (!(viewportWidth > 0) || !(viewportHeight > 0) || !(frameWidthIn > 0) || !(frameHeightIn > 0)) {
+      return null;
+    }
+    return Math.max(viewportWidth / frameWidthIn, viewportHeight / frameHeightIn);
+  }
+
+  _resolveLabelFontSizePx(renderContext = null) {
+    const ppi = this._resolveSheetPlacementPpi(renderContext);
+    if (!(ppi > 0)) return null;
+    const textSizePt = this._getViewTextSizePt(renderContext?.view || null);
+    return (textSizePt / 72) * ppi;
+  }
+
+  _getLabelLayoutMetrics(width, cssWidth = null, renderContext = null) {
+    const safeCssWidth = Math.max(1, cssWidth || width);
+    const dpr = Math.max(1, width / safeCssWidth);
+    const fontSize = this._resolveLabelFontSizePx(renderContext) || (14 * dpr);
+    return {
+      dpr,
+      paddingX: Math.max(4 * dpr, fontSize * (8 / 14)),
+      paddingY: Math.max(3 * dpr, fontSize * (6 / 14)),
+      lineHeight: Math.max(fontSize, fontSize * (18 / 14)),
+      radius: Math.max(4 * dpr, fontSize * (8 / 14)),
+      fontSize,
+    };
+  }
+
   _buildLabelLayout(labels, width, height, cssWidth = null, renderContext = null, { svgCentered = false } = {}) {
     const camera = renderContext?.viewer?.camera || this.viewer?.camera;
     const isMonochrome = this._isMonochromeExport(renderContext);
-    const safeCssWidth = Math.max(1, cssWidth || width);
-    const dpr = Math.max(1, width / safeCssWidth);
-    const paddingX = 8 * dpr;
-    const paddingY = 6 * dpr;
-    const lineHeight = 18 * dpr;
-    const radius = 8 * dpr;
+    const { dpr, paddingX, paddingY, lineHeight, radius, fontSize } =
+      this._getLabelLayoutMetrics(width, cssWidth, renderContext);
     const fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
-    const fontSize = 14 * dpr;
 
     const layout = [];
     labels.forEach((label) => {
@@ -955,6 +995,8 @@ export class PMIViewsWidget {
       viewport,
       renderMode,
       showCenterLines,
+      targetFrameWidthIn: Number(options?.targetFrameWidthIn) > 0 ? Number(options.targetFrameWidthIn) : null,
+      targetFrameHeightIn: Number(options?.targetFrameHeightIn) > 0 ? Number(options.targetFrameHeightIn) : null,
       dispose: () => {
         try {
           if (camera.parent === scene) scene.remove(camera);
@@ -1413,13 +1455,25 @@ export class PMIViewsWidget {
     }
   }
 
-  async captureViewImageDataUrl(view, viewIndex, { hideViewCube = true, renderMode = 'shaded', showCenterLines = false } = {}) {
+  async captureViewImageDataUrl(view, viewIndex, {
+    hideViewCube = true,
+    renderMode = 'shaded',
+    showCenterLines = false,
+    targetFrameWidthIn = null,
+    targetFrameHeightIn = null,
+  } = {}) {
     const viewer = this.viewer;
     if (!viewer) throw new Error('Viewer is not ready to export images');
 
     const captureViewport = this._getCaptureViewportMetrics(view);
     const originalWireframe = this._detectWireframe(viewer.scene);
-    const renderContext = this._createExportRenderContext(captureViewport, view, { renderMode, showCenterLines });
+    const renderContext = this._createExportRenderContext(captureViewport, view, {
+      renderMode,
+      showCenterLines,
+      targetFrameWidthIn,
+      targetFrameHeightIn,
+    });
+    renderContext.view = view || null;
 
     let dataUrl = null;
     const runCapture = async () => {
@@ -1486,6 +1540,8 @@ export class PMIViewsWidget {
       .pmi-row-menu .pmi-btn { width: 100%; justify-content: flex-start; }
       .pmi-row-menu .pmi-btn.danger { justify-content: center; }
       .pmi-row-menu-wireframe { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #e5e7eb; }
+      .pmi-row-menu-setting { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #e5e7eb; }
+      .pmi-row-menu-setting .pmi-input { min-width: 0; }
       .pmi-row-menu hr { border: none; border-top: 1px solid #1f2937; margin: 4px 0; }
     `;
     document.head.appendChild(style);
@@ -1669,6 +1725,27 @@ export class PMIViewsWidget {
         wireframeLabel.appendChild(wireframeCheckbox);
         wireframeLabel.appendChild(wireframeText);
         menu.appendChild(wireframeLabel);
+
+        const textSizeWrap = document.createElement('label');
+        textSizeWrap.className = 'pmi-row-menu-setting';
+        const textSizeText = document.createElement('span');
+        textSizeText.textContent = 'Text size (pt)';
+        const textSizeInput = document.createElement('input');
+        textSizeInput.type = 'number';
+        textSizeInput.min = '1';
+        textSizeInput.max = '288';
+        textSizeInput.step = '0.5';
+        textSizeInput.className = 'pmi-input';
+        textSizeInput.value = String(this._getViewTextSizePt(v));
+        textSizeInput.title = 'PMI label size on the sheet in points';
+        textSizeInput.addEventListener('click', (evt) => evt.stopPropagation());
+        textSizeInput.addEventListener('change', (evt) => {
+          evt.stopPropagation();
+          this._setViewTextSizePt(idx, textSizeInput.value);
+        });
+        textSizeWrap.appendChild(textSizeText);
+        textSizeWrap.appendChild(textSizeInput);
+        menu.appendChild(textSizeWrap);
 
         menuBtn.addEventListener('click', (evt) => {
           evt.stopPropagation();
@@ -2174,14 +2251,9 @@ export class PMIViewsWidget {
     if (!baseImage) throw new Error('Base image missing for SVG composition');
     const camera = renderContext?.viewer?.camera || this.viewer?.camera;
     const isMonochrome = this._isMonochromeExport(renderContext);
-    const safeCssWidth = Math.max(1, cssWidth || width);
-    const dpr = Math.max(1, width / safeCssWidth);
-    const paddingX = 8 * dpr;
-    const paddingY = 6 * dpr;
-    const lineHeight = 18 * dpr;
-    const radius = 8 * dpr;
+    const { paddingX, paddingY, lineHeight, radius, fontSize } =
+      this._getLabelLayoutMetrics(width, cssWidth, renderContext);
     const fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
-    const fontSize = 14 * dpr;
 
     const layout = [];
     labels.forEach((label) => {
@@ -2523,6 +2595,35 @@ export class PMIViewsWidget {
       try {
         this._applyWireframe(this.viewer?.scene, isWireframe);
       } catch { /* ignore */ }
+    }
+  }
+
+  _setViewTextSizePt(index, value) {
+    if (this._readOnly) return;
+    const nextTextSizePt = this._normalizeViewTextSizePt(value);
+    const applyValue = (entry) => {
+      if (!entry || typeof entry !== 'object') return entry;
+      if (!entry.viewSettings || typeof entry.viewSettings !== 'object') {
+        entry.viewSettings = {};
+      }
+      entry.viewSettings.pmiTextSizePt = nextTextSizePt;
+      return entry;
+    };
+
+    let updated = false;
+    const manager = this.viewer?.partHistory?.pmiViewsManager;
+    if (manager && typeof manager.updateView === 'function') {
+      const result = manager.updateView(index, (entry) => applyValue(entry));
+      updated = Boolean(result);
+    } else if (Array.isArray(this.views) && this.views[index]) {
+      applyValue(this.views[index]);
+      updated = true;
+      this.refreshFromHistory();
+    }
+
+    if (!updated) {
+      this.refreshFromHistory();
+      this._renderList();
     }
   }
 

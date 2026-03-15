@@ -130,6 +130,7 @@ import {
     test_sheet_custom_size_persists,
     test_wire_harness_formboard_insert,
 } from './test_wireHarnessFormboard.js';
+import { test_pmi_view_text_size_setting_normalizes } from './test_pmiViewsManager.js';
 import {
     test_feature_dimension_overlay_supports_port,
     test_port_extension_annotation_geometry_preserves_extension_value,
@@ -262,6 +263,7 @@ export const testFunctions = [
     { test: test_wire_harness_formboard_reuses_only_formboard_sheet, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_wire_harness_connection_endpoint_resolution, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheet_custom_size_persists, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_pmi_view_text_size_setting_normalizes, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheet_clipboard_image_utils, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_wire_harness_formboard_insert, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_wire_harness_sheet_table_insert, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

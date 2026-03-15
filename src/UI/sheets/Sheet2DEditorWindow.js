@@ -41,6 +41,7 @@ const POINTS_PER_INCH = 72;
 const PDF_TARGET_DPI = 300;
 const PMI_TITLE_FONT_SIZE_PT = 10;
 const PMI_TITLE_PAD_X_PT = 6;
+const DEFAULT_PMI_VIEW_TEXT_SIZE_PT = 12;
 const MIN_ELEMENT_IN = 0.05;
 const MIN_MEDIA_SCALE = 1;
 const MAX_MEDIA_SCALE = 10;
@@ -1393,6 +1394,7 @@ export class Sheet2DEditorWindow {
 
     const inspector = document.createElement("aside");
     inspector.className = "sheet-slides-inspector";
+    this._inspectorElement = inspector;
 
     const inspectorHeader = document.createElement("div");
     inspectorHeader.className = "sheet-slides-inspector-header";
@@ -1674,6 +1676,15 @@ export class Sheet2DEditorWindow {
       (value) => this._setSelectedPMIField("renderMode", value),
     );
 
+    const pmiTextSizeInput = document.createElement("input");
+    pmiTextSizeInput.type = "number";
+    pmiTextSizeInput.className = "sheet-slides-control";
+    pmiTextSizeInput.step = "0.5";
+    pmiTextSizeInput.min = "1";
+    pmiTextSizeInput.max = "288";
+    pmiTextSizeInput.addEventListener("change", () => this._setSelectedPMIViewSetting("textSizePt", pmiTextSizeInput.value));
+    pmiTextSizeInput.title = "PMI text size on the sheet (pt)";
+
     const showCenterLinesInput = document.createElement("input");
     showCenterLinesInput.type = "checkbox";
     showCenterLinesInput.addEventListener("change", () => this._setSelectedPMIField("showCenterLines", showCenterLinesInput.checked));
@@ -1710,6 +1721,7 @@ export class Sheet2DEditorWindow {
     this._pmiNameValue = pmiNameValue;
     this._pmiLabelPositionInput = pmiLabelPositionInput;
     this._pmiRenderModeInput = pmiRenderModeInput;
+    this._pmiTextSizeInput = pmiTextSizeInput;
     this._showPmiCenterLinesInput = showCenterLinesInput;
     this._showPmiBackgroundInput = showBgInput;
     this._pmiBgInput = pmiBgInput;
@@ -1718,6 +1730,7 @@ export class Sheet2DEditorWindow {
 
     pmiPanel.appendChild(this._makeField("View Name", pmiNameValue));
     pmiPanel.appendChild(this._makeField("Render", pmiRenderModeInput));
+    pmiPanel.appendChild(this._makeField("Text Size (pt)", pmiTextSizeInput));
     this._pmiCenterLinesField = this._makeField("Center Lines", showCenterLinesWrap);
     pmiPanel.appendChild(this._pmiCenterLinesField);
     pmiPanel.appendChild(this._makeField("Anchor", pmiAnchorInput));
@@ -3074,6 +3087,46 @@ export class Sheet2DEditorWindow {
 
   _getPmiShowCenterLines(element) {
     return element?.pmiShowCenterLines === true;
+  }
+
+  _normalizePmiViewTextSizePt(value, fallback = DEFAULT_PMI_VIEW_TEXT_SIZE_PT) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return Math.max(1, Math.min(288, numeric));
+    }
+    return fallback;
+  }
+
+  _getPmiViewTextSizePt(view = null, fallback = DEFAULT_PMI_VIEW_TEXT_SIZE_PT) {
+    return this._normalizePmiViewTextSizePt((view?.viewSettings || view?.settings)?.pmiTextSizePt, fallback);
+  }
+
+  _updatePmiViewForElement(element, updater) {
+    if (!element || element.type !== "pmiInset" || typeof updater !== "function") return null;
+    const view = this._resolvePmiViewForElement(element);
+    const viewIndex = this._resolvePmiViewIndexForElement(element, view);
+    if (!view || viewIndex < 0) return null;
+
+    const manager = this.viewer?.partHistory?.pmiViewsManager;
+    if (manager?.updateView) {
+      return manager.updateView(viewIndex, (entry) => {
+        const target = entry && typeof entry === "object" ? entry : {};
+        if (!target.viewSettings || typeof target.viewSettings !== "object") {
+          target.viewSettings = {};
+        }
+        const result = updater(target);
+        return result && typeof result === "object" ? result : target;
+      });
+    }
+
+    if (!view.viewSettings || typeof view.viewSettings !== "object") {
+      view.viewSettings = {};
+    }
+    const result = updater(view);
+    this._refreshPmiViews({ bumpRevision: true });
+    if (this._pmiPickerOpen) this._renderPmiPicker();
+    void this._refreshAllPmiInsetImages();
+    return result && typeof result === "object" ? result : view;
   }
 
   _getAnchorFractions(anchor) {
@@ -6616,6 +6669,7 @@ export class Sheet2DEditorWindow {
     const needsRefresh = toFiniteNumber(element?.pmiModelRevision, -1) !== this._getCurrentModelRevision()
       || toFiniteNumber(element?.pmiImageRevision, -1) !== this._pmiViewRevision
       || String(element?.pmiImageCaptureKey || "") !== captureKey;
+    const deferRefresh = needsRefresh && this._shouldDeferPmiInsetRefresh(element);
 
     if (src) {
       const img = document.createElement("img");
@@ -6627,19 +6681,40 @@ export class Sheet2DEditorWindow {
       this._bindMediaMetadata(img, src);
       this._applyMediaCropStyles(img, element, widthPx, heightPx);
       host.appendChild(img);
-      if (!needsRefresh) return;
+      if (!needsRefresh || deferRefresh) return;
     }
 
     const placeholder = document.createElement("div");
     placeholder.className = "sheet-slides-pmi-placeholder";
-    placeholder.textContent = selectedView?.camera
+    placeholder.textContent = deferRefresh
+      ? "PMI text updates when resize finishes"
+      : (selectedView?.camera
       ? (src ? "Refreshing PMI image..." : "Generating PMI image...")
-      : "PMI view not assigned";
+      : "PMI view not assigned");
     host.appendChild(placeholder);
 
-    if (selectedView?.camera) {
+    if (selectedView?.camera && !deferRefresh) {
       this._queuePmiInsetImageCapture(element, selectedView, viewIndex, captureKey);
     }
+  }
+
+  _shouldDeferPmiInsetRefresh(element) {
+    if (!element || element.type !== "pmiInset") return false;
+    const dragState = this._dragState;
+    if (!dragState) return false;
+    const elementId = String(element.id || "");
+    if (!elementId) return false;
+
+    if (dragState.mode === "resize") {
+      return String(dragState.elementId || "") === elementId;
+    }
+
+    if (dragState.mode === "selection-resize") {
+      const items = Array.isArray(dragState.selectionSnapshot?.items) ? dragState.selectionSnapshot.items : [];
+      return items.some((item) => String(item?.id || "") === elementId);
+    }
+
+    return false;
   }
 
   _resolvePmiViewForElement(element) {
@@ -6887,6 +6962,7 @@ export class Sheet2DEditorWindow {
   }
 
   _getPmiImageCaptureKey(element, view = this._resolvePmiViewForElement(element), viewIndex = this._resolvePmiViewIndexForElement(element, view)) {
+    const frame = this._getMediaFrameBox(element);
     return [
       "trim-v5",
       this._getCurrentModelRevision(),
@@ -6895,6 +6971,7 @@ export class Sheet2DEditorWindow {
       String(view?.viewName || view?.name || element?.pmiViewName || "PMI View"),
       this._getPmiRenderMode(element),
       this._getPmiShowCenterLines(element) ? "centerlines:on" : "centerlines:off",
+      `frame:${toFiniteNumber(frame?.w, 0).toFixed(4)}x${toFiniteNumber(frame?.h, 0).toFixed(4)}`,
       this._getPmiViewStateSignature(view),
     ].join(":");
   }
@@ -6915,6 +6992,8 @@ export class Sheet2DEditorWindow {
       .then(() => this._capturePmiViewImage(view, viewIndex, {
         renderMode: this._getPmiRenderMode(element),
         showCenterLines: this._getPmiShowCenterLines(element),
+        targetFrameWidthIn: this._getMediaFrameBox(element)?.w,
+        targetFrameHeightIn: this._getMediaFrameBox(element)?.h,
       }))
       .then((dataUrl) => {
         if (!dataUrl) return null;
@@ -7052,6 +7131,8 @@ export class Sheet2DEditorWindow {
         const dataUrl = cached || await this._capturePmiViewImage(group.view, group.viewIndex, {
           renderMode: this._getPmiRenderMode(group.elementSnapshot),
           showCenterLines: this._getPmiShowCenterLines(group.elementSnapshot),
+          targetFrameWidthIn: this._getMediaFrameBox(group.elementSnapshot)?.w,
+          targetFrameHeightIn: this._getMediaFrameBox(group.elementSnapshot)?.h,
         });
         if (!dataUrl) continue;
         this._pmiImageCache.set(group.captureKey, dataUrl);
@@ -7105,7 +7186,12 @@ export class Sheet2DEditorWindow {
     }
   }
 
-  async _capturePmiViewImage(view, viewIndex, { renderMode = "shaded", showCenterLines = false } = {}) {
+  async _capturePmiViewImage(view, viewIndex, {
+    renderMode = "shaded",
+    showCenterLines = false,
+    targetFrameWidthIn = null,
+    targetFrameHeightIn = null,
+  } = {}) {
     const widget = this.viewer?.pmiViewsWidget || null;
     if (!widget || typeof widget.captureViewImageDataUrl !== "function") return null;
 
@@ -7114,6 +7200,8 @@ export class Sheet2DEditorWindow {
       dataUrl = await widget.captureViewImageDataUrl(view, viewIndex, {
         renderMode: normalizePmiRenderMode(renderMode, "shaded"),
         showCenterLines: !!showCenterLines,
+        targetFrameWidthIn: Number(targetFrameWidthIn) > 0 ? Number(targetFrameWidthIn) : null,
+        targetFrameHeightIn: Number(targetFrameHeightIn) > 0 ? Number(targetFrameHeightIn) : null,
       });
     } catch {
       dataUrl = null;
@@ -7333,6 +7421,7 @@ export class Sheet2DEditorWindow {
     if (this._pmiAnchorInput) this._pmiAnchorInput.disabled = !isPMI;
     if (this._pmiLabelPositionInput) this._pmiLabelPositionInput.disabled = !isPMI;
     if (this._pmiRenderModeInput) this._pmiRenderModeInput.disabled = !isPMI;
+    if (this._pmiTextSizeInput) this._pmiTextSizeInput.disabled = !isPMI || !this._resolvePmiViewForElement(selected);
     if (this._showPmiCenterLinesInput) {
       this._showPmiCenterLinesInput.disabled = !isPMI || this._getPmiRenderMode(selected) !== "monochrome";
     }
@@ -7508,10 +7597,12 @@ export class Sheet2DEditorWindow {
     }
 
     if (isPMI) {
+      const selectedView = this._resolvePmiViewForElement(selected);
       this._pmiNameValue.textContent = this._resolvePmiViewDisplayName(selected);
       if (this._pmiAnchorInput) this._pmiAnchorInput.value = this._getPmiAnchorValue(selected);
       if (this._pmiLabelPositionInput) this._pmiLabelPositionInput.value = this._getPmiLabelPosition(selected);
       if (this._pmiRenderModeInput) this._pmiRenderModeInput.value = this._getPmiRenderMode(selected);
+      if (this._pmiTextSizeInput) this._pmiTextSizeInput.value = String(this._getPmiViewTextSizePt(selectedView));
       if (this._showPmiCenterLinesInput) this._showPmiCenterLinesInput.checked = this._getPmiShowCenterLines(selected);
       if (this._pmiCenterLinesField) this._pmiCenterLinesField.style.display = this._getPmiRenderMode(selected) === "monochrome" ? "" : "none";
       this._showPmiBackgroundInput.checked = !isTransparentColor(selected.fill);
@@ -7521,6 +7612,7 @@ export class Sheet2DEditorWindow {
       if (this._pmiAnchorInput) this._pmiAnchorInput.value = "c";
       if (this._pmiLabelPositionInput) this._pmiLabelPositionInput.value = "bottom";
       if (this._pmiRenderModeInput) this._pmiRenderModeInput.value = "shaded";
+      if (this._pmiTextSizeInput) this._pmiTextSizeInput.value = String(DEFAULT_PMI_VIEW_TEXT_SIZE_PT);
       if (this._showPmiCenterLinesInput) this._showPmiCenterLinesInput.checked = false;
       if (this._pmiCenterLinesField) this._pmiCenterLinesField.style.display = "none";
     }
@@ -9127,6 +9219,18 @@ export class Sheet2DEditorWindow {
     this._renderSidebarOnly();
   }
 
+  _setSelectedPMIViewSetting(key, value) {
+    const element = this._getSelectedElement();
+    if (!element || element.type !== "pmiInset") return;
+    if (key !== "textSizePt") return;
+    const nextTextSizePt = this._normalizePmiViewTextSizePt(value);
+    this._updatePmiViewForElement(element, (view) => {
+      view.viewSettings = view.viewSettings && typeof view.viewSettings === "object" ? view.viewSettings : {};
+      view.viewSettings.pmiTextSizePt = nextTextSizePt;
+      return view;
+    });
+  }
+
   _resetSelectedPMIBackground() {
     const element = this._getSelectedElement();
     if (!element || element.type !== "pmiInset") return;
@@ -9417,6 +9521,23 @@ export class Sheet2DEditorWindow {
       .filter(Boolean);
   }
 
+  _flushPendingInspectorEdit() {
+    if (this._isFlushingInspectorEdit) return;
+    try {
+      const active = document.activeElement;
+      if (!active || typeof active.blur !== "function") return;
+      if (!this._inspectorElement?.contains?.(active)) return;
+      const tag = String(active.tagName || "").toUpperCase();
+      const isEditable = !!active.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+      if (!isEditable) return;
+      this._isFlushingInspectorEdit = true;
+      active.blur();
+    } catch { }
+    finally {
+      this._isFlushingInspectorEdit = false;
+    }
+  }
+
   _getSelectedElementIds() {
     const source = Array.isArray(this._selectedElementIds) ? this._selectedElementIds : [];
     const result = [];
@@ -9450,6 +9571,7 @@ export class Sheet2DEditorWindow {
   }
 
   _setSelectedElementIds(elementIds, primaryId = null) {
+    this._flushPendingInspectorEdit();
     const seen = new Set();
     const validIds = [];
     for (const rawId of Array.isArray(elementIds) ? elementIds : []) {
