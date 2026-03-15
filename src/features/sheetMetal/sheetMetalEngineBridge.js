@@ -31,6 +31,22 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function stableStringHash32(value = "") {
+  const text = String(value || "");
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function sanitizeFaceNameToken(value, fallback = "FACE") {
+  const text = String(value || "").trim();
+  const cleaned = text.replace(/[^A-Za-z0-9_.:-]+/g, "_").replace(/^_+|_+$/g, "");
+  return cleaned || fallback;
+}
+
 function featureIdFromInstance(instance, fallback = "SheetMetal") {
   const raw =
     instance?.inputParams?.featureID ??
@@ -129,6 +145,9 @@ function serializeSolidSnapshot(solid) {
     idToFaceName: (solid?._idToFaceName instanceof Map)
       ? Array.from(solid._idToFaceName.entries()).map(([id, name]) => [toFiniteNumber(id, 0), String(name || "")])
       : [],
+    faceMetadata: (solid?._faceMetadata instanceof Map)
+      ? Array.from(solid._faceMetadata.entries()).map(([faceName, metadata]) => [String(faceName || ""), deepClone(metadata)])
+      : [],
   };
 }
 
@@ -169,13 +188,120 @@ function solidFromSnapshot(snapshot, name = "SheetMetalCutout:CUTTER") {
   }
   solid._idToFaceName = idToFaceName;
   solid._faceNameToID = new Map(Array.from(idToFaceName.entries()).map(([id, faceName]) => [faceName, id]));
-  solid._faceMetadata = new Map();
+  const faceMetadata = new Map();
+  const metadataEntries = Array.isArray(snapshot.faceMetadata) ? snapshot.faceMetadata : [];
+  for (const pair of metadataEntries) {
+    if (!Array.isArray(pair) || pair.length < 2) continue;
+    const faceName = String(pair[0] || "");
+    if (!faceName) continue;
+    faceMetadata.set(faceName, deepClone(pair[1]));
+  }
+  solid._faceMetadata = faceMetadata;
   solid._edgeMetadata = new Map();
   solid._auxEdges = [];
   solid._dirty = true;
   solid._manifold = null;
   solid._faceIndex = null;
   return solid;
+}
+
+function legacyBooleanCutoutGroupKey(faceName, metadata) {
+  const meta = metadata && typeof metadata === "object" ? metadata : {};
+  const fmt = (value) => Number(toFiniteNumber(value, 0)).toFixed(4);
+  const fmtVec = (value) => (Array.isArray(value) ? value.map((item) => fmt(item)).join(",") : "");
+  if (meta?.sourceEdgeName) return `sourceEdge:${String(meta.sourceEdgeName)}`;
+  if (meta?.sourceFaceName) return `sourceFace:${String(meta.sourceFaceName)}`;
+  if (meta?.filletSideWallEdge) return `filletEdge:${String(meta.filletSideWallEdge)}`;
+  if (String(meta?.type || "").toLowerCase() === "cylindrical") {
+    return `type:cylindrical|radius:${fmt(meta.radius)}|axis:${fmtVec(meta.axis)}|center:${fmtVec(meta.center)}`;
+  }
+  if (String(meta?.type || "").toLowerCase() === "conical") {
+    return `type:conical|r1:${fmt(meta.radiusBottom)}|r2:${fmt(meta.radiusTop)}|axis:${fmtVec(meta.axis)}|center:${fmtVec(meta.center)}`;
+  }
+  if (meta?.type) return `type:${String(meta.type)}|face:${String(faceName || "")}`;
+  return `face:${String(faceName || "")}`;
+}
+
+function mergeLegacyBooleanCutoutCutterFaces(cutterSolid, cutoutId) {
+  if (!cutterSolid || typeof cutterSolid.getFaceNames !== "function" || typeof cutterSolid.renameFace !== "function") {
+    return cutterSolid;
+  }
+
+  const targetByFaceName = new Map();
+  const representativeMetaByTarget = new Map();
+  const faceNames = cutterSolid.getFaceNames();
+  for (const faceName of faceNames) {
+    if (!faceName) continue;
+    const meta = typeof cutterSolid.getFaceMetadata === "function" ? cutterSolid.getFaceMetadata(faceName) : null;
+    const groupKey = legacyBooleanCutoutGroupKey(faceName, meta);
+    const token = sanitizeFaceNameToken(groupKey, "CUTTER_FACE");
+    const hash = stableStringHash32(groupKey).toString(16).slice(-8).padStart(8, "0");
+    const targetName = `${String(cutoutId || "CUTOUT")}:CUTTER:${token}:${hash}`;
+    targetByFaceName.set(String(faceName), targetName);
+    if (!representativeMetaByTarget.has(targetName) && meta && typeof meta === "object") {
+      representativeMetaByTarget.set(targetName, deepClone(meta));
+    }
+  }
+
+  for (const faceName of faceNames) {
+    const targetName = targetByFaceName.get(String(faceName));
+    if (!targetName || targetName === faceName) continue;
+    try {
+      cutterSolid.renameFace(faceName, targetName);
+    } catch {
+      // best effort
+    }
+  }
+
+  for (const [targetName, meta] of representativeMetaByTarget.entries()) {
+    try { cutterSolid.setFaceMetadata(targetName, meta); } catch { }
+  }
+  return cutterSolid;
+}
+
+function mergeLegacyBooleanCutoutFaces(resultSolid, cutterSolid, cutoutId) {
+  if (!resultSolid || !cutterSolid) return resultSolid;
+  if (typeof resultSolid.renameFace !== "function" || typeof resultSolid.getFaceNames !== "function") return resultSolid;
+  if (typeof cutterSolid.getFaceNames !== "function") return resultSolid;
+
+  const groupTargetByFaceName = new Map();
+  const representativeMetaByTarget = new Map();
+  const cutterFaceNames = cutterSolid.getFaceNames();
+  for (const faceName of cutterFaceNames) {
+    if (!faceName) continue;
+    const meta = typeof cutterSolid.getFaceMetadata === "function" ? cutterSolid.getFaceMetadata(faceName) : null;
+    const groupKey = legacyBooleanCutoutGroupKey(faceName, meta);
+    const token = sanitizeFaceNameToken(groupKey, "CUTTER_FACE");
+    const hash = stableStringHash32(groupKey).toString(16).slice(-8).padStart(8, "0");
+    const targetName = `${String(cutoutId || "CUTOUT")}:LEGACY:${token}:${hash}`;
+    groupTargetByFaceName.set(String(faceName), targetName);
+    if (!representativeMetaByTarget.has(targetName) && meta && typeof meta === "object") {
+      representativeMetaByTarget.set(targetName, deepClone(meta));
+    }
+  }
+
+  const resultFaceNames = resultSolid.getFaceNames();
+  for (const currentName of resultFaceNames) {
+    const targetName = groupTargetByFaceName.get(String(currentName));
+    if (!targetName || targetName === currentName) continue;
+    try {
+      resultSolid.renameFace(currentName, targetName);
+    } catch {
+      // best effort
+    }
+  }
+
+  for (const [targetName, meta] of representativeMetaByTarget.entries()) {
+    try {
+      resultSolid.setFaceMetadata(targetName, {
+        ...meta,
+        cutoutId: String(cutoutId || "CUTOUT"),
+      });
+    } catch {
+      // best effort
+    }
+  }
+  return resultSolid;
 }
 
 function applyRecordedCutoutsToSolid(baseSolid, tree) {
@@ -212,6 +338,7 @@ function applyRecordedCutoutsToSolid(baseSolid, tree) {
 
     try {
       result = result.subtract(cutter);
+      mergeLegacyBooleanCutoutFaces(result, cutter, cutoutId);
       summary.applied += 1;
       summary.appliedCutouts.push({ id: cutoutId });
     } catch (error) {
@@ -595,6 +722,43 @@ function holeOutlineFromEntry(entry) {
   return null;
 }
 
+function normalizeHoleSourceChain2(rawChain, fallbackId = null) {
+  const polylineRaw = Array.isArray(rawChain)
+    ? rawChain
+    : (Array.isArray(rawChain?.polyline) ? rawChain.polyline : []);
+  const polyline = dedupeConsecutivePoints2(polylineRaw.map((point) => [
+    toFiniteNumber(point?.[0]),
+    toFiniteNumber(point?.[1]),
+  ]));
+  if (polyline.length < 2) return null;
+  const rawId = (rawChain && typeof rawChain === "object" && !Array.isArray(rawChain) && rawChain.id != null)
+    ? String(rawChain.id)
+    : (fallbackId != null ? String(fallbackId) : null);
+  return {
+    id: rawId || null,
+    polyline: polyline.map((point) => [point[0], point[1]]),
+  };
+}
+
+function cloneHoleSourceChains2(rawChains = [], fallbackBaseId = "hole_source") {
+  const out = [];
+  const seen = new Set();
+  const list = Array.isArray(rawChains) ? rawChains : [];
+  for (let i = 0; i < list.length; i += 1) {
+    const chain = normalizeHoleSourceChain2(list[i], `${fallbackBaseId}:${i + 1}`);
+    if (!chain) continue;
+    const id = chain.id || `${fallbackBaseId}:${i + 1}`;
+    const key = `${id}|${buildQuantizedPolylineSignature(chain.polyline) || i}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      id,
+      polyline: chain.polyline.map((point) => [point[0], point[1]]),
+    });
+  }
+  return out;
+}
+
 function collectFlatHoleLoops(flat) {
   const raw = Array.isArray(flat?.holes) ? flat.holes : [];
   const out = [];
@@ -970,6 +1134,119 @@ function findSourceEdgeForSegment(a, b, sourceIndex, excludeEdgeId = null) {
   return best?.edge || null;
 }
 
+function findSourceIdForBoundarySegment(a, b, sourceIndex, tol = POINT_EPS * 8) {
+  if (!sourceIndex || !Array.isArray(sourceIndex.segments) || !sourceIndex.segments.length) return null;
+
+  const exactEdge = findSourceEdgeForSegment(a, b, sourceIndex);
+  if (exactEdge?.id != null) return String(exactEdge.id);
+
+  const nearbyIdsForPoint = (point) => {
+    const bestById = new Map();
+    for (const candidate of sourceIndex.segments) {
+      const edgeId = candidate?.edgeId != null ? String(candidate.edgeId) : null;
+      if (!edgeId) continue;
+      const distance = segmentDistanceToPoint2(point, candidate.a, candidate.b);
+      if (!(distance <= tol)) continue;
+      const previous = bestById.get(edgeId);
+      if (previous == null || distance < previous) bestById.set(edgeId, distance);
+    }
+    return bestById;
+  };
+
+  const nearA = nearbyIdsForPoint(a);
+  const nearB = nearbyIdsForPoint(b);
+  let bestSharedId = null;
+  let bestSharedScore = Number.POSITIVE_INFINITY;
+  for (const [edgeId, distA] of nearA.entries()) {
+    const distB = nearB.get(edgeId);
+    if (distB == null) continue;
+    const score = distA + distB;
+    if (score < bestSharedScore) {
+      bestSharedScore = score;
+      bestSharedId = edgeId;
+    }
+  }
+  if (bestSharedId) return bestSharedId;
+
+  const midpoint = [
+    (toFiniteNumber(a?.[0], 0) + toFiniteNumber(b?.[0], 0)) * 0.5,
+    (toFiniteNumber(a?.[1], 0) + toFiniteNumber(b?.[1], 0)) * 0.5,
+  ];
+  let bestId = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const candidate of sourceIndex.segments) {
+    const edgeId = candidate?.edgeId != null ? String(candidate.edgeId) : null;
+    if (!edgeId) continue;
+    const score =
+      segmentDistanceToPoint2(a, candidate.a, candidate.b)
+      + segmentDistanceToPoint2(b, candidate.a, candidate.b)
+      + (segmentDistanceToPoint2(midpoint, candidate.a, candidate.b) * 0.5);
+    if (score < bestScore) {
+      bestScore = score;
+      bestId = edgeId;
+    }
+  }
+  return bestScore <= (tol * 3) ? bestId : null;
+}
+
+function deriveLoopSourceChains2(loop, sourceEdges, fallbackBaseId = "hole_source") {
+  const normalizedLoop = normalizeLoop2(loop);
+  if (normalizedLoop.length < 3) return [];
+
+  const normalizedSourceEdges = [];
+  for (let i = 0; i < (Array.isArray(sourceEdges) ? sourceEdges.length : 0); i += 1) {
+    const edge = sourceEdges[i];
+    const chain = normalizeHoleSourceChain2(edge, `${fallbackBaseId}:${i + 1}`);
+    if (!chain) continue;
+    normalizedSourceEdges.push({
+      id: chain.id || `${fallbackBaseId}:${i + 1}`,
+      polyline: chain.polyline.map((point) => [point[0], point[1]]),
+    });
+  }
+  const sourceIndex = buildEdgeSegmentSourceIndex(normalizedSourceEdges);
+  if (!Array.isArray(sourceIndex?.segments) || !sourceIndex.segments.length) return [];
+
+  const segmentDefs = [];
+  for (let i = 0; i < normalizedLoop.length; i += 1) {
+    const a = normalizedLoop[i];
+    const b = normalizedLoop[(i + 1) % normalizedLoop.length];
+    if (segmentLength2(a, b) <= POINT_EPS) continue;
+    segmentDefs.push({
+      a: copyPoint2(a),
+      b: copyPoint2(b),
+      sourceId: findSourceIdForBoundarySegment(a, b, sourceIndex),
+    });
+  }
+  if (!segmentDefs.some((entry) => !!entry.sourceId)) return [];
+
+  const firstMatchedIndex = (() => {
+    for (let i = 0; i < segmentDefs.length; i += 1) {
+      if (!segmentDefs[i]?.sourceId) continue;
+      const prev = segmentDefs[(i - 1 + segmentDefs.length) % segmentDefs.length];
+      if ((prev?.sourceId || null) !== segmentDefs[i].sourceId) return i;
+    }
+    return segmentDefs.findIndex((entry) => !!entry.sourceId);
+  })();
+  const orderedDefs = firstMatchedIndex > 0
+    ? segmentDefs.slice(firstMatchedIndex).concat(segmentDefs.slice(0, firstMatchedIndex))
+    : segmentDefs;
+
+  const chains = [];
+  for (const entry of orderedDefs) {
+    const sourceId = entry?.sourceId || null;
+    if (!sourceId) continue;
+    const current = chains[chains.length - 1] || null;
+    if (current && current.id === sourceId && appendSegmentToPolyline(current.polyline, entry.a, entry.b)) {
+      continue;
+    }
+    chains.push({
+      id: sourceId,
+      polyline: [copyPoint2(entry.a), copyPoint2(entry.b)],
+    });
+  }
+  return cloneHoleSourceChains2(chains, fallbackBaseId);
+}
+
 function rebuildFlatOuterEdgesFromOutline(flat, outlineLoop, usedIds, cutLoopSources = null) {
   const outline = normalizeLoop2(outlineLoop);
   if (!flat || outline.length < 3) return { changed: false, reason: "invalid_outline" };
@@ -982,15 +1259,11 @@ function rebuildFlatOuterEdgesFromOutline(flat, outlineLoop, usedIds, cutLoopSou
     const sourceChains = Array.isArray(sourceLoops[loopIndex]) ? sourceLoops[loopIndex] : [];
     for (let chainIndex = 0; chainIndex < sourceChains.length; chainIndex += 1) {
       const rawChain = sourceChains[chainIndex];
-      if (!Array.isArray(rawChain) || rawChain.length < 2) continue;
-      const chain = dedupeConsecutivePoints2(rawChain.map((point) => [
-        toFiniteNumber(point?.[0]),
-        toFiniteNumber(point?.[1]),
-      ]));
-      if (chain.length < 2) continue;
+      const chain = normalizeHoleSourceChain2(rawChain, `${flat.id}:cutsrc:${loopIndex + 1}:${chainIndex + 1}`);
+      if (!chain) continue;
       cutSourceEdges.push({
-        id: `${flat.id}:cutsrc:${loopIndex + 1}:${chainIndex + 1}`,
-        polyline: chain.map((point) => [point[0], point[1]]),
+        id: chain.id || `${flat.id}:cutsrc:${loopIndex + 1}:${chainIndex + 1}`,
+        polyline: chain.polyline.map((point) => [point[0], point[1]]),
         __cutSource: true,
       });
     }
@@ -1093,13 +1366,16 @@ function applyCutLoopsToFlat(flat, cutLoops2, featureID, usedIds, cutLoopSources
     if (normalized.length >= 3) {
       const sourceChains = [];
       const rawChains = Array.isArray(rawCutSources[loopIndex]) ? rawCutSources[loopIndex] : [];
-      for (const rawChain of rawChains) {
-        if (!Array.isArray(rawChain) || rawChain.length < 2) continue;
-        const chain = dedupeConsecutivePoints2(rawChain.map((point) => [
-          toFiniteNumber(point?.[0]),
-          toFiniteNumber(point?.[1]),
-        ]));
-        if (chain.length >= 2) sourceChains.push(chain.map((point) => [point[0], point[1]]));
+      for (let chainIndex = 0; chainIndex < rawChains.length; chainIndex += 1) {
+        const chain = normalizeHoleSourceChain2(
+          rawChains[chainIndex],
+          `${featureID}:cutsrc:${loopIndex + 1}:${chainIndex + 1}`,
+        );
+        if (!chain) continue;
+        sourceChains.push({
+          id: chain.id,
+          polyline: chain.polyline.map((point) => [point[0], point[1]]),
+        });
       }
       cutSources.push(sourceChains);
     }
@@ -1217,11 +1493,46 @@ function applyCutLoopsToFlat(flat, cutLoops2, featureID, usedIds, cutLoopSources
 
   const rebuiltHoleEntries = [];
   const createdHoleIds = [];
+  const cutSourcesBySignature = new Map();
+  for (let loopIndex = 0; loopIndex < cutLoops.length; loopIndex += 1) {
+    const signature = buildLoopSignature2(cutLoops[loopIndex]);
+    if (!signature || cutSourcesBySignature.has(signature) || cutSources[loopIndex]?.length <= 0) continue;
+    cutSourcesBySignature.set(
+      signature,
+      cloneHoleSourceChains2(cutSources[loopIndex], `${featureID}:cutsrc:${loopIndex + 1}`),
+    );
+  }
+  const allCutSourceEdges = [];
+  for (let loopIndex = 0; loopIndex < cutSources.length; loopIndex += 1) {
+    const sourceChains = Array.isArray(cutSources[loopIndex]) ? cutSources[loopIndex] : [];
+    for (let chainIndex = 0; chainIndex < sourceChains.length; chainIndex += 1) {
+      const chain = normalizeHoleSourceChain2(
+        sourceChains[chainIndex],
+        `${featureID}:cutsrc:${loopIndex + 1}:${chainIndex + 1}`,
+      );
+      if (!chain) continue;
+      allCutSourceEdges.push({
+        id: chain.id || `${featureID}:cutsrc:${loopIndex + 1}:${chainIndex + 1}`,
+        polyline: chain.polyline.map((point) => [point[0], point[1]]),
+      });
+    }
+  }
   for (const loop of newHoles) {
     const signature = buildLoopSignature2(loop);
     const reused = signature ? existingHoleBySignature.get(signature) : null;
     const reusedHole = Array.isArray(reused) && reused.length ? reused.shift() : null;
     const outline = loop.map((point) => [point[0], point[1]]);
+    const matchedSourceChains = signature ? cutSourcesBySignature.get(signature) : null;
+    const derivedSourceChains = deriveLoopSourceChains2(loop, allCutSourceEdges, `${featureID}:hole_source`);
+    const existingSourceChains = reusedHole?.raw && typeof reusedHole.raw === "object" && !Array.isArray(reusedHole.raw)
+      ? reusedHole.raw.sourceChains
+      : null;
+    const sourceChains = cloneHoleSourceChains2(
+      (derivedSourceChains && derivedSourceChains.length)
+        ? derivedSourceChains
+        : ((matchedSourceChains && matchedSourceChains.length) ? matchedSourceChains : existingSourceChains),
+      `${featureID}:hole_source`,
+    );
 
     if (reusedHole) {
       const raw = reusedHole.raw;
@@ -1231,23 +1542,28 @@ function applyCutLoopsToFlat(flat, cutLoops2, featureID, usedIds, cutLoopSources
           id: String(raw.id || reusedHole.id),
           outline,
         };
+        if (sourceChains.length) updated.sourceChains = sourceChains;
         rebuiltHoleEntries.push(updated);
       } else {
-        rebuiltHoleEntries.push({
+        const updated = {
           id: String(reusedHole.id),
           cutoutId: reusedHole.cutoutId || null,
           outline,
-        });
+        };
+        if (sourceChains.length) updated.sourceChains = sourceChains;
+        rebuiltHoleEntries.push(updated);
       }
       continue;
     }
 
     const id = nextNewHoleId();
-    rebuiltHoleEntries.push({
+    const created = {
       id,
       cutoutId: featureID,
       outline,
-    });
+    };
+    if (sourceChains.length) created.sourceChains = sourceChains;
+    rebuiltHoleEntries.push(created);
     createdHoleIds.push(id);
   }
 
@@ -1372,6 +1688,446 @@ function projectLoopToFlatMidplane(localLoop3, localProjectionDir, planeZ = 0, d
     loop2,
     avgAbsParam: projected.length ? (sumAbsT / projected.length) : Number.POSITIVE_INFINITY,
   };
+}
+
+function buildSolidCutoutSectionSourceId(faceName, metadata) {
+  const key = legacyBooleanCutoutGroupKey(faceName, metadata);
+  const token = sanitizeFaceNameToken(key || faceName || "CUTTER_FACE", "CUTTER_FACE");
+  const hash = stableStringHash32(key || String(faceName || "CUTTER_FACE"))
+    .toString(16)
+    .slice(-8)
+    .padStart(8, "0");
+  return `SOLID_SECTION:${token}:${hash}`;
+}
+
+function pointKey2(point, tol = POINT_EPS * 8) {
+  const quantum = Math.max(POINT_EPS, Math.abs(toFiniteNumber(tol, POINT_EPS * 8)));
+  const x = Math.round(toFiniteNumber(point?.[0], 0) / quantum);
+  const y = Math.round(toFiniteNumber(point?.[1], 0) / quantum);
+  return `${x},${y}`;
+}
+
+function pushUniquePoint2(points, point, tol = POINT_EPS * 6) {
+  const candidate = copyPoint2(point);
+  for (const existing of points) {
+    if (pointDistance2(existing, candidate) <= tol) return;
+  }
+  points.push(candidate);
+}
+
+function sliceTriangleWithPlane2(points3, planeZ = 0, tol = POINT_EPS * 6) {
+  if (!Array.isArray(points3) || points3.length < 3) return null;
+
+  const distances = points3.map((point) => toFiniteNumber(point?.[2], 0) - planeZ);
+  const onPlaneCount = distances.reduce((count, value) => count + (Math.abs(value) <= tol ? 1 : 0), 0);
+  if (onPlaneCount >= 3) return null;
+
+  const intersections = [];
+  const edges = [[0, 1], [1, 2], [2, 0]];
+  for (const [ia, ib] of edges) {
+    const a = points3[ia];
+    const b = points3[ib];
+    const da = distances[ia];
+    const db = distances[ib];
+    const aOn = Math.abs(da) <= tol;
+    const bOn = Math.abs(db) <= tol;
+
+    if (aOn && bOn) {
+      pushUniquePoint2(intersections, [a[0], a[1]], tol);
+      pushUniquePoint2(intersections, [b[0], b[1]], tol);
+      continue;
+    }
+    if (aOn) {
+      pushUniquePoint2(intersections, [a[0], a[1]], tol);
+      continue;
+    }
+    if (bOn) {
+      pushUniquePoint2(intersections, [b[0], b[1]], tol);
+      continue;
+    }
+
+    const crosses = (da < -tol && db > tol) || (da > tol && db < -tol);
+    if (!crosses) continue;
+
+    const denom = toFiniteNumber(b[2], 0) - toFiniteNumber(a[2], 0);
+    if (Math.abs(denom) <= EPS) continue;
+    const t = (planeZ - toFiniteNumber(a[2], 0)) / denom;
+    if (!Number.isFinite(t)) continue;
+    pushUniquePoint2(intersections, [
+      toFiniteNumber(a[0], 0) + (toFiniteNumber(b[0], 0) - toFiniteNumber(a[0], 0)) * t,
+      toFiniteNumber(a[1], 0) + (toFiniteNumber(b[1], 0) - toFiniteNumber(a[1], 0)) * t,
+    ], tol);
+  }
+
+  if (intersections.length < 2) return null;
+  if (intersections.length === 2) {
+    if (pointDistance2(intersections[0], intersections[1]) <= tol) return null;
+    return { a: intersections[0], b: intersections[1] };
+  }
+
+  let best = null;
+  for (let i = 0; i < intersections.length; i += 1) {
+    for (let j = i + 1; j < intersections.length; j += 1) {
+      const dist = pointDistance2(intersections[i], intersections[j]);
+      if (!(dist > tol)) continue;
+      if (!best || dist > best.dist) {
+        best = { a: intersections[i], b: intersections[j], dist };
+      }
+    }
+  }
+  return best ? { a: best.a, b: best.b } : null;
+}
+
+function buildSectionLoopsFromSegments2(segments, tol = POINT_EPS * 8) {
+  const pointByKey = new Map();
+  const adjacency = new Map();
+  const normalizedSegments = [];
+  const seenEdges = new Set();
+
+  const addAdjacency = (fromKey, entry) => {
+    if (!adjacency.has(fromKey)) adjacency.set(fromKey, []);
+    adjacency.get(fromKey).push(entry);
+  };
+
+  for (const segment of Array.isArray(segments) ? segments : []) {
+    const a = copyPoint2(segment?.a);
+    const b = copyPoint2(segment?.b);
+    if (pointDistance2(a, b) <= tol) continue;
+    const aKey = pointKey2(a, tol);
+    const bKey = pointKey2(b, tol);
+    if (!aKey || !bKey || aKey === bKey) continue;
+    if (!pointByKey.has(aKey)) pointByKey.set(aKey, a);
+    if (!pointByKey.has(bKey)) pointByKey.set(bKey, b);
+    const edgeKey = aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
+    if (seenEdges.has(edgeKey)) continue;
+    seenEdges.add(edgeKey);
+
+    const index = normalizedSegments.length;
+    normalizedSegments.push({
+      aKey,
+      bKey,
+      sourceId: segment?.sourceId != null ? String(segment.sourceId) : null,
+    });
+    addAdjacency(aKey, { segmentIndex: index, otherKey: bKey });
+    addAdjacency(bKey, { segmentIndex: index, otherKey: aKey });
+  }
+
+  for (const entries of adjacency.values()) {
+    entries.sort((a, b) => String(a.otherKey).localeCompare(String(b.otherKey)));
+  }
+
+  const usedSegments = new Set();
+  const loops = [];
+  const pickNext = (currentKey, previousKey = null) => {
+    const candidates = Array.isArray(adjacency.get(currentKey)) ? adjacency.get(currentKey) : [];
+    for (const candidate of candidates) {
+      if (usedSegments.has(candidate.segmentIndex)) continue;
+      if (previousKey && candidate.otherKey === previousKey && candidates.length > 1) continue;
+      return candidate;
+    }
+    return candidates.find((candidate) => !usedSegments.has(candidate.segmentIndex)) || null;
+  };
+
+  for (let i = 0; i < normalizedSegments.length; i += 1) {
+    if (usedSegments.has(i)) continue;
+    const seed = normalizedSegments[i];
+    usedSegments.add(i);
+    const chain = [seed.aKey, seed.bKey];
+    const sourceIds = new Set(seed.sourceId ? [seed.sourceId] : []);
+
+    let advanced = true;
+    while (advanced) {
+      advanced = false;
+
+      const endKey = chain[chain.length - 1];
+      const prevKey = chain.length >= 2 ? chain[chain.length - 2] : null;
+      const nextEnd = pickNext(endKey, prevKey);
+      if (nextEnd) {
+        usedSegments.add(nextEnd.segmentIndex);
+        chain.push(nextEnd.otherKey);
+        const sourceId = normalizedSegments[nextEnd.segmentIndex]?.sourceId;
+        if (sourceId) sourceIds.add(sourceId);
+        advanced = true;
+        if (chain[chain.length - 1] === chain[0]) break;
+        continue;
+      }
+
+      const startKey = chain[0];
+      const nextStart = pickNext(startKey, chain[1] || null);
+      if (nextStart) {
+        usedSegments.add(nextStart.segmentIndex);
+        chain.unshift(nextStart.otherKey);
+        const sourceId = normalizedSegments[nextStart.segmentIndex]?.sourceId;
+        if (sourceId) sourceIds.add(sourceId);
+        advanced = true;
+        if (chain[chain.length - 1] === chain[0]) break;
+      }
+    }
+
+    if (chain.length < 4 || chain[0] !== chain[chain.length - 1]) continue;
+    const loop = simplifyCollinearPolyline2(
+      chain.slice(0, -1).map((key) => copyPoint2(pointByKey.get(key))),
+      tol,
+    );
+    const normalized = normalizeLoop2(loop);
+    if (normalized.length < 3) continue;
+    loops.push({
+      loop: normalized,
+      sourceIds: Array.from(sourceIds).filter(Boolean).sort(),
+    });
+  }
+
+  return loops;
+}
+
+function buildSolidPlaneSectionLoops2({
+  localVertices = [],
+  triVerts = [],
+  faceIDs = [],
+  faceNamesById = null,
+  cutter = null,
+  planeZ = 0,
+  tol = POINT_EPS * 6,
+} = {}) {
+  const triCount = (Array.isArray(triVerts) ? (triVerts.length / 3) : 0) | 0;
+  if (triCount <= 0 || !Array.isArray(localVertices) || !localVertices.length) return [];
+
+  const segments = [];
+  const seenSegments = new Set();
+  for (let triIndex = 0; triIndex < triCount; triIndex += 1) {
+    const base = triIndex * 3;
+    const ia = Math.max(0, toFiniteNumber(triVerts[base + 0], 0) | 0);
+    const ib = Math.max(0, toFiniteNumber(triVerts[base + 1], 0) | 0);
+    const ic = Math.max(0, toFiniteNumber(triVerts[base + 2], 0) | 0);
+    const a = localVertices[ia];
+    const b = localVertices[ib];
+    const c = localVertices[ic];
+    if (!Array.isArray(a) || !Array.isArray(b) || !Array.isArray(c)) continue;
+
+    const segment = sliceTriangleWithPlane2([a, b, c], planeZ, tol);
+    if (!segment) continue;
+
+    const faceId = Array.isArray(faceIDs) && triIndex < faceIDs.length
+      ? Math.max(0, toFiniteNumber(faceIDs[triIndex], 0) | 0)
+      : 0;
+    const faceName = faceNamesById instanceof Map
+      ? (faceNamesById.get(faceId) || `FACE_${faceId}`)
+      : `FACE_${faceId}`;
+    const faceMeta = (cutter && typeof cutter.getFaceMetadata === "function")
+      ? cutter.getFaceMetadata(faceName)
+      : null;
+    const sourceId = buildSolidCutoutSectionSourceId(faceName, faceMeta);
+    const signature = segmentSignature2(segment.a, segment.b);
+    if (!signature) continue;
+    const dedupeKey = `${sourceId}|${signature}`;
+    if (seenSegments.has(dedupeKey)) continue;
+    seenSegments.add(dedupeKey);
+    segments.push({
+      a: segment.a,
+      b: segment.b,
+      sourceId,
+    });
+  }
+
+  const loops = buildSectionLoopsFromSegments2(segments, tol);
+  const sourceEdges = segments.map((segment, index) => ({
+    id: segment?.sourceId != null ? String(segment.sourceId) : `solid_section:${index + 1}`,
+    polyline: [copyPoint2(segment.a), copyPoint2(segment.b)],
+  }));
+  return loops.map((entry, index) => {
+    const sourceChains = deriveLoopSourceChains2(
+      entry.loop,
+      sourceEdges,
+      `solid_section:${index + 1}`,
+    );
+    return {
+      ...entry,
+      sourceChains,
+      sourceIds: sourceChains.map((chain) => String(chain.id || "")).filter(Boolean),
+    };
+  });
+}
+
+function applySolidCutoutToTree({ tree, featureID, cutter, rootMatrix = null }) {
+  const summary = {
+    requestedLoops: 0,
+    applied: 0,
+    skipped: 0,
+    assignments: [],
+    skippedLoops: [],
+  };
+  if (!tree?.root || !isSolidLikeObject(cutter) || typeof cutter.getMesh !== "function") return summary;
+
+  let model = null;
+  try {
+    model = evaluateSheetMetal(tree);
+  } catch (error) {
+    summary.skippedLoops.push({
+      reason: "evaluate_failed",
+      message: String(error?.message || error || "failed to evaluate tree"),
+    });
+    summary.skipped = 1;
+    return summary;
+  }
+
+  const root = matrixFromAny(rootMatrix || new THREE.Matrix4().identity());
+  const flatPlacements = [];
+  for (const placement of model?.flats3D || []) {
+    if (!placement?.flat || !placement?.matrix?.isMatrix4) continue;
+    const worldMatrix = root.clone().multiply(placement.matrix.clone());
+    const inverseWorld = worldMatrix.clone().invert();
+    flatPlacements.push({ placement, inverseWorld });
+  }
+  if (!flatPlacements.length) {
+    summary.skipped = 1;
+    summary.skippedLoops.push({ reason: "no_flat_placements" });
+    return summary;
+  }
+
+  let mesh = null;
+  let triVerts = [];
+  let faceIDs = [];
+  let localizableVertices = [];
+  try {
+    mesh = cutter.getMesh();
+    triVerts = mesh?.triVerts?.length ? Array.from(mesh.triVerts) : [];
+    faceIDs = mesh?.faceID?.length
+      ? Array.from(mesh.faceID)
+      : (Array.isArray(cutter?._triIDs) ? cutter._triIDs.slice() : []);
+    const vertProperties = mesh?.vertProperties?.length ? Array.from(mesh.vertProperties) : [];
+    const vertexCount = (vertProperties.length / 3) | 0;
+    localizableVertices = new Array(vertexCount);
+    for (let i = 0; i < vertexCount; i += 1) {
+      localizableVertices[i] = [
+        toFiniteNumber(vertProperties[i * 3 + 0], 0),
+        toFiniteNumber(vertProperties[i * 3 + 1], 0),
+        toFiniteNumber(vertProperties[i * 3 + 2], 0),
+      ];
+    }
+  } catch (error) {
+    summary.skipped = 1;
+    summary.skippedLoops.push({
+      reason: "cutter_mesh_failed",
+      message: String(error?.message || error || "failed to read cutter mesh"),
+    });
+    return summary;
+  } finally {
+    try { if (mesh && typeof mesh.delete === "function") mesh.delete(); } catch { }
+  }
+  if (!triVerts.length || !localizableVertices.length) {
+    summary.skipped = 1;
+    summary.skippedLoops.push({ reason: "empty_cutter_mesh" });
+    return summary;
+  }
+
+  removeCutoutHolesFromTree(tree, featureID);
+  const usedIds = collectTreeIds(tree);
+  const thickness = Math.max(MIN_THICKNESS, Math.abs(toFiniteNumber(tree?.thickness, 1)));
+  const halfT = thickness * 0.5;
+  const sectionTol = Math.max(POINT_EPS * 6, thickness * 1e-3);
+  const faceNamesById = (cutter?._idToFaceName instanceof Map) ? new Map(cutter._idToFaceName) : new Map();
+
+  for (const candidate of flatPlacements) {
+    const flat = candidate.placement.flat;
+    const localVertices = localizableVertices.map((point) => {
+      const local = new THREE.Vector3(point[0], point[1], point[2]).applyMatrix4(candidate.inverseWorld);
+      return [local.x, local.y, local.z];
+    });
+
+    const topSections = buildSolidPlaneSectionLoops2({
+      localVertices,
+      triVerts,
+      faceIDs,
+      faceNamesById,
+      cutter,
+      planeZ: halfT,
+      tol: sectionTol,
+    });
+    const bottomSections = buildSolidPlaneSectionLoops2({
+      localVertices,
+      triVerts,
+      faceIDs,
+      faceNamesById,
+      cutter,
+      planeZ: -halfT,
+      tol: sectionTol,
+    });
+    const topLoops = topSections.map((entry) => entry.loop);
+    const bottomLoops = bottomSections.map((entry) => entry.loop);
+    summary.requestedLoops += topLoops.length + bottomLoops.length;
+    if (!topLoops.length && !bottomLoops.length) continue;
+
+    const cutEntries = [...topSections, ...bottomSections];
+    const cutLoops = unionFilledLoops2([...topLoops, ...bottomLoops]);
+    if (!cutLoops.length) {
+      summary.skipped += 1;
+      summary.skippedLoops.push({
+        flatId: String(flat?.id || ""),
+        reason: "empty_section_union",
+        topSectionCount: topLoops.length,
+        bottomSectionCount: bottomLoops.length,
+      });
+      continue;
+    }
+
+    const sectionSourceEdges = [];
+    for (const entry of cutEntries) {
+      const sourceChains = Array.isArray(entry?.sourceChains) ? entry.sourceChains : [];
+      for (let chainIndex = 0; chainIndex < sourceChains.length; chainIndex += 1) {
+        const chain = normalizeHoleSourceChain2(
+          sourceChains[chainIndex],
+          `${featureID}:solid_section:${chainIndex + 1}`,
+        );
+        if (!chain) continue;
+        sectionSourceEdges.push({
+          id: chain.id || `${featureID}:solid_section:${chainIndex + 1}`,
+          polyline: chain.polyline.map((point) => [point[0], point[1]]),
+        });
+      }
+    }
+    const cutLoopSources = cutLoops.map((loop, loopIndex) => (
+      deriveLoopSourceChains2(loop, sectionSourceEdges, `${featureID}:solid_section:${loopIndex + 1}`)
+    ));
+
+    const sourceIds = new Set();
+    for (const entry of cutEntries) {
+      for (const sourceId of Array.isArray(entry?.sourceIds) ? entry.sourceIds : []) {
+        if (sourceId) sourceIds.add(String(sourceId));
+      }
+    }
+
+    const cutResult = applyCutLoopsToFlat(flat, cutLoops, featureID, usedIds, cutLoopSources);
+    if (!cutResult?.applied) {
+      summary.skipped += 1;
+      summary.skippedLoops.push({
+        flatId: String(flat?.id || ""),
+        reason: cutResult?.reason || "cut_apply_failed",
+        topSectionCount: topLoops.length,
+        bottomSectionCount: bottomLoops.length,
+      });
+      continue;
+    }
+
+    summary.applied += 1;
+    summary.assignments.push({
+      flatId: String(flat?.id || ""),
+      projectionMode: "solid_top_bottom_sections",
+      topSectionCount: topLoops.length,
+      bottomSectionCount: bottomLoops.length,
+      unionLoopCount: Math.max(0, toFiniteNumber(cutResult.totalHoleCount, 0) | 0),
+      sourceGroupCount: sourceIds.size,
+      holeCount: Math.max(0, toFiniteNumber(cutResult.holeCount, 0) | 0),
+      totalHoleCount: Math.max(0, toFiniteNumber(cutResult.totalHoleCount, 0) | 0),
+      createdHoleCount: Array.isArray(cutResult.createdHoleIds) ? cutResult.createdHoleIds.length : 0,
+      holeIds: Array.isArray(cutResult.createdHoleIds) ? cutResult.createdHoleIds.slice() : [],
+      outerChanged: !!cutResult.outerChanged,
+    });
+  }
+
+  if (summary.requestedLoops <= 0) {
+    summary.skippedLoops.push({ reason: "no_flat_sections" });
+  }
+  return summary;
 }
 
 function quantizeCoord(value, quantum = COORD_QUANT) {
@@ -2085,9 +2841,13 @@ function collectCutoutProfileLoops(profileSelections, featureID) {
     if (!key) return;
 
     const chains = [];
-    for (const rawChain of Array.isArray(sourceChains) ? sourceChains : []) {
-      if (!Array.isArray(rawChain) || rawChain.length < 2) continue;
-      const chain = dedupeConsecutivePoints3(rawChain.map((point) => (
+    for (let chainIndex = 0; chainIndex < (Array.isArray(sourceChains) ? sourceChains.length : 0); chainIndex += 1) {
+      const rawChain = sourceChains[chainIndex];
+      const polylineRaw = Array.isArray(rawChain)
+        ? rawChain
+        : (Array.isArray(rawChain?.polyline) ? rawChain.polyline : []);
+      if (polylineRaw.length < 2) continue;
+      const chain = dedupeConsecutivePoints3(polylineRaw.map((point) => (
         point?.isVector3
           ? point.clone()
           : new THREE.Vector3(
@@ -2096,7 +2856,14 @@ function collectCutoutProfileLoops(profileSelections, featureID) {
             toFiniteNumber(point?.[2]),
           )
       )));
-      if (chain.length >= 2) chains.push(chain);
+      if (chain.length >= 2) {
+        chains.push({
+          id: rawChain && typeof rawChain === "object" && !Array.isArray(rawChain) && rawChain.id != null
+            ? String(rawChain.id)
+            : `${featureID}:source:${loops.length + 1}:${chainIndex + 1}`,
+          polyline: chain,
+        });
+      }
     }
 
     if (loopIndexByKey.has(key)) {
@@ -2135,7 +2902,10 @@ function collectCutoutProfileLoops(profileSelections, featureID) {
       for (const entry of group) {
         const polyline = Array.isArray(entry?.polyline) ? entry.polyline : [];
         if (polyline.length < 2) continue;
-        sourceChains.push(polyline);
+        sourceChains.push({
+          id: entry?.id != null ? String(entry.id) : `${featureID}:source:${loops.length + 1}:${sourceChains.length + 1}`,
+          polyline,
+        });
       }
       pushLoop(normalizedLoop, sourceChains);
     }
@@ -2211,14 +2981,26 @@ function applyCutoutLoopsToTree({ tree, featureID, profileLoops3 = [], rootMatri
       continue;
     }
     const worldSourceChains = [];
-    for (const rawChain of Array.isArray(loopEntry?.sourceChains) ? loopEntry.sourceChains : []) {
-      if (!Array.isArray(rawChain) || rawChain.length < 2) continue;
-      const chain = dedupeConsecutivePoints3(rawChain.map((point) => (
+    const rawSourceChains = Array.isArray(loopEntry?.sourceChains) ? loopEntry.sourceChains : [];
+    for (let chainIndex = 0; chainIndex < rawSourceChains.length; chainIndex += 1) {
+      const rawChain = rawSourceChains[chainIndex];
+      const polylineRaw = Array.isArray(rawChain)
+        ? rawChain
+        : (Array.isArray(rawChain?.polyline) ? rawChain.polyline : []);
+      if (polylineRaw.length < 2) continue;
+      const chain = dedupeConsecutivePoints3(polylineRaw.map((point) => (
         point?.isVector3
           ? point.clone()
           : new THREE.Vector3(toFiniteNumber(point?.[0]), toFiniteNumber(point?.[1]), toFiniteNumber(point?.[2]))
       )));
-      if (chain.length >= 2) worldSourceChains.push(chain);
+      if (chain.length >= 2) {
+        worldSourceChains.push({
+          id: rawChain && typeof rawChain === "object" && !Array.isArray(rawChain) && rawChain.id != null
+            ? String(rawChain.id)
+            : `${featureID}:loop:${loopIndex + 1}:source:${chainIndex + 1}`,
+          polyline: chain,
+        });
+      }
     }
     const worldLoop = dedupeConsecutivePoints3(worldLoopRaw.map((point) => (
       point?.isVector3
@@ -2262,12 +3044,24 @@ function applyCutoutLoopsToTree({ tree, featureID, profileLoops3 = [], rootMatri
           holeLoops2 = [localLoop2];
           if (worldSourceChains.length) {
             const projectedChains = [];
-            for (const chain3 of worldSourceChains) {
+            for (let chainIndex = 0; chainIndex < worldSourceChains.length; chainIndex += 1) {
+              const sourceChain = worldSourceChains[chainIndex];
+              const chain3 = Array.isArray(sourceChain)
+                ? sourceChain
+                : (Array.isArray(sourceChain?.polyline) ? sourceChain.polyline : []);
+              if (chain3.length < 2) continue;
               const chain2 = dedupeConsecutivePoints2(chain3.map((point) => {
                 const localPoint = point.clone().applyMatrix4(candidate.inverseWorld);
                 return [localPoint.x, localPoint.y];
               }));
-              if (chain2.length >= 2) projectedChains.push(chain2.map((point) => [point[0], point[1]]));
+              if (chain2.length >= 2) {
+                projectedChains.push({
+                  id: sourceChain && typeof sourceChain === "object" && !Array.isArray(sourceChain) && sourceChain.id != null
+                    ? String(sourceChain.id)
+                    : `${featureID}:projected:${loopIndex + 1}:${chainIndex + 1}`,
+                  polyline: chain2.map((point) => [point[0], point[1]]),
+                });
+              }
             }
             holeLoopSources = [projectedChains];
           } else {
@@ -5308,37 +6102,59 @@ function addFlatPlacementToSolid({ solid, placement, featureID, thickness, edgeC
     const hole = holeEntries[holeIndex];
     const loop = hole.loop;
     const offset = loopOffsets[holeIndex + 1];
+    const holeSourceEdges = cloneHoleSourceChains2(
+      hole?.raw?.sourceChains,
+      `${flat.id}:hole:${hole.id}:source`,
+    ).map((chain, chainIndex) => ({
+      id: chain.id || `${flat.id}:hole:${hole.id}:source:${chainIndex + 1}`,
+      polyline: chain.polyline.map((point) => [point[0], point[1]]),
+    }));
+    const holeSourceIndex = buildEdgeSegmentSourceIndex(holeSourceEdges);
+    const holeFaceGroups = new Map();
     for (let i = 0; i < loop.length; i += 1) {
       const next = (i + 1) % loop.length;
       const holeEdgeIndex = i + 1;
       const edgeSignature = buildQuantizedPolylineSignature([loop[i], loop[next]]);
+      const mappedSourceEdge = findSourceEdgeForSegment(loop[i], loop[next], holeSourceIndex) || null;
       const mappedEdge = edgeIndex.get(edgeSignature)
         || findSourceEdgeForSegment(loop[i], loop[next], edgeSourceIndex)
         || null;
       const edgeId = mappedEdge?.id || makeHoleSegmentEdgeId(flat.id, hole.id, holeEdgeIndex);
       if (mappedEdge?.bend || mappedEdge?.isAttachEdge) continue;
 
-      const sideFace = makeFlatFaceName(featureID, flat.id, `CUTOUT:${hole.id}:EDGE:${holeEdgeIndex}`);
+      const faceGroupKey = mappedSourceEdge?.id || edgeId;
+      let faceGroup = holeFaceGroups.get(faceGroupKey);
+      if (!faceGroup) {
+        faceGroup = {
+          faceName: makeFlatFaceName(featureID, flat.id, `CUTOUT:${hole.id}:EDGE:${holeEdgeIndex}`),
+          edgeId,
+          edgeIndex: holeEdgeIndex,
+          edgeSignature: edgeSignature || null,
+        };
+        holeFaceGroups.set(faceGroupKey, faceGroup);
+      }
+
+      const sideFace = faceGroup.faceName;
       const topA = offset + i;
       const topB = offset + next;
       addTriangleIfValid(solid, sideFace, topPoints[topA], bottomPoints[topA], topPoints[topB]);
       addTriangleIfValid(solid, sideFace, topPoints[topB], bottomPoints[topA], bottomPoints[topB]);
       solid.setFaceMetadata(sideFace, {
         flatId: flat.id,
-        edgeId,
+        edgeId: faceGroup.edgeId,
         holeId: hole.id,
         cutoutId: hole.cutoutId || null,
-        edgeIndex: holeEdgeIndex,
-        edgeSignature: edgeSignature || null,
+        edgeIndex: faceGroup.edgeIndex,
+        edgeSignature: faceGroup.edgeSignature,
         sheetMetal: {
           kind: "flat_cutout_wall",
           representation: "3D",
           flatId: flat.id,
-          edgeId,
+          edgeId: faceGroup.edgeId,
           holeId: hole.id,
           cutoutId: hole.cutoutId || null,
-          edgeIndex: holeEdgeIndex,
-          edgeSignature: edgeSignature || null,
+          edgeIndex: faceGroup.edgeIndex,
+          edgeSignature: faceGroup.edgeSignature,
         },
       });
     }
@@ -6439,15 +7255,29 @@ export function runSheetMetalCutout(instance) {
   }
 
   const rootMatrix = source.rootMatrix || matrixFromAny(source.carrier?.userData?.sheetMetalModel?.rootTransform);
-  const profileLoopData = collectCutoutProfileLoops(profileSelections, featureID);
-  const treeCutSummary = applyCutoutLoopsToTree({
-    tree,
-    featureID,
-    profileLoops3: profileLoopData.loops,
-    rootMatrix,
-  });
+  const isSolidProfile = String(cutterBuild?.sourceType || "").toLowerCase() === "solid";
+  const profileLoopData = isSolidProfile
+    ? {
+      sourceType: "solid",
+      faceCount: 0,
+      loops: [],
+    }
+    : collectCutoutProfileLoops(profileSelections, featureID);
+  const treeCutSummary = isSolidProfile
+    ? applySolidCutoutToTree({
+      tree,
+      featureID,
+      cutter,
+      rootMatrix,
+    })
+    : applyCutoutLoopsToTree({
+      tree,
+      featureID,
+      profileLoops3: profileLoopData.loops,
+      rootMatrix,
+    });
   const midplaneApplied = treeCutSummary.applied > 0;
-  const allowBooleanFallback = String(cutterBuild?.sourceType || "").toLowerCase() === "solid";
+  const allowBooleanFallback = false;
   if (!midplaneApplied && !allowBooleanFallback) {
     instance.persistentData = {
       ...basePersistentPayload(instance),
@@ -6464,6 +7294,7 @@ export function runSheetMetalCutout(instance) {
 
   let cutterSnapshot = null;
   if (!midplaneApplied) {
+    mergeLegacyBooleanCutoutCutterFaces(cutter, featureID);
     cutterSnapshot = serializeSolidSnapshot(cutter);
     if (!cutterSnapshot) {
       instance.persistentData = {
@@ -6489,7 +7320,9 @@ export function runSheetMetalCutout(instance) {
     mode,
     sourceType: cutterBuild?.sourceType || profileLoopData?.sourceType || null,
     profileNames,
-    profileLoopCount: Array.isArray(profileLoopData?.loops) ? profileLoopData.loops.length : 0,
+    profileLoopCount: isSolidProfile
+      ? Math.max(0, toFiniteNumber(treeCutSummary?.requestedLoops, 0) | 0)
+      : (Array.isArray(profileLoopData?.loops) ? profileLoopData.loops.length : 0),
     mappedLoopCount: treeCutSummary.applied,
     mappedLoops: Array.isArray(treeCutSummary.assignments) ? treeCutSummary.assignments : [],
     skippedLoops: Array.isArray(treeCutSummary.skippedLoops) ? treeCutSummary.skippedLoops : [],

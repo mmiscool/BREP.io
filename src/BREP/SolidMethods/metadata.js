@@ -2,6 +2,55 @@
  * Face and edge metadata helpers.
  */
 
+function collapseFaceIdsByName(solid) {
+    if (!solid || !solid._faceNameToID || !solid._idToFaceName || !Array.isArray(solid._triIDs)) return false;
+
+    const nameToId = solid._faceNameToID;
+    const idToName = solid._idToFaceName;
+    const triIDs = solid._triIDs;
+    const canonicalById = new Map();
+    let changed = false;
+
+    for (let i = 0; i < triIDs.length; i++) {
+        const id = triIDs[i];
+        let canonical = canonicalById.get(id);
+        if (canonical === undefined) {
+            const name = idToName.get(id);
+            canonical = (name !== undefined) ? (nameToId.get(name) ?? id) : id;
+            canonicalById.set(id, canonical);
+        }
+        if (canonical !== id) {
+            triIDs[i] = canonical;
+            changed = true;
+        }
+    }
+
+    const rebuiltIdToName = new Map();
+    for (const [name, id] of nameToId.entries()) {
+        if (id === undefined) continue;
+        rebuiltIdToName.set(id, name);
+    }
+    solid._idToFaceName = rebuiltIdToName;
+
+    if (changed) {
+        solid._dirty = true;
+        solid._faceIndex = null;
+        try {
+            if (solid._manifold && typeof solid._manifold.delete === 'function') solid._manifold.delete();
+        } catch { }
+        solid._manifold = null;
+    }
+    return changed;
+}
+
+function renameFaceIdsInMap(solid, oldName, newName) {
+    if (!solid || !(solid._idToFaceName instanceof Map)) return;
+    for (const [id, currentName] of solid._idToFaceName.entries()) {
+        if (currentName !== oldName) continue;
+        solid._idToFaceName.set(id, newName);
+    }
+}
+
 /** Set metadata for a face (e.g., radius for cylindrical faces). */
 export function setFaceMetadata(faceName, metadata) {
     if (!metadata || typeof metadata !== 'object') return this;
@@ -36,11 +85,12 @@ export function renameFace(oldName, newName) {
     if (newId === undefined || newId === oldId) {
         this._faceNameToID.delete(oldName);
         this._faceNameToID.set(newName, oldId);
-        if (this._idToFaceName) this._idToFaceName.set(oldId, newName);
+        renameFaceIdsInMap(this, oldName, newName);
         if (this._faceMetadata) {
             if (mergedMeta) this._faceMetadata.set(newName, mergedMeta);
             this._faceMetadata.delete(oldName);
         }
+        collapseFaceIdsByName(this);
         return this;
     }
 
@@ -56,6 +106,7 @@ export function renameFace(oldName, newName) {
     this._faceNameToID.delete(oldName);
     if (this._idToFaceName) {
         this._idToFaceName.delete(oldId);
+        renameFaceIdsInMap(this, oldName, newName);
         this._idToFaceName.set(newId, newName);
     }
     if (this._faceMetadata) {
@@ -66,6 +117,7 @@ export function renameFace(oldName, newName) {
         this._dirty = true;
         this._faceIndex = null;
     }
+    collapseFaceIdsByName(this);
     return this;
 }
 
