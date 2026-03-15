@@ -272,6 +272,124 @@ function resamplePolyline3(points, sampleCount) {
   return out;
 }
 
+function pointDistanceToAxis(point, axisPoint, axisDir) {
+  if (!point || !axisPoint || !axisDir) return null;
+  const offset = point.clone().sub(axisPoint);
+  const axial = axisDir.clone().multiplyScalar(offset.dot(axisDir));
+  return offset.sub(axial).length();
+}
+
+function firstPointOnFaceGrid(points) {
+  if (!Array.isArray(points)) return null;
+  for (const point of points) {
+    if (!Array.isArray(point) || point.length < 3) continue;
+    return new THREE.Vector3(point[0], point[1], point[2]);
+  }
+  return null;
+}
+
+function buildBendCylindricalMetadata({ facePoints, axisStart, axisEnd, axisDir, fallbackRadius = null }) {
+  if (!axisStart?.isVector3 || !axisEnd?.isVector3 || !axisDir?.isVector3) return null;
+  const axisCenter = axisStart.clone().add(axisEnd).multiplyScalar(0.5);
+  const samplePoint = firstPointOnFaceGrid(facePoints);
+  const sampledRadius = samplePoint ? pointDistanceToAxis(samplePoint, axisStart, axisDir) : null;
+  const radius = Number.isFinite(sampledRadius) ? sampledRadius : fallbackRadius;
+  const height = axisStart.distanceTo(axisEnd);
+  if (!Number.isFinite(radius) || radius <= EPS) return null;
+  return {
+    type: "cylindrical",
+    radius,
+    height: Number.isFinite(height) ? height : 0,
+    axis: [axisDir.x, axisDir.y, axisDir.z],
+    center: [axisCenter.x, axisCenter.y, axisCenter.z],
+  };
+}
+
+function circumcenter2(a, b, c) {
+  const ax = toFiniteNumber(a?.[0]);
+  const ay = toFiniteNumber(a?.[1]);
+  const bx = toFiniteNumber(b?.[0]);
+  const by = toFiniteNumber(b?.[1]);
+  const cx = toFiniteNumber(c?.[0]);
+  const cy = toFiniteNumber(c?.[1]);
+  const d = 2 * ((ax * (by - cy)) + (bx * (cy - ay)) + (cx * (ay - by)));
+  if (Math.abs(d) <= EPS) return null;
+
+  const aSq = (ax * ax) + (ay * ay);
+  const bSq = (bx * bx) + (by * by);
+  const cSq = (cx * cx) + (cy * cy);
+  return [
+    ((aSq * (by - cy)) + (bSq * (cy - ay)) + (cSq * (ay - by))) / d,
+    ((aSq * (cx - bx)) + (bSq * (ax - cx)) + (cSq * (bx - ax))) / d,
+  ];
+}
+
+function fitCircularEdgePolyline2(polyline) {
+  const points = Array.isArray(polyline) ? polyline : [];
+  if (points.length < 3) return null;
+  const first = points[0];
+  const mid = points[(points.length / 2) | 0];
+  const last = points[points.length - 1];
+  const center = circumcenter2(first, mid, last);
+  if (!center) return null;
+
+  const radius = Math.hypot(first[0] - center[0], first[1] - center[1]);
+  if (!(Number.isFinite(radius) && radius > EPS)) return null;
+
+  const startAngle = Math.atan2(first[1] - center[1], first[0] - center[0]);
+  const endAngle = Math.atan2(last[1] - center[1], last[0] - center[0]);
+  let delta = endAngle - startAngle;
+  while (delta <= -Math.PI) delta += Math.PI * 2;
+  while (delta > Math.PI) delta -= Math.PI * 2;
+  if (Math.abs(delta) <= THREE.MathUtils.degToRad(1)) return null;
+
+  const tolerance = Math.max(1e-4, radius * 1e-3);
+  for (const point of points) {
+    const sampleRadius = Math.hypot(point[0] - center[0], point[1] - center[1]);
+    if (Math.abs(sampleRadius - radius) > tolerance) return null;
+  }
+
+  return { center, radius };
+}
+
+function buildFlatWallCylindricalMetadata({ edge, placementMatrix, thickness }) {
+  const fit = fitCircularEdgePolyline2(edge?.polyline);
+  if (!fit) return null;
+  const axisDir = new THREE.Vector3(0, 0, 1).transformDirection(placementMatrix).normalize();
+  const axisCenter = makeMidplaneWorldPoint(placementMatrix, fit.center);
+  const height = Math.abs(toFiniteNumber(thickness, 0));
+  if (!(height > EPS)) return null;
+  return {
+    type: "cylindrical",
+    radius: fit.radius,
+    height,
+    axis: [axisDir.x, axisDir.y, axisDir.z],
+    center: [axisCenter.x, axisCenter.y, axisCenter.z],
+  };
+}
+
+function addCylindricalFaceCenterline({ solid, faceName, metadata }) {
+  if (!solid || !faceName || !metadata || metadata.type !== "cylindrical") return;
+  const axis = Array.isArray(metadata.axis) ? metadata.axis : null;
+  const center = Array.isArray(metadata.center) ? metadata.center : null;
+  const height = Math.abs(toFiniteNumber(metadata.height, 0));
+  if (!axis || axis.length !== 3 || !center || center.length !== 3 || !(height > EPS)) return;
+
+  const axisDir = new THREE.Vector3(axis[0], axis[1], axis[2]);
+  if (axisDir.lengthSq() <= EPS) return;
+  axisDir.normalize();
+
+  const axisCenter = new THREE.Vector3(center[0], center[1], center[2]);
+  const halfHeight = height * 0.5;
+  const start = axisCenter.clone().addScaledVector(axisDir, -halfHeight);
+  const end = axisCenter.clone().addScaledVector(axisDir, halfHeight);
+  solid.addAuxEdge(`${faceName}:CENTERLINE`, [quantizePoint3(start), quantizePoint3(end)], {
+    centerline: true,
+    materialKey: "OVERLAY",
+    polylineWorld: false,
+  });
+}
+
 function buildBendLookup(tree) {
   const lookup = new Map();
   const visitFlat = (flat) => {
@@ -408,7 +526,13 @@ function addFlatPlacementToSolid({ solid, placement, featureID, thickness, edgeC
     const topB = outerOffset + next;
     addTriangleIfValid(solid, sideFace, topPoints[topA], bottomPoints[topA], topPoints[topB]);
     addTriangleIfValid(solid, sideFace, topPoints[topB], bottomPoints[topA], bottomPoints[topB]);
+    const cylindricalMeta = buildFlatWallCylindricalMetadata({
+      edge: mappedEdge,
+      placementMatrix: placement.matrix,
+      thickness,
+    });
     solid.setFaceMetadata(sideFace, {
+      ...(cylindricalMeta || {}),
       flatId: flat.id,
       edgeId,
       edgeSignature: signature || null,
@@ -420,6 +544,7 @@ function addFlatPlacementToSolid({ solid, placement, featureID, thickness, edgeC
         edgeSignature: signature || null,
       },
     });
+    if (cylindricalMeta) addCylindricalFaceCenterline({ solid, faceName: sideFace, metadata: cylindricalMeta });
   }
 
   for (let holeIndex = 0; holeIndex < holeEntries.length; holeIndex += 1) {
@@ -520,7 +645,9 @@ function addBendPlacementToSolid({ solid, bendPlacement, featureID, thickness, b
   const axis = bendPlacement.axisEnd.clone().sub(bendPlacement.axisStart);
   if (axis.lengthSq() <= EPS) return;
   const axisDir = axis.normalize();
-  const axisOrigin = bendPlacement.axisStart.clone();
+  const axisStart = bendPlacement.axisStart.clone();
+  const axisEnd = bendPlacement.axisEnd.clone();
+  const axisOrigin = axisStart.clone();
   const sampleCount = Math.max(2, parentEdgeWorld.length, childEdgeWorld.length);
   const parentEdge = resamplePolyline3(parentEdgeWorld, sampleCount);
   const childEdge = resamplePolyline3(childEdgeWorld, sampleCount);
@@ -561,6 +688,24 @@ function addBendPlacementToSolid({ solid, bendPlacement, featureID, thickness, b
 
   const lookup = bendLookup.get(String(bend.id)) || {};
   const parentEdgeId = lookup?.parentEdgeId ?? null;
+  const midRadius = Math.max(EPS, toFiniteNumber(bendPlacement.midRadius, 0));
+  const fallbackOuterRadius = midRadius + halfT;
+  const fallbackInnerRadius = Math.max(EPS, midRadius - halfT);
+  const isFaceAOuter = bendPlacement.angleRad >= 0;
+  const faceAMetadata = buildBendCylindricalMetadata({
+    facePoints: top,
+    axisStart,
+    axisEnd,
+    axisDir,
+    fallbackRadius: isFaceAOuter ? fallbackOuterRadius : fallbackInnerRadius,
+  });
+  const faceBMetadata = buildBendCylindricalMetadata({
+    facePoints: bottom,
+    axisStart,
+    axisEnd,
+    axisDir,
+    fallbackRadius: isFaceAOuter ? fallbackInnerRadius : fallbackOuterRadius,
+  });
 
   const faceA = makeBendFaceName(featureID, bend.id, "A");
   const faceB = makeBendFaceName(featureID, bend.id, "B");
@@ -602,6 +747,7 @@ function addBendPlacementToSolid({ solid, bendPlacement, featureID, thickness, b
   }
 
   solid.setFaceMetadata(faceA, {
+    ...(faceAMetadata || {}),
     bendId: bend.id,
     sheetMetalFaceType: "A",
     sheetMetal: {
@@ -616,6 +762,7 @@ function addBendPlacementToSolid({ solid, bendPlacement, featureID, thickness, b
     },
   });
   solid.setFaceMetadata(faceB, {
+    ...(faceBMetadata || {}),
     bendId: bend.id,
     sheetMetalFaceType: "B",
     sheetMetal: {
