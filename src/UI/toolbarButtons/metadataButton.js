@@ -104,6 +104,7 @@ class MetadataPanelController {
         content.style.padding = '8px';
         content.style.width = '100%';
         content.style.height = '100%';
+        content.style.minHeight = '0';
         content.style.boxSizing = 'border-box';
         content.style.overflowX = 'hidden';
         content.style.overflowY = 'auto';
@@ -689,51 +690,57 @@ class MetadataPanelController {
         actionRow.appendChild(bulkDeleteBtn);
         this.content.appendChild(actionRow);
 
-        if (faceMetadata) {
-            const faceLabel = document.createElement('div');
-            faceLabel.style.font = '12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
-            faceLabel.style.color = '#cbd5e1';
-            faceLabel.style.marginTop = '10px';
-            faceLabel.textContent = `Face metadata (${faceMetadata.faceName})`;
-            this.content.appendChild(faceLabel);
+        const metadataDetails = document.createElement('div');
+        metadataDetails.style.display = 'flex';
+        metadataDetails.style.flexDirection = 'column';
+        metadataDetails.style.gap = '8px';
+        metadataDetails.style.flex = '1 1 220px';
+        metadataDetails.style.minHeight = '160px';
+        metadataDetails.style.paddingBottom = '2px';
 
-            const facePre = document.createElement('pre');
-            facePre.textContent = JSON.stringify(faceMetadata.metadata, null, 2);
-            facePre.style.margin = '0';
-            facePre.style.padding = '8px';
-            facePre.style.background = '#0f172a';
-            facePre.style.color = '#e2e8f0';
-            facePre.style.font = '12px monospace';
-            facePre.style.border = '1px solid #1f2937';
-            facePre.style.borderRadius = '4px';
-            facePre.style.maxHeight = '160px';
-            facePre.style.overflow = 'auto';
-            facePre.style.whiteSpace = 'pre-wrap';
-            facePre.style.wordBreak = 'break-word';
-            this.content.appendChild(facePre);
+        const appendMetadataBlock = (labelText, metadataValue, options = {}) => {
+            const { marginTop = '0' } = options;
+            const block = document.createElement('div');
+            block.style.display = 'flex';
+            block.style.flexDirection = 'column';
+            block.style.flex = '1 1 0';
+            block.style.minHeight = '0';
+
+            const label = document.createElement('div');
+            label.style.font = '12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+            label.style.color = '#cbd5e1';
+            label.style.marginTop = marginTop;
+            label.style.marginBottom = '6px';
+            label.textContent = labelText;
+            block.appendChild(label);
+
+            const pre = document.createElement('pre');
+            pre.textContent = JSON.stringify(metadataValue, null, 2);
+            pre.style.margin = '0';
+            pre.style.padding = '8px';
+            pre.style.background = '#0f172a';
+            pre.style.color = '#e2e8f0';
+            pre.style.font = '12px monospace';
+            pre.style.border = '1px solid #1f2937';
+            pre.style.borderRadius = '4px';
+            pre.style.flex = '1 1 auto';
+            pre.style.minHeight = '0';
+            pre.style.overflow = 'auto';
+            pre.style.whiteSpace = 'pre-wrap';
+            pre.style.wordBreak = 'break-word';
+            block.appendChild(pre);
+
+            metadataDetails.appendChild(block);
+        };
+
+        if (faceMetadata) {
+            appendMetadataBlock(`Face metadata (${faceMetadata.faceName})`, faceMetadata.metadata, { marginTop: '10px' });
         }
 
-        const effectiveLabel = document.createElement('div');
-        effectiveLabel.style.font = '12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
-        effectiveLabel.style.color = '#cbd5e1';
-        effectiveLabel.style.marginTop = '6px';
-        effectiveLabel.textContent = 'Effective metadata (after inheritance)';
-        this.content.appendChild(effectiveLabel);
-
-        const effectivePre = document.createElement('pre');
-        effectivePre.textContent = JSON.stringify(effective, null, 2);
-        effectivePre.style.margin = '0';
-        effectivePre.style.padding = '8px';
-        effectivePre.style.background = '#0f172a';
-        effectivePre.style.color = '#e2e8f0';
-        effectivePre.style.font = '12px monospace';
-        effectivePre.style.border = '1px solid #1f2937';
-        effectivePre.style.borderRadius = '4px';
-        effectivePre.style.maxHeight = '160px';
-        effectivePre.style.overflow = 'auto';
-        effectivePre.style.whiteSpace = 'pre-wrap';
-        effectivePre.style.wordBreak = 'break-word';
-        this.content.appendChild(effectivePre);
+        appendMetadataBlock('Effective metadata (after inheritance)', effective, {
+            marginTop: faceMetadata ? '0' : '6px'
+        });
+        this.content.appendChild(metadataDetails);
     }
 
     _stringifyMetadataValue(value) {
