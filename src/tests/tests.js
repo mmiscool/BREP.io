@@ -93,6 +93,7 @@ import { test_sheetMetal_bend_face_cylindrical_metadata } from './test_sheetMeta
 import { test_sheet_clipboard_image_utils } from './test_sheetClipboardImageUtils.js';
 import { test_sheetMetal_corner_fillet_compound_reference } from './test_sheetMetal_corner_fillet_compound_reference.js';
 import { test_sheetMetal_corner_fillet_selection_resolution } from './test_sheetMetal_corner_fillet_selection_resolution.js';
+import { test_sheetMetal_cutout_context_button } from './test_sheetMetal_cutout_context_button.js';
 import { test_sheetMetal_cutoutEdge_flange_controls } from './test_sheetMetal_cutoutEdge_flange_controls.js';
 import { test_sheetMetal_nonManifold_sm_f18 } from './test_sheetMetal_nonManifold_sm_f18.js';
 import { afterRun_sketch_openLoop, test_sketch_openLoop } from './test_sketch_openLoop.js';
@@ -346,6 +347,7 @@ export const testFunctions = [
     { test: test_textToFace, afterRun: afterRun_textToFace, printArtifacts: false, exportFaces: true, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_nonManifold_sm_f18, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_bend_face_cylindrical_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sheetMetal_cutout_context_button, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_cutoutEdge_flange_controls, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_corner_fillet, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_corner_fillet_face_cylindrical_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

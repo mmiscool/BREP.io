@@ -54,6 +54,26 @@ export class SheetMetalCutoutFeature {
   static shortName = "SM.CUTOUT";
   static longName = "Sheet Metal Cutout";
   static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems) {
+    const items = Array.isArray(selectedItems) ? selectedItems : [];
+    if (items.length !== 1) return false;
+
+    const pick = items[0] || null;
+    const type = String(pick?.type || "").toUpperCase();
+    const parentType = String(pick?.parent?.type || "").toUpperCase();
+    const isSketch = type === "SKETCH";
+    const isSketchFace = type === "FACE" && parentType === "SKETCH";
+    const isSolid = type === "SOLID";
+    if (!isSketch && !isSketchFace && !isSolid) return false;
+
+    const name = pick?.name
+      || pick?.userData?.faceName
+      || pick?.userData?.solidName
+      || null;
+    if (!name) return false;
+
+    return { field: "profile", value: name };
+  }
 
   constructor() {
     this.inputParams = {};
