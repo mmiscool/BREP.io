@@ -5,6 +5,7 @@ export const SHEET_METAL_WORKBENCH = {
     'D',
     'P',
     'S',
+    'F',
     'SM.TAB',
     'SM.CF',
     'SM.F',
