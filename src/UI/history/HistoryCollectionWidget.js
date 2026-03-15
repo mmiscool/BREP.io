@@ -96,6 +96,7 @@ export class HistoryCollectionWidget {
     this._itemEls = new Map();
     this._forms = new Map();
     this._uiFieldSignatures = new Map();
+    this._dragState = null;
     this._autoFocusOnExpand = false;
     this._pendingFocusEntryId = null;
     this._boundHistoryListener = null;
@@ -118,6 +119,7 @@ export class HistoryCollectionWidget {
     this._metaEls.clear();
     this._itemEls.clear();
     this._uiFieldSignatures.clear();
+    this._resetDragState();
     this._addBtn = null;
     this._addMenu = null;
     if (this._onGlobalClick) {
@@ -405,6 +407,7 @@ export class HistoryCollectionWidget {
     controls.className = 'hc-controls';
     headerRow.appendChild(controls);
     item.appendChild(headerRow);
+    this._attachReorderDropHandlers(item, renderContext);
 
     renderContext.elements = {
       item,
@@ -557,7 +560,7 @@ export class HistoryCollectionWidget {
     const defaults = this._defaultControlDescriptors(context);
     if (typeof this._buildEntryControls === 'function') {
       try {
-        const clone = defaults.map((descriptor) => ({ ...descriptor }));
+        const clone = defaults.map((descriptor) => (descriptor instanceof HTMLElement ? descriptor : { ...descriptor }));
         const custom = this._buildEntryControls(context, clone);
         if (Array.isArray(custom)) return custom;
         if (custom === null) return [];
@@ -567,23 +570,11 @@ export class HistoryCollectionWidget {
   }
 
   _defaultControlDescriptors(context = {}) {
-    const { id = null, index = 0, totalCount = 0 } = context;
+    const { id = null } = context;
     if (id == null) return [];
     const descriptors = [];
-    descriptors.push({
-      key: 'move-up',
-      label: '△',
-      title: 'Move up',
-      disabled: index <= 0,
-      onClick: () => { this._moveEntry(id, -1); },
-    });
-    descriptors.push({
-      key: 'move-down',
-      label: '▽',
-      title: 'Move down',
-      disabled: index >= totalCount - 1,
-      onClick: () => { this._moveEntry(id, 1); },
-    });
+    const reorderHandle = this._createReorderHandleControl(context);
+    if (reorderHandle) descriptors.push(reorderHandle);
     descriptors.push({
       key: 'delete',
       label: '✕',
@@ -627,6 +618,45 @@ export class HistoryCollectionWidget {
       }
     }
     container.hidden = count === 0;
+  }
+
+  _createReorderHandleControl(context = {}) {
+    const entryId = context?.id != null ? String(context.id) : null;
+    if (!entryId) return null;
+    const totalCount = Number.isFinite(context?.totalCount) ? context.totalCount : 0;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'hc-btn hc-drag-handle';
+    button.title = 'Drag to reorder';
+    button.setAttribute('aria-label', 'Drag to reorder');
+    button.draggable = totalCount > 1;
+    button.disabled = totalCount <= 1;
+    button.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+    });
+
+    const bars = document.createElement('span');
+    bars.className = 'hc-drag-handle-bars';
+    bars.setAttribute('aria-hidden', 'true');
+    for (let i = 0; i < 3; i++) {
+      const bar = document.createElement('span');
+      bar.className = 'hc-drag-handle-bar';
+      bars.appendChild(bar);
+    }
+    button.appendChild(bars);
+
+    if (button.draggable) {
+      button.addEventListener('dragstart', (event) => {
+        event.stopPropagation();
+        this._handleReorderDragStart(event, context);
+      });
+      button.addEventListener('dragend', () => {
+        this._resetDragState();
+      });
+    }
+
+    return button;
   }
 
   _maybeRenderEntryToggle(context = {}) {
@@ -767,12 +797,22 @@ export class HistoryCollectionWidget {
     const idx = entries.findIndex((entry, i) => this._extractEntryId(entry, i) === id);
     if (idx < 0) return;
     const target = idx + delta;
-    if (target < 0 || target >= entries.length) return;
+    return this._reorderEntryToIndex(id, target);
+  }
+
+  async _reorderEntryToIndex(id, targetIndex) {
+    if (!id) return false;
+    const entries = this._getEntries();
+    const idx = entries.findIndex((entry, i) => this._extractEntryId(entry, i) === id);
+    if (idx < 0) return false;
+    const nextIndex = Number.isFinite(targetIndex) ? Math.max(0, Math.min(entries.length - 1, targetIndex)) : idx;
+    if (nextIndex === idx) return false;
     const [entry] = entries.splice(idx, 1);
-    entries.splice(target, 0, entry);
+    entries.splice(nextIndex, 0, entry);
     if (id != null) this._expandedId = String(id);
     this.render();
     this._emitCollectionChange('reorder', entry);
+    return true;
   }
 
   _deleteEntry(id) {
@@ -1499,5 +1539,110 @@ export class HistoryCollectionWidget {
       return CSS.escape(str);
     }
     return str.replace(/"/g, '\\"');
+  }
+
+  _attachReorderDropHandlers(item, context = {}) {
+    if (!item || !context?.id) return;
+    const entryId = String(context.id);
+    item.addEventListener('dragover', (event) => {
+      const dragState = this._dragState;
+      if (!dragState?.entryId || dragState.entryId === entryId) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      const position = this._resolveDropPosition(event, item);
+      this._setDragTarget(entryId, position);
+    });
+    item.addEventListener('drop', async (event) => {
+      const dragState = this._dragState;
+      if (!dragState?.entryId || dragState.entryId === entryId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const position = this._resolveDropPosition(event, item);
+      const targetIndex = this._resolveDropTargetIndex(dragState.entryId, entryId, position);
+      if (targetIndex == null) {
+        this._resetDragState();
+        return;
+      }
+      try {
+        await this._reorderEntryToIndex(dragState.entryId, targetIndex);
+      } finally {
+        this._resetDragState();
+      }
+    });
+  }
+
+  _handleReorderDragStart(event, context = {}) {
+    const entryId = context?.id != null ? String(context.id) : null;
+    if (!entryId) return;
+    this._resetDragState();
+    this._dragState = {
+      entryId,
+      overId: null,
+      position: null,
+    };
+    const item = context?.elements?.item || this._itemEls.get(entryId) || null;
+    if (item) item.classList.add('is-dragging');
+    if (event?.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      try { event.dataTransfer.setData('text/plain', entryId); } catch (_) { /* ignore */ }
+    }
+  }
+
+  _resolveDropPosition(event, item) {
+    if (!item || typeof item.getBoundingClientRect !== 'function') return 'after';
+    const rect = item.getBoundingClientRect();
+    const midpoint = rect.top + (rect.height / 2);
+    const clientY = Number(event?.clientY);
+    if (!Number.isFinite(clientY)) return 'after';
+    return clientY < midpoint ? 'before' : 'after';
+  }
+
+  _resolveDropTargetIndex(sourceId, targetId, position = 'after') {
+    if (!sourceId || !targetId) return null;
+    const entries = this._getEntries();
+    const sourceIndex = entries.findIndex((entry, index) => this._extractEntryId(entry, index) === sourceId);
+    const targetIndex = entries.findIndex((entry, index) => this._extractEntryId(entry, index) === targetId);
+    if (sourceIndex < 0 || targetIndex < 0) return null;
+    let nextIndex = position === 'before' ? targetIndex : targetIndex + 1;
+    if (sourceIndex < nextIndex) nextIndex -= 1;
+    nextIndex = Math.max(0, Math.min(entries.length - 1, nextIndex));
+    if (nextIndex === sourceIndex) return null;
+    return nextIndex;
+  }
+
+  _setDragTarget(entryId, position) {
+    const normalizedId = entryId != null ? String(entryId) : null;
+    const normalizedPosition = position === 'before' ? 'before' : 'after';
+    const previousId = this._dragState?.overId || null;
+    if (previousId && previousId !== normalizedId) {
+      this._clearDropIndicator(previousId);
+    }
+    if (this._dragState) {
+      this._dragState.overId = normalizedId;
+      this._dragState.position = normalizedPosition;
+    }
+    if (!normalizedId) return;
+    const item = this._itemEls.get(normalizedId) || null;
+    if (!item) return;
+    item.classList.toggle('is-drop-before', normalizedPosition === 'before');
+    item.classList.toggle('is-drop-after', normalizedPosition === 'after');
+  }
+
+  _clearDropIndicator(entryId) {
+    if (entryId == null) return;
+    const item = this._itemEls.get(String(entryId)) || null;
+    if (!item) return;
+    item.classList.remove('is-drop-before', 'is-drop-after');
+  }
+
+  _resetDragState() {
+    if (this._itemEls instanceof Map) {
+      for (const item of this._itemEls.values()) {
+        try {
+          item.classList.remove('is-dragging', 'is-drop-before', 'is-drop-after');
+        } catch (_) { /* ignore */ }
+      }
+    }
+    this._dragState = null;
   }
 }

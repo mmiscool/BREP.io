@@ -97,9 +97,14 @@ export class HistoryWidget extends HistoryCollectionWidget {
   }
 
   async _moveEntry(id, delta) {
+    return super._moveEntry(id, delta);
+  }
+
+  async _reorderEntryToIndex(id, targetIndex) {
     const entryInfo = this.#findEntryInfo(id);
-    if (!entryInfo) return;
-    super._moveEntry(id, delta);
+    if (!entryInfo) return false;
+    const moved = await super._reorderEntryToIndex(id, targetIndex);
+    if (!moved) return false;
     this._idsSignature = this.#computeIdsSignature();
     const feature = entryInfo.entry;
     if (feature) {
@@ -109,6 +114,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
     }
     await this.#safeRunHistory();
     this.partHistory?.queueHistorySnapshot?.({ debounceMs: 0, reason: 'move' });
+    return true;
   }
 
   _deleteEntry(id) {

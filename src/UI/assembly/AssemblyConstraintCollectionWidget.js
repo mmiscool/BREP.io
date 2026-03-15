@@ -298,29 +298,9 @@ export class AssemblyConstraintCollectionWidget extends HistoryCollectionWidget 
 
   #buildControls(context = {}) {
     const entryId = resolveEntryId(context.entry);
-    const total = context.totalCount || 0;
-    const index = context.index || 0;
     const controls = [];
-    controls.push({
-      key: 'move-up',
-      label: '△',
-      title: 'Move up',
-      disabled: index <= 0,
-      onClick: async () => {
-        await this.#notifyBeforeChange({ entry: context.entry, reason: 'move-up' });
-        if (entryId) this.history?.moveConstraint?.(entryId, -1);
-      },
-    });
-    controls.push({
-      key: 'move-down',
-      label: '▽',
-      title: 'Move down',
-      disabled: index >= total - 1,
-      onClick: async () => {
-        await this.#notifyBeforeChange({ entry: context.entry, reason: 'move-down' });
-        if (entryId) this.history?.moveConstraint?.(entryId, 1);
-      },
-    });
+    const reorderHandle = this._createReorderHandleControl(context);
+    if (reorderHandle) controls.push(reorderHandle);
     controls.push({
       key: 'delete',
       label: '✕',
@@ -332,6 +312,14 @@ export class AssemblyConstraintCollectionWidget extends HistoryCollectionWidget 
       },
     });
     return controls;
+  }
+
+  async _reorderEntryToIndex(id, targetIndex) {
+    if (!id) return false;
+    const info = this._findEntryInfoById(id);
+    if (!info?.entry) return false;
+    await this.#notifyBeforeChange({ entry: info.entry, reason: 'reorder' });
+    return this.history?.moveConstraintToIndex?.(id, targetIndex) === true;
   }
 
   #notifyBeforeChange(payload = {}) {

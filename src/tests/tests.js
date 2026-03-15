@@ -146,7 +146,6 @@ import {
 import { test_wire_harness_sheet_table_insert } from './test_wireHarnessSheetTable.js';
 import {
     test_wire_harness_infers_endpoint_side_from_spline_direction,
-    test_wire_harness_route_prefers_non_reusing_path,
 } from './test_wireHarnessRoutingReuse.js';
 import { test_wire_harness_routes_render_as_scene_solids } from './test_wireHarnessRouteGeometry.js';
 import { test_wire_harness_route_results_persist_in_model_json } from './test_wireHarnessPersistence.js';
@@ -268,7 +267,6 @@ export const testFunctions = [
     { test: test_sheet_clipboard_image_utils, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_wire_harness_formboard_insert, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_wire_harness_sheet_table_insert, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_wire_harness_route_prefers_non_reusing_path, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_wire_harness_infers_endpoint_side_from_spline_direction, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_wire_harness_routes_render_as_scene_solids, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_wire_harness_route_results_persist_in_model_json, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

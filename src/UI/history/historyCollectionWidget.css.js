@@ -35,9 +35,19 @@ export const HISTORY_COLLECTION_WIDGET_CSS = `
     border-radius: 10px;
     background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01));
     overflow: hidden;
+    transition: border-color .15s ease, box-shadow .15s ease, opacity .15s ease;
   }
   .hc-item:hover {
     border-color: white;
+  }
+  .hc-item.is-dragging {
+    opacity: 0.45;
+  }
+  .hc-item.is-drop-before {
+    box-shadow: inset 0 2px 0 rgba(59,130,246,.95);
+  }
+  .hc-item.is-drop-after {
+    box-shadow: inset 0 -2px 0 rgba(59,130,246,.95);
   }
   .hc-item.is-running {
     border-color: var(--accent);
@@ -54,7 +64,7 @@ export const HISTORY_COLLECTION_WIDGET_CSS = `
     align-items: stretch;
     gap: 0px;
     padding: 2px 5px;
-    padding-right: 130px;
+    padding-right: 86px;
     position: relative;
   }
   .hc-toggle {
@@ -157,6 +167,29 @@ export const HISTORY_COLLECTION_WIDGET_CSS = `
     cursor: pointer;
     font-size: 12px;
     transition: border-color .15s ease, box-shadow .15s ease, transform .05s ease;
+  }
+  .hc-drag-handle {
+    cursor: grab;
+  }
+  .hc-drag-handle:active {
+    cursor: grabbing;
+  }
+  .hc-drag-handle:disabled {
+    cursor: default;
+  }
+  .hc-drag-handle-bars {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 3px;
+    width: 14px;
+  }
+  .hc-drag-handle-bar {
+    display: block;
+    width: 14px;
+    height: 2px;
+    border-radius: 999px;
+    background: currentColor;
+    opacity: 0.95;
   }
   .hc-btn:disabled {
     opacity: 0.4;

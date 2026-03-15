@@ -426,10 +426,20 @@ export class AssemblyConstraintHistory {
     if (!id) return false;
     const index = this.constraints.findIndex((entry) => normalizeConstraintEntryId(entry) === id);
     if (index < 0) return false;
-    const target = index + delta;
-    if (target < 0 || target >= this.constraints.length) return false;
+    return this.moveConstraintToIndex(id, index + delta);
+  }
+
+  moveConstraintToIndex(constraintID, targetIndex) {
+    const id = normalizeTypeString(constraintID);
+    if (!id) return false;
+    const index = this.constraints.findIndex((entry) => normalizeConstraintEntryId(entry) === id);
+    if (index < 0) return false;
+    const nextIndex = Number.isFinite(targetIndex)
+      ? Math.max(0, Math.min(this.constraints.length - 1, targetIndex))
+      : index;
+    if (nextIndex === index) return false;
     const [entry] = this.constraints.splice(index, 1);
-    this.constraints.splice(target, 0, entry);
+    this.constraints.splice(nextIndex, 0, entry);
     this.#emitChange('reorder', entry || null);
     this.#scheduleAutoRun();
     return true;

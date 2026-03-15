@@ -81,7 +81,7 @@ const inputParamsSchema = {
 
 export class AssemblyComponentFeature {
   static shortName = 'ACOMP';
-  static longName = 'Assembly Component';
+  static longName = 'ASSY Component';
   static inputParamsSchema = inputParamsSchema;
 
   constructor() {
