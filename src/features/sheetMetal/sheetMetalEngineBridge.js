@@ -1543,6 +1543,37 @@ function collectSketchParents(objects) {
   return out;
 }
 
+function resolveConsumableInputObject(object) {
+  let current = object;
+  while (current) {
+    if (String(current?.type || "").toUpperCase() === "SKETCH") return current;
+    current = current.parent || null;
+  }
+
+  current = object;
+  while (current) {
+    if (String(current?.type || "").toUpperCase() === "SOLID") return current;
+    current = current.parent || null;
+  }
+
+  if (object?.parentSolid && typeof object.parentSolid === "object") return object.parentSolid;
+  return null;
+}
+
+function collectConsumableInputObjects(objects) {
+  const out = [];
+  const seen = new Set();
+  for (const obj of normalizeSelectionArray(objects)) {
+    const consumable = resolveConsumableInputObject(obj);
+    if (!consumable) continue;
+    const key = consumable.uuid || consumable.id || consumable.name || consumable;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(consumable);
+  }
+  return out;
+}
+
 function readEdgePolyline3D(edgeObj) {
   if (!edgeObj || typeof edgeObj !== "object") return null;
 
@@ -6488,7 +6519,7 @@ export function runSheetMetalCutout(instance) {
 
   const removed = [source.carrier];
   if (instance?.inputParams?.consumeProfileSketch !== false) {
-    removed.push(...collectSketchParents(profileSelections));
+    removed.push(...collectConsumableInputObjects(profileSelections));
   }
   const added = [root];
   if (instance?.inputParams?.keepTool || instance?.inputParams?.debugCutter) {

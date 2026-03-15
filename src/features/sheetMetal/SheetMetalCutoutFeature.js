@@ -21,9 +21,10 @@ const inputParamsSchema = {
     hint: "Select a sketch profile or external solid/face cutter (do not pick a face from the same target sheet body).",
   },
   consumeProfileSketch: {
+    label: "Consume input object",
     type: "boolean",
     default_value: true,
-    hint: "Remove the referenced sketch after creating the cutout. Turn off to keep it in the scene.",
+    hint: "Remove the referenced input object after creating the cutout. Sketch inputs remove the sketch; solid/face inputs remove the source solid.",
   },
   forwardDistance: {
     type: "number",

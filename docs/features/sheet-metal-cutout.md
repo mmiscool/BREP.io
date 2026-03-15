@@ -9,7 +9,7 @@ Sheet Metal Cutout removes material from an existing sheet-metal model using a s
 ## Inputs
 - `sheet` – target sheet-metal solid (or a face/edge on that solid).
 - `profile` – sketch, face, or external solid used as the cutout profile/tool.
-- `consumeProfileSketch` – removes source sketch after success when enabled.
+- `consumeProfileSketch` – when enabled, removes the source input object after success. Sketch inputs remove the sketch; solid/face inputs remove the source solid.
 - `forwardDistance` / `backDistance` – profile extrusion depth controls (for sketch/face profiles).
 - `keepTool` – keeps the generated cutter solid in scene.
 - `debugCutter` – keeps internal cleanup cutter for diagnostics.
