@@ -2196,8 +2196,8 @@ export function filletSolid({
         }
 
         if (Math.abs(faceNudgeDistance) > 1e-12) {
-            wedgeSolid.pushFace(`${name}_FACE_A`, faceNudgeDistance);
-            wedgeSolid.pushFace(`${name}_FACE_B`, faceNudgeDistance);
+            wedgeSolid.pushFace(`${name}_FACE_A`, faceNudgeDistance, { warnMissing: false });
+            wedgeSolid.pushFace(`${name}_FACE_B`, faceNudgeDistance, { warnMissing: false });
         }
 
         // Apply end cap offset for INSET fillets using pushFace method
@@ -2205,8 +2205,8 @@ export function filletSolid({
             logDebug('Applying end cap offset to INSET fillet using pushFace...');
             try {
                 if (Math.abs(faceNudgeDistance) > 1e-12) {
-                    wedgeSolid.pushFace(`${name}_END_CAP_1`, faceNudgeDistance);
-                    wedgeSolid.pushFace(`${name}_END_CAP_2`, faceNudgeDistance);
+                    wedgeSolid.pushFace(`${name}_END_CAP_1`, faceNudgeDistance, { warnMissing: false });
+                    wedgeSolid.pushFace(`${name}_END_CAP_2`, faceNudgeDistance, { warnMissing: false });
                     logDebug('End cap offset applied successfully');
                 } else {
                     logDebug('Skipping end cap offset because nudgeFaceDistance is 0.');

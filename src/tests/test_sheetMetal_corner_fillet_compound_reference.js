@@ -40,18 +40,21 @@ export async function test_sheetMetal_corner_fillet_compound_reference(partHisto
   const result = await fillet.run(partHistory);
   const addedCount = Array.isArray(result?.added) ? result.added.length : 0;
   const removedCount = Array.isArray(result?.removed) ? result.removed.length : 0;
-  if (addedCount !== 0 || removedCount !== 0) {
-    throw new Error("Fillet stub should skip unresolved compound-reference selection without scene edits.");
+  if (addedCount !== 1 || removedCount !== 1) {
+    throw new Error("Compound corner reference should resolve to a sheet-metal fillet replacement.");
   }
 
   const persistent = fillet?.persistentData || {};
-  if (persistent.stubbed !== true) {
-    throw new Error("Fillet stub should set persistentData.stubbed=true.");
+  if (persistent.usedSheetMetalPath !== true) {
+    throw new Error("Compound corner reference should use the sheet-metal fillet path.");
   }
-  if (String(persistent.strategy || "") !== "miter_tangent_boolean") {
-    throw new Error("Fillet stub should report miter_tangent_boolean strategy.");
+  const summary = persistent.sheetMetalFilletSummary || {};
+  if (summary.applied !== 1 || summary.appliedCorners !== 1) {
+    throw new Error("Compound corner reference should apply exactly one sheet-metal corner fillet.");
   }
-  if (String(persistent.skipped || "") !== "no_edges") {
-    throw new Error(`Fillet stub should mark no_edges skip reason, got ${String(persistent.skipped || "")}.`);
+  const appliedTarget = Array.isArray(summary.appliedTargets) ? summary.appliedTargets[0] : null;
+  const cornerEdgeIds = Array.isArray(appliedTarget?.cornerEdgeIds) ? appliedTarget.cornerEdgeIds.join(",") : "";
+  if (cornerEdgeIds !== "SM.TAB3:flat_root:e2,SM.TAB3:flat_root:e3") {
+    throw new Error(`Compound corner reference should preserve both corner edges, got ${cornerEdgeIds}.`);
   }
 }

@@ -670,7 +670,7 @@ function nudgeBridgeEndCapsOutward(solid, preferredFacePrefix = null, pushDistan
   let pushed = 0;
   for (const faceName of candidates) {
     try {
-      solid.pushFace(faceName, amount);
+      solid.pushFace(faceName, amount, { warnMissing: false });
       pushed += 1;
     } catch { }
   }

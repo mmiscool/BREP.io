@@ -251,18 +251,23 @@ export function mirrorAcrossPlane(point, normal) {
  * 
  * @param {string} faceName - Name of the face to push
  * @param {number} distance - Distance to push the face (positive = outward along normal)
+ * @param {object} [options]
+ * @param {boolean} [options.warnMissing=true] - Warn when the requested face is absent
+ * @param {boolean} [options.warnInvalidNormal=true] - Warn when no usable face normal can be derived
  * @returns {Solid} this for chaining
  */
-export function pushFace(faceName, distance = 0.001) {
+export function pushFace(faceName, distance = 0.001, options = {}) {
     const dist = Number(distance);
     if (!faceName || !Number.isFinite(dist) || dist === 0) return this;
+    const warnMissing = options?.warnMissing !== false;
+    const warnInvalidNormal = options?.warnInvalidNormal !== false;
 
     // Make sure triangle windings are coherent so the averaged normal points outward.
     try { this._manifoldize(); } catch { /* best effort; fall back to existing winding */ }
 
     const faceID = this._faceNameToID.get(faceName);
     if (faceID === undefined) {
-        console.warn(`pushFace: Face "${faceName}" not found`);
+        if (warnMissing) console.warn(`pushFace: Face "${faceName}" not found`);
         return this;
     }
 
@@ -344,7 +349,7 @@ export function pushFace(faceName, distance = 0.001) {
             moved++;
         }
         if (moved === 0) {
-            console.warn(`pushFace: Invalid normal for face "${faceName}"`);
+            if (warnInvalidNormal) console.warn(`pushFace: Invalid normal for face "${faceName}"`);
             return this;
         }
     }

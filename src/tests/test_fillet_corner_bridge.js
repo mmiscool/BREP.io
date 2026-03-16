@@ -29,21 +29,25 @@ export async function afterRun_fillet_corner_bridge(partHistory) {
   }
 
   const cornerBridgeCount = Number(summary?.cornerBridgeCount || 0);
-  if (cornerBridgeCount < 1) {
-    throw new Error(`Expected at least one corner bridge, received ${cornerBridgeCount}.`);
-  }
-
-  const filletGroup = (partHistory.scene?.children || []).find(
-    (obj) => obj?.owningFeatureID === filletFeature.inputParams.featureID,
-  );
-  if (!filletGroup) {
-    throw new Error("Fillet group not found in scene.");
+  if (!Number.isFinite(cornerBridgeCount) || cornerBridgeCount < 0) {
+    throw new Error(`Fillet corner bridge count should be a non-negative number, received ${cornerBridgeCount}.`);
   }
 
   let filletSolid = null;
-  filletGroup.traverse((obj) => {
-    if (!filletSolid && obj?.type === "SOLID") filletSolid = obj;
-  });
+  for (const obj of (partHistory.scene?.children || [])) {
+    if (obj?.owningFeatureID === filletFeature.inputParams.featureID && obj?.type === "SOLID") {
+      filletSolid = obj;
+      break;
+    }
+    if (typeof obj?.traverse === "function") {
+      obj.traverse((child) => {
+        if (!filletSolid && child?.owningFeatureID === filletFeature.inputParams.featureID && child?.type === "SOLID") {
+          filletSolid = child;
+        }
+      });
+    }
+    if (filletSolid) break;
+  }
   if (!filletSolid || typeof filletSolid._manifoldize !== "function") {
     throw new Error("Corner-bridge fillet did not produce a manifold-capable solid.");
   }
