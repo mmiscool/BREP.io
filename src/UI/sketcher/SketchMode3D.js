@@ -1358,14 +1358,25 @@ export class SketchMode3D {
       if (!c || !s || !e) return false;
       if (Math.hypot(s.u - e.u, s.v - e.v) < 1e-6) return false;
       const cId = this.#createPointAtUV(c.u, c.v, false);
-      // Swap start/end to match sketcher arc direction expectations.
-      const sId = this.#createPointAtUV(e.u, e.v, false);
-      const eId = this.#createPointAtUV(s.u, s.v, false);
+      const viewIsMirrored = this.#isViewingSketchFromBackSide();
+      const arcStart = viewIsMirrored ? e : s;
+      const arcEnd = viewIsMirrored ? s : e;
+      const sId = this.#createPointAtUV(arcStart.u, arcStart.v, false);
+      const eId = this.#createPointAtUV(arcEnd.u, arcEnd.v, false);
       if (cId == null || sId == null || eId == null) return false;
       this.#addGeometry("arc", [cId, sId, eId]);
       return { type: "arc", pointIds: [cId, sId, eId], endpointIds: [sId, eId] };
     }
     return false;
+  }
+
+  #isViewingSketchFromBackSide() {
+    const cam = this.viewer?.camera;
+    const basis = this._lock?.basis;
+    if (!cam || !basis?.origin || !basis?.z) return false;
+    const viewOffset = cam.position.clone().sub(basis.origin);
+    if (viewOffset.lengthSq() < 1e-12) return false;
+    return viewOffset.dot(basis.z) > 0;
   }
 
   #createBezierFromStroke(points) {
