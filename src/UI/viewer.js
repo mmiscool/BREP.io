@@ -3877,6 +3877,11 @@ export class Viewer {
             try { metadataPanel.handleSelection(target); }
             catch (e) { try { console.warn('Metadata panel update failed:', e); } catch { } }
         }
+        const solidOverlapDiagnostics = this.__solidOverlapDiagnosticsController;
+        if (solidOverlapDiagnostics && typeof solidOverlapDiagnostics.handleSelection === 'function') {
+            try { solidOverlapDiagnostics.handleSelection(target); }
+            catch (e) { try { console.warn('Solid overlap diagnostics update failed:', e); } catch { } }
+        }
         if (triggerOnClick && typeof target.onClick === 'function') {
             try { target.onClick(pointerEvent); } catch { }
         }

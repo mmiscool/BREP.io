@@ -3,14 +3,49 @@
 
 <head>
   <meta charset="utf-8" />
-  <title>BREP.io</title>
+  <title>BREP.io | Open Source Browser-Based Parametric CAD</title>
+  
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-<meta name="color-scheme" content="dark" />
+  <meta name="description" content="BREP.io is a modern, open source parametric CAD modeler for the web. Design 3D parts with a professional B-Rep kernel and export to STL/STEP directly in your browser.">
+  
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <meta name="color-scheme" content="dark" />
+  <link rel="canonical" href="https://brep.io/" />
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "BREP.io",
+    "operatingSystem": "Web Browser",
+    "applicationCategory": "DesignApplication",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "description": "Professional-grade open source parametric CAD for the browser."
+  }
+  </script>
 </head>
 
 <body>
-  <div id="app"></div>
+  <div id="app">
+    <header style="display:none;">
+      <h1>BREP.io: The Open Source CAD for the Web</h1>
+      <p>A web-based 3D modeling tool for engineers and makers. Key features include:</p>
+      <ul>
+        <li>Full parametric constraint solver</li>
+        <li>B-Rep (Boundary Representation) geometry kernel</li>
+        <li>No installation required - runs in any modern browser</li>
+        <li>Export to STL and STEP for 3D printing and manufacturing</li>
+      </ul>
+    </header>
+    
+    <div style="text-align: center; margin-top: 35vh; font-family: sans-serif; color: #888;">
+      <p>Initializing BREP.io Parametric CAD...</p>
+    </div>
+  </div>
 
   <script type="module" src="./src/main.js"></script>
 </body>

@@ -14,6 +14,7 @@ import { createTestsButton } from './testsButton.js';
 import { createScriptRunnerButton } from './scriptRunnerButton.js';
 import { createHistoryTestSnippetButton } from './historyTestSnippetButton.js';
 import { createSelectionStateButton } from './selectionStateButton.js';
+import { createSolidOverlapDiagnosticsButton } from './solidOverlapDiagnosticsButton.js';
 import { createSheetEditorButton } from './sheetEditorButton.js';
 import { createSheetMetalFlatExportButton } from './sheetMetalFlatExportButton.js';
 import { createSheetMetalDebugButton } from './sheetMetalDebugButton.js';
@@ -41,6 +42,7 @@ export function registerDefaultToolbarButtons(viewer) {
     { id: 'save', create: createSaveButton, source: 'builtin' },
     { id: 'zoomToFit', create: createZoomToFitButton, source: 'builtin' },
     { id: 'wireframe', create: createWireframeToggleButton, source: 'builtin' },
+    { id: 'solidOverlapDiagnostics', create: createSolidOverlapDiagnosticsButton, source: 'builtin' },
     { id: 'import', create: createImportButton, source: 'builtin' },
     { id: 'export', create: createExportButton, source: 'builtin' },
     { id: 'share', create: createShareButton, source: 'builtin' },

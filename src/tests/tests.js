@@ -114,6 +114,11 @@ import { afterRun_solidMetrics, test_solidMetrics } from './test_solidMetrics.js
 import { test_stlLoader } from './test_stlLoader.js';
 import { test_selection_owning_feature_resolution } from './test_selection_owning_feature.js';
 import {
+    test_solid_overlap_diagnostics_detects_cross_solid_overlap,
+    test_solid_overlap_diagnostics_detects_coplanar_overlap,
+    test_solid_overlap_diagnostics_ignores_boundary_touching_faces,
+} from './test_solid_overlap_diagnostics.js';
+import {
     afterRun_smooth_with_subdivision_replaces_source_solid,
     test_smooth_with_subdivision_replaces_source_solid,
 } from './test_smooth_with_subdivision.js';
@@ -362,6 +367,9 @@ export const testFunctions = [
     { test: test_history_features_basic, afterRun: afterRun_history_features_basic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_history_expand_does_not_dirty, afterRun: afterRun_history_expand_does_not_dirty, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_selection_owning_feature_resolution, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_solid_overlap_diagnostics_detects_coplanar_overlap, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_solid_overlap_diagnostics_ignores_boundary_touching_faces, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_solid_overlap_diagnostics_detects_cross_solid_overlap, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_visibility_hidden_state_persistence, afterRun: afterRun_visibility_hidden_state_persistence, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_textToFace, afterRun: afterRun_textToFace, printArtifacts: false, exportFaces: true, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_nonManifold_sm_f18, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
