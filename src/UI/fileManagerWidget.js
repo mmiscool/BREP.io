@@ -377,26 +377,23 @@ export class FileManagerWidget {
     const hasChanges = await this.hasUnsavedChanges();
     if (!hasChanges) return true;
 
-    const saveBeforeLeave = await confirm(
-      'You have unsaved changes.\n\nSave before returning to Home?\n\nOK = Save and return\nCancel = Do not save',
-    );
-
-    if (saveBeforeLeave) {
+    const action = await this._openNavigateHomeDialog();
+    if (action === 'save') {
+      let saveResult = null;
       try {
-        await this.saveCurrent();
+        saveResult = await this.saveCurrent();
       } catch {
         alert('Save failed. Staying in CAD.');
         return false;
       }
-      const stillDirty = await this.hasUnsavedChanges();
-      if (stillDirty) {
-        alert('Model is still unsaved. Staying in CAD.');
+      if (!saveResult?.saved) {
         return false;
       }
       return true;
     }
 
-    return await confirm('Discard unsaved changes and return to Home?');
+    if (action === 'discard') return true;
+    return false;
   }
 
 
@@ -518,6 +515,44 @@ export class FileManagerWidget {
         justify-content: flex-end;
         gap: 8px;
       }
+      .fm-home-confirm-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(2, 6, 23, 0.72);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10055;
+        padding: 16px;
+        box-sizing: border-box;
+      }
+      .fm-home-confirm-panel {
+        width: min(420px, 92vw);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        background: #0b0e14;
+        border: 1px solid #1f2937;
+        border-radius: 12px;
+        color: #e5e7eb;
+        padding: 16px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      }
+      .fm-home-confirm-title {
+        font-weight: 700;
+        font-size: 14px;
+      }
+      .fm-home-confirm-copy {
+        font-size: 12px;
+        line-height: 1.45;
+        color: #cbd5f5;
+      }
+      .fm-home-confirm-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
       @media (max-width: 760px) {
         .fm-save-target-panel {
           width: min(98vw, 1100px);
@@ -575,6 +610,87 @@ export class FileManagerWidget {
     } catch { /* ignore */ }
     this._saveOverlay = null;
     this._saveLogEl = null;
+  }
+
+  async _openNavigateHomeDialog() {
+    return await new Promise((resolve) => {
+      let closed = false;
+
+      const overlay = document.createElement('div');
+      overlay.className = 'fm-home-confirm-overlay';
+
+      const panel = document.createElement('section');
+      panel.className = 'fm-home-confirm-panel';
+      overlay.appendChild(panel);
+
+      const title = document.createElement('div');
+      title.className = 'fm-home-confirm-title';
+      title.textContent = 'Unsaved changes';
+      panel.appendChild(title);
+
+      const copy = document.createElement('div');
+      copy.className = 'fm-home-confirm-copy';
+      copy.textContent = 'This part has unsaved changes. Do you want to save before returning to Home?';
+      panel.appendChild(copy);
+
+      const actions = document.createElement('div');
+      actions.className = 'fm-home-confirm-actions';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'fm-btn';
+      cancelBtn.textContent = 'Cancel';
+
+      const discardBtn = document.createElement('button');
+      discardBtn.type = 'button';
+      discardBtn.className = 'fm-btn danger';
+      discardBtn.textContent = "Don't save";
+
+      const saveBtn = document.createElement('button');
+      saveBtn.type = 'button';
+      saveBtn.className = 'fm-btn';
+      saveBtn.textContent = 'Save and return';
+
+      actions.appendChild(cancelBtn);
+      actions.appendChild(discardBtn);
+      actions.appendChild(saveBtn);
+      panel.appendChild(actions);
+
+      const close = (result) => {
+        if (closed) return;
+        closed = true;
+        try { document.removeEventListener('keydown', onKeyDown, true); } catch { /* ignore */ }
+        try { overlay.remove(); } catch { /* ignore */ }
+        resolve(result || 'cancel');
+      };
+
+      const onKeyDown = (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          close('cancel');
+          return;
+        }
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          event.stopPropagation();
+          close('save');
+        }
+      };
+
+      cancelBtn.addEventListener('click', () => close('cancel'));
+      discardBtn.addEventListener('click', () => close('discard'));
+      saveBtn.addEventListener('click', () => close('save'));
+      overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) close('cancel');
+      });
+
+      document.body.appendChild(overlay);
+      document.addEventListener('keydown', onKeyDown, true);
+      requestAnimationFrame(() => {
+        try { saveBtn.focus(); } catch { /* ignore */ }
+      });
+    });
   }
 
   _buildUI() {
@@ -892,7 +1008,9 @@ export class FileManagerWidget {
   }
 
   async saveCurrent() {
-    if (!this.viewer || !this.viewer.partHistory) return;
+    if (!this.viewer || !this.viewer.partHistory) {
+      return { saved: false, reason: 'unavailable' };
+    }
     const currentPath = normalizeModelPath(this.currentName || '');
     const typedPath = normalizeModelPath(this.nameInput.value || '');
     const currentSource = this._normalizeSource(this.currentSource) || 'local';
@@ -912,9 +1030,9 @@ export class FileManagerWidget {
       target = await this._openSaveTargetDialog(initialPath);
     }
 
-    if (!target) return;
+    if (!target) return { saved: false, reason: 'canceled' };
     const modelPath = String(normalizeModelPath(target.modelPath || '') || '').trim();
-    if (!modelPath) return;
+    if (!modelPath) return { saved: false, reason: 'invalid_target' };
     const targetSource = this._normalizeSource(target.source || currentSource || 'local') || 'local';
     const targetRepo = String(target.repoFull || '').trim();
     const targetBranch = String(target.branch || currentBranch || '').trim();
@@ -935,7 +1053,7 @@ export class FileManagerWidget {
         if (existing) {
           const location = targetRepo ? ` in ${targetRepo}` : '';
           const overwrite = await window.confirm(`"${modelPath}" already exists${location}. Overwrite it?`);
-          if (!overwrite) return;
+          if (!overwrite) return { saved: false, reason: 'overwrite_declined' };
         }
       } catch {
         // Ignore lookup failures and allow save attempt to proceed.
@@ -1086,7 +1204,7 @@ export class FileManagerWidget {
         );
         if (!res.ok) {
           this._logSaveProgress('Save canceled.');
-          return;
+          return { saved: false, reason: 'canceled' };
         }
         try {
           const pendingKey = this._recordScopeKey(modelPath, targetSource, targetRepo);
@@ -1124,6 +1242,13 @@ export class FileManagerWidget {
       if (skipped.length) {
         try { console.warn('[FileManagerWidget] Skipped non-manifold solids:', skipped); } catch {}
       }
+      return {
+        saved: true,
+        modelPath,
+        source: targetSource,
+        repoFull: targetRepo,
+        branch: targetBranch,
+      };
     } catch (err) {
       const msg = (err && err.message) ? err.message : String(err || 'Unknown error');
       this._logSaveProgress(`Save failed: ${msg}`);

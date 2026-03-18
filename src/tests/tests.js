@@ -126,8 +126,10 @@ import {
     test_solid_overlap_diagnostics_ignores_boundary_touching_faces,
 } from './test_solid_overlap_diagnostics.js';
 import {
+    afterRun_smooth_with_subdivision_preserves_mirrored_union_symmetry,
     afterRun_smooth_with_subdivision_preserves_centered_ring_symmetry,
     afterRun_smooth_with_subdivision_replaces_source_solid,
+    test_smooth_with_subdivision_preserves_mirrored_union_symmetry,
     test_smooth_with_subdivision_preserves_centered_ring_symmetry,
     test_smooth_with_subdivision_replaces_source_solid,
 } from './test_smooth_with_subdivision.js';
@@ -367,6 +369,7 @@ export const testFunctions = [
     { test: test_edge_smooth_face_selection, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_smooth_with_subdivision_replaces_source_solid, afterRun: afterRun_smooth_with_subdivision_replaces_source_solid, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_smooth_with_subdivision_preserves_centered_ring_symmetry, afterRun: afterRun_smooth_with_subdivision_preserves_centered_ring_symmetry, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_smooth_with_subdivision_preserves_mirrored_union_symmetry, afterRun: afterRun_smooth_with_subdivision_preserves_mirrored_union_symmetry, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_hole_through, afterRun: afterRun_hole_through, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_countersink, afterRun: afterRun_hole_countersink, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_counterbore, afterRun: afterRun_hole_counterbore, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
