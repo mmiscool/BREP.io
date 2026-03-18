@@ -11,6 +11,22 @@ const DEFAULT_PADDING = 8;
 const CARD_MARGIN = 14;
 const MIN_CARD_GAP = 12;
 
+function isLoopbackHostname(hostname) {
+  const host = String(hostname || '').trim().toLowerCase();
+  if (!host) return false;
+  if (host === 'localhost' || host.endsWith('.localhost') || host === '::1') return true;
+  return /^127(?:\.\d{1,3}){3}$/.test(host);
+}
+
+export function shouldSkipStartupTourForRuntime() {
+  try {
+    if (typeof window === 'undefined' || !window.location) return false;
+    return isLoopbackHostname(window.location.hostname);
+  } catch {
+    return false;
+  }
+}
+
 function ensureTourStyles() {
   if (typeof document === 'undefined') return;
   if (document.getElementById('startup-tour-styles')) return;
@@ -260,6 +276,7 @@ export class StartupTour {
   }
 
   async maybeStart() {
+    if (shouldSkipStartupTourForRuntime()) return false;
     if (StartupTour.isDone()) return false;
     await waitForDialogsToClose();
     this.start();
