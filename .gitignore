@@ -22,5 +22,6 @@ junk.*
 public/docs/*
 public/help/*
 public/fonts
+public/assets/*
 pnpm-lock.yaml
 pnpm-lock.yaml

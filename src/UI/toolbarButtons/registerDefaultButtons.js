@@ -19,6 +19,7 @@ import { createSheetEditorButton } from './sheetEditorButton.js';
 import { createSheetMetalFlatExportButton } from './sheetMetalFlatExportButton.js';
 import { createSheetMetalDebugButton } from './sheetMetalDebugButton.js';
 import { createHomeButton } from './homeButton.js';
+import { createGuidedTourButton } from './guidedTourButton.js';
 
 function isLocalhostRuntime() {
   try {
@@ -26,7 +27,8 @@ function isLocalhostRuntime() {
     const host = String(window.location.hostname || '').toLowerCase();
     return host === 'localhost'
       || host.endsWith('.localhost')
-      || host === '::1';
+      || host === '::1'
+      || /^127(?:\.\d{1,3}){3}$/.test(host);
   } catch {
     return false;
   }
@@ -52,6 +54,7 @@ export function registerDefaultToolbarButtons(viewer) {
 
   if (isLocalhost) creators.push({ id: 'sheetMetalDebug', create: createSheetMetalDebugButton, source: 'builtin' });
   creators.push({ id: 'about', create: createAboutButton, source: 'builtin' });
+  if (isLocalhost) creators.push({ id: 'guidedTour', create: createGuidedTourButton, source: 'builtin' });
   if (isLocalhost) creators.push({ id: 'tests', create: createTestsButton, source: 'builtin' });
   creators.push({ id: 'historyTestSnippet', create: createHistoryTestSnippetButton, source: 'builtin' });
   creators.push({ id: 'scriptRunner', create: createScriptRunnerButton, source: 'builtin' });
