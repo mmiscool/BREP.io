@@ -1,6 +1,5 @@
 import { deepClone } from "../../utils/deepClone.js";
 import { sketchToDXF, sketchToSVG, sketchTo3DPolylines } from "./sketchToSVG.js";
-export { bootSketcher2DFrame } from "./Sketcher2DFrameApp.js";
 
 const DEFAULT_CHANNEL = "brep:sketcher2d";
 const DEFAULT_TIMEOUT_MS = 12000;
@@ -14,6 +13,15 @@ const DEFAULT_THEME = {
   pointSizePx: null,
   curveThicknessPx: null,
 };
+
+async function loadSketcher2DFrameModule() {
+  return await import("./Sketcher2DFrameApp.js");
+}
+
+export async function bootSketcher2DFrame(...args) {
+  const mod = await loadSketcher2DFrameModule();
+  return mod.bootSketcher2DFrame(...args);
+}
 
 function createDeferred() {
   let resolve;

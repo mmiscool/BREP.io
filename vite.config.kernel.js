@@ -67,7 +67,7 @@ export default defineConfig({
         'node:url',
       ],
       output: {
-        inlineDynamicImports: true,
+        codeSplitting: false,
         manualChunks: undefined,
       },
     },

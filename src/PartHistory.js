@@ -2,12 +2,9 @@
 import * as THREE from 'three';
 
 
-// Feature classes live in their own files; registry wires them up.
-import { FeatureRegistry } from './FeatureRegistry.js';
 import { SelectionFilter } from './UI/SelectionFilter.js';
 import { AssemblyConstraintHistory } from './assemblyConstraints/AssemblyConstraintHistory.js';
 import { AssemblyConstraintRegistry } from './assemblyConstraints/AssemblyConstraintRegistry.js';
-import { AssemblyComponentFeature } from './features/assemblyComponent/AssemblyComponentFeature.js';
 import { MetadataManager } from './metadataManager.js';
 import { PMIViewsManager } from './pmi/PMIViewsManager.js';
 import { Sheet2DManager } from './sheets/Sheet2DManager.js';
@@ -24,6 +21,31 @@ import {
 
 const debug = false;
 const UI_ONLY_INPUT_PARAM_KEYS = new Set(['__open']);
+const ASSEMBLY_COMPONENT_FEATURE_KEYS = new Set([
+  'ACOMP',
+  'ASSY COMPONENT',
+  'ASSEMBLY COMPONENT',
+  'ASSEMBLYCOMPONENTFEATURE',
+]);
+
+let featureRegistryCtorPromise = null;
+
+async function loadFeatureRegistryCtor() {
+  if (!featureRegistryCtorPromise) {
+    featureRegistryCtorPromise = import('./FeatureRegistry.js').then((mod) => mod.FeatureRegistry);
+  }
+  return await featureRegistryCtorPromise;
+}
+
+function normalizeFeatureTypeKey(value) {
+  if (value === 0) return '0';
+  if (value == null) return '';
+  return String(value).trim().toUpperCase();
+}
+
+function isAssemblyComponentFeatureType(value) {
+  return ASSEMBLY_COMPONENT_FEATURE_KEYS.has(normalizeFeatureTypeKey(value));
+}
 
 function resolveFeatureEntryId(entry, fallback = null) {
   if (!entry) return fallback;
@@ -61,7 +83,8 @@ export class PartHistory {
     this.features = [];
     this.scene = new THREE.Scene();
     this.idCounter = 0;
-    this.featureRegistry = new FeatureRegistry();
+    this.featureRegistry = null;
+    this._featureRegistryPromise = null;
     this.assemblyConstraintRegistry = new AssemblyConstraintRegistry();
     this.assemblyConstraintHistory = new AssemblyConstraintHistory(this, this.assemblyConstraintRegistry);
     this.callbacks = {};
@@ -219,6 +242,17 @@ export class PartHistory {
         }
       }
     } catch { /* ignore texture disposal errors */ }
+  }
+
+  async #getFeatureRegistry() {
+    if (this.featureRegistry) return this.featureRegistry;
+    if (!this._featureRegistryPromise) {
+      this._featureRegistryPromise = loadFeatureRegistryCtor()
+        .then((FeatureRegistry) => new FeatureRegistry());
+    }
+    const registry = await this._featureRegistryPromise;
+    this.featureRegistry = registry;
+    return registry;
   }
 
   #disposeObjectResources(object) {
@@ -482,6 +516,7 @@ export class PartHistory {
     const whatStepToStopAt = this.currentHistoryStepId;
     const hiddenVisibilityState = this.#captureHiddenVisibilityState();
     let modelChanged = false;
+    const featureRegistry = await this.#getFeatureRegistry();
 
     this.#setFeatureRunningState(null);
     try {
@@ -519,7 +554,7 @@ export class PartHistory {
         if (this.callbacks.run) {
           await this.callbacks.run(featureId);
         }
-        const FeatureClass = this.featureRegistry.getSafe(feature.type);
+        const FeatureClass = featureRegistry.getSafe(feature.type);
         if (!FeatureClass) {
           // Record an error on the feature but do not abort the whole run.
           const t1 = nowMs();
@@ -1346,29 +1381,17 @@ export class PartHistory {
   hasAssemblyComponents() {
     const features = Array.isArray(this.features) ? this.features : [];
     if (!features.length) return false;
-    const normalize = (value) => {
-      if (value === 0) return '0';
-      if (value == null) return '';
-      return String(value).trim().toUpperCase();
-    };
-    const targets = new Set([
-      normalize(AssemblyComponentFeature?.shortName),
-      normalize(AssemblyComponentFeature?.longName),
-      normalize(AssemblyComponentFeature?.name),
-    ]);
-    targets.delete('');
 
     for (const feature of features) {
       if (!feature) continue;
       const rawType = feature?.type ?? feature?.inputParams?.type ?? null;
-      const typeKey = normalize(rawType);
-      if (typeKey && targets.has(typeKey)) return true;
+      if (isAssemblyComponentFeatureType(rawType)) return true;
 
       try {
         const FeatureClass = this.featureRegistry?.getSafe?.(rawType) || null;
-        if (FeatureClass === AssemblyComponentFeature) return true;
-        const resolvedKey = normalize(FeatureClass?.longName || FeatureClass?.shortName || FeatureClass?.name);
-        if (resolvedKey && targets.has(resolvedKey)) return true;
+        if (isAssemblyComponentFeatureType(FeatureClass?.longName || FeatureClass?.shortName || FeatureClass?.name)) {
+          return true;
+        }
       } catch { /* ignore unknown feature types */ }
     }
 
@@ -1430,21 +1453,21 @@ export class PartHistory {
       return [];
     }
 
+    const featureRegistry = await this.#getFeatureRegistry();
     const updates = [];
-    const targetName = String(AssemblyComponentFeature?.longName || AssemblyComponentFeature?.name || '').trim().toUpperCase();
 
     for (const feature of this.features) {
       if (!feature || !feature.type) continue;
 
       let FeatureClass = null;
       try {
-        FeatureClass = this.featureRegistry?.getSafe?.(feature.type) || null;
+        FeatureClass = featureRegistry.getSafe(feature.type) || null;
       } catch {
         FeatureClass = null;
       }
 
-      const isAssemblyComponent = FeatureClass === AssemblyComponentFeature
-        || (FeatureClass && String(FeatureClass?.longName || FeatureClass?.name || '').trim().toUpperCase() === targetName);
+      const isAssemblyComponent = isAssemblyComponentFeatureType(feature.type)
+        || isAssemblyComponentFeatureType(FeatureClass?.longName || FeatureClass?.shortName || FeatureClass?.name);
       if (!isAssemblyComponent) continue;
 
       const componentName = feature?.inputParams?.componentName;
@@ -1497,6 +1520,7 @@ export class PartHistory {
   async updateAssemblyComponents(options = {}) {
     const { rerun = true } = options || {};
     const updates = await this._collectAssemblyComponentUpdates();
+    const featureRegistry = await this.#getFeatureRegistry();
     const updatedCount = updates.length;
 
     if (updatedCount === 0) {
@@ -1506,8 +1530,9 @@ export class PartHistory {
     for (const { feature, componentName, componentPath, sourceStorage, repoFull, branch, record, nextSavedAt } of updates) {
       let featureInfo = feature?.persistentData?.componentData?.featureInfo || null;
       try {
-        const tempFeature = new AssemblyComponentFeature();
-        if (typeof tempFeature._extractFeatureInfo === 'function') {
+        const FeatureClass = featureRegistry.getSafe(feature.type) || featureRegistry.get(feature.type);
+        const tempFeature = FeatureClass ? new FeatureClass() : null;
+        if (tempFeature && typeof tempFeature._extractFeatureInfo === 'function') {
           const bytes = base64ToUint8Array(record.data3mf);
           if (bytes && bytes.length) {
             const info = await tempFeature._extractFeatureInfo(bytes);
@@ -1549,9 +1574,8 @@ export class PartHistory {
   }
 
   async newFeature(featureType) {
-    const FeatureClass = (this.featureRegistry && typeof this.featureRegistry.getSafe === 'function')
-      ? (this.featureRegistry.getSafe(featureType) || this.featureRegistry.get(featureType))
-      : this.featureRegistry.get(featureType);
+    const featureRegistry = await this.#getFeatureRegistry();
+    const FeatureClass = featureRegistry.getSafe(featureType) || featureRegistry.get(featureType);
     const feature = {
       type: featureType,
       inputParams: await extractDefaultValues(FeatureClass.inputParamsSchema),
@@ -1559,7 +1583,7 @@ export class PartHistory {
     };
     feature.inputParams.id = await this.generateId(featureType);
     this.#linkFeatureParams(feature);
-    if (FeatureClass === AssemblyComponentFeature) {
+    if (isAssemblyComponentFeatureType(FeatureClass?.longName || FeatureClass?.shortName || FeatureClass?.name)) {
       const defaultInstanceName = String(feature.inputParams.id || '').trim();
       if (!String(feature.inputParams.instanceName || '').trim()) {
         feature.inputParams.instanceName = defaultInstanceName;

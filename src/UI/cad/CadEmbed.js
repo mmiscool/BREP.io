@@ -1,9 +1,21 @@
 import { deepClone } from "../../utils/deepClone.js";
-export { bootCadFrame, bootCADFrame } from "./CadFrameApp.js";
 import cadCssText from "../../styles/cad.css?raw";
 
 const DEFAULT_CHANNEL = "brep:cad";
 const DEFAULT_TIMEOUT_MS = 20000;
+
+async function loadCadFrameModule() {
+  return await import("./CadFrameApp.js");
+}
+
+export async function bootCadFrame(...args) {
+  const mod = await loadCadFrameModule();
+  return mod.bootCadFrame(...args);
+}
+
+export async function bootCADFrame(...args) {
+  return bootCadFrame(...args);
+}
 
 function createDeferred() {
   let resolve;

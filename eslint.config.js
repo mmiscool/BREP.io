@@ -29,11 +29,13 @@ export default [
     rules: {
       "no-empty": ["warn", { allowEmptyCatch: true }],
       "no-constant-binary-expression": "warn",
+      "no-useless-assignment": "off",
       "no-undef": "warn",
       "no-unused-private-class-members": "warn",
       "no-useless-catch": "warn",
       "no-unsafe-finally": "warn",
       "no-useless-escape": "warn",
+      "preserve-caught-error": "off",
       "no-unused-vars": [
         "warn",
         {

@@ -1,26 +1,45 @@
-// Public entry point for the BREP kernel package
-// Expose the core BREP kernel and part history classes
+// Public entry point for the BREP kernel package.
+// Keep embed boot functions alive here so a single brep-kernel bundle can
+// serve both direct API consumers and iframe bootstrap imports.
 
-export { BREP } from './BREP/BREP.js';
-
-// Part history API
-export { PartHistory, extractDefaultValues } from './PartHistory.js';
-
-// Assembly constraints history and registry (useful when working with PartHistory)
-export { AssemblyConstraintHistory } from './assemblyConstraints/AssemblyConstraintHistory.js';
-export { AssemblyConstraintRegistry } from './assemblyConstraints/AssemblyConstraintRegistry.js';
-
-// License helpers
-export {
+import { BREP } from './BREP/BREP.js';
+import { PartHistory, extractDefaultValues } from './PartHistory.js';
+import { AssemblyConstraintHistory } from './assemblyConstraints/AssemblyConstraintHistory.js';
+import { AssemblyConstraintRegistry } from './assemblyConstraints/AssemblyConstraintRegistry.js';
+import {
   getPackageLicenseInfo,
   getPackageLicenseInfoString,
   getPackageLicenseText,
   getAllLicensesInfoString,
 } from './licenseInfo.js';
+import { Sketcher2DEmbed, bootSketcher2DFrame } from './UI/sketcher2d/Sketcher2DEmbed.js';
+import { sketchToSVG, sketchToSVGPaths, sketchToDXF, sketchTo3DPolylines } from './UI/sketcher2d/sketchToSVG.js';
+import { CadEmbed, CADEmbed, bootCadFrame, bootCADFrame } from './UI/cad/CadEmbed.js';
 
-// 2D Sketcher embed (iframe-based)
-export { Sketcher2DEmbed, bootSketcher2DFrame } from './UI/sketcher2d/Sketcher2DEmbed.js';
-export { sketchToSVG, sketchToSVGPaths, sketchToDXF, sketchTo3DPolylines } from './UI/sketcher2d/sketchToSVG.js';
+if (typeof globalThis !== 'undefined') {
+  globalThis.__BREP_bootCadFrame = bootCadFrame;
+  globalThis.__BREP_bootCADFrame = bootCADFrame;
+  globalThis.__BREP_bootSketcher2DFrame = bootSketcher2DFrame;
+}
 
-// Full CAD app embed (iframe-based)
-export { CadEmbed, CADEmbed, bootCadFrame, bootCADFrame } from './UI/cad/CadEmbed.js';
+export {
+  AssemblyConstraintHistory,
+  AssemblyConstraintRegistry,
+  BREP,
+  CADEmbed,
+  CadEmbed,
+  PartHistory,
+  Sketcher2DEmbed,
+  bootCADFrame,
+  bootCadFrame,
+  bootSketcher2DFrame,
+  extractDefaultValues,
+  getAllLicensesInfoString,
+  getPackageLicenseInfo,
+  getPackageLicenseInfoString,
+  getPackageLicenseText,
+  sketchTo3DPolylines,
+  sketchToDXF,
+  sketchToSVG,
+  sketchToSVGPaths,
+};

@@ -24,3 +24,4 @@ public/help/*
 public/fonts
 pnpm-lock.yaml
 pnpm-lock.yaml
+public/assets/ghLoader.*.js
