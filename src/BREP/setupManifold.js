@@ -1,5 +1,9 @@
 // setupManifold.js (ESM)
 // Universal loader that works in both Node.js and the browser (Vite)
+import {
+  MANIFOLD_RUNTIME_IS_LOCAL,
+  MANIFOLD_RUNTIME_SOURCE,
+} from "../generated/manifoldSource.js";
 
 const INLINE_WASM_BASE64 =
   typeof globalThis.__MANIFOLD_WASM_BASE64__ !== 'undefined' && globalThis.__MANIFOLD_WASM_BASE64__;
@@ -35,7 +39,9 @@ const patchFileURLToPathForDataUrl = async () => {
 
 const loadModule = async () => {
   if (isNode) await patchFileURLToPathForDataUrl();
-  const mod = await import('../../manifold-plus/dist/manifold.js');
+  const mod = MANIFOLD_RUNTIME_IS_LOCAL
+    ? await import('../../manifold-plus/dist/manifold.js')
+    : await import('manifold-3d');
   return mod?.default ?? mod;
 };
 
@@ -82,7 +88,9 @@ export const manifold = await (async () => {
   }
 
   // Browser (Vite): use ?url to get the WASM asset URL
-  const { default: wasmUrl } = await import('../../manifold-plus/dist/manifold.wasm?url');
+  const { default: wasmUrl } = MANIFOLD_RUNTIME_IS_LOCAL
+    ? await import('../../manifold-plus/dist/manifold.wasm?url')
+    : await import('manifold-3d/manifold.wasm?url');
   const wasm = await initWasm({
     locateFile: () => wasmUrl,
   });
@@ -99,4 +107,11 @@ export const manifold = await (async () => {
 export const Manifold = manifold.Manifold;
 export const CrossSection = manifold.CrossSection;
 export const ManifoldMesh = manifold.Mesh;
-export const manifoldPlusSum = (a, b) => manifold.sum(a, b);
+export const manifoldBuildSource = MANIFOLD_RUNTIME_SOURCE;
+export const manifoldHasCustomExtensions = typeof manifold.sum === 'function';
+export const manifoldPlusSum = (a, b) => {
+  if (typeof manifold.sum !== 'function') {
+    throw new Error('Custom manifold extensions are only available when using the local manifold build.');
+  }
+  return manifold.sum(a, b);
+};

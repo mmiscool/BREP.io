@@ -81,6 +81,7 @@ import {
     test_import3d_planar_extraction_merges_sliver_bridge,
 } from './test_import3dPlanarExtraction.js';
 import { test_mirror } from './test_mirror.js';
+import { test_cppSolidCore_preserves_face_ids_and_metadata } from './test_cppSolidCore.js';
 import { test_manifoldPlus_sum } from './test_manifoldPlus.js';
 import {
     afterRun_offsetFace_preserves_individual_edges,
@@ -190,6 +191,7 @@ const TEST_LOG_PATH = path.join('tests', 'test-run.log');
 
 
 export const testFunctions = [
+    { test: test_cppSolidCore_preserves_face_ids_and_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_manifoldPlus_sum, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_plane, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_primitiveCube, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },

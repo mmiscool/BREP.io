@@ -9,6 +9,7 @@ const buildDir = path.join(sourceDir, "build");
 const distDir = path.join(sourceDir, "dist");
 const emsdkDir = process.env.EMSDK || path.join(os.homedir(), "emsdk");
 const emsdkEnvScript = path.join(emsdkDir, "emsdk_env.sh");
+const emsdkVersion = "3.1.64";
 const isWindows = process.platform === "win32";
 
 const run = (command, args, options = {}) => {
@@ -18,6 +19,15 @@ const run = (command, args, options = {}) => {
     shell: false,
     ...options,
   });
+
+  if (result.error?.code === "ENOENT") {
+    if (command === "emcmake" || command === "emcc" || command === "cmake") {
+      throw new Error(
+        `Missing required command '${command}'. Install/activate Emscripten so emcmake/emcc are available, or install EMSDK at '${emsdkDir}'.`
+      );
+    }
+    throw new Error(`Missing required command '${command}'.`);
+  }
 
   if (result.status !== 0) {
     const commandText = [command, ...args].join(" ");
@@ -33,7 +43,10 @@ const runWithEmscripten = (commandText) => {
   }
 
   const quoted = commandText.replaceAll('"', '\\"');
-  run("bash", ["-lc", `source "${emsdkEnvScript}" >/dev/null && ${quoted}`]);
+  run("bash", [
+    "-lc",
+    `cd "${emsdkDir}" && ./emsdk install ${emsdkVersion} >/dev/null && ./emsdk activate ${emsdkVersion} >/dev/null && source "${emsdkEnvScript}" >/dev/null && cd "${rootDir}" && ${quoted}`,
+  ]);
 };
 
 const runEmscriptenCommand = (command, args) => {
@@ -46,6 +59,21 @@ const runEmscriptenCommand = (command, args) => {
   run(command, args);
 };
 
+const resolveBuiltArtifact = (buildDir, filename) => {
+  const candidates = [
+    path.join(buildDir, "vendor", "manifold3d", "bindings", "wasm", filename),
+    path.join(buildDir, "bindings", "wasm", filename),
+    path.join(buildDir, filename),
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+};
+
 try {
   if (!existsSync(path.join(rootDir, "vendor", "manifold3d", "CMakeLists.txt"))) {
     throw new Error(
@@ -53,7 +81,6 @@ try {
     );
   }
 
-  rmSync(buildDir, { recursive: true, force: true });
   mkdirSync(buildDir, { recursive: true });
 
   runEmscriptenCommand("emcmake", [
@@ -62,14 +89,18 @@ try {
     sourceDir,
     "-B",
     buildDir,
-    "-DCMAKE_BUILD_TYPE=Release",
+    "-DCMAKE_BUILD_TYPE=MinSizeRel",
+    "-DMANIFOLD_PAR=OFF",
+    "-DMANIFOLD_USE_BUILTIN_TBB=ON",
+    "-DMANIFOLD_DEBUG=OFF",
+    "-DMANIFOLD_ASSERT=OFF",
   ]);
 
-  runEmscriptenCommand("cmake", ["--build", buildDir, "--target", "manifoldplusjs"]);
+  runEmscriptenCommand("cmake", ["--build", buildDir, "--target", "manifoldjs"]);
 
-  const builtJsPath = path.join(buildDir, "manifold.js");
-  const builtWasmPath = path.join(buildDir, "manifold.wasm");
-  if (!existsSync(builtJsPath) || !existsSync(builtWasmPath)) {
+  const builtJsPath = resolveBuiltArtifact(buildDir, "manifold.js");
+  const builtWasmPath = resolveBuiltArtifact(buildDir, "manifold.wasm");
+  if (!builtJsPath || !builtWasmPath) {
     throw new Error("Expected manifold.js and manifold.wasm were not produced.");
   }
 

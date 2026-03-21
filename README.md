@@ -143,10 +143,13 @@ Additional implemented features in the codebase include collapse edge, edge smoo
 Prerequisites:
 - Node.js 18+
 - `pnpm`
+- `git submodule update --init --recursive`
+- Emscripten SDK (`emcmake`/`emcc` on `PATH`, or EMSDK installed at `$HOME/emsdk`)
 
 Install and run locally:
 
 ```bash
+git submodule update --init --recursive
 pnpm install
 pnpm dev
 ```
@@ -163,6 +166,9 @@ Then open the Vite URL shown in your terminal.
 | `pnpm build` | Production build of the app into `dist/` (includes kernel build step). |
 | `pnpm build:manifoldPlus` | Builds the local manifold wasm/js bundle from the `vendor/manifold3d` submodule plus local custom bindings. |
 | `pnpm build:kernel` | Builds the ESM kernel bundle into `dist-kernel/` and syncs assets. |
+| `pnpm use:manifold:npm` | Switches runtime/builds to the published `manifold-3d` npm package. |
+| `pnpm use:manifold:local` | Switches runtime/builds to the locally compiled manifold bundle. |
+| `pnpm which:manifold` | Prints the currently selected manifold source. |
 | `pnpm test` | Runs the Node test suite (`src/tests/tests.js`), writing artifacts to `tests/results/`. |
 | `pnpm liveTesting` | Watches `src/` and `tests/` and reruns tests on change. |
 | `pnpm capture` | Captures docs/dialog screenshots. |
@@ -171,6 +177,24 @@ Then open the Vite URL shown in your terminal.
 Build outputs:
 - `dist/`: static web app (ready for CDN/web hosting)
 - `dist-kernel/`: published kernel bundle artifacts
+
+## CI and Pages Deployments
+
+The kernel build compiles a custom wasm bundle from the `vendor/manifold3d` git submodule. CI environments must:
+
+- fetch submodules
+- install Emscripten/EMSDK before running `pnpm build`
+
+This repo includes GitHub Actions workflows for:
+
+- npm publishing with submodules + EMSDK
+- Cloudflare Pages deployment via Wrangler Direct Upload
+
+For Cloudflare Pages, use the GitHub Actions deploy workflow instead of relying on Cloudflare's Git build container to compile the wasm bundle. Configure these repository settings before enabling the workflow:
+
+- secret `CLOUDFLARE_ACCOUNT_ID`
+- secret `CLOUDFLARE_API_TOKEN`
+- variable `CLOUDFLARE_PAGES_PROJECT_NAME`
 
 ## Use as an NPM Package
 

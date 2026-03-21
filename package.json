@@ -6,14 +6,17 @@
     "dev": "node ./scripts/prepareFontAssets.js && pnpm prepareFonts && pnpm build:kernel && vite --host 0.0.0.0",
     "build": "pnpm prepareFonts && pnpm build:kernel && vite build",
     "build:manifoldPlus": "node ./scripts/buildManifoldPlus.js",
-    "build:kernel": "pnpm build:manifoldPlus && pnpm generateLicenses && vite build --config vite.config.kernel.js && node ./scripts/syncKernelAssets.js",
+    "build:kernel": "node ./scripts/prepareManifoldRuntime.js && pnpm generateLicenses && vite build --config vite.config.kernel.js && node ./scripts/syncKernelAssets.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "liveTesting": "nodemon --watch src --watch tests --ext js --exec \"pnpm test\"",
-    "test": "pnpm build:manifoldPlus && node ./src/tests/tests.js",
+    "test": "node ./scripts/prepareManifoldRuntime.js && node ./src/tests/tests.js",
     "generateLicenses": "node ./generateLicenses.js && node ./scripts/generateLicenseBundle.js",
     "prepareFonts": "node ./scripts/prepareFontAssets.js",
-    "capture": "node ./scripts/capture.js"
+    "capture": "node ./scripts/capture.js",
+    "use:manifold:npm": "node ./scripts/setManifoldSource.js npm",
+    "use:manifold:local": "node ./scripts/setManifoldSource.js local",
+    "which:manifold": "node ./scripts/setManifoldSource.js"
   },
   "type": "module",
   "bin": {
@@ -51,6 +54,7 @@
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.0",
     "jszip": "^3.10.1",
+    "manifold-3d": "3.3.2",
     "monaco-editor": "^0.55.1",
     "pngjs": "^7.0.0",
     "tess2": "^1.0.0",

@@ -2,6 +2,7 @@
 // Expose the core BREP kernel and part history classes
 
 export { BREP } from './BREP/BREP.js';
+export { CppSolidCore } from './BREP/CppSolidCore.js';
 
 // Part history API
 export { PartHistory, extractDefaultValues } from './PartHistory.js';
