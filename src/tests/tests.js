@@ -18,6 +18,10 @@ import {
 } from './test_boolean_overlap_conditioning.js';
 import { test_Chamfer } from './test_chamfer.js';
 import {
+    test_cppChamfer_auto_direction_uses_native_classifier,
+    test_cppChamfer_single_edge_builds_native_named_tool_and_result,
+} from './test_cppChamfer.js';
+import {
     test_edge_smooth_constraints_prevent_triangle_foldback,
     test_edge_smooth_curve_fit,
     test_edge_smooth_curve_fit_closed_loop,
@@ -40,6 +44,14 @@ import {
     afterRun_fillet_generated_history_20260321144106,
     test_fillet_generated_history_20260321144106,
 } from './test_fillet_generated_history_20260321144106.js';
+import {
+    afterRun_generated_history_20260322220620,
+    test_generated_history_20260322220620,
+} from './test_generated_history_20260322220620.js';
+import {
+    afterRun_generated_history_20260322222832,
+    test_generated_history_20260322222832,
+} from './test_generated_history_20260322222832.js';
 import {
     afterRun_fillet_preserves_original_face_names,
     test_fillet_preserves_original_face_names,
@@ -91,15 +103,25 @@ import {
     test_fillet_face_names_and_merge_metadata_survive_native_manifold_rebuild,
 } from './test_cppFaceNamingRegression.js';
 import {
+    test_cppSolidCore_boundaryQueries_match_geometric_edges_on_split_authoring_mesh,
     test_cppSolidCore_offsetFace_moves_vertices_for_face,
     test_cppSolidCore_preserves_face_ids_and_metadata,
     test_cppSolidCore_prepareManifoldMesh_repairs_orientation,
     test_cppSolidCore_pushFace_moves_vertices_for_face,
+    test_cppSolidCore_removeDisconnectedIslandsByVolume_drops_small_shells,
     test_cppSolidCore_setAuthoringState_and_bakeTransform,
+    test_cppSolidCore_topologyQueries_return_native_face_and_edge_payloads,
     test_cppSolidCore_weldVerticesByEpsilon_compacts_authoring_buffers,
 } from './test_cppSolidCore.js';
-import { test_cppSolidBakeTransform_updates_solid_authoring_state } from './test_cppSolidBakeTransform.js';
 import {
+    test_cppSolidBakeTransform_updates_solid_authoring_state,
+    test_cppSolidMirror_preserves_face_metadata,
+} from './test_cppSolidBakeTransform.js';
+import {
+    test_cppSolidNative_booleanCombinedAuthoringState_preserves_face_names_and_metadata,
+    test_cppSolidNative_buildFilletEdgeAuthoringState_returns_standard_edge_snapshots,
+    test_cppSolidNative_filletEdge_finalSnapshot_preserves_face_names_and_metadata,
+    test_cppSolidNative_classifyFilletEdgeDirection_cubeConvexEdge_isInset,
     test_cppSolidNative_invertNormals_and_manifoldize_rebuilds_coherent_mesh,
     test_cppSolidNative_offsetFace_updates_planar_face_vertices,
     test_cppSolidNative_pushFace_updates_planar_face_vertices,
@@ -220,6 +242,12 @@ import {
     afterRun_visibility_hidden_state_persistence,
     test_visibility_hidden_state_persistence,
 } from './test_visibility_hidden_state_persistence.js';
+import { test_revolve_feature_resolves_face_and_edge_string_references } from './test_revolveFeature.js';
+import { test_revolve_after_union_preserves_face_reference_resolution } from './test_revolve_after_union_face_reference.js';
+import {
+    afterRun_primitive_boolean_union_preserves_face_grouping,
+    test_primitive_boolean_union_preserves_face_grouping,
+} from './test_primitive_boolean_face_grouping.js';
 
 const IS_NODE_RUNTIME = typeof process !== 'undefined' && process.versions && process.versions.node && typeof window === 'undefined';
 const TEST_LOG_PATH = path.join('tests', 'test-run.log');
@@ -233,11 +261,21 @@ export const testFunctions = [
     { test: test_cppSolidCore_pushFace_moves_vertices_for_face, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidCore_offsetFace_moves_vertices_for_face, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidCore_prepareManifoldMesh_repairs_orientation, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidCore_topologyQueries_return_native_face_and_edge_payloads, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidCore_boundaryQueries_match_geometric_edges_on_split_authoring_mesh, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidCore_removeDisconnectedIslandsByVolume_drops_small_shells, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidBakeTransform_updates_solid_authoring_state, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidMirror_preserves_face_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_revolve_feature_resolves_face_and_edge_string_references, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_revolve_after_union_preserves_face_reference_resolution, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_setEpsilon_welds_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_pushFace_updates_planar_face_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_offsetFace_updates_planar_face_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_invertNormals_and_manifoldize_rebuilds_coherent_mesh, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidNative_classifyFilletEdgeDirection_cubeConvexEdge_isInset, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidNative_booleanCombinedAuthoringState_preserves_face_names_and_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidNative_buildFilletEdgeAuthoringState_returns_standard_edge_snapshots, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidNative_filletEdge_finalSnapshot_preserves_face_names_and_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_open_tube_preserves_expected_face_labels, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_closed_hollow_tube_preserves_expected_face_labels, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_union_preserves_distinct_face_labels_across_native_snapshots, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -272,6 +310,14 @@ export const testFunctions = [
     { test: test_port_definition_uses_transform_reference_and_direction_reference, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_boolean_subtract, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_boolean_face_metadata_preserved, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    {
+        test: test_primitive_boolean_union_preserves_face_grouping,
+        afterRun: afterRun_primitive_boolean_union_preserves_face_grouping,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
     {
         test: test_boolean_operation_target_name_preserved,
         afterRun: afterRun_boolean_operation_target_name_preserved,
@@ -418,6 +464,22 @@ export const testFunctions = [
         resetHistory: true,
     },
     {
+        test: test_generated_history_20260322220620,
+        afterRun: afterRun_generated_history_20260322220620,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_generated_history_20260322222832,
+        afterRun: afterRun_generated_history_20260322222832,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
         test: test_fillet_preserves_original_face_names,
         afterRun: afterRun_fillet_preserves_original_face_names,
         printArtifacts: false,
@@ -436,6 +498,8 @@ export const testFunctions = [
     { test: test_Fillet_NonClosed, afterRun: afterRun_Fillet_NonClosed, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_fillets_more_dificult, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_Chamfer, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_cppChamfer_single_edge_builds_native_named_tool_and_result, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppChamfer_auto_direction_uses_native_classifier, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_edge_smooth_curve_fit, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_edge_smooth_curve_fit_closed_loop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_edge_smooth_constraints_prevent_triangle_foldback, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

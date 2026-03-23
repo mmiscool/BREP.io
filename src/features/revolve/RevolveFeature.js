@@ -1,5 +1,9 @@
 import { BREP } from "../../BREP/BREP.js";
-import { selectionHasSketch } from "../selectionUtils.js";
+import {
+    normalizeSelectionName,
+    resolveSelectionObject,
+    selectionHasSketch,
+} from "../selectionUtils.js";
 
 const inputParamsSchema = {
     id: {
@@ -68,6 +72,17 @@ export class RevolveFeature {
         this.persistentData = {};
     }
 
+    _resolveReference(entry, partHistory) {
+        const resolved = resolveSelectionObject(entry, partHistory);
+        if (resolved) return resolved;
+
+        const refName = normalizeSelectionName(entry);
+        if (!refName) return null;
+        try { return partHistory?.getObjectByName?.(refName) || null; } catch { }
+        try { return partHistory?.scene?.getObjectByName?.(refName) || null; } catch { }
+        return null;
+    }
+
     uiFieldsTest(context) {
         const params = this.inputParams || context?.params || {};
         const partHistory = context?.history || null;
@@ -78,7 +93,7 @@ export class RevolveFeature {
         const { profile, axis, angle, resolution } = this.inputParams;
 
         // Resolve profile object: accept FACE or SKETCH group object
-        const obj = Array.isArray(profile) ? (profile[0] || null) : (profile || null);
+        const obj = this._resolveReference(Array.isArray(profile) ? (profile[0] || null) : (profile || null), partHistory);
         let faceObj = obj;
         if (obj && obj.type === 'SKETCH') {
             faceObj = obj.children.find(ch => ch.type === 'FACE') || obj.children.find(ch => ch.userData?.faceName);
@@ -86,7 +101,7 @@ export class RevolveFeature {
         if (!faceObj || !faceObj.geometry) return { added: [], removed: [] };
         // if the face is a child of a sketch we need to remove the sketch from the scene
 
-        const axisObj = Array.isArray(axis) ? (axis[0] || null) : (axis || null);
+        const axisObj = this._resolveReference(Array.isArray(axis) ? (axis[0] || null) : (axis || null), partHistory);
         if (!axisObj) {
             console.warn("RevolveFeature: no axis selected");
             return { added: [], removed: [] };

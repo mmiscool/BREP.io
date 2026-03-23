@@ -1,4 +1,4 @@
-import { computeFilletCenterline } from "../BREP/fillets/fillet.js";
+import { computeFilletCenterlineForEdge } from "../BREP/CppSolidCore.js";
 import { fs } from "../fs.proxy.js";
 
 const PART_PATH = "src/tests/partFiles/fillet_angle_test.BREP.json";
@@ -34,13 +34,16 @@ export async function afterRun_fillet_angle(partHistory) {
 
   const radius = Number(filletFeature.inputParams?.radius) || 2;
   const side = String(filletFeature.inputParams?.direction || "INSET").toUpperCase();
-  const res = computeFilletCenterline(edgeObj, radius, side);
+  const res = computeFilletCenterlineForEdge(edgeObj, radius, side);
 
   if (!Array.isArray(res.points) || !Array.isArray(res.edge)) {
     throw new Error("computeFilletCenterline should return point arrays.");
   }
   if (!Array.isArray(res.tangentA) || !Array.isArray(res.tangentB)) {
     throw new Error("computeFilletCenterline should return tangent arrays.");
+  }
+  if (res.nativeKernel !== true) {
+    throw new Error("Expected computeFilletCenterline to use the native fillet centerline kernel for a standard edge.");
   }
 
   console.log(

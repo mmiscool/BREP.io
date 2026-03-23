@@ -11,6 +11,8 @@ export async function test_boolean_face_metadata_preserved() {
   const tool = new BREP.Cube({ x: 6, y: 6, z: 6, name: 'TOOL' });
   base.setFaceMetadata('BASE_NX', { sourceFeatureId: 'BASE_FEATURE', marker: 'base-nx' });
   tool.setFaceMetadata('TOOL_PX', { sourceFeatureId: 'TOOL_FEATURE', marker: 'tool-px' });
+  base.addCenterline([-5, 0, 0], [5, 0, 0], 'BASE_AXIS');
+  tool.addCenterline([0, -3, 0], [0, 3, 0], 'TOOL_AXIS');
   tool.bakeTRS({
     position: [7, 2, 2],
     rotationEuler: [0, 0, 0],
@@ -41,4 +43,7 @@ export async function test_boolean_face_metadata_preserved() {
   const baseFaceMeta = result.getFaceMetadata('BASE_NX');
   assert(baseFaceMeta && baseFaceMeta.sourceFeatureId === 'BASE_FEATURE', 'Base face provenance should survive union fallback.');
   assert(baseFaceMeta && baseFaceMeta.marker === 'base-nx', 'Base face custom metadata should survive union fallback.');
+  const auxEdges = Array.isArray(result._auxEdges) ? result._auxEdges : [];
+  assert(auxEdges.some((entry) => entry?.name === 'BASE_AXIS' && entry?.centerline), 'Base centerline should survive union fallback.');
+  assert(auxEdges.some((entry) => entry?.name === 'TOOL_AXIS' && entry?.centerline), 'Tool centerline should survive union fallback.');
 }

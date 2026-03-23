@@ -1,4 +1,11 @@
 import { Manifold } from "../SolidShared.js";
+import {
+    cppSolidCoreHasAuthoringBridge,
+    cppSolidCoreHasNativeAuxEdgeMutation,
+    getSyncedCppSolidCore,
+    requireCppSolidCoreCapability,
+    syncSolidAuxEdgesFromCpp,
+} from "../CppSolidCore.js";
 
 /**
  * Solid authoring helpers: vertex/face ID management and convenience geometry.
@@ -99,16 +106,20 @@ export function addAuxEdge(name, points, options = {}) {
         const hasCenterlineOption = Object.prototype.hasOwnProperty.call(options || {}, 'centerline');
         const inferredCenterline = typeof label === 'string' && /centerline/i.test(label);
         const centerline = hasCenterlineOption ? !!options.centerline : inferredCenterline;
-        const entry = {
-            name: label,
-            points: pts,
+        requireCppSolidCoreCapability(
+            cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeAuxEdgeMutation,
+            'Solid.addAuxEdge()',
+        );
+        const core = getSyncedCppSolidCore(this);
+        core.addAuxEdge(label, pts, {
             closedLoop: !!options.closedLoop,
             polylineWorld: !!options.polylineWorld,
             materialKey: options.materialKey || 'OVERLAY',
             centerline,
-        };
-        if (!Array.isArray(this._auxEdges)) this._auxEdges = [];
-        this._auxEdges.push(entry);
+            faceA: options.faceA || '',
+            faceB: options.faceB || '',
+        });
+        syncSolidAuxEdgesFromCpp(this, core);
     } catch { /* ignore */ }
     return this;
 }

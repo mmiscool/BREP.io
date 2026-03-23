@@ -31,9 +31,9 @@ const inputParamsSchema = {
     },
     direction: {
         type: "options",
-        options: ["INSET", "OUTSET"],
-        default_value: "INSET",
-        hint: "Prefer chamfer inside (INSET) or outside (OUTSET)",
+        options: ["AUTO", "INSET", "OUTSET"],
+        default_value: "AUTO",
+        hint: "Choose chamfer side automatically (AUTO) or force INSET/OUTSET",
     },
     debug: {
         type: "boolean",
@@ -81,7 +81,7 @@ export class ChamferFeature {
             }
             return { added: [], removed: [] };
         }
-        const direction = String(this.inputParams.direction || "INSET").toUpperCase();
+        const direction = String(this.inputParams.direction || "AUTO").toUpperCase();
         const distance = Number(this.inputParams.distance);
         if (!Number.isFinite(distance) || !(distance > 0)) {
             console.warn("Invalid chamfer distance supplied; aborting.", { distance: this.inputParams.distance });

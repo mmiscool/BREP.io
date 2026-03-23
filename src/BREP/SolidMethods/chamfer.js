@@ -1,5 +1,28 @@
-// Solid.chamfer implementation: wraps ChamferSolid builder and applies booleans.
+// Solid.chamfer implementation: wraps native chamfer tool generation and applies booleans.
+import { applySolidAuthoringStateSnapshot, buildSolidAuthoringStateSnapshot } from '../CppSolidCore.js';
+import { manifold } from '../setupManifold.js';
 import { resolveEdgesFromInputs } from './edgeResolution.js';
+
+function hasNativeChamferWorkflowBuilder() {
+  return typeof manifold?.buildChamferWorkflowAuthoringState === 'function';
+}
+
+function requireNativeChamferWorkflow() {
+  if (!hasNativeChamferWorkflowBuilder()) {
+    throw new Error('Chamfer generation requires the custom local manifold build with native chamfer workflow support.');
+  }
+}
+
+function solidFromSnapshot(snapshot, name, SolidCtor) {
+  if (!snapshot) return null;
+  const solid = new SolidCtor();
+  applySolidAuthoringStateSnapshot(solid, snapshot, { remapFaceIDs: true });
+  solid._dirty = true;
+  solid._manifold = null;
+  solid._faceIndex = null;
+  try { solid.name = name; } catch { }
+  return solid;
+}
 
 /**
  * Apply chamfers to this Solid and return a new Solid with the result.
@@ -21,23 +44,24 @@ import { resolveEdgesFromInputs } from './edgeResolution.js';
  * @returns {import('../BetterSolid.js').Solid}
  */
 export async function chamfer(opts = {}) {
-  const { ChamferSolid } = await import("../chamfer.js");
+  requireNativeChamferWorkflow();
+  const { Solid } = await import("../BetterSolid.js");
   const distance = Number(opts.distance);
   if (!Number.isFinite(distance) || distance <= 0) {
     throw new Error(`Solid.chamfer: distance must be > 0, got ${opts.distance}`);
   }
-  const dir = String(opts.direction || 'INSET').toUpperCase();
+  const dirMode = String(opts.direction || 'INSET').toUpperCase();
+  const autoDirection = dirMode === 'AUTO';
+  const dir = dirMode === 'OUTSET' ? 'OUTSET' : (autoDirection ? 'AUTO' : 'INSET');
   const inflateRaw = Number.isFinite(opts.inflate) ? Number(opts.inflate) : 0.1;
-  const inflateForSolid = (dir === 'OUTSET') ? -inflateRaw : inflateRaw;
   const debug = !!opts.debug;
   const featureID = opts.featureID || 'CHAMFER';
   console.log('[Solid.chamfer] Begin', {
     featureID,
     solid: this?.name,
     distance,
-    direction: dir,
+    direction: dirMode,
     inflate: inflateRaw,
-    inflateApplied: inflateForSolid,
     debug,
     requestedEdgeNames: Array.isArray(opts.edgeNames) ? opts.edgeNames : [],
     providedEdgeCount: Array.isArray(opts.edges) ? opts.edges.length : 0,
@@ -52,56 +76,74 @@ export async function chamfer(opts = {}) {
     return c;
   }
 
-  const chamferSolids = [];
+  const baseSnapshot = buildSolidAuthoringStateSnapshot(this);
+  const edgePayload = [];
   let idx = 0;
   for (const e of unique) {
-    const name = `${featureID}_CHAMFER_${idx++}`;
-    try {
-      const chamfer = new ChamferSolid({
-        edgeToChamfer: e,
-        distance,
-        direction: dir,
-        inflate: inflateForSolid,
-        debug,
-        sampleCount: opts.sampleCount,
-        snapSeamToEdge: opts.snapSeamToEdge,
-        sideStripSubdiv: opts.sideStripSubdiv,
-        seamInsetScale: opts.seamInsetScale,
-        flipSide: opts.flipSide,
-        debugStride: opts.debugStride,
-      });
-      try { chamfer.name = name; } catch { }
-      chamferSolids.push(chamfer);
-    } catch (err) {
-      console.warn('[Solid.chamfer] Failed to build chamfer solid for edge', { edge: e?.name, error: err?.message || err });
+    const faceAName = String(e?.faces?.[0]?.name || e?.userData?.faceA || '');
+    const faceBName = String(e?.faces?.[1]?.name || e?.userData?.faceB || '');
+    const polyline = Array.isArray(e?.userData?.polylineLocal) ? e.userData.polylineLocal : [];
+    if (!faceAName || !faceBName || polyline.length < 2) {
+      console.warn('[Solid.chamfer] Skipping edge with missing faces/polyline.', { edge: e?.name });
+      continue;
     }
+    edgePayload.push({
+      name: `${featureID}_CHAMFER_${idx++}`,
+      edgeReference: String(e?.name || `EDGE_${idx}`),
+      faceAName,
+      faceBName,
+      polyline,
+      closedLoop: !!(e?.closedLoop || e?.userData?.closedLoop),
+      sampleCount: opts.sampleCount,
+      snapSeamToEdge: opts.snapSeamToEdge,
+      flipSide: opts.flipSide,
+    });
   }
 
-  if (chamferSolids.length === 0) {
-    console.error('[Solid.chamfer] All chamfer solids failed; returning clone.', { featureID, edgeCount: unique.length });
+  if (edgePayload.length === 0) {
+    console.error('[Solid.chamfer] All chamfer inputs failed; returning clone.', { featureID, edgeCount: unique.length });
     const c = this.clone();
     try { c.name = this.name; } catch { }
     return c;
   }
-  console.log('[Solid.chamfer] Built chamfer solids for edges', chamferSolids.length);
 
-  // Apply to base solid (union for OUTSET, subtract for INSET)
-  let result = this;
-  for (const chamferSolid of chamferSolids) {
-    const beforeTri = Array.isArray(result?._triVerts) ? (result._triVerts.length / 3) : 0;
-    result = (dir === 'OUTSET') ? result.union(chamferSolid) : result.subtract(chamferSolid);
-    const afterTri = Array.isArray(result?._triVerts) ? (result._triVerts.length / 3) : 0;
-    console.log('[Solid.chamfer] Applied chamfer boolean', {
+  const nativeResult = manifold.buildChamferWorkflowAuthoringState({
+    snapshot: baseSnapshot,
+    edges: edgePayload,
+    distance,
+    directionMode: dir,
+    inflate: inflateRaw,
+    featureID,
+    name: this?.name || `${featureID}_FINAL_CHAMFER`,
+    cleanupTinyFaceIslandsArea: Number.isFinite(opts.cleanupTinyFaceIslandsArea)
+      ? Number(opts.cleanupTinyFaceIslandsArea)
+      : 0.01,
+    debug,
+  });
+  if (autoDirection && nativeResult?.directionDecision) {
+    console.log('[Solid.chamfer] AUTO direction classification complete.', {
       featureID,
-      operation: (dir === 'OUTSET') ? 'union' : 'subtract',
-      beforeTriangles: beforeTri,
-      afterTriangles: afterTri,
+      insetEdges: nativeResult.directionDecision.insetEdges,
+      outsetEdges: nativeResult.directionDecision.outsetEdges,
+      fallbackEdges: nativeResult.directionDecision.fallbackEdges,
+      ambiguousEdges: nativeResult.directionDecision.ambiguousEdges,
     });
-    try { result.name = this.name; } catch { }
   }
 
-  // Expose chamfer tool solids for debug/inspection (e.g., ChamferFeature)
-  try { result.__debugChamferSolids = chamferSolids; } catch { }
+  const finalSnapshot = nativeResult?.finalSnapshot || null;
+  const result = solidFromSnapshot(finalSnapshot, this?.name || `${featureID}_FINAL_CHAMFER`, Solid);
+  if (!result) {
+    throw new Error('Native chamfer workflow returned no result snapshot.');
+  }
+
+  const debugChamferSolids = [];
+  const debugSnapshots = Array.isArray(nativeResult?.debugSnapshots) ? nativeResult.debugSnapshots : [];
+  for (const entry of debugSnapshots) {
+    const debugSolid = solidFromSnapshot(entry?.snapshot, String(entry?.name || 'CHAMFER_DEBUG'), Solid);
+    if (debugSolid) debugChamferSolids.push(debugSolid);
+  }
+  try { result.__debugChamferSolids = debugChamferSolids; } catch { }
+  try { result.__chamferDirectionDecision = nativeResult?.directionDecision || null; } catch { }
 
   const finalTriCount = Array.isArray(result?._triVerts) ? (result._triVerts.length / 3) : 0;
   const finalVertCount = Array.isArray(result?._vertProperties) ? (result._vertProperties.length / 3) : 0;

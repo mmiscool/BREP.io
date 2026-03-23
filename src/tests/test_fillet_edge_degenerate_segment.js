@@ -1,4 +1,5 @@
-import { computeFilletCenterline } from "../BREP/fillets/fillet.js";
+import { computeFilletCenterlineForEdge } from "../BREP/CppSolidCore.js";
+import { filletSolid } from "../BREP/fillets/fillet.js";
 import { fs } from "../fs.proxy.js";
 
 const PART_PATH = "src/tests/partFiles/fillet_test.BREP.json";
@@ -27,11 +28,14 @@ export async function afterRun_fillet_edge_degenerate_segment(partHistory) {
   if (!edgeObj) throw new Error(`Fillet source edge not found: ${String(rawEdge)}`);
 
   const radii = [0.5, 0.675, 1.0];
-  const results = radii.map((radius) => ({ radius, res: computeFilletCenterline(edgeObj, radius, "INSET") }));
+  const results = radii.map((radius) => ({ radius, res: computeFilletCenterlineForEdge(edgeObj, radius, "INSET") }));
 
   for (const { radius, res } of results) {
     if (!Array.isArray(res.points) || !Array.isArray(res.edge)) {
       throw new Error(`computeFilletCenterline should provide point arrays (radius=${radius}).`);
+    }
+    if (res.nativeKernel !== true) {
+      throw new Error(`Expected native fillet centerline kernel for radius=${radius}.`);
     }
     if (res.points.length < 2) {
       throw new Error(`computeFilletCenterline should produce at least 2 points (radius=${radius}).`);
@@ -58,6 +62,36 @@ export async function afterRun_fillet_edge_degenerate_segment(partHistory) {
   const allSameCount = pointCounts.every((count) => count === pointCounts[0]);
   if (!allSameCount) {
     throw new Error(`Degenerate-edge sampling changed with radius: pointCounts=${JSON.stringify(pointCounts)}`);
+  }
+
+  const faceAName = String(edgeObj?.faces?.[0]?.name || edgeObj?.userData?.faceA || "");
+  const faceBName = String(edgeObj?.faces?.[1]?.name || edgeObj?.userData?.faceB || "");
+  const polylineLocal = Array.isArray(edgeObj?.userData?.polylineLocal) ? edgeObj.userData.polylineLocal : [];
+  if (faceAName && faceBName && polylineLocal.length >= 2) {
+    const segmentCount = Math.max(1, polylineLocal.length - 1);
+    edgeObj.userData.segmentFacePairs = Array.from({ length: segmentCount }, () => [faceAName, faceBName]);
+    let segmentResult = null;
+    try {
+      const segmented = computeFilletCenterlineForEdge(edgeObj, radii[0], "INSET");
+      if (segmented.nativeKernel !== true || segmented.points.length < 2) {
+        throw new Error("Native segmented centerline path did not return a usable result.");
+      }
+
+      segmentResult = filletSolid({
+        edgeToFillet: edgeObj,
+        radius: radii[0],
+        sideMode: "INSET",
+        name: "SEGMENT_FACE_PAIR_NATIVE_TEST",
+      });
+      if (!segmentResult?.finalSolid || !Array.isArray(segmentResult.finalSolid?._triVerts) || segmentResult.finalSolid._triVerts.length < 3) {
+        throw new Error("Native segmented fillet edge build did not produce a solid.");
+      }
+    } finally {
+      try { segmentResult?.tube?.free?.(); } catch { }
+      try { segmentResult?.wedge?.free?.(); } catch { }
+      try { segmentResult?.finalSolid?.free?.(); } catch { }
+      try { delete edgeObj.userData.segmentFacePairs; } catch { }
+    }
   }
 
   console.log(

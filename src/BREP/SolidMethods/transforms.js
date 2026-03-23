@@ -3,8 +3,10 @@ import { composeTrsMatrixDeg } from "../../utils/xformMath.js";
 import {
     CppSolidCore,
     cppSolidCoreHasAuthoringBridge,
+    cppSolidCoreHasNativeMetadataTransform,
     cppSolidCoreHasNativeOffsetFace,
     cppSolidCoreHasNativePushFace,
+    getSolidAuthoringStateSnapshot,
     requireCppSolidCoreCapability,
     syncSolidAuthoringStateFromCpp,
     syncSolidAuthoringStateToCpp,
@@ -34,50 +36,6 @@ export function bakeTransform(matrix) {
             if (this._manifold && typeof this._manifold.delete === 'function') this._manifold.delete();
         } catch { /* ignore */ }
         this._manifold = null;
-        // Bake the same transform into any auxiliary edges
-        try {
-            if (Array.isArray(this._auxEdges) && this._auxEdges.length) {
-                const tmp = new THREE.Vector3();
-                for (const aux of this._auxEdges) {
-                    const pts = Array.isArray(aux?.points) ? aux.points : null;
-                    if (!pts) continue;
-                    for (let i = 0; i < pts.length; i++) {
-                        const p = pts[i];
-                        if (!Array.isArray(p) || p.length !== 3) continue;
-                        tmp.set(p[0], p[1], p[2]).applyMatrix4(m);
-                        pts[i] = [tmp.x, tmp.y, tmp.z];
-                    }
-                }
-            }
-        } catch { /* ignore aux bake errors */ }
-
-        // Bake the same transform into face metadata (center and axis vectors)
-        try {
-            if (this._faceMetadata && this._faceMetadata.size > 0) {
-                const tmp = new THREE.Vector3();
-                for (const [, metadata] of this._faceMetadata.entries()) {
-                    if (!metadata || typeof metadata !== 'object') continue;
-
-                    // Transform center point if present
-                    if (Array.isArray(metadata.center) && metadata.center.length === 3) {
-                        tmp.set(metadata.center[0], metadata.center[1], metadata.center[2]);
-                        tmp.applyMatrix4(m);
-                        metadata.center = [tmp.x, tmp.y, tmp.z];
-                    }
-
-                    // Transform axis direction if present (use transformDirection for vectors)
-                    if (Array.isArray(metadata.axis) && metadata.axis.length === 3) {
-                        tmp.set(metadata.axis[0], metadata.axis[1], metadata.axis[2]);
-                        tmp.transformDirection(m).normalize();
-                        metadata.axis = [tmp.x, tmp.y, tmp.z];
-                    }
-                }
-            }
-            if (this._edgeMetadata && this._edgeMetadata.size > 0) {
-                // Edge metadata currently only carries scalar tags; keep the map intact
-                this._edgeMetadata = new Map(this._edgeMetadata);
-            }
-        } catch { /* ignore metadata bake errors */ }
     } catch (_) { /* ignore */ }
     return this;
 }
@@ -130,6 +88,7 @@ export function mirrorAcrossPlane(point, normal) {
         ? normal.clone().normalize()
         : new THREE.Vector3(normal[0], normal[1], normal[2]).normalize();
 
+    const sourceSnapshot = getSolidAuthoringStateSnapshot(this);
     const mesh = this.getMesh();
     try {
         const vp = mesh.vertProperties; // Float32Array
@@ -157,10 +116,12 @@ export function mirrorAcrossPlane(point, normal) {
         mirrored._triVerts = Array.from(tv);
         mirrored._triIDs = faceIDs.length ? faceIDs : new Array((tv.length / 3) | 0).fill(0);
 
-        // Restore face name maps
+        // Restore face name maps and metadata from the native-backed authoring snapshot.
         try {
-            mirrored._idToFaceName = new Map(this._idToFaceName);
-            mirrored._faceNameToID = new Map(this._faceNameToID);
+            mirrored._idToFaceName = new Map(sourceSnapshot?.idToFaceName || []);
+            mirrored._faceNameToID = new Map(sourceSnapshot?.faceNameToID || []);
+            mirrored._faceMetadata = new Map(Array.from(sourceSnapshot?.faceMetadataJson || [], ([name, raw]) => [name, JSON.parse(raw || "{}")]));
+            mirrored._edgeMetadata = new Map(Array.from(sourceSnapshot?.edgeMetadataJson || [], ([name, raw]) => [name, JSON.parse(raw || "{}")]));
         } catch (_) { }
 
         // Mirror auxiliary edges (e.g., centerlines) across the same plane.
@@ -204,6 +165,29 @@ export function mirrorAcrossPlane(point, normal) {
         mirrored._dirty = true;  // manifold must rebuild on demand
         mirrored._faceIndex = null;
         mirrored._manifold = null;
+        try {
+            requireCppSolidCoreCapability(
+                cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeMetadataTransform,
+                "Solid.mirrorAcrossPlane()",
+            );
+            const nx = n.x;
+            const ny = n.y;
+            const nz = n.z;
+            const planeDot = P0.dot(n);
+            const reflection = new THREE.Matrix4().set(
+                1 - (2 * nx * nx), -2 * nx * ny, -2 * nx * nz, 2 * planeDot * nx,
+                -2 * ny * nx, 1 - (2 * ny * ny), -2 * ny * nz, 2 * planeDot * ny,
+                -2 * nz * nx, -2 * nz * ny, 1 - (2 * nz * nz), 2 * planeDot * nz,
+                0, 0, 0, 1,
+            );
+            mirrored._cppSolidCore = mirrored._cppSolidCore || new CppSolidCore();
+            syncSolidAuthoringStateToCpp(mirrored, mirrored._cppSolidCore);
+            mirrored._cppSolidCore.transformMetadata(reflection);
+            syncSolidAuthoringStateFromCpp(mirrored, mirrored._cppSolidCore);
+            mirrored._cppSolidCore.dispose();
+            mirrored._cppSolidCore = null;
+            mirrored._cppSolidCoreSyncStamp = null;
+        } catch { /* ignore metadata reflection errors */ }
         return mirrored;
     } finally { try { if (mesh && typeof mesh.delete === 'function') mesh.delete(); } catch { } }
 }

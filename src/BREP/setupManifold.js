@@ -37,8 +37,13 @@ const patchFileURLToPathForDataUrl = async () => {
 };
 
 const loadModule = async () => {
-  if (isNode) await patchFileURLToPathForDataUrl();
-  const mod = await import('../../manifold-plus/dist/manifold.js');
+  if (isNode) {
+    await patchFileURLToPathForDataUrl();
+    const mod = await import('../../manifold-plus/dist/manifold.js');
+    return mod?.default ?? mod;
+  }
+
+  const mod = await import('../../manifold-plus/dist/manifold.js?embindfix=2');
   return mod?.default ?? mod;
 };
 

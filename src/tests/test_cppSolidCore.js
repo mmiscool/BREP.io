@@ -68,7 +68,14 @@ export async function test_cppSolidCore_setAuthoringState_and_bakeTransform() {
             triIDs: [42],
             faceNameToID: [["FACE_A", 42]],
             idToFaceName: [[42, "FACE_A"]],
-            faceMetadataJson: [["FACE_A", JSON.stringify({ kind: "planar" })]],
+            faceMetadataJson: [[
+                "FACE_A",
+                JSON.stringify({
+                    kind: "planar",
+                    center: [0.25, 0.5, 0],
+                    axis: [1, 0, 0],
+                }),
+            ]],
             edgeMetadataJson: [["FACE_A|EDGE_0", JSON.stringify({ smooth: true })]],
         });
 
@@ -100,8 +107,19 @@ export async function test_cppSolidCore_setAuthoringState_and_bakeTransform() {
         if (snapshot.idToFaceName.get(42) !== "FACE_A") {
             throw new Error("Face ID to name mapping was not preserved across setAuthoringState/bakeTransform.");
         }
-        if (core.getFaceMetadata("FACE_A").kind !== "planar") {
-            throw new Error("Face metadata was not preserved across setAuthoringState/bakeTransform.");
+        const faceMetadata = core.getFaceMetadata("FACE_A");
+        if (faceMetadata.kind !== "planar") {
+            throw new Error("Face metadata kind was not preserved across setAuthoringState/bakeTransform.");
+        }
+        if (Math.abs((faceMetadata.center?.[0] ?? NaN) - 5.25) > 1e-6
+            || Math.abs((faceMetadata.center?.[1] ?? NaN) - (-1.5)) > 1e-6
+            || Math.abs((faceMetadata.center?.[2] ?? NaN) - 3) > 1e-6) {
+            throw new Error(`Face metadata center was not transformed natively: ${JSON.stringify(faceMetadata.center)}.`);
+        }
+        if (Math.abs((faceMetadata.axis?.[0] ?? NaN) - 1) > 1e-6
+            || Math.abs((faceMetadata.axis?.[1] ?? NaN) - 0) > 1e-6
+            || Math.abs((faceMetadata.axis?.[2] ?? NaN) - 0) > 1e-6) {
+            throw new Error(`Face metadata axis was not transformed natively: ${JSON.stringify(faceMetadata.axis)}.`);
         }
         if (core.getEdgeMetadata("FACE_A|EDGE_0").smooth !== true) {
             throw new Error("Edge metadata was not preserved across setAuthoringState/bakeTransform.");
@@ -290,6 +308,220 @@ export async function test_cppSolidCore_prepareManifoldMesh_repairs_orientation(
         }
         if (prepared.mergeFromVert.length !== prepared.mergeToVert.length) {
             throw new Error("Expected prepareManifoldMesh merge arrays to stay aligned.");
+        }
+    } finally {
+        core.dispose();
+    }
+}
+
+export async function test_cppSolidCore_topologyQueries_return_native_face_and_edge_payloads() {
+    if (manifoldBuildSource !== "local") {
+        return;
+    }
+
+    const core = new CppSolidCore();
+    try {
+        core.setAuthoringState({
+            numProp: 3,
+            vertProperties: [
+                0, 0, 0,
+                1, 0, 0,
+                0, 1, 0,
+                0, 0, 1,
+            ],
+            triVerts: [
+                0, 1, 2,
+                0, 3, 1,
+                1, 3, 2,
+                2, 3, 0,
+            ],
+            triIDs: [31, 32, 33, 34],
+            faceNameToID: [
+                ["F0", 31],
+                ["F1", 32],
+                ["F2", 33],
+                ["F3", 34],
+            ],
+            idToFaceName: [
+                [31, "F0"],
+                [32, "F1"],
+                [33, "F2"],
+                [34, "F3"],
+            ],
+            faceMetadataJson: [["F0", JSON.stringify({ kind: "planar" })]],
+            edgeMetadataJson: [["F0|F1[0]", JSON.stringify({ smooth: false })]],
+        });
+
+        const face = core.getFace("F0");
+        if (!Array.isArray(face) || face.length !== 1) {
+            throw new Error(`Expected native getFace("F0") to return 1 triangle, received ${face?.length}.`);
+        }
+        if (face[0]?.faceName !== "F0" || !Array.isArray(face[0]?.indices) || face[0].indices.length !== 3) {
+            throw new Error("Expected native getFace() to return triangle descriptors with faceName and indices.");
+        }
+
+        const faces = core.getFaces(true);
+        if (!Array.isArray(faces) || faces.length !== 4) {
+            throw new Error(`Expected native getFaces(true) to return 4 named faces, received ${faces?.length}.`);
+        }
+        const faceNames = faces.map((entry) => entry?.faceName).sort();
+        if (faceNames.join("|") !== "F0|F1|F2|F3") {
+            throw new Error(`Unexpected native face names: ${faceNames.join(", ")}.`);
+        }
+
+        const boundaries = core.getBoundaryEdgePolylines();
+        if (!Array.isArray(boundaries) || boundaries.length !== 6) {
+            throw new Error(`Expected tetrahedron native boundary extraction to return 6 labeled edges, received ${boundaries?.length}.`);
+        }
+        const sample = boundaries.find((edge) => edge?.name === "F0|F1[0]") || boundaries[0];
+        if (!sample || !Array.isArray(sample?.positions) || sample.positions.length < 2) {
+            throw new Error("Expected native boundary edges to expose polyline positions.");
+        }
+        if (!Array.isArray(sample?.indices) || sample.indices.length < 2) {
+            throw new Error("Expected native boundary edges to expose vertex indices.");
+        }
+    } finally {
+        core.dispose();
+    }
+}
+
+export async function test_cppSolidCore_boundaryQueries_match_geometric_edges_on_split_authoring_mesh() {
+    if (manifoldBuildSource !== "local") {
+        return;
+    }
+
+    const core = new CppSolidCore();
+    try {
+        core.setAuthoringState({
+            numProp: 3,
+            vertProperties: [
+                0, 0, 0,
+                1, 0, 0,
+                0, 1, 0,
+                1.0000002, 0, 0,
+                0.0000002, 1, 0,
+                1, 1, 0,
+            ],
+            triVerts: [
+                0, 1, 2,
+                3, 5, 4,
+            ],
+            triIDs: [101, 202],
+            faceNameToID: [
+                ["FA", 101],
+                ["FB", 202],
+            ],
+            idToFaceName: [
+                [101, "FA"],
+                [202, "FB"],
+            ],
+        });
+
+        const boundaries = core.getBoundaryEdgePolylines();
+        if (!Array.isArray(boundaries) || boundaries.length !== 1) {
+            throw new Error(`Expected one geometric shared edge between split faces, received ${boundaries?.length}.`);
+        }
+
+        const edge = boundaries[0];
+        if (edge?.name !== "FA|FB[0]") {
+            throw new Error(`Expected native split-mesh edge name FA|FB[0], received ${edge?.name}.`);
+        }
+        if (!Array.isArray(edge?.positions) || edge.positions.length !== 2) {
+            throw new Error("Expected native split-mesh boundary extraction to return a 2-point polyline.");
+        }
+        const [[x0, y0, z0], [x1, y1, z1]] = edge.positions;
+        const endpoints = [
+            `${x0.toFixed(6)},${y0.toFixed(6)},${z0.toFixed(6)}`,
+            `${x1.toFixed(6)},${y1.toFixed(6)},${z1.toFixed(6)}`,
+        ].sort();
+        if (endpoints.join("|") !== "0.000000,1.000000,0.000000|1.000000,0.000000,0.000000") {
+            throw new Error(`Unexpected geometric edge endpoints from native split-mesh query: ${endpoints.join(" | ")}.`);
+        }
+    } finally {
+        core.dispose();
+    }
+}
+
+export async function test_cppSolidCore_removeDisconnectedIslandsByVolume_drops_small_shells() {
+    if (manifoldBuildSource !== "local") {
+        return;
+    }
+
+    const core = new CppSolidCore();
+    try {
+        core.setAuthoringState({
+            numProp: 3,
+            vertProperties: [
+                0, 0, 0,
+                1, 0, 0,
+                0, 1, 0,
+                0, 0, 1,
+                5, 5, 5,
+                5.1, 5, 5,
+                5, 5.1, 5,
+                5, 5, 5.1,
+            ],
+            triVerts: [
+                0, 1, 2,
+                0, 3, 1,
+                1, 3, 2,
+                2, 3, 0,
+                4, 5, 6,
+                4, 7, 5,
+                5, 7, 6,
+                6, 7, 4,
+            ],
+            triIDs: [51, 52, 53, 54, 61, 62, 63, 64],
+            faceNameToID: [
+                ["BIG_A", 51],
+                ["BIG_B", 52],
+                ["BIG_C", 53],
+                ["BIG_D", 54],
+                ["SMALL_A", 61],
+                ["SMALL_B", 62],
+                ["SMALL_C", 63],
+                ["SMALL_D", 64],
+            ],
+            idToFaceName: [
+                [51, "BIG_A"],
+                [52, "BIG_B"],
+                [53, "BIG_C"],
+                [54, "BIG_D"],
+                [61, "SMALL_A"],
+                [62, "SMALL_B"],
+                [63, "SMALL_C"],
+                [64, "SMALL_D"],
+            ],
+            faceMetadataJson: [
+                ["BIG_A", JSON.stringify({ group: "big" })],
+                ["SMALL_A", JSON.stringify({ group: "small" })],
+            ],
+            edgeMetadataJson: [],
+        });
+
+        const removed = core.removeDisconnectedIslandsByVolume(0.01);
+        if (removed !== 4) {
+            throw new Error(`Expected 4 removed triangles from the small shell, received ${removed}.`);
+        }
+
+        const snapshot = core.getAuthoringState();
+        if (snapshot.triangleCount !== 4) {
+            throw new Error(`Expected only the main shell triangles to remain, received ${snapshot.triangleCount}.`);
+        }
+        if (snapshot.vertexCount !== 4) {
+            throw new Error(`Expected only the main shell vertices to remain, received ${snapshot.vertexCount}.`);
+        }
+
+        const faceNames = Array.from(snapshot.faceNameToID.keys()).sort();
+        if (faceNames.join("|") !== "BIG_A|BIG_B|BIG_C|BIG_D") {
+            throw new Error(`Unexpected surviving face names after native island cleanup: ${faceNames.join(", ")}.`);
+        }
+
+        if (core.getFaceMetadata("BIG_A").group !== "big") {
+            throw new Error("Expected big-shell face metadata to survive native island cleanup.");
+        }
+        if (Object.keys(core.getFaceMetadata("SMALL_A") || {}).length !== 0) {
+            throw new Error("Expected removed small-shell face metadata to be pruned.");
         }
     } finally {
         core.dispose();

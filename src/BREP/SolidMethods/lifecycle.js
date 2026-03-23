@@ -1,6 +1,11 @@
 /**
  * Solid lifecycle helpers: constructor, cloning, resource cleanup.
  */
+import {
+    applySolidAuthoringStateSnapshot,
+    getSolidAuthoringStateSnapshot,
+} from "../CppSolidCore.js";
+
 export function constructorImpl() {
     // Geometry data (MeshGL layout, but we build incrementally in JS arrays)
     this._numProp = 3;                // x,y,z
@@ -18,6 +23,8 @@ export function constructorImpl() {
     // Face and edge metadata storage
     this._faceMetadata = new Map(); // faceName -> metadata object
     this._edgeMetadata = new Map(); // edgeName -> metadata object
+    this._faceMetadataVersion = 0;
+    this._edgeMetadataVersion = 0;
 
     // Laziness & caching
     this._dirty = true;               // arrays changed and manifold needs rebuild
@@ -26,6 +33,7 @@ export function constructorImpl() {
     this._epsilon = 0;                // optional vertex weld tolerance (off by default)
     this._freeTimer = null;           // handle for scheduled wasm cleanup
     this._cppSolidCore = null;        // optional reusable native authoring bridge
+    this._cppSolidCoreSyncStamp = null;
 
     this.type = 'SOLID';
     this.renderOrder = 1;
@@ -41,41 +49,12 @@ export function constructorImpl() {
 export function clone() {
     const Solid = this.constructor;
     const s = new Solid();
-    s._numProp = this._numProp;
-    s._vertProperties = this._vertProperties.slice();
-    s._triVerts = this._triVerts.slice();
-    s._triIDs = this._triIDs.slice();
-    s._vertKeyToIndex = new Map();
-    for (let i = 0; i < s._vertProperties.length; i += 3) {
-        const x = s._vertProperties[i];
-        const y = s._vertProperties[i + 1];
-        const z = s._vertProperties[i + 2];
-        s._vertKeyToIndex.set(`${x},${y},${z}`, (i / 3) | 0);
-    }
-    // Copy face name maps
-    try {
-        s._idToFaceName = new Map(this._idToFaceName);
-        s._faceNameToID = new Map(this._faceNameToID);
-    } catch (_) { /* ignore */ }
-    try { s._faceMetadata = new Map(this._faceMetadata); } catch (_) { s._faceMetadata = new Map(); }
-    try { s._edgeMetadata = new Map(this._edgeMetadata); } catch (_) { s._edgeMetadata = new Map(); }
-    // Copy auxiliary edges (deep copy points)
-    try {
-        s._auxEdges = Array.isArray(this._auxEdges)
-            ? this._auxEdges.map(e => ({
-                name: e?.name,
-                closedLoop: !!e?.closedLoop,
-                polylineWorld: !!e?.polylineWorld,
-                materialKey: e?.materialKey,
-                centerline: !!e?.centerline,
-                points: Array.isArray(e?.points) ? e.points.map(p => Array.isArray(p) ? [p[0], p[1], p[2]] : p) : [],
-            }))
-            : [];
-    } catch { s._auxEdges = []; }
+    applySolidAuthoringStateSnapshot(s, getSolidAuthoringStateSnapshot(this));
     s._dirty = true;
     s._manifold = null;
     s._faceIndex = null;
     s._cppSolidCore = null;
+    s._cppSolidCoreSyncStamp = null;
     s.type = 'SOLID';
     s.renderOrder = this.renderOrder;
     return s;
@@ -102,6 +81,7 @@ export function free() {
             try { if (typeof this._cppSolidCore.dispose === 'function') this._cppSolidCore.dispose(); } catch (_) { }
             this._cppSolidCore = null;
         }
+        this._cppSolidCoreSyncStamp = null;
         this._dirty = true;
         this._faceIndex = null;
     } catch (_) { /* noop */ }

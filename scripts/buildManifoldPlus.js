@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, rmSync } from "fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import path from "path";
 import { spawnSync } from "child_process";
 import os from "os";
@@ -127,6 +127,16 @@ const resolveBuiltArtifact = (buildDir, filename) => {
   return null;
 };
 
+const applyBrowserEmbindDestructorGuard = (jsPath) => {
+  const source = readFileSync(jsPath, "utf8");
+  const original =
+    "runDestructors=destructors=>{while(destructors.length){var ptr=destructors.pop();var del=destructors.pop();del(ptr)}};";
+  const replacement =
+    "runDestructors=destructors=>{if(!destructors)return;while(destructors.length){var ptr=destructors.pop();var del=destructors.pop();del(ptr)}};";
+  if (!source.includes(original)) return;
+  writeFileSync(jsPath, source.replace(original, replacement));
+};
+
 try {
   if (!existsSync(path.join(rootDir, "vendor", "manifold3d", "CMakeLists.txt"))) {
     throw new Error(
@@ -160,8 +170,10 @@ try {
 
   rmSync(distDir, { recursive: true, force: true });
   mkdirSync(distDir, { recursive: true });
-  cpSync(builtJsPath, path.join(distDir, "manifold.js"), { force: true });
+  const distJsPath = path.join(distDir, "manifold.js");
+  cpSync(builtJsPath, distJsPath, { force: true });
   cpSync(builtWasmPath, path.join(distDir, "manifold.wasm"), { force: true });
+  applyBrowserEmbindDestructorGuard(distJsPath);
 
   console.log(`[build:manifoldPlus] Wrote ${path.relative(rootDir, distDir)}/manifold.js`);
   console.log(`[build:manifoldPlus] Wrote ${path.relative(rootDir, distDir)}/manifold.wasm`);

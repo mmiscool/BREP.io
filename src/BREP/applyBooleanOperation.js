@@ -4,9 +4,14 @@
 
 import * as THREE from 'three';
 import { Solid } from "./BetterSolid.js";
+import { Manifold } from "./SolidShared.js";
+import {
+  applySolidAuthoringStateSnapshot,
+  getSolidAuthoringStateSnapshot,
+} from "./CppSolidCore.js";
 import { MeshRepairer } from "./MeshRepairer.js";
-import { Manifold, ManifoldMesh } from "./SolidShared.js";
 import { computeBoundsFromVertices } from "./boundsUtils.js";
+import { manifold } from "./setupManifold.js";
 import {
   buildBooleanOverlapConditioningPlan,
   SOLID_OVERLAP_DIAGNOSTIC_DEFAULTS,
@@ -132,30 +137,164 @@ function __booleanDebugLogger(featureID, op, baseSolid, tools) {
   };
 }
 
+function __booleanIsFallbackFaceName(name) {
+  if (name == null) return true;
+  const raw = String(name).trim();
+  return !raw || raw === 'FACE' || /^FACE_\d+$/.test(raw);
+}
+
+function __booleanIsSyntheticFaceName(name) {
+  if (__booleanIsFallbackFaceName(name)) return true;
+  const raw = String(name || '').trim();
+  if (!raw) return true;
+  return /_REPAIR_\d+$/.test(raw);
+}
+
+function __booleanGetFaceTrackingStats(solid, sourceFaceNames = null) {
+  if (!solid || typeof solid !== 'object') {
+    return {
+      total: 0,
+      descriptive: 0,
+      synthetic: 0,
+      sourceMatches: 0,
+    };
+  }
+  const names = (solid._faceNameToID instanceof Map)
+    ? Array.from(solid._faceNameToID.keys())
+    : (typeof solid.getFaceNames === 'function' ? solid.getFaceNames() : []);
+  const normalizedNames = Array.isArray(names)
+    ? names.map((name) => String(name || '').trim()).filter(Boolean)
+    : [];
+  let descriptive = 0;
+  let synthetic = 0;
+  let sourceMatches = 0;
+  for (const faceName of normalizedNames) {
+    if (__booleanIsSyntheticFaceName(faceName)) synthetic += 1;
+    else descriptive += 1;
+    if (sourceFaceNames instanceof Set && sourceFaceNames.has(faceName)) {
+      sourceMatches += 1;
+    }
+  }
+  return {
+    total: normalizedNames.length,
+    descriptive,
+    synthetic,
+    sourceMatches,
+  };
+}
+
+function __booleanCollectSourceFaceNames(...sourceSolids) {
+  const names = new Set();
+  for (const solid of sourceSolids) {
+    if (!solid || typeof solid !== 'object') continue;
+    const faceNames = (solid._faceNameToID instanceof Map)
+      ? Array.from(solid._faceNameToID.keys())
+      : (typeof solid.getFaceNames === 'function' ? solid.getFaceNames() : []);
+    for (const faceName of Array.isArray(faceNames) ? faceNames : []) {
+      const normalized = String(faceName || '').trim();
+      if (!normalized || __booleanIsSyntheticFaceName(normalized)) continue;
+      names.add(normalized);
+    }
+  }
+  return names;
+}
+
+function __booleanCountFaceNameMatches(solid, faceNames) {
+  if (!(faceNames instanceof Set) || faceNames.size === 0) return 0;
+  const names = (solid?._faceNameToID instanceof Map)
+    ? Array.from(solid._faceNameToID.keys())
+    : (typeof solid?.getFaceNames === 'function' ? solid.getFaceNames() : []);
+  let matches = 0;
+  for (const faceName of Array.isArray(names) ? names : []) {
+    if (faceNames.has(String(faceName || '').trim())) matches += 1;
+  }
+  return matches;
+}
+
+function __booleanShouldPreferRestoredFaceTracking(originalSolid, restoredSolid, sourceFaceNames, preferredFaceNames = null) {
+  const originalStats = __booleanGetFaceTrackingStats(originalSolid, sourceFaceNames);
+  const restoredStats = __booleanGetFaceTrackingStats(restoredSolid, sourceFaceNames);
+  const originalPreferredMatches = __booleanCountFaceNameMatches(originalSolid, preferredFaceNames);
+  const restoredPreferredMatches = __booleanCountFaceNameMatches(restoredSolid, preferredFaceNames);
+  if (restoredPreferredMatches > originalPreferredMatches) return true;
+  if (restoredStats.sourceMatches > originalStats.sourceMatches) return true;
+  if (restoredStats.synthetic < originalStats.synthetic && restoredStats.descriptive >= originalStats.descriptive) {
+    return true;
+  }
+  if (originalStats.descriptive === 0 && restoredStats.descriptive > 0) return true;
+  return false;
+}
+
+function __booleanHasMeaningfulFaceTracking(solid) {
+  if (!solid || typeof solid !== 'object') return false;
+  const names = (solid._faceNameToID instanceof Map)
+    ? Array.from(solid._faceNameToID.keys())
+    : (typeof solid.getFaceNames === 'function' ? solid.getFaceNames() : []);
+  if (Array.isArray(names) && names.some((name) => !__booleanIsSyntheticFaceName(name))) {
+    return true;
+  }
+  return solid._faceMetadata instanceof Map && solid._faceMetadata.size > 0;
+}
+
 function __booleanCloneMetadataValue(value) {
   if (!value || typeof value !== 'object') return value ?? null;
   if (Array.isArray(value)) return value.map((entry) => __booleanCloneMetadataValue(entry));
   return { ...value };
 }
 
-function __booleanCopyFaceMetadataByName(targetSolid, ...sourceSolids) {
-  if (!targetSolid || typeof targetSolid.setFaceMetadata !== 'function') return;
+function __booleanCollectMetadataEntries(...sourceSolids) {
+  const faceMetadata = new Map();
+  const edgeMetadata = new Map();
+  const auxEdges = [];
   for (const source of sourceSolids) {
     if (!source) continue;
-    const sourceMap = source._faceMetadata instanceof Map ? source._faceMetadata : null;
-    if (!sourceMap || sourceMap.size === 0) continue;
-    for (const [faceName, metadata] of sourceMap.entries()) {
+    const snapshot = getSolidAuthoringStateSnapshot(source);
+    const faceEntries = snapshot?.faceMetadataJson instanceof Map
+      ? snapshot.faceMetadataJson.entries()
+      : Array.isArray(snapshot?.faceMetadataJson) ? snapshot.faceMetadataJson : [];
+    for (const [faceName, metadataJson] of faceEntries) {
       const normalizedName = String(faceName || '').trim();
       if (!normalizedName) continue;
-      const targetHasFace = targetSolid?._faceNameToID instanceof Map
-        ? targetSolid._faceNameToID.has(normalizedName)
-        : false;
-      if (!targetHasFace) continue;
-      try {
-        targetSolid.setFaceMetadata(normalizedName, __booleanCloneMetadataValue(metadata));
-      } catch { /* ignore metadata carry-over failures */ }
+      let normalizedJson = String(metadataJson || '').trim();
+      if (!normalizedJson) {
+        normalizedJson = JSON.stringify({});
+      } else {
+        try {
+          normalizedJson = JSON.stringify(__booleanCloneMetadataValue(JSON.parse(normalizedJson)) || {});
+        } catch {
+          normalizedJson = JSON.stringify({});
+        }
+      }
+      faceMetadata.set(normalizedName, normalizedJson);
+    }
+    const edgeEntries = snapshot?.edgeMetadataJson instanceof Map
+      ? snapshot.edgeMetadataJson.entries()
+      : Array.isArray(snapshot?.edgeMetadataJson) ? snapshot.edgeMetadataJson : [];
+    for (const [edgeName, metadataJson] of edgeEntries) {
+      const normalizedName = String(edgeName || '').trim();
+      if (!normalizedName) continue;
+      let normalizedJson = String(metadataJson || '').trim();
+      if (!normalizedJson) {
+        normalizedJson = JSON.stringify({});
+      } else {
+        try {
+          normalizedJson = JSON.stringify(__booleanCloneMetadataValue(JSON.parse(normalizedJson)) || {});
+        } catch {
+          normalizedJson = JSON.stringify({});
+        }
+      }
+      edgeMetadata.set(normalizedName, normalizedJson);
+    }
+    const aux = Array.isArray(snapshot?.auxEdges) ? snapshot.auxEdges : null;
+    if (aux && aux.length > 0) {
+      for (const entry of aux) auxEdges.push(entry);
     }
   }
+  return {
+    faceMetadataJson: Array.from(faceMetadata.entries()),
+    edgeMetadataJson: Array.from(edgeMetadata.entries()),
+    auxEdges,
+  };
 }
 
 function __booleanApproxScale(solid) {
@@ -416,7 +555,7 @@ function __booleanSolidToGeometry(solid) {
   }
 }
 
-function __booleanAssignFaceData(geometry, sourceMeta, debugLog) {
+function __booleanAssignFaceData(geometry, sourceMeta, debugLog, options = {}) {
   try {
     if (!geometry) return null;
     const indexAttr = geometry.getIndex();
@@ -433,14 +572,13 @@ function __booleanAssignFaceData(geometry, sourceMeta, debugLog) {
 
     const scale = Math.max(1, Number(sourceMeta?.scale) || 1);
     const distLimit = Math.max(1e-9, Math.pow(scale * 5e-3, 2));
-    const scoreLimit = Math.max(distLimit * 16, distLimit * 2, 1e-6);
     const fallbackPrefix = sourceMeta?.fallbackPrefix || 'REPAIRED';
 
-    const faceIDs = new Uint32Array(triCount);
-    const nameToID = new Map();
-    const idToName = new Map();
-    let nextID = 1;
-    let fallbackCount = 0;
+    const targetTriangles = Array.isArray(options?.targetTriangles) ? options.targetTriangles : null;
+    const preferTriangleNearestSourceLabel = options?.preferTriangleNearestSourceLabel === true;
+    const regionCandidates = new Map();
+    const triRegions = new Array(triCount);
+    const triAssignments = new Array(triCount);
 
     for (let t = 0; t < triCount; t++) {
       const i0 = idx[t * 3];
@@ -464,6 +602,7 @@ function __booleanAssignFaceData(geometry, sourceMeta, debugLog) {
 
       let bestName = null;
       let bestScore = Infinity;
+      let bestPriority = Infinity;
 
       for (const tri of triangles) {
         const dx = centerX - tri.center[0];
@@ -476,22 +615,127 @@ function __booleanAssignFaceData(geometry, sourceMeta, debugLog) {
         const normalPenalty = 1 - dot;
 
         const score = dist2 + normalPenalty * distLimit;
-        if (score < bestScore) {
+        const priority = Number.isFinite(tri?.sourcePriority) ? Number(tri.sourcePriority) : 0;
+        if (score < bestScore || (Math.abs(score - bestScore) <= 1e-12 && priority < bestPriority)) {
           bestScore = score;
           bestName = tri.faceName;
+          bestPriority = priority;
         }
       }
 
-      let faceName = bestName;
-      if (!faceName || !(bestScore <= scoreLimit)) {
-        fallbackCount += 1;
-        faceName = `${fallbackPrefix}_${fallbackCount}`;
+      const regionName = String(targetTriangles?.[t]?.faceName || `__tri_${t}`).trim() || `__tri_${t}`;
+      triRegions[t] = regionName;
+      const isMatched = !!bestName;
+      triAssignments[t] = {
+        bestName,
+        bestPriority,
+        bestScore,
+        matched: isMatched,
+      };
+      if (preferTriangleNearestSourceLabel) continue;
+      let region = regionCandidates.get(regionName);
+      if (!region) {
+        region = { candidates: new Map(), triangleCount: 0 };
+        regionCandidates.set(regionName, region);
       }
+      region.triangleCount += 1;
+      if (isMatched) {
+        const current = region.candidates.get(bestName) || { totalScore: 0, count: 0, bestPriority: Infinity };
+        current.totalScore += bestScore;
+        current.count += 1;
+        current.bestPriority = Math.min(current.bestPriority, bestPriority);
+        region.candidates.set(bestName, current);
+      }
+    }
 
+    const faceIDs = new Uint32Array(triCount);
+    const nameToID = new Map();
+    const idToName = new Map();
+    let fallbackCount = 0;
+    const nextFallbackName = () => `${fallbackPrefix}_${++fallbackCount}`;
+    const regionAssignments = new Map();
+    let splitRegionCount = 0;
+
+    if (preferTriangleNearestSourceLabel) {
+      for (let t = 0; t < triCount; t++) {
+        const triAssignment = triAssignments[t] || null;
+        let faceName = String(triAssignment?.bestName || '').trim();
+        if (!faceName) faceName = nextFallbackName();
+        let id = nameToID.get(faceName);
+        if (!id) {
+          id = Manifold.reserveIDs(1);
+          nameToID.set(faceName, id);
+          idToName.set(id, faceName);
+        }
+        faceIDs[t] = id;
+      }
+      return { faceIDs, idToFaceName: idToName };
+    }
+
+    for (const [regionName, region] of regionCandidates.entries()) {
+      let bestFaceName = null;
+      let bestAverageScore = Infinity;
+      let bestPriority = Infinity;
+      let matchedTriangleCount = 0;
+      let bestMatchCount = 0;
+      for (const [candidateName, candidate] of region.candidates.entries()) {
+        if (!candidate?.count) continue;
+        matchedTriangleCount += candidate.count;
+        const averageScore = candidate.totalScore / candidate.count;
+        const priority = Number.isFinite(candidate?.bestPriority) ? Number(candidate.bestPriority) : Infinity;
+        if (
+          averageScore < bestAverageScore
+          || (Math.abs(averageScore - bestAverageScore) <= 1e-12 && priority < bestPriority)
+        ) {
+          bestAverageScore = averageScore;
+          bestFaceName = candidateName;
+          bestPriority = priority;
+        }
+        if (candidate.count > bestMatchCount) bestMatchCount = candidate.count;
+      }
+      if (!bestFaceName) {
+        regionAssignments.set(regionName, {
+          mode: 'collapse',
+          faceName: nextFallbackName(),
+        });
+        continue;
+      }
+      const dominantCoverage = matchedTriangleCount > 0 ? (bestMatchCount / matchedTriangleCount) : 1;
+      const shouldSplitRegion = region.candidates.size > 1 && matchedTriangleCount > 0 && dominantCoverage < 0.85;
+      if (shouldSplitRegion) {
+        splitRegionCount += 1;
+        regionAssignments.set(regionName, {
+          mode: 'split',
+          fallbackName: nextFallbackName(),
+        });
+        continue;
+      }
+      regionAssignments.set(regionName, {
+        mode: 'collapse',
+        faceName: bestFaceName,
+      });
+    }
+    if (splitRegionCount > 0) {
+      debugLog?.('Boolean face restore split mixed result regions', {
+        splitRegionCount,
+        totalRegions: regionAssignments.size,
+      });
+    }
+
+    for (let t = 0; t < triCount; t++) {
+      const regionName = triRegions[t] || `__tri_${t}`;
+      const regionAssignment = regionAssignments.get(regionName);
+      let faceName = regionAssignment?.faceName || null;
+      if (regionAssignment?.mode === 'split') {
+        const triAssignment = triAssignments[t];
+        faceName = triAssignment?.matched && triAssignment?.bestName
+          ? triAssignment.bestName
+          : regionAssignment.fallbackName;
+      }
+      if (!faceName) faceName = nextFallbackName();
       let id = nameToID.get(faceName);
       if (!id) {
-        id = nextID;
-        nextID += 1;
+        id = Manifold.reserveIDs(1);
         nameToID.set(faceName, id);
         idToName.set(id, faceName);
       }
@@ -505,27 +749,117 @@ function __booleanAssignFaceData(geometry, sourceMeta, debugLog) {
   }
 }
 
-function __booleanMakeSolidFromGeometry(geometry, faceIDs, idToFaceName, debugLog) {
+function __booleanMakeSolidFromGeometry(geometry, faceIDs, idToFaceName, debugLog, ...sourceSolids) {
   try {
     if (!geometry || !faceIDs || !idToFaceName) return null;
+    if (typeof manifold?.buildSolidAuthoringStateFromMesh !== 'function') {
+      throw new Error('Native mesh-to-solid rebuild helper is unavailable.');
+    }
     const indexAttr = geometry.getIndex();
     const posAttr = geometry.getAttribute('position');
     if (!indexAttr || !posAttr) return null;
-    const triArray = Uint32Array.from(indexAttr.array);
-    const posArray = Float32Array.from(posAttr.array);
-    const faceIDArray = faceIDs instanceof Uint32Array ? faceIDs : Uint32Array.from(faceIDs);
-    const meshGL = new ManifoldMesh({
+    const metadataEntries = __booleanCollectMetadataEntries(...sourceSolids);
+    const faceNameToID = Array.from(idToFaceName.entries(), ([id, faceName]) => [faceName, id]);
+    const snapshot = manifold.buildSolidAuthoringStateFromMesh({
       numProp: 3,
-      vertProperties: posArray,
-      triVerts: triArray,
-      faceID: faceIDArray,
+      vertProperties: Array.from(posAttr.array || []),
+      triVerts: Array.from(indexAttr.array || []),
+      faceID: Array.from(faceIDs instanceof Uint32Array ? faceIDs : Uint32Array.from(faceIDs)),
+      faceNameToID,
+      idToFaceName: Array.from(idToFaceName.entries()),
+      faceMetadataJson: metadataEntries.faceMetadataJson,
+      edgeMetadataJson: metadataEntries.edgeMetadataJson,
+      auxEdges: metadataEntries.auxEdges,
     });
-    meshGL.merge();
-    const manifoldObj = new Manifold(meshGL);
-    return Solid._fromManifold(manifoldObj, idToFaceName);
+    const rebuilt = new Solid();
+    applySolidAuthoringStateSnapshot(rebuilt, snapshot);
+    const restoredIdToFaceName = new Map(idToFaceName);
+    if (restoredIdToFaceName.size > 0) {
+      rebuilt._idToFaceName = restoredIdToFaceName;
+      rebuilt._faceNameToID = new Map(Array.from(restoredIdToFaceName.entries(), ([id, faceName]) => [faceName, id]));
+      rebuilt._faceMetadata = new Map(
+        Array.from(metadataEntries.faceMetadataJson || [], ([faceName, raw]) => {
+          try { return [faceName, JSON.parse(raw || "{}")]; } catch { return [faceName, {}]; }
+        }).filter(([faceName]) => rebuilt._faceNameToID.has(faceName))
+      );
+      rebuilt._edgeMetadata = new Map(
+        Array.from(metadataEntries.edgeMetadataJson || [], ([edgeName, raw]) => {
+          try { return [edgeName, JSON.parse(raw || "{}")]; } catch { return [edgeName, {}]; }
+        })
+      );
+    }
+    rebuilt._dirty = true;
+    rebuilt._manifold = null;
+    rebuilt._faceIndex = null;
+    return rebuilt;
   } catch (err) {
     debugLog?.('Solid rebuild failed', { message: err?.message || err });
     return null;
+  }
+}
+
+function __booleanRestoreFaceTrackingFromSources(solid, debugLog, ...sourceSolids) {
+  try {
+    if (!solid || typeof solid !== 'object') return solid;
+    const validSources = sourceSolids.filter(Boolean);
+    if (!validSources.length) return solid;
+    const sourceFaceNames = __booleanCollectSourceFaceNames(...validSources);
+    const preferredFaceNames = __booleanCollectSourceFaceNames(validSources[0]);
+    const solidStats = __booleanGetFaceTrackingStats(solid, sourceFaceNames);
+    const shouldAttemptRestore = (
+      !__booleanHasMeaningfulFaceTracking(solid)
+      || solidStats.synthetic > 0
+      || (sourceFaceNames.size > 0 && solidStats.sourceMatches < sourceFaceNames.size)
+    );
+    if (!shouldAttemptRestore) return solid;
+
+    const targetMeta = __booleanSolidToGeometry(solid);
+    if (!targetMeta?.geometry) return solid;
+
+    const sourceGeometries = validSources.map((entry) => __booleanSolidToGeometry(entry)).filter(Boolean);
+    if (!sourceGeometries.length) {
+      try { targetMeta.geometry.dispose(); } catch { }
+      return solid;
+    }
+
+    try {
+      const faceData = __booleanAssignFaceData(targetMeta.geometry, {
+        triangles: sourceGeometries.flatMap((entry, sourceIndex) => (
+          Array.isArray(entry?.triangles)
+            ? entry.triangles.map((triangle) => ({ ...triangle, sourcePriority: sourceIndex }))
+            : []
+        )),
+        scale: Math.max(1, ...sourceGeometries.map((entry) => Number(entry?.scale) || 1)),
+        fallbackPrefix: `${solid?.name || validSources[0]?.name || 'BOOLEAN'}_REPAIR`,
+      }, debugLog, {
+        targetTriangles: targetMeta.triangles,
+        preferTriangleNearestSourceLabel: true,
+      });
+      if (!faceData) return solid;
+
+      const rebuilt = __booleanMakeSolidFromGeometry(
+        targetMeta.geometry,
+        faceData.faceIDs,
+        faceData.idToFaceName,
+        debugLog,
+        ...validSources,
+      );
+      if (!rebuilt || !__booleanHasMeaningfulFaceTracking(rebuilt)) return solid;
+      if (!__booleanShouldPreferRestoredFaceTracking(solid, rebuilt, sourceFaceNames, preferredFaceNames)) {
+        return solid;
+      }
+      try { rebuilt.name = solid.name || rebuilt.name; } catch { }
+      try { rebuilt.owningFeatureID = solid.owningFeatureID || rebuilt.owningFeatureID; } catch { }
+      return rebuilt;
+    } finally {
+      try { targetMeta.geometry.dispose(); } catch { }
+      for (const entry of sourceGeometries) {
+        try { entry?.geometry?.dispose?.(); } catch { }
+      }
+    }
+  } catch (err) {
+    debugLog?.('Face tracking restore failed', { message: err?.message || err });
+    return solid;
   }
 }
 
@@ -557,19 +891,22 @@ function __booleanAttemptRepairSolid(solid, eps, debugLog) {
         continue;
       }
 
-      const faceData = __booleanAssignFaceData(repairedGeom, source, debugLog);
+      const faceData = __booleanAssignFaceData(repairedGeom, source, debugLog, {
+        targetTriangles: source?.triangles,
+      });
       if (!faceData) {
         try { repairedGeom.dispose(); } catch { }
         continue;
       }
 
-      const rebuilt = __booleanMakeSolidFromGeometry(repairedGeom, faceData.faceIDs, faceData.idToFaceName, debugLog);
+      const rebuilt = __booleanMakeSolidFromGeometry(
+        repairedGeom, faceData.faceIDs, faceData.idToFaceName, debugLog, solid,
+      );
       try { repairedGeom.dispose(); } catch { }
       if (rebuilt) {
         try {
           rebuilt.name = solid.name || rebuilt.name;
           rebuilt.owningFeatureID = solid.owningFeatureID || rebuilt.owningFeatureID;
-          __booleanCopyFaceMetadataByName(rebuilt, solid);
         } catch { }
         return rebuilt;
       }
@@ -658,13 +995,14 @@ function __booleanMeshMergeUnion(baseSolid, toolSolid, eps, debugLog) {
       continue;
     }
 
-    const rebuilt = __booleanMakeSolidFromGeometry(repairedGeom, faceData.faceIDs, faceData.idToFaceName, debugLog);
+    const rebuilt = __booleanMakeSolidFromGeometry(
+      repairedGeom, faceData.faceIDs, faceData.idToFaceName, debugLog, baseSolid, toolSolid,
+    );
     try { repairedGeom.dispose(); } catch { }
     if (rebuilt) {
       try {
         rebuilt.name = baseSolid?.name || rebuilt.name;
         rebuilt.owningFeatureID = baseSolid?.owningFeatureID || rebuilt.owningFeatureID;
-        __booleanCopyFaceMetadataByName(rebuilt, baseSolid, toolSolid);
       } catch { }
       return rebuilt;
     }
@@ -757,7 +1095,8 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
         }
         let success = false;
         try {
-          const out = conditionedTarget.subtract(conditionedTool);
+          let out = conditionedTarget.subtract(conditionedTool);
+          out = __booleanRestoreFaceTrackingFromSources(out, debugLog, conditionedTarget, conditionedTool);
           await addResult(out, target);
           success = true;
         } catch (e1) {
@@ -776,7 +1115,8 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
           const eps = Math.max(1e-9, 1e-6 * scale);
           preCleanLocal(a, eps);
           preCleanLocal(b, eps);
-          const out = a.subtract(b);
+          let out = a.subtract(b);
+          out = __booleanRestoreFaceTrackingFromSources(out, debugLog, a, b);
           await addResult(out, target);
           success = true;
         } catch (e2) {
@@ -831,6 +1171,7 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
       try {
         // Attempt the boolean directly; repair fallback handles welding if needed.
         result = (op === 'UNION') ? workingResult.union(workingTool) : workingResult.intersect(workingTool);
+        result = __booleanRestoreFaceTrackingFromSources(result, debugLog, workingResult, workingTool);
       } catch (e1) {
         debugLog('Primary union/intersect failed; attempting welded fallback', {
           message: e1?.message || e1,
@@ -851,6 +1192,7 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
             preClean(baseOperand, eps);
             preClean(toolOperand, eps);
             result = (op === 'UNION') ? baseOperand.union(toolOperand) : baseOperand.intersect(toolOperand);
+            result = __booleanRestoreFaceTrackingFromSources(result, debugLog, baseOperand, toolOperand);
             repaired = true;
           }
         } catch (repairErr) {
@@ -864,6 +1206,7 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
           preClean(a, eps);
           preClean(b, eps);
           result = (op === 'UNION') ? a.union(b) : a.intersect(b);
+          result = __booleanRestoreFaceTrackingFromSources(result, debugLog, a, b);
         } catch (e2) {
           let meshRecovered = false;
           if (op === 'UNION') {
@@ -871,11 +1214,16 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
               const merged = __booleanMeshMergeUnion(workingResult, workingTool, eps, debugLog);
               if (merged) {
                 debugLog('Mesh-merge fallback succeeded');
-                const repairedMerged = __booleanAttemptRepairSolid(merged, eps, debugLog) || merged;
-                if (repairedMerged !== merged) {
+                const repairedMerged = __booleanAttemptRepairSolid(merged, eps, debugLog);
+                const mergedHasTracking = __booleanHasMeaningfulFaceTracking(merged);
+                const repairedMergedHasTracking = __booleanHasMeaningfulFaceTracking(repairedMerged);
+                const finalMerged = (repairedMerged && (!mergedHasTracking || repairedMergedHasTracking))
+                  ? repairedMerged
+                  : merged;
+                if (finalMerged !== merged) {
                   debugLog('Mesh-merge result repaired');
                 }
-                result = repairedMerged;
+                result = finalMerged;
                 meshRecovered = true;
               }
             } catch (meshErr) {
