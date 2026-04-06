@@ -3,8 +3,12 @@ import {
     applySolidAuthoringStateSnapshot,
     buildSolidAuthoringStateSnapshot,
     cppSolidCoreHasNativeManifoldPrep,
+    cppSolidCoreHasNativeInternalTriangleCleanup,
     cppSolidCoreHasNativeOffsetFace,
     cppSolidCoreHasNativePushFace,
+    cppSolidCoreHasNativeSmallIslandCleanup,
+    cppSolidCoreHasNativeTinyFaceIslandCleanup,
+    cppSolidCoreHasNativeTinyFaceMerge,
     cppSolidCoreHasNativeWeldVerticesByEpsilon,
 } from "../BREP/CppSolidCore.js";
 import { Cube } from "../BREP/primitives.js";
@@ -37,6 +41,148 @@ export async function test_cppSolidNative_setEpsilon_welds_vertices() {
     }
     if (solid._triVerts.length / 3 !== 4) {
         throw new Error(`Expected 4 triangles after weld, received ${solid._triVerts.length / 3}.`);
+    }
+}
+
+export async function test_cppSolidNative_cleanupTinyFaceIslands_reassigns_small_face_and_prunes_metadata() {
+    if (manifoldBuildSource !== "local" || !cppSolidCoreHasNativeTinyFaceIslandCleanup) {
+        return;
+    }
+
+    const solid = new Solid();
+    solid
+        .addTriangle("BIG", [0.4, 0, 0], [2, 0, 0], [2, 1, 0])
+        .addTriangle("BIG", [0.4, 0, 0], [2, 1, 0], [0, 1, 0])
+        .addTriangle("TINY", [0, 0, 0], [0.4, 0, 0], [0, 1, 0]);
+
+    solid._faceMetadata.set("BIG", { group: "main" });
+    solid._faceMetadata.set("TINY", { group: "tiny" });
+
+    const reassigned = solid.cleanupTinyFaceIslands(0.25);
+    if (reassigned !== 1) {
+        throw new Error(`Expected native tiny-face cleanup to reassign 1 triangle, received ${reassigned}.`);
+    }
+
+    const faceNames = Array.from(solid._faceNameToID.keys()).sort();
+    if (faceNames.join("|") !== "BIG") {
+        throw new Error(`Expected TINY face to be pruned after native cleanup, received ${faceNames.join(", ")}.`);
+    }
+
+    if (solid._triIDs.length !== 3) {
+        throw new Error(`Expected 3 authored triangles after native cleanup, received ${solid._triIDs.length}.`);
+    }
+
+    const bigId = solid._faceNameToID.get("BIG");
+    if (!Number.isFinite(bigId)) {
+        throw new Error("Expected BIG face ID to survive native cleanup.");
+    }
+    for (const triId of solid._triIDs) {
+        if (triId !== bigId) {
+            throw new Error(`Expected all triangles to be reassigned to BIG, received triangle face ID ${triId}.`);
+        }
+    }
+
+    if (solid._faceMetadata.get("BIG")?.group !== "main") {
+        throw new Error("Expected BIG face metadata to survive native tiny-face cleanup.");
+    }
+    if (solid._faceMetadata.has("TINY")) {
+        throw new Error("Expected pruned TINY face metadata to be removed after native cleanup.");
+    }
+}
+
+export async function test_cppSolidNative_removeSmallIslands_drops_external_shell_and_prunes_metadata() {
+    if (manifoldBuildSource !== "local" || !cppSolidCoreHasNativeSmallIslandCleanup) {
+        return;
+    }
+
+    const solid = new Solid();
+    solid
+        .addTriangle("BIG_A", [0, 0, 0], [1, 0, 0], [0, 1, 0])
+        .addTriangle("BIG_B", [0, 0, 0], [0, 0, 1], [1, 0, 0])
+        .addTriangle("BIG_C", [1, 0, 0], [0, 0, 1], [0, 1, 0])
+        .addTriangle("BIG_D", [0, 0, 0], [0, 1, 0], [0, 0, 1])
+        .addTriangle("SMALL_A", [5, 5, 5], [5.1, 5, 5], [5, 5.1, 5])
+        .addTriangle("SMALL_B", [5, 5, 5], [5, 5, 5.1], [5.1, 5, 5])
+        .addTriangle("SMALL_C", [5.1, 5, 5], [5, 5, 5.1], [5, 5.1, 5])
+        .addTriangle("SMALL_D", [5, 5, 5], [5, 5.1, 5], [5, 5, 5.1]);
+
+    solid._faceMetadata.set("BIG_A", { group: "big" });
+    solid._faceMetadata.set("SMALL_A", { group: "small" });
+
+    const removed = solid.removeSmallIslands({
+        maxTriangles: 4,
+        removeInternal: false,
+        removeExternal: true,
+    });
+    if (removed !== 4) {
+        throw new Error(`Expected native small-island cleanup to remove 4 triangles, received ${removed}.`);
+    }
+
+    const faceNames = Array.from(solid._faceNameToID.keys()).sort();
+    if (faceNames.join("|") !== "BIG_A|BIG_B|BIG_C|BIG_D") {
+        throw new Error(`Unexpected surviving face names after native small-island cleanup: ${faceNames.join(", ")}.`);
+    }
+    if (solid._faceMetadata.get("BIG_A")?.group !== "big") {
+        throw new Error("Expected big-shell metadata to survive native small-island cleanup.");
+    }
+    if (solid._faceMetadata.has("SMALL_A")) {
+        throw new Error("Expected removed small-shell metadata to be pruned after native small-island cleanup.");
+    }
+}
+
+export async function test_cppSolidNative_mergeTinyFaces_merges_small_adjacent_face() {
+    if (manifoldBuildSource !== "local" || !cppSolidCoreHasNativeTinyFaceMerge) {
+        return;
+    }
+
+    const solid = new Solid();
+    solid
+        .addTriangle("BIG", [0.4, 0, 0], [2, 0, 0], [2, 1, 0])
+        .addTriangle("BIG", [0.4, 0, 0], [2, 1, 0], [0, 1, 0])
+        .addTriangle("TINY", [0, 0, 0], [0.4, 0, 0], [0, 1, 0]);
+
+    solid._faceMetadata.set("BIG", { group: "main" });
+    solid._faceMetadata.set("TINY", { group: "tiny" });
+
+    const returned = solid.mergeTinyFaces(0.25);
+    if (returned !== solid) {
+        throw new Error("Expected mergeTinyFaces to remain chainable when routed through the native core.");
+    }
+
+    const faceNames = Array.from(solid._faceNameToID.keys()).sort();
+    if (faceNames.join("|") !== "BIG") {
+        throw new Error(`Expected TINY face to merge into BIG, received ${faceNames.join(", ")}.`);
+    }
+    if (solid._faceMetadata.get("BIG")?.group !== "main") {
+        throw new Error("Expected BIG face metadata to survive native tiny-face merge.");
+    }
+    if (solid._faceMetadata.has("TINY")) {
+        throw new Error("Expected merged TINY face metadata to be pruned after native mergeTinyFaces.");
+    }
+}
+
+export async function test_cppSolidNative_removeInternalTriangles_preserves_clean_manifold_shell() {
+    if (manifoldBuildSource !== "local" || !cppSolidCoreHasNativeInternalTriangleCleanup) {
+        return;
+    }
+
+    const solid = new Cube(2, 2, 2);
+    solid._faceMetadata.set("Cube_PZ", { kind: "top" });
+
+    const removed = solid.removeInternalTriangles();
+    if (removed !== 0) {
+        throw new Error(`Expected native internal-triangle cleanup to leave a clean cube untouched, received removal count ${removed}.`);
+    }
+
+    const faceNames = Array.from(solid._faceNameToID.keys()).sort();
+    if (faceNames.join("|") !== "Cube_NX|Cube_NY|Cube_NZ|Cube_PX|Cube_PY|Cube_PZ") {
+        throw new Error(`Unexpected face names after native internal-triangle cleanup on a clean cube: ${faceNames.join(", ")}.`);
+    }
+    if (solid._faceMetadata.get("Cube_PZ")?.kind !== "top") {
+        throw new Error("Expected cube face metadata to survive native internal-triangle cleanup on a clean shell.");
+    }
+    if (solid._triVerts.length / 3 !== 12) {
+        throw new Error(`Expected clean cube triangle count to remain 12, received ${solid._triVerts.length / 3}.`);
     }
 }
 

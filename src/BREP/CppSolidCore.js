@@ -228,6 +228,62 @@ export const cppSolidCoreHasNativeMetadataTransform = (() => {
     }
 })();
 
+export const cppSolidCoreHasNativeTinyFaceIslandCleanup = (() => {
+    try {
+        if (typeof manifold?.BrepSolidCore !== "function") return false;
+        const probe = new manifold.BrepSolidCore();
+        try {
+            return typeof probe.cleanupTinyFaceIslands === "function";
+        } finally {
+            if (typeof probe.delete === "function") probe.delete();
+        }
+    } catch {
+        return false;
+    }
+})();
+
+export const cppSolidCoreHasNativeSmallIslandCleanup = (() => {
+    try {
+        if (typeof manifold?.BrepSolidCore !== "function") return false;
+        const probe = new manifold.BrepSolidCore();
+        try {
+            return typeof probe.removeSmallIslands === "function";
+        } finally {
+            if (typeof probe.delete === "function") probe.delete();
+        }
+    } catch {
+        return false;
+    }
+})();
+
+export const cppSolidCoreHasNativeTinyFaceMerge = (() => {
+    try {
+        if (typeof manifold?.BrepSolidCore !== "function") return false;
+        const probe = new manifold.BrepSolidCore();
+        try {
+            return typeof probe.mergeTinyFaces === "function";
+        } finally {
+            if (typeof probe.delete === "function") probe.delete();
+        }
+    } catch {
+        return false;
+    }
+})();
+
+export const cppSolidCoreHasNativeInternalTriangleCleanup = (() => {
+    try {
+        if (typeof manifold?.BrepSolidCore !== "function") return false;
+        const probe = new manifold.BrepSolidCore();
+        try {
+            return typeof probe.removeInternalTriangles === "function";
+        } finally {
+            if (typeof probe.delete === "function") probe.delete();
+        }
+    } catch {
+        return false;
+    }
+})();
+
 export const cppSolidCoreHasNativeDisconnectedIslandCleanup = (() => {
     try {
         if (typeof manifold?.BrepSolidCore !== "function") return false;
@@ -651,6 +707,22 @@ export class CppSolidCore {
 
     cleanupTinyFaceIslands(maxArea) {
         return Number(this._native.cleanupTinyFaceIslands(maxArea));
+    }
+
+    removeSmallIslands(maxTriangles, removeInternal = true, removeExternal = true) {
+        return Number(this._native.removeSmallIslands(
+            Math.max(0, Number(maxTriangles) | 0),
+            !!removeInternal,
+            !!removeExternal,
+        ));
+    }
+
+    mergeTinyFaces(maxArea) {
+        return Number(this._native.mergeTinyFaces(maxArea));
+    }
+
+    removeInternalTriangles() {
+        return Number(this._native.removeInternalTriangles());
     }
 
     removeDisconnectedIslandsByVolume(minVolume) {

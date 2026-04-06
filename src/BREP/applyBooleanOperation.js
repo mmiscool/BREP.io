@@ -806,10 +806,22 @@ function __booleanRestoreFaceTrackingFromSources(solid, debugLog, ...sourceSolid
     const sourceFaceNames = __booleanCollectSourceFaceNames(...validSources);
     const preferredFaceNames = __booleanCollectSourceFaceNames(validSources[0]);
     const solidStats = __booleanGetFaceTrackingStats(solid, sourceFaceNames);
+    const operandTrackingLost = validSources.some((entry) => {
+      const operandFaceNames = __booleanCollectSourceFaceNames(entry);
+      if (operandFaceNames.size === 0) return false;
+      return __booleanCountFaceNameMatches(solid, operandFaceNames) === 0;
+    });
     const shouldAttemptRestore = (
       !__booleanHasMeaningfulFaceTracking(solid)
       || solidStats.synthetic > 0
-      || (sourceFaceNames.size > 0 && solidStats.sourceMatches < sourceFaceNames.size)
+      // Boolean operations legitimately consume some source faces (for example,
+      // entry/exit caps or the target face being replaced). Treating any
+      // missing source label as broken tracking forces an expensive
+      // triangle-to-triangle reassignment pass even when the native boolean
+      // already preserved descriptive labels correctly. Only rebuild when
+      // tracking is synthetic/empty or an entire operand lost all of its
+      // descriptive face names in the result.
+      || operandTrackingLost
     );
     if (!shouldAttemptRestore) return solid;
 

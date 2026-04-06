@@ -388,6 +388,25 @@ export class FilletFeature {
         added.push(...debugSolids);
         // Replace the original geometry in the scene
         removed.push(targetSolid);
+
+
+
+
+        // loop over all added objects and set the epsilon vale on the solid
+        for (const obj of added) {
+            if (obj && typeof obj === 'object' && typeof obj.setEpsilon === 'function') {
+                try {
+                    await obj.collapseTinyTriangles(0.001);
+                    obj.visualize()
+                } catch (e) {
+                    console.warn('[FilletFeature] Failed to set epsilon on fillet result solid.', { error: e });
+                }
+            }
+        }
+
+
+
+
         return { added, removed };
     }
 }

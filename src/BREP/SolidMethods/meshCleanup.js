@@ -1,3 +1,13 @@
+import {
+    cppSolidCoreHasAuthoringBridge,
+    cppSolidCoreHasNativeInternalTriangleCleanup,
+    cppSolidCoreHasNativeSmallIslandCleanup,
+    cppSolidCoreHasNativeTinyFaceIslandCleanup,
+    cppSolidCoreHasNativeTinyFaceMerge,
+    getSyncedCppSolidCore,
+    syncSolidAuthoringStateFromCpp,
+} from "../CppSolidCore.js";
+
 /**
  * Mesh cleanup and refinement utilities.
  */
@@ -9,6 +19,19 @@
  * @param {boolean} [options.removeExternal=true] drop islands outside the main shell
  */
 export function removeSmallIslands({ maxTriangles = 30, removeInternal = true, removeExternal = true } = {}) {
+    if (cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeSmallIslandCleanup) {
+        const core = getSyncedCppSolidCore(this);
+        const removed = core.removeSmallIslands(maxTriangles, removeInternal, removeExternal);
+        if (removed > 0) {
+            syncSolidAuthoringStateFromCpp(this, core);
+            this._dirty = true;
+            this._faceIndex = null;
+            try { if (this._manifold && typeof this._manifold.delete === "function") this._manifold.delete(); } catch { }
+            this._manifold = null;
+        }
+        return removed;
+    }
+
     const tv = this._triVerts;
     const vp = this._vertProperties;
     const triCount = (tv.length / 3) | 0;
@@ -1909,42 +1932,55 @@ export function removeInternalTriangles(options = {}) {
         : { fallback: options };
     const fallback = (opts.fallback || 'winding').toString().toLowerCase();
 
-    let mesh = null;
     try {
-        const manifoldObj = this._manifoldize();
-        mesh = manifoldObj.getMesh();
-        const triVerts = Array.from(mesh.triVerts || []);
-        const vertProps = Array.from(mesh.vertProperties || []);
-        const triCountAfter = (triVerts.length / 3) | 0;
-        const ids = (mesh.faceID && mesh.faceID.length === triCountAfter)
-            ? Array.from(mesh.faceID)
-            : new Array(triCountAfter).fill(0);
-
-        // Overwrite our authoring arrays with the exterior-only mesh
-        this._numProp = mesh.numProp || 3;
-        this._vertProperties = vertProps;
-        this._triVerts = triVerts;
-        this._triIDs = ids;
-
-        // Rebuild quick index map
-        this._vertKeyToIndex = new Map();
-        for (let i = 0; i < this._vertProperties.length; i += 3) {
-            const x = this._vertProperties[i], y = this._vertProperties[i + 1], z = this._vertProperties[i + 2];
-            this._vertKeyToIndex.set(`${x},${y},${z}`, (i / 3) | 0);
+        if (cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeInternalTriangleCleanup) {
+            const core = getSyncedCppSolidCore(this);
+            const removed = core.removeInternalTriangles();
+            syncSolidAuthoringStateFromCpp(this, core);
+            this._dirty = false;
+            this._faceIndex = null;
+            try { if (this._manifold && typeof this._manifold.delete === 'function') this._manifold.delete(); } catch { }
+            this._manifold = null;
+            return removed > 0 ? removed : 0;
         }
 
-        // These arrays now match the current manifold, so mark clean
-        this._dirty = false;
-        this._faceIndex = null;
+        let mesh = null;
+        try {
+            const manifoldObj = this._manifoldize();
+            mesh = manifoldObj.getMesh();
+            const triVerts = Array.from(mesh.triVerts || []);
+            const vertProps = Array.from(mesh.vertProperties || []);
+            const triCountAfter = (triVerts.length / 3) | 0;
+            const ids = (mesh.faceID && mesh.faceID.length === triCountAfter)
+                ? Array.from(mesh.faceID)
+                : new Array(triCountAfter).fill(0);
 
-        // Keep existing id/name maps; Manifold preserves triangle faceIDs.
-        const removed = triCountBefore - triCountAfter;
-        return removed > 0 ? removed : 0;
+            // Overwrite our authoring arrays with the exterior-only mesh
+            this._numProp = mesh.numProp || 3;
+            this._vertProperties = vertProps;
+            this._triVerts = triVerts;
+            this._triIDs = ids;
+
+            // Rebuild quick index map
+            this._vertKeyToIndex = new Map();
+            for (let i = 0; i < this._vertProperties.length; i += 3) {
+                const x = this._vertProperties[i], y = this._vertProperties[i + 1], z = this._vertProperties[i + 2];
+                this._vertKeyToIndex.set(`${x},${y},${z}`, (i / 3) | 0);
+            }
+
+            // These arrays now match the current manifold, so mark clean
+            this._dirty = false;
+            this._faceIndex = null;
+
+            // Keep existing id/name maps; Manifold preserves triangle faceIDs.
+            const removed = triCountBefore - triCountAfter;
+            return removed > 0 ? removed : 0;
+        } finally {
+            try { if (mesh && typeof mesh.delete === 'function') mesh.delete(); } catch { }
+        }
     } catch (err) {
         const mode = (fallback === 'ray' || fallback === 'raycast') ? 'raycast' : 'winding';
         try { console.warn(`[removeInternalTriangles] Manifold rebuild failed (${err?.message || err}); falling back to ${mode} classifier.`); } catch { }
-    } finally {
-        try { if (mesh && typeof mesh.delete === 'function') mesh.delete(); } catch { }
     }
 
     // Fallback path for non-manifold/self-intersecting meshes
@@ -2261,6 +2297,19 @@ export function cleanupTinyFaceIslands(size) {
     const maxArea = Number(size);
     if (!Number.isFinite(maxArea) || maxArea <= 0) return 0;
 
+    if (cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeTinyFaceIslandCleanup) {
+        const core = getSyncedCppSolidCore(this);
+        const reassigned = core.cleanupTinyFaceIslands(maxArea);
+        if (reassigned > 0) {
+            syncSolidAuthoringStateFromCpp(this, core);
+            this._dirty = true;
+            this._faceIndex = null;
+            try { if (this._manifold && typeof this._manifold.delete === "function") this._manifold.delete(); } catch { }
+            this._manifold = null;
+        }
+        return reassigned;
+    }
+
     const tv = this._triVerts;
     const vp = this._vertProperties;
     const ids = this._triIDs;
@@ -2493,6 +2542,26 @@ export function cleanupTinyFaceIslands(size) {
 // Merge faces whose area is below a threshold into their largest adjacent neighbor.
 export function mergeTinyFaces(maxArea = 0.001) {
     if (!Number.isFinite(maxArea) || maxArea <= 0) return this;
+
+    if (cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeTinyFaceMerge) {
+        const core = getSyncedCppSolidCore(this);
+        const merged = core.mergeTinyFaces(maxArea);
+        if (merged > 0) {
+            syncSolidAuthoringStateFromCpp(this, core);
+            this._faceIndex = null;
+            this._dirty = true;
+            try { if (this._manifold && typeof this._manifold.delete === 'function') this._manifold.delete(); } catch { }
+            this._manifold = null;
+            try {
+                if (typeof this._manifoldize === 'function') {
+                    this._manifoldize();
+                    if (typeof this._ensureFaceIndex === 'function') this._ensureFaceIndex();
+                }
+            } catch { }
+        }
+        return this;
+    }
+
     if (typeof this.getFaceNames !== 'function' || typeof this.getBoundaryEdgePolylines !== 'function') return this;
     const faceNames = this.getFaceNames() || [];
     if (!Array.isArray(faceNames) || faceNames.length === 0) return this;

@@ -27,3 +27,4 @@ manifold-plus/build/*
 manifold-plus/dist/*
 pnpm-lock.yaml
 pnpm-lock.yaml
+.pnpm-store/*

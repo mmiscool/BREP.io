@@ -35,6 +35,7 @@ This page is a quick entry point for implementation and integration docs.
 - [Embeddable CAD App](./cad-embed.md)
 - [Radius Metadata for Extruded Sketches](./extruded-sketch-radius-embedding.md)
 - [Cylindrical Face Radius Embedding](./cylindrical-face-radius-embedding.md)
+- [Topological Face Naming and Triangle Ownership](./topological-face-tracking.md)
 - [Solid Methods](./solid-methods.md)
 - [Simplified Radial Dimensions](./simplified-radial-dimensions.md)
 

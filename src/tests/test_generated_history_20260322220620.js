@@ -1,4 +1,4 @@
-import { manifoldBuildSource } from "../BREP/setupManifold.js";
+import { manifold, manifoldBuildSource } from "../BREP/setupManifold.js";
 
 const GENERATED_SKETCH = {
   points: [
@@ -59,6 +59,21 @@ function isSyntheticFaceName(name) {
 
 export async function test_generated_history_20260322220620(partHistory) {
   if (manifoldBuildSource !== "local") return;
+
+  if (typeof manifold?.buildSolidAuthoringStateFromMesh === "function") {
+    const original = manifold.buildSolidAuthoringStateFromMesh;
+    const state = {
+      original,
+      e16RestoreCalls: 0,
+    };
+    partHistory.__generatedHistory20260322220620FaceRestoreState = state;
+    manifold.buildSolidAuthoringStateFromMesh = function (...args) {
+      if (partHistory?.runningFeatureId === "E16") {
+        state.e16RestoreCalls += 1;
+      }
+      return original.apply(this, args);
+    };
+  }
 
   const feature1 = await partHistory.newFeature("P.CY");
   Object.assign(feature1.inputParams, {
@@ -163,10 +178,18 @@ export async function test_generated_history_20260322220620(partHistory) {
 
 export async function afterRun_generated_history_20260322220620(partHistory) {
   if (manifoldBuildSource !== "local") return;
+  const faceRestoreState = partHistory.__generatedHistory20260322220620FaceRestoreState || null;
+  if (faceRestoreState?.original) {
+    manifold.buildSolidAuthoringStateFromMesh = faceRestoreState.original;
+  }
   const solid = getSolidByName(partHistory, "P.CY1");
   const summary = summarizeSolid(solid);
   if (!solid || !summary) {
     throw new Error("[generated_history_20260322220620] Expected final solid P.CY1 to exist.");
+  }
+
+  if ((faceRestoreState?.e16RestoreCalls || 0) !== 0) {
+    throw new Error(`[generated_history_20260322220620] Expected E16 union to skip fallback face tracking restore, observed ${faceRestoreState.e16RestoreCalls} mesh rebuild(s).`);
   }
 
   if (summary.faces.includes("P.CY1_B")) {

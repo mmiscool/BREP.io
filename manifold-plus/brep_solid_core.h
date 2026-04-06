@@ -49,6 +49,10 @@ class BrepSolidCore {
   bool RenameFace(const std::string& old_face_name,
                   const std::string& new_face_name);
   uint32_t CleanupTinyFaceIslands(double max_area);
+  uint32_t RemoveSmallIslands(uint32_t max_triangles, bool remove_internal,
+                              bool remove_external);
+  uint32_t MergeTinyFaces(double max_area);
+  uint32_t RemoveInternalTriangles();
   uint32_t RemoveDisconnectedIslandsByVolume(double min_volume);
   void SetEdgeMetadataJson(const std::string& edge_name,
                            const std::string& metadata_json);

@@ -57,6 +57,109 @@ double TriangleAreaFromVerts(const std::vector<float>& vert_properties,
   return 0.5 * std::hypot(nx, ny, nz);
 }
 
+double SignedVolume6FromVerts(const std::vector<float>& vert_properties,
+                              uint32_t num_prop, uint32_t i0, uint32_t i1,
+                              uint32_t i2) {
+  const uint32_t a = i0 * num_prop;
+  const uint32_t b = i1 * num_prop;
+  const uint32_t c = i2 * num_prop;
+  const double x0 = vert_properties[a + 0];
+  const double y0 = vert_properties[a + 1];
+  const double z0 = vert_properties[a + 2];
+  const double x1 = vert_properties[b + 0];
+  const double y1 = vert_properties[b + 1];
+  const double z1 = vert_properties[b + 2];
+  const double x2 = vert_properties[c + 0];
+  const double y2 = vert_properties[c + 1];
+  const double z2 = vert_properties[c + 2];
+  return x0 * (y1 * z2 - z1 * y2) - y0 * (x1 * z2 - z1 * x2) +
+         z0 * (x1 * y2 - y1 * x2);
+}
+
+double RayTriangleHit(const std::array<double, 3>& origin,
+                      const std::array<double, 3>& dir,
+                      const std::array<std::array<double, 3>, 3>& tri) {
+  constexpr double kEps = 1e-12;
+  const double ax = tri[0][0], ay = tri[0][1], az = tri[0][2];
+  const double bx = tri[1][0], by = tri[1][1], bz = tri[1][2];
+  const double cx = tri[2][0], cy = tri[2][1], cz = tri[2][2];
+  const double e1x = bx - ax, e1y = by - ay, e1z = bz - az;
+  const double e2x = cx - ax, e2y = cy - ay, e2z = cz - az;
+  const double px = dir[1] * e2z - dir[2] * e2y;
+  const double py = dir[2] * e2x - dir[0] * e2z;
+  const double pz = dir[0] * e2y - dir[1] * e2x;
+  const double det = e1x * px + e1y * py + e1z * pz;
+  if (std::abs(det) < kEps) return -1.0;
+  const double inv_det = 1.0 / det;
+  const double tvecx = origin[0] - ax;
+  const double tvecy = origin[1] - ay;
+  const double tvecz = origin[2] - az;
+  const double u = (tvecx * px + tvecy * py + tvecz * pz) * inv_det;
+  if (u < 0.0 || u > 1.0) return -1.0;
+  const double qx = tvecy * e1z - tvecz * e1y;
+  const double qy = tvecz * e1x - tvecx * e1z;
+  const double qz = tvecx * e1y - tvecy * e1x;
+  const double v = (dir[0] * qx + dir[1] * qy + dir[2] * qz) * inv_det;
+  if (v < 0.0 || (u + v) > 1.0) return -1.0;
+  const double t_hit = (e2x * qx + e2y * qy + e2z * qz) * inv_det;
+  return t_hit > kEps ? t_hit : -1.0;
+}
+
+void CompactMeshByTriangleMask(uint32_t num_prop, std::vector<float>& vert_props,
+                               std::vector<uint32_t>& tri_verts,
+                               std::vector<uint32_t>& tri_ids,
+                               const std::vector<uint8_t>& keep_tri) {
+  const uint32_t tri_count =
+      std::min(static_cast<uint32_t>(tri_verts.size() / 3),
+               static_cast<uint32_t>(tri_ids.size()));
+  const uint32_t nv =
+      static_cast<uint32_t>(vert_props.size() / std::max<uint32_t>(3, num_prop));
+  if (tri_count == 0 || nv == 0) return;
+
+  std::vector<uint8_t> used_vert(nv, 0);
+  std::vector<uint32_t> new_tri_verts;
+  std::vector<uint32_t> new_tri_ids;
+  new_tri_verts.reserve(tri_verts.size());
+  new_tri_ids.reserve(tri_ids.size());
+
+  for (uint32_t t = 0; t < tri_count; ++t) {
+    if (t >= keep_tri.size() || !keep_tri[t]) continue;
+    const uint32_t base = t * 3;
+    const uint32_t a = tri_verts[base + 0];
+    const uint32_t b = tri_verts[base + 1];
+    const uint32_t c = tri_verts[base + 2];
+    if (a >= nv || b >= nv || c >= nv) continue;
+    new_tri_verts.push_back(a);
+    new_tri_verts.push_back(b);
+    new_tri_verts.push_back(c);
+    new_tri_ids.push_back(tri_ids[t]);
+    used_vert[a] = 1;
+    used_vert[b] = 1;
+    used_vert[c] = 1;
+  }
+
+  std::vector<int32_t> old_to_new(nv, -1);
+  std::vector<float> new_vert_properties;
+  new_vert_properties.reserve(vert_props.size());
+  uint32_t write = 0;
+  for (uint32_t i = 0; i < nv; ++i) {
+    if (!used_vert[i]) continue;
+    old_to_new[i] = static_cast<int32_t>(write++);
+    const uint32_t base = i * num_prop;
+    for (uint32_t prop = 0; prop < num_prop; ++prop) {
+      new_vert_properties.push_back(vert_props[base + prop]);
+    }
+  }
+
+  for (uint32_t& index : new_tri_verts) {
+    index = static_cast<uint32_t>(old_to_new[index]);
+  }
+
+  vert_props.swap(new_vert_properties);
+  tri_verts.swap(new_tri_verts);
+  tri_ids.swap(new_tri_ids);
+}
+
 std::string MakeQuantizedPointKey(double x, double y, double z,
                                   double scale = 1e6) {
   const long long qx = static_cast<long long>(std::llround(x * scale));
@@ -1881,6 +1984,262 @@ uint32_t BrepSolidCore::CleanupTinyFaceIslands(double max_area) {
     PruneUnusedFaces();
   }
   return reassigned;
+}
+
+uint32_t BrepSolidCore::RemoveSmallIslands(uint32_t max_triangles,
+                                           bool remove_internal,
+                                           bool remove_external) {
+  if (max_triangles == 0 || (!remove_internal && !remove_external)) return 0;
+
+  const uint32_t tri_count =
+      std::min(static_cast<uint32_t>(tri_verts_.size() / 3),
+               static_cast<uint32_t>(tri_ids_.size()));
+  const uint32_t nv = VertexCount();
+  if (tri_count == 0 || nv == 0 || vert_properties_.size() < 9) return 0;
+
+  std::unordered_map<std::string, std::vector<uint32_t>> edge_to_tris;
+  edge_to_tris.reserve(tri_count * 3);
+  for (uint32_t t = 0; t < tri_count; ++t) {
+    const uint32_t base = t * 3;
+    const uint32_t i0 = tri_verts_[base + 0];
+    const uint32_t i1 = tri_verts_[base + 1];
+    const uint32_t i2 = tri_verts_[base + 2];
+    edge_to_tris[MakeUndirectedEdgeKey(i0, i1)].push_back(t);
+    edge_to_tris[MakeUndirectedEdgeKey(i1, i2)].push_back(t);
+    edge_to_tris[MakeUndirectedEdgeKey(i2, i0)].push_back(t);
+  }
+
+  std::vector<std::vector<uint32_t>> tri_adj(tri_count);
+  for (const auto& entry : edge_to_tris) {
+    const auto& tris = entry.second;
+    if (tris.size() != 2) continue;
+    tri_adj[tris[0]].push_back(tris[1]);
+    tri_adj[tris[1]].push_back(tris[0]);
+  }
+
+  std::vector<int32_t> comp_id(tri_count, -1);
+  std::vector<std::vector<uint32_t>> comps;
+  std::vector<uint32_t> stack;
+  stack.reserve(tri_count);
+  int32_t comp_count = 0;
+  for (uint32_t seed = 0; seed < tri_count; ++seed) {
+    if (comp_id[seed] != -1) continue;
+    comp_id[seed] = comp_count;
+    stack.clear();
+    stack.push_back(seed);
+    comps.push_back({});
+    while (!stack.empty()) {
+      const uint32_t t = stack.back();
+      stack.pop_back();
+      comps.back().push_back(t);
+      for (const uint32_t nbr : tri_adj[t]) {
+        if (nbr >= tri_count || comp_id[nbr] != -1) continue;
+        comp_id[nbr] = comp_count;
+        stack.push_back(nbr);
+      }
+    }
+    comp_count++;
+  }
+
+  if (comps.size() <= 1) return 0;
+
+  size_t main_idx = 0;
+  for (size_t i = 1; i < comps.size(); ++i) {
+    if (comps[i].size() > comps[main_idx].size()) main_idx = i;
+  }
+
+  std::vector<std::array<std::array<double, 3>, 3>> main_faces;
+  main_faces.reserve(comps[main_idx].size());
+  for (const uint32_t t : comps[main_idx]) {
+    const uint32_t base = t * 3;
+    const uint32_t i0 = tri_verts_[base + 0];
+    const uint32_t i1 = tri_verts_[base + 1];
+    const uint32_t i2 = tri_verts_[base + 2];
+    if (i0 >= nv || i1 >= nv || i2 >= nv) continue;
+    const uint32_t a = i0 * num_prop_;
+    const uint32_t b = i1 * num_prop_;
+    const uint32_t c = i2 * num_prop_;
+    main_faces.push_back({{{vert_properties_[a + 0], vert_properties_[a + 1],
+                            vert_properties_[a + 2]},
+                           {vert_properties_[b + 0], vert_properties_[b + 1],
+                            vert_properties_[b + 2]},
+                           {vert_properties_[c + 0], vert_properties_[c + 1],
+                            vert_properties_[c + 2]}}});
+  }
+
+  const std::array<double, 3> ray_dir{1.0, 0.0, 0.0};
+  auto point_inside_main = [&](const std::array<double, 3>& point) {
+    uint32_t hits = 0;
+    for (const auto& tri : main_faces) {
+      if (RayTriangleHit(point, ray_dir, tri) >= 0.0) hits++;
+    }
+    return (hits % 2u) == 1u;
+  };
+
+  auto tri_centroid = [&](uint32_t t) {
+    const uint32_t base = t * 3;
+    const uint32_t i0 = tri_verts_[base + 0];
+    const uint32_t i1 = tri_verts_[base + 1];
+    const uint32_t i2 = tri_verts_[base + 2];
+    const uint32_t a = i0 * num_prop_;
+    const uint32_t b = i1 * num_prop_;
+    const uint32_t c = i2 * num_prop_;
+    return std::array<double, 3>{
+        (vert_properties_[a + 0] + vert_properties_[b + 0] +
+         vert_properties_[c + 0]) /
+            3.0 +
+            1e-8,
+        (vert_properties_[a + 1] + vert_properties_[b + 1] +
+         vert_properties_[c + 1]) /
+            3.0 +
+            1e-8,
+        (vert_properties_[a + 2] + vert_properties_[b + 2] +
+         vert_properties_[c + 2]) /
+            3.0 +
+            1e-8};
+  };
+
+  std::vector<uint8_t> remove_comp(comps.size(), 0);
+  for (size_t i = 0; i < comps.size(); ++i) {
+    if (i == main_idx) continue;
+    const auto& tris = comps[i];
+    if (tris.empty() || tris.size() > max_triangles) continue;
+    const bool inside = point_inside_main(tri_centroid(tris[0]));
+    if ((inside && remove_internal) || (!inside && remove_external)) {
+      remove_comp[i] = 1;
+    }
+  }
+
+  uint32_t removed = 0;
+  std::vector<uint8_t> keep_tri(tri_count, 1);
+  for (uint32_t t = 0; t < tri_count; ++t) {
+    if (!remove_comp[comp_id[t]]) continue;
+    keep_tri[t] = 0;
+    removed++;
+  }
+  if (removed == 0) return 0;
+
+  CompactMeshByTriangleMask(num_prop_, vert_properties_, tri_verts_, tri_ids_,
+                            keep_tri);
+  RebuildVertexKeyIndex();
+  PruneUnusedFaces();
+  return removed;
+}
+
+uint32_t BrepSolidCore::MergeTinyFaces(double max_area) {
+  if (!std::isfinite(max_area) || max_area <= 0.0) return 0;
+
+  auto merge_from_mesh = [&](const manifold::MeshGL& mesh) {
+    const uint32_t tri_count = static_cast<uint32_t>(mesh.NumTri());
+    if (tri_count == 0 || mesh.faceID.size() < tri_count ||
+        mesh.vertProperties.size() < 9) {
+      return uint32_t{0};
+    }
+
+    std::unordered_map<uint32_t, double> face_area;
+    face_area.reserve(face_name_to_id_.size());
+    for (uint32_t t = 0; t < tri_count; ++t) {
+      const uint32_t base = t * 3;
+      const uint32_t i0 = mesh.triVerts[base + 0];
+      const uint32_t i1 = mesh.triVerts[base + 1];
+      const uint32_t i2 = mesh.triVerts[base + 2];
+      face_area[mesh.faceID[t]] += TriangleAreaFromVerts(
+          mesh.vertProperties, mesh.numProp, i0, i1, i2);
+    }
+
+    std::unordered_map<std::string, std::vector<uint32_t>> edge_to_tris;
+    edge_to_tris.reserve(tri_count * 3);
+    for (uint32_t t = 0; t < tri_count; ++t) {
+      const uint32_t base = t * 3;
+      const uint32_t i0 = mesh.triVerts[base + 0];
+      const uint32_t i1 = mesh.triVerts[base + 1];
+      const uint32_t i2 = mesh.triVerts[base + 2];
+      edge_to_tris[MakeUndirectedEdgeKey(i0, i1)].push_back(t);
+      edge_to_tris[MakeUndirectedEdgeKey(i1, i2)].push_back(t);
+      edge_to_tris[MakeUndirectedEdgeKey(i2, i0)].push_back(t);
+    }
+
+    std::unordered_map<uint32_t, std::unordered_set<uint32_t>> neighbors;
+    for (const auto& entry : edge_to_tris) {
+      const auto& tris = entry.second;
+      if (tris.size() != 2) continue;
+      const uint32_t face_a = mesh.faceID[tris[0]];
+      const uint32_t face_b = mesh.faceID[tris[1]];
+      if (face_a == face_b) continue;
+      neighbors[face_a].insert(face_b);
+      neighbors[face_b].insert(face_a);
+    }
+    if (neighbors.empty()) return uint32_t{0};
+
+    std::vector<std::string> face_names;
+    face_names.reserve(face_name_to_id_.size());
+    for (const auto& entry : face_name_to_id_) {
+      face_names.push_back(entry.first);
+    }
+
+    uint32_t merged = 0;
+    for (const std::string& face_name : face_names) {
+      const auto found = face_name_to_id_.find(face_name);
+      if (found == face_name_to_id_.end()) continue;
+      const uint32_t face_id = found->second;
+      const double area = face_area.count(face_id) ? face_area[face_id] : 0.0;
+      if (!(area < max_area)) continue;
+      const auto nbr_found = neighbors.find(face_id);
+      if (nbr_found == neighbors.end() || nbr_found->second.empty()) continue;
+
+      uint32_t best_id = 0;
+      double best_neighbor_area = -1.0;
+      for (const uint32_t neighbor_id : nbr_found->second) {
+        const double neighbor_area =
+            face_area.count(neighbor_id) ? face_area[neighbor_id] : 0.0;
+        if (neighbor_area > best_neighbor_area) {
+          best_neighbor_area = neighbor_area;
+          best_id = neighbor_id;
+        }
+      }
+      if (best_neighbor_area < 0.0) continue;
+      const std::string best_name = ResolveFaceName(best_id);
+      if (best_name.empty() || best_name == face_name) continue;
+      if (RenameFace(face_name, best_name)) merged++;
+    }
+
+    return merged;
+  };
+
+  try {
+    const uint32_t merged = merge_from_mesh(BuildRuntimeMeshGL());
+    if (merged > 0) return merged;
+  } catch (...) {
+  }
+
+  return merge_from_mesh(BuildAuthoringMeshGL());
+}
+
+uint32_t BrepSolidCore::RemoveInternalTriangles() {
+  const uint32_t tri_count_before =
+      static_cast<uint32_t>(tri_verts_.size() / 3);
+  if (tri_count_before == 0) return 0;
+
+  const manifold::MeshGL mesh = BuildRuntimeMeshGL();
+  const uint32_t tri_count_after = static_cast<uint32_t>(mesh.NumTri());
+  if (tri_count_after == 0 && tri_count_before > 0) {
+    throw std::runtime_error(
+        "native manifold rebuild produced an empty mesh");
+  }
+
+  num_prop_ = std::max<uint32_t>(3, mesh.numProp);
+  vert_properties_ = mesh.vertProperties;
+  tri_verts_ = mesh.triVerts;
+  if (mesh.faceID.size() == tri_count_after) {
+    tri_ids_ = mesh.faceID;
+  } else {
+    tri_ids_.assign(tri_count_after, 0);
+  }
+  RebuildVertexKeyIndex();
+  PruneUnusedFaces();
+
+  return tri_count_before > tri_count_after ? (tri_count_before - tri_count_after)
+                                            : 0;
 }
 
 uint32_t BrepSolidCore::RemoveDisconnectedIslandsByVolume(double min_volume) {

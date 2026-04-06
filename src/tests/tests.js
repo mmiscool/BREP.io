@@ -120,11 +120,15 @@ import {
 import {
     test_cppSolidNative_booleanCombinedAuthoringState_preserves_face_names_and_metadata,
     test_cppSolidNative_buildFilletEdgeAuthoringState_returns_standard_edge_snapshots,
+    test_cppSolidNative_cleanupTinyFaceIslands_reassigns_small_face_and_prunes_metadata,
     test_cppSolidNative_filletEdge_finalSnapshot_preserves_face_names_and_metadata,
     test_cppSolidNative_classifyFilletEdgeDirection_cubeConvexEdge_isInset,
     test_cppSolidNative_invertNormals_and_manifoldize_rebuilds_coherent_mesh,
+    test_cppSolidNative_mergeTinyFaces_merges_small_adjacent_face,
     test_cppSolidNative_offsetFace_updates_planar_face_vertices,
     test_cppSolidNative_pushFace_updates_planar_face_vertices,
+    test_cppSolidNative_removeInternalTriangles_preserves_clean_manifold_shell,
+    test_cppSolidNative_removeSmallIslands_drops_external_shell_and_prunes_metadata,
     test_cppSolidNative_setEpsilon_welds_vertices,
 } from './test_cppSolidNativeOps.js';
 import {
@@ -269,6 +273,10 @@ export const testFunctions = [
     { test: test_revolve_feature_resolves_face_and_edge_string_references, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_revolve_after_union_preserves_face_reference_resolution, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_setEpsilon_welds_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidNative_cleanupTinyFaceIslands_reassigns_small_face_and_prunes_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidNative_removeSmallIslands_drops_external_shell_and_prunes_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidNative_mergeTinyFaces_merges_small_adjacent_face, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidNative_removeInternalTriangles_preserves_clean_manifold_shell, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_pushFace_updates_planar_face_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_offsetFace_updates_planar_face_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_invertNormals_and_manifoldize_rebuilds_coherent_mesh, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

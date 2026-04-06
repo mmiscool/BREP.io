@@ -34,6 +34,11 @@ EMSCRIPTEN_BINDINGS(manifold_plus_solid_bindings) {
       .function("renameFace", &manifoldplus::BrepSolidCore::RenameFace)
       .function("cleanupTinyFaceIslands",
                 &manifoldplus::BrepSolidCore::CleanupTinyFaceIslands)
+      .function("removeSmallIslands",
+                &manifoldplus::BrepSolidCore::RemoveSmallIslands)
+      .function("mergeTinyFaces", &manifoldplus::BrepSolidCore::MergeTinyFaces)
+      .function("removeInternalTriangles",
+                &manifoldplus::BrepSolidCore::RemoveInternalTriangles)
       .function("removeDisconnectedIslandsByVolume",
                 &manifoldplus::BrepSolidCore::RemoveDisconnectedIslandsByVolume)
       .function("setEdgeMetadataJson",
