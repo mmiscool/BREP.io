@@ -16,6 +16,7 @@ import { PartHistory } from '../PartHistory.js';
 import { loadSavedPlugins } from '../plugins/pluginManager.js';
 import { createAxisHelperGroup, DEFAULT_AXIS_HELPER_PX } from '../utils/axisHelpers.js';
 import { readBrowserStorageValue, writeBrowserStorageValue } from '../utils/browserStorage.js';
+import { setSketchFeatureSceneVisibility } from '../utils/sketchFeatureVisibility.js';
 import { AccordionWidget } from './AccordionWidget.js';
 import { AssemblyConstraintsWidget } from './assembly/AssemblyConstraintsWidget.js';
 import { CADmaterials, CADmaterialWidget } from './CADmaterials.js';
@@ -2392,13 +2393,7 @@ export class Viewer {
     startSketchMode(featureID) {
         if (this._viewerOnlyMode) return;
         // Hide the sketch in the scene if it exists
-        try {
-            const ph = this.partHistory.getObjectByName(featureID);
-            if (ph) ph.visible = false;
-        } catch (e) {
-            debugLog(e);
-            debugLog(this.viewer);
-        }
+        setSketchFeatureSceneVisibility(this.partHistory, featureID, false);
 
         debugLog('Starting Sketch Mode for featureID:', featureID);
         debugLog(this.partHistory.scene);
@@ -2454,8 +2449,10 @@ export class Viewer {
     }
 
     endSketchMode() {
+        const activeSketchFeatureID = this._sketchMode?.featureID || null;
         try { if (this._sketchMode) this._sketchMode.close(); } catch { }
         this._sketchMode = null;
+        setSketchFeatureSceneVisibility(this.partHistory, activeSketchFeatureID, true);
         // Ensure core UI is visible and controls enabled
         const prevSidebar = this._sketchSidebarPrev;
         this._sketchSidebarPrev = null;
