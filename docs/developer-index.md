@@ -14,6 +14,7 @@ This page is a quick entry point for implementation and integration docs.
 - [BREP API (BREP.js exports)](./brep-api.md)
 - [BREP Kernel (core classes & helpers)](./brep-kernel.md)
 - [BREP Model and Classes](./brep-model.md)
+- [Expressions and Configurator](./expressions.md)
 - [PartHistory Reference](./part-history.md)
 - [How It Works](./how-it-works.md)
 - [What's New](./whats-new.md)
@@ -41,6 +42,7 @@ This page is a quick entry point for implementation and integration docs.
 
 ## Application and UI Architecture
 - [History Systems](./history-systems.md)
+- [Expressions and Configurator](./expressions.md)
 - [Feature Dimension Gizmos (Developer)](./feature-dimension-gizmos.md)
 - [Input Params Schema](./input-params-schema.md)
 - [UI Overview (Browser)](./ui-overview.md)

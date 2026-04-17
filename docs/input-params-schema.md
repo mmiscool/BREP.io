@@ -27,6 +27,31 @@ const inputParamsSchema = {
 
 `SchemaForm` clones `default_value` when seeding `params`; when a default is omitted it falls back to `false` for booleans, `''` for most text/select fields, `null` for single reference selections, `{ position:[0,0,0], rotationEuler:[0,0,0], scale:[1,1,1] }` for transforms, and `[0,0,0]` for vec3. Keys `id` and `featureID` are reserved and not rendered. You can override rendering with `renderWidget` or `widgetRenderer` (a function that receives `{ ui, key, def, id, controlWrap, row }`). PMI annotations also honor `defaultResolver({ pmimode, handler })` for dynamic defaults.
 
+## Expressions in dialogs
+
+For the dedicated user-facing Expressions panel guide, see [Expressions and Configurator](./expressions.md).
+
+`SchemaForm` evaluates expression-capable fields against `partHistory.getExpressionsSource()`. That source includes:
+
+- the default prelude (`resolution = 32;`)
+- the current configurator values object (`configurator`)
+- the user script from the Expressions panel
+
+In practice, dialog fields can reference:
+
+```js
+width * 2
+configurator.panelWidth
+configurator.materialName
+```
+
+Expression UI behavior:
+
+- `number` fields always accept expressions.
+- `string` fields can opt in with `allowExpression: true`.
+- The form stores raw expression text in `params.__expr` and keeps the evaluated display value in the main field.
+- When expressions or configurator values change, open dialogs refresh so displayed values stay in sync.
+
 ## Selection filters for references
 
 `reference_selection` widgets call `SelectionFilter.SetSelectionTypes(def.selectionFilter)`. Valid tokens come from `SelectionFilter.TYPES`: `SOLID`, `COMPONENT`, `FACE`, `PLANE`, `SKETCH`, `EDGE`, `LOOP`, `VERTEX`, or `ALL` (to allow any scene pick).
@@ -35,8 +60,9 @@ const inputParamsSchema = {
 
 ### string
 - Required: `type: 'string'`, `label`
-- Optional: `default_value`, `hint`
+- Optional: `default_value`, `hint`, `allowExpression`
 - Behavior: single-line text box.
+- When `allowExpression: true`, the field can evaluate expression text and stores the raw expression in `params.__expr[key]`.
 - Example:
 ```js
 title: {
@@ -44,6 +70,15 @@ title: {
   label: 'Title',
   default_value: 'My feature', // Optional
   hint: 'Shown in the tree', // Optional
+}
+```
+
+```js
+text: {
+  type: 'string',
+  label: 'Text',
+  allowExpression: true,
+  default_value: 'configurator.label'
 }
 ```
 
@@ -65,6 +100,7 @@ note: {
 - Required: `type: 'number'`, `label`
 - Optional: `default_value`, `hint`, `step`, `min`, `max`
 - Behavior: numeric input that flips to text when the value looks like an expression.
+- Number fields can reference variables from the Expressions panel and configurator values through `configurator.fieldName`.
 - Example:
 ```js
 distance: {
@@ -74,6 +110,16 @@ distance: {
   step: 0.01, // Optional
   min: 0, // Optional
   max: 100, // Optional
+}
+```
+
+```js
+width: {
+  type: 'number',
+  label: 'Width',
+  default_value: 'configurator.panelWidth',
+  min: 0,
+  step: 0.1
 }
 ```
 

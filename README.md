@@ -46,6 +46,7 @@ Core APIs:
 - [BREP API Export Map](docs/brep-api.md)
 - [BREP Kernel Reference](docs/brep-kernel.md)
 - [Solid Methods](docs/solid-methods.md)
+- [Expressions and Configurator](docs/expressions.md)
 - [Part History](docs/part-history.md)
 - [2D Sketch Solver](docs/sketch-solver-2d.md)
 - [Embeddable CAD (`CadEmbed`)](docs/cad-embed.md)

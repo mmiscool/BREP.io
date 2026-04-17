@@ -1,6 +1,6 @@
 # PartHistory Reference
 
-`PartHistory` lives in `src/PartHistory.js` and is the core modeling history manager. It owns the feature list, the shared Three.js scene, the expression scratchpad, PMI views, metadata, and the assembly constraint history. It can rebuild geometry deterministically by replaying feature entries, serialize and restore part state, and maintain undo/redo via JSON snapshots.
+`PartHistory` lives in `src/PartHistory.js` and is the core modeling history manager. It owns the feature list, the shared Three.js scene, the expression scratchpad, configurator state, PMI views, metadata, and the assembly constraint history. It can rebuild geometry deterministically by replaying feature entries, serialize and restore part state, and maintain undo/redo via JSON snapshots.
 
 ## Live Demos
 - Examples hub: [https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
@@ -12,6 +12,7 @@
 - Manage the ordered list of modeling features (`features`).
 - Own and mutate the shared Three.js `scene`.
 - Evaluate parameter expressions via a user-defined expression script.
+- Store configurator widget definitions and current configurator values.
 - Run the history to (re)build geometry from feature inputs.
 - Persist and restore feature history, PMI views, metadata, and assembly constraints.
 - Track and apply undo/redo snapshots.
@@ -31,6 +32,7 @@ Creates a new history manager and initializes:
 - `pmiViewsManager`: `new PMIViewsManager(this)`
 - `metadataManager`: `new MetadataManager()`
 - `expressions`: default example script string
+- `configurator`: `{ fields: [], values: {} }`
 - `callbacks`: empty bag for optional hooks
 - Undo/redo state in `_historyUndo`
 
@@ -87,12 +89,61 @@ Objects are expected to be compatible with Three.js scene nodes. If they impleme
 
 ## Expressions
 
-`expressions` is a user-editable script string. Numeric inputs can reference it.
+For the user-facing guide focused specifically on the Expressions panel and configurator workflow, see [Expressions and Configurator](./expressions.md).
+
+`expressions` is a user-editable script string stored on `partHistory.expressions`. Expression-aware inputs evaluate against a shared source built from:
+
+- the default prelude (`resolution = 32;`)
+- the current configurator values object (`configurator`)
+- the user script in `expressions`
+
+This means feature dialogs can reference both scratch variables and configurator fields:
+
+```js
+width = 20;
+height = width * 2;
+```
+
+```js
+configurator.panelWidth
+configurator.materialName
+```
 
 - Static helper: `PartHistory.evaluateExpression(expressionsSource, equation)`
 - Instance helper: `partHistory.evaluateExpression(equation)`
 
 `evaluateExpression` uses `Function()` to execute the script and return an evaluated value. It returns `null` on error. Treat expression input as code (do not evaluate untrusted content).
+
+### Configurator
+
+`configurator` is stored on `partHistory.configurator` and has this normalized shape:
+
+```js
+{
+  fields: [
+    {
+      name: 'panelWidth',
+      label: 'Panel Width',
+      type: 'slider', // slider | number | select | string
+      defaultValue: 42,
+      min: 0,
+      max: 100,
+      step: 1
+    }
+  ],
+  values: {
+    panelWidth: 42
+  }
+}
+```
+
+Behavior in the Expressions sidebar:
+
+- The live configurator form is shown above the expression editor only when at least one configurator field exists.
+- The Edit Configurator session can add, remove, and edit widgets of type `slider`, `number`, `select`, and `string`.
+- While the editor is open, the live configurator form previews the draft widget set in real time.
+- The model is not re-run for those draft edits until the edit session is closed or saved.
+- After the edit session is committed, `runHistory()` is triggered and the resulting configurator values become available through `configurator.fieldName`.
 
 ## Execution flow
 
@@ -147,6 +198,7 @@ Returns a pretty-printed JSON string containing:
 - `features` (type, inputParams, persistentData, timestamp)
 - `idCounter`
 - `expressions`
+- `configurator`
 - `pmiViews` (via `PMIViewsManager`)
 - `metadata` (from `MetadataManager`)
 - `assemblyConstraints` and `assemblyConstraintIdCounter`
@@ -204,6 +256,7 @@ Assembly component utilities:
 - `pmiViewsManager: PMIViewsManager`
 - `metadataManager: MetadataManager`
 - `expressions: string`
+- `configurator: { fields: Array<Object>, values: Object }`
 - `currentHistoryStepId: string | null`
 - `callbacks: Object` (optional hooks)
 - `_historyUndo: Object` (internal state)
@@ -229,7 +282,23 @@ Evaluates `equation` using `expressionsSource` as the preamble. Returns `null` o
 
 #### `evaluateExpression(equation): any | null`
 
-Same as static helper but uses `this.expressions`.
+Same as static helper but uses `this.getExpressionsSource()`, which includes the default prelude and the current configurator values.
+
+#### `buildExpressionSource(expressionsSource = this.expressions): string`
+
+Builds the executable expression preamble from the default `resolution`, the current configurator values, and the user script.
+
+#### `getExpressionsSource(): string`
+
+Returns the fully assembled expression source used by dialogs and evaluators.
+
+#### `getConfiguratorState(): { fields: Array<Object>, values: Object }`
+
+Returns a normalized copy of the current configurator definition and values.
+
+#### `getConfiguratorValues(): Object`
+
+Returns the normalized `configurator.values` object that is injected into the expression runtime.
 
 #### `getObjectByName(name): Object3D | null`
 
@@ -264,6 +333,7 @@ Increments `idCounter` and returns `${prefix}${idCounter}`.
 Normalizes and evaluates input params based on schema types:
 
 - `number`: evaluates expressions
+- `string` with `allowExpression: true`: evaluates expressions and coerces the result back to a string
 - `reference_selection`: resolves object names to scene objects
 - `boolean_operation`: normalizes op and target list, optional bias/offset
 - `transform`: evaluates position/rotation/scale arrays
@@ -353,6 +423,22 @@ await history.runHistory();
 ```js
 history.expressions = "x = 10; y = x * 2;";
 feature.inputParams.depth = "y + 5";
+await history.runHistory();
+```
+
+### Configurator-backed expressions
+
+```js
+history.configurator = {
+  fields: [
+    { name: 'panelWidth', label: 'Panel Width', type: 'number', defaultValue: 24, step: 1 }
+  ],
+  values: {
+    panelWidth: 24
+  }
+};
+
+feature.inputParams.width = "configurator.panelWidth * 2";
 await history.runHistory();
 ```
 
