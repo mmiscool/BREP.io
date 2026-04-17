@@ -26,7 +26,7 @@ const inputParamsSchema = {
   },
   resolution: {
     type: 'number',
-    default_value: 32,
+    default_value: "resolution",
     hint: 'Segments around the tube circumference'
   },
   mode: {

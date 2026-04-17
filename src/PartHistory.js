@@ -24,6 +24,8 @@ import {
 
 const debug = false;
 const UI_ONLY_INPUT_PARAM_KEYS = new Set(['__open']);
+const DEFAULT_EXPRESSION_PRELUDE = 'resolution = 32;\n';
+const DEFAULT_EXPRESSIONS = "//Examples:\nx = 10 + 6; \ny = x * 2;" + "\n\n" + DEFAULT_EXPRESSION_PRELUDE;
 
 function resolveFeatureEntryId(entry, fallback = null) {
   if (!entry) return fallback;
@@ -69,7 +71,7 @@ export class PartHistory {
     this._modelChangeListeners = new Set();
     this.currentHistoryStepId = null;
     this.runningFeatureId = null;
-    this.expressions = "//Examples:\nx = 10 + 6; \ny = x * 2;";
+    this.expressions = DEFAULT_EXPRESSIONS;
     this.activeWorkbench = getDefaultWorkbenchForNewPart();
     this.pmiViewsManager = new PMIViewsManager(this);
     this.sheet2DManager = new Sheet2DManager(this);
@@ -378,7 +380,7 @@ export class PartHistory {
   }
 
   static evaluateExpression(expressionsSource, equation) {
-    const exprSource = typeof expressionsSource === 'string' ? expressionsSource : '';
+    const exprSource = PartHistory.buildExpressionSource(expressionsSource);
     const fnBody = `${exprSource}; return ${equation} ;`;
     try {
       let result = Function(fnBody)();
@@ -397,6 +399,22 @@ export class PartHistory {
 
   evaluateExpression(equation) {
     return PartHistory.evaluateExpression(this.expressions, equation);
+  }
+
+  static buildExpressionSource(expressionsSource) {
+    const exprSource = typeof expressionsSource === 'string' ? expressionsSource : '';
+    if (!exprSource.trim()) return DEFAULT_EXPRESSION_PRELUDE;
+    // Provide a default resolution before the user script runs; users can
+    // overwrite it later with `resolution = ...` in their own expressions.
+    return `${DEFAULT_EXPRESSION_PRELUDE}\n${exprSource}`;
+  }
+
+  buildExpressionSource(expressionsSource = this.expressions) {
+    return PartHistory.buildExpressionSource(expressionsSource);
+  }
+
+  getExpressionsSource() {
+    return this.buildExpressionSource(this.expressions);
   }
 
   getModelRevision() {
@@ -442,7 +460,7 @@ export class PartHistory {
     this.pmiViewsManager.reset();
     this.sheet2DManager.reset();
     this.wireHarnessManager.reset();
-    this.expressions = "//Examples:\nx = 10 + 6; \ny = x * 2;";
+    this.expressions = DEFAULT_EXPRESSIONS;
     this.activeWorkbench = getDefaultWorkbenchForNewPart();
     // Reset MetadataManager
     this.metadataManager = new MetadataManager();
@@ -1587,7 +1605,7 @@ export class PartHistory {
       ? inputParams.__expr
       : null;
     const evalExpression = (equation) => {
-      const exprSource = typeof this.expressions === 'string' ? this.expressions : '';
+      const exprSource = this.getExpressionsSource();
       const fnBody = `${exprSource}; return ${equation} ;`;
       try {
         let result = Function(fnBody)();

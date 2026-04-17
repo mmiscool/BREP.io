@@ -173,7 +173,7 @@ const inputParamsSchema = {
   },
   curveResolution: {
     type: "number",
-    default_value: 12,
+    default_value: "resolution",
     hint: "Curve resolution (segments per curve)",
   },
   placementPlane: {

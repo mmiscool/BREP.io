@@ -122,7 +122,7 @@ export function renderTransformField({ ui, key, def, id, controlWrap, valueAdapt
     grid.className = 'transform-grid';
     const addRow = (labelTxt, clsPrefix, valuesArr) => {
         const rowEl = document.createElement('div');
-        rowEl.className = 'transform-row';
+        rowEl.className = 'transform-row transform-axis-row';
         const lab = document.createElement('div');
         lab.className = 'transform-label';
         lab.textContent = labelTxt;

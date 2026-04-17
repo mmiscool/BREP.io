@@ -1564,7 +1564,7 @@ const inputParamsSchema = {
   },
   curveResolution: {
     type: "number",
-    default_value: DEFAULT_RESOLUTION,
+    default_value: "resolution",
     hint: "Samples per segment used to visualize the spline",
   },
   portRefs: {

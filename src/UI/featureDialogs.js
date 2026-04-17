@@ -2004,7 +2004,7 @@ export class SchemaForm {
                 }
             } catch (_) { /* ignore */ }
             if (!addedToScene) {
-                 
+
                 console.warn('[TransformControls] Could not add gizmo to scene (no Object3D found).');
             }
         }
@@ -2263,7 +2263,7 @@ export class SchemaForm {
             try {
                 this.options.onChange(featureID, details);
             } catch (error) {
-                 
+
                 console.log(error);
             }
         }
@@ -2296,11 +2296,14 @@ export class SchemaForm {
 
     _getExpressionsSource() {
         const ph = this.options?.partHistory || this.options?.viewer?.partHistory || null;
-        return (ph && typeof ph.expressions === 'string') ? ph.expressions : '';
+        if (!ph || typeof ph.getExpressionsSource !== 'function') {
+            throw new Error('SchemaForm expression evaluation requires partHistory.getExpressionsSource().');
+        }
+        return ph.getExpressionsSource();
     }
 
     _evaluateExpression(exprText) {
-        const raw = exprText == null ? '' : String(exprText);
+        const raw = (exprText == null ? '' : String(exprText));
         if (!raw.trim()) return { ok: false, value: null };
         const source = this._getExpressionsSource();
         const fnBody = `${source}; return ${raw} ;`;
@@ -2848,6 +2851,7 @@ export class SchemaForm {
       .transform-wrap.ref-active .transform-details { display: block; }
       .transform-grid { display: flex; flex-direction: column; gap: 6px; }
       .transform-row { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 8px; }
+      .transform-axis-row { grid-template-columns: 1fr; align-items: stretch; gap: 4px; }
       .transform-label { color: var(--muted); font-size: 12px; }
       .transform-inputs { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 6px; }
       .transform-input { padding: 6px 8px; }

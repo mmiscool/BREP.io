@@ -2425,7 +2425,7 @@ export class Viewer {
         const ph = this.partHistory;
         if (!ph || !featureID) return;
         // Always restore normal UI first
-        this.endSketchMode();
+        this.endSketchMode(featureID);
         const f = Array.isArray(ph.features) ? ph.features.find(x => x?.inputParams?.featureID === featureID) : null;
         if (!f) return;
         f.lastRunInputParams = {};
@@ -2437,19 +2437,31 @@ export class Viewer {
         try {
             const runPromise = ph.runHistory();
             if (runPromise && typeof runPromise.then === 'function') {
-                runPromise.then(() => ph.queueHistorySnapshot?.({ debounceMs: 0, reason: 'sketch' }));
+                void (async () => {
+                    try {
+                        await runPromise;
+                        ph.queueHistorySnapshot?.({ debounceMs: 0, reason: 'sketch' });
+                    } catch (error) {
+                        console.warn('[Viewer] Sketch history run failed:', error);
+                    } finally {
+                        setSketchFeatureSceneVisibility(ph, featureID, true);
+                    }
+                })();
             } else {
+                setSketchFeatureSceneVisibility(ph, featureID, true);
                 ph.queueHistorySnapshot?.({ debounceMs: 0, reason: 'sketch' });
             }
-        } catch { }
+        } catch {
+            setSketchFeatureSceneVisibility(ph, featureID, true);
+        }
     }
 
-    onSketchCancelled(_featureID) {
-        this.endSketchMode();
+    onSketchCancelled(featureID) {
+        this.endSketchMode(featureID);
     }
 
-    endSketchMode() {
-        const activeSketchFeatureID = this._sketchMode?.featureID || null;
+    endSketchMode(featureID = null) {
+        const activeSketchFeatureID = featureID || this._sketchMode?.featureID || null;
         try { if (this._sketchMode) this._sketchMode.close(); } catch { }
         this._sketchMode = null;
         setSketchFeatureSceneVisibility(this.partHistory, activeSketchFeatureID, true);

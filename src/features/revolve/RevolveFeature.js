@@ -37,7 +37,7 @@ const inputParamsSchema = {
     },
     resolution: {
         type: "number",
-        default_value: 64,
+        default_value: "resolution",
         hint: "Number of segments used for the revolve sweep",
     },
     boolean: {

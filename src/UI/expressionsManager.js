@@ -74,7 +74,12 @@ export class expressionsManager {
         this.resultDiv.style.color = 'green';
         let succeeded = false;
         try {
-            const functionString = `return (function(){ ${this.textArea.value} ;});`;
+            const partHistory = this.viewer?.partHistory || null;
+            if (!partHistory || typeof partHistory.buildExpressionSource !== 'function') {
+                throw new Error('expressionsManager requires viewer.partHistory.buildExpressionSource().');
+            }
+            const source = partHistory.buildExpressionSource(this.textArea.value);
+            const functionString = `return (function(){ ${source} ;});`;
             Function(functionString)();
             this.viewer.partHistory.expressions = this.textArea.value;
             succeeded = true;

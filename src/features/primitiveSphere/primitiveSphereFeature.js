@@ -18,7 +18,7 @@ const inputParamsSchema = {
     },
     resolution: {
         type: 'number',
-        default_value: 32,
+        default_value: "resolution",
         hint: 'Base segment count (longitude). Latitude segments are derived from this.'
     },
     transform: {

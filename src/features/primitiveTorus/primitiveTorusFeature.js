@@ -26,7 +26,7 @@ const inputParamsSchema = {
     },
     resolution: {
         type: 'number',
-        default_value: 64,
+        default_value: "resolution",
         hint: 'Quality resolution (base setting for segments)'
     },
     arc: {

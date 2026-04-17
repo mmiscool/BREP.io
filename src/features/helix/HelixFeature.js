@@ -57,7 +57,7 @@ const inputParamsSchema = {
   },
   resolution: {
     type: "number",
-    default_value: 64,
+    default_value: "resolution",
     hint: "Segments per turn for the helix polyline",
   },
   mode: {

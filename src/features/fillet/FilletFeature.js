@@ -35,7 +35,7 @@ const inputParamsSchema = {
     resolution: {
         type: "number",
         step: 1,
-        default_value: 32,
+        default_value: "resolution",
         hint: "Segments around the fillet tube circumference",
     },
     inflate: {
