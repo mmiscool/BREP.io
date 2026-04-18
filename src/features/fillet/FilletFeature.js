@@ -9,6 +9,7 @@ const DEBUG_MODE_NONE = "NONE";
 const DEBUG_MODE_WEDGE_AND_TUBE = "WEDGE AND TUBE";
 const DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEAN = "WEDGE AND TUBE AFTER BOOLEAN";
 const DEBUG_MODE_COMBINED_BEFORE_TARGET = "COMBINED FILLET BEFORE TARGET BOOLEAN";
+const FINAL_FILLET_SIMPLIFY_TOLERANCE = 0.0004;
 
 const inputParamsSchema = {
     id: {
@@ -614,10 +615,21 @@ export class FilletFeature {
             },
             usedSheetMetalPath: false,
         };
-        const { triCount, vertCount } = getSolidGeometryCounts(result);
         if (!result) {
             throw new Error(`[FilletFeature] Fillet returned no result for feature ${fid || '(unknown)'}.`);
         }
+        if (typeof result.simplify === 'function') {
+            try {
+                result.simplify(FINAL_FILLET_SIMPLIFY_TOLERANCE, true);
+            } catch (e) {
+                console.warn('[FilletFeature] Final simplify cleanup failed; keeping unsimplified fillet result.', {
+                    featureID: fid,
+                    tolerance: FINAL_FILLET_SIMPLIFY_TOLERANCE,
+                    error: e,
+                });
+            }
+        }
+        const { triCount, vertCount } = getSolidGeometryCounts(result);
         if (triCount === 0 || vertCount === 0) {
             throw new Error(`[FilletFeature] Fillet produced empty geometry for feature ${fid || '(unknown)'}. `
                 + `(triangles=${triCount}, vertices=${vertCount}, direction=${dir}, radius=${r}, `
