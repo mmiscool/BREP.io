@@ -1,4 +1,5 @@
 import { Solid } from "../BREP/BetterSolid.js";
+import { __testOnlyMergeCoplanarAdjacentFilletEndCaps } from "../BREP/SolidMethods/fillet.js";
 import {
     applySolidAuthoringStateSnapshot,
     buildSolidAuthoringStateSnapshot,
@@ -409,6 +410,144 @@ export async function test_cppSolidNative_filletEdge_finalSnapshot_preserves_fac
         if (!nativeMetadata.has(faceName)) {
             throw new Error(`Expected native finalSnapshot to preserve metadata for ${faceName}.`);
         }
+    }
+}
+
+export async function test_cppSolidNative_postBoolean_fillet_merges_coplanar_cube_end_caps() {
+    if (manifoldBuildSource !== "local" || typeof manifold?.buildFilletAuthoringState !== "function") {
+        return;
+    }
+
+    const cube = new Cube({ x: 2, y: 2, z: 2, name: "CPP_POST_BOOL_FILLET" });
+    const boundary = (cube.getBoundaryEdgePolylines() || []).find((candidate) => {
+        const faceA = String(candidate?.faceA || "");
+        const faceB = String(candidate?.faceB || "");
+        return (faceA === "CPP_POST_BOOL_FILLET_NX" && faceB === "CPP_POST_BOOL_FILLET_NY")
+            || (faceA === "CPP_POST_BOOL_FILLET_NY" && faceB === "CPP_POST_BOOL_FILLET_NX");
+    });
+    if (!boundary || !Array.isArray(boundary.positions) || boundary.positions.length < 2) {
+        throw new Error("Expected cube boundary polyline between CPP_POST_BOOL_FILLET_NX and CPP_POST_BOOL_FILLET_NY.");
+    }
+    const edge = {
+        name: String(boundary.name || "CPP_POST_BOOL_FILLET_NX|CPP_POST_BOOL_FILLET_NY[0]"),
+        parentSolid: cube,
+        faces: [{ name: boundary.faceA }, { name: boundary.faceB }],
+        userData: {
+            faceA: boundary.faceA,
+            faceB: boundary.faceB,
+            polylineLocal: boundary.positions.map((point) => Array.from(point || [])),
+            closedLoop: !!boundary.closedLoop,
+        },
+        closedLoop: !!boundary.closedLoop,
+    };
+
+    const result = await cube.fillet({
+        radius: 0.25,
+        edges: [edge],
+        direction: "INSET",
+        resolution: 24,
+        featureID: "CPP_POST_BOOL_FILLET",
+    });
+    if (!result || typeof result.getFaceNames !== "function" || typeof result.getFaceMetadata !== "function") {
+        throw new Error("Expected Solid.fillet() to return a readable solid.");
+    }
+
+    const faceNames = Array.from(result.getFaceNames() || []);
+    for (const required of ["CPP_POST_BOOL_FILLET_NZ", "CPP_POST_BOOL_FILLET_PZ"]) {
+        if (!faceNames.includes(required)) {
+            throw new Error(`Expected post-boolean fillet result to preserve face ${required}.`);
+        }
+    }
+
+    const survivingEndCapNames = faceNames.filter((faceName) => /(?:_END_CAP_[12]|_TUBE_CapStart|_TUBE_CapEnd)$/.test(String(faceName || "")));
+    if (survivingEndCapNames.length !== 0) {
+        throw new Error(`Expected single-edge cube fillet to merge its coplanar end caps, found ${survivingEndCapNames.join(", ")}.`);
+    }
+
+    const survivingEndCapMetadata = faceNames.filter((faceName) => {
+        const metadata = result.getFaceMetadata(faceName) || {};
+        return metadata?.filletEndCap === true;
+    });
+    if (survivingEndCapMetadata.length !== 0) {
+        throw new Error(`Expected single-edge cube fillet to clear filletEndCap metadata after merging, found ${survivingEndCapMetadata.join(", ")}.`);
+    }
+
+    if (Number(result.__filletEndCapMergeCount || 0) !== 2) {
+        throw new Error(`Expected two end-cap merges for a single-edge cube fillet, received ${result.__filletEndCapMergeCount}.`);
+    }
+}
+
+function buildSyntheticCoplanarEndCapSolid() {
+    const solid = new Solid();
+    const A0 = [0, 0, 0];
+    const B0 = [1, 0, 0];
+    const C0 = [1, 1, 0];
+    const D0 = [0, 1, 0];
+    const A = [0, 0, 1];
+    const E = [0.2, 0, 1];
+    const F = [0, 0.2, 1];
+    const B = [1, 0, 1];
+    const C = [1, 1, 1];
+    const D = [0, 1, 1];
+
+    solid
+        .addTriangle("BOTTOM", A0, C0, B0)
+        .addTriangle("BOTTOM", A0, D0, C0)
+        .addTriangle("FILLET_ENDCAP", A, E, F)
+        .addTriangle("TOP_MAIN", E, B, C)
+        .addTriangle("TOP_MAIN", E, C, F)
+        .addTriangle("TOP_MAIN", F, C, D)
+        .addTriangle("FRONT", A0, B0, B)
+        .addTriangle("FRONT", A0, B, E)
+        .addTriangle("FRONT", A0, E, A)
+        .addTriangle("LEFT", A0, A, F)
+        .addTriangle("LEFT", A0, F, D)
+        .addTriangle("LEFT", A0, D, D0)
+        .addTriangle("RIGHT", B0, C0, C)
+        .addTriangle("RIGHT", B0, C, B)
+        .addTriangle("BACK", D0, D, C)
+        .addTriangle("BACK", D0, C, C0);
+
+    solid.setFaceMetadata("TOP_MAIN", { marker: "top-main" });
+    solid.setFaceMetadata("FILLET_ENDCAP", {
+        filletSourceArea: 0.02,
+        filletRoundFace: "F_TEST_TUBE_Outer",
+        filletEndCap: true,
+        sourceFeatureId: "F_TEST",
+    });
+    return solid;
+}
+
+export async function test_cppSolidNative_mergeCoplanarAdjacentFilletEndCaps_retags_triangles_to_planar_neighbor() {
+    if (manifoldBuildSource !== "local" || typeof manifold?.buildFilletAuthoringState !== "function") {
+        return;
+    }
+
+    const solid = buildSyntheticCoplanarEndCapSolid();
+    const summary = __testOnlyMergeCoplanarAdjacentFilletEndCaps(solid, { featureID: "F_TEST" });
+    if (Number(summary?.mergedEndCaps || 0) !== 1) {
+        throw new Error(`Expected one coplanar adjacent fillet end cap to merge, received ${summary?.mergedEndCaps}.`);
+    }
+
+    const faceNames = new Set(solid.getFaceNames?.() || []);
+    if (faceNames.has("FILLET_ENDCAP")) {
+        throw new Error("Expected FILLET_ENDCAP face to be retagged into TOP_MAIN.");
+    }
+    if (!faceNames.has("TOP_MAIN")) {
+        throw new Error("Expected TOP_MAIN to survive the end-cap merge.");
+    }
+
+    const topTriangles = solid.getFace("TOP_MAIN") || [];
+    if (topTriangles.length !== 4) {
+        throw new Error(`Expected TOP_MAIN to own 4 triangles after merge, received ${topTriangles.length}.`);
+    }
+
+    const topMetadata = solid.getFaceMetadata("TOP_MAIN") || {};
+    if (topMetadata.marker !== "top-main") {
+        throw new Error("Expected merged target face to preserve its original metadata.");
+    }
+    if (topMetadata.filletEndCap === true) {
+        throw new Error("Expected merged target face metadata to exclude filletEndCap.");
     }
 }
 

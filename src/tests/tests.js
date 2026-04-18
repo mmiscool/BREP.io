@@ -53,6 +53,10 @@ import {
     test_generated_history_20260322222832,
 } from './test_generated_history_20260322222832.js';
 import {
+    afterRun_generated_history_20260418030116,
+    test_generated_history_20260418030116,
+} from './test_generated_history_20260418030116.js';
+import {
     afterRun_fillet_preserves_original_face_names,
     test_fillet_preserves_original_face_names,
 } from './test_fillet_preserves_original_face_names.js';
@@ -126,7 +130,9 @@ import {
     test_cppSolidNative_classifyFilletEdgeDirection_cubeConvexEdge_isInset,
     test_cppSolidNative_invertNormals_and_manifoldize_rebuilds_coherent_mesh,
     test_cppSolidNative_mergeTinyFaces_merges_small_adjacent_face,
+    test_cppSolidNative_mergeCoplanarAdjacentFilletEndCaps_retags_triangles_to_planar_neighbor,
     test_cppSolidNative_offsetFace_updates_planar_face_vertices,
+    test_cppSolidNative_postBoolean_fillet_merges_coplanar_cube_end_caps,
     test_cppSolidNative_pushFace_updates_planar_face_vertices,
     test_cppSolidNative_removeInternalTriangles_preserves_clean_manifold_shell,
     test_cppSolidNative_removeSmallIslands_drops_external_shell_and_prunes_metadata,
@@ -286,6 +292,8 @@ export const testFunctions = [
     { test: test_cppSolidNative_booleanCombinedAuthoringState_preserves_face_names_and_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_buildFilletEdgeAuthoringState_returns_standard_edge_snapshots, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_filletEdge_finalSnapshot_preserves_face_names_and_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidNative_postBoolean_fillet_merges_coplanar_cube_end_caps, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidNative_mergeCoplanarAdjacentFilletEndCaps_retags_triangles_to_planar_neighbor, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_open_tube_preserves_expected_face_labels, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_closed_hollow_tube_preserves_expected_face_labels, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_union_preserves_distinct_face_labels_across_native_snapshots, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -485,6 +493,14 @@ export const testFunctions = [
     {
         test: test_generated_history_20260322222832,
         afterRun: afterRun_generated_history_20260322222832,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_generated_history_20260418030116,
+        afterRun: afterRun_generated_history_20260418030116,
         printArtifacts: false,
         exportFaces: false,
         exportSolids: false,
