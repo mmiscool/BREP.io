@@ -647,17 +647,27 @@ export class PartHistory {
         }
 
 
-        // manually run the sketch feature and then test if the geometry has changed
-        // if so, mark dirty
+        // Sketch features need a preview run to detect topology/reference-driven changes.
+        // Reuse that preview result later instead of re-running the same sketch again.
         const featureName = FeatureClass?.longName || FeatureClass?.shortName || FeatureClass?.name || '';
+        let sketchPreviewRun = null;
         if (featureName === 'Sketch') {
           try {
-            instance.run(this);
-            const sketchChanged = await instance.hasSketchChanged(feature);
+            const previewStartedAt = nowMs();
+            const previewResultArtifacts = await instance.run(this);
+            const previewEndedAt = nowMs();
+            sketchPreviewRun = {
+              resultArtifacts: previewResultArtifacts,
+              startedAt: previewStartedAt,
+              endedAt: previewEndedAt,
+              durationMs: Math.max(0, Math.round(previewEndedAt - previewStartedAt)),
+            };
+            const sketchChanged = instance.hasSketchChanged(feature);
             if (sketchChanged) feature.dirty = true;
           } catch (error) {
             console.warn('[PartHistory] Sketch change detection failed:', error);
             feature.dirty = true;
+            sketchPreviewRun = null;
           }
         }
 
@@ -671,10 +681,15 @@ export class PartHistory {
           feature.lastRunInputParams = inputParamsSignature;
 
 
-          const t0 = nowMs();
+          let t0 = nowMs();
 
           try {
-            instance.resultArtifacts = await instance.run(this);
+            if (sketchPreviewRun) {
+              instance.resultArtifacts = sketchPreviewRun.resultArtifacts;
+              t0 = sketchPreviewRun.startedAt;
+            } else {
+              instance.resultArtifacts = await instance.run(this);
+            }
             feature.effects = {
               added: instance.resultArtifacts.added || [],
               removed: instance.resultArtifacts.removed || []
@@ -684,8 +699,8 @@ export class PartHistory {
             feature.timestamp = Date.now();
             previousFeatureTimestamp = feature.timestamp;
 
-            const t1 = nowMs();
-            const dur = Math.max(0, Math.round(t1 - t0));
+            const t1 = sketchPreviewRun ? sketchPreviewRun.endedAt : nowMs();
+            const dur = sketchPreviewRun ? sketchPreviewRun.durationMs : Math.max(0, Math.round(t1 - t0));
 
             feature.lastRun = { ok: true, startedAt: t0, endedAt: t1, durationMs: dur, error: null };
             feature.dirty = false;

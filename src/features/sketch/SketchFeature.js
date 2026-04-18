@@ -6,6 +6,7 @@ import { renderButtonField } from '../../UI/featureDialogWidgets/buttonField.js'
 import { deepClone } from '../../utils/deepClone.js';
 import { ConstraintEngine } from './sketchSolver2D/ConstraintEngine.js';
 const THREE = BREP.THREE;
+const EXTERNAL_REF_POINT_EPS = 1e-6;
 
 function hasReferenceValue(value) {
     if (value == null) return false;
@@ -587,7 +588,7 @@ export class SketchFeature {
             const passCount = Math.max(1, Number(maxPasses) || 1);
             const iters = Math.max(1, Number(iterations) || 500);
             for (let pass = 0; pass < passCount; pass++) {
-                const engine = new ConstraintEngine(JSON.stringify(solved));
+                const engine = new ConstraintEngine(solved);
                 solved = engine.solve(iters);
                 const pointSig = JSON.stringify(solved?.points || []);
                 const hasConstraintErrors = Array.isArray(solved?.constraints)
@@ -730,8 +731,16 @@ export class SketchFeature {
                         const uvB = toUV(ends.b);
                         const p0 = ptById.get(r.p0);
                         const p1 = ptById.get(r.p1);
-                        if (p0 && (p0.x !== uvA.u || p0.y !== uvA.v)) { p0.x = uvA.u; p0.y = uvA.v; changed = true; }
-                        if (p1 && (p1.x !== uvB.u || p1.y !== uvB.v)) { p1.x = uvB.u; p1.y = uvB.v; changed = true; }
+                        if (p0 && (Math.abs(Number(p0.x) - uvA.u) > EXTERNAL_REF_POINT_EPS || Math.abs(Number(p0.y) - uvA.v) > EXTERNAL_REF_POINT_EPS)) {
+                            p0.x = uvA.u;
+                            p0.y = uvA.v;
+                            changed = true;
+                        }
+                        if (p1 && (Math.abs(Number(p1.x) - uvB.u) > EXTERNAL_REF_POINT_EPS || Math.abs(Number(p1.y) - uvB.v) > EXTERNAL_REF_POINT_EPS)) {
+                            p1.x = uvB.u;
+                            p1.y = uvB.v;
+                            changed = true;
+                        }
                         if (p0) {
                             p0.fixed = true;
                             p0.externalReference = true;
@@ -909,8 +918,9 @@ export class SketchFeature {
         }
 
         // Utility helpers for loops
+        const PROFILE_ENDPOINT_EPS = 1e-5;
         const key=(x,y)=> `${x.toFixed(6)},${y.toFixed(6)}`;
-        const nearlyEqual=(a,b,eps=1e-6)=> Math.abs(a-b)<=eps;
+        const nearlyEqual=(a,b,eps=PROFILE_ENDPOINT_EPS)=> Math.abs(a-b)<=eps;
         const closePt=(p,q)=> nearlyEqual(p[0],q[0]) && nearlyEqual(p[1],q[1]);
         const ensureClosed=(arr)=>{
             if (arr.length<3) return arr;
@@ -963,11 +973,48 @@ export class SketchFeature {
         };
 
         // Build multiple loops by chaining segments greedily per connected component
+        const endpointBuckets = new Map();
+        const endpointRepresentatives = [];
+        const endpointBucketKey = (point) => {
+            const cellX = Math.round(point[0] / PROFILE_ENDPOINT_EPS);
+            const cellY = Math.round(point[1] / PROFILE_ENDPOINT_EPS);
+            return { cellX, cellY, key: `${cellX},${cellY}` };
+        };
+        const locateEndpointRepresentative = (point, createIfMissing = false) => {
+            const base = endpointBucketKey(point);
+            for (let dx = -1; dx <= 1; dx += 1) {
+                for (let dy = -1; dy <= 1; dy += 1) {
+                    const bucket = endpointBuckets.get(`${base.cellX + dx},${base.cellY + dy}`);
+                    if (!bucket) continue;
+                    for (const repIndex of bucket) {
+                        const rep = endpointRepresentatives[repIndex];
+                        if (rep && closePt(rep.point, point)) return rep.key;
+                    }
+                }
+            }
+            if (!createIfMissing) return key(point[0], point[1]);
+            const repIndex = endpointRepresentatives.length;
+            const repKey = `ep:${repIndex}`;
+            endpointRepresentatives.push({ key: repKey, point: [point[0], point[1]] });
+            let bucket = endpointBuckets.get(base.key);
+            if (!bucket) {
+                bucket = [];
+                endpointBuckets.set(base.key, bucket);
+            }
+            bucket.push(repIndex);
+            return repKey;
+        };
         const unused = new Set(segs.map((_,i)=>i));
         const startKey = new Map(); // pointKey -> Set(segIndex as start)
         const endKey = new Map();   // pointKey -> Set(segIndex as end)
         const addTo = (map, k, v)=>{ let s=map.get(k); if(!s){ s=new Set(); map.set(k,s);} s.add(v); };
-        segs.forEach((s,i)=>{ const a=s.pts[0], b=s.pts[s.pts.length-1]; addTo(startKey, key(a[0],a[1]), i); addTo(endKey, key(b[0],b[1]), i); });
+        segs.forEach((s,i)=>{
+            const a=s.pts[0], b=s.pts[s.pts.length-1];
+            s._startKey = locateEndpointRepresentative(a, true);
+            s._endKey = locateEndpointRepresentative(b, true);
+            addTo(startKey, s._startKey, i);
+            addTo(endKey, s._endKey, i);
+        });
 
         const loopsInfo=[]; // { pts, segIDs }
         while (unused.size){
@@ -981,7 +1028,7 @@ export class SketchFeature {
             while(extended){
                 extended=false;
                 // try extend forward
-                const tail = chain[chain.length-1]; const tk = key(tail[0],tail[1]);
+                const tail = chain[chain.length-1]; const tk = locateEndpointRepresentative(tail, false);
                 let nextIdx = null; let reverse=false;
                 for (const si of (startKey.get(tk)||[])) { if (unused.has(si)) { nextIdx=si; reverse=false; break; } }
                 if (nextIdx===null){ for (const ei of (endKey.get(tk)||[])) { if (unused.has(ei)) { nextIdx=ei; reverse=true; break; } } }
@@ -997,7 +1044,7 @@ export class SketchFeature {
                     continue;
                 }
                 // try extend backward
-                const head = chain[0]; const hk = key(head[0],head[1]);
+                const head = chain[0]; const hk = locateEndpointRepresentative(head, false);
                 nextIdx = null; reverse=false;
                 for (const ei of (endKey.get(hk)||[])) { if (unused.has(ei)) { nextIdx=ei; reverse=false; break; } }
                 if (nextIdx===null){ for (const si of (startKey.get(hk)||[])) { if (unused.has(si)) { nextIdx=si; reverse=true; break; } } }

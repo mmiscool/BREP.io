@@ -7,7 +7,9 @@ import { Solid } from "./BetterSolid.js";
 import { Manifold } from "./SolidShared.js";
 import {
   applySolidAuthoringStateSnapshot,
+  getSyncedCppSolidCore,
   getSolidAuthoringStateSnapshot,
+  syncSolidAuthoringStateFromCpp,
 } from "./CppSolidCore.js";
 import { MeshRepairer } from "./MeshRepairer.js";
 import { computeBoundsFromVertices } from "./boundsUtils.js";
@@ -443,6 +445,310 @@ function __booleanConditionOperands(op, stationarySolid, movingSolid, debugLog, 
   };
 }
 
+function __booleanCloneMetadataObject(metadata) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return {};
+  return { ...metadata };
+}
+
+function __booleanRefreshAuthoringStateFromNative(solid) {
+  if (!solid || typeof solid !== 'object') return;
+  const snapshot = getSolidAuthoringStateSnapshot(solid);
+  if (!snapshot || typeof snapshot !== 'object') return;
+  applySolidAuthoringStateSnapshot(solid, snapshot);
+}
+
+function __booleanGetFaceFeatureId(faceName, metadata = null) {
+  const explicit = String(
+    metadata?.sourceFeatureId
+    || metadata?.sourceFeatureID
+    || metadata?.featureID
+    || '',
+  ).trim();
+  if (explicit) return explicit;
+  const rawName = String(faceName || '').trim();
+  if (!rawName) return '';
+  const colonIndex = rawName.indexOf(':');
+  if (colonIndex <= 0) return '';
+  return rawName.slice(0, colonIndex).trim();
+}
+
+function __booleanGetFaceType(faceName, metadata = null) {
+  const explicit = String(metadata?.faceType || '').trim().toUpperCase();
+  if (explicit) return explicit;
+  const rawName = String(faceName || '').trim().toUpperCase();
+  if (!rawName) return '';
+  if (rawName.endsWith('_SW')) return 'SIDEWALL';
+  if (rawName.endsWith('PROFILE_START')) return 'STARTCAP';
+  if (rawName.endsWith('PROFILE_END')) return 'ENDCAP';
+  return '';
+}
+
+function __booleanInvalidateSolidCaches(solid) {
+  if (!solid || typeof solid !== 'object') return;
+  solid._dirty = true;
+  solid._faceIndex = null;
+  try { if (solid._manifold && typeof solid._manifold.delete === 'function') solid._manifold.delete(); } catch { }
+  solid._manifold = null;
+}
+
+function __booleanDeriveSolidToleranceFromVerts(solid, baseTol = 1e-5) {
+  const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : null;
+  if (!vp || vp.length < 6) return baseTol;
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < vp.length; i += 3) {
+    const x = vp[i + 0];
+    const y = vp[i + 1];
+    const z = vp[i + 2];
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+  }
+  const dx = maxX - minX;
+  const dy = maxY - minY;
+  const dz = maxZ - minZ;
+  const diag = Math.hypot(dx, dy, dz) || 1;
+  return Math.max(baseTol, diag * 1e-6);
+}
+
+function __booleanBoundaryPolylineLength(points) {
+  if (!Array.isArray(points) || points.length === 0) return 0;
+  let length = 0;
+  if (typeof points[0] === 'number') {
+    for (let i = 3; i + 2 < points.length; i += 3) {
+      length += Math.hypot(
+        (points[i + 0] || 0) - (points[i - 3] || 0),
+        (points[i + 1] || 0) - (points[i - 2] || 0),
+        (points[i + 2] || 0) - (points[i - 1] || 0),
+      );
+    }
+    return length;
+  }
+  for (let i = 1; i < points.length; i += 1) {
+    const a = points[i - 1];
+    const b = points[i];
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length < 3 || b.length < 3) continue;
+    length += Math.hypot(
+      (b[0] || 0) - (a[0] || 0),
+      (b[1] || 0) - (a[1] || 0),
+      (b[2] || 0) - (a[2] || 0),
+    );
+  }
+  return length;
+}
+
+function __booleanAnalyzePlanarFace(solid, faceName) {
+  if (!solid || typeof solid.getFace !== 'function' || !faceName) return null;
+  const triangles = solid.getFace(faceName) || [];
+  if (!Array.isArray(triangles) || triangles.length === 0) return null;
+
+  let area = 0;
+  let nx = 0;
+  let ny = 0;
+  let nz = 0;
+  let planePoint = null;
+  const points = [];
+
+  for (const triangle of triangles) {
+    const p1 = Array.isArray(triangle?.p1) ? triangle.p1 : null;
+    const p2 = Array.isArray(triangle?.p2) ? triangle.p2 : null;
+    const p3 = Array.isArray(triangle?.p3) ? triangle.p3 : null;
+    if (!p1 || !p2 || !p3) continue;
+    const ux = (p2[0] || 0) - (p1[0] || 0);
+    const uy = (p2[1] || 0) - (p1[1] || 0);
+    const uz = (p2[2] || 0) - (p1[2] || 0);
+    const vx = (p3[0] || 0) - (p1[0] || 0);
+    const vy = (p3[1] || 0) - (p1[1] || 0);
+    const vz = (p3[2] || 0) - (p1[2] || 0);
+    const cx = uy * vz - uz * vy;
+    const cy = uz * vx - ux * vz;
+    const cz = ux * vy - uy * vx;
+    const triArea = 0.5 * Math.hypot(cx, cy, cz);
+    if (!(triArea > 0)) continue;
+    nx += cx;
+    ny += cy;
+    nz += cz;
+    area += triArea;
+    if (!planePoint) planePoint = [p1[0] || 0, p1[1] || 0, p1[2] || 0];
+    points.push(p1, p2, p3);
+  }
+
+  const normalLen = Math.hypot(nx, ny, nz);
+  if (!(area > 0) || !(normalLen > 1e-12) || !planePoint) return null;
+  const normal = [nx / normalLen, ny / normalLen, nz / normalLen];
+
+  return {
+    faceName,
+    area,
+    normal,
+    point: planePoint,
+    points,
+  };
+}
+
+function __booleanArePlanarFaceAnalysesCoplanar(faceA, faceB, {
+  distanceTolerance = 1e-4,
+  normalTolerance = 2e-4,
+} = {}) {
+  if (!faceA || !faceB) return false;
+  const dot = (
+    faceA.normal[0] * faceB.normal[0]
+    + faceA.normal[1] * faceB.normal[1]
+    + faceA.normal[2] * faceB.normal[2]
+  );
+  if (Math.abs(Math.abs(dot) - 1) > normalTolerance) return false;
+
+  const distanceFromPlane = (normal, planePoint, point) => Math.abs(
+    normal[0] * ((point[0] || 0) - (planePoint[0] || 0))
+    + normal[1] * ((point[1] || 0) - (planePoint[1] || 0))
+    + normal[2] * ((point[2] || 0) - (planePoint[2] || 0))
+  );
+
+  if (distanceFromPlane(faceA.normal, faceA.point, faceB.point) > distanceTolerance) return false;
+  if (distanceFromPlane(faceB.normal, faceB.point, faceA.point) > distanceTolerance) return false;
+  return true;
+}
+
+function __booleanMergeCoplanarAdjacentIntersectSidewalls(solid, debugLog, context = null) {
+  const op = String(context?.op || '').toUpperCase();
+  const featureID = String(context?.featureID || '').trim();
+  if (op !== 'INTERSECT' || !featureID) return { mergedFaces: 0 };
+  if (
+    !solid
+    || typeof solid.getFaceNames !== 'function'
+    || typeof solid.getFaceMetadata !== 'function'
+    || typeof solid.getBoundaryEdgePolylines !== 'function'
+    || typeof solid.renameFace !== 'function'
+    || typeof solid.setFaceMetadata !== 'function'
+  ) {
+    return { mergedFaces: 0 };
+  }
+
+  const solidTol = __booleanDeriveSolidToleranceFromVerts(solid, 1e-5);
+  const distanceTolerance = Math.max(solidTol * 4, 2e-4);
+  const normalTolerance = 2e-4;
+  const minSharedBoundaryLength = Math.max(distanceTolerance * 10, 1e-3);
+
+  const collectNeighborSharedLengths = () => {
+    const map = new Map();
+    const add = (from, to, length) => {
+      if (!from || !to || !(length > 0)) return;
+      let inner = map.get(from);
+      if (!inner) {
+        inner = new Map();
+        map.set(from, inner);
+      }
+      inner.set(to, (inner.get(to) || 0) + length);
+    };
+
+    const boundaries = solid.getBoundaryEdgePolylines() || [];
+    for (const boundary of boundaries) {
+      const faceA = String(boundary?.faceA || '').trim();
+      const faceB = String(boundary?.faceB || '').trim();
+      if (!faceA || !faceB || faceA === faceB) continue;
+      const sharedLength = __booleanBoundaryPolylineLength(boundary?.positions || boundary?.pts || []);
+      if (!(sharedLength > 0)) continue;
+      add(faceA, faceB, sharedLength);
+      add(faceB, faceA, sharedLength);
+    }
+    return map;
+  };
+
+  const getFaceAnalysis = (() => {
+    const cache = new Map();
+    return (faceName) => {
+      if (!cache.has(faceName)) cache.set(faceName, __booleanAnalyzePlanarFace(solid, faceName));
+      return cache.get(faceName);
+    };
+  })();
+
+  let mergedFaces = 0;
+  const maxPasses = Math.max(1, (solid.getFaceNames() || []).length);
+
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    const neighborSharedLengths = collectNeighborSharedLengths();
+    const currentFeatureFaces = (solid.getFaceNames() || [])
+      .map((name) => String(name || '').trim())
+      .filter((name) => {
+        if (!name) return false;
+        const metadata = solid.getFaceMetadata(name) || {};
+        return (
+          __booleanGetFaceFeatureId(name, metadata) === featureID
+          && __booleanGetFaceType(name, metadata) === 'SIDEWALL'
+        );
+      });
+    if (currentFeatureFaces.length === 0) break;
+
+    let mergedThisPass = false;
+    for (const faceName of currentFeatureFaces) {
+      const faceAnalysis = getFaceAnalysis(faceName);
+      if (!faceAnalysis) continue;
+      const neighbors = neighborSharedLengths.get(faceName);
+      if (!neighbors || neighbors.size === 0) continue;
+
+      let best = null;
+      for (const [neighborName, sharedLength] of neighbors.entries()) {
+        if (!(sharedLength > minSharedBoundaryLength)) continue;
+        const neighborMetadata = solid.getFaceMetadata(neighborName) || {};
+        if (__booleanGetFaceFeatureId(neighborName, neighborMetadata) === featureID) continue;
+        const neighborFaceType = __booleanGetFaceType(neighborName, neighborMetadata);
+        if (neighborFaceType !== 'STARTCAP' && neighborFaceType !== 'ENDCAP') continue;
+
+        const neighborAnalysis = getFaceAnalysis(neighborName);
+        if (!neighborAnalysis) continue;
+        if (!__booleanArePlanarFaceAnalysesCoplanar(faceAnalysis, neighborAnalysis, {
+          distanceTolerance,
+          normalTolerance,
+        })) {
+          continue;
+        }
+
+        const candidate = {
+          faceName: neighborName,
+          sharedLength,
+          area: Number(neighborAnalysis.area) || 0,
+        };
+        if (
+          !best
+          || candidate.sharedLength > best.sharedLength
+          || (candidate.sharedLength === best.sharedLength && candidate.area > best.area)
+        ) {
+          best = candidate;
+        }
+      }
+
+      if (!best?.faceName) continue;
+
+      const targetMetadata = __booleanCloneMetadataObject(solid.getFaceMetadata(best.faceName) || {});
+      if (!solid.renameFace(faceName, best.faceName)) continue;
+      const core = getSyncedCppSolidCore(solid);
+      core.setFaceMetadata(best.faceName, targetMetadata);
+      syncSolidAuthoringStateFromCpp(solid, core);
+      __booleanInvalidateSolidCaches(solid);
+      mergedFaces += 1;
+      mergedThisPass = true;
+
+      debugLog?.('Merged coplanar intersect sidewall into host face', {
+        context,
+        sourceFaceName: faceName,
+        targetFaceName: best.faceName,
+        sharedLength: best.sharedLength,
+        distanceTolerance,
+        normalTolerance,
+      });
+      break;
+    }
+
+    if (!mergedThisPass) break;
+  }
+
+  return {
+    mergedFaces,
+    distanceTolerance,
+    normalTolerance,
+  };
+}
+
 async function __booleanPostTinyFaceCleanup(solid, debugLog, context = null) {
   if (!solid || typeof solid !== 'object') return solid;
   try {
@@ -452,6 +758,22 @@ async function __booleanPostTinyFaceCleanup(solid, debugLog, context = null) {
   } catch (err) {
     debugLog?.('Post-boolean tiny-face cleanup failed', {
       maxArea: BOOLEAN_TINY_FACE_MAX_AREA,
+      context,
+      message: err?.message || err,
+    });
+  }
+  try {
+    __booleanRefreshAuthoringStateFromNative(solid);
+  } catch (err) {
+    debugLog?.('Post-boolean authoring-state refresh failed', {
+      context,
+      message: err?.message || err,
+    });
+  }
+  try {
+    __booleanMergeCoplanarAdjacentIntersectSidewalls(solid, debugLog, context);
+  } catch (err) {
+    debugLog?.('Post-boolean coplanar intersect merge failed', {
       context,
       message: err?.message || err,
     });
@@ -1083,7 +1405,7 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
       };
 
       const addResult = async (solid, target) => {
-        solid = await __booleanPostTinyFaceCleanup(solid, debugLog, { op: 'SUBTRACT' });
+        solid = await __booleanPostTinyFaceCleanup(solid, debugLog, { op: 'SUBTRACT', featureID });
         const inheritedName = target?.name || target?.uuid || null;
         const finalName = inheritedName || (featureID ? `${featureID}_${++idx}` : solid.name || 'RESULT');
         try { solid.name = finalName; } catch (_) { }
@@ -1247,7 +1569,7 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
         }
       }
     }
-    result = await __booleanPostTinyFaceCleanup(result, debugLog, { op });
+    result = await __booleanPostTinyFaceCleanup(result, debugLog, { op, featureID });
     debugLog('Boolean successful', {
       result: __booleanDebugSummarizeSolid(result),
       removedCount: tools.length + (baseSolid ? 1 : 0),

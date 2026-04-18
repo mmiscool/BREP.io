@@ -32,6 +32,10 @@ import {
     afterRun_extrude_negative_distance_cap_alignment,
     test_extrude_negative_distance_cap_alignment,
 } from './test_extrude_negative_distance.js';
+import {
+    afterRun_extrude_intersect_coplanar_face_merge,
+    test_extrude_intersect_coplanar_face_merge,
+} from './test_extrude_intersect_coplanar_face_merge.js';
 import { test_face_source_feature_seed } from './test_face_source_feature_seed.js';
 import { test_ExtrudeFace } from './test_extrudeFace.js';
 import { test_Fillet } from './test_fillet.js';
@@ -40,6 +44,14 @@ import {
     afterRun_fillet_edge_degenerate_segment,
     test_fillet_edge_degenerate_segment,
 } from './test_fillet_edge_degenerate_segment.js';
+import {
+    afterRun_sketch_profile_tolerant_loop_join,
+    test_sketch_profile_tolerant_loop_join,
+} from './test_sketch_profile_tolerant_loop_join.js';
+import {
+    afterRun_fillet_compound_snapshot_resolution,
+    test_fillet_compound_snapshot_resolution,
+} from './test_fillet_compound_snapshot_resolution.js';
 import {
     afterRun_fillet_generated_history_20260321144106,
     test_fillet_generated_history_20260321144106,
@@ -457,6 +469,14 @@ export const testFunctions = [
         exportSolids: true,
         resetHistory: true,
     },
+    {
+        test: test_extrude_intersect_coplanar_face_merge,
+        afterRun: afterRun_extrude_intersect_coplanar_face_merge,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
     { test: test_ExtrudeFace, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_Fillet, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_fillet_angle, afterRun: afterRun_fillet_angle, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -471,6 +491,22 @@ export const testFunctions = [
     {
         test: test_fillet_edge_degenerate_segment,
         afterRun: afterRun_fillet_edge_degenerate_segment,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_sketch_profile_tolerant_loop_join,
+        afterRun: afterRun_sketch_profile_tolerant_loop_join,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_fillet_compound_snapshot_resolution,
+        afterRun: afterRun_fillet_compound_snapshot_resolution,
         printArtifacts: false,
         exportFaces: false,
         exportSolids: false,

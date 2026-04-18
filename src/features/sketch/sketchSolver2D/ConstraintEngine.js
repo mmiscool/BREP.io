@@ -9,10 +9,50 @@ const POINT_LINE_DISTANCE_TYPE = "↥";
 const distanceConstraintTypes = new Set(["⟺", POINT_LINE_DISTANCE_TYPE]);
 let globalDistanceSolveCycleId = 0;
 
+function cloneGeometry(geometry) {
+    if (!geometry || typeof geometry !== "object") return geometry;
+    return {
+        ...geometry,
+        points: Array.isArray(geometry.points) ? geometry.points.slice() : geometry.points,
+    };
+}
+
+function cloneConstraint(constraint) {
+    if (!constraint || typeof constraint !== "object") return constraint;
+    return {
+        ...constraint,
+        points: Array.isArray(constraint.points) ? constraint.points.slice() : constraint.points,
+    };
+}
+
+function pointStateSignature(points) {
+    let out = "";
+    for (let i = 0; i < points.length; i++) {
+        const point = points[i];
+        if (!point) {
+            out += "null;";
+            continue;
+        }
+        out += `${point.id}:${point.x},${point.y},${point.fixed ? 1 : 0};`;
+    }
+    return out;
+}
+
+function allPointsSignature(points) {
+    let out = "";
+    for (let i = 0; i < points.length; i++) {
+        const point = points[i];
+        out += `${point.id}:${point.x},${point.y},${point.fixed ? 1 : 0};`;
+    }
+    return out;
+}
+
 // === Engine that performs numeric solving on a sketch snapshot ===
 class ConstraintEngine {
-    constructor(sketchJSON) {
-        const sketch = JSON.parse(sketchJSON);
+    constructor(sketchInput) {
+        const sketch = (typeof sketchInput === "string")
+            ? JSON.parse(sketchInput)
+            : (sketchInput || {});
         this.points = sketch.points.map(p => new Point(
             p.id,
             p.x,
@@ -21,8 +61,13 @@ class ConstraintEngine {
             p.construction,
             p.externalReference
         ));
-        this.geometries = sketch.geometries || [];
-        this.constraints = sketch.constraints || [];
+        this.pointById = new Map(this.points.map((point) => [point.id, point]));
+        this.geometries = Array.isArray(sketch.geometries)
+            ? sketch.geometries.map(cloneGeometry)
+            : [];
+        this.constraints = Array.isArray(sketch.constraints)
+            ? sketch.constraints.map(cloneConstraint)
+            : [];
     }
 
     processConstraintsOfType(type) {
@@ -31,15 +76,23 @@ class ConstraintEngine {
             : this.constraints.filter(c => c.type === type);
 
         for (const constraint of list) {
-            constraint.status = "";
             const constraintValue = parseFloat(constraint.value);
-            const points = constraint.points.map(id => this.points.find(p => p.id === id));
-            const before = JSON.stringify(points);
+            const points = constraint.points.map(id => this.pointById.get(id));
+            const before = pointStateSignature(points);
+            const previousSolveValue = constraint._previousSolveValue;
+            const sameSolveValue = (previousSolveValue === constraintValue)
+                || (Number.isNaN(previousSolveValue) && Number.isNaN(constraintValue));
+            const distanceSlidePending = distanceConstraintTypes.has(constraint?.type)
+                && constraint?._distanceThrottleActive === true;
 
             if (constraint.previousPointValues !== undefined &&
+                sameSolveValue &&
+                !distanceSlidePending &&
                 constraint.previousPointValues === before &&
                 constraint.status === "solved") continue;
 
+            constraint.status = "";
+            constraint.error = null;
             try {
                 constraintFunctions[constraint.type](this, constraint, points, constraintValue);
             } catch (e) {
@@ -47,7 +100,8 @@ class ConstraintEngine {
                 constraint.error = e?.message || String(e);
             }
 
-            const after = JSON.stringify(points);
+            const after = pointStateSignature(points);
+            constraint._previousSolveValue = constraintValue;
             if (before === after) {
                 constraint.status = "solved";
                 constraint.previousPointValues = after;
@@ -132,7 +186,7 @@ class ConstraintEngine {
             "⇌", "⟺", POINT_LINE_DISTANCE_TYPE, "⇌", "⟺", POINT_LINE_DISTANCE_TYPE, "⏛", "━", "│", // repeated passes for convergence
         ];
 
-        let prev = JSON.stringify(this.points);
+        let prev = allPointsSignature(this.points);
 
         for (let i = 0; i < iterations; i++) {
             this._distanceSolvePassToken = `${this._distanceSolveCycleId}:${i}`;
@@ -147,26 +201,11 @@ class ConstraintEngine {
                 this.tidyDecimalsOfPoints(decimalsPlaces, false);
             }
 
-            const cur = JSON.stringify(this.points);
+            const cur = allPointsSignature(this.points);
             if (cur === prev && !hasPendingDistanceTargetSlides()) {
                 break;
             }
             prev = cur;
-
-            // Movement throttling
-            const maxMove = 0.5;
-            for (let j = 0; j < this.points.length; j++) {
-                const p = this.points[j];
-                const last = JSON.parse(prev)[j];
-                const dx = p.x - last.x;
-                const dy = p.y - last.y;
-                const d = Math.hypot(dx, dy);
-                if (d > maxMove) {
-                    const s = maxMove / d;
-                    p.x = last.x + dx * s;
-                    p.y = last.y + dy * s;
-                }
-            }
         }
 
         // Return a new sketch object mirroring input structure
@@ -179,11 +218,11 @@ class ConstraintEngine {
                 construction: p.construction === true,
                 externalReference: p.externalReference === true
             })),
-            geometries: this.geometries,
-            constraints: this.constraints.filter(c => !c.temporary) // drop temporaries
+            geometries: this.geometries.map(cloneGeometry),
+            constraints: this.constraints.filter(c => !c.temporary).map(cloneConstraint) // drop temporaries
         };
 
-        return JSON.parse(JSON.stringify(updatedSketch));
+        return updatedSketch;
     }
 }
 
@@ -252,7 +291,7 @@ export class ConstraintSolver {
             ? this.fullSolve()
             : (iterations == null ? this.defaultLoops() : iterations);
 
-        const engine = new ConstraintEngine(JSON.stringify(this.sketchObject));
+        const engine = new ConstraintEngine(this.sketchObject);
         const solved = engine.solve(iters);
         //console.log(`Solver completed in ${iters} iterations.`);
         //console.log(solved.constraints);

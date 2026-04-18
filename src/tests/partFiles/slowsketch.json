@@ -1,0 +1,3973 @@
+{
+  "features": [
+    {
+      "type": "S",
+      "inputParams": {
+        "id": "S1",
+        "sketchPlane": null,
+        "editSketch": null,
+        "dumpSketchDiagnostics": null,
+        "curveResolution": "resolution",
+        "__open": false
+      },
+      "persistentData": {
+        "basis": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x": [
+            1,
+            0,
+            0
+          ],
+          "y": [
+            0,
+            1,
+            0
+          ],
+          "z": [
+            0,
+            0,
+            1
+          ]
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0,
+              "y": 0,
+              "fixed": true,
+              "construction": true,
+              "externalReference": false
+            },
+            {
+              "id": 2,
+              "x": 2.107407,
+              "y": -19.888659,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 3,
+              "x": -24.999983,
+              "y": -75.000094,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 4,
+              "x": 24.99998,
+              "y": -16.583233,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 5,
+              "x": -24.999983,
+              "y": -75.000094,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 6,
+              "x": 24.999978,
+              "y": -75.000094,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 7,
+              "x": 24.999978,
+              "y": -75.000094,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 8,
+              "x": 24.99998,
+              "y": -16.583233,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 9,
+              "x": -24.999972,
+              "y": -16.583225,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 10,
+              "x": -24.999972,
+              "y": -16.583225,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 11,
+              "x": 0,
+              "y": -75.000093,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 12,
+              "x": -24.999972,
+              "y": -16.583225,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 14,
+              "x": 24.99998,
+              "y": -16.583233,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 15,
+              "x": -0.000004,
+              "y": -60.000046,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 16,
+              "x": -20.000036,
+              "y": -75.000094,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 17,
+              "x": -20.000036,
+              "y": -32.000141,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 18,
+              "x": 19.99995,
+              "y": -32.000141,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 19,
+              "x": 19.99995,
+              "y": -32.000141,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 20,
+              "x": 19.999952,
+              "y": -75.000095,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 21,
+              "x": 19.999952,
+              "y": -75.000095,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 22,
+              "x": 24.999978,
+              "y": -75.000095,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            }
+          ],
+          "geometries": [
+            {
+              "id": 2,
+              "type": "circle",
+              "points": [
+                0,
+                2
+              ],
+              "construction": false
+            },
+            {
+              "id": 3,
+              "type": "line",
+              "points": [
+                3,
+                6
+              ],
+              "construction": true
+            },
+            {
+              "id": 4,
+              "type": "line",
+              "points": [
+                7,
+                4
+              ],
+              "construction": false
+            },
+            {
+              "id": 5,
+              "type": "line",
+              "points": [
+                8,
+                9
+              ],
+              "construction": true
+            },
+            {
+              "id": 6,
+              "type": "line",
+              "points": [
+                10,
+                5
+              ],
+              "construction": false
+            },
+            {
+              "id": 7,
+              "type": "line",
+              "points": [
+                0,
+                11
+              ],
+              "construction": true
+            },
+            {
+              "id": 9,
+              "type": "arc",
+              "points": [
+                0,
+                14,
+                12
+              ],
+              "construction": false
+            },
+            {
+              "id": 10,
+              "type": "line",
+              "points": [
+                11,
+                15
+              ],
+              "construction": true
+            },
+            {
+              "id": 11,
+              "type": "line",
+              "points": [
+                3,
+                16
+              ],
+              "construction": false
+            },
+            {
+              "id": 12,
+              "type": "line",
+              "points": [
+                17,
+                16
+              ],
+              "construction": false
+            },
+            {
+              "id": 13,
+              "type": "line",
+              "points": [
+                17,
+                18
+              ],
+              "construction": false
+            },
+            {
+              "id": 14,
+              "type": "line",
+              "points": [
+                19,
+                20
+              ],
+              "construction": false
+            },
+            {
+              "id": 15,
+              "type": "line",
+              "points": [
+                21,
+                22
+              ],
+              "construction": false
+            }
+          ],
+          "constraints": [
+            {
+              "id": 0,
+              "type": "⏚",
+              "points": [
+                0
+              ],
+              "status": "solved",
+              "previousPointValues": "[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true,\"construction\":true,\"externalReference\":false}]"
+            },
+            {
+              "id": 2,
+              "type": "⟺",
+              "points": [
+                0,
+                2
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "diameter",
+              "value": 20,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "_distanceRequestedTarget": 20,
+              "_distanceAppliedTarget": 20,
+              "_distanceThrottleActive": false,
+              "_distanceLastAppliedPassToken": null,
+              "error": null,
+              "previousPointValues": "[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true,\"construction\":true,\"externalReference\":false},{\"id\":2,\"x\":2.107407,\"y\":-19.888659,\"fixed\":false,\"construction\":false,\"externalReference\":false}]",
+              "radialGeometryType": "circle"
+            },
+            {
+              "id": 3,
+              "type": "≡",
+              "points": [
+                3,
+                5
+              ],
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":3,\"x\":-24.999983,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":5,\"x\":-24.999983,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 4,
+              "type": "≡",
+              "points": [
+                6,
+                7
+              ],
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":6,\"x\":24.999978,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":7,\"x\":24.999978,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 5,
+              "type": "≡",
+              "points": [
+                4,
+                8
+              ],
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":4,\"x\":24.99998,\"y\":-16.583233,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":8,\"x\":24.99998,\"y\":-16.583233,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 6,
+              "type": "≡",
+              "points": [
+                9,
+                10
+              ],
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":9,\"x\":-24.999972,\"y\":-16.583225,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":10,\"x\":-24.999972,\"y\":-16.583225,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 7,
+              "type": "⟂",
+              "points": [
+                3,
+                6,
+                7,
+                4
+              ],
+              "status": "",
+              "value": 270,
+              "error": null,
+              "previousPointValues": "[{\"id\":3,\"x\":-24.999989,\"y\":-74.999952,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":6,\"x\":24.999978,\"y\":-74.999952,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":7,\"x\":24.999978,\"y\":-74.999952,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":4,\"x\":24.999978,\"y\":-16.583236,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 8,
+              "type": "⟂",
+              "points": [
+                7,
+                4,
+                8,
+                9
+              ],
+              "status": "solved",
+              "value": 270,
+              "error": null,
+              "previousPointValues": "[{\"id\":7,\"x\":24.999979,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":4,\"x\":24.999979,\"y\":-16.583233,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":8,\"x\":24.99998,\"y\":-16.583233,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":9,\"x\":-24.999972,\"y\":-16.583225,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 9,
+              "type": "⟂",
+              "points": [
+                8,
+                9,
+                10,
+                5
+              ],
+              "status": "solved",
+              "value": 270,
+              "error": null,
+              "previousPointValues": "[{\"id\":8,\"x\":24.99998,\"y\":-16.583233,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":9,\"x\":-24.999972,\"y\":-16.583225,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":10,\"x\":-24.999972,\"y\":-16.583225,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":5,\"x\":-24.999983,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 11,
+              "type": "⋯",
+              "points": [
+                6,
+                3,
+                11
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":6,\"x\":24.999978,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":3,\"x\":-24.999983,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":11,\"x\":0,\"y\":-75.000093,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 12,
+              "type": "━",
+              "points": [
+                3,
+                6
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":3,\"x\":-24.999983,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":6,\"x\":24.999978,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 13,
+              "type": "⏛",
+              "points": [
+                10,
+                5,
+                12
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":10,\"x\":-24.999972,\"y\":-16.583225,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":5,\"x\":-24.999983,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":12,\"x\":-24.999972,\"y\":-16.583225,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 17,
+              "type": "⏛",
+              "points": [
+                7,
+                4,
+                14
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":7,\"x\":24.999978,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":4,\"x\":24.99998,\"y\":-16.583233,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":14,\"x\":24.99998,\"y\":-16.583233,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 18,
+              "type": "≡",
+              "points": [
+                12,
+                9
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":12,\"x\":-24.999972,\"y\":-16.583225,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":9,\"x\":-24.999972,\"y\":-16.583225,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 19,
+              "type": "≡",
+              "points": [
+                14,
+                4
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":14,\"x\":24.99998,\"y\":-16.583233,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":4,\"x\":24.99998,\"y\":-16.583233,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 20,
+              "type": "│",
+              "points": [
+                0,
+                11
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true,\"construction\":true,\"externalReference\":false},{\"id\":11,\"x\":0,\"y\":-75.000093,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 21,
+              "type": "⟺",
+              "points": [
+                0,
+                14
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "diameter",
+              "value": 30,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "_distanceRequestedTarget": 30,
+              "_distanceAppliedTarget": 30,
+              "_distanceThrottleActive": false,
+              "_distanceLastAppliedPassToken": null,
+              "error": null,
+              "previousPointValues": "[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true,\"construction\":true,\"externalReference\":false},{\"id\":14,\"x\":24.99998,\"y\":-16.583233,\"fixed\":false,\"construction\":false,\"externalReference\":false}]",
+              "radialGeometryType": "arc"
+            },
+            {
+              "id": 22,
+              "type": "⟺",
+              "points": [
+                3,
+                6
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 50,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "_distanceRequestedTarget": 50,
+              "_distanceAppliedTarget": 50,
+              "_distanceThrottleActive": false,
+              "_distanceLastAppliedPassToken": "105:77",
+              "error": null,
+              "previousPointValues": "[{\"id\":3,\"x\":-24.999983,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":6,\"x\":24.999978,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 23,
+              "type": "⟺",
+              "points": [
+                11,
+                15
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 15,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "_distanceRequestedTarget": 15,
+              "_distanceAppliedTarget": 15,
+              "_distanceThrottleActive": false,
+              "_distanceLastAppliedPassToken": "129:72",
+              "error": null,
+              "previousPointValues": "[{\"id\":11,\"x\":0,\"y\":-75.000093,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":15,\"x\":-0.000004,\"y\":-60.000046,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 24,
+              "type": "⏛",
+              "points": [
+                15,
+                0,
+                11
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":15,\"x\":-0.000004,\"y\":-60.000046,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true,\"construction\":true,\"externalReference\":false},{\"id\":11,\"x\":0,\"y\":-75.000093,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 25,
+              "type": "⟺",
+              "points": [
+                15,
+                0
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 60,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "_distanceRequestedTarget": 60,
+              "_distanceAppliedTarget": 60,
+              "_distanceThrottleActive": false,
+              "_distanceLastAppliedPassToken": null,
+              "error": null,
+              "previousPointValues": "[{\"id\":15,\"x\":-0.000004,\"y\":-60.000046,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true,\"construction\":true,\"externalReference\":false}]"
+            },
+            {
+              "id": 26,
+              "type": "≡",
+              "points": [
+                18,
+                19
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":18,\"x\":19.99995,\"y\":-32.000141,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":19,\"x\":19.99995,\"y\":-32.000141,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 27,
+              "type": "≡",
+              "points": [
+                20,
+                21
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":20,\"x\":19.999952,\"y\":-75.000095,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":21,\"x\":19.999952,\"y\":-75.000095,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 28,
+              "type": "≡",
+              "points": [
+                6,
+                22
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":6,\"x\":24.999978,\"y\":-75.000057,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":22,\"x\":24.999978,\"y\":-75.000057,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 29,
+              "type": "│",
+              "points": [
+                17,
+                16
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":17,\"x\":-20.000036,\"y\":-32.000141,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":16,\"x\":-20.000036,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 30,
+              "type": "│",
+              "points": [
+                19,
+                20
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null
+            },
+            {
+              "id": 31,
+              "type": "⇌",
+              "points": [
+                3,
+                16,
+                21,
+                22
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":3,\"x\":-24.999983,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":16,\"x\":-20.000036,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":21,\"x\":19.999952,\"y\":-75.000095,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":22,\"x\":24.999978,\"y\":-75.000095,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 32,
+              "type": "━",
+              "points": [
+                3,
+                16
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":3,\"x\":-24.999983,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":16,\"x\":-20.000036,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 33,
+              "type": "━",
+              "points": [
+                21,
+                22
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":21,\"x\":19.999952,\"y\":-75.000095,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":22,\"x\":24.999978,\"y\":-75.000095,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 34,
+              "type": "━",
+              "points": [
+                17,
+                18
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":17,\"x\":-20.000036,\"y\":-32.000141,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":18,\"x\":19.99995,\"y\":-32.000141,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 35,
+              "type": "⇌",
+              "points": [
+                21,
+                22,
+                3,
+                16
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":21,\"x\":19.999952,\"y\":-75.000095,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":22,\"x\":24.999978,\"y\":-75.000095,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":3,\"x\":-24.999983,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":16,\"x\":-20.000036,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 36,
+              "type": "⟺",
+              "points": [
+                16,
+                20
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 40,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "_distanceRequestedTarget": 40,
+              "_distanceAppliedTarget": 40,
+              "_distanceThrottleActive": false,
+              "_distanceLastAppliedPassToken": "497:75",
+              "error": null,
+              "previousPointValues": "[{\"id\":16,\"x\":-20.000036,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":20,\"x\":19.999952,\"y\":-75.000095,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 37,
+              "type": "⟺",
+              "points": [
+                19,
+                20
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 43,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "_distanceRequestedTarget": 43,
+              "_distanceAppliedTarget": 43,
+              "_distanceThrottleActive": false,
+              "_distanceLastAppliedPassToken": "499:71",
+              "error": null,
+              "previousPointValues": "[{\"id\":19,\"x\":19.99995,\"y\":-32.000141,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":20,\"x\":19.999952,\"y\":-75.000095,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            }
+          ]
+        },
+        "lastSketchSignature": "{\"points\":[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true,\"construction\":true,\"externalReference\":false},{\"id\":2,\"x\":2.107407,\"y\":-19.888659,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":3,\"x\":-24.999983,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":4,\"x\":24.99998,\"y\":-16.583233,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":5,\"x\":-24.999983,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":6,\"x\":24.999978,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":7,\"x\":24.999978,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":8,\"x\":24.99998,\"y\":-16.583233,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":9,\"x\":-24.999972,\"y\":-16.583225,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":10,\"x\":-24.999972,\"y\":-16.583225,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":11,\"x\":0,\"y\":-75.000093,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":12,\"x\":-24.999972,\"y\":-16.583225,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":14,\"x\":24.99998,\"y\":-16.583233,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":15,\"x\":-0.000004,\"y\":-60.000046,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":16,\"x\":-20.000036,\"y\":-75.000094,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":17,\"x\":-20.000036,\"y\":-32.000141,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":18,\"x\":19.99995,\"y\":-32.000141,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":19,\"x\":19.99995,\"y\":-32.000141,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":20,\"x\":19.999952,\"y\":-75.000095,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":21,\"x\":19.999952,\"y\":-75.000095,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":22,\"x\":24.999978,\"y\":-75.000095,\"fixed\":false,\"construction\":false,\"externalReference\":false}],\"geometries\":[{\"id\":2,\"type\":\"circle\",\"points\":[0,2],\"construction\":false},{\"id\":3,\"type\":\"line\",\"points\":[3,6],\"construction\":true},{\"id\":4,\"type\":\"line\",\"points\":[7,4],\"construction\":false},{\"id\":5,\"type\":\"line\",\"points\":[8,9],\"construction\":true},{\"id\":6,\"type\":\"line\",\"points\":[10,5],\"construction\":false},{\"id\":7,\"type\":\"line\",\"points\":[0,11],\"construction\":true},{\"id\":9,\"type\":\"arc\",\"points\":[0,14,12],\"construction\":false},{\"id\":10,\"type\":\"line\",\"points\":[11,15],\"construction\":true},{\"id\":11,\"type\":\"line\",\"points\":[3,16],\"construction\":false},{\"id\":12,\"type\":\"line\",\"points\":[17,16],\"construction\":false},{\"id\":13,\"type\":\"line\",\"points\":[17,18],\"construction\":false},{\"id\":14,\"type\":\"line\",\"points\":[19,20],\"construction\":false},{\"id\":15,\"type\":\"line\",\"points\":[21,22],\"construction\":false}],\"constraints\":[{\"id\":0,\"type\":\"⏚\",\"points\":[0],\"status\":\"solved\",\"previousPointValues\":\"[{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true,\\\"construction\\\":true,\\\"externalReference\\\":false}]\"},{\"id\":2,\"type\":\"⟺\",\"points\":[0,2],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"diameter\",\"value\":20,\"valueNeedsSetup\":true,\"status\":\"solved\",\"_distanceRequestedTarget\":20,\"_distanceAppliedTarget\":20,\"_distanceThrottleActive\":false,\"_distanceLastAppliedPassToken\":null,\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true,\\\"construction\\\":true,\\\"externalReference\\\":false},{\\\"id\\\":2,\\\"x\\\":2.107407,\\\"y\\\":-19.888659,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\",\"radialGeometryType\":\"circle\"},{\"id\":3,\"type\":\"≡\",\"points\":[3,5],\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":3,\\\"x\\\":-24.999983,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":5,\\\"x\\\":-24.999983,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":4,\"type\":\"≡\",\"points\":[6,7],\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":6,\\\"x\\\":24.999978,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":7,\\\"x\\\":24.999978,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":5,\"type\":\"≡\",\"points\":[4,8],\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":4,\\\"x\\\":24.99998,\\\"y\\\":-16.583233,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":8,\\\"x\\\":24.99998,\\\"y\\\":-16.583233,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":6,\"type\":\"≡\",\"points\":[9,10],\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":9,\\\"x\\\":-24.999972,\\\"y\\\":-16.583225,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":10,\\\"x\\\":-24.999972,\\\"y\\\":-16.583225,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":7,\"type\":\"⟂\",\"points\":[3,6,7,4],\"status\":\"\",\"value\":270,\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":3,\\\"x\\\":-24.999989,\\\"y\\\":-74.999952,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":6,\\\"x\\\":24.999978,\\\"y\\\":-74.999952,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":7,\\\"x\\\":24.999978,\\\"y\\\":-74.999952,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":4,\\\"x\\\":24.999978,\\\"y\\\":-16.583236,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":8,\"type\":\"⟂\",\"points\":[7,4,8,9],\"status\":\"solved\",\"value\":270,\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":7,\\\"x\\\":24.999979,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":4,\\\"x\\\":24.999979,\\\"y\\\":-16.583233,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":8,\\\"x\\\":24.99998,\\\"y\\\":-16.583233,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":9,\\\"x\\\":-24.999972,\\\"y\\\":-16.583225,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":9,\"type\":\"⟂\",\"points\":[8,9,10,5],\"status\":\"solved\",\"value\":270,\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":8,\\\"x\\\":24.99998,\\\"y\\\":-16.583233,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":9,\\\"x\\\":-24.999972,\\\"y\\\":-16.583225,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":10,\\\"x\\\":-24.999972,\\\"y\\\":-16.583225,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":5,\\\"x\\\":-24.999983,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":11,\"type\":\"⋯\",\"points\":[6,3,11],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":6,\\\"x\\\":24.999978,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":3,\\\"x\\\":-24.999983,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":11,\\\"x\\\":0,\\\"y\\\":-75.000093,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":12,\"type\":\"━\",\"points\":[3,6],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":3,\\\"x\\\":-24.999983,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":6,\\\"x\\\":24.999978,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":13,\"type\":\"⏛\",\"points\":[10,5,12],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":10,\\\"x\\\":-24.999972,\\\"y\\\":-16.583225,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":5,\\\"x\\\":-24.999983,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":12,\\\"x\\\":-24.999972,\\\"y\\\":-16.583225,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":17,\"type\":\"⏛\",\"points\":[7,4,14],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":7,\\\"x\\\":24.999978,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":4,\\\"x\\\":24.99998,\\\"y\\\":-16.583233,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":14,\\\"x\\\":24.99998,\\\"y\\\":-16.583233,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":18,\"type\":\"≡\",\"points\":[12,9],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":12,\\\"x\\\":-24.999972,\\\"y\\\":-16.583225,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":9,\\\"x\\\":-24.999972,\\\"y\\\":-16.583225,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":19,\"type\":\"≡\",\"points\":[14,4],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":14,\\\"x\\\":24.99998,\\\"y\\\":-16.583233,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":4,\\\"x\\\":24.99998,\\\"y\\\":-16.583233,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":20,\"type\":\"│\",\"points\":[0,11],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true,\\\"construction\\\":true,\\\"externalReference\\\":false},{\\\"id\\\":11,\\\"x\\\":0,\\\"y\\\":-75.000093,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":21,\"type\":\"⟺\",\"points\":[0,14],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"diameter\",\"value\":30,\"valueNeedsSetup\":true,\"status\":\"solved\",\"_distanceRequestedTarget\":30,\"_distanceAppliedTarget\":30,\"_distanceThrottleActive\":false,\"_distanceLastAppliedPassToken\":null,\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true,\\\"construction\\\":true,\\\"externalReference\\\":false},{\\\"id\\\":14,\\\"x\\\":24.99998,\\\"y\\\":-16.583233,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\",\"radialGeometryType\":\"arc\"},{\"id\":22,\"type\":\"⟺\",\"points\":[3,6],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":50,\"valueNeedsSetup\":true,\"status\":\"solved\",\"_distanceRequestedTarget\":50,\"_distanceAppliedTarget\":50,\"_distanceThrottleActive\":false,\"_distanceLastAppliedPassToken\":\"105:77\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":3,\\\"x\\\":-24.999983,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":6,\\\"x\\\":24.999978,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":23,\"type\":\"⟺\",\"points\":[11,15],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":15,\"valueNeedsSetup\":true,\"status\":\"solved\",\"_distanceRequestedTarget\":15,\"_distanceAppliedTarget\":15,\"_distanceThrottleActive\":false,\"_distanceLastAppliedPassToken\":\"129:72\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":11,\\\"x\\\":0,\\\"y\\\":-75.000093,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":15,\\\"x\\\":-0.000004,\\\"y\\\":-60.000046,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":24,\"type\":\"⏛\",\"points\":[15,0,11],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":15,\\\"x\\\":-0.000004,\\\"y\\\":-60.000046,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true,\\\"construction\\\":true,\\\"externalReference\\\":false},{\\\"id\\\":11,\\\"x\\\":0,\\\"y\\\":-75.000093,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":25,\"type\":\"⟺\",\"points\":[15,0],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":60,\"valueNeedsSetup\":true,\"status\":\"solved\",\"_distanceRequestedTarget\":60,\"_distanceAppliedTarget\":60,\"_distanceThrottleActive\":false,\"_distanceLastAppliedPassToken\":null,\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":15,\\\"x\\\":-0.000004,\\\"y\\\":-60.000046,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true,\\\"construction\\\":true,\\\"externalReference\\\":false}]\"},{\"id\":26,\"type\":\"≡\",\"points\":[18,19],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":18,\\\"x\\\":19.99995,\\\"y\\\":-32.000141,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":19,\\\"x\\\":19.99995,\\\"y\\\":-32.000141,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":27,\"type\":\"≡\",\"points\":[20,21],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":20,\\\"x\\\":19.999952,\\\"y\\\":-75.000095,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":21,\\\"x\\\":19.999952,\\\"y\\\":-75.000095,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":28,\"type\":\"≡\",\"points\":[6,22],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":6,\\\"x\\\":24.999978,\\\"y\\\":-75.000057,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":22,\\\"x\\\":24.999978,\\\"y\\\":-75.000057,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":29,\"type\":\"│\",\"points\":[17,16],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":17,\\\"x\\\":-20.000036,\\\"y\\\":-32.000141,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":16,\\\"x\\\":-20.000036,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":30,\"type\":\"│\",\"points\":[19,20],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null},{\"id\":31,\"type\":\"⇌\",\"points\":[3,16,21,22],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":3,\\\"x\\\":-24.999983,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":16,\\\"x\\\":-20.000036,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":21,\\\"x\\\":19.999952,\\\"y\\\":-75.000095,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":22,\\\"x\\\":24.999978,\\\"y\\\":-75.000095,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":32,\"type\":\"━\",\"points\":[3,16],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":3,\\\"x\\\":-24.999983,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":16,\\\"x\\\":-20.000036,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":33,\"type\":\"━\",\"points\":[21,22],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":21,\\\"x\\\":19.999952,\\\"y\\\":-75.000095,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":22,\\\"x\\\":24.999978,\\\"y\\\":-75.000095,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":34,\"type\":\"━\",\"points\":[17,18],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":17,\\\"x\\\":-20.000036,\\\"y\\\":-32.000141,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":18,\\\"x\\\":19.99995,\\\"y\\\":-32.000141,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":35,\"type\":\"⇌\",\"points\":[21,22,3,16],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":21,\\\"x\\\":19.999952,\\\"y\\\":-75.000095,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":22,\\\"x\\\":24.999978,\\\"y\\\":-75.000095,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":3,\\\"x\\\":-24.999983,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":16,\\\"x\\\":-20.000036,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":36,\"type\":\"⟺\",\"points\":[16,20],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":40,\"valueNeedsSetup\":true,\"status\":\"solved\",\"_distanceRequestedTarget\":40,\"_distanceAppliedTarget\":40,\"_distanceThrottleActive\":false,\"_distanceLastAppliedPassToken\":\"497:75\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":16,\\\"x\\\":-20.000036,\\\"y\\\":-75.000094,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":20,\\\"x\\\":19.999952,\\\"y\\\":-75.000095,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":37,\"type\":\"⟺\",\"points\":[19,20],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":43,\"valueNeedsSetup\":true,\"status\":\"solved\",\"_distanceRequestedTarget\":43,\"_distanceAppliedTarget\":43,\"_distanceThrottleActive\":false,\"_distanceLastAppliedPassToken\":\"499:71\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":19,\\\"x\\\":19.99995,\\\"y\\\":-32.000141,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":20,\\\"x\\\":19.999952,\\\"y\\\":-75.000095,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"}]}",
+        "lastSketchChanged": false,
+        "externalRefs": [],
+        "sketchDimOffsets": {
+          "1": {
+            "du": 49.19810344950051,
+            "dv": -1.2238172315206342
+          },
+          "2": {
+            "du": 36.79788551752042,
+            "dv": 21.18244923000511
+          },
+          "21": {
+            "du": 45.893441471090284,
+            "dv": -19.221080405039686
+          },
+          "22": {
+            "d": -26.172240943903994
+          },
+          "23": {
+            "d": 43.25031763488518
+          },
+          "25": {
+            "d": 43.461028788421565
+          },
+          "36": {
+            "d": -14.793635250448673
+          },
+          "37": {
+            "d": 18.84620428996233
+          }
+        }
+      },
+      "timestamp": 1776536665176
+    },
+    {
+      "type": "E",
+      "inputParams": {
+        "id": "E2",
+        "profile": "S1:PROFILE",
+        "consumeProfileSketch": true,
+        "distance": "30",
+        "distanceBack": "0",
+        "boolean": {
+          "targets": [],
+          "operation": "NONE",
+          "overlapConditioningEnabled": true
+        },
+        "__open": false
+      },
+      "persistentData": {
+        "__refPreviewSnapshots": {
+          "profile": {
+            "S1:PROFILE": {
+              "type": "FACE",
+              "edgePositions": [
+                [
+                  24.999978,
+                  -75.000094,
+                  0,
+                  24.99998,
+                  -16.583233,
+                  0
+                ],
+                [
+                  24.99998,
+                  -16.583233,
+                  0,
+                  27.75136134316416,
+                  -11.395813280930106,
+                  0,
+                  29.43957809244606,
+                  -5.771815872969195,
+                  0,
+                  29.999954059443947,
+                  0.07330186860950924,
+                  0,
+                  29.41102104012965,
+                  5.915611389344298,
+                  0,
+                  27.69534126943502,
+                  11.531291718719912,
+                  0,
+                  24.918643053949666,
+                  16.705204131722994,
+                  0,
+                  21.187302696950947,
+                  21.239134190462288,
+                  0,
+                  16.644269184120326,
+                  24.95938541028668,
+                  0,
+                  11.463587756696093,
+                  27.723433634332103,
+                  0,
+                  5.843732175936741,
+                  29.42538718502461,
+                  0,
+                  0.0000011222317287852573,
+                  30.000043612179763,
+                  0,
+                  -5.84372997446637,
+                  29.42538762222534,
+                  0,
+                  -11.463585682557964,
+                  27.723434491984232,
+                  0,
+                  -16.644267316775373,
+                  24.959386655533265,
+                  0,
+                  -21.187301107937845,
+                  21.239135775597482,
+                  0,
+                  -24.918641804144073,
+                  16.7052059960197,
+                  0,
+                  -27.695340406717435,
+                  11.531293790756246,
+                  0,
+                  -29.411020597551094,
+                  5.915613589739809,
+                  0,
+                  -29.99995405395976,
+                  0.07330411306626003,
+                  0,
+                  -29.43957852426634,
+                  -5.7718136704371386,
+                  0,
+                  -27.751362195745727,
+                  -11.395811204702547,
+                  0,
+                  -24.999972,
+                  -16.583225,
+                  0
+                ],
+                [
+                  -24.999972,
+                  -16.583225,
+                  0,
+                  -24.999983,
+                  -75.000094,
+                  0
+                ],
+                [
+                  -24.999983,
+                  -75.000094,
+                  0,
+                  -20.000036,
+                  -75.000094,
+                  0
+                ],
+                [
+                  -20.000036,
+                  -32.000141,
+                  0,
+                  -20.000036,
+                  -75.000094,
+                  0
+                ],
+                [
+                  -20.000036,
+                  -32.000141,
+                  0,
+                  19.99995,
+                  -32.000141,
+                  0
+                ],
+                [
+                  19.99995,
+                  -32.000141,
+                  0,
+                  19.999952,
+                  -75.000095,
+                  0
+                ],
+                [
+                  19.999952,
+                  -75.000095,
+                  0,
+                  24.999978,
+                  -75.000095,
+                  0
+                ],
+                [
+                  19.999998027048154,
+                  0,
+                  0,
+                  19.61570367302248,
+                  3.901806055418754,
+                  0,
+                  18.477588827455904,
+                  7.653667892285811,
+                  0,
+                  16.629390605601397,
+                  11.111403564278726,
+                  0,
+                  14.142134228643322,
+                  14.14213422864332,
+                  0,
+                  11.111403564278728,
+                  16.629390605601397,
+                  0,
+                  7.653667892285812,
+                  18.477588827455904,
+                  0,
+                  3.9018060554187555,
+                  19.61570367302248,
+                  0,
+                  1.224646678338895e-15,
+                  19.999998027048154,
+                  0,
+                  -3.901806055418753,
+                  19.61570367302248,
+                  0,
+                  -7.65366789228581,
+                  18.477588827455904,
+                  0,
+                  -11.111403564278723,
+                  16.6293906056014,
+                  0,
+                  -14.14213422864332,
+                  14.142134228643322,
+                  0,
+                  -16.6293906056014,
+                  11.111403564278726,
+                  0,
+                  -18.477588827455904,
+                  7.653667892285814,
+                  0,
+                  -19.61570367302248,
+                  3.9018060554187612,
+                  0,
+                  -19.999998027048154,
+                  2.44929335667779e-15,
+                  0,
+                  -19.61570367302248,
+                  -3.9018060554187564,
+                  0,
+                  -18.477588827455907,
+                  -7.653667892285809,
+                  0,
+                  -16.6293906056014,
+                  -11.111403564278723,
+                  0,
+                  -14.142134228643323,
+                  -14.14213422864332,
+                  0,
+                  -11.111403564278726,
+                  -16.629390605601397,
+                  0,
+                  -7.653667892285823,
+                  -18.4775888274559,
+                  0,
+                  -3.901806055418762,
+                  -19.615703673022477,
+                  0,
+                  -3.673940035016685e-15,
+                  -19.999998027048154,
+                  0,
+                  3.901806055418755,
+                  -19.61570367302248,
+                  0,
+                  7.6536678922858155,
+                  -18.477588827455904,
+                  0,
+                  11.111403564278719,
+                  -16.6293906056014,
+                  0,
+                  14.142134228643318,
+                  -14.142134228643323,
+                  0,
+                  16.629390605601397,
+                  -11.111403564278726,
+                  0,
+                  18.4775888274559,
+                  -7.6536678922858234,
+                  0,
+                  19.615703673022477,
+                  -3.9018060554187635,
+                  0,
+                  19.999998027048154,
+                  0,
+                  0
+                ]
+              ],
+              "center": [
+                -0.7357173881804602,
+                -0.5231993044497537,
+                0
+              ],
+              "normal": [
+                0,
+                0,
+                -1
+              ],
+              "sourceUuid": "8a69def2-29ac-4d74-96dd-ec0c688a495c",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1776536665176
+            }
+          }
+        }
+      },
+      "timestamp": 1776536665188
+    },
+    {
+      "type": "S",
+      "inputParams": {
+        "id": "S3",
+        "sketchPlane": "E2:S1:G4_SW",
+        "editSketch": null,
+        "dumpSketchDiagnostics": null,
+        "curveResolution": "resolution",
+        "__open": true
+      },
+      "persistentData": {
+        "basis": {
+          "origin": [
+            24.99997901916504,
+            -45.79166221618652,
+            -15
+          ],
+          "x": [
+            0,
+            0,
+            1
+          ],
+          "y": [
+            6.530130774357913e-8,
+            0.9999999999999979,
+            0
+          ],
+          "z": [
+            -0.9999999999999979,
+            6.530130774357913e-8,
+            0
+          ],
+          "refName": "E2:S1:G4_SW"
+        },
+        "sketch": {
+          "points": [
+            {
+              "id": 0,
+              "x": 0,
+              "y": 0,
+              "fixed": true,
+              "construction": true,
+              "externalReference": false
+            },
+            {
+              "id": 1,
+              "x": -0.000003,
+              "y": -14.20842,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 2,
+              "x": -14.25748,
+              "y": -18.86935,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 3,
+              "x": 15,
+              "y": -29.208429,
+              "fixed": true,
+              "construction": true,
+              "externalReference": true
+            },
+            {
+              "id": 4,
+              "x": -15,
+              "y": -29.208429,
+              "fixed": true,
+              "construction": true,
+              "externalReference": true
+            },
+            {
+              "id": 5,
+              "x": 15,
+              "y": 29.208429,
+              "fixed": true,
+              "construction": false,
+              "externalReference": true
+            },
+            {
+              "id": 6,
+              "x": 15,
+              "y": -29.208429,
+              "fixed": true,
+              "construction": true,
+              "externalReference": true
+            },
+            {
+              "id": 7,
+              "x": 5.000065,
+              "y": 3.791595,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 8,
+              "x": 10.999994,
+              "y": 75.791579,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 9,
+              "x": 5.000065,
+              "y": 3.791595,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 10,
+              "x": 11.000014,
+              "y": 3.791595,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 11,
+              "x": 11.000014,
+              "y": 3.791597,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 12,
+              "x": 10.999994,
+              "y": 75.791579,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 13,
+              "x": 5.000036,
+              "y": 75.791576,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 14,
+              "x": 5.000036,
+              "y": 75.791576,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 15,
+              "x": 14.999998,
+              "y": 75.791579,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 16,
+              "x": 14.999999,
+              "y": 75.791579,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 17,
+              "x": 15,
+              "y": 29.208429,
+              "fixed": true,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 18,
+              "x": 0.999955,
+              "y": 75.791576,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 19,
+              "x": 0.999955,
+              "y": 75.791576,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 21,
+              "x": 15,
+              "y": -14.20842,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 23,
+              "x": 15,
+              "y": -14.208419,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 25,
+              "x": 8.000042,
+              "y": 3.791597,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 26,
+              "x": 5.000065,
+              "y": 3.791595,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 27,
+              "x": 11.000014,
+              "y": 3.791597,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 28,
+              "x": -9.000088,
+              "y": 9.115208,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 29,
+              "x": -5.400055,
+              "y": -0.214255,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 30,
+              "x": 0.999953,
+              "y": 9.115209,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 31,
+              "x": -5.400055,
+              "y": -0.214255,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 33,
+              "x": -5.400055,
+              "y": -0.214255,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 34,
+              "x": 0.999953,
+              "y": 9.115209,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 35,
+              "x": 0.999953,
+              "y": 9.115208,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 36,
+              "x": 6.42437,
+              "y": -21.206854,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 37,
+              "x": 0.999957,
+              "y": 78.465139,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 38,
+              "x": 0.999957,
+              "y": 78.465139,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 39,
+              "x": 5.000035,
+              "y": 78.465139,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 40,
+              "x": 5.000035,
+              "y": 78.465139,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 41,
+              "x": 5.000036,
+              "y": 75.791576,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 42,
+              "x": 10.999993,
+              "y": 78.824426,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 43,
+              "x": 10.999993,
+              "y": 78.824426,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 44,
+              "x": 14.999997,
+              "y": 78.824426,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 45,
+              "x": 14.999997,
+              "y": 78.824426,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            },
+            {
+              "id": 46,
+              "x": 14.999998,
+              "y": 75.791579,
+              "fixed": false,
+              "construction": false,
+              "externalReference": false
+            }
+          ],
+          "geometries": [
+            {
+              "id": 2,
+              "type": "line",
+              "points": [
+                4,
+                3
+              ],
+              "construction": true
+            },
+            {
+              "id": 3,
+              "type": "line",
+              "points": [
+                3,
+                5
+              ],
+              "construction": true
+            },
+            {
+              "id": 4,
+              "type": "line",
+              "points": [
+                7,
+                10
+              ],
+              "construction": true
+            },
+            {
+              "id": 5,
+              "type": "line",
+              "points": [
+                11,
+                8
+              ],
+              "construction": false
+            },
+            {
+              "id": 6,
+              "type": "line",
+              "points": [
+                12,
+                13
+              ],
+              "construction": true
+            },
+            {
+              "id": 7,
+              "type": "line",
+              "points": [
+                14,
+                9
+              ],
+              "construction": false
+            },
+            {
+              "id": 8,
+              "type": "line",
+              "points": [
+                8,
+                15
+              ],
+              "construction": true
+            },
+            {
+              "id": 9,
+              "type": "line",
+              "points": [
+                16,
+                17
+              ],
+              "construction": false
+            },
+            {
+              "id": 10,
+              "type": "line",
+              "points": [
+                13,
+                18
+              ],
+              "construction": true
+            },
+            {
+              "id": 12,
+              "type": "line",
+              "points": [
+                5,
+                21
+              ],
+              "construction": false
+            },
+            {
+              "id": 15,
+              "type": "arc",
+              "points": [
+                25,
+                26,
+                27
+              ],
+              "construction": false
+            },
+            {
+              "id": 16,
+              "type": "arc",
+              "points": [
+                28,
+                29,
+                30
+              ],
+              "construction": false
+            },
+            {
+              "id": 17,
+              "type": "line",
+              "points": [
+                31,
+                28
+              ],
+              "construction": true
+            },
+            {
+              "id": 19,
+              "type": "arc",
+              "points": [
+                1,
+                33,
+                23
+              ],
+              "construction": false
+            },
+            {
+              "id": 20,
+              "type": "line",
+              "points": [
+                19,
+                34
+              ],
+              "construction": false
+            },
+            {
+              "id": 21,
+              "type": "line",
+              "points": [
+                35,
+                28
+              ],
+              "construction": true
+            },
+            {
+              "id": 22,
+              "type": "line",
+              "points": [
+                1,
+                28
+              ],
+              "construction": true
+            },
+            {
+              "id": 23,
+              "type": "circle",
+              "points": [
+                1,
+                36
+              ],
+              "construction": false
+            },
+            {
+              "id": 24,
+              "type": "line",
+              "points": [
+                18,
+                37
+              ],
+              "construction": false
+            },
+            {
+              "id": 25,
+              "type": "line",
+              "points": [
+                38,
+                39
+              ],
+              "construction": false
+            },
+            {
+              "id": 26,
+              "type": "line",
+              "points": [
+                40,
+                41
+              ],
+              "construction": false
+            },
+            {
+              "id": 27,
+              "type": "line",
+              "points": [
+                8,
+                42
+              ],
+              "construction": false
+            },
+            {
+              "id": 28,
+              "type": "line",
+              "points": [
+                43,
+                44
+              ],
+              "construction": false
+            },
+            {
+              "id": 29,
+              "type": "line",
+              "points": [
+                45,
+                46
+              ],
+              "construction": false
+            }
+          ],
+          "constraints": [
+            {
+              "id": 0,
+              "type": "⏚",
+              "points": [
+                0
+              ],
+              "status": "solved",
+              "previousPointValues": "[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true,\"construction\":true,\"externalReference\":false}]"
+            },
+            {
+              "id": 1,
+              "type": "⏚",
+              "points": [
+                3
+              ],
+              "status": "solved",
+              "previousPointValues": "[{\"id\":3,\"x\":15,\"y\":-29.208429,\"fixed\":true,\"construction\":true,\"externalReference\":true}]"
+            },
+            {
+              "id": 2,
+              "type": "⏚",
+              "points": [
+                4
+              ],
+              "status": "solved",
+              "previousPointValues": "[{\"id\":4,\"x\":-15,\"y\":-29.208429,\"fixed\":true,\"construction\":true,\"externalReference\":true}]"
+            },
+            {
+              "id": 3,
+              "type": "↥",
+              "points": [
+                4,
+                3,
+                1
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 15,
+              "valueNeedsSetup": true,
+              "status": "",
+              "_distanceRequestedTarget": 15,
+              "_distanceAppliedTarget": 15,
+              "_distanceThrottleActive": false,
+              "_distanceLastAppliedPassToken": "816:66",
+              "_linePointDistanceSign": 1,
+              "error": "Line to Point Distance not satisfied\n        15 != 15.000010999999999",
+              "previousPointValues": "[{\"id\":4,\"x\":-15,\"y\":-29.208429,\"fixed\":true,\"construction\":true,\"externalReference\":true},{\"id\":3,\"x\":15,\"y\":-29.208429,\"fixed\":true,\"construction\":true,\"externalReference\":true},{\"id\":1,\"x\":-0.000003,\"y\":-14.20842,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 4,
+              "type": "⏚",
+              "points": [
+                5
+              ],
+              "status": "solved",
+              "previousPointValues": "[{\"id\":5,\"x\":15,\"y\":29.208429,\"fixed\":true,\"construction\":false,\"externalReference\":true}]"
+            },
+            {
+              "id": 5,
+              "type": "⏚",
+              "points": [
+                6
+              ],
+              "status": "solved",
+              "previousPointValues": "[{\"id\":6,\"x\":15,\"y\":-29.208429,\"fixed\":true,\"construction\":true,\"externalReference\":true}]"
+            },
+            {
+              "id": 6,
+              "type": "↥",
+              "points": [
+                3,
+                5,
+                1
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 15,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "_distanceRequestedTarget": 15,
+              "_distanceAppliedTarget": 15,
+              "_distanceThrottleActive": false,
+              "_distanceLastAppliedPassToken": null,
+              "_linePointDistanceSign": 1,
+              "error": null,
+              "previousPointValues": "[{\"id\":3,\"x\":15,\"y\":-29.208429,\"fixed\":true,\"construction\":true,\"externalReference\":true},{\"id\":5,\"x\":15,\"y\":29.208429,\"fixed\":true,\"construction\":false,\"externalReference\":true},{\"id\":1,\"x\":-0.000003,\"y\":-14.208428999999999,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 7,
+              "type": "⟺",
+              "points": [
+                1,
+                2
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "radius",
+              "value": 15,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "_distanceRequestedTarget": 15,
+              "_distanceAppliedTarget": 15,
+              "_distanceThrottleActive": false,
+              "_distanceLastAppliedPassToken": null,
+              "error": null,
+              "previousPointValues": "[{\"id\":1,\"x\":-0.000003,\"y\":-14.208418,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":2,\"x\":-14.25748,\"y\":-18.86935,\"fixed\":false,\"construction\":false,\"externalReference\":false}]",
+              "radialGeometryType": "circle"
+            },
+            {
+              "id": 8,
+              "type": "≡",
+              "points": [
+                7,
+                9
+              ],
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":7,\"x\":5.000065,\"y\":3.791595,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":9,\"x\":5.000065,\"y\":3.791595,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 9,
+              "type": "≡",
+              "points": [
+                10,
+                11
+              ],
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":10,\"x\":10.999998,\"y\":3.791602,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":11,\"x\":10.999998,\"y\":3.791602,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 10,
+              "type": "≡",
+              "points": [
+                8,
+                12
+              ],
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":8,\"x\":10.999994,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":12,\"x\":10.999994,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 11,
+              "type": "≡",
+              "points": [
+                13,
+                14
+              ],
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":13,\"x\":5.000036,\"y\":75.791576,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":14,\"x\":5.000036,\"y\":75.791576,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 12,
+              "type": "⟂",
+              "points": [
+                7,
+                10,
+                11,
+                8
+              ],
+              "status": "",
+              "value": 270,
+              "error": "Vertical constraint not satisfied\n        11.000014 != 10.999994",
+              "previousPointValues": "[{\"id\":7,\"x\":-7.0432345000000005,\"y\":8.672207499999999,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":10,\"x\":8.912233,\"y\":9.009407,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":11,\"x\":8.912233,\"y\":9.009407,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":8,\"x\":8.912233,\"y\":78.711506,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 13,
+              "type": "⟂",
+              "points": [
+                11,
+                8,
+                12,
+                13
+              ],
+              "status": "",
+              "value": 270,
+              "error": "Angle constraint not satisfied\n            270 != 269.99997135190983\n            Diff: 0.0000\n            ",
+              "previousPointValues": "[{\"id\":11,\"x\":10.699537,\"y\":3.791589,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":8,\"x\":10.699537,\"y\":75.7914695,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":12,\"x\":10.399075,\"y\":75.7914695,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":13,\"x\":4.399051,\"y\":75.7914705,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 14,
+              "type": "⟂",
+              "points": [
+                12,
+                13,
+                14,
+                9
+              ],
+              "status": "solved",
+              "value": 270,
+              "error": null,
+              "previousPointValues": "[{\"id\":12,\"x\":10.99999400000028,\"y\":75.79157825,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":13,\"x\":5.000035999999719,\"y\":75.79157675,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":14,\"x\":5.000036,\"y\":75.791576,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":9,\"x\":5.000065,\"y\":3.791595,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 15,
+              "type": "━",
+              "points": [
+                7,
+                10
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":7,\"x\":5.000065,\"y\":3.791595,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":10,\"x\":11.000014,\"y\":3.791595,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 16,
+              "type": "⟺",
+              "points": [
+                11,
+                8
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 72,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "_distanceRequestedTarget": 72,
+              "_distanceAppliedTarget": 72,
+              "_distanceThrottleActive": false,
+              "_distanceLastAppliedPassToken": null,
+              "error": null,
+              "previousPointValues": "[{\"id\":11,\"x\":11.000014,\"y\":3.791597,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":8,\"x\":10.999994,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 17,
+              "type": "↥",
+              "points": [
+                11,
+                8,
+                5
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 4,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "_distanceRequestedTarget": 4,
+              "_distanceAppliedTarget": 4,
+              "_distanceThrottleActive": false,
+              "_distanceLastAppliedPassToken": "1525:59",
+              "_linePointDistanceSign": -1,
+              "error": null,
+              "previousPointValues": "[{\"id\":11,\"x\":11.000014,\"y\":3.791597,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":8,\"x\":10.999994,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":5,\"x\":15,\"y\":29.208429,\"fixed\":true,\"construction\":false,\"externalReference\":true}]"
+            },
+            {
+              "id": 18,
+              "type": "⟺",
+              "points": [
+                12,
+                13
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 6,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "_distanceRequestedTarget": 6,
+              "_distanceAppliedTarget": 6,
+              "_distanceThrottleActive": false,
+              "_distanceLastAppliedPassToken": "1617:65",
+              "error": null,
+              "previousPointValues": "[{\"id\":12,\"x\":10.999994,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":13,\"x\":5.000036,\"y\":75.791576,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 19,
+              "type": "↥",
+              "points": [
+                7,
+                10,
+                1
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 18,
+              "valueNeedsSetup": true,
+              "status": "",
+              "_distanceRequestedTarget": 18,
+              "_distanceAppliedTarget": 18,
+              "_distanceThrottleActive": false,
+              "_distanceLastAppliedPassToken": "1817:64",
+              "_linePointDistanceSign": -1,
+              "error": "Line to Point Distance not satisfied\n        18 != 18.000025",
+              "previousPointValues": "[{\"id\":7,\"x\":5.033976,\"y\":3.791557,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":10,\"x\":10.991137,\"y\":3.791557,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":1,\"x\":-0.000007,\"y\":-14.208437,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 20,
+              "type": "≡",
+              "points": [
+                15,
+                16
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":15,\"x\":14.999998,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":16,\"x\":14.999998,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 21,
+              "type": "≡",
+              "points": [
+                5,
+                17
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":5,\"x\":15,\"y\":29.208429,\"fixed\":true,\"construction\":false,\"externalReference\":true},{\"id\":17,\"x\":15,\"y\":29.208429,\"fixed\":true,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 22,
+              "type": "│",
+              "points": [
+                16,
+                17
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":16,\"x\":15,\"y\":75.79158,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":17,\"x\":15,\"y\":29.208429,\"fixed\":true,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 23,
+              "type": "━",
+              "points": [
+                8,
+                15
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":8,\"x\":10.999994,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":15,\"x\":14.999998,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 24,
+              "type": "≡",
+              "points": [
+                18,
+                19
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":18,\"x\":0.999955,\"y\":75.791576,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":19,\"x\":0.999955,\"y\":75.791576,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 25,
+              "type": "━",
+              "points": [
+                13,
+                18
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":13,\"x\":5.000036,\"y\":75.791576,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":18,\"x\":0.999955,\"y\":75.791576,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 27,
+              "type": "⟺",
+              "points": [
+                18,
+                15
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": 14,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "_distanceRequestedTarget": 14,
+              "_distanceAppliedTarget": 14,
+              "_distanceThrottleActive": false,
+              "_distanceLastAppliedPassToken": "2503:65",
+              "error": null,
+              "previousPointValues": "[{\"id\":18,\"x\":0.999955,\"y\":75.791576,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":15,\"x\":14.999998,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 28,
+              "type": "━",
+              "points": [
+                21,
+                1
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":21,\"x\":15,\"y\":-14.20842,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":1,\"x\":-0.000003,\"y\":-14.20842,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 29,
+              "type": "│",
+              "points": [
+                5,
+                21
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":5,\"x\":15,\"y\":29.208429,\"fixed\":true,\"construction\":false,\"externalReference\":true},{\"id\":21,\"x\":15,\"y\":-14.20842,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 31,
+              "type": "≡",
+              "points": [
+                21,
+                23
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":21,\"x\":15,\"y\":-14.208418,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":23,\"x\":15,\"y\":-14.208418,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 33,
+              "type": "⇌",
+              "points": [
+                1,
+                2,
+                1,
+                23
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":1,\"x\":-0.000003,\"y\":-14.208418,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":2,\"x\":-14.25748,\"y\":-18.86935,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":1,\"x\":-0.000003,\"y\":-14.208418,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":23,\"x\":15,\"y\":-14.208419,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 36,
+              "type": "≡",
+              "points": [
+                26,
+                7
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":26,\"x\":5.000065,\"y\":3.791595,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":7,\"x\":5.000065,\"y\":3.791595,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 37,
+              "type": "≡",
+              "points": [
+                27,
+                11
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":27,\"x\":10.999998,\"y\":3.791602,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":11,\"x\":10.999998,\"y\":3.791602,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 38,
+              "type": "⋯",
+              "points": [
+                10,
+                7,
+                25
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":10,\"x\":11.000014,\"y\":3.791596,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":7,\"x\":5.000065,\"y\":3.791596,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":25,\"x\":8.000042,\"y\":3.791597,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 43,
+              "type": "≡",
+              "points": [
+                33,
+                31
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":33,\"x\":-5.400055,\"y\":-0.214255,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":31,\"x\":-5.400055,\"y\":-0.214255,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 44,
+              "type": "≡",
+              "points": [
+                33,
+                31
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":33,\"x\":-5.400055,\"y\":-0.214255,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":31,\"x\":-5.400055,\"y\":-0.214255,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 45,
+              "type": "≡",
+              "points": [
+                29,
+                31
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":29,\"x\":-5.400055,\"y\":-0.214255,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":31,\"x\":-5.400055,\"y\":-0.214255,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 46,
+              "type": "≡",
+              "points": [
+                30,
+                34
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":30,\"x\":0.999953,\"y\":9.115209,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":34,\"x\":0.999953,\"y\":9.115209,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 48,
+              "type": "⟺",
+              "points": [
+                28,
+                29
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "radius",
+              "value": 10,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "_distanceRequestedTarget": 10,
+              "_distanceAppliedTarget": 10,
+              "_distanceThrottleActive": false,
+              "_distanceLastAppliedPassToken": "3919:65",
+              "error": null,
+              "previousPointValues": "[{\"id\":28,\"x\":-9.000088,\"y\":9.115208,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":29,\"x\":-5.400055,\"y\":-0.214255,\"fixed\":false,\"construction\":false,\"externalReference\":false}]",
+              "radialGeometryType": "arc"
+            },
+            {
+              "id": 49,
+              "type": "━",
+              "points": [
+                35,
+                28
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":35,\"x\":0.999953,\"y\":9.115208,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":28,\"x\":-9.000088,\"y\":9.115208,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 50,
+              "type": "⏛",
+              "points": [
+                29,
+                1,
+                28
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":29,\"x\":-5.400055,\"y\":-0.214255,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":1,\"x\":-0.000003,\"y\":-14.208421,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":28,\"x\":-9.000088,\"y\":9.115208,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 51,
+              "type": "≡",
+              "points": [
+                30,
+                35
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":30,\"x\":0.999924,\"y\":9.115209,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":35,\"x\":0.999924,\"y\":9.115209,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 52,
+              "type": "│",
+              "points": [
+                19,
+                34
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":19,\"x\":0.999953,\"y\":75.791519,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":34,\"x\":0.999953,\"y\":9.115194,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 53,
+              "type": "⟺",
+              "points": [
+                1,
+                36
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "diameter",
+              "value": 9.5,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "_distanceRequestedTarget": 9.5,
+              "_distanceAppliedTarget": 9.5,
+              "_distanceThrottleActive": false,
+              "_distanceLastAppliedPassToken": "164:56",
+              "error": null,
+              "previousPointValues": "[{\"id\":1,\"x\":-0.000003,\"y\":-14.208418,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":36,\"x\":6.42437,\"y\":-21.206854,\"fixed\":false,\"construction\":false,\"externalReference\":false}]",
+              "radialGeometryType": "circle",
+              "valueExpr": "configurator.holeDiameter",
+              "valueExprMode": "diameter"
+            },
+            {
+              "id": 54,
+              "type": "≡",
+              "points": [
+                37,
+                38
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":37,\"x\":0.999957,\"y\":78.465139,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":38,\"x\":0.999957,\"y\":78.465139,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 55,
+              "type": "≡",
+              "points": [
+                39,
+                40
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":39,\"x\":5.000035,\"y\":78.465139,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":40,\"x\":5.000035,\"y\":78.465139,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 56,
+              "type": "≡",
+              "points": [
+                13,
+                41
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":13,\"x\":5.000036,\"y\":75.791576,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":41,\"x\":5.000036,\"y\":75.791576,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 57,
+              "type": "≡",
+              "points": [
+                42,
+                43
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":42,\"x\":10.999993,\"y\":78.824426,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":43,\"x\":10.999993,\"y\":78.824426,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 58,
+              "type": "≡",
+              "points": [
+                44,
+                45
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":44,\"x\":14.999997,\"y\":78.824426,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":45,\"x\":14.999997,\"y\":78.824426,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 59,
+              "type": "≡",
+              "points": [
+                15,
+                46
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":15,\"x\":14.999998,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":46,\"x\":14.999998,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 60,
+              "type": "│",
+              "points": [
+                18,
+                37
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":18,\"x\":0.999947,\"y\":75.791576,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":37,\"x\":0.999947,\"y\":78.465139,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 61,
+              "type": "━",
+              "points": [
+                38,
+                39
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":38,\"x\":0.999957,\"y\":78.465139,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":39,\"x\":5.000035,\"y\":78.465139,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 62,
+              "type": "│",
+              "points": [
+                40,
+                41
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":40,\"x\":4.999942,\"y\":78.465139,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":41,\"x\":4.999942,\"y\":75.791557,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 63,
+              "type": "│",
+              "points": [
+                8,
+                42
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":8,\"x\":10.999993,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":42,\"x\":10.999993,\"y\":78.607797,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 64,
+              "type": "━",
+              "points": [
+                43,
+                44
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "solved",
+              "error": null,
+              "previousPointValues": "[{\"id\":43,\"x\":10.999993,\"y\":78.824426,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":44,\"x\":14.999997,\"y\":78.824426,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            },
+            {
+              "id": 65,
+              "type": "│",
+              "points": [
+                45,
+                46
+              ],
+              "labelX": 0,
+              "labelY": 0,
+              "displayStyle": "",
+              "value": null,
+              "valueNeedsSetup": true,
+              "status": "",
+              "error": null,
+              "previousPointValues": "[{\"id\":45,\"x\":14.99999,\"y\":78.824426,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":46,\"x\":14.99999,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false}]"
+            }
+          ]
+        },
+        "lastSketchSignature": "{\"points\":[{\"id\":0,\"x\":0,\"y\":0,\"fixed\":true,\"construction\":true,\"externalReference\":false},{\"id\":1,\"x\":-0.000003,\"y\":-14.20842,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":2,\"x\":-14.25748,\"y\":-18.86935,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":3,\"x\":15,\"y\":-29.208429,\"fixed\":true,\"construction\":true,\"externalReference\":true},{\"id\":4,\"x\":-15,\"y\":-29.208429,\"fixed\":true,\"construction\":true,\"externalReference\":true},{\"id\":5,\"x\":15,\"y\":29.208429,\"fixed\":true,\"construction\":false,\"externalReference\":true},{\"id\":6,\"x\":15,\"y\":-29.208429,\"fixed\":true,\"construction\":true,\"externalReference\":true},{\"id\":7,\"x\":5.000065,\"y\":3.791595,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":8,\"x\":10.999994,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":9,\"x\":5.000065,\"y\":3.791595,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":10,\"x\":11.000014,\"y\":3.791595,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":11,\"x\":11.000014,\"y\":3.791597,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":12,\"x\":10.999994,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":13,\"x\":5.000036,\"y\":75.791576,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":14,\"x\":5.000036,\"y\":75.791576,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":15,\"x\":14.999998,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":16,\"x\":14.999999,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":17,\"x\":15,\"y\":29.208429,\"fixed\":true,\"construction\":false,\"externalReference\":false},{\"id\":18,\"x\":0.999955,\"y\":75.791576,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":19,\"x\":0.999955,\"y\":75.791576,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":21,\"x\":15,\"y\":-14.20842,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":23,\"x\":15,\"y\":-14.208419,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":25,\"x\":8.000042,\"y\":3.791597,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":26,\"x\":5.000065,\"y\":3.791595,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":27,\"x\":11.000014,\"y\":3.791597,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":28,\"x\":-9.000088,\"y\":9.115208,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":29,\"x\":-5.400055,\"y\":-0.214255,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":30,\"x\":0.999953,\"y\":9.115209,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":31,\"x\":-5.400055,\"y\":-0.214255,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":33,\"x\":-5.400055,\"y\":-0.214255,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":34,\"x\":0.999953,\"y\":9.115209,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":35,\"x\":0.999953,\"y\":9.115208,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":36,\"x\":6.42437,\"y\":-21.206854,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":37,\"x\":0.999957,\"y\":78.465139,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":38,\"x\":0.999957,\"y\":78.465139,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":39,\"x\":5.000035,\"y\":78.465139,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":40,\"x\":5.000035,\"y\":78.465139,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":41,\"x\":5.000036,\"y\":75.791576,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":42,\"x\":10.999993,\"y\":78.824426,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":43,\"x\":10.999993,\"y\":78.824426,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":44,\"x\":14.999997,\"y\":78.824426,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":45,\"x\":14.999997,\"y\":78.824426,\"fixed\":false,\"construction\":false,\"externalReference\":false},{\"id\":46,\"x\":14.999998,\"y\":75.791579,\"fixed\":false,\"construction\":false,\"externalReference\":false}],\"geometries\":[{\"id\":2,\"type\":\"line\",\"points\":[4,3],\"construction\":true},{\"id\":3,\"type\":\"line\",\"points\":[3,5],\"construction\":true},{\"id\":4,\"type\":\"line\",\"points\":[7,10],\"construction\":true},{\"id\":5,\"type\":\"line\",\"points\":[11,8],\"construction\":false},{\"id\":6,\"type\":\"line\",\"points\":[12,13],\"construction\":true},{\"id\":7,\"type\":\"line\",\"points\":[14,9],\"construction\":false},{\"id\":8,\"type\":\"line\",\"points\":[8,15],\"construction\":true},{\"id\":9,\"type\":\"line\",\"points\":[16,17],\"construction\":false},{\"id\":10,\"type\":\"line\",\"points\":[13,18],\"construction\":true},{\"id\":12,\"type\":\"line\",\"points\":[5,21],\"construction\":false},{\"id\":15,\"type\":\"arc\",\"points\":[25,26,27],\"construction\":false},{\"id\":16,\"type\":\"arc\",\"points\":[28,29,30],\"construction\":false},{\"id\":17,\"type\":\"line\",\"points\":[31,28],\"construction\":true},{\"id\":19,\"type\":\"arc\",\"points\":[1,33,23],\"construction\":false},{\"id\":20,\"type\":\"line\",\"points\":[19,34],\"construction\":false},{\"id\":21,\"type\":\"line\",\"points\":[35,28],\"construction\":true},{\"id\":22,\"type\":\"line\",\"points\":[1,28],\"construction\":true},{\"id\":23,\"type\":\"circle\",\"points\":[1,36],\"construction\":false},{\"id\":24,\"type\":\"line\",\"points\":[18,37],\"construction\":false},{\"id\":25,\"type\":\"line\",\"points\":[38,39],\"construction\":false},{\"id\":26,\"type\":\"line\",\"points\":[40,41],\"construction\":false},{\"id\":27,\"type\":\"line\",\"points\":[8,42],\"construction\":false},{\"id\":28,\"type\":\"line\",\"points\":[43,44],\"construction\":false},{\"id\":29,\"type\":\"line\",\"points\":[45,46],\"construction\":false}],\"constraints\":[{\"id\":0,\"type\":\"⏚\",\"points\":[0],\"status\":\"solved\",\"previousPointValues\":\"[{\\\"id\\\":0,\\\"x\\\":0,\\\"y\\\":0,\\\"fixed\\\":true,\\\"construction\\\":true,\\\"externalReference\\\":false}]\"},{\"id\":1,\"type\":\"⏚\",\"points\":[3],\"status\":\"solved\",\"previousPointValues\":\"[{\\\"id\\\":3,\\\"x\\\":15,\\\"y\\\":-29.208429,\\\"fixed\\\":true,\\\"construction\\\":true,\\\"externalReference\\\":true}]\"},{\"id\":2,\"type\":\"⏚\",\"points\":[4],\"status\":\"solved\",\"previousPointValues\":\"[{\\\"id\\\":4,\\\"x\\\":-15,\\\"y\\\":-29.208429,\\\"fixed\\\":true,\\\"construction\\\":true,\\\"externalReference\\\":true}]\"},{\"id\":3,\"type\":\"↥\",\"points\":[4,3,1],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":15,\"valueNeedsSetup\":true,\"status\":\"\",\"_distanceRequestedTarget\":15,\"_distanceAppliedTarget\":15,\"_distanceThrottleActive\":false,\"_distanceLastAppliedPassToken\":\"816:66\",\"_linePointDistanceSign\":1,\"error\":\"Line to Point Distance not satisfied\\n        15 != 15.000010999999999\",\"previousPointValues\":\"[{\\\"id\\\":4,\\\"x\\\":-15,\\\"y\\\":-29.208429,\\\"fixed\\\":true,\\\"construction\\\":true,\\\"externalReference\\\":true},{\\\"id\\\":3,\\\"x\\\":15,\\\"y\\\":-29.208429,\\\"fixed\\\":true,\\\"construction\\\":true,\\\"externalReference\\\":true},{\\\"id\\\":1,\\\"x\\\":-0.000003,\\\"y\\\":-14.20842,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":4,\"type\":\"⏚\",\"points\":[5],\"status\":\"solved\",\"previousPointValues\":\"[{\\\"id\\\":5,\\\"x\\\":15,\\\"y\\\":29.208429,\\\"fixed\\\":true,\\\"construction\\\":false,\\\"externalReference\\\":true}]\"},{\"id\":5,\"type\":\"⏚\",\"points\":[6],\"status\":\"solved\",\"previousPointValues\":\"[{\\\"id\\\":6,\\\"x\\\":15,\\\"y\\\":-29.208429,\\\"fixed\\\":true,\\\"construction\\\":true,\\\"externalReference\\\":true}]\"},{\"id\":6,\"type\":\"↥\",\"points\":[3,5,1],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":15,\"valueNeedsSetup\":true,\"status\":\"solved\",\"_distanceRequestedTarget\":15,\"_distanceAppliedTarget\":15,\"_distanceThrottleActive\":false,\"_distanceLastAppliedPassToken\":null,\"_linePointDistanceSign\":1,\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":3,\\\"x\\\":15,\\\"y\\\":-29.208429,\\\"fixed\\\":true,\\\"construction\\\":true,\\\"externalReference\\\":true},{\\\"id\\\":5,\\\"x\\\":15,\\\"y\\\":29.208429,\\\"fixed\\\":true,\\\"construction\\\":false,\\\"externalReference\\\":true},{\\\"id\\\":1,\\\"x\\\":-0.000003,\\\"y\\\":-14.208428999999999,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":7,\"type\":\"⟺\",\"points\":[1,2],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"radius\",\"value\":15,\"valueNeedsSetup\":true,\"status\":\"solved\",\"_distanceRequestedTarget\":15,\"_distanceAppliedTarget\":15,\"_distanceThrottleActive\":false,\"_distanceLastAppliedPassToken\":null,\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":1,\\\"x\\\":-0.000003,\\\"y\\\":-14.208418,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":2,\\\"x\\\":-14.25748,\\\"y\\\":-18.86935,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\",\"radialGeometryType\":\"circle\"},{\"id\":8,\"type\":\"≡\",\"points\":[7,9],\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":7,\\\"x\\\":5.000065,\\\"y\\\":3.791595,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":9,\\\"x\\\":5.000065,\\\"y\\\":3.791595,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":9,\"type\":\"≡\",\"points\":[10,11],\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":10,\\\"x\\\":10.999998,\\\"y\\\":3.791602,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":11,\\\"x\\\":10.999998,\\\"y\\\":3.791602,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":10,\"type\":\"≡\",\"points\":[8,12],\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":8,\\\"x\\\":10.999994,\\\"y\\\":75.791579,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":12,\\\"x\\\":10.999994,\\\"y\\\":75.791579,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":11,\"type\":\"≡\",\"points\":[13,14],\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":13,\\\"x\\\":5.000036,\\\"y\\\":75.791576,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":14,\\\"x\\\":5.000036,\\\"y\\\":75.791576,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":12,\"type\":\"⟂\",\"points\":[7,10,11,8],\"status\":\"\",\"value\":270,\"error\":\"Vertical constraint not satisfied\\n        11.000014 != 10.999994\",\"previousPointValues\":\"[{\\\"id\\\":7,\\\"x\\\":-7.0432345000000005,\\\"y\\\":8.672207499999999,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":10,\\\"x\\\":8.912233,\\\"y\\\":9.009407,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":11,\\\"x\\\":8.912233,\\\"y\\\":9.009407,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":8,\\\"x\\\":8.912233,\\\"y\\\":78.711506,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":13,\"type\":\"⟂\",\"points\":[11,8,12,13],\"status\":\"\",\"value\":270,\"error\":\"Angle constraint not satisfied\\n            270 != 269.99997135190983\\n            Diff: 0.0000\\n            \",\"previousPointValues\":\"[{\\\"id\\\":11,\\\"x\\\":10.699537,\\\"y\\\":3.791589,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":8,\\\"x\\\":10.699537,\\\"y\\\":75.7914695,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":12,\\\"x\\\":10.399075,\\\"y\\\":75.7914695,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":13,\\\"x\\\":4.399051,\\\"y\\\":75.7914705,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":14,\"type\":\"⟂\",\"points\":[12,13,14,9],\"status\":\"solved\",\"value\":270,\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":12,\\\"x\\\":10.99999400000028,\\\"y\\\":75.79157825,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":13,\\\"x\\\":5.000035999999719,\\\"y\\\":75.79157675,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":14,\\\"x\\\":5.000036,\\\"y\\\":75.791576,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":9,\\\"x\\\":5.000065,\\\"y\\\":3.791595,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":15,\"type\":\"━\",\"points\":[7,10],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":7,\\\"x\\\":5.000065,\\\"y\\\":3.791595,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":10,\\\"x\\\":11.000014,\\\"y\\\":3.791595,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":16,\"type\":\"⟺\",\"points\":[11,8],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":72,\"valueNeedsSetup\":true,\"status\":\"solved\",\"_distanceRequestedTarget\":72,\"_distanceAppliedTarget\":72,\"_distanceThrottleActive\":false,\"_distanceLastAppliedPassToken\":null,\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":11,\\\"x\\\":11.000014,\\\"y\\\":3.791597,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":8,\\\"x\\\":10.999994,\\\"y\\\":75.791579,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":17,\"type\":\"↥\",\"points\":[11,8,5],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":4,\"valueNeedsSetup\":true,\"status\":\"solved\",\"_distanceRequestedTarget\":4,\"_distanceAppliedTarget\":4,\"_distanceThrottleActive\":false,\"_distanceLastAppliedPassToken\":\"1525:59\",\"_linePointDistanceSign\":-1,\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":11,\\\"x\\\":11.000014,\\\"y\\\":3.791597,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":8,\\\"x\\\":10.999994,\\\"y\\\":75.791579,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":5,\\\"x\\\":15,\\\"y\\\":29.208429,\\\"fixed\\\":true,\\\"construction\\\":false,\\\"externalReference\\\":true}]\"},{\"id\":18,\"type\":\"⟺\",\"points\":[12,13],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":6,\"valueNeedsSetup\":true,\"status\":\"solved\",\"_distanceRequestedTarget\":6,\"_distanceAppliedTarget\":6,\"_distanceThrottleActive\":false,\"_distanceLastAppliedPassToken\":\"1617:65\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":12,\\\"x\\\":10.999994,\\\"y\\\":75.791579,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":13,\\\"x\\\":5.000036,\\\"y\\\":75.791576,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":19,\"type\":\"↥\",\"points\":[7,10,1],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":18,\"valueNeedsSetup\":true,\"status\":\"\",\"_distanceRequestedTarget\":18,\"_distanceAppliedTarget\":18,\"_distanceThrottleActive\":false,\"_distanceLastAppliedPassToken\":\"1817:64\",\"_linePointDistanceSign\":-1,\"error\":\"Line to Point Distance not satisfied\\n        18 != 18.000025\",\"previousPointValues\":\"[{\\\"id\\\":7,\\\"x\\\":5.033976,\\\"y\\\":3.791557,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":10,\\\"x\\\":10.991137,\\\"y\\\":3.791557,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":1,\\\"x\\\":-0.000007,\\\"y\\\":-14.208437,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":20,\"type\":\"≡\",\"points\":[15,16],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":15,\\\"x\\\":14.999998,\\\"y\\\":75.791579,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":16,\\\"x\\\":14.999998,\\\"y\\\":75.791579,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":21,\"type\":\"≡\",\"points\":[5,17],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":5,\\\"x\\\":15,\\\"y\\\":29.208429,\\\"fixed\\\":true,\\\"construction\\\":false,\\\"externalReference\\\":true},{\\\"id\\\":17,\\\"x\\\":15,\\\"y\\\":29.208429,\\\"fixed\\\":true,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":22,\"type\":\"│\",\"points\":[16,17],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":16,\\\"x\\\":15,\\\"y\\\":75.79158,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":17,\\\"x\\\":15,\\\"y\\\":29.208429,\\\"fixed\\\":true,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":23,\"type\":\"━\",\"points\":[8,15],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":8,\\\"x\\\":10.999994,\\\"y\\\":75.791579,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":15,\\\"x\\\":14.999998,\\\"y\\\":75.791579,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":24,\"type\":\"≡\",\"points\":[18,19],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":18,\\\"x\\\":0.999955,\\\"y\\\":75.791576,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":19,\\\"x\\\":0.999955,\\\"y\\\":75.791576,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":25,\"type\":\"━\",\"points\":[13,18],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":13,\\\"x\\\":5.000036,\\\"y\\\":75.791576,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":18,\\\"x\\\":0.999955,\\\"y\\\":75.791576,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":27,\"type\":\"⟺\",\"points\":[18,15],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":14,\"valueNeedsSetup\":true,\"status\":\"solved\",\"_distanceRequestedTarget\":14,\"_distanceAppliedTarget\":14,\"_distanceThrottleActive\":false,\"_distanceLastAppliedPassToken\":\"2503:65\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":18,\\\"x\\\":0.999955,\\\"y\\\":75.791576,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":15,\\\"x\\\":14.999998,\\\"y\\\":75.791579,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":28,\"type\":\"━\",\"points\":[21,1],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":21,\\\"x\\\":15,\\\"y\\\":-14.20842,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":1,\\\"x\\\":-0.000003,\\\"y\\\":-14.20842,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":29,\"type\":\"│\",\"points\":[5,21],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":5,\\\"x\\\":15,\\\"y\\\":29.208429,\\\"fixed\\\":true,\\\"construction\\\":false,\\\"externalReference\\\":true},{\\\"id\\\":21,\\\"x\\\":15,\\\"y\\\":-14.20842,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":31,\"type\":\"≡\",\"points\":[21,23],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":21,\\\"x\\\":15,\\\"y\\\":-14.208418,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":23,\\\"x\\\":15,\\\"y\\\":-14.208418,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":33,\"type\":\"⇌\",\"points\":[1,2,1,23],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":1,\\\"x\\\":-0.000003,\\\"y\\\":-14.208418,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":2,\\\"x\\\":-14.25748,\\\"y\\\":-18.86935,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":1,\\\"x\\\":-0.000003,\\\"y\\\":-14.208418,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":23,\\\"x\\\":15,\\\"y\\\":-14.208419,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":36,\"type\":\"≡\",\"points\":[26,7],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":26,\\\"x\\\":5.000065,\\\"y\\\":3.791595,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":7,\\\"x\\\":5.000065,\\\"y\\\":3.791595,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":37,\"type\":\"≡\",\"points\":[27,11],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":27,\\\"x\\\":10.999998,\\\"y\\\":3.791602,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":11,\\\"x\\\":10.999998,\\\"y\\\":3.791602,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":38,\"type\":\"⋯\",\"points\":[10,7,25],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":10,\\\"x\\\":11.000014,\\\"y\\\":3.791596,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":7,\\\"x\\\":5.000065,\\\"y\\\":3.791596,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":25,\\\"x\\\":8.000042,\\\"y\\\":3.791597,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":43,\"type\":\"≡\",\"points\":[33,31],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":33,\\\"x\\\":-5.400055,\\\"y\\\":-0.214255,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":31,\\\"x\\\":-5.400055,\\\"y\\\":-0.214255,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":44,\"type\":\"≡\",\"points\":[33,31],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":33,\\\"x\\\":-5.400055,\\\"y\\\":-0.214255,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":31,\\\"x\\\":-5.400055,\\\"y\\\":-0.214255,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":45,\"type\":\"≡\",\"points\":[29,31],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":29,\\\"x\\\":-5.400055,\\\"y\\\":-0.214255,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":31,\\\"x\\\":-5.400055,\\\"y\\\":-0.214255,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":46,\"type\":\"≡\",\"points\":[30,34],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":30,\\\"x\\\":0.999953,\\\"y\\\":9.115209,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":34,\\\"x\\\":0.999953,\\\"y\\\":9.115209,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":48,\"type\":\"⟺\",\"points\":[28,29],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"radius\",\"value\":10,\"valueNeedsSetup\":true,\"status\":\"solved\",\"_distanceRequestedTarget\":10,\"_distanceAppliedTarget\":10,\"_distanceThrottleActive\":false,\"_distanceLastAppliedPassToken\":\"3919:65\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":28,\\\"x\\\":-9.000088,\\\"y\\\":9.115208,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":29,\\\"x\\\":-5.400055,\\\"y\\\":-0.214255,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\",\"radialGeometryType\":\"arc\"},{\"id\":49,\"type\":\"━\",\"points\":[35,28],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":35,\\\"x\\\":0.999953,\\\"y\\\":9.115208,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":28,\\\"x\\\":-9.000088,\\\"y\\\":9.115208,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":50,\"type\":\"⏛\",\"points\":[29,1,28],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":29,\\\"x\\\":-5.400055,\\\"y\\\":-0.214255,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":1,\\\"x\\\":-0.000003,\\\"y\\\":-14.208421,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":28,\\\"x\\\":-9.000088,\\\"y\\\":9.115208,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":51,\"type\":\"≡\",\"points\":[30,35],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":30,\\\"x\\\":0.999924,\\\"y\\\":9.115209,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":35,\\\"x\\\":0.999924,\\\"y\\\":9.115209,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":52,\"type\":\"│\",\"points\":[19,34],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":19,\\\"x\\\":0.999953,\\\"y\\\":75.791519,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":34,\\\"x\\\":0.999953,\\\"y\\\":9.115194,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":53,\"type\":\"⟺\",\"points\":[1,36],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"diameter\",\"value\":9.5,\"valueNeedsSetup\":true,\"status\":\"solved\",\"_distanceRequestedTarget\":9.5,\"_distanceAppliedTarget\":9.5,\"_distanceThrottleActive\":false,\"_distanceLastAppliedPassToken\":\"164:56\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":1,\\\"x\\\":-0.000003,\\\"y\\\":-14.208418,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":36,\\\"x\\\":6.42437,\\\"y\\\":-21.206854,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\",\"radialGeometryType\":\"circle\",\"valueExpr\":\"configurator.holeDiameter\",\"valueExprMode\":\"diameter\"},{\"id\":54,\"type\":\"≡\",\"points\":[37,38],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":37,\\\"x\\\":0.999957,\\\"y\\\":78.465139,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":38,\\\"x\\\":0.999957,\\\"y\\\":78.465139,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":55,\"type\":\"≡\",\"points\":[39,40],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":39,\\\"x\\\":5.000035,\\\"y\\\":78.465139,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":40,\\\"x\\\":5.000035,\\\"y\\\":78.465139,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":56,\"type\":\"≡\",\"points\":[13,41],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":13,\\\"x\\\":5.000036,\\\"y\\\":75.791576,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":41,\\\"x\\\":5.000036,\\\"y\\\":75.791576,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":57,\"type\":\"≡\",\"points\":[42,43],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":42,\\\"x\\\":10.999993,\\\"y\\\":78.824426,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":43,\\\"x\\\":10.999993,\\\"y\\\":78.824426,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":58,\"type\":\"≡\",\"points\":[44,45],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":44,\\\"x\\\":14.999997,\\\"y\\\":78.824426,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":45,\\\"x\\\":14.999997,\\\"y\\\":78.824426,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":59,\"type\":\"≡\",\"points\":[15,46],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":15,\\\"x\\\":14.999998,\\\"y\\\":75.791579,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":46,\\\"x\\\":14.999998,\\\"y\\\":75.791579,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":60,\"type\":\"│\",\"points\":[18,37],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":18,\\\"x\\\":0.999947,\\\"y\\\":75.791576,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":37,\\\"x\\\":0.999947,\\\"y\\\":78.465139,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":61,\"type\":\"━\",\"points\":[38,39],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":38,\\\"x\\\":0.999957,\\\"y\\\":78.465139,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":39,\\\"x\\\":5.000035,\\\"y\\\":78.465139,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":62,\"type\":\"│\",\"points\":[40,41],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":40,\\\"x\\\":4.999942,\\\"y\\\":78.465139,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":41,\\\"x\\\":4.999942,\\\"y\\\":75.791557,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":63,\"type\":\"│\",\"points\":[8,42],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":8,\\\"x\\\":10.999993,\\\"y\\\":75.791579,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":42,\\\"x\\\":10.999993,\\\"y\\\":78.607797,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":64,\"type\":\"━\",\"points\":[43,44],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"solved\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":43,\\\"x\\\":10.999993,\\\"y\\\":78.824426,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":44,\\\"x\\\":14.999997,\\\"y\\\":78.824426,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"},{\"id\":65,\"type\":\"│\",\"points\":[45,46],\"labelX\":0,\"labelY\":0,\"displayStyle\":\"\",\"value\":null,\"valueNeedsSetup\":true,\"status\":\"\",\"error\":null,\"previousPointValues\":\"[{\\\"id\\\":45,\\\"x\\\":14.99999,\\\"y\\\":78.824426,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false},{\\\"id\\\":46,\\\"x\\\":14.99999,\\\"y\\\":75.791579,\\\"fixed\\\":false,\\\"construction\\\":false,\\\"externalReference\\\":false}]\"}]}",
+        "lastSketchChanged": false,
+        "__refPreviewSnapshots": {
+          "sketchPlane": {
+            "E2:S1:G4_SW": {
+              "type": "FACE",
+              "edgePositions": [
+                [
+                  24.999980926513672,
+                  -16.583232879638672,
+                  0,
+                  24.999980926513672,
+                  -16.583232879638672,
+                  -30
+                ],
+                [
+                  24.999977111816406,
+                  -75.00009155273438,
+                  0,
+                  24.999977111816406,
+                  -75.00009155273438,
+                  -30
+                ],
+                [
+                  24.999980926513672,
+                  -16.583232879638672,
+                  -30,
+                  24.999977111816406,
+                  -75.00009155273438,
+                  -30
+                ],
+                [
+                  24.999980926513672,
+                  -16.583232879638672,
+                  0,
+                  24.999977111816406,
+                  -75.00009155273438,
+                  0
+                ]
+              ],
+              "center": [
+                24.99997901916504,
+                -45.79166221618652,
+                -15
+              ],
+              "normal": [
+                -0.9999999999999979,
+                6.530130774357913e-8,
+                0
+              ],
+              "sourceUuid": "dcdd51de-75a6-4114-9327-e07f1b3eaa5d",
+              "sourceFeatureId": "E2",
+              "sourceTimestamp": 1776536665188
+            }
+          }
+        },
+        "externalRefs": [
+          {
+            "edgeId": 108032,
+            "edgeName": "E2:S1:G4_SW|E2:S1:PROFILE_SW[0]",
+            "solidName": "E2",
+            "p0": 3,
+            "p1": 4
+          },
+          {
+            "edgeId": 108043,
+            "edgeName": "E2:S1:G4_SW|E2:S1:PROFILE_START[0]",
+            "solidName": "E2",
+            "p0": 5,
+            "p1": 6
+          }
+        ],
+        "sketchDimOffsets": {
+          "3": {
+            "d": -40.0437378310186
+          },
+          "6": {
+            "d": 21.49399010239945
+          },
+          "7": {
+            "du": -32.03583969920145,
+            "dv": -21.442594187736887
+          },
+          "16": {
+            "d": -27.29885698642529
+          },
+          "17": {
+            "d": -33.88195683755707
+          },
+          "18": {
+            "d": -11.290288212063942
+          },
+          "19": {
+            "d": 0
+          },
+          "27": {
+            "d": 19.4646145081843
+          },
+          "48": {
+            "du": 2.9919126600000006,
+            "dv": -7.63155251
+          },
+          "53": {
+            "du": -10.967688035024102,
+            "dv": -23.460316123772365
+          }
+        }
+      },
+      "timestamp": 1776536963008
+    },
+    {
+      "type": "E",
+      "inputParams": {
+        "id": "E4",
+        "profile": "S3:PROFILE",
+        "consumeProfileSketch": true,
+        "distance": 10,
+        "distanceBack": 68.9,
+        "boolean": {
+          "targets": [
+            "E2"
+          ],
+          "operation": "INTERSECT",
+          "overlapConditioningEnabled": true
+        },
+        "__open": false
+      },
+      "persistentData": {
+        "__refPreviewSnapshots": {
+          "profile": {
+            "S3:PROFILE": {
+              "type": "FACE",
+              "edgePositions": [
+                [
+                  24.999979266759453,
+                  -42.00009321618653,
+                  -3.999986,
+                  24.999983968450543,
+                  29.99985978381332,
+                  -4.000006000000001
+                ],
+                [
+                  24.999983968450543,
+                  29.99985978381332,
+                  -4.000006000000001,
+                  24.999983968450543,
+                  29.99985978381332,
+                  0
+                ],
+                [
+                  24.999983968450543,
+                  29.99985978381332,
+                  0,
+                  24.99998092651365,
+                  -16.583233216186585,
+                  0
+                ],
+                [
+                  24.99998092651365,
+                  -16.583233216186585,
+                  0,
+                  24.999978091336565,
+                  -60.000083216186496,
+                  0
+                ],
+                [
+                  24.99997900518899,
+                  -46.005686216186525,
+                  -20.399948000000002,
+                  24.999978966945996,
+                  -46.59132527938378,
+                  -21.723673731390306,
+                  24.999978920549328,
+                  -47.30182660969891,
+                  -22.98478862857764,
+                  24.99997886643104,
+                  -48.13057402334279,
+                  -24.171549197802086,
+                  24.999978805095076,
+                  -49.06985022976375,
+                  -25.27290433232446,
+                  24.999978737112595,
+                  -50.11090869500716,
+                  -26.278598220260744,
+                  24.999978663116654,
+                  -51.24405508938304,
+                  -27.17926584663593,
+                  24.9999785837963,
+                  -52.45873756100137,
+                  -27.966520200342885,
+                  24.999978499890165,
+                  -53.7436449945486,
+                  -28.63303037393547,
+                  24.99997841217958,
+                  -55.08681234032025,
+                  -29.172589828991256,
+                  24.999978321481308,
+                  -56.47573203268629,
+                  -29.580174191357127,
+                  24.99997822863993,
+                  -57.897470460461335,
+                  -29.851988038088862,
+                  24.99997813451998,
+                  -59.33878840460831,
+                  -29.98550024040503,
+                  24.999978039997913,
+                  -60.786264321760385,
+                  -29.97946753354185,
+                  24.99997794595391,
+                  -62.226419325546004,
+                  -29.833946094026576,
+                  24.999977853263704,
+                  -63.645842701891475,
+                  -29.550291016562074,
+                  24.999977762790436,
+                  -65.03131678950363,
+                  -29.131143695393703,
+                  24.999977675376584,
+                  -66.36994006264626,
+                  -28.580407227663205,
+                  24.99997759183615,
+                  -67.64924727006425,
+                  -27.90321006779339,
+                  24.999977512947062,
+                  -68.85732551132257,
+                  -27.105858271353732,
+                  24.99997743944393,
+                  -69.98292516965806,
+                  -26.195776773111724,
+                  24.999977372011223,
+                  -71.01556466833784,
+                  -25.181440246088403,
+                  24.999977311276865,
+                  -71.94562807503408,
+                  -24.072294185458006,
+                  24.99997725780642,
+                  -72.76445464532358,
+                  -22.878666952158042,
+                  24.9999772120978,
+                  -73.46441947148372,
+                  -21.61167359525915,
+                  24.99997717457665,
+                  -74.03900448558393,
+                  -20.28311234869998,
+                  24.999977145592357,
+                  -74.48285915569195,
+                  -18.905354766209257,
+                  24.99997712541483,
+                  -74.79185030999263,
+                  -17.491230517477454,
+                  24.999977114231964,
+                  -74.9631006248571,
+                  -16.053907918355673,
+                  24.999977112147885,
+                  -74.99501541846179,
+                  -14.606771307583713,
+                  24.999977119182006,
+                  -74.88729750045522,
+                  -13.163296411914352,
+                  24.999977135268825,
+                  -74.64094993939266,
+                  -11.736924860232989,
+                  24.99997716025854,
+                  -74.25826672216819,
+                  -10.340939015196545,
+                  24.999977193918443,
+                  -73.74281139242366,
+                  -8.988338287958346,
+                  24.999977235935102,
+                  -73.09938386685332,
+                  -7.6917180877355635,
+                  24.999977285917254,
+                  -72.3339757384106,
+                  -6.463152533440137,
+                  24.99997734339947,
+                  -71.4537144826334,
+                  -5.3140820195616865,
+                  24.999977407846462,
+                  -70.46679708663791,
+                  -4.255206683287938,
+                  24.999977478658117,
+                  -69.38241371882773,
+                  -3.2963867648965817,
+                  24.999977555175025,
+                  -68.2106621501051,
+                  -2.44655078926162,
+                  24.99997763668467,
+                  -66.96245372349368,
+                  -1.71361242348752,
+                  24.999977722428024,
+                  -65.64941174778292,
+                  -1.1043967848923284,
+                  24.99997781160666,
+                  -64.28376326135182,
+                  -0.6245768855594402,
+                  24.999977903390132,
+                  -62.87822517406674,
+                  -0.27862080528575817,
+                  24.999977996923764,
+                  -61.445885847498964,
+                  -0.06975008485154888,
+                  24.999978091336565,
+                  -60.000083216186496,
+                  0
+                ],
+                [
+                  24.99997900518899,
+                  -46.005686216186525,
+                  -20.399948000000002,
+                  24.999979029508385,
+                  -45.63326806522292,
+                  -19.553559900631363,
+                  24.999979058829155,
+                  -45.1842606506272,
+                  -18.745190903478413,
+                  24.999979092900595,
+                  -44.662503266852504,
+                  -17.981753069469267,
+                  24.99997913143137,
+                  -44.072457266126634,
+                  -17.269774269962284,
+                  24.99997917409202,
+                  -43.41916791109794,
+                  -16.615342369359794,
+                  24.99997922051777,
+                  -42.708221234681524,
+                  -16.024053170056742,
+                  24.999979270311645,
+                  -41.94569627598122,
+                  -15.500962564827487,
+                  24.99997932304788,
+                  -41.138113100700096,
+                  -15.050543305777817,
+                  24.99997937827555,
+                  -40.29237705049737,
+                  -14.676646759514705,
+                  24.999979435522423,
+                  -39.41571969799482,
+                  -14.38246997555104,
+                  24.999979494299,
+                  -38.51563701230421,
+                  -14.170528349531082,
+                  24.999979554102705,
+                  -37.599825263799296,
+                  -14.042634115023182,
+                  24.99997961442218,
+                  -36.676115216186545,
+                  -13.999951
+                ],
+                [
+                  24.999983968450344,
+                  29.999856783813314,
+                  -13.999952,
+                  24.99997961442218,
+                  -36.676115216186545,
+                  -13.999951
+                ],
+                [
+                  24.999983968450344,
+                  29.999856783813314,
+                  -9.999967999999999,
+                  24.999983968450344,
+                  29.999856783813314,
+                  -13.999952
+                ],
+                [
+                  24.999983968450344,
+                  29.999856783813314,
+                  -9.999967999999999,
+                  24.999979266759517,
+                  -42.00009221618653,
+                  -9.999939999999999
+                ],
+                [
+                  24.999979266759517,
+                  -42.00009221618653,
+                  -9.999939999999999,
+                  24.99997924813778,
+                  -42.285258579195336,
+                  -9.986356222869912,
+                  24.999979229684683,
+                  -42.56784246385299,
+                  -9.945727148002527,
+                  24.999979211567343,
+                  -42.84528474294224,
+                  -9.878420719137566,
+                  24.999979193949823,
+                  -43.11507285249116,
+                  -9.785046474622241,
+                  24.999979176991683,
+                  -43.37476354597537,
+                  -9.666450027329422,
+                  24.99997916084649,
+                  -43.62200502076972,
+                  -9.523705406645117,
+                  24.999979145660465,
+                  -43.85455821646866,
+                  -9.358105331877626,
+                  24.999979131571127,
+                  -44.07031709219413,
+                  -9.171149505173906,
+                  24.999979118706076,
+                  -44.26732769925616,
+                  -8.964531029964542,
+                  24.999979107181822,
+                  -44.44380587644105,
+                  -8.740121077934136,
+                  24.999979097102724,
+                  -44.5981534076756,
+                  -8.49995194337562,
+                  24.999979088560067,
+                  -44.72897249574087,
+                  -8.246198638391107,
+                  24.999979081631214,
+                  -44.835078420958965,
+                  -7.981159195616261,
+                  24.999979076378906,
+                  -44.915510270213886,
+                  -7.70723385684998,
+                  24.999979072850717,
+                  -44.96953963914242,
+                  -7.4269033360607235,
+                  24.9999790710786,
+                  -44.99667722868659,
+                  -7.142706353623326,
+                  24.999979071078595,
+                  -44.99667727626836,
+                  -6.857216645240017,
+                  24.99997907285071,
+                  -44.96953978145679,
+                  -6.573019653756747,
+                  24.999979076378892,
+                  -44.91551050597205,
+                  -6.292689114957662,
+                  24.999979081631192,
+                  -44.83507874802585,
+                  -6.018763749380698,
+                  24.99997908856004,
+                  -44.72897291115451,
+                  -5.753724271237118,
+                  24.999979097102692,
+                  -44.59815390767394,
+                  -5.499970922646128,
+                  24.999979107181783,
+                  -44.443806456496006,
+                  -5.259801736638291,
+                  24.999979118706033,
+                  -44.26732835411467,
+                  -5.035391725781663,
+                  24.99997913157108,
+                  -44.07031781592569,
+                  -4.828773184901912,
+                  24.99997914566041,
+                  -43.85455900251903,
+                  -4.641817286278361,
+                  24.999979160846436,
+                  -43.62200586202029,
+                  -4.476217133992915,
+                  24.999979176991626,
+                  -43.37476443480764,
+                  -4.333472430894547,
+                  24.999979193949763,
+                  -43.11507378085571,
+                  -4.214875897037906,
+                  24.99997921156728,
+                  -42.84528570243164,
+                  -4.12150156259295,
+                  24.99997922968462,
+                  -42.56784344577795,
+                  -4.054195041246954,
+                  24.999979248137716,
+                  -42.285259574663385,
+                  -4.013565872184662,
+                  24.999979266759453,
+                  -42.00009321618653,
+                  -3.999986
+                ],
+                [
+                  24.999978091336565,
+                  -60.000083216186496,
+                  -5.500016100108622,
+                  24.999978152142596,
+                  -59.0689222551937,
+                  -5.5457611047505075,
+                  24.99997821236303,
+                  -58.14672888327962,
+                  -5.682555569274701,
+                  24.99997827141791,
+                  -57.24238432673798,
+                  -5.909082088208374,
+                  24.99997832873851,
+                  -56.364597918013274,
+                  -6.2231590873422,
+                  24.999978383772802,
+                  -55.5218232200684,
+                  -6.621761833482573,
+                  24.99997843599077,
+                  -54.72217661395208,
+                  -7.10105156428573,
+                  24.99997848488953,
+                  -53.97335913361251,
+                  -7.656412457637623,
+                  24.99997852999816,
+                  -53.28258230073063,
+                  -8.282496084544125,
+                  24.99997857088224,
+                  -52.65649867382413,
+                  -8.973272917426005,
+                  24.999978607148034,
+                  -52.10113778047224,
+                  -9.722090397765577,
+                  24.99997863844628,
+                  -51.62184804966908,
+                  -10.521737003881897,
+                  24.99997866447556,
+                  -51.223245303528714,
+                  -11.364511701826773,
+                  24.999978684985198,
+                  -50.90916830439488,
+                  -12.242298110551474,
+                  24.999978699777678,
+                  -50.682641785461215,
+                  -13.146642667093122,
+                  24.999978708710536,
+                  -50.54584732093702,
+                  -14.0688360390072,
+                  24.999978711697743,
+                  -50.500102316295134,
+                  -14.999996999999999,
+                  24.999978708710536,
+                  -50.54584732093702,
+                  -15.931157960992799,
+                  24.999978699777678,
+                  -50.682641785461215,
+                  -16.853351332906875,
+                  24.999978684985198,
+                  -50.90916830439488,
+                  -17.757695889448524,
+                  24.99997866447556,
+                  -51.223245303528714,
+                  -18.635482298173226,
+                  24.99997863844628,
+                  -51.62184804966908,
+                  -19.4782569961181,
+                  24.999978607148034,
+                  -52.101137780472236,
+                  -20.27790360223442,
+                  24.99997857088224,
+                  -52.65649867382413,
+                  -21.026721082573992,
+                  24.99997852999816,
+                  -53.28258230073063,
+                  -21.717497915455873,
+                  24.99997848488953,
+                  -53.97335913361251,
+                  -22.343581542362376,
+                  24.99997843599077,
+                  -54.72217661395208,
+                  -22.898942435714268,
+                  24.999978383772802,
+                  -55.5218232200684,
+                  -23.378232166517428,
+                  24.99997832873851,
+                  -56.364597918013274,
+                  -23.7768349126578,
+                  24.99997827141791,
+                  -57.24238432673798,
+                  -24.09091191179163,
+                  24.99997821236303,
+                  -58.146728883279614,
+                  -24.3174384307253,
+                  24.999978152142596,
+                  -59.0689222551937,
+                  -24.45423289524949,
+                  24.999978091336565,
+                  -60.00008321618649,
+                  -24.499977899891377,
+                  24.99997803053054,
+                  -60.93124417717929,
+                  -24.454232895249493,
+                  24.999977970310105,
+                  -61.853437549093364,
+                  -24.3174384307253,
+                  24.999977911255222,
+                  -62.75778210563501,
+                  -24.09091191179163,
+                  24.999977853934624,
+                  -63.635568514359704,
+                  -23.7768349126578,
+                  24.999977798900332,
+                  -64.47834321230458,
+                  -23.378232166517428,
+                  24.999977746682365,
+                  -65.2779898184209,
+                  -22.89894243571427,
+                  24.999977697783603,
+                  -66.02680729876047,
+                  -22.343581542362376,
+                  24.99997765267497,
+                  -66.71758413164235,
+                  -21.717497915455873,
+                  24.999977611790893,
+                  -67.34366775854885,
+                  -21.026721082574,
+                  24.9999775755251,
+                  -67.89902865190075,
+                  -20.277903602234424,
+                  24.999977544226855,
+                  -68.37831838270391,
+                  -19.478256996118102,
+                  24.999977518197575,
+                  -68.77692112884426,
+                  -18.635482298173233,
+                  24.999977497687933,
+                  -69.0909981279781,
+                  -17.757695889448527,
+                  24.999977482895456,
+                  -69.31752464691178,
+                  -16.853351332906882,
+                  24.9999774739626,
+                  -69.45431911143596,
+                  -15.931157960992797,
+                  24.99997747097539,
+                  -69.50006411607785,
+                  -14.999997000000002,
+                  24.9999774739626,
+                  -69.45431911143596,
+                  -14.068836039007206,
+                  24.999977482895456,
+                  -69.31752464691178,
+                  -13.146642667093122,
+                  24.999977497687933,
+                  -69.09099812797811,
+                  -12.242298110551477,
+                  24.999977518197575,
+                  -68.77692112884426,
+                  -11.364511701826771,
+                  24.999977544226855,
+                  -68.37831838270391,
+                  -10.5217370038819,
+                  24.9999775755251,
+                  -67.89902865190075,
+                  -9.72209039776558,
+                  24.999977611790893,
+                  -67.34366775854885,
+                  -8.973272917426003,
+                  24.99997765267497,
+                  -66.71758413164235,
+                  -8.282496084544128,
+                  24.999977697783603,
+                  -66.02680729876047,
+                  -7.656412457637626,
+                  24.999977746682365,
+                  -65.2779898184209,
+                  -7.10105156428573,
+                  24.999977798900332,
+                  -64.4783432123046,
+                  -6.621761833482575,
+                  24.999977853934624,
+                  -63.63556851435972,
+                  -6.223159087342204,
+                  24.999977911255222,
+                  -62.757782105635016,
+                  -5.909082088208374,
+                  24.999977970310105,
+                  -61.85343754909337,
+                  -5.682555569274703,
+                  24.99997803053054,
+                  -60.93124417717929,
+                  -5.5457611047505075,
+                  24.999978091336565,
+                  -60.000083216186496,
+                  -5.500016100108622
+                ]
+              ],
+              "center": [
+                24.999978296505,
+                -55.40782084178728,
+                -13.819795162287805
+              ],
+              "normal": [
+                0.9999999999999961,
+                -6.14018746519776e-8,
+                -6.254773849412199e-8
+              ],
+              "sourceUuid": "76070672-aafd-4d37-9376-7fbbc165eca3",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1776536487884
+            }
+          },
+          "boolean": {}
+        }
+      },
+      "timestamp": 1776536487957
+    },
+    {
+      "type": "F",
+      "inputParams": {
+        "id": "F5",
+        "edges": [
+          "E2:S1:G4_SW|E2:S1:G9_SW[1]",
+          "E2:S1:G4_SW|E2:S1:G9_SW[0]",
+          "E2:S1:G6_SW|E2:S1:G9_SW[1]",
+          "E2:S1:G6_SW|E2:S1:G9_SW[0]"
+        ],
+        "radius": "10",
+        "resolution": "resolution",
+        "inflate": 0.1,
+        "nudgeFaceDistance": 0.0001,
+        "direction": "AUTO",
+        "debug": "NONE",
+        "showTangentOverlays": false,
+        "__open": false
+      },
+      "persistentData": {
+        "__refPreviewSnapshots": {
+          "edges": {
+            "E2:S1:G4_SW|E2:S1:G9_SW[1]": {
+              "type": "EDGE",
+              "positions": [
+                24.999980926513672,
+                -16.583232879638672,
+                -9.999950408935547,
+                24.999980926513672,
+                -16.583232879638672,
+                -13.999951362609863
+              ],
+              "sourceUuid": "c152d76c-a222-430f-89c2-187e10f2dc66",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1776536487957
+            },
+            "E2:S1:G4_SW|E2:S1:G9_SW[0]": {
+              "type": "EDGE",
+              "positions": [
+                24.999980926513672,
+                -16.583232879638672,
+                -3.7420997425980165e-14,
+                24.999980926513672,
+                -16.583232879638672,
+                -3.999993085861206
+              ],
+              "sourceUuid": "2c6ed1e3-5c9b-4ff0-97ca-c9606bd1fe3c",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1776536487957
+            },
+            "E2:S1:G6_SW|E2:S1:G9_SW[1]": {
+              "type": "EDGE",
+              "positions": [
+                -24.999971389770508,
+                -16.58322525024414,
+                0,
+                -24.999971389770508,
+                -16.58322525024414,
+                -3.9999899864196777
+              ],
+              "sourceUuid": "b4492302-0d23-4e0b-a2e8-659897c3b658",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1776536487957
+            },
+            "E2:S1:G6_SW|E2:S1:G9_SW[0]": {
+              "type": "EDGE",
+              "positions": [
+                -24.999971389770508,
+                -16.58322525024414,
+                -9.999946594238281,
+                -24.999971389770508,
+                -16.58322525024414,
+                -13.999947547912598
+              ],
+              "sourceUuid": "adc64502-3f73-4e52-b7d6-f5cbfb54d6f3",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1776536487957
+            }
+          }
+        },
+        "edgeDirectionDecision": {
+          "mode": "AUTO",
+          "autoEnabled": true,
+          "fallbackDirection": "INSET",
+          "totalEdges": 4,
+          "insetEdges": 0,
+          "outsetEdges": 4,
+          "fallbackEdges": 0,
+          "ambiguousEdges": 0
+        },
+        "miterSummary": {
+          "cornerBridgeCount": 0
+        },
+        "usedSheetMetalPath": false
+      },
+      "timestamp": 1776536488444
+    },
+    {
+      "type": "F",
+      "inputParams": {
+        "id": "F6",
+        "edges": [
+          "E2:S1:G12_SW|E2:S1:G13_SW[1]",
+          "E2:S1:G12_SW|E2:S1:G13_SW[0]",
+          "E2:S1:G13_SW|E2:S1:G14_SW[1]",
+          "E2:S1:G13_SW|E2:S1:G14_SW[0]"
+        ],
+        "radius": "5",
+        "resolution": "resolution",
+        "inflate": 0.1,
+        "nudgeFaceDistance": 0.0001,
+        "direction": "AUTO",
+        "debug": "NONE",
+        "showTangentOverlays": false,
+        "__open": false
+      },
+      "persistentData": {
+        "__refPreviewSnapshots": {
+          "edges": {
+            "E2:S1:G12_SW|E2:S1:G13_SW[1]": {
+              "type": "EDGE",
+              "positions": [
+                -20.000036239624023,
+                -32.00014114379883,
+                0,
+                -20.000036239624023,
+                -32.00014114379883,
+                -3.999985933303833
+              ],
+              "sourceUuid": "1e13962e-975e-4e37-a96c-0a14ad515435",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1776536488444
+            },
+            "E2:S1:G12_SW|E2:S1:G13_SW[0]": {
+              "type": "EDGE",
+              "positions": [
+                -20.000036239624023,
+                -32.00014114379883,
+                -9.9999418258667,
+                -20.000036239624023,
+                -32.00014114379883,
+                -13.999948501586914
+              ],
+              "sourceUuid": "71e88950-d059-48e8-acc2-008272f718f4",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1776536488444
+            },
+            "E2:S1:G13_SW|E2:S1:G14_SW[0]": {
+              "type": "EDGE",
+              "positions": [
+                19.999950408935547,
+                -32.00014114379883,
+                -9.999943733215332,
+                19.999950408935547,
+                -32.00014114379883,
+                -13.999950408935547
+              ],
+              "sourceUuid": "28fe3746-70fe-48f1-a628-7797d0cd7a8e",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1776536488444
+            },
+            "E2:S1:G13_SW|E2:S1:G14_SW[1]": {
+              "type": "EDGE",
+              "positions": [
+                19.999950408935547,
+                -32.00014114379883,
+                0,
+                19.999950408935547,
+                -32.00014114379883,
+                -3.999988555908203
+              ],
+              "sourceUuid": "8fb72028-f74d-41cb-8a51-8a683046fcb3",
+              "sourceFeatureId": null,
+              "sourceTimestamp": 1776536488444
+            }
+          }
+        },
+        "edgeDirectionDecision": {
+          "mode": "AUTO",
+          "autoEnabled": true,
+          "fallbackDirection": "INSET",
+          "totalEdges": 4,
+          "insetEdges": 0,
+          "outsetEdges": 4,
+          "fallbackEdges": 0,
+          "ambiguousEdges": 0
+        },
+        "miterSummary": {
+          "cornerBridgeCount": 0
+        },
+        "usedSheetMetalPath": false
+      },
+      "timestamp": 1776536488970
+    }
+  ],
+  "idCounter": 6,
+  "expressions": "//Examples:\nx = 10 + 6; \ny = x * 2;\nresolution = configurator.resolution;",
+  "configurator": {
+    "fields": [
+      {
+        "name": "resolution",
+        "label": "resolution",
+        "type": "select",
+        "options": [
+          "32",
+          "64",
+          "128",
+          "256",
+          "512"
+        ],
+        "defaultValue": "32"
+      },
+      {
+        "name": "holeDiameter",
+        "label": "Hole Diameter",
+        "type": "slider",
+        "min": 1,
+        "max": 24,
+        "step": 1,
+        "defaultValue": 24
+      }
+    ],
+    "values": {
+      "resolution": "32",
+      "holeDiameter": 19
+    }
+  },
+  "activeWorkbench": "MODELING",
+  "pmiViews": [
+    {
+      "viewName": "View 1",
+      "name": "View 1",
+      "camera": {
+        "version": 3,
+        "type": "OrthographicCamera",
+        "worldMatrix": [
+          0.8893802926701778,
+          -0.4568764758958369,
+          0.01632730176425133,
+          0,
+          -0.2810705714449164,
+          -0.5746159995555608,
+          -0.7686454234056376,
+          0,
+          0.3605579410823368,
+          0.6790289675910578,
+          -0.6394666780174654,
+          0,
+          32.19139138253526,
+          74.6961982535874,
+          -91.71112004220535,
+          1
+        ],
+        "projection": {
+          "kind": "orthographic",
+          "aspect": 1.1446759259259258,
+          "left": -11.446759259259258,
+          "right": 11.446759259259258,
+          "top": 10,
+          "bottom": -10,
+          "near": 0,
+          "far": 201.1817894311394,
+          "zoom": 0.16007236214800585,
+          "view": {
+            "enabled": false
+          }
+        },
+        "position": {
+          "x": 32.19139138253526,
+          "y": 74.6961982535874,
+          "z": -91.71112004220535
+        },
+        "quaternion": {
+          "x": 0.8808324145720335,
+          "y": -0.20944592726508965,
+          "z": 0.10696848702760989,
+          "w": -0.4108824695387869
+        },
+        "up": {
+          "x": -0.28107057144491104,
+          "y": -0.5746159995555499,
+          "z": -0.7686454234056223
+        },
+        "zoom": 0.16007236214800585,
+        "near": 0,
+        "far": 201.1817894311394,
+        "layers": 1,
+        "target": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "controlsState": {
+          "target": [
+            0,
+            0,
+            0
+          ],
+          "cameraMatrix": [
+            0.8893802926701778,
+            -0.4568764758958369,
+            0.01632730176425133,
+            0,
+            -0.2810705714449164,
+            -0.5746159995555608,
+            -0.7686454234056376,
+            0,
+            0.3605579410823368,
+            0.6790289675910578,
+            -0.6394666780174654,
+            0,
+            32.19139138253526,
+            74.6961982535874,
+            -91.71112004220535,
+            1
+          ],
+          "cameraUp": {
+            "x": -0.28107057144491104,
+            "y": -0.5746159995555499,
+            "z": -0.7686454234056223
+          },
+          "cameraNear": 0,
+          "cameraFar": 201.1817894311394,
+          "cameraZoom": 0.16007236214800585,
+          "gizmoMatrix": [
+            6.247174631404417,
+            0,
+            0,
+            0,
+            0,
+            6.247174631404417,
+            0,
+            0,
+            0,
+            0,
+            6.247174631404417,
+            0,
+            -14.58950640554687,
+            -13.404994671657962,
+            -8.742970142580383,
+            1
+          ]
+        },
+        "userData": {
+          "preventRemove": true
+        },
+        "viewport": {
+          "width": 988.996826171875,
+          "height": 863.9999389648438
+        }
+      },
+      "viewSettings": {
+        "wireframe": false,
+        "visibilityState": {
+          "hidden": [
+            {
+              "key": "{\"type\":\"EDGE\",\"objectName\":\"E4_AXIS_0\",\"objectFeatureId\":\"F6\",\"anchorType\":\"SOLID\",\"anchorName\":\"E2\",\"anchorFeatureId\":\"F6\",\"faceA\":\"\",\"faceB\":\"\"}",
+              "count": 1
+            },
+            {
+              "key": "{\"type\":\"EDGE\",\"objectName\":\"E4_AXIS_1\",\"objectFeatureId\":\"F6\",\"anchorType\":\"SOLID\",\"anchorName\":\"E2\",\"anchorFeatureId\":\"F6\",\"faceA\":\"\",\"faceB\":\"\"}",
+              "count": 1
+            },
+            {
+              "key": "{\"type\":\"EDGE\",\"objectName\":\"E4_AXIS_2\",\"objectFeatureId\":\"F6\",\"anchorType\":\"SOLID\",\"anchorName\":\"E2\",\"anchorFeatureId\":\"F6\",\"faceA\":\"\",\"faceB\":\"\"}",
+              "count": 1
+            }
+          ]
+        }
+      },
+      "annotations": [
+        {
+          "type": "linear",
+          "inputParams": {
+            "id": "DIM1",
+            "targets": [
+              "VERTEX[E2:S1:G9_SW|E4:S3:G10_SW[0]+E2:S1:G9_SW|E4:S3:G20_SW[1]+E4:S3:G10_SW|E4:S3:G20_SW[0]]",
+              "VERTEX[E2:S1:G9_SW|E2:S1:PROFILE_START[1]+E2:S1:G9_SW|E4:S3:G8_SW[1]+E2:S1:PROFILE_START|E4:S3:G8_SW[0]]"
+            ],
+            "planeRefName": "E2:S1:G12_SW",
+            "alignment": "view",
+            "offset": 42.966980579068476,
+            "showExt": true,
+            "isReference": false,
+            "decimals": 3,
+            "value": "0.000",
+            "labelWorld": [
+              0.0018707193667069077,
+              72.96684032036194,
+              -7.503371611928046
+            ],
+            "type": "linear"
+          },
+          "persistentData": {},
+          "enabled": true
+        },
+        {
+          "type": "linear",
+          "inputParams": {
+            "id": "DIM2",
+            "targets": [
+              "VERTEX[E2:S1:G9_SW|E4:S3:G10_SW[0]+E2:S1:G9_SW|E4:S3:G7_SW[1]+E4:S3:G10_SW|E4:S3:G7_SW[0]]",
+              "VERTEX[E2:S1:G9_SW|E4:S3:G5_SW[1]+E2:S1:G9_SW|E4:S3:G8_SW[1]+E4:S3:G5_SW|E4:S3:G8_SW[0]]"
+            ],
+            "planeRefName": "E2:S1:G12_SW",
+            "alignment": "view",
+            "offset": 26.524311876476798,
+            "showExt": true,
+            "isReference": false,
+            "decimals": 3,
+            "value": "0.000",
+            "labelWorld": [
+              0.0018707193667069077,
+              56.524171606221344,
+              -7.252057717615742
+            ],
+            "type": "linear"
+          },
+          "persistentData": {},
+          "enabled": true
+        },
+        {
+          "type": "radial",
+          "inputParams": {
+            "id": "RAD3",
+            "cylindricalFaceRef": "E2:S1:G2_SW",
+            "planeRef": "E4:S3:G20_SW",
+            "displayStyle": "diameter",
+            "alignment": "view",
+            "offset": -63.261406447792055,
+            "isReference": false,
+            "decimals": 3,
+            "value": "⌀40.000 (wu)",
+            "type": "radial"
+          },
+          "persistentData": {},
+          "enabled": true
+        },
+        {
+          "type": "radial",
+          "inputParams": {
+            "id": "RAD4",
+            "cylindricalFaceRef": "E2:S1:G9_SW",
+            "planeRef": "E4:S3:G20_SW",
+            "displayStyle": "diameter",
+            "alignment": "view",
+            "offset": -34.62103636430221,
+            "isReference": false,
+            "decimals": 3,
+            "value": "⌀60.000 (wu)",
+            "type": "radial"
+          },
+          "persistentData": {
+            "labelWorld": [
+              44.044720668571344,
+              4.6209905567829,
+              -14.00007757253048
+            ]
+          },
+          "enabled": true
+        },
+        {
+          "type": "linear",
+          "inputParams": {
+            "id": "DIM5",
+            "targets": [
+              "E4_AXIS_2",
+              "E2_AXIS_0"
+            ],
+            "planeRefName": "E4:S3:G20_SW",
+            "alignment": "view",
+            "offset": 1.7788043519790824,
+            "showExt": true,
+            "isReference": false,
+            "decimals": 3,
+            "value": "42.000",
+            "labelWorld": [
+              -1.7788093314015612,
+              -79.87410928065967,
+              -15.000052707386601
+            ],
+            "type": "linear"
+          },
+          "persistentData": {},
+          "enabled": true
+        },
+        {
+          "type": "radial",
+          "inputParams": {
+            "id": "RAD6",
+            "cylindricalFaceRef": "E4:S3:G16_SW",
+            "planeRef": "E2:S1:G4_SW",
+            "displayStyle": "radius",
+            "alignment": "view",
+            "offset": 37.68617951009105,
+            "isReference": false,
+            "decimals": 3,
+            "value": "R10.000 (wu)",
+            "type": "radial"
+          },
+          "persistentData": {
+            "labelWorld": [
+              24.999978928237866,
+              -74.02826342009797,
+              23.686050438691893
+            ]
+          },
+          "enabled": true
+        },
+        {
+          "type": "radial",
+          "inputParams": {
+            "id": "RAD7",
+            "cylindricalFaceRef": "E4:S3:G15_SW",
+            "planeRef": "E2:S1:G4_SW",
+            "displayStyle": "radius",
+            "alignment": "view",
+            "offset": 20.572260457820335,
+            "isReference": false,
+            "decimals": 3,
+            "value": "R3.000 (wu)",
+            "type": "radial"
+          },
+          "persistentData": {
+            "labelWorld": [
+              24.99997973037604,
+              -52.62586653256008,
+              16.57227947532604
+            ]
+          },
+          "enabled": true
+        },
+        {
+          "type": "radial",
+          "inputParams": {
+            "id": "RAD8",
+            "cylindricalFaceRef": "E4:S3:G19_SW",
+            "planeRef": "E2:S1:G4_SW",
+            "displayStyle": "radius",
+            "alignment": "view",
+            "offset": 3.737842934456589,
+            "isReference": false,
+            "decimals": 3,
+            "value": "R15.000 (wu)",
+            "type": "radial"
+          },
+          "persistentData": {
+            "labelWorld": [
+              24.99997745862991,
+              -87.14583945765997,
+              3.7377771061068756
+            ]
+          },
+          "enabled": true
+        },
+        {
+          "type": "radial",
+          "inputParams": {
+            "id": "RAD9",
+            "cylindricalFaceRef": "E4:S3:G23_SW",
+            "planeRef": "E2:S1:G4_SW",
+            "displayStyle": "diameter",
+            "alignment": "view",
+            "offset": 21.00402840969395,
+            "isReference": false,
+            "decimals": 3,
+            "value": "⌀24.000 (wu)",
+            "type": "radial"
+          },
+          "persistentData": {
+            "labelWorld": [
+              24.99997843633079,
+              -79.2062612657852,
+              18.00405137543038
+            ]
+          },
+          "__open": true,
+          "enabled": true
+        },
+        {
+          "type": "angle",
+          "inputParams": {
+            "id": "ANG10",
+            "decimals": 1,
+            "targets": [
+              "E2:S1:G12_SW",
+              "E2:S1:G13_SW"
+            ],
+            "planeRefName": "E4:S3:G20_SW",
+            "reverseElementOrder": true,
+            "isReference": false,
+            "angleType": "reflex",
+            "value": "270.0°",
+            "type": "angle"
+          },
+          "persistentData": {
+            "labelWorld": [
+              -26.822700861702597,
+              -43.17316826494112,
+              -10.429009863954079
+            ]
+          },
+          "enabled": true
+        }
+      ]
+    }
+  ],
+  "sheets2D": [],
+  "wireHarness": {
+    "connections": [],
+    "routeResults": []
+  },
+  "metadata": {},
+  "assemblyConstraints": [],
+  "assemblyConstraintIdCounter": 0
+}
