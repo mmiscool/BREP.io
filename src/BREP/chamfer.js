@@ -86,15 +86,15 @@ export class ChamferSolid extends Solid {
         const normalsA = [];
         const normalsB = [];
         const tangents = [];
+        const sampleVectors = samples.map(arrToV);
+        const tangentSampleDistance = computeChamferTangentSampleDistance(sampleVectors, isClosed);
 
         // Decide a global offset sign sSign ∈ {+1,-1} so the bevel consistently
         // goes INSET (toward inward) or OUTSET (toward outward) along the edge.
         // Evaluate at mid sample using local face normals.
         const midIdx = (samples.length / 2) | 0;
-        const pm = arrToV(samples[midIdx]);
-        const pmPrev = arrToV(samples[Math.max(0, midIdx - 1)]);
-        const pmNext = arrToV(samples[Math.min(samples.length - 1, midIdx + 1)]);
-        const tm = new THREE.Vector3().subVectors(pmNext, pmPrev).normalize();
+        const pm = sampleVectors[midIdx].clone();
+        const tm = computeChamferStableTangent(sampleVectors, midIdx, tangentSampleDistance, isClosed).normalize();
         const nAm = localFaceNormalAtPoint(solid, faceA.name, pm) || nAavg;
         const nBm = localFaceNormalAtPoint(solid, faceB.name, pm) || nBavg;
         const vAm = nAm.clone().cross(tm).normalize();
@@ -112,14 +112,8 @@ export class ChamferSolid extends Solid {
 
         // Build offset rails with the chosen global sign
         for (let i = 0; i < samples.length; i++) {
-            const p = arrToV(samples[i]);
-            const pPrev = isClosed
-                ? arrToV(samples[(i - 1 + samples.length) % samples.length])
-                : arrToV(samples[Math.max(0, i - 1)]);
-            const pNext = isClosed
-                ? arrToV(samples[(i + 1) % samples.length])
-                : arrToV(samples[Math.min(samples.length - 1, i + 1)]);
-            const t = new THREE.Vector3().subVectors(pNext, pPrev);
+            const p = sampleVectors[i].clone();
+            const t = computeChamferStableTangent(sampleVectors, i, tangentSampleDistance, isClosed);
             if (t.lengthSq() < 1e-14) continue;
             t.normalize();
 
@@ -227,6 +221,79 @@ function polylineLength(pts) {
     let L = 0;
     for (let i = 1; i < pts.length; i++) L += pts[i].distanceTo(pts[i - 1]);
     return L;
+}
+
+function computeChamferTangentSampleDistance(points, closeLoop) {
+    if (!Array.isArray(points) || points.length < 2) return 1e-6;
+    const segmentCount = closeLoop ? points.length : (points.length - 1);
+    let totalLength = 0;
+    let maxSegLen = 0;
+    let positiveCount = 0;
+    for (let i = 0; i < segmentCount; i++) {
+        const a = points[i];
+        const b = points[(i + 1) % points.length];
+        if (!a || !b) continue;
+        const len = a.distanceTo(b);
+        if (!Number.isFinite(len) || len <= 1e-12) continue;
+        totalLength += len;
+        positiveCount += 1;
+        if (len > maxSegLen) maxSegLen = len;
+    }
+    if (positiveCount === 0) return 1e-6;
+    const avgSegLen = totalLength / positiveCount;
+    return Math.max(1e-6, avgSegLen * 0.5, maxSegLen * 0.1);
+}
+
+function computeChamferStableTangent(points, index, minDistance, closeLoop) {
+    if (!Array.isArray(points) || points.length < 2) return new THREE.Vector3();
+    const count = points.length;
+    const minSpan = Number.isFinite(minDistance) ? Math.max(1e-6, minDistance) : 1e-6;
+    let prevIndex = index;
+    let nextIndex = index;
+
+    if (closeLoop) {
+        let backwardDistance = 0;
+        let backwardSteps = 0;
+        while (backwardSteps < count - 1 && backwardDistance < minSpan) {
+            const nextPrev = (prevIndex - 1 + count) % count;
+            backwardDistance += points[prevIndex].distanceTo(points[nextPrev]);
+            prevIndex = nextPrev;
+            backwardSteps += 1;
+        }
+
+        let forwardDistance = 0;
+        let forwardSteps = 0;
+        while (forwardSteps < count - 1 && forwardDistance < minSpan) {
+            const nextNext = (nextIndex + 1) % count;
+            forwardDistance += points[nextNext].distanceTo(points[nextIndex]);
+            nextIndex = nextNext;
+            forwardSteps += 1;
+        }
+    } else {
+        let backwardDistance = 0;
+        while (prevIndex > 0 && backwardDistance < minSpan) {
+            backwardDistance += points[prevIndex].distanceTo(points[prevIndex - 1]);
+            prevIndex -= 1;
+        }
+
+        let forwardDistance = 0;
+        while (nextIndex < count - 1 && forwardDistance < minSpan) {
+            forwardDistance += points[nextIndex + 1].distanceTo(points[nextIndex]);
+            nextIndex += 1;
+        }
+    }
+
+    const tangent = points[nextIndex].clone().sub(points[prevIndex]);
+    if (tangent.lengthSq() > 1e-14) return tangent;
+
+    const fallbackPrev = closeLoop
+        ? points[(index - 1 + count) % count]
+        : points[Math.max(0, index - 1)];
+    const fallbackNext = closeLoop
+        ? points[(index + 1) % count]
+        : points[Math.min(count - 1, index + 1)];
+    if (!fallbackPrev || !fallbackNext) return tangent;
+    return fallbackNext.clone().sub(fallbackPrev);
 }
 
 function resolveChamferSelfIntersections(railGroup, isClosed) {

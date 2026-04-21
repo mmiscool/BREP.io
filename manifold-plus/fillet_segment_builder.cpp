@@ -6,6 +6,7 @@
 #include <manifold/manifold.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cctype>
 #include <cstdint>
@@ -115,6 +116,18 @@ std::vector<Vec3> ReadPoints(const emscripten::val& values, const char* label) {
   return out;
 }
 
+bool ReadOptionalPoint(const emscripten::val& value, Vec3& out) {
+  if (value.isUndefined() || value.isNull()) return false;
+  const double x = value[0].as<double>();
+  const double y = value[1].as<double>();
+  const double z = value[2].as<double>();
+  if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+    throw std::runtime_error("Non-finite optional point value.");
+  }
+  out = {x, y, z};
+  return true;
+}
+
 emscripten::val ToJsArray(const std::vector<float>& values) {
   emscripten::val array = emscripten::val::array();
   for (uint32_t i = 0; i < values.size(); ++i) {
@@ -131,14 +144,18 @@ emscripten::val ToJsArray(const std::vector<uint32_t>& values) {
   return array;
 }
 
+emscripten::val ToPointValue(const Vec3& value) {
+  emscripten::val point = emscripten::val::array();
+  point.set(0, value.x);
+  point.set(1, value.y);
+  point.set(2, value.z);
+  return point;
+}
+
 emscripten::val ToPointArray(const std::vector<Vec3>& values) {
   emscripten::val array = emscripten::val::array();
   for (uint32_t i = 0; i < values.size(); ++i) {
-    emscripten::val point = emscripten::val::array();
-    point.set(0, values[i].x);
-    point.set(1, values[i].y);
-    point.set(2, values[i].z);
-    array.set(i, point);
+    array.set(i, ToPointValue(values[i]));
   }
   return array;
 }
@@ -929,7 +946,8 @@ bool AddTriangleIfValid(SnapshotBuilder& builder, const std::string& face_name,
   return true;
 }
 
-std::vector<Vec3> BuildTubePath(const std::vector<Vec3>& centerline, bool closed) {
+std::vector<Vec3> BuildTubePath(const std::vector<Vec3>& centerline, bool closed,
+                                double nudge_face_distance) {
   std::vector<Vec3> path = centerline;
   if (path.size() < 2) return path;
   if (closed) {
@@ -942,7 +960,7 @@ std::vector<Vec3> BuildTubePath(const std::vector<Vec3>& centerline, bool closed
     return path;
   }
 
-  constexpr double extension_distance = 0.1;
+  const double extension_distance = 0.1 + nudge_face_distance;
   {
     const Vec3 p0 = path[0];
     const Vec3 p1 = path[1];
@@ -1083,6 +1101,21 @@ emscripten::val ApplyFaceOpsAndMetadata(
     const std::unordered_map<std::string, std::string>& metadata) {
   BrepSolidCore core;
   core.SetAuthoringState(snapshot);
+  bool has_face_push = false;
+  for (const auto& op : push_faces) {
+    if (std::abs(op.second) > 1e-12) {
+      has_face_push = true;
+      break;
+    }
+  }
+  if (has_face_push) {
+    try {
+      // Match the JS pushFace precondition: repair triangle winding coherence
+      // and outward orientation before deriving face normals for nudging.
+      core.PrepareManifoldMesh();
+    } catch (...) {
+    }
+  }
   for (const auto& op : push_faces) {
     if (std::abs(op.second) <= 1e-12) continue;
     try {
@@ -3098,10 +3131,7 @@ emscripten::val BuildFilletSegmentAuthoringState(const emscripten::val& options)
   }
 
   emscripten::val wedge_snapshot = BuildSnapshot(wedge_builder);
-  std::vector<std::pair<std::string, double>> wedge_push_faces = {
-      {name + "_FACE_A", nudge_face_distance},
-      {name + "_FACE_B", nudge_face_distance},
-  };
+  std::vector<std::pair<std::string, double>> wedge_push_faces;
   if (!closed) {
     wedge_push_faces.push_back({name + "_END_CAP_1", nudge_face_distance});
     wedge_push_faces.push_back({name + "_END_CAP_2", nudge_face_distance});
@@ -3111,7 +3141,9 @@ emscripten::val BuildFilletSegmentAuthoringState(const emscripten::val& options)
       BuildWedgeMetadata(wedge_snapshot, name, closed));
 
   emscripten::val tube_options = emscripten::val::object();
-  tube_options.set("points", ToPointArray(BuildTubePath(centerline, closed)));
+  tube_options.set("points",
+                   ToPointArray(BuildTubePath(centerline, closed,
+                                             nudge_face_distance)));
   tube_options.set("radius", radius);
   tube_options.set("innerRadius", 0.0);
   tube_options.set("resolution",
@@ -3763,6 +3795,78 @@ double PolylineLength(const std::vector<Vec3>& points) {
   return length;
 }
 
+double ComputeChamferTangentSampleDistance(const std::vector<Vec3>& points,
+                                           bool closed) {
+  if (points.size() < 2) return 1e-6;
+  const size_t segment_count = closed ? points.size() : (points.size() - 1);
+  double total_length = 0.0;
+  double max_seg_len = 0.0;
+  size_t positive_count = 0;
+  for (size_t i = 0; i < segment_count; ++i) {
+    const Vec3& a = points[i];
+    const Vec3& b = points[(i + 1) % points.size()];
+    const double len = std::sqrt(DistanceSq(a, b));
+    if (!std::isfinite(len) || !(len > 1e-12)) continue;
+    total_length += len;
+    max_seg_len = std::max(max_seg_len, len);
+    positive_count += 1;
+  }
+  if (positive_count == 0) return 1e-6;
+  const double avg_seg_len = total_length / static_cast<double>(positive_count);
+  return std::max({1e-6, avg_seg_len * 0.5, max_seg_len * 0.1});
+}
+
+Vec3 ComputeChamferStableTangent(const std::vector<Vec3>& points, size_t index,
+                                 double min_distance, bool closed) {
+  if (points.size() < 2 || index >= points.size()) return {};
+  const size_t count = points.size();
+  const double min_span =
+      std::isfinite(min_distance) ? std::max(1e-6, min_distance) : 1e-6;
+  size_t prev_index = index;
+  size_t next_index = index;
+
+  if (closed) {
+    double backward_distance = 0.0;
+    size_t backward_steps = 0;
+    while (backward_steps + 1 < count && backward_distance < min_span) {
+      const size_t next_prev = (prev_index + count - 1) % count;
+      backward_distance += std::sqrt(DistanceSq(points[prev_index], points[next_prev]));
+      prev_index = next_prev;
+      backward_steps += 1;
+    }
+
+    double forward_distance = 0.0;
+    size_t forward_steps = 0;
+    while (forward_steps + 1 < count && forward_distance < min_span) {
+      const size_t next_next = (next_index + 1) % count;
+      forward_distance += std::sqrt(DistanceSq(points[next_next], points[next_index]));
+      next_index = next_next;
+      forward_steps += 1;
+    }
+  } else {
+    double backward_distance = 0.0;
+    while (prev_index > 0 && backward_distance < min_span) {
+      backward_distance += std::sqrt(DistanceSq(points[prev_index], points[prev_index - 1]));
+      prev_index -= 1;
+    }
+
+    double forward_distance = 0.0;
+    while (next_index + 1 < count && forward_distance < min_span) {
+      forward_distance += std::sqrt(DistanceSq(points[next_index + 1], points[next_index]));
+      next_index += 1;
+    }
+  }
+
+  Vec3 tangent = Subtract(points[next_index], points[prev_index]);
+  if (LengthSq(tangent) > 1e-14) return tangent;
+
+  const size_t fallback_prev =
+      closed ? (index + count - 1) % count : (index > 0 ? index - 1 : 0);
+  const size_t fallback_next =
+      closed ? (index + 1) % count : std::min(count - 1, index + 1);
+  return Subtract(points[fallback_next], points[fallback_prev]);
+}
+
 Vec3 PointAtArcLength(const std::vector<Vec3>& points, double distance) {
   if (points.empty()) return {};
   double acc = 0.0;
@@ -4200,12 +4304,13 @@ emscripten::val BuildChamferAuthoringState(const emscripten::val& options) {
         "buildChamferAuthoringState produced too few polyline samples.");
   }
 
+  const double tangent_sample_distance =
+      ComputeChamferTangentSampleDistance(polyline, closed_loop);
   const size_t mid_idx = polyline.size() / 2;
   const Vec3 pm = polyline[mid_idx];
-  const Vec3 pm_prev = polyline[mid_idx > 0 ? mid_idx - 1 : 0];
-  const Vec3 pm_next =
-      polyline[mid_idx + 1 < polyline.size() ? mid_idx + 1 : polyline.size() - 1];
-  Vec3 t_mid = Normalize(Subtract(pm_next, pm_prev));
+  Vec3 t_mid =
+      Normalize(ComputeChamferStableTangent(polyline, mid_idx,
+                                            tangent_sample_distance, closed_loop));
   if (!(LengthSq(t_mid) > 1e-14)) {
     throw std::runtime_error("buildChamferAuthoringState could not resolve edge tangent.");
   }
@@ -4237,13 +4342,8 @@ emscripten::val BuildChamferAuthoringState(const emscripten::val& options) {
 
   for (size_t i = 0; i < polyline.size(); ++i) {
     const Vec3& point = polyline[i];
-    const Vec3 prev =
-        closed_loop ? polyline[(i + polyline.size() - 1) % polyline.size()]
-                    : polyline[i > 0 ? i - 1 : 0];
-    const Vec3 next =
-        closed_loop ? polyline[(i + 1) % polyline.size()]
-                    : polyline[i + 1 < polyline.size() ? i + 1 : polyline.size() - 1];
-    Vec3 tangent = Normalize(Subtract(next, prev));
+    Vec3 tangent = Normalize(ComputeChamferStableTangent(
+        polyline, i, tangent_sample_distance, closed_loop));
     if (!(LengthSq(tangent) > 1e-14)) continue;
 
     Vec3 n_a = Normalize(LocalFaceNormalAtPoint(face_a, point, face_a_avg));
@@ -4513,6 +4613,8 @@ emscripten::val BuildFilletEdgeAuthoringState(const emscripten::val& options) {
   const std::string side_mode_raw = ReadString(options["sideMode"], "INSET");
   const std::string side_mode =
       side_mode_raw == "OUTSET" ? "OUTSET" : "INSET";
+  const double effective_nudge_face_distance =
+      side_mode == "OUTSET" ? 0.0 : nudge_face_distance;
   const std::string name = ReadString(options["name"], "fillet");
   const std::string edge_reference = ReadString(options["edgeReference"], "");
 
@@ -4610,7 +4712,7 @@ emscripten::val BuildFilletEdgeAuthoringState(const emscripten::val& options) {
   segment_options.set("edge", ToPointArray(edge_wedge));
   segment_options.set("radius", radius);
   segment_options.set("requestedRadius", requested_radius);
-  segment_options.set("nudgeFaceDistance", nudge_face_distance);
+  segment_options.set("nudgeFaceDistance", effective_nudge_face_distance);
   segment_options.set("resolution", resolution_raw);
   segment_options.set("closedLoop", result_closed);
   segment_options.set("edgeReference", edge_reference);
@@ -5135,54 +5237,89 @@ emscripten::val BuildFilletAuthoringState(const emscripten::val& options) {
     for (const auto& pair : info.id_to_face_name) {
       face_names.insert(pair.second);
     }
-    std::vector<std::string> merge_face_names;
-    const std::vector<std::string> side_candidates = {
-        entry.fillet_name + "_SURFACE_CA", entry.fillet_name + "_SURFACE_CB",
-        entry.fillet_name + "_FACE_A",     entry.fillet_name + "_FACE_B",
-        entry.fillet_name + "_WEDGE_A",    entry.fillet_name + "_WEDGE_B",
-        entry.fillet_name + "_SIDE_A",     entry.fillet_name + "_SIDE_B"};
-    for (const std::string& candidate : side_candidates) {
+
+    std::vector<std::string> tube_merge_face_names;
+    std::vector<std::string> side_merge_face_names;
+    const std::vector<std::string> tube_side_candidates =
+        entry.closed_loop
+            ? std::vector<std::string>{entry.fillet_name + "_WEDGE_A",
+                                       entry.fillet_name + "_WEDGE_B"}
+            : std::vector<std::string>{entry.fillet_name + "_SURFACE_CA",
+                                       entry.fillet_name + "_SURFACE_CB"};
+    const std::vector<std::string> edge_side_candidates =
+        entry.closed_loop
+            ? std::vector<std::string>{entry.fillet_name + "_SIDE_A",
+                                       entry.fillet_name + "_SIDE_B"}
+            : std::vector<std::string>{entry.fillet_name + "_FACE_A",
+                                       entry.fillet_name + "_FACE_B"};
+    for (const std::string& candidate : tube_side_candidates) {
       if (face_names.find(candidate) != face_names.end()) {
-        merge_face_names.push_back(candidate);
+        tube_merge_face_names.push_back(candidate);
+      }
+    }
+    for (const std::string& candidate : edge_side_candidates) {
+      if (face_names.find(candidate) != face_names.end()) {
+        side_merge_face_names.push_back(candidate);
       }
     }
     if (include_start_cap &&
         face_names.find(entry.fillet_name + "_END_CAP_1") != face_names.end()) {
-      merge_face_names.push_back(entry.fillet_name + "_END_CAP_1");
+      side_merge_face_names.push_back(entry.fillet_name + "_END_CAP_1");
     }
     if (include_end_cap &&
         face_names.find(entry.fillet_name + "_END_CAP_2") != face_names.end()) {
-      merge_face_names.push_back(entry.fillet_name + "_END_CAP_2");
+      side_merge_face_names.push_back(entry.fillet_name + "_END_CAP_2");
     }
 
     const std::string tube_outer_face_name = entry.fillet_name + "_TUBE_Outer";
-    const std::string merge_target_face_name =
+    const std::string tube_merge_target_face_name =
         face_names.find(tube_outer_face_name) != face_names.end()
             ? tube_outer_face_name
-            : BuildEdgeDerivedSideWallFaceName(entry.edge_reference, feature_id);
-    if (face_names.find(merge_target_face_name) != face_names.end()) {
-      merge_face_names.insert(merge_face_names.begin(), merge_target_face_name);
-    }
-    for (const auto& pair : info.id_to_face_name) {
-      if (!IsFallbackFaceName(pair.second, pair.first, true) ||
-          pair.second == merge_target_face_name) {
-        continue;
-      }
-      merge_face_names.push_back(pair.second);
-    }
+            : (entry.fillet_name + "_TUBE_Outer");
+    const std::string side_merge_target_face_name =
+        BuildEdgeDerivedSideWallFaceName(entry.edge_reference, feature_id);
 
-    if (!merge_face_names.empty()) {
-      entry.merge_target_face_name = merge_target_face_name;
-      entry.merge_face_names = merge_face_names;
+    if (!tube_merge_face_names.empty() || !side_merge_face_names.empty()) {
+      BrepSolidCore core;
+      core.SetAuthoringState(entry.final_snapshot);
+      auto apply_merge_group = [&](const std::string& target_face_name,
+                                   const std::vector<std::string>& source_face_names,
+                                   const std::string& metadata_json) {
+        if (target_face_name.empty() || source_face_names.empty()) return;
+        for (const std::string& source_face_name : source_face_names) {
+          if (source_face_name.empty() || source_face_name == target_face_name) continue;
+          core.RenameFace(source_face_name, target_face_name);
+        }
+        if (!metadata_json.empty()) {
+          core.SetFaceMetadataJson(target_face_name, metadata_json);
+        }
+      };
+
       emscripten::val metadata = emscripten::val::object();
       metadata.set("filletMergedSideWall", true);
       metadata.set("filletSideWall", true);
       metadata.set("filletSideWallEdge", entry.edge_reference);
       metadata.set("filletSideWallIncludesStartCap", include_start_cap);
       metadata.set("filletSideWallIncludesEndCap", include_end_cap);
-      entry.merge_face_metadata_json = JsonStringifyObject(metadata);
-    }
+      const std::string merge_face_metadata_json = JsonStringifyObject(metadata);
 
+      apply_merge_group(tube_merge_target_face_name, tube_merge_face_names,
+                        merge_face_metadata_json);
+      apply_merge_group(side_merge_target_face_name, side_merge_face_names,
+                        merge_face_metadata_json);
+
+      emscripten::val grouped_snapshot = core.GetAuthoringState();
+      SnapshotInfo grouped_info = ReadBooleanReadySnapshotInfo(
+          grouped_snapshot, entry.fillet_name + "_GROUPED");
+      manifold::MeshGL grouped_mesh = grouped_info.mesh;
+      RelabelFallbackFacesByAdjacency(
+          grouped_mesh, grouped_info.id_to_face_name, grouped_info.face_name_to_id,
+          grouped_info.face_metadata_json, feature_id);
+      entry.final_snapshot = BuildSnapshotFromMesh(
+          grouped_mesh, grouped_info.id_to_face_name, grouped_info.face_name_to_id,
+          grouped_info.face_metadata_json, grouped_info.edge_metadata_json,
+          grouped_info.aux_edges, ReadString(grouped_snapshot["name"], ""));
+    }
   }
 
   emscripten::val combine_options = emscripten::val::object();
@@ -5368,6 +5505,10 @@ emscripten::val BuildFilletCornerBridgeAuthoringState(
     tube_snapshot = BuildTubeAuthoringState(tube_options);
     BrepSolidCore core;
     core.SetAuthoringState(tube_snapshot);
+    try {
+      core.PrepareManifoldMesh();
+    } catch (...) {
+    }
     try {
       core.PushFace(tube_name + "_CapStart", bridge_end_cap_push_distance);
     } catch (...) {

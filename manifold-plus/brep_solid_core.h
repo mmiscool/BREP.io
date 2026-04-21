@@ -60,6 +60,7 @@ class BrepSolidCore {
 
   emscripten::val GetFace(const std::string& face_name);
   emscripten::val GetFaces(bool include_empty);
+  emscripten::val GetFaceNormal(const std::string& face_name);
   emscripten::val GetBoundaryEdgePolylines();
   emscripten::val ComputeFilletCenterline(const emscripten::val& options) const;
   void AddAuxEdge(const std::string& name, const emscripten::val& points,

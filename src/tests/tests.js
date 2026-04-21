@@ -20,6 +20,7 @@ import { test_Chamfer } from './test_chamfer.js';
 import {
     test_cppChamfer_auto_direction_uses_native_classifier,
     test_cppChamfer_single_edge_builds_native_named_tool_and_result,
+    test_cppChamfer_stabilizes_tiny_terminal_segments_before_offsetting,
 } from './test_cppChamfer.js';
 import {
     test_edge_smooth_constraints_prevent_triangle_foldback,
@@ -139,13 +140,17 @@ import {
     test_cppSolidNative_buildFilletEdgeAuthoringState_returns_standard_edge_snapshots,
     test_cppSolidNative_cleanupTinyFaceIslands_reassigns_small_face_and_prunes_metadata,
     test_cppSolidNative_filletEdge_finalSnapshot_preserves_face_names_and_metadata,
+    test_cppSolidNative_filletEdge_nudgeFaceDistance_moves_only_end_cap_vertices,
     test_cppSolidNative_classifyFilletEdgeDirection_cubeConvexEdge_isInset,
+    test_cppSolidNative_getFaceNormal_reports_planar_face_normal,
     test_cppSolidNative_invertNormals_and_manifoldize_rebuilds_coherent_mesh,
     test_cppSolidNative_mergeTinyFaces_merges_small_adjacent_face,
     test_cppSolidNative_mergeCoplanarAdjacentFilletEndCaps_retags_triangles_to_planar_neighbor,
     test_cppSolidNative_offsetFace_updates_planar_face_vertices,
     test_cppSolidNative_postBoolean_fillet_merges_coplanar_cube_end_caps,
+    test_cppSolidNative_postBoolean_fillet_reverse_end_cap_nudge_requires_merge,
     test_cppSolidNative_reassignTinyFilletSidewallSliverTriangles_merges_triangle_whose_vertices_lie_on_single_planar_face_boundary,
+    test_cppSolidNative_reversePostBooleanFilletEndCapNudge_skips_faces_that_share_vertices_with_fillet_sidewalls,
     test_cppSolidNative_pushFace_updates_planar_face_vertices,
     test_cppSolidNative_removeInternalTriangles_preserves_clean_manifold_shell,
     test_cppSolidNative_removeSmallIslands_drops_external_shell_and_prunes_metadata,
@@ -178,6 +183,7 @@ import { test_primitiveCylinder } from './test_primitiveCylinder.js';
 import { test_primitivePyramid } from './test_primitivePyramid.js';
 import { test_primitiveSphere } from './test_primitiveSphere.js';
 import { test_primitiveTorus } from './test_primitiveTorus.js';
+import { afterRun_pushFace_feature, test_pushFace_feature } from './test_pushFace_feature.js';
 import { afterRun_pushFace, test_pushFace } from './test_pushFace.js';
 import { test_sheetMetal_corner_fillet } from './test_sheetMetal_corner_fillet.js';
 import { test_sheetMetal_corner_fillet_face_cylindrical_metadata } from './test_sheetMetal_corner_fillet_face_cylindrical_metadata.js';
@@ -301,14 +307,18 @@ export const testFunctions = [
     { test: test_cppSolidNative_mergeTinyFaces_merges_small_adjacent_face, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_removeInternalTriangles_preserves_clean_manifold_shell, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_pushFace_updates_planar_face_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidNative_getFaceNormal_reports_planar_face_normal, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_offsetFace_updates_planar_face_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_invertNormals_and_manifoldize_rebuilds_coherent_mesh, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_classifyFilletEdgeDirection_cubeConvexEdge_isInset, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_booleanCombinedAuthoringState_preserves_face_names_and_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_buildFilletEdgeAuthoringState_returns_standard_edge_snapshots, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_filletEdge_finalSnapshot_preserves_face_names_and_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidNative_filletEdge_nudgeFaceDistance_moves_only_end_cap_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_postBoolean_fillet_merges_coplanar_cube_end_caps, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidNative_postBoolean_fillet_reverse_end_cap_nudge_requires_merge, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_mergeCoplanarAdjacentFilletEndCaps_retags_triangles_to_planar_neighbor, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidNative_reversePostBooleanFilletEndCapNudge_skips_faces_that_share_vertices_with_fillet_sidewalls, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_reassignTinyFilletSidewallSliverTriangles_merges_triangle_whose_vertices_lie_on_single_planar_face_boundary, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_open_tube_preserves_expected_face_labels, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_closed_hollow_tube_preserves_expected_face_labels, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -569,6 +579,7 @@ export const testFunctions = [
     { test: test_Chamfer, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_cppChamfer_single_edge_builds_native_named_tool_and_result, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppChamfer_auto_direction_uses_native_classifier, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppChamfer_stabilizes_tiny_terminal_segments_before_offsetting, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_edge_smooth_curve_fit, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_edge_smooth_curve_fit_closed_loop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_edge_smooth_constraints_prevent_triangle_foldback, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -582,6 +593,7 @@ export const testFunctions = [
     { test: test_hole_counterbore, afterRun: afterRun_hole_counterbore, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_thread_symbolic, afterRun: afterRun_hole_thread_symbolic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_thread_modeled, afterRun: afterRun_hole_thread_modeled, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_pushFace_feature, afterRun: afterRun_pushFace_feature, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_pushFace, afterRun: afterRun_pushFace, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_mirror, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_history_features_basic, afterRun: afterRun_history_features_basic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },

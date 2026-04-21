@@ -42,6 +42,15 @@ export function getFace(name) {
 }
 
 /**
+ * Get the averaged authored normal for a face.
+ * Returns { faceFound, validNormal, normal: [x, y, z], planarRatio, affectedVertexCount }.
+ */
+export function getFaceNormal(name) {
+    requireCppSolidCoreCapability(cppSolidCoreHasNativeTopologyQueries, "Solid.getFaceNormal");
+    return getSyncedCppSolidCore(this).getFaceNormal(name);
+}
+
+/**
  * Enumerate faces with their triangles in one pass.
  */
 export function getFaces(includeEmpty = false) {

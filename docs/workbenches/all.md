@@ -20,6 +20,7 @@ The All workbench is the unfiltered view. It exposes every built-in feature that
 - [Fillet](../features/fillet.md)
 - [Chamfer](../features/chamfer.md)
 - [Hole](../features/hole.md)
+- [Push Face](../features/push-face.md)
 - [Pattern Linear](../features/pattern-linear.md)
 - [Pattern Radial](../features/pattern-radial.md)
 - [Pattern](../features/pattern.md)

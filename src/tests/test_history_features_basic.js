@@ -105,6 +105,11 @@ export async function test_history_features_basic(partHistory) {
   overlap.inputParams.targetSolid = overlapBase.inputParams.featureID;
   overlap.inputParams.distance = 0.0005;
 
+  const pushFaceBase = await partHistory.newFeature("P.CU");
+  const pushFace = await partHistory.newFeature("PF");
+  pushFace.inputParams.faces = [`${pushFaceBase.inputParams.featureID}_PZ`];
+  pushFace.inputParams.distance = 0.5;
+
   const patLinBase = await partHistory.newFeature("P.CU");
   const patLin = await partHistory.newFeature("PATLIN");
   patLin.inputParams.solids = [patLinBase.inputParams.featureID];
@@ -146,9 +151,19 @@ export async function afterRun_history_features_basic(partHistory) {
     if (!obj) throw new Error(`${label} object not found in scene`);
   };
 
+  const requireFeatureOwnedObject = (type, label) => {
+    const entry = partHistory.features.find((f) => f?.type === type);
+    if (!entry) throw new Error(`${label} feature missing from history`);
+    const fid = entry?.inputParams?.featureID;
+    if (!fid) throw new Error(`${label} feature missing featureID`);
+    const obj = (partHistory.scene?.children || []).find((candidate) => candidate?.owningFeatureID === fid);
+    if (!obj) throw new Error(`${label} object owned by ${fid} not found in scene`);
+  };
+
   requireFeatureObject("D", "Datium");
   requireFeatureObject("SP", "Spline");
   requireFeatureObject("HX", "Helix");
   requireFeatureObject("LOFT", "Loft");
   requireFeatureObject("R", "Revolve");
+  requireFeatureOwnedObject("PF", "Push Face");
 }

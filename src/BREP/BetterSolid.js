@@ -279,6 +279,15 @@ export class Solid extends THREE.Group {
     }
 
     /**
+     * Query the averaged authored normal for a named face.
+     * @param {string} faceName
+     * @returns {{faceFound:boolean, validNormal:boolean, normal:number[], planarRatio:number, affectedVertexCount:number}}
+     */
+    getFaceNormal(..._args) {
+        return SolidMethods.getFaceNormal.apply(this, arguments);
+    }
+
+    /**
      * Remove tiny boundary-adjacent triangles via edge flips under an area threshold.
      * @param {number} areaThreshold
      * @param {number} [maxIterations=1]

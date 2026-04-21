@@ -33,6 +33,7 @@ import { TubeFeature } from './features/tube/TubeFeature.js';
 import { AssemblyComponentFeature } from './features/assemblyComponent/AssemblyComponentFeature.js';
 import { OffsetShellFeature } from './features/offsetShell/OffsetShellFeature.js';
 import { OffsetFaceFeature } from './features/offsetFace/OffsetFaceFeature.js';
+import { PushFaceFeature } from './features/pushFace/PushFaceFeature.js';
 import { NurbsFaceSolidFeature } from './features/nurbsFaceSolid/NurbsFaceSolidFeature.js';
 import { PolygonSolidFeature } from './features/polygonSolid/PolygonSolidFeature.js';
 import { SmoothWithSubdivisionFeature } from './features/smoothWithSubdivision/SmoothWithSubdivisionFeature.js';
@@ -98,6 +99,7 @@ export class FeatureRegistry {
     this.register(EdgeSmoothFeature);
     this.register(OffsetShellFeature);
     this.register(OffsetFaceFeature);
+    this.register(PushFaceFeature);
     this.register(NurbsFaceSolidFeature);
     this.register(PolygonSolidFeature);
     this.register(SmoothWithSubdivisionFeature);
@@ -150,6 +152,8 @@ export class FeatureRegistry {
     // Smooth With Subdivision spacing variations
     this.aliases.set('SMOOTHWITHSUBDIVISION', SmoothWithSubdivisionFeature);
     this.aliases.set('SMOOTH SUBDIVISION', SmoothWithSubdivisionFeature);
+    // Push Face variations
+    this.aliases.set('PUSHFACE', PushFaceFeature);
   }
 
   register(FeatureClass) {

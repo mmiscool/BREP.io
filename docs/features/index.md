@@ -37,6 +37,7 @@ Reference docs for the built-in modeling features.
 - [Primitive Pyramid](primitive-pyramid.md)
 - [Primitive Sphere](primitive-sphere.md)
 - [Primitive Torus](primitive-torus.md)
+- [Push Face](push-face.md)
 - [Remesh](remesh.md)
 - [Revolve](revolve.md)
 - [Sheet Metal Contour Flange](sheet-metal-contour-flange.md)

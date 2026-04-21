@@ -176,6 +176,7 @@ export const cppSolidCoreHasNativeTopologyQueries = (() => {
         try {
             return typeof probe.getFace === "function"
                 && typeof probe.getFaces === "function"
+                && typeof probe.getFaceNormal === "function"
                 && typeof probe.getBoundaryEdgePolylines === "function";
         } finally {
             if (typeof probe.delete === "function") probe.delete();
@@ -755,6 +756,17 @@ export class CppSolidCore {
             p2: Array.from(tri?.p2 || []),
             p3: Array.from(tri?.p3 || []),
         }));
+    }
+
+    getFaceNormal(faceName) {
+        const result = this._native.getFaceNormal(faceName) || {};
+        return {
+            faceFound: !!result?.faceFound,
+            validNormal: !!result?.validNormal,
+            normal: Array.from(result?.normal || []),
+            planarRatio: Number(result?.planarRatio ?? 0),
+            affectedVertexCount: Number(result?.affectedVertexCount ?? 0),
+        };
     }
 
     getFaces(includeEmpty = false) {

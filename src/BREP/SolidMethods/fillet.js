@@ -726,9 +726,10 @@ function mergeCoplanarAdjacentFilletEndCaps(solid, opts = {}) {
 
   const featureID = String(opts?.featureID || '').trim();
   const debug = !!opts?.debug;
+  const nudgeDistance = Math.abs(Number(opts?.nudgeFaceDistance) || 0);
   const solidTol = deriveSolidToleranceFromVerts(solid, 1e-5);
-  const distanceTolerance = Math.max(solidTol * 4, 2e-4);
-  const planarityTolerance = Math.max(distanceTolerance * 2, 2e-4);
+  const distanceTolerance = Math.max(solidTol * 4, 2e-4, nudgeDistance * 3);
+  const planarityTolerance = Math.max(distanceTolerance * 2, 2e-4, nudgeDistance * 4);
   const normalTolerance = Math.max(1e-6, Math.abs(Number(opts?.normalTolerance) || 2e-4));
   const core = getSyncedCppSolidCore(solid);
   let mergedEndCaps = 0;
@@ -814,8 +815,71 @@ function reversePostBooleanFilletEndCapNudge(solid, nudgeFaceDistance = 0, { deb
     return { reversedFaces: 0, nudgeAmount };
   }
 
+  const triVerts = Array.isArray(solid?._triVerts) ? solid._triVerts : [];
+  const triIDs = Array.isArray(solid?._triIDs) ? solid._triIDs : [];
+  const idToFaceName = solid?._idToFaceName instanceof Map ? solid._idToFaceName : null;
+  const getFaceMetadata = (name) => (typeof solid.getFaceMetadata === 'function')
+    ? (solid.getFaceMetadata(name) || {})
+    : {};
+  const isFilletManagedNeighbor = (faceName) => {
+    if (!faceName) return false;
+    const metadata = getFaceMetadata(faceName);
+    return metadata?.filletEndCap !== true && (
+      metadata?.filletSideWall === true
+      || metadata?.filletMergedSideWall === true
+      || typeof metadata?.filletRoundFace === 'string'
+      || faceName.endsWith('_TUBE_Outer')
+    );
+  };
+  const vertexToFaceNames = new Map();
+  if (idToFaceName && triVerts.length >= 3 && triIDs.length > 0) {
+    const triCount = Math.min(triIDs.length, (triVerts.length / 3) | 0);
+    for (let triIndex = 0; triIndex < triCount; triIndex += 1) {
+      const faceName = String(idToFaceName.get(triIDs[triIndex] >>> 0) || '').trim();
+      if (!faceName) continue;
+      const base = triIndex * 3;
+      for (const vertexIndex of [triVerts[base + 0] >>> 0, triVerts[base + 1] >>> 0, triVerts[base + 2] >>> 0]) {
+        let faceNames = vertexToFaceNames.get(vertexIndex);
+        if (!faceNames) {
+          faceNames = new Set();
+          vertexToFaceNames.set(vertexIndex, faceNames);
+        }
+        faceNames.add(faceName);
+      }
+    }
+  }
+
   let reversedFaces = 0;
+  let skippedFaces = 0;
   for (const faceName of endCapFaceNames) {
+    let touchesFilletManagedNeighbor = false;
+    if (idToFaceName && vertexToFaceNames.size > 0) {
+      const faceVertexIndices = new Set();
+      const triCount = Math.min(triIDs.length, (triVerts.length / 3) | 0);
+      for (let triIndex = 0; triIndex < triCount; triIndex += 1) {
+        if (String(idToFaceName.get(triIDs[triIndex] >>> 0) || '').trim() !== faceName) continue;
+        const base = triIndex * 3;
+        faceVertexIndices.add(triVerts[base + 0] >>> 0);
+        faceVertexIndices.add(triVerts[base + 1] >>> 0);
+        faceVertexIndices.add(triVerts[base + 2] >>> 0);
+      }
+      for (const vertexIndex of faceVertexIndices) {
+        const sharedFaceNames = vertexToFaceNames.get(vertexIndex);
+        if (!sharedFaceNames) continue;
+        for (const sharedFaceName of sharedFaceNames) {
+          if (sharedFaceName === faceName) continue;
+          if (isFilletManagedNeighbor(sharedFaceName)) {
+            touchesFilletManagedNeighbor = true;
+            break;
+          }
+        }
+        if (touchesFilletManagedNeighbor) break;
+      }
+    }
+    if (touchesFilletManagedNeighbor) {
+      skippedFaces += 1;
+      continue;
+    }
     try {
       solid.pushFace(faceName, -nudgeAmount, {
         warnMissing: false,
@@ -829,12 +893,14 @@ function reversePostBooleanFilletEndCapNudge(solid, nudgeFaceDistance = 0, { deb
     console.log('[Solid.fillet] Reversed post-boolean fillet end-cap nudge.', {
       featureID,
       reversedFaces,
+      skippedFaces,
       nudgeAmount,
     });
   }
 
   return {
     reversedFaces,
+    skippedFaces,
     nudgeAmount,
   };
 }
@@ -1189,6 +1255,7 @@ function reassignTinyFilletSidewallSliverTriangles(solid, opts = {}) {
   };
 }
 
+export { reversePostBooleanFilletEndCapNudge as __testOnlyReversePostBooleanFilletEndCapNudge };
 export { mergeCoplanarAdjacentFilletEndCaps as __testOnlyMergeCoplanarAdjacentFilletEndCaps };
 export { reassignTinyFilletSidewallSliverTriangles as __testOnlyReassignTinyFilletSidewallSliverTriangles };
 
@@ -1201,9 +1268,11 @@ export { reassignTinyFilletSidewallSliverTriangles as __testOnlyReassignTinyFill
  * @param {any[]} [opts.edges] Optional pre-resolved Edge objects (must belong to this Solid)
  * @param {'AUTO'|'INSET'|'OUTSET'|string} [opts.direction='AUTO'] Choose boolean side per edge automatically (AUTO) or force INSET/OUTSET
  * @param {number} [opts.inflate=0.1] Inflation for cutting tube
- * @param {number} [opts.nudgeFaceDistance=0.0001] pushFace amount applied to wedge faces/end caps before boolean
+ * @param {number} [opts.nudgeFaceDistance=0.0001] pushFace amount applied to wedge end caps before boolean
  * @param {number} [opts.resolution=32] Tube resolution (segments around circumference)
  * @param {number} [opts.cleanupTinyFaceIslandsArea=0.01] area threshold for reassigning tiny enclosed face-label islands (<= 0 disables)
+ * @param {boolean} [opts.mergeCoplanarEndCaps=true] merge coplanar fillet end caps into adjacent host faces
+ * @param {boolean} [opts.reassignSliverTriangles=true] reassign tiny fillet sidewall sliver triangles into planar neighbors
  * @param {boolean} [opts.debug=false] Enable debug visuals in fillet builder
  * @param {number} [opts.debugSolidsLevel=0] -1=none, 0=tube+wedge, 1=edge fillet boolean result, 2=all intermediate solids
  * @param {boolean} [opts.debugShowCombinedBeforeTarget=false] Emit the combined fillet solid before target boolean
@@ -1235,6 +1304,9 @@ export async function fillet(opts = {}) {
   const cleanupTinyFaceIslandsArea = Number.isFinite(cleanupTinyFaceIslandsAreaRaw)
     ? cleanupTinyFaceIslandsAreaRaw
     : 0.01;
+  const mergeCoplanarEndCaps = opts.mergeCoplanarEndCaps !== false;
+  const reverseEndCapNudge = mergeCoplanarEndCaps;
+  const reassignSliverTriangles = opts.reassignSliverTriangles !== false;
   const featureID = opts.featureID || 'FILLET';
 
   // Resolve pre-selected edge objects.
@@ -1345,41 +1417,57 @@ export async function fillet(opts = {}) {
   try {
     result.__filletCornerBridgeCount = Math.max(0, Number(nativeResult?.entryCount || 0) - edgePayload.length);
   } catch { }
-  try {
-    const reversedEndCapNudgeSummary = reversePostBooleanFilletEndCapNudge(result, nudgeFaceDistance, {
-      featureID,
-      debug,
-    });
-    result.__filletEndCapReverseNudgeCount = Math.max(0, Number(reversedEndCapNudgeSummary?.reversedFaces || 0));
-  } catch (error) {
-    console.warn('[Solid.fillet] Failed to reverse post-boolean fillet end-cap nudge.', {
-      featureID,
-      error: error?.message || error,
-    });
+  result.__filletEndCapReverseNudgeEnabled = reverseEndCapNudge;
+  if (reverseEndCapNudge) {
+    try {
+      const reversedEndCapNudgeSummary = reversePostBooleanFilletEndCapNudge(result, nudgeFaceDistance, {
+        featureID,
+        debug,
+      });
+      result.__filletEndCapReverseNudgeCount = Math.max(0, Number(reversedEndCapNudgeSummary?.reversedFaces || 0));
+    } catch (error) {
+      console.warn('[Solid.fillet] Failed to reverse post-boolean fillet end-cap nudge.', {
+        featureID,
+        error: error?.message || error,
+      });
+    }
+  } else {
+    result.__filletEndCapReverseNudgeCount = 0;
   }
-  try {
-    const endCapMergeSummary = mergeCoplanarAdjacentFilletEndCaps(result, {
-      featureID,
-      debug,
-    });
-    result.__filletEndCapMergeCount = Math.max(0, Number(endCapMergeSummary?.mergedEndCaps || 0));
-  } catch (error) {
-    console.warn('[Solid.fillet] Failed to merge coplanar adjacent fillet end caps.', {
-      featureID,
-      error: error?.message || error,
-    });
+  result.__filletEndCapMergeEnabled = mergeCoplanarEndCaps;
+  if (mergeCoplanarEndCaps) {
+    try {
+      const endCapMergeSummary = mergeCoplanarAdjacentFilletEndCaps(result, {
+        featureID,
+        debug,
+        nudgeFaceDistance,
+      });
+      result.__filletEndCapMergeCount = Math.max(0, Number(endCapMergeSummary?.mergedEndCaps || 0));
+    } catch (error) {
+      console.warn('[Solid.fillet] Failed to merge coplanar adjacent fillet end caps.', {
+        featureID,
+        error: error?.message || error,
+      });
+    }
+  } else {
+    result.__filletEndCapMergeCount = 0;
   }
-  try {
-    const sliverTriangleSummary = reassignTinyFilletSidewallSliverTriangles(result, {
-      featureID,
-      debug,
-    });
-    result.__filletSliverTriangleReassignCount = Math.max(0, Number(sliverTriangleSummary?.reassignedTriangles || 0));
-  } catch (error) {
-    console.warn('[Solid.fillet] Failed to reassign tiny fillet sliver triangles.', {
-      featureID,
-      error: error?.message || error,
-    });
+  result.__filletSliverTriangleReassignEnabled = reassignSliverTriangles;
+  if (reassignSliverTriangles) {
+    try {
+      const sliverTriangleSummary = reassignTinyFilletSidewallSliverTriangles(result, {
+        featureID,
+        debug,
+      });
+      result.__filletSliverTriangleReassignCount = Math.max(0, Number(sliverTriangleSummary?.reassignedTriangles || 0));
+    } catch (error) {
+      console.warn('[Solid.fillet] Failed to reassign tiny fillet sliver triangles.', {
+        featureID,
+        error: error?.message || error,
+      });
+    }
+  } else {
+    result.__filletSliverTriangleReassignCount = 0;
   }
   return result;
 }

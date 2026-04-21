@@ -1125,6 +1125,94 @@ emscripten::val BrepSolidCore::GetFaces(bool include_empty) {
   return out;
 }
 
+emscripten::val BrepSolidCore::GetFaceNormal(const std::string& face_name) {
+  emscripten::val result = emscripten::val::object();
+  result.set("faceFound", false);
+  result.set("validNormal", false);
+  result.set("normal", emscripten::val::array());
+  result.set("planarRatio", 0.0);
+  result.set("affectedVertexCount", 0);
+
+  const auto face_found = face_name_to_id_.find(face_name);
+  if (face_found == face_name_to_id_.end()) return result;
+  result.set("faceFound", true);
+
+  const uint32_t face_id = face_found->second;
+  const uint32_t tri_count =
+      std::min(static_cast<uint32_t>(tri_ids_.size()),
+               static_cast<uint32_t>(tri_verts_.size() / 3));
+  const uint32_t nv = VertexCount();
+  if (tri_count == 0 || nv == 0) return result;
+
+  double nx = 0.0;
+  double ny = 0.0;
+  double nz = 0.0;
+  double area_sum = 0.0;
+  std::vector<uint8_t> affected(nv, 0);
+
+  for (uint32_t tri_idx = 0; tri_idx < tri_count; ++tri_idx) {
+    if (tri_ids_[tri_idx] != face_id) continue;
+
+    const uint32_t tri_base = tri_idx * 3;
+    const uint32_t i0 = tri_verts_[tri_base + 0];
+    const uint32_t i1 = tri_verts_[tri_base + 1];
+    const uint32_t i2 = tri_verts_[tri_base + 2];
+    if (i0 >= nv || i1 >= nv || i2 >= nv) continue;
+
+    affected[i0] = 1;
+    affected[i1] = 1;
+    affected[i2] = 1;
+
+    const uint32_t a = i0 * num_prop_;
+    const uint32_t b = i1 * num_prop_;
+    const uint32_t c = i2 * num_prop_;
+
+    const double ax = vert_properties_[a + 0];
+    const double ay = vert_properties_[a + 1];
+    const double az = vert_properties_[a + 2];
+    const double bx = vert_properties_[b + 0];
+    const double by = vert_properties_[b + 1];
+    const double bz = vert_properties_[b + 2];
+    const double cx = vert_properties_[c + 0];
+    const double cy = vert_properties_[c + 1];
+    const double cz = vert_properties_[c + 2];
+
+    const double ux = bx - ax;
+    const double uy = by - ay;
+    const double uz = bz - az;
+    const double vx = cx - ax;
+    const double vy = cy - ay;
+    const double vz = cz - az;
+    const double tx = uy * vz - uz * vy;
+    const double ty = uz * vx - ux * vz;
+    const double tz = ux * vy - uy * vx;
+    const double t_len = std::hypot(tx, ty, tz);
+    if (!(t_len > 0.0)) continue;
+
+    area_sum += t_len;
+    nx += tx;
+    ny += ty;
+    nz += tz;
+  }
+
+  uint32_t affected_count = 0;
+  for (uint8_t value : affected) affected_count += value ? 1u : 0u;
+  result.set("affectedVertexCount", affected_count);
+
+  const double len = std::hypot(nx, ny, nz);
+  const double planar_ratio = area_sum > 0.0 ? (len / area_sum) : 0.0;
+  result.set("planarRatio", planar_ratio);
+  if (!(len > 0.0)) return result;
+
+  emscripten::val normal = emscripten::val::array();
+  normal.set(0, nx / len);
+  normal.set(1, ny / len);
+  normal.set(2, nz / len);
+  result.set("validNormal", true);
+  result.set("normal", normal);
+  return result;
+}
+
 emscripten::val BrepSolidCore::GetBoundaryEdgePolylines() {
   auto build_polylines = [&](const manifold::MeshGL& mesh) {
   const uint32_t tri_count = static_cast<uint32_t>(mesh.NumTri());

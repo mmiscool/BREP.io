@@ -1,6 +1,7 @@
 import { Solid } from "../BREP/BetterSolid.js";
 import {
     __testOnlyMergeCoplanarAdjacentFilletEndCaps,
+    __testOnlyReversePostBooleanFilletEndCapNudge,
     __testOnlyReassignTinyFilletSidewallSliverTriangles,
 } from "../BREP/SolidMethods/fillet.js";
 import {
@@ -212,6 +213,31 @@ export async function test_cppSolidNative_pushFace_updates_planar_face_vertices(
     }
 }
 
+export async function test_cppSolidNative_getFaceNormal_reports_planar_face_normal() {
+    if (manifoldBuildSource !== "local") {
+        return;
+    }
+
+    const solid = new Solid();
+    solid
+        .addTriangle("FACE_TOP", [0, 0, 0], [1, 0, 0], [1, 1, 0])
+        .addTriangle("FACE_TOP", [0, 0, 0], [1, 1, 0], [0, 1, 0]);
+
+    const result = solid.getFaceNormal("FACE_TOP");
+    if (!result?.faceFound || !result?.validNormal) {
+        throw new Error(`Expected getFaceNormal to return a valid normal for FACE_TOP, received ${JSON.stringify(result)}.`);
+    }
+    if (!approx(result.normal?.[0] ?? NaN, 0) || !approx(result.normal?.[1] ?? NaN, 0) || !approx(result.normal?.[2] ?? NaN, 1)) {
+        throw new Error(`Expected FACE_TOP normal [0, 0, 1], received ${JSON.stringify(result.normal)}.`);
+    }
+    if (!approx(Number(result.planarRatio ?? NaN), 1, 1e-6)) {
+        throw new Error(`Expected planar FACE_TOP to report planarRatio 1, received ${result.planarRatio}.`);
+    }
+    if (Number(result.affectedVertexCount || 0) !== 4) {
+        throw new Error(`Expected FACE_TOP to touch 4 vertices, received ${result.affectedVertexCount}.`);
+    }
+}
+
 export async function test_cppSolidNative_offsetFace_updates_planar_face_vertices() {
     if (manifoldBuildSource !== "local" || !cppSolidCoreHasNativeOffsetFace) {
         return;
@@ -416,6 +442,96 @@ export async function test_cppSolidNative_filletEdge_finalSnapshot_preserves_fac
     }
 }
 
+export async function test_cppSolidNative_filletEdge_nudgeFaceDistance_moves_only_end_cap_vertices() {
+    if (manifoldBuildSource !== "local" || typeof manifold?.buildFilletEdgeAuthoringState !== "function") {
+        return;
+    }
+
+    const cube = new Cube({ x: 2, y: 2, z: 2, name: "CPP_FILLET_NUDGE_SCOPE" });
+    const boundary = (cube.getBoundaryEdgePolylines() || []).find((candidate) => {
+        const a = String(candidate?.faceA || "");
+        const b = String(candidate?.faceB || "");
+        return (a === "CPP_FILLET_NUDGE_SCOPE_NX" && b === "CPP_FILLET_NUDGE_SCOPE_NY")
+            || (a === "CPP_FILLET_NUDGE_SCOPE_NY" && b === "CPP_FILLET_NUDGE_SCOPE_NX");
+    });
+    if (!boundary || !Array.isArray(boundary.positions) || boundary.positions.length < 2) {
+        throw new Error("Expected cube boundary polyline for native wedge nudge scope test.");
+    }
+
+    const buildResult = (nudgeFaceDistance) => manifold.buildFilletEdgeAuthoringState({
+        snapshot: buildSolidAuthoringStateSnapshot(cube),
+        faceAName: boundary.faceA,
+        faceBName: boundary.faceB,
+        polyline: boundary.positions,
+        radius: 0.25,
+        requestedRadius: 0.25,
+        sideMode: "INSET",
+        inflate: 0.0,
+        nudgeFaceDistance,
+        resolution: 24,
+        closedLoop: false,
+        name: "CPP_FILLET_NUDGE_SCOPE",
+        edgeReference: boundary.name,
+    });
+
+    const baseline = buildResult(0.0);
+    const nudged = buildResult(0.1);
+    const baselineSnapshot = baseline?.wedgeSnapshot;
+    const nudgedSnapshot = nudged?.wedgeSnapshot;
+    if (!baselineSnapshot || !nudgedSnapshot) {
+        throw new Error("Expected native fillet edge builder to return wedge snapshots for nudge scope comparison.");
+    }
+
+    const baselineVerts = Array.isArray(baselineSnapshot.vertProperties) ? baselineSnapshot.vertProperties : [];
+    const nudgedVerts = Array.isArray(nudgedSnapshot.vertProperties) ? nudgedSnapshot.vertProperties : [];
+    const baselineTriVerts = Array.isArray(baselineSnapshot.triVerts) ? baselineSnapshot.triVerts : [];
+    const baselineTriIDs = Array.isArray(baselineSnapshot.triIDs) ? baselineSnapshot.triIDs : [];
+    const faceNameToID = new Map(baselineSnapshot.faceNameToID || []);
+    if (baselineVerts.length !== nudgedVerts.length) {
+        throw new Error("Expected wedge vertex buffers to keep the same size when only nudgeFaceDistance changes.");
+    }
+
+    const endCapFaceIDs = [
+        faceNameToID.get("CPP_FILLET_NUDGE_SCOPE_END_CAP_1"),
+        faceNameToID.get("CPP_FILLET_NUDGE_SCOPE_END_CAP_2"),
+    ].filter((value) => Number.isFinite(value));
+    if (endCapFaceIDs.length !== 2) {
+        throw new Error(`Expected two wedge end-cap face IDs, received ${JSON.stringify(endCapFaceIDs)}.`);
+    }
+
+    const endCapVertexIndices = new Set();
+    for (let triIndex = 0; triIndex < baselineTriIDs.length; triIndex += 1) {
+        if (!endCapFaceIDs.includes(baselineTriIDs[triIndex])) continue;
+        const base = triIndex * 3;
+        endCapVertexIndices.add(baselineTriVerts[base + 0]);
+        endCapVertexIndices.add(baselineTriVerts[base + 1]);
+        endCapVertexIndices.add(baselineTriVerts[base + 2]);
+    }
+
+    let movedEndCapVertices = 0;
+    let movedNonEndCapVertices = 0;
+    for (let vertexIndex = 0; vertexIndex * 3 + 2 < baselineVerts.length; vertexIndex += 1) {
+        const base = vertexIndex * 3;
+        const dx = Math.abs(Number(nudgedVerts[base + 0] || 0) - Number(baselineVerts[base + 0] || 0));
+        const dy = Math.abs(Number(nudgedVerts[base + 1] || 0) - Number(baselineVerts[base + 1] || 0));
+        const dz = Math.abs(Number(nudgedVerts[base + 2] || 0) - Number(baselineVerts[base + 2] || 0));
+        const moved = Math.max(dx, dy, dz) > 1e-8;
+        if (!moved) continue;
+        if (endCapVertexIndices.has(vertexIndex)) {
+            movedEndCapVertices += 1;
+        } else {
+            movedNonEndCapVertices += 1;
+        }
+    }
+
+    if (movedEndCapVertices <= 0) {
+        throw new Error("Expected positive nudgeFaceDistance to move at least one wedge end-cap vertex.");
+    }
+    if (movedNonEndCapVertices !== 0) {
+        throw new Error(`Expected nudgeFaceDistance to leave non-end-cap wedge vertices untouched, but ${movedNonEndCapVertices} moved.`);
+    }
+}
+
 export async function test_cppSolidNative_postBoolean_fillet_merges_coplanar_cube_end_caps() {
     if (manifoldBuildSource !== "local" || typeof manifold?.buildFilletAuthoringState !== "function") {
         return;
@@ -477,6 +593,53 @@ export async function test_cppSolidNative_postBoolean_fillet_merges_coplanar_cub
 
     if (Number(result.__filletEndCapMergeCount || 0) !== 2) {
         throw new Error(`Expected two end-cap merges for a single-edge cube fillet, received ${result.__filletEndCapMergeCount}.`);
+    }
+}
+
+export async function test_cppSolidNative_postBoolean_fillet_reverse_end_cap_nudge_requires_merge() {
+    if (manifoldBuildSource !== "local" || typeof manifold?.buildFilletAuthoringState !== "function") {
+        return;
+    }
+
+    const buildEdge = (cube) => {
+        const boundary = (cube.getBoundaryEdgePolylines() || []).find((candidate) => {
+            const faceA = String(candidate?.faceA || "");
+            const faceB = String(candidate?.faceB || "");
+            return (faceA === `${cube.name}_NX` && faceB === `${cube.name}_NY`)
+                || (faceA === `${cube.name}_NY` && faceB === `${cube.name}_NX`);
+        });
+        if (!boundary || !Array.isArray(boundary.positions) || boundary.positions.length < 2) {
+            throw new Error(`Expected cube boundary polyline between ${cube.name}_NX and ${cube.name}_NY.`);
+        }
+        return {
+            name: String(boundary.name || `${cube.name}_NX|${cube.name}_NY[0]`),
+            parentSolid: cube,
+            faces: [{ name: boundary.faceA }, { name: boundary.faceB }],
+            userData: {
+                faceA: boundary.faceA,
+                faceB: boundary.faceB,
+                polylineLocal: boundary.positions.map((point) => Array.from(point || [])),
+                closedLoop: !!boundary.closedLoop,
+            },
+            closedLoop: !!boundary.closedLoop,
+        };
+    };
+
+    const cube = new Cube({ x: 2, y: 2, z: 2, name: "CPP_POST_BOOL_FILLET_SUPPRESS" });
+    const result = await cube.fillet({
+        radius: 0.25,
+        edges: [buildEdge(cube)],
+        direction: "INSET",
+        resolution: 24,
+        featureID: "CPP_POST_BOOL_FILLET_SUPPRESS",
+        mergeCoplanarEndCaps: false,
+    });
+
+    if (result.__filletEndCapReverseNudgeEnabled !== false) {
+        throw new Error("Expected reverse-end-cap nudge to stay disabled when mergeCoplanarEndCaps is off.");
+    }
+    if (Number(result.__filletEndCapReverseNudgeCount || 0) !== 0) {
+        throw new Error(`Expected zero reversed end caps when merge is disabled, received ${result.__filletEndCapReverseNudgeCount}.`);
     }
 }
 
@@ -551,6 +714,37 @@ export async function test_cppSolidNative_mergeCoplanarAdjacentFilletEndCaps_ret
     }
     if (topMetadata.filletEndCap === true) {
         throw new Error("Expected merged target face metadata to exclude filletEndCap.");
+    }
+}
+
+export async function test_cppSolidNative_reversePostBooleanFilletEndCapNudge_skips_faces_that_share_vertices_with_fillet_sidewalls() {
+    const solid = buildSyntheticCoplanarEndCapSolid();
+    solid.setFaceMetadata("TOP_MAIN", {
+        ...(solid.getFaceMetadata("TOP_MAIN") || {}),
+        filletSideWall: true,
+        filletRoundFace: "F_TEST_TUBE_Outer",
+    });
+    const before = buildSolidAuthoringStateSnapshot(solid);
+    const summary = __testOnlyReversePostBooleanFilletEndCapNudge(solid, 0.05, { featureID: "F_TEST" });
+    if (Number(summary?.reversedFaces || 0) !== 0) {
+        throw new Error(`Expected reversePostBooleanFilletEndCapNudge to skip shared sidewall vertices, received ${summary?.reversedFaces} reversed faces.`);
+    }
+    if (Number(summary?.skippedFaces || 0) !== 1) {
+        throw new Error(`Expected reversePostBooleanFilletEndCapNudge to report one skipped face, received ${summary?.skippedFaces}.`);
+    }
+    const after = buildSolidAuthoringStateSnapshot(solid);
+    const comparableBefore = JSON.stringify({
+        vertProperties: before.vertProperties,
+        triVerts: before.triVerts,
+        triIDs: before.triIDs,
+    });
+    const comparableAfter = JSON.stringify({
+        vertProperties: after.vertProperties,
+        triVerts: after.triVerts,
+        triIDs: after.triIDs,
+    });
+    if (comparableBefore !== comparableAfter) {
+        throw new Error("Expected reversePostBooleanFilletEndCapNudge skip path to leave geometry unchanged.");
     }
 }
 

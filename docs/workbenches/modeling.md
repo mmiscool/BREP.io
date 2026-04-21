@@ -20,6 +20,7 @@ The Modeling workbench is the default workbench for new parts. It focuses on cor
 - [Fillet](../features/fillet.md)
 - [Chamfer](../features/chamfer.md)
 - [Hole](../features/hole.md)
+- [Push Face](../features/push-face.md)
 - [Pattern Linear](../features/pattern-linear.md)
 - [Pattern Radial](../features/pattern-radial.md)
 - [Pattern](../features/pattern.md)

@@ -51,6 +51,7 @@ export {
     getMesh,
     _ensureFaceIndex,
     getFace,
+    getFaceNormal,
     getFaces,
     getBoundaryEdgePolylines,
 } from "./meshQueries.js";

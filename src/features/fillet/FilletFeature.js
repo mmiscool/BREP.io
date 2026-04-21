@@ -9,7 +9,10 @@ const DEBUG_MODE_NONE = "NONE";
 const DEBUG_MODE_WEDGE_AND_TUBE = "WEDGE AND TUBE";
 const DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEAN = "WEDGE AND TUBE AFTER BOOLEAN";
 const DEBUG_MODE_COMBINED_BEFORE_TARGET = "COMBINED FILLET BEFORE TARGET BOOLEAN";
-const FINAL_FILLET_SIMPLIFY_TOLERANCE = 0.0004;
+const FINAL_FILLET_SIMPLIFY_TOLERANCE = 0.0009;
+const FILLET_NATIVE_TINY_FACE_ISLAND_CLEANUP_AREA = 0.01;
+const FILLET_POST_COLLAPSE_TINY_TRIANGLE_THRESHOLD = 0.001;
+const FILLET_POST_COLLAPSE_TINY_FACE_ISLAND_CLEANUP_AREA = 0.01;
 
 const inputParamsSchema = {
     id: {
@@ -46,7 +49,37 @@ const inputParamsSchema = {
         type: "number",
         step: 0.0001,
         default_value: 0.0001,
-        hint: "Push fillet wedge faces by this amount before booleaning (0 disables).",
+        hint: "Push fillet wedge end caps outward by this amount before booleaning (0 disables).",
+    },
+    simplifyResult: {
+        type: "boolean",
+        default_value: true,
+        hint: "Run the final simplify pass on the fillet result.",
+    },
+    cleanupNativeTinyFaceIslands: {
+        type: "boolean",
+        default_value: true,
+        hint: "Run the native tiny-face island cleanup during fillet combine.",
+    },
+    mergeCoplanarEndCaps: {
+        type: "boolean",
+        default_value: true,
+        hint: "Merge coplanar fillet end caps into adjacent host faces.",
+    },
+    reassignSliverTriangles: {
+        type: "boolean",
+        default_value: true,
+        hint: "Reassign tiny fillet sidewall sliver triangles into planar neighbors.",
+    },
+    collapseTinyTriangles: {
+        type: "boolean",
+        default_value: true,
+        hint: "Collapse tiny triangles on the final fillet result.",
+    },
+    cleanupPostCollapseTinyFaceIslands: {
+        type: "boolean",
+        default_value: true,
+        hint: "Clean up tiny face islands after collapsing tiny triangles.",
     },
     direction: {
         type: "options",
@@ -579,6 +612,12 @@ export class FilletFeature {
         }
 
         let result = null;
+        const simplifyResult = this.inputParams?.simplifyResult !== false;
+        const cleanupNativeTinyFaceIslands = this.inputParams?.cleanupNativeTinyFaceIslands !== false;
+        const mergeCoplanarEndCaps = this.inputParams?.mergeCoplanarEndCaps !== false;
+        const reassignSliverTriangles = this.inputParams?.reassignSliverTriangles !== false;
+        const collapseTinyTriangles = this.inputParams?.collapseTinyTriangles !== false;
+        const cleanupPostCollapseTinyFaceIslands = this.inputParams?.cleanupPostCollapseTinyFaceIslands !== false;
         result = await targetSolid.fillet({
             radius: r,
             resolution: this.inputParams?.resolution,
@@ -587,10 +626,21 @@ export class FilletFeature {
             direction: dir,
             inflate: Number(this.inputParams.inflate) || 0,
             nudgeFaceDistance: this.inputParams?.nudgeFaceDistance,
+            cleanupTinyFaceIslandsArea: cleanupNativeTinyFaceIslands
+                ? FILLET_NATIVE_TINY_FACE_ISLAND_CLEANUP_AREA
+                : 0,
+            mergeCoplanarEndCaps,
+            reassignSliverTriangles,
             debug: debugEnabled,
             debugSolidsLevel: configuredDebugLevel,
             debugShowCombinedBeforeTarget,
         });
+        try {
+            result.__filletFinalSimplifyEnabled = simplifyResult;
+            result.__filletNativeTinyFaceIslandCleanupEnabled = cleanupNativeTinyFaceIslands;
+            result.__filletPostCollapseTinyTriangleCollapseEnabled = collapseTinyTriangles;
+            result.__filletPostCollapseTinyFaceIslandCleanupEnabled = cleanupPostCollapseTinyFaceIslands;
+        } catch { }
         const collectDebugSolids = (res) => {
             const out = [];
             if (!Array.isArray(res?.__debugAddedSolids)) return out;
@@ -618,7 +668,7 @@ export class FilletFeature {
         if (!result) {
             throw new Error(`[FilletFeature] Fillet returned no result for feature ${fid || '(unknown)'}.`);
         }
-        if (typeof result.simplify === 'function') {
+        if (simplifyResult && typeof result.simplify === 'function') {
             try {
                 result.simplify(FINAL_FILLET_SIMPLIFY_TOLERANCE, true);
             } catch (e) {
@@ -653,7 +703,19 @@ export class FilletFeature {
         for (const obj of added) {
             if (obj && typeof obj === 'object' && typeof obj.setEpsilon === 'function') {
                 try {
-                    await obj.collapseTinyTriangles(0.001);
+                    if (collapseTinyTriangles) {
+                        await obj.collapseTinyTriangles(FILLET_POST_COLLAPSE_TINY_TRIANGLE_THRESHOLD);
+                    }
+                    obj.__filletPostCollapseTinyTriangleCollapseEnabled = collapseTinyTriangles;
+                    if (cleanupPostCollapseTinyFaceIslands && typeof obj.cleanupTinyFaceIslands === 'function') {
+                        obj.__filletPostCollapseTinyFaceIslandCleanupCount = Math.max(
+                            0,
+                            Number(obj.cleanupTinyFaceIslands(FILLET_POST_COLLAPSE_TINY_FACE_ISLAND_CLEANUP_AREA) || 0),
+                        );
+                    } else {
+                        obj.__filletPostCollapseTinyFaceIslandCleanupCount = 0;
+                    }
+                    obj.__filletPostCollapseTinyFaceIslandCleanupEnabled = cleanupPostCollapseTinyFaceIslands;
                     obj.visualize()
                 } catch (e) {
                     console.warn('[FilletFeature] Failed to set epsilon on fillet result solid.', { error: e });

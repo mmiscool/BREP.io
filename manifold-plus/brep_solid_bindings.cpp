@@ -47,6 +47,7 @@ EMSCRIPTEN_BINDINGS(manifold_plus_solid_bindings) {
                 &manifoldplus::BrepSolidCore::GetEdgeMetadataJson)
       .function("getFace", &manifoldplus::BrepSolidCore::GetFace)
       .function("getFaces", &manifoldplus::BrepSolidCore::GetFaces)
+      .function("getFaceNormal", &manifoldplus::BrepSolidCore::GetFaceNormal)
       .function("getBoundaryEdgePolylines",
                 &manifoldplus::BrepSolidCore::GetBoundaryEdgePolylines)
       .function("computeFilletCenterline",

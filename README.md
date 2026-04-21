@@ -96,6 +96,7 @@ Solid operations:
 - [Fillet](docs/features/fillet.md)
 - [Chamfer](docs/features/chamfer.md)
 - [Hole](docs/features/hole.md)
+- [Push Face](docs/features/push-face.md)
 - [Offset Shell](docs/features/offset-shell.md)
 - [Remesh](docs/features/remesh.md)
 - [Transform](docs/features/transform.md)
