@@ -33,6 +33,12 @@ function normalizeText(value, fallback = '') {
   return next || fallback;
 }
 
+function normalizeOptionalMotionLimit(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return Math.abs(numeric) <= 1e-9 ? null : numeric;
+}
+
 function normalizeTransform(value) {
   const raw = value && typeof value === 'object' ? value : {};
   return {
@@ -171,6 +177,9 @@ export class SimulationWorkbenchManager {
       center: new THREE.Vector3(),
       axis: new THREE.Vector3(),
       translation: new THREE.Vector3(),
+      velocity: new THREE.Vector3(),
+      angularVelocity: new THREE.Vector3(),
+      radius: new THREE.Vector3(),
     };
     this._bindStateManager();
   }
@@ -606,7 +615,7 @@ export class SimulationWorkbenchManager {
     for (const solid of this._listSceneSolids()) {
       const bodyDesc = (selectedSolid && solid === selectedSolid)
         ? rapier.RigidBodyDesc.kinematicPositionBased()
-        : (this._isSolidMotionDriven(solid)
+        : (this._isSolidKinematicMotionDriven(solid)
           ? rapier.RigidBodyDesc.kinematicPositionBased()
           : (this.getSolidFixed(solid) ? rapier.RigidBodyDesc.fixed() : rapier.RigidBodyDesc.dynamic()));
       const position = solid.getWorldPosition(new THREE.Vector3());
@@ -695,27 +704,11 @@ export class SimulationWorkbenchManager {
         bodyState.body.setNextKinematicRotation(worldQuaternion);
       }
     }
-    if (this._isPlaying) {
-      for (const solid of this._listSceneSolids()) {
-        if (!this._isSolidMotionDriven(solid)) continue;
-        const bodyState = this._bodyState.get(solid.uuid);
-        if (!bodyState?.body) continue;
-        const worldPosition = solid.getWorldPosition(new THREE.Vector3());
-        const worldQuaternion = solid.getWorldQuaternion(new THREE.Quaternion());
-        bodyState.body.setNextKinematicTranslation(worldPosition);
-        bodyState.body.setNextKinematicRotation(worldQuaternion);
-      }
-    }
-
     world.step();
     for (const bodyState of this._bodyState.values()) {
       const { solid, body } = bodyState;
       if (!solid || !body) continue;
       if (selectedSolid && solid === selectedSolid) {
-        this._syncProxyGroupTransform(solid);
-        continue;
-      }
-      if (this._isSolidMotionDriven(solid)) {
         this._syncProxyGroupTransform(solid);
         continue;
       }
@@ -923,15 +916,36 @@ export class SimulationWorkbenchManager {
     return this._getMotionEntries().some((motion) => normalizeText(this._resolveReferenceName(motion?.solid), '') === name);
   }
 
+  _isSolidKinematicMotionDriven(solid) {
+    return !!solid && this.getSolidFixed(solid) && this._isSolidMotionDriven(solid);
+  }
+
   _applyMotionStep(dt) {
-    let changed = false;
+    const selectedSolid = this._transformSession?.solid || null;
+    const commands = new Map();
+    for (const solid of this._listSceneSolids()) {
+      if (!this._isSolidMotionDriven(solid)) continue;
+      if (selectedSolid && solid === selectedSolid) continue;
+      if (this._isSolidKinematicMotionDriven(solid)) continue;
+      const body = this._bodyState.get(solid.uuid)?.body;
+      if (!body) continue;
+      body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    }
     for (const motion of this._getMotionEntries()) {
       const solid = this._resolveMotionSolid(motion);
       if (!solid) continue;
-      if (motion.type === 'linear') changed = this._applyLinearMotionStep(solid, motion, dt) || changed;
-      else changed = this._applyRotationMotionStep(solid, motion, dt) || changed;
+      if (selectedSolid && solid === selectedSolid) continue;
+      if (motion.type === 'linear') this._applyLinearMotionStep(solid, motion, dt, commands);
+      else this._applyRotationMotionStep(solid, motion, dt, commands);
     }
-    return changed;
+    for (const [solidUuid, command] of commands.entries()) {
+      const body = this._bodyState.get(solidUuid)?.body;
+      if (!body) continue;
+      body.setLinvel(command.linear, true);
+      body.setAngvel(command.angular, true);
+    }
+    return commands.size > 0;
   }
 
   _resolveMotionSolid(motion) {
@@ -994,15 +1008,30 @@ export class SimulationWorkbenchManager {
     }
   }
 
-  _applyRotationMotionStep(solid, motion, dt) {
+  _getMotionCommand(commands, solid) {
+    if (!solid?.uuid) return null;
+    let command = commands.get(solid.uuid);
+    if (!command) {
+      command = {
+        linear: { x: 0, y: 0, z: 0 },
+        angular: { x: 0, y: 0, z: 0 },
+      };
+      commands.set(solid.uuid, command);
+    }
+    return command;
+  }
+
+  _applyRotationMotionStep(solid, motion, dt, commands) {
     const state = this._motionState.get(motion.id) || { progress: 0, completed: false };
-    if (state.completed) return;
+    if (state.completed) return false;
     const axis = this._resolveMotionAxis(motion);
-    if (!axis) return;
+    if (!axis) return false;
+    const body = this._bodyState.get(solid.uuid)?.body || null;
+    if (!body) return false;
     const speedDeg = Number(motion?.speed);
-    if (!Number.isFinite(speedDeg) || Math.abs(speedDeg) <= 1e-9) return;
+    if (!Number.isFinite(speedDeg) || Math.abs(speedDeg) <= 1e-9) return false;
     let deltaDeg = speedDeg * dt;
-    const limitDeg = Number.isFinite(Number(motion?.angle)) ? Number(motion.angle) : null;
+    const limitDeg = normalizeOptionalMotionLimit(motion?.angle);
     if (limitDeg != null) {
       const remaining = limitDeg - state.progress;
       if (Math.abs(remaining) <= 1e-9) {
@@ -1016,24 +1045,53 @@ export class SimulationWorkbenchManager {
       if (Math.abs(deltaDeg) > Math.abs(remaining)) deltaDeg = remaining;
     }
     if (Math.abs(deltaDeg) <= 1e-9) return false;
-    this._rotateSolidAroundWorldAxis(solid, axis.start, axis.end, THREE.MathUtils.degToRad(deltaDeg));
+    if (this._isSolidKinematicMotionDriven(solid)) {
+      this._rotateSolidAroundWorldAxis(solid, axis.start, axis.end, THREE.MathUtils.degToRad(deltaDeg));
+      const worldPosition = solid.getWorldPosition(new THREE.Vector3());
+      const worldQuaternion = solid.getWorldQuaternion(new THREE.Quaternion());
+      body.setNextKinematicTranslation(worldPosition);
+      body.setNextKinematicRotation(worldQuaternion);
+      this._updateRuntimeTransformFromSolid(solid, { persist: false });
+      this._movedSolidIds.add(solid.uuid);
+      state.progress += deltaDeg;
+      if (limitDeg != null && Math.abs(limitDeg - state.progress) <= 1e-9) state.completed = true;
+      this._motionState.set(motion.id, state);
+      return true;
+    }
+    const omega = THREE.MathUtils.degToRad(deltaDeg) / Math.max(dt, 1e-9);
+    const scratch = this._scratch;
+    const command = this._getMotionCommand(commands, solid);
+    const translation = body.translation();
+    scratch.axis.copy(axis.end).sub(axis.start).normalize().multiplyScalar(omega);
+    scratch.radius.set(
+      Number(translation?.x) || 0,
+      Number(translation?.y) || 0,
+      Number(translation?.z) || 0,
+    ).sub(axis.start);
+    scratch.velocity.copy(scratch.axis).cross(scratch.radius);
+    command.angular.x += scratch.axis.x;
+    command.angular.y += scratch.axis.y;
+    command.angular.z += scratch.axis.z;
+    command.linear.x += scratch.velocity.x;
+    command.linear.y += scratch.velocity.y;
+    command.linear.z += scratch.velocity.z;
     state.progress += deltaDeg;
     if (limitDeg != null && Math.abs(limitDeg - state.progress) <= 1e-9) state.completed = true;
     this._motionState.set(motion.id, state);
-    this._updateRuntimeTransformFromSolid(solid, { persist: false });
-    this._movedSolidIds.add(solid.uuid);
     return true;
   }
 
-  _applyLinearMotionStep(solid, motion, dt) {
+  _applyLinearMotionStep(solid, motion, dt, commands) {
     const state = this._motionState.get(motion.id) || { progress: 0, completed: false };
-    if (state.completed) return;
+    if (state.completed) return false;
     const axis = this._resolveMotionAxis(motion);
-    if (!axis) return;
+    if (!axis) return false;
+    const body = this._bodyState.get(solid.uuid)?.body || null;
+    if (!body) return false;
     const speed = Number(motion?.speed);
-    if (!Number.isFinite(speed) || Math.abs(speed) <= 1e-9) return;
+    if (!Number.isFinite(speed) || Math.abs(speed) <= 1e-9) return false;
     let delta = speed * dt;
-    const limit = Number.isFinite(Number(motion?.distance)) ? Number(motion.distance) : null;
+    const limit = normalizeOptionalMotionLimit(motion?.distance);
     if (limit != null) {
       const remaining = limit - state.progress;
       if (Math.abs(remaining) <= 1e-9) {
@@ -1047,12 +1105,38 @@ export class SimulationWorkbenchManager {
       if (Math.abs(delta) > Math.abs(remaining)) delta = remaining;
     }
     if (Math.abs(delta) <= 1e-9) return false;
-    this._translateSolidAlongWorldAxis(solid, axis.start, axis.end, delta);
+    if (this._isSolidKinematicMotionDriven(solid)) {
+      this._translateSolidAlongWorldAxis(solid, axis.start, axis.end, delta);
+      const worldPosition = solid.getWorldPosition(new THREE.Vector3());
+      const worldQuaternion = solid.getWorldQuaternion(new THREE.Quaternion());
+      body.setNextKinematicTranslation(worldPosition);
+      body.setNextKinematicRotation(worldQuaternion);
+      this._updateRuntimeTransformFromSolid(solid, { persist: false });
+      this._movedSolidIds.add(solid.uuid);
+      state.progress += delta;
+      if (limit != null && Math.abs(limit - state.progress) <= 1e-9) state.completed = true;
+      this._motionState.set(motion.id, state);
+      return true;
+    }
+    const velocityScale = delta / Math.max(dt, 1e-9);
+    const scratch = this._scratch;
+    const command = this._getMotionCommand(commands, solid);
+    const translation = body.translation();
+    scratch.axis.copy(axis.end).sub(axis.start).normalize();
+    scratch.translation.copy(scratch.axis).multiplyScalar(delta);
+    body.setTranslation({
+      x: (Number(translation?.x) || 0) + scratch.translation.x,
+      y: (Number(translation?.y) || 0) + scratch.translation.y,
+      z: (Number(translation?.z) || 0) + scratch.translation.z,
+    }, true);
+    scratch.axis.multiplyScalar(velocityScale);
+    command.linear.x += scratch.axis.x;
+    command.linear.y += scratch.axis.y;
+    command.linear.z += scratch.axis.z;
+    body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     state.progress += delta;
     if (limit != null && Math.abs(limit - state.progress) <= 1e-9) state.completed = true;
     this._motionState.set(motion.id, state);
-    this._updateRuntimeTransformFromSolid(solid, { persist: false });
-    this._movedSolidIds.add(solid.uuid);
     return true;
   }
 
