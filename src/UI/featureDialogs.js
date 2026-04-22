@@ -2605,11 +2605,30 @@ export class SchemaForm {
             }
             case 'options': {
                 const asStr = String(value == null ? '' : value);
+                const fieldKey = String(
+                    el?.dataset?.key
+                    || el?.closest?.('.field-row')?.dataset?.key
+                    || ''
+                );
+                const def = (fieldKey && this.schema && this.schema[fieldKey] && typeof this.schema[fieldKey] === 'object')
+                    ? this.schema[fieldKey]
+                    : {};
+                const defaultValue = Object.prototype.hasOwnProperty.call(def, 'default_value')
+                    ? String(def.default_value ?? '')
+                    : '';
                 let has = false;
                 for (let i = 0; i < el.options.length; i++) {
                     if (el.options[i].value === asStr) { has = true; break; }
                 }
-                el.value = has ? asStr : (el.options[0] ? el.options[0].value : '');
+                if (has) {
+                    el.value = asStr;
+                    break;
+                }
+                let hasDefault = false;
+                for (let i = 0; i < el.options.length; i++) {
+                    if (el.options[i].value === defaultValue) { hasDefault = true; break; }
+                }
+                el.value = hasDefault ? defaultValue : (el.options[0] ? el.options[0].value : defaultValue);
                 break;
             }
             case 'file': {

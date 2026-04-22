@@ -40,25 +40,25 @@ const inputParamsSchema = {
     debug: {
         type: "options",
         options: [
-            "None",
-            "triangle cross sections only",
-            "chamfer solid only",
-            "chamfer solid and cross sections",
+            "NONE",
+            "TRIANGLE CROSS SECTIONS ONLY",
+            "CHAMFER SOLID ONLY",
+            "CHAMFER SOLID AND CROSS SECTIONS",
         ],
-        default_value: "None",
+        default_value: "NONE",
         hint: "Choose which chamfer debug geometry to draw",
     }
 };
 
 function normalizeChamferDebugMode(rawValue) {
-    if (rawValue === true) return "chamfer solid and cross sections";
-    if (rawValue === false || rawValue == null) return "None";
+    if (rawValue === true) return "CHAMFER SOLID AND CROSS SECTIONS";
+    if (rawValue === false || rawValue == null) return "NONE";
     const value = String(rawValue).trim().toLowerCase();
-    if (value === "triangle cross sections only") return "triangle cross sections only";
-    if (value === "chamfer solid only") return "chamfer solid only";
-    if (value === "chamfer solid and cross sections") return "chamfer solid and cross sections";
-    if (value === "none") return "None";
-    return "None";
+    if (value === "triangle cross sections only") return "TRIANGLE CROSS SECTIONS ONLY";
+    if (value === "chamfer solid only") return "CHAMFER SOLID ONLY";
+    if (value === "chamfer solid and cross sections") return "CHAMFER SOLID AND CROSS SECTIONS";
+    if (value === "none") return "NONE";
+    return "NONE";
 }
 
 function isSectionDebugSolid(debugSolid) {
@@ -69,13 +69,13 @@ function isSectionDebugSolid(debugSolid) {
 function shouldIncludeChamferDebugSolid(debugMode, debugSolid) {
     const isSection = isSectionDebugSolid(debugSolid);
     switch (debugMode) {
-        case "triangle cross sections only":
+        case "TRIANGLE CROSS SECTIONS ONLY":
             return isSection;
-        case "chamfer solid only":
+        case "CHAMFER SOLID ONLY":
             return !isSection;
-        case "chamfer solid and cross sections":
+        case "CHAMFER SOLID AND CROSS SECTIONS":
             return true;
-        case "None":
+        case "NONE":
         default:
             return false;
     }
@@ -247,7 +247,7 @@ export class ChamferFeature {
             edges: edgeObjs,
             direction,
             inflate: Number(this.inputParams.inflate),
-            debug: debugMode !== "None",
+            debug: debugMode !== "NONE",
             featureID: fid,
         });
 
@@ -269,7 +269,7 @@ export class ChamferFeature {
         result.visualize();
 
         const added = [result];
-        if (debugMode !== "None" && Array.isArray(result.__debugChamferSolids)) {
+        if (debugMode !== "NONE" && Array.isArray(result.__debugChamferSolids)) {
             for (const dbg of result.__debugChamferSolids) {
                 if (!dbg) continue;
                 if (!shouldIncludeChamferDebugSolid(debugMode, dbg)) continue;

@@ -4821,20 +4821,21 @@ double TriangleAreaFromMesh(const manifold::MeshGL& mesh, uint32_t tri_idx) {
   return TriangleArea(a, b, c);
 }
 
-void MergeChamferCapFaceIslands(
+void MergeNamedFaceIslandsToBestNeighbor(
     manifold::MeshGL& mesh, std::unordered_map<uint32_t, std::string>& id_to_face_name,
-    std::unordered_map<std::string, uint32_t>& face_name_to_id) {
+    std::unordered_map<std::string, uint32_t>& face_name_to_id,
+    const std::function<bool(const std::string&)>& should_process_face) {
   struct ComponentInfo {
     std::vector<uint32_t> triangles;
     double area = 0.0;
   };
 
-  auto process_cap_face = [&](const std::string& cap_face_name) {
-    const auto face_found = face_name_to_id.find(cap_face_name);
+  auto process_face = [&](const std::string& source_face_name) {
+    const auto face_found = face_name_to_id.find(source_face_name);
     if (face_found == face_name_to_id.end()) return;
-    const uint32_t cap_face_id = face_found->second;
+    const uint32_t source_face_id = face_found->second;
     const std::vector<std::vector<uint32_t>> components =
-        BuildFaceComponentsForFaceId(mesh, cap_face_id);
+        BuildFaceComponentsForFaceId(mesh, source_face_id);
     if (components.size() <= 1) return;
 
     std::vector<ComponentInfo> infos;
@@ -4891,7 +4892,7 @@ void MergeChamferCapFaceIslands(
             if (neighbor_tri_idx == tri_idx) continue;
             if (neighbor_tri_idx >= mesh.faceID.size()) continue;
             const uint32_t neighbor_face_id = mesh.faceID[neighbor_tri_idx];
-            if (neighbor_face_id == cap_face_id) continue;
+            if (neighbor_face_id == source_face_id) continue;
             neighbor_scores[neighbor_face_id] += EdgeLength(mesh, va, vb);
           }
         }
@@ -4913,11 +4914,7 @@ void MergeChamferCapFaceIslands(
 
   for (const auto& entry : face_name_to_id) {
     const std::string& face_name = entry.first;
-    if (face_name.size() >= 5 &&
-        (face_name.rfind("_CAP0") == face_name.size() - 5 ||
-         face_name.rfind("_CAP1") == face_name.size() - 5)) {
-      process_cap_face(face_name);
-    }
+    if (should_process_face(face_name)) process_face(face_name);
   }
 
   std::unordered_map<std::string, std::string> ignored_metadata;
@@ -4965,7 +4962,23 @@ void ApplyChamferFaceNamesToMesh(
     mesh.faceID[tri_idx] = best_face_id;
   }
 
-  MergeChamferCapFaceIslands(mesh, id_to_face_name, face_name_to_id);
+  MergeNamedFaceIslandsToBestNeighbor(
+      mesh, id_to_face_name, face_name_to_id,
+      [](const std::string& face_name) {
+        return face_name.size() >= 5 &&
+               (face_name.rfind("_CAP0") == face_name.size() - 5 ||
+                face_name.rfind("_CAP1") == face_name.size() - 5);
+      });
+  MergeNamedFaceIslandsToBestNeighbor(
+      mesh, id_to_face_name, face_name_to_id,
+      [](const std::string& face_name) {
+        return (face_name.size() >= 7 &&
+                face_name.rfind("_SIDE_A") == face_name.size() - 7) ||
+               (face_name.size() >= 7 &&
+                face_name.rfind("_SIDE_B") == face_name.size() - 7) ||
+               (face_name.size() >= 6 &&
+                face_name.rfind("_BEVEL") == face_name.size() - 6);
+      });
   NormalizeFaceMaps(mesh, id_to_face_name, face_name_to_id, ignored_metadata);
 }
 

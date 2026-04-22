@@ -148,6 +148,17 @@ export async function sanitizeInputParams(schema, inputParams, expressionsEvalua
                 }
             } else if (schema[key].type === "boolean") {
                 sanitized[key] = Boolean(Object.prototype.hasOwnProperty.call(inputParams, key) ? inputParams[key] : schema[key].default_value);
+            } else if (schema[key].type === "options") {
+                const options = Array.isArray(schema[key].options) ? schema[key].options.map((option) => String(option)) : [];
+                const defaultValue = Object.prototype.hasOwnProperty.call(schema[key], 'default_value')
+                    ? schema[key].default_value
+                    : (options[0] ?? '');
+                const candidate = inputParams[key] == null ? defaultValue : inputParams[key];
+                const candidateString = String(candidate);
+                const defaultString = String(defaultValue ?? '');
+                sanitized[key] = options.includes(candidateString)
+                    ? candidateString
+                    : (options.includes(defaultString) ? defaultString : (options[0] ?? defaultString));
             } else {
                 sanitized[key] = inputParams[key];
             }
