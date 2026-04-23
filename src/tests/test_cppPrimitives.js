@@ -61,6 +61,12 @@ export async function test_cppPrimitive_torus_and_pyramid_preserve_face_labels()
     assert(torusFaceNames.has("CPP_TORUS_Side"), "Expected native torus to expose side face.");
     assert(torusFaceNames.has("CPP_TORUS_Cap0"), "Expected native partial torus to expose start cap.");
     assert(torusFaceNames.has("CPP_TORUS_Cap1"), "Expected native partial torus to expose end cap.");
+    const torusMeta = torus.getFaceMetadata("CPP_TORUS_Side");
+    if (torusMeta?.type) {
+        assert(torusMeta.type === "toroidal", "Expected native torus side metadata to remain toroidal.");
+        assert(Math.abs((torusMeta?.majorRadius || 0) - 10) <= 1e-9, "Expected native torus metadata to preserve major radius.");
+        assert(Math.abs((torusMeta?.tubeRadius || 0) - 2) <= 1e-9, "Expected native torus metadata to preserve tube radius.");
+    }
 
     const fullTorus = new Torus({ mR: 10, tR: 2, resolution: 24, arcDegrees: 360, name: "CPP_TORUS_FULL" });
     const fullTorusFaceNames = new Set(fullTorus.getFaceNames());
@@ -83,4 +89,9 @@ export async function test_cppPrimitive_sphere_preserves_single_face_label() {
     const faceNames = sphere.getFaceNames();
     assert(faceNames.length === 1 && faceNames[0] === "CPP_SPHERE", "Expected native sphere to expose a single named face.");
     assert(sphere.getTriangleCount() > 0, "Expected native sphere to contain triangles.");
+    const metadata = sphere.getFaceMetadata("CPP_SPHERE");
+    if (metadata?.type) {
+        assert(metadata.type === "spherical", "Expected native sphere metadata to remain spherical.");
+        assert(Math.abs((metadata?.radius || 0) - 5) <= 1e-9, "Expected native sphere metadata to preserve radius.");
+    }
 }

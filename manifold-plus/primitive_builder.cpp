@@ -185,6 +185,23 @@ std::string ConicalMetadataJson(double radius_bottom, double radius_top,
   return json.str();
 }
 
+std::string SphericalMetadataJson(double radius) {
+  std::ostringstream json;
+  json.precision(std::numeric_limits<double>::max_digits10);
+  json << "{\"type\":\"spherical\",\"radius\":" << radius
+       << ",\"center\":[0,0,0]}";
+  return json.str();
+}
+
+std::string ToroidalMetadataJson(double major_radius, double tube_radius) {
+  std::ostringstream json;
+  json.precision(std::numeric_limits<double>::max_digits10);
+  json << "{\"type\":\"toroidal\",\"majorRadius\":" << major_radius
+       << ",\"tubeRadius\":" << tube_radius
+       << ",\"axis\":[0,1,0],\"center\":[0,0,0]}";
+  return json.str();
+}
+
 void BuildCube(const emscripten::val& options, SnapshotBuilder& builder,
                const std::string& name) {
   const double x = ReadFiniteNumber(options["x"], "x");
@@ -304,6 +321,8 @@ void BuildSphere(const emscripten::val& options, SnapshotBuilder& builder,
     AddTriangleOriented(builder, face_name, south, last_ring[lon], last_ring[next],
                         centroid);
   }
+
+  builder.SetFaceMetadata(face_name, SphericalMetadataJson(radius));
 }
 
 void BuildCylinder(const emscripten::val& options, SnapshotBuilder& builder,
@@ -490,6 +509,9 @@ void BuildTorus(const emscripten::val& options, SnapshotBuilder& builder,
                           rings.back()[next], end_outward);
     }
   }
+
+  builder.SetFaceMetadata(name + "_Side",
+                          ToroidalMetadataJson(major_radius, tube_radius));
 }
 
 emscripten::val ToJsArray(const std::vector<float>& values) {

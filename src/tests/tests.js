@@ -182,7 +182,22 @@ import {
     afterRun_offsetFace_preserves_individual_edges,
     test_offsetFace_preserves_individual_edges,
 } from './test_offsetFace_preserves_individual_edges.js';
-import { test_offsetShellGrouping } from './test_offsetShellGrouping.js';
+import {
+    test_offsetShell_polyhedral_exact_preserves_sharp_cube_faces,
+    test_offsetShell_polyhedral_exact_supports_non_convex_planar_solids,
+    test_offsetShell_generic_mesh_face_uses_tangent_supports,
+    test_offsetShell_support_surfaces_handle_cylinder_and_cone,
+    test_offsetShell_support_surfaces_handle_sphere_and_torus,
+    afterRun_offsetShell_repro_20260423012942_keeps_negative_single_open_face_shell_inside_source,
+    afterRun_offsetShell_repro_20260423005441_keeps_negative_two_open_face_shell_inward,
+    test_offsetShell_vertex_tangent_normals_preserve_generic_sphere_inset_direction,
+    afterRun_offsetShell_repro_20260422215549_can_keep_original_solid,
+    afterRun_offsetShell_repro_20260422215549_keeps_outward_direction_on_tube_face,
+    test_offsetShell_repro_20260423012942_keeps_negative_single_open_face_shell_inside_source,
+    test_offsetShell_repro_20260423005441_keeps_negative_two_open_face_shell_inward,
+    test_offsetShell_repro_20260422215549_can_keep_original_solid,
+    test_offsetShell_repro_20260422215549_keeps_outward_direction_on_tube_face,
+} from './test_offsetShellPolyhedralExact.js';
 import { test_plane } from './test_plane.js';
 import { test_primitiveCone } from './test_primitiveCone.js';
 import { test_primitiveCube } from './test_primitiveCube.js';
@@ -486,7 +501,44 @@ export const testFunctions = [
     { test: test_sketch_solver_topology_coincident_chain_multi_step, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_solver_distance_slide_large_drop_settles_single_solve, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_solver_line_to_point_distance_constraint, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_offsetShellGrouping, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_offsetShell_polyhedral_exact_preserves_sharp_cube_faces, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_offsetShell_vertex_tangent_normals_preserve_generic_sphere_inset_direction, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_offsetShell_polyhedral_exact_supports_non_convex_planar_solids, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_offsetShell_support_surfaces_handle_cylinder_and_cone, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_offsetShell_support_surfaces_handle_sphere_and_torus, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_offsetShell_generic_mesh_face_uses_tangent_supports, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    {
+        test: test_offsetShell_repro_20260422215549_keeps_outward_direction_on_tube_face,
+        afterRun: afterRun_offsetShell_repro_20260422215549_keeps_outward_direction_on_tube_face,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_offsetShell_repro_20260422215549_can_keep_original_solid,
+        afterRun: afterRun_offsetShell_repro_20260422215549_can_keep_original_solid,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_offsetShell_repro_20260423012942_keeps_negative_single_open_face_shell_inside_source,
+        afterRun: afterRun_offsetShell_repro_20260423012942_keeps_negative_single_open_face_shell_inside_source,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_offsetShell_repro_20260423005441_keeps_negative_two_open_face_shell_inward,
+        afterRun: afterRun_offsetShell_repro_20260423005441_keeps_negative_two_open_face_shell_inward,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
     {
         test: test_extrude_negative_distance_cap_alignment,
         afterRun: afterRun_extrude_negative_distance_cap_alignment,

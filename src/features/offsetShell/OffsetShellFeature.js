@@ -16,7 +16,13 @@ const inputParamsSchema = {
     selectionFilter: ['FACE'],
     multiple: true,
     default_value: [],
-    hint: 'Pick one or more faces on the solid to shell (used to find the solid)',
+    hint: 'Pick one or more faces to remove and open while shelling the solid',
+  },
+  replaceOriginalSolid: {
+    type: 'boolean',
+    label: 'REPLACE ORIGINAL SOLID',
+    default_value: true,
+    hint: 'When enabled, remove the source solid and leave only the shell result in the scene.',
   },
 };
 
@@ -54,6 +60,17 @@ export class OffsetShellFeature {
     }
 
     const targetSolid = solids.values().next().value;
+    const removeFaceNames = Array.from(new Set(faceEntries
+      .map((entry) => {
+        if (typeof entry === 'string') return entry.trim();
+        return String(
+          entry?.userData?.faceName
+          || entry?.faceName
+          || entry?.name
+          || ''
+        ).trim();
+      })
+      .filter(Boolean)));
 
     const dist = Number(this.inputParams.distance);
     if (!Number.isFinite(dist) || dist === 0) {
@@ -70,6 +87,7 @@ export class OffsetShellFeature {
       resultSolid = OffsetShellSolid.generate(targetSolid, dist, {
         featureId,
         newSolidName,
+        removeFaceNames,
       });
     } catch (err) {
       console.error('[OffsetShellFeature] Solid.offsetShell failed:', err);
@@ -81,9 +99,44 @@ export class OffsetShellFeature {
       return { added: [], removed: [] };
     }
 
+    const triangleEscapeDiagnostics = resultSolid?.__offsetDiagnostics?.triangleGenerationEscapeCheck || null;
+    if (triangleEscapeDiagnostics?.enabled && Number(triangleEscapeDiagnostics.escapedTriangleCount || 0) > 0) {
+      const topFaces = Object.entries(triangleEscapeDiagnostics.escapedFaceCounts || {})
+        .sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0))
+        .slice(0, 6)
+        .map(([faceName, count]) => ({ faceName, count: Number(count) || 0 }));
+      console.warn(
+        `[OffsetShellFeature] Inward shell triangle diagnostics detected ${Number(triangleEscapeDiagnostics.escapedTriangleCount || 0)} `
+        + `escaping emitted triangles while building "${newSolidName}".`,
+        {
+          escapedVertexCount: Number(triangleEscapeDiagnostics.escapedVertexCount || 0),
+          topFaces,
+        },
+      );
+    }
+
+    const inwardEscapeDiagnostics = resultSolid?.__offsetDiagnostics?.inwardEscapeCheck || null;
+    if (
+      (!triangleEscapeDiagnostics?.enabled || Number(triangleEscapeDiagnostics.escapedTriangleCount || 0) <= 0)
+      && inwardEscapeDiagnostics?.enabled
+      && Number(inwardEscapeDiagnostics.rawEscapedVertexCount || 0) > 0
+    ) {
+      console.warn(
+        `[OffsetShellFeature] Inward offset diagnostics detected ${Number(inwardEscapeDiagnostics.rawEscapedVertexCount || 0)} `
+        + `source-escape vertices while building "${newSolidName}".`,
+        {
+          escapedVertices: (inwardEscapeDiagnostics.escapedVertices || []).slice(0, 8),
+        },
+      );
+    }
+
     try { resultSolid.name = newSolidName; } catch {}
     try { resultSolid.visualize(); } catch {}
 
-    return { added: [resultSolid], removed: [] };
+    const replaceOriginalSolid = this.inputParams.replaceOriginalSolid !== false;
+    return {
+      added: [resultSolid],
+      removed: replaceOriginalSolid ? [targetSolid] : [],
+    };
   }
 }
