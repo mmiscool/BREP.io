@@ -1580,9 +1580,12 @@ function buildFaceSupport(face, metadata = {}, options = {}) {
 
 function supportResidualAndGradient(support, point, distance) {
   if (!support) return null;
+  const effectiveDistance = Number.isFinite(Number(support?.distanceOverride))
+    ? Number(support.distanceOverride)
+    : distance;
   if (support.kind === 'plane') {
     return {
-      residual: support.normal.dot(point) - (support.offset + distance),
+      residual: support.normal.dot(point) - (support.offset + effectiveDistance),
       gradient: support.normal.clone(),
     };
   }
@@ -1592,7 +1595,7 @@ function supportResidualAndGradient(support, point, distance) {
     if (len <= SOLVER_EPS) return null;
     const normalSign = Number.isFinite(Number(support.normalSign)) ? Math.sign(Number(support.normalSign)) || 1 : 1;
     return {
-      residual: (normalSign * (len - support.radius)) - distance,
+      residual: (normalSign * (len - support.radius)) - effectiveDistance,
       gradient: delta.multiplyScalar(normalSign / len),
     };
   }
@@ -1604,7 +1607,7 @@ function supportResidualAndGradient(support, point, distance) {
     if (radialLen <= SOLVER_EPS) return null;
     const normalSign = Number.isFinite(Number(support.normalSign)) ? Math.sign(Number(support.normalSign)) || 1 : 1;
     return {
-      residual: (normalSign * (radialLen - support.radius)) - distance,
+      residual: (normalSign * (radialLen - support.radius)) - effectiveDistance,
       gradient: radial.multiplyScalar(normalSign / radialLen),
     };
   }
@@ -1627,7 +1630,7 @@ function supportResidualAndGradient(support, point, distance) {
     if (gradLen <= SOLVER_EPS) return null;
     const offsetScale = gradLen;
     return {
-      residual: radialLen - baseRadius - (distance * offsetScale),
+      residual: radialLen - baseRadius - (effectiveDistance * offsetScale),
       gradient: grad.multiplyScalar(1 / gradLen),
     };
   }
@@ -1647,7 +1650,7 @@ function supportResidualAndGradient(support, point, distance) {
     const gradLen = gradient.length();
     if (gradLen <= SOLVER_EPS) return null;
     return {
-      residual: tubeLen - (support.tubeRadius + distance),
+      residual: tubeLen - (support.tubeRadius + effectiveDistance),
       gradient: gradient.multiplyScalar(1 / gradLen),
     };
   }
@@ -1932,6 +1935,40 @@ function _incrementDiagnosticCounter(bucket, key) {
   bucket[normalizedKey] = (Number(bucket[normalizedKey]) || 0) + 1;
 }
 
+function _buildRemovedBoundarySupport(face) {
+  if (!face) return null;
+  const support = face.support || null;
+  if (support && support.kind !== 'vertex_tangent') {
+    return {
+      ...support,
+      distanceOverride: 0,
+    };
+  }
+  if (isFiniteVec3(face.normal) && Number.isFinite(face.offset)) {
+    return {
+      kind: 'plane',
+      faceName: face.name,
+      normal: face.normal.clone(),
+      offset: face.offset,
+      distanceOverride: 0,
+    };
+  }
+  return null;
+}
+
+function _pointNearRemovedBoundary(point, removedBoundarySupports, tolerance) {
+  if (!isFiniteVec3(point) || !Array.isArray(removedBoundarySupports) || removedBoundarySupports.length === 0) {
+    return false;
+  }
+  const tol = Math.max(1e-8, Number(tolerance) || 0);
+  for (const support of removedBoundarySupports) {
+    const sample = supportResidualAndGradient(support, point, 0);
+    if (!sample) continue;
+    if (Math.abs(Number(sample.residual) || 0) <= tol) return true;
+  }
+  return false;
+}
+
 function _recordInwardTriangleEscape(diagnostics, triangleKind, faceName, p0, p1, p2, options = {}) {
   if (!diagnostics?.enabled) return;
   if (triangleKind === 'outer') return;
@@ -1939,6 +1976,8 @@ function _recordInwardTriangleEscape(diagnostics, triangleKind, faceName, p0, p1
   const insideTester = typeof options.insideTester === 'function' ? options.insideTester : null;
   if (!insideTester) return;
   const sourcePointKeys = options.sourcePointKeys instanceof Set ? options.sourcePointKeys : null;
+  const removedBoundarySupports = Array.isArray(options.removedBoundarySupports) ? options.removedBoundarySupports : [];
+  const removedBoundaryTolerance = Math.max(1e-8, Number(options.removedBoundaryTolerance) || 0);
   const points = [p0, p1, p2].map((point) => new THREE.Vector3(
     Number(point?.[0]) || 0,
     Number(point?.[1]) || 0,
@@ -1947,10 +1986,12 @@ function _recordInwardTriangleEscape(diagnostics, triangleKind, faceName, p0, p1
   const vertices = points.map((point) => {
     const onSource = !!sourcePointKeys?.has?.(pointKey(point, 8));
     const inside = _safePointInsideTest(insideTester, point);
+    const onRemovedBoundary = _pointNearRemovedBoundary(point, removedBoundarySupports, removedBoundaryTolerance);
     return {
       point: [point.x, point.y, point.z],
       onSource,
       inside,
+      onRemovedBoundary,
     };
   });
   const centroid = new THREE.Vector3()
@@ -1959,10 +2000,11 @@ function _recordInwardTriangleEscape(diagnostics, triangleKind, faceName, p0, p1
     .add(points[2])
     .multiplyScalar(1 / 3);
   const centroidInside = _safePointInsideTest(insideTester, centroid);
+  const centroidOnRemovedBoundary = _pointNearRemovedBoundary(centroid, removedBoundarySupports, removedBoundaryTolerance);
   const nonSourceOutsideCount = vertices.reduce((count, entry) => (
-    count + ((!entry.onSource && entry.inside === false) ? 1 : 0)
+    count + ((!entry.onSource && entry.inside === false && !entry.onRemovedBoundary) ? 1 : 0)
   ), 0);
-  if (centroidInside !== false && nonSourceOutsideCount === 0) return;
+  if ((centroidInside !== false || centroidOnRemovedBoundary) && nonSourceOutsideCount === 0) return;
 
   diagnostics.escapedTriangleCount += 1;
   diagnostics.escapedVertexCount += nonSourceOutsideCount;
@@ -2005,6 +2047,8 @@ function _buildPolyhedralShellSolid(sourceSolid, analysis, outerVertices, innerV
     triangleDiagnostics = null,
     insideTester = null,
     sourcePointKeys = null,
+    removedBoundarySupports = null,
+    removedBoundaryTolerance = 0,
   } = options;
 
   const removeFaceSet = new Set(Array.from(removeFaceNames || [], (faceName) => String(faceName || '').trim()).filter(Boolean));
@@ -2021,7 +2065,12 @@ function _buildPolyhedralShellSolid(sourceSolid, analysis, outerVertices, innerV
       p0,
       p1,
       p2,
-      { insideTester, sourcePointKeys },
+      {
+        insideTester,
+        sourcePointKeys,
+        removedBoundarySupports,
+        removedBoundaryTolerance,
+      },
     );
     out.addTriangle(faceName, p0, p1, p2);
   };
@@ -2110,6 +2159,10 @@ export function buildOffsetPolyhedralSolid(sourceSolid, analysis, distance, opti
   const removeFaceSet = new Set(Array.from(removeFaceNames || [], (faceName) => String(faceName || '').trim()).filter(Boolean));
   const insideTester = typeof analysis?.pointInsideTester === 'function' ? analysis.pointInsideTester : null;
   const modelScale = _modelScale(sourceSolid);
+  const removedBoundaryTolerance = Math.max(1e-6, modelScale * 1e-5);
+  const removedBoundarySupports = removeFaceSet.size
+    ? Array.from(removeFaceSet, (faceName) => _buildRemovedBoundarySupport(analysis.faceMap.get(faceName))).filter(Boolean)
+    : [];
   const inwardTriangleDiagnostics = (dist < 0 && insideTester && removeFaceSet.size)
     ? {
       enabled: true,
@@ -2149,8 +2202,15 @@ export function buildOffsetPolyhedralSolid(sourceSolid, analysis, distance, opti
     const supports = dedupeSupports(Array.from(supportFaceNames || [], (faceName) => {
       const face = analysis.faceMap.get(faceName);
       const support = face?.support || null;
+      const distanceOverride = removeFaceSet.has(faceName) ? 0 : undefined;
       if (!support) return null;
-      if (support.kind !== 'vertex_tangent') return support;
+      if (support.kind !== 'vertex_tangent') {
+        if (distanceOverride === undefined) return support;
+        return {
+          ...support,
+          distanceOverride,
+        };
+      }
       const normal = analysis.vertexFaceNormalMap?.get?.(`${vertexIndex}|${faceName}`) || null;
       if (!normal || normal.lengthSq() <= SOLVER_EPS) return null;
       return {
@@ -2158,6 +2218,7 @@ export function buildOffsetPolyhedralSolid(sourceSolid, analysis, distance, opti
         faceName,
         normal: normal.clone(),
         offset: normal.dot(analysis.vertices[vertexIndex]),
+        ...(distanceOverride === undefined ? {} : { distanceOverride }),
       };
     }).filter(Boolean));
     if (!supports.length) {
@@ -2219,7 +2280,8 @@ export function buildOffsetPolyhedralSolid(sourceSolid, analysis, distance, opti
     let finalMoved = moved;
     if (inwardEscapeDiagnostics && moved.distanceToSquared(analysis.vertices[vertexIndex]) > Math.max(1e-16, Math.pow(modelScale * 1e-8, 2))) {
       const rawInside = _safePointInsideTest(insideTester, moved);
-      if (rawInside === false) {
+      const onRemovedBoundary = _pointNearRemovedBoundary(moved, removedBoundarySupports, removedBoundaryTolerance);
+      if (rawInside === false && !onRemovedBoundary) {
         inwardEscapeDiagnostics.rawEscapedVertexCount += 1;
         inwardEscapeDiagnostics.finalEscapedVertexCount += 1;
         if (inwardEscapeDiagnostics.escapedVertices.length < inwardEscapeDiagnostics.maxRecordedVertices) {
@@ -2257,6 +2319,8 @@ export function buildOffsetPolyhedralSolid(sourceSolid, analysis, distance, opti
       triangleDiagnostics: inwardTriangleDiagnostics,
       insideTester,
       sourcePointKeys,
+      removedBoundarySupports,
+      removedBoundaryTolerance,
     });
   } else {
     out = new Solid();

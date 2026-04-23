@@ -258,6 +258,34 @@ function diagnosticFaceCounts(diagnostics) {
     .sort((a, b) => b[1] - a[1]);
 }
 
+function assertRemovedFaceRimStaysOnSourceSurface(source, shell, removedFaceName, label) {
+  const analysis = analyzePolyhedralSolid(source);
+  const removedSupport = analysis?.faceMap?.get(removedFaceName)?.support || null;
+  if (!removedSupport || removedSupport.kind !== 'plane') {
+    throw new Error(`[${label}] Expected removed face "${removedFaceName}" to resolve to a planar support.`);
+  }
+  const rimFaces = (shell.getFaces(false) || []).filter((face) => String(face?.faceName || '').includes(`RIM_${removedFaceName}_`));
+  if (!rimFaces.length) {
+    throw new Error(`[${label}] Expected shell to contain rim faces for removed face "${removedFaceName}".`);
+  }
+  let maxPlaneDistance = 0;
+  for (const face of rimFaces) {
+    for (const tri of face?.triangles || []) {
+      for (const point of [tri.p1, tri.p2, tri.p3]) {
+        const v = new THREE.Vector3(Number(point?.[0]) || 0, Number(point?.[1]) || 0, Number(point?.[2]) || 0);
+        const distance = Math.abs(removedSupport.normal.dot(v) - removedSupport.offset);
+        if (distance > maxPlaneDistance) maxPlaneDistance = distance;
+      }
+    }
+  }
+  if (maxPlaneDistance > 1e-4) {
+    throw new Error(
+      `[${label}] Expected rim around removed face "${removedFaceName}" to stay on the original source face without a bevel `
+      + `(max plane distance=${maxPlaneDistance}).`,
+    );
+  }
+}
+
 export async function buildReproHistory_20260422215549(partHistory = new PartHistory(), options = {}) {
   const includeOffsetShell = options.includeOffsetShell !== false;
   const includeRemesh = options.includeRemesh === true;
@@ -676,6 +704,77 @@ export async function test_offsetShell_generic_mesh_face_uses_tangent_supports()
   }
 }
 
+export async function buildReproHistory_20260423023524(partHistory = new PartHistory(), options = {}) {
+  const includeOffsetShell = options.includeOffsetShell !== false;
+  const replaceOriginalSolid = options.replaceOriginalSolid !== false;
+  const offsetDistance = String(options.offsetDistance ?? '-0.25');
+  await buildReproHistory_20260422215549(partHistory, { includeOffsetShell: false });
+
+  const feature5 = await partHistory.newFeature('S');
+  Object.assign(feature5.inputParams, {
+    id: 'S13',
+    sketchPlane: 'E3:S2:G10_SW',
+    editSketch: null,
+    dumpSketchDiagnostics: null,
+    curveResolution: 'resolution',
+  });
+  feature5.persistentData = {
+    sketch: {
+      points: [
+        { id: 0, x: 0, y: 0, fixed: true, construction: true, externalReference: false },
+        { id: 1, x: -4.032545, y: -3.56033, fixed: false, construction: false, externalReference: false },
+        { id: 2, x: -2.276544, y: -3.849133, fixed: false, construction: false, externalReference: false },
+        { id: 3, x: 0.106266, y: -1.702017, fixed: false, construction: false, externalReference: false },
+        { id: 4, x: -1.082167, y: 0.144895, fixed: false, construction: false, externalReference: false },
+        { id: 5, x: -5.123026, y: -0.76459, fixed: false, construction: false, externalReference: false },
+      ],
+      geometries: [
+        { id: 1, type: 'bezier', points: [1, 2, 3, 4], construction: false },
+        { id: 2, type: 'line', points: [1, 2], construction: true },
+        { id: 3, type: 'line', points: [4, 3], construction: true },
+        { id: 4, type: 'line', points: [1, 5], construction: false },
+        { id: 5, type: 'line', points: [4, 5], construction: false },
+      ],
+      constraints: [
+        {
+          id: 0,
+          type: '⏚',
+          points: [0],
+          status: 'solved',
+          error: null,
+          _previousSolveValue: null,
+          previousPointValues: '0:0,0,1;',
+        },
+      ],
+    },
+  };
+
+  const feature6 = await partHistory.newFeature('E');
+  Object.assign(feature6.inputParams, {
+    id: 'E14',
+    profile: 'S13:PROFILE',
+    consumeProfileSketch: true,
+    distance: 10,
+    distanceBack: 10,
+    boolean: {
+      targets: ['E3'],
+      operation: 'UNION',
+      overlapConditioningEnabled: true,
+    },
+  });
+
+  if (includeOffsetShell) {
+    const feature7 = await partHistory.newFeature('O.S');
+    Object.assign(feature7.inputParams, {
+      id: 'O.S15',
+      distance: offsetDistance,
+      faces: ['E3:S2:PROFILE_START'],
+      replaceOriginalSolid,
+    });
+  }
+  return partHistory;
+}
+
 export async function test_offsetShell_repro_20260422215549_keeps_outward_direction_on_tube_face(partHistory) {
   await buildReproHistory_20260422215549(partHistory);
 }
@@ -700,6 +799,13 @@ export async function test_offsetShell_repro_20260423012942_keeps_negative_singl
     offsetDistance: '-0.25',
     offsetFaces: ['E3:S2:PROFILE_START'],
     replaceOriginalSolid: false,
+  });
+}
+
+export async function test_offsetShell_repro_20260423023524_keeps_negative_open_face_shell_with_union_boss(partHistory) {
+  await buildReproHistory_20260423023524(partHistory, {
+    offsetDistance: '-0.25',
+    replaceOriginalSolid: true,
   });
 }
 
@@ -980,6 +1086,7 @@ export async function afterRun_offsetShell_repro_20260423012942_keeps_negative_s
       + `received escapedVertexCount=${escapedVertices}.`,
     );
   }
+  assertRemovedFaceRimStaysOnSourceSurface(source, shell, 'E3:S2:PROFILE_START', 'offsetShell_repro_20260423012942');
 
   const topology = analyzeMeshTopology(shell);
   if (topology.boundaryEdgeCount || topology.nonManifoldEdgeCount) {
@@ -987,5 +1094,47 @@ export async function afterRun_offsetShell_repro_20260423012942_keeps_negative_s
       `[offsetShell_repro_20260423012942] Shell mesh must be closed and manifold. `
       + `Boundaries=${topology.boundaryEdgeCount}, nonManifold=${topology.nonManifoldEdgeCount}.`,
     );
+  }
+}
+
+export async function afterRun_offsetShell_repro_20260423023524_keeps_negative_open_face_shell_with_union_boss(partHistory) {
+  const shell = getSolidByName(partHistory, 'E3_O.S15');
+  if (!shell) {
+    throw new Error('[offsetShell_repro_20260423023524] Expected shell solid E3_O.S15 to replace the source solid.');
+  }
+  if (getSolidByName(partHistory, 'E3')) {
+    throw new Error('[offsetShell_repro_20260423023524] Expected offset shell to replace the original source solid.');
+  }
+  if (!['polyhedral_topology_shell', 'polyhedral_boolean_shell'].includes(String(shell.__offsetMethod || ''))) {
+    throw new Error(`[offsetShell_repro_20260423023524] Expected shell result to use a polyhedral shell path, received ${shell.__offsetMethod || 'fallback'}.`);
+  }
+
+  const diagnostics = shell?.__offsetDiagnostics?.triangleGenerationEscapeCheck || null;
+  if (diagnostics?.enabled && Number(diagnostics.escapedTriangleCount || 0) !== 0) {
+    throw new Error(
+      `[offsetShell_repro_20260423023524] Expected the union-boss repro to finish with no escaping emitted triangles, `
+      + `received ${Number(diagnostics.escapedTriangleCount || 0)}.`,
+    );
+  }
+
+  const faceNames = new Set((shell.getFaces(false) || []).map((face) => String(face?.faceName || '')));
+  for (const removedName of ['E3:S2:PROFILE_START', `${shell.name}_E3:S2:PROFILE_START`, `${shell.name}_INNER_E3:S2:PROFILE_START`]) {
+    if (faceNames.has(removedName)) {
+      throw new Error(`[offsetShell_repro_20260423023524] Expected removed face "${removedName}" to be absent from the final shell.`);
+    }
+  }
+  if (!Array.from(faceNames).some((faceName) => faceName.includes('E14:S13'))) {
+    throw new Error('[offsetShell_repro_20260423023524] Expected the final shell to preserve face labels from the E14 union boss.');
+  }
+
+  const topology = analyzeMeshTopology(shell);
+  if (topology.boundaryEdgeCount || topology.nonManifoldEdgeCount) {
+    throw new Error(
+      `[offsetShell_repro_20260423023524] Shell mesh must be closed and manifold. `
+      + `Boundaries=${topology.boundaryEdgeCount}, nonManifold=${topology.nonManifoldEdgeCount}.`,
+    );
+  }
+  if (typeof shell._isCoherentlyOrientedManifold === 'function' && shell._isCoherentlyOrientedManifold() !== true) {
+    throw new Error('[offsetShell_repro_20260423023524] Shell mesh failed coherent manifold orientation check.');
   }
 }

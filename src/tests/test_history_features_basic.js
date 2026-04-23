@@ -110,6 +110,11 @@ export async function test_history_features_basic(partHistory) {
   pushFace.inputParams.faces = [`${pushFaceBase.inputParams.featureID}_PZ`];
   pushFace.inputParams.distance = 0.5;
 
+  const thickenBase = await partHistory.newFeature("P.CU");
+  const thicken = await partHistory.newFeature("THK");
+  thicken.inputParams.face = `${thickenBase.inputParams.featureID}_PZ`;
+  thicken.inputParams.distance = 0.5;
+
   const patLinBase = await partHistory.newFeature("P.CU");
   const patLin = await partHistory.newFeature("PATLIN");
   patLin.inputParams.solids = [patLinBase.inputParams.featureID];
@@ -166,4 +171,5 @@ export async function afterRun_history_features_basic(partHistory) {
   requireFeatureObject("LOFT", "Loft");
   requireFeatureObject("R", "Revolve");
   requireFeatureOwnedObject("PF", "Push Face");
+  requireFeatureOwnedObject("THK", "Thicken");
 }

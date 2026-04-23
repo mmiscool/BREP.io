@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { CADmaterials } from "../UI/CADmaterials.js";
 import { SelectionState } from "../UI/SelectionState.js";
 import { computeTriangleArea } from "./triangleUtils.js";
+import { thickenFaceToSolid } from "./faceThicken.js";
 
 export class Face extends THREE.Mesh {
     constructor(geometry) {
@@ -133,6 +134,10 @@ export class Face extends THREE.Mesh {
 
     renameFace(newName) {
         this.parentSolid.renameFace(this.name, newName);
+    }
+
+    thicken(distance, options = {}) {
+        return thickenFaceToSolid(this, distance, options);
     }
 
     /**

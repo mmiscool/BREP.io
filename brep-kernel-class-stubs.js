@@ -409,6 +409,11 @@ class Face {
     return notImplemented();
   }
 
+  thicken(distance, options = {}) {
+    // Build a closed solid by thickening this face along its local normals.
+    return notImplemented();
+  }
+
   getNeighbors() {
     // Return face objects that share an edge boundary with this face.
     return notImplemented();
