@@ -401,7 +401,85 @@ function extractFaceSurface(face, options = {}) {
   };
 }
 
-function buildPrismManifold(p0, p1, p2, q0, q1, q2, distance) {
+function buildThickenClassificationState(labels, distance) {
+  const groups = [
+    {
+      label: labels.source,
+      kind: 'source',
+      metadata: {
+        type: 'thicken_source',
+        sourceFaceName: labels.sourceFaceName,
+        distance,
+      },
+    },
+    {
+      label: labels.offset,
+      kind: 'offset',
+      metadata: {
+        type: 'thicken_offset',
+        sourceFaceName: labels.sourceFaceName,
+        distance,
+      },
+    },
+    ...labels.rims.map((label, loopIndex) => ({
+      label,
+      kind: 'rim',
+      metadata: {
+        type: 'thicken_rim',
+        sourceFaceName: labels.sourceFaceName,
+        loopIndex,
+        distance,
+      },
+    })),
+  ];
+
+  const faceNameToID = new Map();
+  const idToFaceName = new Map();
+  const faceMetadataJson = [];
+  let nextID = 1;
+  for (const group of groups) {
+    const id = nextID >>> 0;
+    nextID += 1;
+    faceNameToID.set(group.label, id);
+    idToFaceName.set(id, group.label);
+    faceMetadataJson.push([group.label, JSON.stringify(group.metadata || {})]);
+  }
+
+  return {
+    labels,
+    groups,
+    faceNameToID,
+    idToFaceName,
+    faceMetadataJson,
+  };
+}
+
+function buildClassificationFromPropagatedFaceIDs(mesh, classificationState) {
+  const triVerts = Array.from(mesh?.triVerts ?? []);
+  const triCount = (triVerts.length / 3) | 0;
+  const triIDs = Array.from(mesh?.faceID ?? [], (rawID) => Number(rawID) >>> 0);
+  if (!triCount || triIDs.length !== triCount) return null;
+
+  const idToFaceName = classificationState?.idToFaceName instanceof Map
+    ? classificationState.idToFaceName
+    : new Map();
+  for (const id of triIDs) {
+    if (!idToFaceName.has(id)) return null;
+  }
+
+  return {
+    triIDs,
+    faceNameToID: classificationState?.faceNameToID instanceof Map
+      ? classificationState.faceNameToID
+      : new Map(),
+    idToFaceName,
+    faceMetadataJson: Array.from(classificationState?.faceMetadataJson || []),
+    groups: Array.isArray(classificationState?.groups) ? classificationState.groups : [],
+    method: 'propagated_face_ids',
+  };
+}
+
+function buildPrismManifold(p0, p1, p2, q0, q1, q2, distance, faceIDs = {}) {
   const from = distance >= 0
     ? [p0, p1, p2]
     : [q0, q1, q2];
@@ -429,8 +507,36 @@ function buildPrismManifold(p0, p1, p2, q0, q1, q2, distance) {
     2, 0, 3,
     2, 3, 5,
   ]);
-  const mesh = new ManifoldMesh({ numProp: 3, vertProperties, triVerts });
-  return new Manifold(mesh);
+  const sourceFaceID = Number(faceIDs?.sourceFaceID) >>> 0;
+  const offsetFaceID = Number(faceIDs?.offsetFaceID) >>> 0;
+  const defaultInternalSideFaceID = Number.isFinite(Number(faceIDs?.internalSideFaceID))
+    ? (Number(faceIDs.internalSideFaceID) >>> 0)
+    : (sourceFaceID || offsetFaceID || 1);
+  const sideFaceIDs = Array.isArray(faceIDs?.sideFaceIDs) ? faceIDs.sideFaceIDs : [];
+  const capA = distance >= 0 ? (sourceFaceID || 1) : (offsetFaceID || 1);
+  const capB = distance >= 0 ? (offsetFaceID || capA) : (sourceFaceID || capA);
+  const side0 = Number.isFinite(Number(sideFaceIDs[0]))
+    ? (Number(sideFaceIDs[0]) >>> 0)
+    : defaultInternalSideFaceID;
+  const side1 = Number.isFinite(Number(sideFaceIDs[1]))
+    ? (Number(sideFaceIDs[1]) >>> 0)
+    : defaultInternalSideFaceID;
+  const side2 = Number.isFinite(Number(sideFaceIDs[2]))
+    ? (Number(sideFaceIDs[2]) >>> 0)
+    : defaultInternalSideFaceID;
+  const faceID = new Uint32Array([
+    capA,
+    capB,
+    side0, side0,
+    side1, side1,
+    side2, side2,
+  ]);
+  const mesh = new ManifoldMesh({ numProp: 3, vertProperties, triVerts, faceID });
+  try {
+    return new Manifold(mesh);
+  } finally {
+    try { mesh.delete?.(); } catch { /* ignore */ }
+  }
 }
 
 function buildHullFallback(p0, p1, p2, q0, q1, q2) {
@@ -487,11 +593,12 @@ function unionManifoldsDeterministically(manifolds, batchSize = 24) {
   return current[0];
 }
 
-function classifyUnionMesh(mesh, surface, distance, labels) {
+function classifyUnionMesh(mesh, surface, distance, classificationState) {
   const triVerts = Array.from(mesh?.triVerts ?? []);
   const vertProperties = Array.from(mesh?.vertProperties ?? []);
   const triCount = (triVerts.length / 3) | 0;
   const distanceScale = Math.max(Math.abs(Number(distance) || 0) * 0.05, surface.scale * 1e-5, 1e-6);
+  const labels = classificationState?.labels || {};
 
   const sourceTriangles = [];
   const offsetTriangles = [];
@@ -526,40 +633,58 @@ function classifyUnionMesh(mesh, surface, distance, labels) {
     }
   }
 
-  const groups = [
-    buildReferenceGroup(labels.source, sourceTriangles, 'source', {
+  const sourceGroup = classificationState?.groups?.[0] || {
+    label: labels.source,
+    kind: 'source',
+    metadata: {
       type: 'thicken_source',
       sourceFaceName: labels.sourceFaceName,
       distance,
-    }),
-    buildReferenceGroup(labels.offset, offsetTriangles, 'offset', {
+    },
+  };
+  const offsetGroup = classificationState?.groups?.[1] || {
+    label: labels.offset,
+    kind: 'offset',
+    metadata: {
       type: 'thicken_offset',
       sourceFaceName: labels.sourceFaceName,
       distance,
+    },
+  };
+  const rimGroups = Array.isArray(classificationState?.groups)
+    ? classificationState.groups.slice(2)
+    : [];
+
+  const referenceGroups = [
+    buildReferenceGroup(sourceGroup.label, sourceTriangles, sourceGroup.kind || 'source', sourceGroup.metadata || {}),
+    buildReferenceGroup(offsetGroup.label, offsetTriangles, offsetGroup.kind || 'offset', offsetGroup.metadata || {}),
+    ...rimLoopTriangles.map((triangles, loopIndex) => {
+      const rimGroup = rimGroups[loopIndex] || {
+        label: labels.rims?.[loopIndex],
+        kind: 'rim',
+        metadata: {
+          type: 'thicken_rim',
+          sourceFaceName: labels.sourceFaceName,
+          loopIndex,
+          distance,
+        },
+      };
+      return buildReferenceGroup(
+        rimGroup.label,
+        triangles,
+        rimGroup.kind || 'rim',
+        rimGroup.metadata || {},
+      );
     }),
-    ...rimLoopTriangles.map((triangles, loopIndex) => buildReferenceGroup(
-      labels.rims[loopIndex],
-      triangles,
-      'rim',
-      {
-        type: 'thicken_rim',
-        sourceFaceName: labels.sourceFaceName,
-        loopIndex,
-        distance,
-      },
-    )),
   ].filter((group) => Array.isArray(group?.triangles) && group.triangles.length);
 
-  const faceNameToID = new Map();
-  const idToFaceName = new Map();
-  const faceMetadataJson = [];
-  let nextID = 1;
-  for (const group of groups) {
-    faceNameToID.set(group.label, nextID);
-    idToFaceName.set(nextID, group.label);
-    faceMetadataJson.push([group.label, JSON.stringify(group.metadata || {})]);
-    nextID += 1;
-  }
+  const faceNameToID = classificationState?.faceNameToID instanceof Map
+    ? classificationState.faceNameToID
+    : new Map();
+  const idToFaceName = classificationState?.idToFaceName instanceof Map
+    ? classificationState.idToFaceName
+    : new Map();
+  const faceMetadataJson = Array.from(classificationState?.faceMetadataJson || []);
 
   const classifiedIDs = new Array(triCount);
   const a = new THREE.Vector3();
@@ -589,9 +714,9 @@ function classifyUnionMesh(mesh, surface, distance, labels) {
     const triNormal = triangleNormal(a, b, c);
     if (triNormal.lengthSq() > TRI_EPS) triNormal.normalize();
 
-    let bestGroup = groups[0];
+    let bestGroup = referenceGroups[0];
     let bestScore = Infinity;
-    for (const group of groups) {
+    for (const group of referenceGroups) {
       let bestDistanceSq = Infinity;
       let bestAlignmentPenalty = 0;
       for (const ref of group.triangles) {
@@ -620,7 +745,8 @@ function classifyUnionMesh(mesh, surface, distance, labels) {
     faceNameToID,
     idToFaceName,
     faceMetadataJson,
-    groups,
+    groups: Array.isArray(classificationState?.groups) ? classificationState.groups : referenceGroups,
+    method: 'heuristic_reclassification',
   };
 }
 
