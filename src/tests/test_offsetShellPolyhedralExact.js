@@ -36,6 +36,20 @@ function faceSignedMove(sourceFaceCentroid, shellFaceCentroid, outward) {
   );
 }
 
+function radialDistanceToCylinderAxis(support, point) {
+  if (!support || support.kind !== 'cylinder' || !Array.isArray(point) || point.length < 3) return NaN;
+  const center = support.center;
+  const axis = support.axis;
+  if (!center || !axis) return NaN;
+  const local = new THREE.Vector3(
+    (Number(point[0]) || 0) - center.x,
+    (Number(point[1]) || 0) - center.y,
+    (Number(point[2]) || 0) - center.z,
+  );
+  const axial = axis.clone().multiplyScalar(local.dot(axis));
+  return local.sub(axial).length();
+}
+
 function getSolidByName(partHistory, name) {
   return (partHistory?.scene?.children || []).find(
     (obj) => obj?.type === 'SOLID' && String(obj?.name || '') === String(name),
@@ -887,18 +901,10 @@ export async function afterRun_offsetShell_repro_20260423005441_keeps_negative_t
 
   const sourceFaces = source.getFaces(false) || [];
   const shellFaces = shell.getFaces(false) || [];
-  const sourceCentroid = solidCentroid(source);
-  const pointInside = buildPointInsideTester(source);
-  if (!pointInside) {
-    throw new Error('[offsetShell_repro_20260423005441] Could not build source point-inside tester.');
+  const analysis = analyzePolyhedralSolid(source);
+  if (!analysis?.faceMap) {
+    throw new Error('[offsetShell_repro_20260423005441] Could not analyze remeshed source solid supports.');
   }
-
-  const dist2 = (a, b) => {
-    const dx = a[0] - b[0];
-    const dy = a[1] - b[1];
-    const dz = a[2] - b[2];
-    return dx * dx + dy * dy + dz * dz;
-  };
 
   const tubeSourceFaces = sourceFaces
     .map((face) => String(face?.faceName || ''))
@@ -913,47 +919,23 @@ export async function afterRun_offsetShell_repro_20260423005441_keeps_negative_t
     if (!sourceFace) {
       throw new Error(`[offsetShell_repro_20260423005441] Missing source face "${sourceFaceName}".`);
     }
-    const sourceFaceCentroid = faceCentroid(sourceFace);
-    const token = sourceFaceToken(sourceFaceName);
-    if (!token) {
-      throw new Error(`[offsetShell_repro_20260423005441] Invalid source face token for "${sourceFaceName}".`);
+    const sourceSupport = analysis.faceMap.get(sourceFaceName)?.support || null;
+    if (!sourceSupport || sourceSupport.kind !== 'cylinder') {
+      throw new Error(`[offsetShell_repro_20260423005441] Expected remeshed source face "${sourceFaceName}" to infer a cylindrical support.`);
     }
-    const outward = faceOutwardNormal(sourceFaceName, source, pointInside, sourceCentroid);
-    if (!outward) {
-      throw new Error(`[offsetShell_repro_20260423005441] Failed to orient source face normal for "${sourceFaceName}".`);
+    const shellInnerFaceName = `${shell.name}_INNER_${sourceFaceName}`;
+    const shellInnerFace = shellFaces.find((face) => String(face?.faceName || '') === shellInnerFaceName) || null;
+    if (!shellInnerFace) {
+      throw new Error(`[offsetShell_repro_20260423005441] Missing shell inner face "${shellInnerFaceName}".`);
     }
-
-    const scored = shellFaces
-      .map((shellFace) => {
-        if (!String(shellFace?.faceName || '').includes(token)) return null;
-        const shellFaceCentroid = faceCentroid(shellFace);
-        return {
-          shellFaceName: shellFace.faceName,
-          signedMove: faceSignedMove(sourceFaceCentroid, shellFaceCentroid, outward),
-          candidateDist2: dist2(sourceFaceCentroid, shellFaceCentroid),
-        };
-      })
-      .filter(Boolean)
-      .sort((a, b) => {
-        if (Math.abs(a.signedMove - b.signedMove) > 1e-9) {
-          return a.signedMove - b.signedMove;
-        }
-        return a.candidateDist2 - b.candidateDist2;
-      });
-
-    if (!scored.length) {
-      throw new Error(`[offsetShell_repro_20260423005441] Could not map source face "${sourceFaceName}" to any shell faces.`);
-    }
-
-    const best = scored[0];
-    if (!(best.signedMove < -1e-5)) {
-      const report = scored
-        .slice(0, 3)
-        .map((item) => `${item.shellFaceName}: ${item.signedMove.toFixed(6)}`)
-        .join(', ');
+    const sourceRadius = radialDistanceToCylinderAxis(sourceSupport, faceCentroid(sourceFace));
+    const shellRadius = radialDistanceToCylinderAxis(sourceSupport, faceCentroid(shellInnerFace));
+    const expectedDelta = -0.25 * (Number(sourceSupport.normalSign) || 1);
+    const actualDelta = shellRadius - sourceRadius;
+    if (!(actualDelta * expectedDelta > 1e-5)) {
       throw new Error(
-        `[offsetShell_repro_20260423005441] Expected source face "${sourceFaceName}" to move inward `
-        + `(best=${best.signedMove.toFixed(6)}; candidates=[${report}]).`,
+        `[offsetShell_repro_20260423005441] Expected source face "${sourceFaceName}" to move inward along its cylindrical support `
+        + `(expected delta sign ${Math.sign(expectedDelta)}, actual delta=${actualDelta}).`,
       );
     }
   }
