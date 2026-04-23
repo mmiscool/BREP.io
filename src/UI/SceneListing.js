@@ -145,6 +145,7 @@ export class SceneListing {
     #isPlane(obj) { return obj && obj.type === "PLANE"; }
     #isDatum(obj) { return obj && obj.type === "DATUM"; }
     #isSketch(obj) { return obj && obj.type === "SKETCH"; }
+    #isComponent(obj) { return obj && obj.type === "COMPONENT"; }
     #canExpand(obj) {
         if (!obj || !obj.isObject3D) return false;
         if (this._showAllObjects) return !!(obj.children && obj.children.length);
@@ -438,6 +439,8 @@ export class SceneListing {
             return btn;
         };
 
+        const isSolid = (obj) => obj && obj.type === "SOLID";
+        const isComponent = (obj) => this.#isComponent(obj);
         const isFace = (obj) => this.#isFace(obj);
         const isEdge = (obj) => this.#isRegularEdge(obj);
         const isVertex = (obj) => this.#isVertex(obj);
@@ -445,6 +448,8 @@ export class SceneListing {
         const isDatumOrPlane = (obj) => this.#isDatum(obj) || this.#isPlane(obj);
         const isSketchOrChild = (obj) => this.#isSketch(obj) || (obj && obj.parent && this.#isSketch(obj.parent));
 
+        this.toolbar.appendChild(makeTypeButton("Solid", "Toggle visibility of all Solids", isSolid));
+        this.toolbar.appendChild(makeTypeButton("Component", "Toggle visibility of all Components", isComponent));
         this.toolbar.appendChild(makeTypeButton("Face", "Toggle visibility of all Faces", isFace));
         this.toolbar.appendChild(makeTypeButton("Edge", "Toggle visibility of all Edges (excluding centerlines)", isEdge));
         this.toolbar.appendChild(makeTypeButton("Centerline", "Toggle visibility of all Centerlines", isCenterline));
