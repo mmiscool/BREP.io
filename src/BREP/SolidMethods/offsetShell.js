@@ -21,6 +21,18 @@ function getFaceName(entry) {
     return name || null;
 }
 
+function restoreThickenStartFaceName(thickened, sourceFaceName) {
+    if (!thickened || typeof thickened.renameFace !== "function") return;
+    if (!sourceFaceName) return;
+    const startFaceName = `${sourceFaceName}_START`;
+    if (startFaceName === sourceFaceName) return;
+    try {
+        thickened.renameFace(startFaceName, sourceFaceName);
+    } catch {
+        /* ignore rename failures and keep the generated names */
+    }
+}
+
 export function offsetShell(faces, distance, options = {}) {
     const featureId = String(options?.featureId || options?.name || this?.name || "OffsetShell").trim() || "OffsetShell";
     const newSolidName = String(options?.newSolidName || `${this?.name || "Solid"}_${featureId}`).trim() || `${this?.name || "Solid"}_${featureId}`;
@@ -71,6 +83,8 @@ export function offsetShell(faces, distance, options = {}) {
             skippedCount += 1;
             continue;
         }
+
+        restoreThickenStartFaceName(thickened, sourceFaceName);
 
         if (!combined) {
             combined = thickened;

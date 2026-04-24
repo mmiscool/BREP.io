@@ -421,13 +421,15 @@ function buildThickenClassificationState(labels, distance) {
         distance,
       },
     },
-    ...labels.sidewalls.map((label, loopIndex) => ({
-      label,
+    ...labels.sidewalls.map((entry) => ({
+      label: entry.label,
       kind: 'sidewall',
       metadata: {
         type: 'sidewall',
         sourceFaceName: labels.sourceFaceName,
-        loopIndex,
+        loopIndex: entry.loopIndex,
+        edgeIndex: entry.edgeIndex,
+        edgeKey: entry.key,
         distance,
       },
     })),
@@ -451,6 +453,7 @@ function buildThickenClassificationState(labels, distance) {
     faceNameToID,
     idToFaceName,
     faceMetadataJson,
+    edgeKeyToLabel: new Map(labels.sidewalls.map((entry) => [entry.key, entry.label])),
   };
 }
 
@@ -720,7 +723,7 @@ function classifyUnionMesh(mesh, surface, distance, classificationState) {
 
   const startTriangles = [];
   const endTriangles = [];
-  const sidewallLoopTriangles = surface.loops.map(() => []);
+  const sidewallTrianglesByLabel = new Map();
 
   for (let triIndex = 0; triIndex < surface.triangles.length; triIndex++) {
     const [a, b, c] = surface.triangles[triIndex];
@@ -740,14 +743,19 @@ function classifyUnionMesh(mesh, surface, distance, classificationState) {
     }
 
     for (const [u, v] of [[a, b], [b, c], [c, a]]) {
-      const loopIndex = surface.boundaryEdgeToLoop.get(edgeKey(u, v));
-      if (loopIndex == null) continue;
+      const sideLabel = classificationState?.edgeKeyToLabel?.get?.(edgeKey(u, v));
+      if (!sideLabel) continue;
       const pu = surface.vertices[u];
       const pv = surface.vertices[v];
       const qu = pu.clone().add(surface.vertexNormals[u].clone().multiplyScalar(distance));
       const qv = pv.clone().add(surface.vertexNormals[v].clone().multiplyScalar(distance));
-      sidewallLoopTriangles[loopIndex].push({ a: pu, b: pv, c: qv });
-      sidewallLoopTriangles[loopIndex].push({ a: pu, b: qv, c: qu });
+      let triangles = sidewallTrianglesByLabel.get(sideLabel);
+      if (!triangles) {
+        triangles = [];
+        sidewallTrianglesByLabel.set(sideLabel, triangles);
+      }
+      triangles.push({ a: pu, b: pv, c: qv });
+      triangles.push({ a: pu, b: qv, c: qu });
     }
   }
 
@@ -770,23 +778,14 @@ function classifyUnionMesh(mesh, surface, distance, classificationState) {
     },
   };
   const sidewallGroups = Array.isArray(classificationState?.groups)
-    ? classificationState.groups.slice(2)
+    ? classificationState.groups.filter((group) => group?.kind === 'sidewall')
     : [];
 
   const referenceGroups = [
     buildReferenceGroup(startGroup.label, startTriangles, startGroup.kind || 'start', startGroup.metadata || {}),
     buildReferenceGroup(endGroup.label, endTriangles, endGroup.kind || 'end', endGroup.metadata || {}),
-    ...sidewallLoopTriangles.map((triangles, loopIndex) => {
-      const sidewallGroup = sidewallGroups[loopIndex] || {
-        label: labels.sidewalls?.[loopIndex],
-        kind: 'sidewall',
-        metadata: {
-          type: 'sidewall',
-          sourceFaceName: labels.sourceFaceName,
-          loopIndex,
-          distance,
-        },
-      };
+    ...sidewallGroups.map((sidewallGroup) => {
+      const triangles = sidewallTrianglesByLabel.get(sidewallGroup.label) || [];
       return buildReferenceGroup(
         sidewallGroup.label,
         triangles,
@@ -964,13 +963,13 @@ function buildStitchedThickenMesh(surface, distance, classificationState) {
 
   for (let loopIndex = 0; loopIndex < (surface.loops?.length || 0); loopIndex++) {
     const loop = surface.loops[loopIndex];
-    const sideLabel = classificationState?.labels?.sidewalls?.[loopIndex];
-    const sideFaceID = Number(classificationState?.faceNameToID?.get?.(sideLabel)) >>> 0;
     for (const edge of loop?.edges || []) {
       const u = edge.start >>> 0;
       const v = edge.end >>> 0;
       const qu = vertexCount + u;
       const qv = vertexCount + v;
+      const sideLabel = classificationState?.edgeKeyToLabel?.get?.(edge.key);
+      const sideFaceID = Number(classificationState?.faceNameToID?.get?.(sideLabel)) >>> 0;
       if (distance >= 0) {
         addTriangle(u, v, qv, sideFaceID);
         addTriangle(u, qv, qu, sideFaceID);
@@ -1032,9 +1031,14 @@ export function thickenFaceToSolid(face, distance, options = {}) {
     sourceFaceName,
     start: `${sourceFaceName}_START`,
     end: `${sourceFaceName}_END`,
-    sidewalls: loops.map((_, loopIndex) => (loopIndex === 0
-      ? `${sourceFaceName}_SW`
-      : `${sourceFaceName}_L${loopIndex}_SW`)),
+    sidewalls: loops.flatMap((loop, loopIndex) => (Array.isArray(loop?.edges) ? loop.edges : []).map((edge, edgeIndex) => ({
+      key: edge.key,
+      loopIndex,
+      edgeIndex,
+      label: loopIndex === 0
+        ? `${sourceFaceName}_E${edgeIndex}_SW`
+        : `${sourceFaceName}_L${loopIndex}_E${edgeIndex}_SW`,
+    }))),
   };
   const classificationState = buildThickenClassificationState(labels, dist);
   const solidName = String(options.name || featureId).trim() || featureId;
@@ -1169,12 +1173,12 @@ export function thickenFaceToSolid(face, distance, options = {}) {
 
     try {
       const sideFaceIDs = [
-        surface.boundaryEdgeToLoop.get(edgeKey(a, b)),
-        surface.boundaryEdgeToLoop.get(edgeKey(b, c)),
-        surface.boundaryEdgeToLoop.get(edgeKey(c, a)),
-      ].map((loopIndex) => {
-        if (loopIndex == null) return defaultInternalSideFaceID;
-        const label = labels.sidewalls[loopIndex];
+        edgeKey(a, b),
+        edgeKey(b, c),
+        edgeKey(c, a),
+      ].map((boundaryKey) => {
+        const label = classificationState.edgeKeyToLabel.get(boundaryKey);
+        if (!label) return defaultInternalSideFaceID;
         const id = classificationState.faceNameToID.get(label);
         return Number.isFinite(Number(id)) ? (Number(id) >>> 0) : defaultInternalSideFaceID;
       });
