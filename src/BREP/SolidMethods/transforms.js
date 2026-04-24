@@ -4,7 +4,6 @@ import {
     CppSolidCore,
     cppSolidCoreHasAuthoringBridge,
     cppSolidCoreHasNativeMetadataTransform,
-    cppSolidCoreHasNativeOffsetFace,
     cppSolidCoreHasNativePushFace,
     getSolidAuthoringStateSnapshot,
     requireCppSolidCoreCapability,
@@ -48,32 +47,6 @@ export function bakeTRS(trs) {
         const m = composeTrsMatrixDeg(trs, THREE);
         return this.bakeTransform(m);
     } catch (_) { return this; }
-}
-
-/**
- * Offset all vertices belonging to the given face along the face's
- * area-weighted average normal by the specified distance.
- */
-export function offsetFace(faceName, distance) {
-    const dist = Number(distance);
-    if (!Number.isFinite(dist) || dist === 0) return this;
-    const faceID = this._faceNameToID.get(faceName);
-    if (faceID === undefined) return this;
-
-    requireCppSolidCoreCapability(
-        cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeOffsetFace,
-        "Solid.offsetFace()"
-    );
-    this._cppSolidCore = this._cppSolidCore || new CppSolidCore();
-    syncSolidAuthoringStateToCpp(this, this._cppSolidCore);
-    const result = this._cppSolidCore.offsetFace(faceName, dist) || {};
-    if (!result.faceFound || !result.moved) return this;
-    syncSolidAuthoringStateFromCpp(this, this._cppSolidCore);
-    this._dirty = true;
-    this._faceIndex = null;
-    try { if (this._manifold && typeof this._manifold.delete === 'function') this._manifold.delete(); } catch { }
-    this._manifold = null;
-    return this;
 }
 
 /**

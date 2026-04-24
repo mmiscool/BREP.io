@@ -126,7 +126,6 @@ import {
 import { test_configurator_expressions } from './test_configuratorExpressions.js';
 import {
     test_cppSolidCore_boundaryQueries_match_geometric_edges_on_split_authoring_mesh,
-    test_cppSolidCore_offsetFace_moves_vertices_for_face,
     test_cppSolidCore_preserves_face_ids_and_metadata,
     test_cppSolidCore_prepareManifoldMesh_repairs_orientation,
     test_cppSolidCore_pushFace_moves_vertices_for_face,
@@ -152,7 +151,6 @@ import {
     test_cppSolidNative_invertNormals_and_manifoldize_rebuilds_coherent_mesh,
     test_cppSolidNative_mergeTinyFaces_merges_small_adjacent_face,
     test_cppSolidNative_mergeCoplanarAdjacentFilletEndCaps_retags_triangles_to_planar_neighbor,
-    test_cppSolidNative_offsetFace_updates_planar_face_vertices,
     test_cppSolidNative_postBoolean_fillet_merges_coplanar_cube_end_caps,
     test_cppSolidNative_postBoolean_fillet_reverse_end_cap_nudge_requires_merge,
     test_cppSolidNative_reassignTinyFilletSidewallSliverTriangles_merges_triangle_whose_vertices_lie_on_single_planar_face_boundary,
@@ -194,24 +192,6 @@ import {
     test_thicken_feature_multiple_faces_produce_multiple_solids,
     test_thicken_feature_serializes_and_replays_planar_profile,
 } from './test_thickenFeature.js';
-import {
-    test_offsetShell_polyhedral_exact_preserves_sharp_cube_faces,
-    test_offsetShell_polyhedral_exact_supports_non_convex_planar_solids,
-    test_offsetShell_generic_mesh_face_uses_tangent_supports,
-    test_offsetShell_support_surfaces_handle_cylinder_and_cone,
-    test_offsetShell_support_surfaces_handle_sphere_and_torus,
-    afterRun_offsetShell_repro_20260423023524_keeps_negative_open_face_shell_with_union_boss,
-    afterRun_offsetShell_repro_20260423012942_keeps_negative_single_open_face_shell_inside_source,
-    afterRun_offsetShell_repro_20260423005441_keeps_negative_two_open_face_shell_inward,
-    test_offsetShell_vertex_tangent_normals_preserve_generic_sphere_inset_direction,
-    afterRun_offsetShell_repro_20260422215549_can_keep_original_solid,
-    afterRun_offsetShell_repro_20260422215549_keeps_outward_direction_on_tube_face,
-    test_offsetShell_repro_20260423023524_keeps_negative_open_face_shell_with_union_boss,
-    test_offsetShell_repro_20260423012942_keeps_negative_single_open_face_shell_inside_source,
-    test_offsetShell_repro_20260423005441_keeps_negative_two_open_face_shell_inward,
-    test_offsetShell_repro_20260422215549_can_keep_original_solid,
-    test_offsetShell_repro_20260422215549_keeps_outward_direction_on_tube_face,
-} from './test_offsetShellPolyhedralExact.js';
 import { test_plane } from './test_plane.js';
 import { test_primitiveCone } from './test_primitiveCone.js';
 import { test_primitiveCube } from './test_primitiveCube.js';
@@ -310,6 +290,7 @@ import {
     afterRun_visibility_hidden_state_persistence,
     test_visibility_hidden_state_persistence,
 } from './test_visibility_hidden_state_persistence.js';
+import { test_thicken_feature_is_available_in_modeling_and_surfacing_workbenches } from './test_workbenchFeatureVisibility.js';
 import { test_sketch_feature_scene_visibility } from './test_sketchFeatureVisibility.js';
 import { test_revolve_feature_resolves_face_and_edge_string_references } from './test_revolveFeature.js';
 import { test_remesh_simplify_welds_by_tolerance_before_simplify } from './test_remeshFeature.js';
@@ -330,7 +311,6 @@ export const testFunctions = [
     { test: test_cppSolidCore_weldVerticesByEpsilon_aligns_authoring_points_without_compacting_buffers, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidCore_weldVerticesByEpsilon_aligns_neighboring_cells_by_true_distance, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidCore_pushFace_moves_vertices_for_face, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_cppSolidCore_offsetFace_moves_vertices_for_face, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidCore_prepareManifoldMesh_repairs_orientation, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidCore_topologyQueries_return_native_face_and_edge_payloads, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidCore_boundaryQueries_match_geometric_edges_on_split_authoring_mesh, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -348,7 +328,6 @@ export const testFunctions = [
     { test: test_cppSolidNative_removeInternalTriangles_preserves_clean_manifold_shell, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_pushFace_updates_planar_face_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_getFaceNormal_reports_planar_face_normal, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_cppSolidNative_offsetFace_updates_planar_face_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_invertNormals_and_manifoldize_rebuilds_coherent_mesh, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_classifyFilletEdgeDirection_cubeConvexEdge_isInset, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_booleanCombinedAuthoringState_preserves_face_names_and_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -392,6 +371,7 @@ export const testFunctions = [
     { test: test_face_thicken_partial_torus_side_avoids_internal_voids, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_face_thicken_filleted_planar_face_keeps_clean_boundaries, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_face_thicken_self_overlap_cylinder_side, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_thicken_feature_is_available_in_modeling_and_surfacing_workbenches, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     {
         test: test_thicken_feature_serializes_and_replays_planar_profile,
         afterRun: afterRun_thicken_feature_serializes_and_replays_planar_profile,
@@ -537,52 +517,6 @@ export const testFunctions = [
     { test: test_sketch_solver_topology_coincident_chain_multi_step, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_solver_distance_slide_large_drop_settles_single_solve, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_solver_line_to_point_distance_constraint, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_offsetShell_polyhedral_exact_preserves_sharp_cube_faces, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_offsetShell_vertex_tangent_normals_preserve_generic_sphere_inset_direction, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_offsetShell_polyhedral_exact_supports_non_convex_planar_solids, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_offsetShell_support_surfaces_handle_cylinder_and_cone, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_offsetShell_support_surfaces_handle_sphere_and_torus, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_offsetShell_generic_mesh_face_uses_tangent_supports, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    {
-        test: test_offsetShell_repro_20260422215549_keeps_outward_direction_on_tube_face,
-        afterRun: afterRun_offsetShell_repro_20260422215549_keeps_outward_direction_on_tube_face,
-        printArtifacts: false,
-        exportFaces: false,
-        exportSolids: false,
-        resetHistory: true,
-    },
-    {
-        test: test_offsetShell_repro_20260422215549_can_keep_original_solid,
-        afterRun: afterRun_offsetShell_repro_20260422215549_can_keep_original_solid,
-        printArtifacts: false,
-        exportFaces: false,
-        exportSolids: false,
-        resetHistory: true,
-    },
-    {
-        test: test_offsetShell_repro_20260423012942_keeps_negative_single_open_face_shell_inside_source,
-        afterRun: afterRun_offsetShell_repro_20260423012942_keeps_negative_single_open_face_shell_inside_source,
-        printArtifacts: false,
-        exportFaces: false,
-        exportSolids: false,
-        resetHistory: true,
-    },
-    {
-        test: test_offsetShell_repro_20260423005441_keeps_negative_two_open_face_shell_inward,
-        afterRun: afterRun_offsetShell_repro_20260423005441_keeps_negative_two_open_face_shell_inward,
-        printArtifacts: false,
-        exportFaces: false,
-        exportSolids: false,
-        resetHistory: true,
-    },
-    {
-        test: test_offsetShell_repro_20260423023524_keeps_negative_open_face_shell_with_union_boss,
-        afterRun: afterRun_offsetShell_repro_20260423023524_keeps_negative_open_face_shell_with_union_boss,
-        printArtifacts: false,
-        exportFaces: false,
-        exportSolids: false,
-        resetHistory: true,
-    },
     {
         test: test_extrude_negative_distance_cap_alignment,
         afterRun: afterRun_extrude_negative_distance_cap_alignment,

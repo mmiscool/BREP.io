@@ -21,6 +21,7 @@ export const SURFACING_WORKBENCH = {
     'OVL',
     'RM',
     'O.S',
+    'THK',
   ],
   contextFamilies: {
     features: true,

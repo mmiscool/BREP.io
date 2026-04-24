@@ -381,16 +381,6 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Offset all vertices of a named face along its average normal by a distance.
-     * @param {string} faceName
-     * @param {number} distance
-     * @returns {Solid}
-     */
-    offsetFace(..._args) {
-        return SolidMethods.offsetFace.apply(this, arguments);
-    }
-
-    /**
      * Internal: build faceID -> triangle index cache if missing.
      * @returns {void}
      */

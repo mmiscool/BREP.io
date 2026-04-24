@@ -110,20 +110,6 @@ export const cppSolidCoreHasNativeWeldVerticesByEpsilon = (() => {
     }
 })();
 
-export const cppSolidCoreHasNativeOffsetFace = (() => {
-    try {
-        if (typeof manifold?.BrepSolidCore !== "function") return false;
-        const probe = new manifold.BrepSolidCore();
-        try {
-            return typeof probe.offsetFace === "function";
-        } finally {
-            if (typeof probe.delete === "function") probe.delete();
-        }
-    } catch {
-        return false;
-    }
-})();
-
 export const cppSolidCoreHasNativePushFace = (() => {
     try {
         if (typeof manifold?.BrepSolidCore !== "function") return false;
@@ -857,10 +843,6 @@ export class CppSolidCore {
     weldVerticesByEpsilon(epsilon) {
         this._native.weldVerticesByEpsilon(epsilon);
         return this;
-    }
-
-    offsetFace(faceName, distance) {
-        return this._native.offsetFace(faceName, distance);
     }
 
     pushFace(faceName, distance) {

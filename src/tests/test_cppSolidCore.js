@@ -274,45 +274,6 @@ export async function test_cppSolidCore_pushFace_moves_vertices_for_face() {
     }
 }
 
-export async function test_cppSolidCore_offsetFace_moves_vertices_for_face() {
-    if (manifoldBuildSource !== "local") {
-        return;
-    }
-
-    const core = new CppSolidCore();
-    try {
-        core.setAuthoringState({
-            numProp: 3,
-            vertProperties: [
-                0, 0, 0,
-                1, 0, 0,
-                1, 1, 0,
-                0, 1, 0,
-            ],
-            triVerts: [0, 1, 2, 0, 2, 3],
-            triIDs: [12, 12],
-            faceNameToID: [["FACE_TOP", 12]],
-            idToFaceName: [[12, "FACE_TOP"]],
-            faceMetadataJson: [],
-            edgeMetadataJson: [],
-        });
-
-        const result = core.offsetFace("FACE_TOP", 0.5);
-        if (!result?.faceFound || !result?.moved) {
-            throw new Error(`Expected offsetFace to move FACE_TOP, received ${JSON.stringify(result)}.`);
-        }
-
-        const snapshot = core.getAuthoringState();
-        for (let i = 2; i < snapshot.vertProperties.length; i += 3) {
-            if (Math.abs(snapshot.vertProperties[i] - 0.5) > 1e-6) {
-                throw new Error(`Expected offset face z=0.5, received ${snapshot.vertProperties[i]} at index ${i}.`);
-            }
-        }
-    } finally {
-        core.dispose();
-    }
-}
-
 export async function test_cppSolidCore_prepareManifoldMesh_repairs_orientation() {
     if (manifoldBuildSource !== "local") {
         return;

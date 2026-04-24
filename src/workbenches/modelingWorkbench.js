@@ -20,6 +20,7 @@ export const MODELING_WORKBENCH = {
     'CH',
     'H',
     'PF',
+    'THK',
     'PATLIN',
     'PATRAD',
     'PATTERN',

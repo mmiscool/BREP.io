@@ -9,7 +9,6 @@ import {
     buildSolidAuthoringStateSnapshot,
     cppSolidCoreHasNativeManifoldPrep,
     cppSolidCoreHasNativeInternalTriangleCleanup,
-    cppSolidCoreHasNativeOffsetFace,
     cppSolidCoreHasNativePushFace,
     cppSolidCoreHasNativeSmallIslandCleanup,
     cppSolidCoreHasNativeTinyFaceIslandCleanup,
@@ -278,28 +277,6 @@ export async function test_cppSolidNative_getFaceNormal_reports_planar_face_norm
     }
     if (Number(result.affectedVertexCount || 0) !== 4) {
         throw new Error(`Expected FACE_TOP to touch 4 vertices, received ${result.affectedVertexCount}.`);
-    }
-}
-
-export async function test_cppSolidNative_offsetFace_updates_planar_face_vertices() {
-    if (manifoldBuildSource !== "local" || !cppSolidCoreHasNativeOffsetFace) {
-        return;
-    }
-
-    const solid = new Solid();
-    solid
-        .addTriangle("FACE_TOP", [0, 0, 0], [1, 0, 0], [1, 1, 0])
-        .addTriangle("FACE_TOP", [0, 0, 0], [1, 1, 0], [0, 1, 0]);
-
-    solid.offsetFace("FACE_TOP", 0.25);
-
-    for (let i = 2; i < solid._vertProperties.length; i += 3) {
-        if (!approx(solid._vertProperties[i], 0.25)) {
-            throw new Error(`Expected FACE_TOP z=0.25 after native offsetFace, received ${solid._vertProperties[i]} at index ${i}.`);
-        }
-    }
-    if (solid._faceNameToID.get("FACE_TOP") !== solid._triIDs[0]) {
-        throw new Error("Expected face ID mapping to remain stable after native offsetFace.");
     }
 }
 

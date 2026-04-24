@@ -170,11 +170,6 @@ class Solid {
     return notImplemented();
   }
 
-  offsetFace(faceName, distance) {
-    // Offset a named face by moving its vertices along the face normal by the given distance.
-    return notImplemented();
-  }
-
   _ensureFaceIndex() {
     // Build the internal face-to-triangle lookup cache used by face queries.
     return notImplemented();
@@ -564,11 +559,6 @@ class CppSolidCore {
 
   weldVerticesByEpsilon(epsilon) {
     // Weld authored vertices in the native bridge using the given epsilon.
-    return notImplemented();
-  }
-
-  offsetFace(faceName, distance) {
-    // Offset a named face in native authoring data by the requested distance.
     return notImplemented();
   }
 

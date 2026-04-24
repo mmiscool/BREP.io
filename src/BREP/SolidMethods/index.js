@@ -20,7 +20,6 @@ export {
 export {
     bakeTransform,
     bakeTRS,
-    offsetFace,
     mirrorAcrossPlane,
     pushFace,
 } from "./transforms.js";
