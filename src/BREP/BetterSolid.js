@@ -693,6 +693,20 @@ export class Solid extends THREE.Group {
         return SolidMethods.fillet.apply(this, [options]);
     }
 
+    /**
+     * Build an open shell by thickening every face except the supplied exclusions
+     * and boolean-unioning the results into a single solid.
+     * @param {Array<string|any>|string|any} faces face names or face objects to exclude/open
+     * @param {number} distance shell thickness magnitude; per-face thickening uses `-abs(distance)`
+     * @param {object} [options]
+     * @param {string} [options.featureId='OffsetShell'] name prefix for generated intermediates
+     * @param {string} [options.newSolidName] final result name override
+     * @returns {Solid|null}
+     */
+    offsetShell(..._args) {
+        return SolidMethods.offsetShell.apply(this, arguments);
+    }
+
 
     /**
      * Getter to access current FACE children; triggers visualize() before returning them.

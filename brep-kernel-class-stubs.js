@@ -115,6 +115,11 @@ class Solid {
     return notImplemented();
   }
 
+  offsetShell(faces, distance, options = {}) {
+    // Build an open shell by thickening all solid faces except the supplied exclusions and unioning the results.
+    return notImplemented();
+  }
+
   removeTinyBoundaryTriangles(areaThreshold, maxIterations = 1) {
     // Clean up tiny boundary-adjacent triangles by applying limited topological edits near the boundary.
     return notImplemented();

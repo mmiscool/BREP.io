@@ -70,3 +70,4 @@ export { volume, surfaceArea, getTriangleCount } from "./metrics.js";
 export { visualize } from "./visualize.js";
 export { fillet } from "./fillet.js";
 export { chamfer } from "./chamfer.js";
+export { offsetShell } from "./offsetShell.js";
