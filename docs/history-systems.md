@@ -2,11 +2,6 @@
 
 BREP keeps several independent “history” timelines so modeling, PMI, and assembly constraint editing can all replay their steps deterministically. Each history owns the data it needs to recompute results but follows a shared pattern: store a list of entries, redo work by iterating through that list, and serialize just the declarative inputs plus any persistent outputs.
 
-## Live Demos
-- Examples hub: [https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
-- Embeded CAD: [https://BREP.io/apiExamples/Embeded_CAD.html](https://BREP.io/apiExamples/Embeded_CAD.html)
-- Embeded CAD Integration Test: [https://BREP.io/apiExamples/Embeded_CAD_Integration_Test.html](https://BREP.io/apiExamples/Embeded_CAD_Integration_Test.html)
-
 ## Shared Building Blocks
 
 - `ListEntityBase` (`src/core/entities/ListEntityBase.js`) standardizes the three buckets found across every history entry: `inputParams` (user-editable data), `persistentData` (saved outputs), and `runtimeAttributes` (ephemeral session state).

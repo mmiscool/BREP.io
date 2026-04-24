@@ -1,17 +1,23 @@
 # BREP Kernel Reference
 
-This page catalogs the core classes and helpers that make up the BREP kernel (everything under `src/BREP`). Use it alongside `docs/solid-methods.md` for `Solid` details and `docs/brep-api.md` for the export map.
+This page describes the structure of the BREP kernel and where responsibilities live in `src/BREP`. It is the architecture overview, not the canonical method reference.
 
-## Live Demos
-- Examples hub: [https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
-- BREP Booleans: [https://BREP.io/apiExamples/BREP_Booleans.html](https://BREP.io/apiExamples/BREP_Booleans.html)
-- BREP Primitives: [https://BREP.io/apiExamples/BREP_Primitives.html](https://BREP.io/apiExamples/BREP_Primitives.html)
-- BREP Transforms: [https://BREP.io/apiExamples/BREP_Transforms.html](https://BREP.io/apiExamples/BREP_Transforms.html)
-- BREP Export: [https://BREP.io/apiExamples/BREP_Export.html](https://BREP.io/apiExamples/BREP_Export.html)
+Use these pages alongside it:
+- [Kernel and Geometry Docs](./developer/kernel/index.md) for the navigable kernel doc section.
+- [BREP Class API Reference](./api/index.md) for per-method docs.
+- [BREP.js Export Map and Usage](./brep-api.md) for public exports.
+- [Solid Developer Guide](./solid-methods.md) for the high-level `Solid` workflow.
+
+## Class Docs
+
+- [Solid API Index](./api/solid/index.md)
+- [Face API Index](./api/face/index.md)
+- [Edge API Index](./api/edge/index.md)
+- [Solid Developer Guide](./solid-methods.md)
 
 ## Core types
-- **Solid / Face / Edge / Vertex** – Geometry + selection primitives (`Solid` API in `docs/solid-methods.md`).
-- **AssemblyComponent** – Groups one or more solids for the assembly constraint solver. Options: `{ name='Component', fixed=false }`.
+- **Solid / Face / Edge / Vertex** – Core geometry and selection primitives. API docs live under [docs/api/](./api/index.md).
+- **AssemblyComponent** – Assembly-level grouping and transform unit for constraints.
 
 ## Primitives (`src/BREP/primitives.js`)
 All extend `Solid` and immediately generate geometry.
@@ -29,6 +35,18 @@ All extend `Solid` and immediately generate geometry.
 - **TubeSolid (Tube)** – `{ points=[], radius=1, innerRadius=0, resolution=32, closed=false, name='Tube' }`.
 - **ChamferSolid** – `{ edgeToChamfer, distance=1, sampleCount=50, snapSeamToEdge=true, sideStripSubdiv=8, seamInsetScale=1e-3, direction='INSET'|'OUTSET', inflate=0, flipSide=false, debug=false, debugStride=12 }`.
 - **OffsetShellSolid.generate(sourceSolid, distance, { newSolidName, featureId='OffsetShell' })** – Static helper to build offset shells.
+- **Face.thicken(distance, options)** – Face-level helper for turning a rendered face into a closed solid.
+
+## Face thickening (`src/BREP/faceThicken.js`)
+- `thickenFaceToSolid(face, distance, options = {})` is the implementation behind `Face.thicken(...)`.
+- Requires a valid face with triangulated geometry and a non-zero finite distance.
+- Tries a stitched-shell build first, then falls back to deterministic prism-union construction when needed.
+- Emits diagnostics on the result:
+  - `result.__thickenMethod`
+  - `result.__thickenClassificationMethod`
+  - `result.__thickenDiagnostics`
+  - `result.userData.thicken`
+- Propagates available source-face metadata onto the generated start/end cap faces.
 
 ## Fillet utilities (`src/BREP/fillets/fillet.js`)
 - `filletSolid({ edgeToFillet, radius, sideMode='INSET'|'OUTSET', inflate=0.1, resolution=32, showTangentOverlays=false, debug=false, name='fillet' })` – Builds wedge/tube helpers and returns `{ finalSolid, tube, wedge }`; overlays add tangency polylines to the tube for debugging/PMI tagging.
@@ -48,9 +66,12 @@ All extend `Solid` and immediately generate geometry.
   - `fixTriangleNormals(geometry)`
   - `repairAll(geometry, { weldEps=5e-4, lineEps=5e-4, gridCell=0.01 })`
 
-## Misc helpers
-- **MeshToBrep**, **MeshRepairer**, and **applyBooleanOperation** live in `src/BREP` and are re-exported via `BREP.js` (`docs/brep-api.md`).
-- **SolidMethod docs** – `docs/solid-methods.md` covers all core operations (authoring, cleanup, booleans, export).
+## How To Read The Kernel Docs
+
+- Start here when you need file-level orientation or want to know which module owns a behavior.
+- Use [docs/api/](./api/index.md) when you need exact method behavior or examples.
+- Use [brep-api.md](./brep-api.md) when you need to know what is exported from `BREP.js`.
+- Use [brep-model.md](./brep-model.md) when you want the compact data-model summary.
 
 ## Example: boolean with primitives
 ```js

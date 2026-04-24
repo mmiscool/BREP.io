@@ -2,10 +2,6 @@
 
 Reference docs for the built-in modeling features.
 
-## Live Demos
-- Examples hub: [https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
-- Embeded CAD: [https://BREP.io/apiExamples/Embeded_CAD.html](https://BREP.io/apiExamples/Embeded_CAD.html)
-
 - [Assembly Component](assembly-component.md)
 - [Boolean](boolean.md)
 - [Chamfer](chamfer.md)
@@ -50,6 +46,7 @@ Reference docs for the built-in modeling features.
 - [Spline](spline.md)
 - [Sweep](sweep.md)
 - [Text to Face](text-to-face.md)
+- [Thicken](thicken.md)
 - [Transform](transform.md)
 - [Tube](tube.md)
 

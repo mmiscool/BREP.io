@@ -43,7 +43,7 @@ The first thing to move is the authoring-state owner, because every later expens
    - `bakeTransform` is now running in C++ via the bridge
    - `pushFace` is now running in C++ via the bridge
    - weld-by-epsilon is now running in C++ via the bridge
-   - next targets: `offsetFace`, mirror and cleanup/remesh passes
+   - next targets: mirror and cleanup/remesh passes
 
 3. Move mesh/manifold rebuild work into `BrepSolidCore`
    - winding correction
@@ -52,7 +52,6 @@ The first thing to move is the authoring-state owner, because every later expens
    - boolean result reconstruction
 
 4. Move expensive geometry transforms and cleanup
-   - `offsetFace`
    - `mirrorAcrossPlane`
    - remesh / degenerate cleanup / internal-triangle removal
 

@@ -1,5 +1,7 @@
 # BREP Model and Classes
 
+This page is the compact conceptual summary of the BREP data model. It is intentionally shorter than the API reference and kernel architecture pages.
+
 ## Overview
 - BREP combines a triangle mesh with per-triangle face labels. Labels map to globally unique IDs in Manifold so selections survive boolean operations.
 - During manifoldization, triangle windings are made consistent, outward orientation is enforced, and an optional weld epsilon deduplicates vertices.
@@ -8,15 +10,21 @@
 ## Solid
 - `Solid` is a `THREE.Group` subclass that handles authoring, CSG, queries, and export.
 - Geometry storage uses `_vertProperties` (flat positions), `_triVerts` (triangle indices), and `_triIDs` (face IDs) plus name-to-ID maps.
-- Key methods include `addTriangle`, `setEpsilon`, `mirrorAcrossPlane`, `invertNormals`, `fixTriangleWindingsByAdjacency`, `removeTinyBoundaryTriangles`, `getMesh`, `getFace`, `getFaces`, `getFaceNames`, `getBoundaryEdgePolylines`, `visualize`, `union`, `subtract`, `intersect`, `difference`, `simplify`, `setTolerance`, `volume`, `surfaceArea`, `toSTL`, and `writeSTL`.
-- Full per-method descriptions and examples live in `docs/solid-methods.md`.
+- Full `Solid` API details live in the [Solid Developer Guide](./solid-methods.md) and [Solid API index](./api/solid/index.md).
 
 ## Face
 - `Face` is a `THREE.Mesh` representing all triangles that share a label.
 - Provides `getAverageNormal()` and `surfaceArea()` helpers for inspection and downstream logic.
+- Provides `thicken(distance, options)` to build a new closed solid from an open face by offsetting along face normals and stitching side walls.
+- Full `Face` method docs live in the [Face API index](./api/face/index.md).
 
 ## Edge
 - `Edge` instances represent boundary polylines between two face labels and expose metadata describing the adjacent faces.
 - Use edges for PMI dimension snapping, measurement, and preview visualization.
+- Full `Edge` method docs live in the [Edge API index](./api/edge/index.md).
 
-Additional implementation details can be explored in `src/BREP/BetterSolid.js` and related helpers.
+## Use This Page Vs Others
+
+- Use this page for the conceptual model.
+- Use [brep-kernel.md](./brep-kernel.md) for source-level architecture.
+- Use [docs/api/](./api/index.md) for exact method behavior.

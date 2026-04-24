@@ -35,30 +35,9 @@ This project is in active development and APIs may continue to evolve.
 ## Documentation Index
 
 General:
-- [Getting Started](docs/getting-started.md)
 - [Developer Docs Index](docs/developer-index.md)
-- [Bug Reporting and Repro Test Cases](docs/bug-reporting.md)
 - [Highlights](docs/highlights.md)
 - [What's New](docs/whats-new.md)
-- [API Examples](docs/api-examples.md)
-
-Core APIs:
-- [BREP API Export Map](docs/brep-api.md)
-- [BREP Kernel Reference](docs/brep-kernel.md)
-- [Solid Methods](docs/solid-methods.md)
-- [Expressions and Configurator](docs/expressions.md)
-- [Part History](docs/part-history.md)
-- [2D Sketch Solver](docs/sketch-solver-2d.md)
-- [Embeddable CAD (`CadEmbed`)](docs/cad-embed.md)
-- [Embeddable Sketcher (`Sketcher2DEmbed`)](docs/sketcher2d-embed.md)
-
-System docs:
-- [History Systems](docs/history-systems.md)
-- [Input Params Schema](docs/input-params-schema.md)
-- [File Formats: Import and Export](docs/file-formats.md)
-- [Plugins and Examples](docs/plugins.md)
-- [Inspector](docs/inspector.md)
-- [Inspector Improvements](docs/inspector-improvements.md)
 
 Mode guides:
 - [Modeling Mode](docs/modes/modeling.md)
@@ -97,6 +76,7 @@ Solid operations:
 - [Chamfer](docs/features/chamfer.md)
 - [Hole](docs/features/hole.md)
 - [Push Face](docs/features/push-face.md)
+- [Thicken](docs/features/thicken.md)
 - [Offset Shell](docs/features/offset-shell.md)
 - [Remesh](docs/features/remesh.md)
 - [Transform](docs/features/transform.md)

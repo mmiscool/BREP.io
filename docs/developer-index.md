@@ -1,125 +1,29 @@
-# Developer Docs Index
+# Developer Docs
 
-This page is a quick entry point for implementation and integration docs.
+This is the top-level hub for developer-facing documentation.
 
-## Embedding Quick Links
-- [CAD Embedding Guide (CadEmbed)](./cad-embed.md)
-- [2D Sketcher Embedding Guide](./sketcher2d-embed.md)
+Pick the area you are working in:
 
 ## Start Here
-- [Getting Started](./getting-started.md)
-- [Bug Reporting and Repro Test Cases](./bug-reporting.md)
+
+- [Getting Started](./getting-started.md) - local setup, dev server, and tests.
+- [API Examples](./api-examples.md) - runnable examples and demo entry points.
+- [Bug Reporting and Repro Test Cases](./bug-reporting.md) - how to capture actionable reports.
 - [Developer Discord](https://discord.gg/R5KNAKrQ)
-- [API Examples (Live Demos)](./api-examples.md)
-- [BREP API (BREP.js exports)](./brep-api.md)
-- [BREP Kernel (core classes & helpers)](./brep-kernel.md)
-- [BREP Model and Classes](./brep-model.md)
-- [Expressions and Configurator](./expressions.md)
+
+## Developer Doc Sections
+
+- [Kernel and Geometry Docs](./developer/kernel/index.md) - BREP kernel architecture, class APIs, topology, metadata, booleans, and geometry internals.
+- [Embedding and Integration Docs](./developer/embedding/index.md) - `CadEmbed`, `Sketcher2DEmbed`, package usage, and integration demos.
+- [Application Architecture Docs](./developer/architecture/index.md) - `PartHistory`, history execution, expressions, UI structure, and implementation notes.
+- [Application Subsystems Docs](./developer/subsystems/index.md) - assembly constraints, inspector, PMI annotations, plugins, and related subsystems.
+
+## Most Used Pages
+
+- [BREP Class API Reference](./api/index.md)
+- [Solid API Index](./api/solid/index.md)
+- [BREP Kernel Reference](./brep-kernel.md)
+- [BREP.js Export Map and Usage](./brep-api.md)
 - [PartHistory Reference](./part-history.md)
-- [How It Works](./how-it-works.md)
-- [What's New](./whats-new.md)
-- [Highlights](./highlights.md)
-
-## Live API Example Pages
-- [Examples Index](https://BREP.io/apiExamples/index.html)
-- [BREP Booleans](https://BREP.io/apiExamples/BREP_Booleans.html)
-- [BREP Primitives](https://BREP.io/apiExamples/BREP_Primitives.html)
-- [BREP Transforms](https://BREP.io/apiExamples/BREP_Transforms.html)
-- [BREP Export](https://BREP.io/apiExamples/BREP_Export.html)
-- [Embeded 2D Sketcher](https://BREP.io/apiExamples/Embeded_2D_Sketcher.html)
-- [Embeded CAD](https://BREP.io/apiExamples/Embeded_CAD.html)
-- [Embeded CAD Integration Test](https://BREP.io/apiExamples/Embeded_CAD_Integration_Test.html)
-
-## Sketch and Geometry APIs
-- [2D Sketch Solver (standalone)](./sketch-solver-2d.md)
-- [Embeddable 2D Sketcher](./sketcher2d-embed.md)
-- [Embeddable CAD App](./cad-embed.md)
-- [Radius Metadata for Extruded Sketches](./extruded-sketch-radius-embedding.md)
-- [Cylindrical Face Radius Embedding](./cylindrical-face-radius-embedding.md)
-- [Topological Face Naming and Triangle Ownership](./topological-face-tracking.md)
-- [Solid Methods](./solid-methods.md)
-- [Simplified Radial Dimensions](./simplified-radial-dimensions.md)
-
-## Application and UI Architecture
-- [History Systems](./history-systems.md)
-- [Expressions and Configurator](./expressions.md)
-- [Feature Dimension Gizmos (Developer)](./feature-dimension-gizmos.md)
-- [Input Params Schema](./input-params-schema.md)
-- [UI Overview (Browser)](./ui-overview.md)
-- [Plugins and Examples](./plugins.md)
-- [Inspector](./inspector.md)
-- [Inspector Improvements](./inspector-improvements.md)
-- [Dialog Screenshots](./dialog-screenshots.md)
-
-## Data and File IO
-- [File Formats: Import and Export](./file-formats.md)
-- [GitHub Repo Storage](./github-repo-storage.md)
-
-## Assembly Constraints
-- [Constraint Solver](./assembly-constraints/solver.md)
-- [Angle Constraint](./assembly-constraints/angle-constraint.md)
-- [Coincident Constraint](./assembly-constraints/coincident-constraint.md)
-- [Distance Constraint](./assembly-constraints/distance-constraint.md)
-- [Fixed Constraint](./assembly-constraints/fixed-constraint.md)
-- [Parallel Constraint](./assembly-constraints/parallel-constraint.md)
-- [Touch Align Constraint](./assembly-constraints/touch-align-constraint.md)
-
-## Feature and Mode Docs
-- [Features Index](./features/index.md)
-- [Modeling Mode](./modes/modeling.md)
-- [Sketch Mode](./modes/sketch.md)
-- [PMI Mode](./modes/pmi.md)
-- [2D Sheets Mode](./modes/sheets.md)
-
-## Feature Docs (Detailed)
-- [Assembly Component](./features/assembly-component.md)
-- [Boolean](./features/boolean.md)
-- [Chamfer](./features/chamfer.md)
-- [Datium](./features/datium.md)
-- [Datum](./features/datum.md)
-- [Extrude](./features/extrude.md)
-- [Fillet](./features/fillet.md)
-- [Helix](./features/helix.md)
-- [Hole](./features/hole.md)
-- [Image Heightmap Solid](./features/image-heightmap-solid.md)
-- [Image To Face](./features/image-to-face.md)
-- [Import 3D Model](./features/import-3d-model.md)
-- [Loft](./features/loft.md)
-- [Mirror](./features/mirror.md)
-- [Offset Shell](./features/offset-shell.md)
-- [Pattern](./features/pattern.md)
-- [Pattern Linear](./features/pattern-linear.md)
-- [Pattern Radial](./features/pattern-radial.md)
-- [Plane](./features/plane.md)
-- [Polygon Solid](./features/polygon-solid.md)
-- [Primitive Cone](./features/primitive-cone.md)
-- [Primitive Cube](./features/primitive-cube.md)
-- [Primitive Cylinder](./features/primitive-cylinder.md)
-- [Primitive Pyramid](./features/primitive-pyramid.md)
-- [Primitive Sphere](./features/primitive-sphere.md)
-- [Primitive Torus](./features/primitive-torus.md)
-- [Remesh](./features/remesh.md)
-- [Revolve](./features/revolve.md)
-- [Sheet Metal Contour Flange](./features/sheet-metal-contour-flange.md)
-- [Sheet Metal Flange](./features/sheet-metal-flange.md)
-- [Sheet Metal Tab](./features/sheet-metal-tab.md)
-- [Sketch](./features/sketch.md)
-- [Smooth With Subdivision](./features/smooth-with-subdivision.md)
-- [Spline](./features/spline.md)
-- [Sweep](./features/sweep.md)
-- [Text To Face](./features/text-to-face.md)
-- [Transform](./features/transform.md)
-- [Tube](./features/tube.md)
-
-## PMI Annotation Docs
-- [PMI Annotations Index](./pmi-annotations/index.md)
-- [Angle Dimension](./pmi-annotations/angle-dimension.md)
-- [Explode Body](./pmi-annotations/explode-body.md)
-- [Hole Callout](./pmi-annotations/hole-callout.md)
-- [Leader](./pmi-annotations/leader.md)
-- [Linear Dimension](./pmi-annotations/linear-dimension.md)
-- [Note](./pmi-annotations/note.md)
-- [Radial Dimension](./pmi-annotations/radial-dimension.md)
-
-## License Docs
-- [Font Licenses](./fonts-licenses.md)
+- [CadEmbed API](./cad-embed.md)
+- [Sketcher2DEmbed API](./sketcher2d-embed.md)

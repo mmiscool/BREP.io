@@ -9,10 +9,6 @@ The panel has two parts:
 
 This is most useful when you want to build a part once, then resize or retune it quickly.
 
-## Live Demos
-- Examples hub: [https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
-- Embeded CAD: [https://BREP.io/apiExamples/Embeded_CAD.html](https://BREP.io/apiExamples/Embeded_CAD.html)
-
 ## Expressions Panel
 
 Write variables in the Expressions box, then reference those variable names in feature dialog inputs.

@@ -36,7 +36,6 @@ class BrepSolidCore {
   void TransformMetadata(const emscripten::val& matrix_values);
   void WeldVerticesByEpsilon(double eps);
   emscripten::val PushFace(const std::string& face_name, double distance);
-  emscripten::val OffsetFace(const std::string& face_name, double distance);
   void NormalizeFaceTracking();
   bool IsCoherentlyOrientedManifold() const;
   bool FixTriangleWindingsByAdjacency();
