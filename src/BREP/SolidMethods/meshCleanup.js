@@ -914,916 +914,949 @@ export function collapseTinyTriangles(lengthThreshold) {
 }
 
 /**
- * MANIFOLD-SAFE: Detect and split self-intersecting triangle pairs.
- * - Uses conservative intersection detection to maintain manifold properties
- * - Only splits when intersection creates proper interior segments
- * - Ensures all new triangles maintain proper adjacency relationships
- * - Preserves face IDs and avoids creating T-junctions or non-manifold edges
- * - Returns the number of pairwise splits applied.
+ * Split triangles wherever they intersect other triangles, producing a conforming
+ * triangle mesh suitable for internal-triangle classification.
+ *
+ * This is intentionally arrangement-based: every original triangle collects all
+ * intersection segments first, then touched triangles are rebuilt from a local
+ * planar straight-line graph. That avoids the old "split one pair, restart"
+ * behavior that could miss interactions between multiple intersections on the
+ * same source triangle.
+ *
+ * @param {boolean|object} [diagnostics=false]
+ * @returns {number} number of triangle-pair intersections that caused a split
  */
 export function splitSelfIntersectingTriangles(diagnostics = false) {
-    const vp = this._vertProperties;
-    const tv = this._triVerts;
-    const triCount0 = (tv.length / 3) | 0;
-    if (triCount0 < 2) return 0;
-    
-    if (diagnostics) {
-        console.log(`\n=== splitSelfIntersectingTriangles Diagnostics ===`);
-        console.log(`Initial triangle count: ${triCount0}`);
-        console.log(`Initial vertex count: ${vp.length / 3}`);
+    const opts = diagnostics && typeof diagnostics === "object" ? diagnostics : {};
+    const logDiagnostics = diagnostics === true || opts.diagnostics === true;
+    const detectOnly = opts.detectOnly === true || opts.probeOnly === true;
+    const maxIntersections = Math.max(0, Number(opts.maxIntersections) || 0);
+    const sourceVP = Array.from(this._vertProperties || []);
+    const sourceTV = Array.from(this._triVerts || []);
+    const sourceIDs = Array.from(this._triIDs || []);
+    const triCount0 = (sourceTV.length / 3) | 0;
+    if (triCount0 < 2 || sourceVP.length < 9) return 0;
+
+    const vec = {
+        add(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; },
+        sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; },
+        mul(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; },
+        dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; },
+        cross(a, b) {
+            return [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ];
+        },
+        len(a) { return Math.hypot(a[0], a[1], a[2]); },
+        dist(a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]); },
+        norm(a) {
+            const length = Math.hypot(a[0], a[1], a[2]);
+            return length > 0 ? [a[0] / length, a[1] / length, a[2] / length] : [0, 0, 0];
+        },
+    };
+
+    const v2 = {
+        sub(a, b) { return [a[0] - b[0], a[1] - b[1]]; },
+        cross(a, b) { return a[0] * b[1] - a[1] * b[0]; },
+        dot(a, b) { return a[0] * b[0] + a[1] * b[1]; },
+        dist(a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1]); },
+    };
+
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (let i = 0; i < sourceVP.length; i += 3) {
+        const x = sourceVP[i + 0], y = sourceVP[i + 1], z = sourceVP[i + 2];
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+    const modelScale = Math.max(1, Math.hypot(maxX - minX, maxY - minY, maxZ - minZ));
+    const snapEps = Math.max(1e-9, Number(opts.snapTolerance) || modelScale * 1e-9);
+    const planeEps = Math.max(snapEps * 8, modelScale * 1e-10);
+    const areaEps = Math.max(1e-18, modelScale * modelScale * 1e-18);
+    const qPoint = (p) => [
+        Math.round(p[0] / snapEps),
+        Math.round(p[1] / snapEps),
+        Math.round(p[2] / snapEps),
+    ].join(",");
+
+    const sourcePoint = (index) => [
+        sourceVP[index * 3 + 0],
+        sourceVP[index * 3 + 1],
+        sourceVP[index * 3 + 2],
+    ];
+
+    const triangleArea3 = (a, b, c) => vec.len(vec.cross(vec.sub(b, a), vec.sub(c, a))) * 0.5;
+    const planeOf = (a, b, c) => {
+        const raw = vec.cross(vec.sub(b, a), vec.sub(c, a));
+        const length = vec.len(raw);
+        if (!(length > 1e-18)) return null;
+        const n = vec.mul(raw, 1 / length);
+        return { n, d: -vec.dot(n, a) };
+    };
+    const signedDistance = (plane, point) => vec.dot(plane.n, point) + plane.d;
+
+    const makeBasis = (a, b, c) => {
+        const n = vec.norm(vec.cross(vec.sub(b, a), vec.sub(c, a)));
+        if (vec.len(n) <= 0) return null;
+        let u = vec.sub(b, a);
+        if (vec.len(u) <= snapEps) u = vec.sub(c, a);
+        u = vec.norm(u);
+        if (vec.len(u) <= 0) return null;
+        const v = vec.norm(vec.cross(n, u));
+        if (vec.len(v) <= 0) return null;
+        const origin = a;
+        return {
+            origin,
+            u,
+            v,
+            n,
+            project(point) {
+                const p = vec.sub(point, origin);
+                return [vec.dot(p, u), vec.dot(p, v)];
+            },
+            unproject(point) {
+                return vec.add(origin, vec.add(vec.mul(u, point[0]), vec.mul(v, point[1])));
+            },
+        };
+    };
+
+    const pointInTri2D = (p, a, b, c, eps = 1e-12) => {
+        const ab = v2.sub(b, a);
+        const bc = v2.sub(c, b);
+        const ca = v2.sub(a, c);
+        const ap = v2.sub(p, a);
+        const bp = v2.sub(p, b);
+        const cp = v2.sub(p, c);
+        const c0 = v2.cross(ab, ap);
+        const c1 = v2.cross(bc, bp);
+        const c2 = v2.cross(ca, cp);
+        return (c0 >= -eps && c1 >= -eps && c2 >= -eps)
+            || (c0 <= eps && c1 <= eps && c2 <= eps);
+    };
+
+    const segmentIntersection2D = (a, b, c, d, eps = 1e-12) => {
+        const r = v2.sub(b, a);
+        const s = v2.sub(d, c);
+        const denom = v2.cross(r, s);
+        const ca = v2.sub(c, a);
+        const out = [];
+        if (Math.abs(denom) > eps) {
+            const t = v2.cross(ca, s) / denom;
+            const u = v2.cross(ca, r) / denom;
+            if (t >= -eps && t <= 1 + eps && u >= -eps && u <= 1 + eps) {
+                out.push([a[0] + r[0] * t, a[1] + r[1] * t]);
+            }
+            return out;
+        }
+        if (Math.abs(v2.cross(ca, r)) > eps) return out;
+
+        const axis = Math.abs(r[0]) >= Math.abs(r[1]) ? 0 : 1;
+        const a0 = a[axis], a1 = b[axis], c0 = c[axis], c1 = d[axis];
+        const minA = Math.min(a0, a1), maxA = Math.max(a0, a1);
+        const minC = Math.min(c0, c1), maxC = Math.max(c0, c1);
+        const lo = Math.max(minA, minC);
+        const hi = Math.min(maxA, maxC);
+        if (hi < lo - eps) return out;
+        const pointAt = (value) => {
+            const denomAxis = a1 - a0;
+            const t = Math.abs(denomAxis) > eps ? (value - a0) / denomAxis : 0;
+            return [a[0] + r[0] * t, a[1] + r[1] * t];
+        };
+        out.push(pointAt(lo));
+        if (hi > lo + eps) out.push(pointAt(hi));
+        return out;
+    };
+
+    const pointOnSegment2D = (p, a, b, eps = 1e-10) => {
+        const ab = v2.sub(b, a);
+        const ap = v2.sub(p, a);
+        const abLenSq = v2.dot(ab, ab);
+        if (!(abLenSq > eps * eps)) return false;
+        const cross = Math.abs(v2.cross(ab, ap));
+        if (cross > eps * Math.sqrt(abLenSq)) return false;
+        const t = v2.dot(ap, ab) / abLenSq;
+        return t >= -eps && t <= 1 + eps;
+    };
+
+    const pointOnSegment3D = (p, a, b, eps = snapEps) => {
+        const ab = vec.sub(b, a);
+        const ap = vec.sub(p, a);
+        const abLen = vec.len(ab);
+        if (!(abLen > eps)) return vec.dist(p, a) <= eps;
+        const cross = vec.len(vec.cross(ab, ap));
+        if (cross > eps * abLen) return false;
+        const t = vec.dot(ap, ab) / (abLen * abLen);
+        return t >= -eps && t <= 1 + eps;
+    };
+
+    const convexHull2D = (points) => {
+        const keyed = [];
+        const seen = new Set();
+        const q2 = (p) => `${Math.round(p[0] / snapEps)},${Math.round(p[1] / snapEps)}`;
+        for (const p of points) {
+            const key = q2(p);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            keyed.push(p);
+        }
+        keyed.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+        if (keyed.length <= 2) return keyed;
+        const cross = (o, a, b) => v2.cross(v2.sub(a, o), v2.sub(b, o));
+        const lower = [];
+        for (const p of keyed) {
+            while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= snapEps) lower.pop();
+            lower.push(p);
+        }
+        const upper = [];
+        for (let i = keyed.length - 1; i >= 0; i--) {
+            const p = keyed[i];
+            while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= snapEps) upper.pop();
+            upper.push(p);
+        }
+        lower.pop();
+        upper.pop();
+        return lower.concat(upper);
+    };
+
+    const polygonArea2D = (loop, pointsAccessor = (p) => p) => {
+        let area = 0;
+        for (let i = 0; i < loop.length; i++) {
+            const a = pointsAccessor(loop[i]);
+            const b = pointsAccessor(loop[(i + 1) % loop.length]);
+            area += a[0] * b[1] - b[0] * a[1];
+        }
+        return area * 0.5;
+    };
+
+    const trianglePlaneSegment = (tri, plane) => {
+        const pts = [];
+        const add = (p) => {
+            for (const q of pts) {
+                if (vec.dist(p, q) <= snapEps) return;
+            }
+            pts.push(p);
+        };
+        const distances = tri.map((p) => signedDistance(plane, p));
+        for (let i = 0; i < 3; i++) {
+            const j = (i + 1) % 3;
+            const p = tri[i], q = tri[j];
+            const dp = distances[i], dq = distances[j];
+            if (Math.abs(dp) <= planeEps) add(p);
+            if (Math.abs(dp) <= planeEps && Math.abs(dq) <= planeEps) {
+                add(q);
+                continue;
+            }
+            if ((dp < -planeEps && dq > planeEps) || (dp > planeEps && dq < -planeEps)) {
+                const t = dp / (dp - dq);
+                add([
+                    p[0] + (q[0] - p[0]) * t,
+                    p[1] + (q[1] - p[1]) * t,
+                    p[2] + (q[2] - p[2]) * t,
+                ]);
+            }
+        }
+        if (pts.length <= 2) return pts;
+        let best = [pts[0], pts[1]];
+        let bestDist = -Infinity;
+        for (let i = 0; i < pts.length; i++) {
+            for (let j = i + 1; j < pts.length; j++) {
+                const dist = vec.dist(pts[i], pts[j]);
+                if (dist > bestDist) {
+                    best = [pts[i], pts[j]];
+                    bestDist = dist;
+                }
+            }
+        }
+        return best;
+    };
+
+    const coplanarTriangleOverlap = (triA, triB, basis) => {
+        const a2 = triA.map((p) => basis.project(p));
+        const b2 = triB.map((p) => basis.project(p));
+        const pts = [];
+        const add2 = (p) => {
+            for (const q of pts) {
+                if (v2.dist(p, q) <= snapEps) return;
+            }
+            pts.push(p);
+        };
+        for (const p of a2) {
+            if (pointInTri2D(p, b2[0], b2[1], b2[2], snapEps)) add2(p);
+        }
+        for (const p of b2) {
+            if (pointInTri2D(p, a2[0], a2[1], a2[2], snapEps)) add2(p);
+        }
+        for (let i = 0; i < 3; i++) {
+            const a0 = a2[i], a1 = a2[(i + 1) % 3];
+            for (let j = 0; j < 3; j++) {
+                const b0 = b2[j], b1 = b2[(j + 1) % 3];
+                for (const p of segmentIntersection2D(a0, a1, b0, b1, snapEps)) add2(p);
+            }
+        }
+        if (pts.length < 2) return null;
+        const hull = convexHull2D(pts);
+        if (hull.length >= 3 && Math.abs(polygonArea2D(hull)) > areaEps) {
+            const segments = [];
+            for (let i = 0; i < hull.length; i++) {
+                segments.push([basis.unproject(hull[i]), basis.unproject(hull[(i + 1) % hull.length])]);
+            }
+            return { type: "segments", segments };
+        }
+        if (hull.length >= 2 && v2.dist(hull[0], hull[hull.length - 1]) > snapEps) {
+            return { type: "segments", segments: [[basis.unproject(hull[0]), basis.unproject(hull[hull.length - 1])]] };
+        }
+        return null;
+    };
+
+    const triangleIntersection = (triA, triB) => {
+        const planeA = planeOf(triA[0], triA[1], triA[2]);
+        const planeB = planeOf(triB[0], triB[1], triB[2]);
+        if (!planeA || !planeB) return null;
+
+        const distB = triB.map((p) => signedDistance(planeA, p));
+        const distA = triA.map((p) => signedDistance(planeB, p));
+        const allPositive = (arr) => arr.every((v) => v > planeEps);
+        const allNegative = (arr) => arr.every((v) => v < -planeEps);
+        if (allPositive(distB) || allNegative(distB) || allPositive(distA) || allNegative(distA)) return null;
+
+        const normalsCross = vec.cross(planeA.n, planeB.n);
+        const crossLength = vec.len(normalsCross);
+        const coplanar = crossLength <= 1e-8
+            && distB.every((v) => Math.abs(v) <= planeEps)
+            && distA.every((v) => Math.abs(v) <= planeEps);
+        if (coplanar) {
+            const basis = makeBasis(triA[0], triA[1], triA[2]);
+            return basis ? coplanarTriangleOverlap(triA, triB, basis) : null;
+        }
+        if (!(crossLength > 1e-14)) return null;
+
+        const segA = trianglePlaneSegment(triA, planeB);
+        const segB = trianglePlaneSegment(triB, planeA);
+        if (segA.length < 2 || segB.length < 2) {
+            if (segA.length === 1 && segB.length === 2 && pointOnSegment3D(segA[0], segB[0], segB[1])) {
+                return { type: "point", point: segA[0] };
+            }
+            if (segB.length === 1 && segA.length === 2 && pointOnSegment3D(segB[0], segA[0], segA[1])) {
+                return { type: "point", point: segB[0] };
+            }
+            const candidates = segA.concat(segB);
+            const unique = [];
+            for (const candidate of candidates) {
+                if (unique.some((p) => vec.dist(p, candidate) <= snapEps)) continue;
+                unique.push(candidate);
+            }
+            if (unique.length === 1) return { type: "point", point: unique[0] };
+            return null;
+        }
+
+        const axis = vec.mul(normalsCross, 1 / crossLength);
+        const origin = segA[0];
+        const intervalA = segA.map((p) => vec.dot(vec.sub(p, origin), axis)).sort((a, b) => a - b);
+        const intervalB = segB.map((p) => vec.dot(vec.sub(p, origin), axis)).sort((a, b) => a - b);
+        const lo = Math.max(intervalA[0], intervalB[0]);
+        const hi = Math.min(intervalA[1], intervalB[1]);
+        if (hi < lo - snapEps) return null;
+        const p = vec.add(origin, vec.mul(axis, lo));
+        const q = vec.add(origin, vec.mul(axis, hi));
+        if (vec.dist(p, q) > snapEps) return { type: "segments", segments: [[p, q]] };
+        return { type: "point", point: p };
+    };
+
+    const records = new Array(triCount0);
+    for (let t = 0; t < triCount0; t++) {
+        const base = t * 3;
+        const i0 = sourceTV[base + 0] >>> 0;
+        const i1 = sourceTV[base + 1] >>> 0;
+        const i2 = sourceTV[base + 2] >>> 0;
+        const points = [sourcePoint(i0), sourcePoint(i1), sourcePoint(i2)];
+        const min = [
+            Math.min(points[0][0], points[1][0], points[2][0]),
+            Math.min(points[0][1], points[1][1], points[2][1]),
+            Math.min(points[0][2], points[1][2], points[2][2]),
+        ];
+        const max = [
+            Math.max(points[0][0], points[1][0], points[2][0]),
+            Math.max(points[0][1], points[1][1], points[2][1]),
+            Math.max(points[0][2], points[1][2], points[2][2]),
+        ];
+        records[t] = {
+            indices: [i0, i1, i2],
+            id: sourceIDs[t] ?? 0,
+            points,
+            min,
+            max,
+            segments: [],
+            pointsOnly: [],
+            segmentKeys: new Set(),
+            pointKeys: new Set(),
+        };
     }
 
-    // Use conservative tolerance to avoid creating near-degenerate geometry
-    const EPS = 1e-6;
-
-    // Basic vector math
-    const vec = {
-        sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; },
-        add(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; },
-        dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; },
-        cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; },
-        mul(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; },
-        len(a) { return Math.hypot(a[0], a[1], a[2]); },
-        norm(a) { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; },
+    const addPointOnly = (record, point) => {
+        const key = qPoint(point);
+        if (record.pointKeys.has(key)) return;
+        record.pointKeys.add(key);
+        record.pointsOnly.push(point);
     };
 
-    const pointOf = (i) => [vp[i * 3 + 0], vp[i * 3 + 1], vp[i * 3 + 2]];
-    const triArea = (ia, ib, ic) => {
-        const A = pointOf(ia), B = pointOf(ib), C = pointOf(ic);
-        const ab = vec.sub(B, A), ac = vec.sub(C, A);
-        const cr = vec.cross(ab, ac);
-        return 0.5 * Math.hypot(cr[0], cr[1], cr[2]);
-    };
-
-    // Plane from triangle
-    const planeOf = (A, B, C) => {
-        const n = vec.cross(vec.sub(B, A), vec.sub(C, A));
-        const ln = vec.len(n);
-        if (ln < 1e-18) return { n: [0, 0, 0], d: 0 };
-        const nn = [n[0] / ln, n[1] / ln, n[2] / ln];
-        const d = -vec.dot(nn, A);
-        return { n: nn, d };
-    };
-
-    const sd = (pl, P) => vec.dot(pl.n, P) + pl.d;
-
-    // Clip triangle by plane -> segment endpoints on triangle edges
-    const triPlaneClipSegment = (A, B, C, pl) => {
-        const sA = sd(pl, A), sB = sd(pl, B), sC = sd(pl, C);
-        const pts = [];
-        const pushIfUnique = (P) => {
-            for (let k = 0; k < pts.length; k++) {
-                const Q = pts[k];
-                if (Math.hypot(P[0] - Q[0], P[1] - Q[1], P[2] - Q[2]) < 1e-9) return;
-            }
-            pts.push(P);
-        };
-        const edgeHit = (P, sP, Q, sQ) => {
-            if (sP === 0 && sQ === 0) return; // coplanar edge, skip
-            if ((sP > 0 && sQ < 0) || (sP < 0 && sQ > 0)) {
-                const t = sP / (sP - sQ);
-                const hit = [P[0] + (Q[0] - P[0]) * t, P[1] + (Q[1] - P[1]) * t, P[2] + (Q[2] - P[2]) * t];
-                pushIfUnique(hit);
-            } else if (Math.abs(sP) < 1e-12) {
-                pushIfUnique(P);
-            } else if (Math.abs(sQ) < 1e-12) {
-                pushIfUnique(Q);
-            }
-        };
-        edgeHit(A, sA, B, sB);
-        edgeHit(B, sB, C, sC);
-        edgeHit(C, sC, A, sA);
-        if (pts.length < 2) return null;
-        if (pts.length > 2) {
-            // In degenerate near-coplanar cases we may collect 3 points; keep the two farthest
-            let bestI = 0, bestJ = 1, bestD = -1;
-            for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
-                const dx = pts[i][0] - pts[j][0];
-                const dy = pts[i][1] - pts[j][1];
-                const dz = pts[i][2] - pts[j][2];
-                const d2 = dx * dx + dy * dy + dz * dz;
-                if (d2 > bestD) { bestD = d2; bestI = i; bestJ = j; }
-            }
-            return [pts[bestI], pts[bestJ]];
+    const addSegment = (record, a, b) => {
+        if (vec.dist(a, b) <= snapEps) {
+            addPointOnly(record, a);
+            return;
         }
-        return [pts[0], pts[1]];
+        const ka = qPoint(a), kb = qPoint(b);
+        const key = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+        if (record.segmentKeys.has(key)) return;
+        record.segmentKeys.add(key);
+        record.segments.push([a, b]);
     };
 
-    // Enhanced triangle-triangle intersection that handles coplanar overlapping cases
-    const triTriIntersectSegment = (A, B, C, D, E, F) => {
-        const p1 = planeOf(A, B, C);
-        const p2 = planeOf(D, E, F);
-        const n1 = p1.n, n2 = p2.n;
-        const cr = vec.cross(n1, n2);
-        const crLen = vec.len(cr);
-        
-        // Check if planes are nearly parallel (coplanar case)
-        if (crLen < 0.1) { // Allow more parallel cases for coplanar detection
-            // For coplanar/nearly coplanar triangles, check for overlap
-            const coplanarResult = handleCoplanarTriangles(A, B, C, D, E, F, p1, p2);
-            if (coplanarResult) return coplanarResult;
-            return null;
-        }
-        
-        // Check if triangles are on opposite sides of each other's planes
-        const sD = sd(p1, D), sE = sd(p1, E), sF = sd(p1, F);
-        if ((sD > EPS && sE > EPS && sF > EPS) || (sD < -EPS && sE < -EPS && sF < -EPS)) return null;
-        
-        const sA = sd(p2, A), sB = sd(p2, B), sC = sd(p2, C);
-        if ((sA > EPS && sB > EPS && sC > EPS) || (sA < -EPS && sB < -EPS && sC < -EPS)) return null;
-
-        const seg1 = triPlaneClipSegment(A, B, C, p2);
-        const seg2 = triPlaneClipSegment(D, E, F, p1);
-        if (!seg1 || !seg2) return null;
-        
-        const [P1, P2] = seg1;
-        const [Q1, Q2] = seg2;
-        const dir = vec.sub(P2, P1);
-        const L = vec.len(dir);
-        if (L < 1e-9) return null; // Reject very short intersection segments
-        const Lhat = vec.mul(dir, 1 / L);
-
-        const tP1 = 0;
-        const tP2 = L;
-        const tQ1 = vec.dot(vec.sub(Q1, P1), Lhat);
-        const tQ2 = vec.dot(vec.sub(Q2, P1), Lhat);
-        const i1 = Math.min(tP1, tP2), i2 = Math.max(tP1, tP2);
-        const j1 = Math.min(tQ1, tQ2), j2 = Math.max(tQ1, tQ2);
-        const a = Math.max(i1, j1), b = Math.min(i2, j2);
-        
-        // Require significant overlap to avoid edge cases
-        if (!(b > a + 1e-8)) return null;
-        
-        const X = [P1[0] + Lhat[0] * a, P1[1] + Lhat[1] * a, P1[2] + Lhat[2] * a];
-        const Y = [P1[0] + Lhat[0] * b, P1[1] + Lhat[1] * b, P1[2] + Lhat[2] * b];
-        
-        return [X, Y];
-    };
-
-    // Handle coplanar or nearly coplanar triangles
-    const handleCoplanarTriangles = (A, B, C, D, E, F, p1, p2) => {
-        // Check if triangles are on roughly the same plane
-        const maxDist1 = Math.max(Math.abs(sd(p1, D)), Math.abs(sd(p1, E)), Math.abs(sd(p1, F)));
-        const maxDist2 = Math.max(Math.abs(sd(p2, A)), Math.abs(sd(p2, B)), Math.abs(sd(p2, C)));
-        
-        // Use a more generous threshold for coplanar detection
-        const threshold = Math.max(1e-6, EPS * 100);
-        
-        if (maxDist1 > threshold || maxDist2 > threshold) return null;
-        
-        // For coplanar overlapping triangles, we need to create valid cutting lines
-        // that allow both triangles to be subdivided properly
-        
-        const n1 = vec.cross(vec.sub(B, A), vec.sub(C, A));
-        const n2 = vec.cross(vec.sub(E, D), vec.sub(F, D));
-        const avgN = vec.norm(vec.add(n1, n2));
-        
-        // Choose projection axis
-        const absN = [Math.abs(avgN[0]), Math.abs(avgN[1]), Math.abs(avgN[2])];
-        let dropAxis = 0;
-        if (absN[1] > absN[dropAxis]) dropAxis = 1;
-        if (absN[2] > absN[dropAxis]) dropAxis = 2;
-        
-        const project = (P) => {
-            if (dropAxis === 0) return [P[1], P[2]];
-            if (dropAxis === 1) return [P[0], P[2]];
-            return [P[0], P[1]];
+    const sharedCoordinatePoints = (recordA, recordB) => {
+        const common = [];
+        const add = (point) => {
+            if (common.some((existing) => vec.dist(existing, point) <= snapEps)) return;
+            common.push(point);
         };
-        
-        const tri1_2d = [project(A), project(B), project(C)];
-        const tri2_2d = [project(D), project(E), project(F)];
-        
-        // Find all intersection points between triangle edges
-        const intersectionPoints = [];
-        
-        // Edge-edge intersections
-        const edges1 = [[A, B], [B, C], [C, A]];
-        const edges1_2d = [[tri1_2d[0], tri1_2d[1]], [tri1_2d[1], tri1_2d[2]], [tri1_2d[2], tri1_2d[0]]];
-        const edges2_2d = [[tri2_2d[0], tri2_2d[1]], [tri2_2d[1], tri2_2d[2]], [tri2_2d[2], tri2_2d[0]]];
-        
-        for (let i = 0; i < 3; i++) {
-            for (let j = 0; j < 3; j++) {
-                const int2d = lineIntersection2D(edges1_2d[i], edges2_2d[j]);
-                if (int2d) {
-                    // Convert back to 3D using parametric interpolation on edge1
-                    const t1 = getParameterOnSegment2D(edges1_2d[i], int2d);
-                    if (t1 >= 0 && t1 <= 1) {
-                        const int3d = [
-                            edges1[i][0][0] + t1 * (edges1[i][1][0] - edges1[i][0][0]),
-                            edges1[i][0][1] + t1 * (edges1[i][1][1] - edges1[i][0][1]),
-                            edges1[i][0][2] + t1 * (edges1[i][1][2] - edges1[i][0][2])
-                        ];
-                        intersectionPoints.push(int3d);
+        for (const pa of recordA.points) {
+            for (const pb of recordB.points) {
+                if (vec.dist(pa, pb) <= snapEps) add(pa);
+            }
+        }
+        return common;
+    };
+
+    const isOnlySharedEdge = (recordA, recordB, a, b) => {
+        const common = sharedCoordinatePoints(recordA, recordB);
+        if (common.length !== 2) return false;
+        const a0 = vec.dist(a, common[0]) <= snapEps && vec.dist(b, common[1]) <= snapEps;
+        const a1 = vec.dist(a, common[1]) <= snapEps && vec.dist(b, common[0]) <= snapEps;
+        return a0 || a1;
+    };
+
+    const isOnlySharedPoint = (recordA, recordB, point) => {
+        const common = sharedCoordinatePoints(recordA, recordB);
+        return common.length > 0 && common.some((p) => vec.dist(p, point) <= snapEps);
+    };
+
+    const overlapAABB = (a, b) => !(
+        a.max[0] < b.min[0] - planeEps || b.max[0] < a.min[0] - planeEps
+        || a.max[1] < b.min[1] - planeEps || b.max[1] < a.min[1] - planeEps
+        || a.max[2] < b.min[2] - planeEps || b.max[2] < a.min[2] - planeEps
+    );
+
+    const order = Array.from({ length: triCount0 }, (_, i) => i)
+        .sort((a, b) => records[a].min[0] - records[b].min[0]);
+    let pairIntersections = 0;
+    let pointIntersections = 0;
+    let testedPairs = 0;
+    for (let oi = 0; oi < order.length; oi++) {
+        const ai = order[oi];
+        const a = records[ai];
+        if (triangleArea3(a.points[0], a.points[1], a.points[2]) <= areaEps) continue;
+        for (let oj = oi + 1; oj < order.length; oj++) {
+            const bi = order[oj];
+            const b = records[bi];
+            if (b.min[0] > a.max[0] + planeEps) break;
+            if (!overlapAABB(a, b)) continue;
+            if (triangleArea3(b.points[0], b.points[1], b.points[2]) <= areaEps) continue;
+            testedPairs++;
+            const hit = triangleIntersection(a.points, b.points);
+            if (!hit) continue;
+            const commonPoints = sharedCoordinatePoints(a, b);
+            if (commonPoints.length > 0) {
+                const touchesCommonPoint = (point) => commonPoints.some((common) => vec.dist(point, common) <= snapEps);
+                if (hit.type === "point" && touchesCommonPoint(hit.point)) continue;
+                if (hit.type === "segments") {
+                    const segments = hit.segments || [];
+                    if (segments.length && segments.every(([p, q]) => touchesCommonPoint(p) || touchesCommonPoint(q))) {
+                        continue;
                     }
                 }
             }
-        }
-        
-        // If we don't have edge intersections, try a different approach for overlapping triangles
-        if (intersectionPoints.length === 0) {
-            // For completely contained triangles or other overlap cases,
-            // create a cutting line across the overlapping region
-            
-            // Find the centroid of the overlapping region
-            // Create a cutting line that passes through the overlap
-            // Use the longest edge of the smaller triangle as the basis
-            const tri1Area = 0.5 * vec.len(vec.cross(vec.sub(B, A), vec.sub(C, A)));
-            const tri2Area = 0.5 * vec.len(vec.cross(vec.sub(E, D), vec.sub(F, D)));
-            
-            let cutStart, cutEnd;
-            if (tri1Area > tri2Area) {
-                // Triangle 1 is larger, use triangle 2's longest edge as cut direction
-                const edges2Lens = [
-                    vec.len(vec.sub(E, D)),
-                    vec.len(vec.sub(F, E)),
-                    vec.len(vec.sub(D, F))
-                ];
-                const maxEdgeIdx = edges2Lens.indexOf(Math.max(...edges2Lens));
-                cutStart = [D, E, F][maxEdgeIdx];
-                cutEnd = [D, E, F][(maxEdgeIdx + 1) % 3];
-            } else {
-                // Triangle 2 is larger, use triangle 1's longest edge as cut direction
-                const edges1Lens = [
-                    vec.len(vec.sub(B, A)),
-                    vec.len(vec.sub(C, B)),
-                    vec.len(vec.sub(A, C))
-                ];
-                const maxEdgeIdx = edges1Lens.indexOf(Math.max(...edges1Lens));
-                cutStart = [A, B, C][maxEdgeIdx];
-                cutEnd = [A, B, C][(maxEdgeIdx + 1) % 3];
+            if (hit.type === "point") {
+                if (isOnlySharedPoint(a, b, hit.point)) continue;
+                addPointOnly(a, hit.point);
+                addPointOnly(b, hit.point);
+                pointIntersections++;
+                if (detectOnly && maxIntersections > 0 && (pairIntersections + pointIntersections) >= maxIntersections) {
+                    return pairIntersections + pointIntersections;
+                }
+                continue;
             }
-            
-            return [cutStart, cutEnd];
+            let addedForPair = false;
+            for (const [p, q] of hit.segments || []) {
+                if (isOnlySharedEdge(a, b, p, q)) continue;
+                addSegment(a, p, q);
+                addSegment(b, p, q);
+                addedForPair = true;
+            }
+            if (addedForPair) {
+                pairIntersections++;
+                if (detectOnly && maxIntersections > 0 && (pairIntersections + pointIntersections) >= maxIntersections) {
+                    return pairIntersections + pointIntersections;
+                }
+            }
         }
-        
-        // Remove duplicate intersection points
-        const uniquePoints = [];
-        for (const pt of intersectionPoints) {
-            let isDuplicate = false;
-            for (const existing of uniquePoints) {
-                if (vec.len(vec.sub(pt, existing)) < 1e-9) {
-                    isDuplicate = true;
+    }
+
+    const totalIntersections = pairIntersections + pointIntersections;
+    if (totalIntersections === 0) {
+        if (logDiagnostics) {
+            console.log("[splitSelfIntersectingTriangles] no splittable intersections", { triCount: triCount0, testedPairs });
+        }
+        return 0;
+    }
+
+    // Keep the triangle arrangement conforming across existing mesh edges. If
+    // an intersection inserts a vertex on one triangle's edge, every triangle
+    // sharing that geometric edge must also be retriangulated with the same
+    // point; otherwise the split leaves T-junctions that appear as boundary and
+    // non-manifold edges in the indexed mesh.
+    const propagatedEdgePointKeys = new Set();
+    const edgeSplitPoints = [];
+    const addEdgeSplitPoint = (point) => {
+        const key = qPoint(point);
+        if (propagatedEdgePointKeys.has(key)) return;
+        propagatedEdgePointKeys.add(key);
+        edgeSplitPoints.push(point);
+    };
+    for (const record of records) {
+        for (const [a, b] of record.segments) {
+            addEdgeSplitPoint(a);
+            addEdgeSplitPoint(b);
+        }
+        for (const point of record.pointsOnly) {
+            addEdgeSplitPoint(point);
+        }
+    }
+    if (edgeSplitPoints.length && edgeSplitPoints.length <= 1024) {
+        for (const record of records) {
+            for (const point of edgeSplitPoints) {
+                if (record.points.some((vertex) => vec.dist(vertex, point) <= snapEps)) continue;
+                let liesOnEdge = false;
+                for (let i = 0; i < 3; i++) {
+                    const a = record.points[i];
+                    const b = record.points[(i + 1) % 3];
+                    if (!pointOnSegment3D(point, a, b, snapEps)) continue;
+                    liesOnEdge = true;
                     break;
                 }
+                if (liesOnEdge) addPointOnly(record, point);
             }
-            if (!isDuplicate) uniquePoints.push(pt);
         }
-        
-        if (uniquePoints.length >= 2) {
-            // Return the two most distant points as the cutting line
-            let maxDist = 0;
-            let bestPair = [uniquePoints[0], uniquePoints[1]];
-            
-            for (let i = 0; i < uniquePoints.length; i++) {
-                for (let j = i + 1; j < uniquePoints.length; j++) {
-                    const dist = vec.len(vec.sub(uniquePoints[i], uniquePoints[j]));
-                    if (dist > maxDist) {
-                        maxDist = dist;
-                        bestPair = [uniquePoints[i], uniquePoints[j]];
+    }
+
+    this._vertProperties = sourceVP.slice();
+    this._vertKeyToIndex = new Map();
+    const globalVertexByKey = new Map();
+    for (let i = 0; i < this._vertProperties.length; i += 3) {
+        const index = (i / 3) | 0;
+        const p = [this._vertProperties[i + 0], this._vertProperties[i + 1], this._vertProperties[i + 2]];
+        this._vertKeyToIndex.set(`${p[0]},${p[1]},${p[2]}`, index);
+        if (!globalVertexByKey.has(qPoint(p))) globalVertexByKey.set(qPoint(p), index);
+    }
+
+    const getOrCreateVertex = (point) => {
+        const key = qPoint(point);
+        const existing = globalVertexByKey.get(key);
+        if (existing !== undefined) return existing;
+        const index = (this._vertProperties.length / 3) | 0;
+        this._vertProperties.push(point[0], point[1], point[2]);
+        globalVertexByKey.set(key, index);
+        this._vertKeyToIndex.set(`${point[0]},${point[1]},${point[2]}`, index);
+        return index;
+    };
+
+    const makeLocalRetriangulator = (record) => {
+        const basis = makeBasis(record.points[0], record.points[1], record.points[2]);
+        if (!basis) return null;
+        const localPoints = [];
+        const localByGlobal = new Map();
+        const localByKey = new Map();
+        const localSegments = [];
+        const localScale = Math.max(
+            v2.dist(basis.project(record.points[0]), basis.project(record.points[1])),
+            v2.dist(basis.project(record.points[1]), basis.project(record.points[2])),
+            v2.dist(basis.project(record.points[2]), basis.project(record.points[0])),
+            1,
+        );
+        const eps2 = Math.max(snapEps, localScale * 1e-10);
+        const area2 = Math.max(1e-18, localScale * localScale * 1e-16);
+        const localKey = (p) => `${Math.round(p[0] / eps2)},${Math.round(p[1] / eps2)}`;
+        const addLocalPoint = (point) => {
+            const global = getOrCreateVertex(point);
+            const globalExisting = localByGlobal.get(global);
+            if (globalExisting !== undefined) return globalExisting;
+            const p2 = basis.project(point);
+            const key = localKey(p2);
+            const keyed = localByKey.get(key);
+            if (keyed !== undefined) {
+                localByGlobal.set(global, keyed);
+                return keyed;
+            }
+            const index = localPoints.length;
+            localPoints.push({ global, p3: point, p2 });
+            localByGlobal.set(global, index);
+            localByKey.set(key, index);
+            return index;
+        };
+        const addLocalSegment = (a, b) => {
+            const ia = addLocalPoint(a);
+            const ib = addLocalPoint(b);
+            if (ia === ib) return;
+            localSegments.push([ia, ib]);
+        };
+        const original = record.points.map(addLocalPoint);
+        addLocalSegment(record.points[0], record.points[1]);
+        addLocalSegment(record.points[1], record.points[2]);
+        addLocalSegment(record.points[2], record.points[0]);
+        for (const [a, b] of record.segments) addLocalSegment(a, b);
+        for (const point of record.pointsOnly) {
+            const ip = addLocalPoint(point);
+            for (const io of original) {
+                if (ip !== io) localSegments.push([ip, io]);
+            }
+        }
+        return { basis, localPoints, localSegments, original, eps2, area2 };
+    };
+
+    const segmentProperlyCrosses = (a, b, c, d, eps) => {
+        const ab = v2.sub(b, a);
+        const ac = v2.sub(c, a);
+        const ad = v2.sub(d, a);
+        const cd = v2.sub(d, c);
+        const ca = v2.sub(a, c);
+        const cb = v2.sub(b, c);
+        const o1 = v2.cross(ab, ac);
+        const o2 = v2.cross(ab, ad);
+        const o3 = v2.cross(cd, ca);
+        const o4 = v2.cross(cd, cb);
+        return o1 * o2 < -eps * eps && o3 * o4 < -eps * eps;
+    };
+
+    const retriangulateRecord = (record) => {
+        if (!record.segments.length && !record.pointsOnly.length) {
+            return [[record.indices[0], record.indices[1], record.indices[2]]];
+        }
+        const rt = makeLocalRetriangulator(record);
+        if (!rt) return [[record.indices[0], record.indices[1], record.indices[2]]];
+        const { localPoints, localSegments, original, eps2, area2 } = rt;
+        const sourceNormal = vec.norm(vec.cross(
+            vec.sub(record.points[1], record.points[0]),
+            vec.sub(record.points[2], record.points[0]),
+        ));
+
+        const addSegmentIntersections = () => {
+            const originalLength = localSegments.length;
+            for (let i = 0; i < originalLength; i++) {
+                const [a0, a1] = localSegments[i];
+                const a = localPoints[a0].p2;
+                const b = localPoints[a1].p2;
+                for (let j = i + 1; j < originalLength; j++) {
+                    const [b0, b1] = localSegments[j];
+                    const c = localPoints[b0].p2;
+                    const d = localPoints[b1].p2;
+                    for (const p of segmentIntersection2D(a, b, c, d, eps2)) {
+                        const p3 = rt.basis.unproject(p);
+                        const index = (() => {
+                            const global = getOrCreateVertex(p3);
+                            const existing = localPoints.findIndex((entry) => entry.global === global);
+                            if (existing >= 0) return existing;
+                            const next = localPoints.length;
+                            localPoints.push({ global, p3, p2: p });
+                            return next;
+                        })();
+                        if (index === a0 || index === a1 || index === b0 || index === b1) continue;
                     }
                 }
             }
-            
-            return maxDist > 1e-8 ? bestPair : null;
-        }
-        
-        return null;
-    };
-
-    // Helper function to subdivide a triangle around a contained triangle
-    const subdivideContainingTriangle = (containingTri, containedTri) => {
-        // For a triangle A containing triangle B, create triangles that fill A but exclude B
-        // This creates a "frame" around the contained triangle
-        
-        const A = [containingTri.A, containingTri.B, containingTri.C];
-        const B = [containedTri.A, containedTri.B, containedTri.C];
-        
-        // Create triangles connecting vertices of A to vertices of B
-        const subdivisions = [];
-        
-        // Check if triangles are nearly identical (would create degenerate subdivisions)
-        const areTrianglesNearlyIdentical = (tri1, tri2, tolerance = 1e-6) => {
-            for (let i = 0; i < 3; i++) {
-                let minDist = Infinity;
-                for (let j = 0; j < 3; j++) {
-                    const dist = vec.len(vec.sub(tri1[i], tri2[j]));
-                    minDist = Math.min(minDist, dist);
-                }
-                if (minDist > tolerance) return false;
-            }
-            return true;
         };
-        
-        // Check triangle area to avoid degenerate triangles
-        const triangleArea = (p1, p2, p3) => {
-            const cross = vec.cross(vec.sub(p2, p1), vec.sub(p3, p1));
-            return 0.5 * vec.len(cross);
+
+        const connectInteriorComponents = () => {
+            const parent = new Int32Array(localPoints.length);
+            for (let i = 0; i < parent.length; i++) parent[i] = i;
+            const find = (x) => {
+                let r = x;
+                while (parent[r] !== r) r = parent[r];
+                while (parent[x] !== x) {
+                    const p = parent[x];
+                    parent[x] = r;
+                    x = p;
+                }
+                return r;
+            };
+            const unite = (a, b) => {
+                const ra = find(a), rb = find(b);
+                if (ra !== rb) parent[rb] = ra;
+            };
+            for (const [a, b] of localSegments) unite(a, b);
+            const boundaryRoot = find(original[0]);
+            const components = new Map();
+            for (let i = 0; i < localPoints.length; i++) {
+                const root = find(i);
+                let list = components.get(root);
+                if (!list) { list = []; components.set(root, list); }
+                list.push(i);
+            }
+            const existingSegments = () => localSegments.map(([a, b]) => [localPoints[a].p2, localPoints[b].p2]);
+            for (const [root, members] of components.entries()) {
+                if (root === boundaryRoot || members.some((i) => original.includes(i))) continue;
+                let best = null;
+                const blockers = existingSegments();
+                for (const member of members) {
+                    const p = localPoints[member].p2;
+                    for (const target of original) {
+                        const q = localPoints[target].p2;
+                        let visible = true;
+                        for (const [s0, s1] of blockers) {
+                            if (v2.dist(p, s0) <= eps2 || v2.dist(p, s1) <= eps2 || v2.dist(q, s0) <= eps2 || v2.dist(q, s1) <= eps2) continue;
+                            if (segmentProperlyCrosses(p, q, s0, s1, eps2)) {
+                                visible = false;
+                                break;
+                            }
+                        }
+                        if (!visible) continue;
+                        const dist = v2.dist(p, q);
+                        if (!best || dist < best.dist) best = { member, target, dist };
+                    }
+                }
+                if (best) localSegments.push([best.member, best.target]);
+            }
         };
-        
-        if (areTrianglesNearlyIdentical(A, B, 1e-3)) {
-            // Triangles are too similar, skip subdivision to avoid degeneracies
-            return null;
+
+        connectInteriorComponents();
+        addSegmentIntersections();
+
+        const edgeSet = new Set();
+        const addEdge = (a, b) => {
+            if (a === b) return;
+            if (v2.dist(localPoints[a].p2, localPoints[b].p2) <= eps2) return;
+            const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+            if (edgeSet.has(key)) return;
+            edgeSet.add(key);
+        };
+
+        for (const [a, b] of localSegments) {
+            const pa = localPoints[a].p2;
+            const pb = localPoints[b].p2;
+            const ab = v2.sub(pb, pa);
+            const abLenSq = v2.dot(ab, ab);
+            if (!(abLenSq > eps2 * eps2)) continue;
+            const split = [];
+            for (let i = 0; i < localPoints.length; i++) {
+                const p = localPoints[i].p2;
+                if (!pointOnSegment2D(p, pa, pb, eps2)) continue;
+                const t = v2.dot(v2.sub(p, pa), ab) / abLenSq;
+                split.push({ index: i, t });
+            }
+            split.sort((u, v) => u.t - v.t);
+            for (let i = 0; i + 1 < split.length; i++) addEdge(split[i].index, split[i + 1].index);
         }
-        
-        // Strategy: Create triangles by connecting each vertex of A to nearest edge of B
-        // This avoids creating very small or degenerate triangles
-        
-        for (let i = 0; i < 3; i++) {
-            const vertexA = A[i];
-            
-            // Find the best connection points on triangle B's edges
-            const edgesB = [
-                [B[0], B[1]], [B[1], B[2]], [B[2], B[0]]
-            ];
-            
-            let bestEdgeIdx = -1;
-            let bestDist = Infinity;
-            
-            // Find the edge of B that's closest to this vertex of A
-            for (let j = 0; j < 3; j++) {
-                const edgeStart = edgesB[j][0];
-                const edgeEnd = edgesB[j][1];
-                const midPoint = vec.add(edgeStart, vec.mul(vec.sub(edgeEnd, edgeStart), 0.5));
-                const dist = vec.len(vec.sub(vertexA, midPoint));
-                
-                if (dist < bestDist) {
-                    bestDist = dist;
-                    bestEdgeIdx = j;
+
+        const adjacency = new Map();
+        for (const key of edgeSet) {
+            const [aRaw, bRaw] = key.split("|");
+            const a = Number(aRaw), b = Number(bRaw);
+            if (!adjacency.has(a)) adjacency.set(a, new Set());
+            if (!adjacency.has(b)) adjacency.set(b, new Set());
+            adjacency.get(a).add(b);
+            adjacency.get(b).add(a);
+        }
+        for (const [index, set] of adjacency.entries()) {
+            const p = localPoints[index].p2;
+            adjacency.set(index, Array.from(set).sort((a, b) => {
+                const pa = localPoints[a].p2;
+                const pb = localPoints[b].p2;
+                return Math.atan2(pa[1] - p[1], pa[0] - p[0]) - Math.atan2(pb[1] - p[1], pb[0] - p[0]);
+            }));
+        }
+
+        const directedVisited = new Set();
+        const directedKey = (a, b) => `${a}>${b}`;
+        const loops = [];
+        for (const key of edgeSet) {
+            const [aRaw, bRaw] = key.split("|");
+            for (const start of [[Number(aRaw), Number(bRaw)], [Number(bRaw), Number(aRaw)]]) {
+                let [from, to] = start;
+                if (directedVisited.has(directedKey(from, to))) continue;
+                const loop = [];
+                const guardMax = Math.max(12, edgeSet.size * 4);
+                let guard = 0;
+                while (!directedVisited.has(directedKey(from, to)) && guard++ < guardMax) {
+                    directedVisited.add(directedKey(from, to));
+                    loop.push(from);
+                    const neighbors = adjacency.get(to) || [];
+                    const incoming = neighbors.indexOf(from);
+                    if (incoming < 0 || neighbors.length === 0) break;
+                    const next = neighbors[(incoming - 1 + neighbors.length) % neighbors.length];
+                    from = to;
+                    to = next;
+                    if (from === start[0] && to === start[1]) break;
+                }
+                if (loop.length >= 3) {
+                    const area = polygonArea2D(loop, (i) => localPoints[i].p2);
+                    if (area > area2) loops.push(loop);
                 }
             }
-            
-            if (bestEdgeIdx >= 0) {
-                const edgeStart = edgesB[bestEdgeIdx][0];
-                const edgeEnd = edgesB[bestEdgeIdx][1];
-                
-                // Create triangle from vertex A to the edge of B
-                const area = triangleArea(vertexA, edgeStart, edgeEnd);
-                
-                // Only add if triangle has significant area (avoid degenerates)
-                if (area > 1e-8) {
-                    const newTri = [
-                        this._getPointIndex(vertexA),
-                        this._getPointIndex(edgeStart), 
-                        this._getPointIndex(edgeEnd)
-                    ];
-                    subdivisions.push(newTri);
+        }
+
+        const pointStrictlyInTri2D = (p, a, b, c) => {
+            const area = Math.abs(v2.cross(v2.sub(b, a), v2.sub(c, a)));
+            if (!(area > area2)) return false;
+            const a0 = Math.abs(v2.cross(v2.sub(a, p), v2.sub(b, p)));
+            const a1 = Math.abs(v2.cross(v2.sub(b, p), v2.sub(c, p)));
+            const a2 = Math.abs(v2.cross(v2.sub(c, p), v2.sub(a, p)));
+            if (Math.abs((a0 + a1 + a2) - area) > Math.max(area2, area * 1e-8)) return false;
+            return a0 > area2 && a1 > area2 && a2 > area2;
+        };
+
+        const triangulateLoop = (loop) => {
+            const out = [];
+            const indices = loop.slice();
+            const signedArea = polygonArea2D(indices, (i) => localPoints[i].p2);
+            if (signedArea < 0) indices.reverse();
+            let guard = 0;
+            while (indices.length > 3 && guard++ < loop.length * loop.length * 4) {
+                let clipped = false;
+                for (let i = 0; i < indices.length; i++) {
+                    const i0 = indices[(i - 1 + indices.length) % indices.length];
+                    const i1 = indices[i];
+                    const i2 = indices[(i + 1) % indices.length];
+                    const p0 = localPoints[i0].p2;
+                    const p1 = localPoints[i1].p2;
+                    const p2 = localPoints[i2].p2;
+                    if (v2.cross(v2.sub(p1, p0), v2.sub(p2, p1)) <= area2) continue;
+                    let contains = false;
+                    for (const candidate of indices) {
+                        if (candidate === i0 || candidate === i1 || candidate === i2) continue;
+                        if (pointStrictlyInTri2D(localPoints[candidate].p2, p0, p1, p2)) {
+                            contains = true;
+                            break;
+                        }
+                    }
+                    if (contains) continue;
+                    out.push([i0, i1, i2]);
+                    indices.splice(i, 1);
+                    clipped = true;
+                    break;
+                }
+                if (!clipped) {
+                    for (let i = 1; i + 1 < indices.length; i++) out.push([indices[0], indices[i], indices[i + 1]]);
+                    indices.length = 0;
                 }
             }
-        }
-        
-        return subdivisions.length > 0 ? subdivisions : null;
-    };
-
-    // 2D line segment intersection
-    const lineIntersection2D = ([p1, p2], [p3, p4]) => {
-        const x1 = p1[0], y1 = p1[1], x2 = p2[0], y2 = p2[1];
-        const x3 = p3[0], y3 = p3[1], x4 = p4[0], y4 = p4[1];
-        
-        const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
-        if (Math.abs(denom) < 1e-10) return null; // Parallel lines
-        
-        const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
-        const u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom;
-        
-        if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
-            return [x1 + t * (x2 - x1), y1 + t * (y2 - y1)];
-        }
-        
-        return null;
-    };
-
-    // Get parameter along 2D segment
-    const getParameterOnSegment2D = ([p1, p2], point) => {
-        const dx = p2[0] - p1[0];
-        const dy = p2[1] - p1[1];
-        
-        if (Math.abs(dx) > Math.abs(dy)) {
-            return (point[0] - p1[0]) / dx;
-        } else {
-            return (point[1] - p1[1]) / dy;
-        }
-    };
-
-    // Manifold-safe barycentric coordinates
-    const barycentric = (A, B, C, X) => {
-        const v0 = vec.sub(C, A);
-        const v1 = vec.sub(B, A);
-        const v2 = vec.sub(X, A);
-
-        const dot00 = vec.dot(v0, v0);
-        const dot01 = vec.dot(v0, v1);
-        const dot02 = vec.dot(v0, v2);
-        const dot11 = vec.dot(v1, v1);
-        const dot12 = vec.dot(v1, v2);
-
-        const denom = dot00 * dot11 - dot01 * dot01;
-        if (Math.abs(denom) < 1e-14) return null; // Degenerate triangle
-
-        const invDenom = 1.0 / denom;
-        const u = (dot11 * dot02 - dot01 * dot12) * invDenom;
-        const v = (dot00 * dot12 - dot01 * dot02) * invDenom;
-        const w = 1.0 - u - v;
-
-        return [w, v, u]; // [A, B, C] weights
-    };
-
-    // Conservative edge classification that avoids T-junctions
-    const classifyEdge = (w) => {
-        const [wa, wb, wc] = w;
-        const t = 0.05; // Conservative margin: points must be well away from vertices
-        
-        // Only classify as on an edge if clearly on that edge and not near vertices
-        if (wc < t && wa > t && wb > t) return 0; // AB edge
-        if (wa < t && wb > t && wc > t) return 1; // BC edge  
-        if (wb < t && wa > t && wc > t) return 2; // CA edge
-        
-        return -1; // Not clearly on any edge
-    };
-
-    // Enhanced triangle splitting for coplanar overlapping triangles
-    const splitOneTriangle = (ia, ib, ic, P, Q) => {
-        const A = pointOf(ia), B = pointOf(ib), C = pointOf(ic);
-        const wP = barycentric(A, B, C, P);
-        const wQ = barycentric(A, B, C, Q);
-        
-        if (!wP || !wQ) {
-            if (diagnostics) console.log(`    FAIL: Degenerate barycentric coordinates`);
-            return null; // Degenerate case
-        }
-        
-        // For coplanar case, allow points on or near edges - be more permissive
-        const reasonablyInside = (w) => w[0] >= -0.1 && w[1] >= -0.1 && w[2] >= -0.1 && 
-                                        (w[0] + w[1] + w[2]) >= 0.9 && (w[0] + w[1] + w[2]) <= 1.1;
-        if (!reasonablyInside(wP) || !reasonablyInside(wQ)) {
-            if (diagnostics) {
-                console.log(`    FAIL: Points not reasonably inside triangle`);
-                console.log(`    P weights: [${wP[0].toFixed(4)}, ${wP[1].toFixed(4)}, ${wP[2].toFixed(4)}] sum=${(wP[0] + wP[1] + wP[2]).toFixed(4)}`);
-                console.log(`    Q weights: [${wQ[0].toFixed(4)}, ${wQ[1].toFixed(4)}, ${wQ[2].toFixed(4)}] sum=${(wQ[0] + wQ[1] + wQ[2]).toFixed(4)}`);
-            }
-            return null;
-        }
-        
-        // Check if points are too close to existing vertices - be more permissive for coplanar cases
-        const minVertexDist = 1e-6; // Increased from 1e-8 to allow closer points
-        const nearVertex = (pt, vertex) => vec.len(vec.sub(pt, vertex)) < minVertexDist;
-        if (nearVertex(P, A) || nearVertex(P, B) || nearVertex(P, C) ||
-            nearVertex(Q, A) || nearVertex(Q, B) || nearVertex(Q, C)) {
-            if (diagnostics) console.log(`    FAIL: Points too close to existing vertices`);
-            return null;
-        }
-        
-        const edgeP = classifyEdge(wP);
-        const edgeQ = classifyEdge(wQ);
-
-        const ip = this._getPointIndex(P);
-        const iq = this._getPointIndex(Q);
-
-        // More lenient area check for coplanar cases
-        const emit = (i0, i1, i2, out) => {
-            if (i0 === i1 || i1 === i2 || i2 === i0) return;
-            const area = triArea(i0, i1, i2);
-            if (!(area > 1e-12)) return; // More lenient for coplanar splitting
-            out.push([i0, i1, i2]);
+            if (indices.length === 3) out.push([indices[0], indices[1], indices[2]]);
+            return out;
         };
 
         const out = [];
-        const iA = ia, iB = ib, iC = ic;
-
-        // Enhanced splitting: handle both interior and edge cases
-        if (edgeP === -1 && edgeQ === -1) {
-            // Both points are interior - create fan triangulation
-            emit(iA, ip, iq, out);
-            emit(iA, iB, ip, out);
-            emit(ip, iB, iq, out);
-            emit(iB, iC, iq, out);
-            emit(iq, iC, iA, out);
-        } else if (edgeP === -1 || edgeQ === -1) {
-            // One interior, one on edge
-            const interior = edgeP === -1 ? ip : iq;
-            const edge = edgeP === -1 ? iq : ip;
-            const edgeId = edgeP === -1 ? edgeQ : edgeP;
-            
-            const E_AB = 0, E_BC = 1, E_CA = 2;
-            
-            if (edgeId === E_AB) {
-                emit(iA, edge, interior, out);
-                emit(edge, iB, interior, out);
-                emit(iB, iC, interior, out);
-                emit(iC, iA, interior, out);
-            } else if (edgeId === E_BC) {
-                emit(iB, edge, interior, out);
-                emit(edge, iC, interior, out);
-                emit(iC, iA, interior, out);
-                emit(iA, iB, interior, out);
-            } else if (edgeId === E_CA) {
-                emit(iC, edge, interior, out);
-                emit(edge, iA, interior, out);
-                emit(iA, iB, interior, out);
-                emit(iB, iC, interior, out);
-            }
-        } else {
-            // Both on edges - handle specific edge combinations
-            const E_AB = 0, E_BC = 1, E_CA = 2;
-            
-            if ((edgeP === E_AB && edgeQ === E_CA) || (edgeQ === E_AB && edgeP === E_CA)) {
-                // Cut near vertex A
-                emit(iA, ip, iq, out);
-                emit(ip, iB, iC, out);
-                emit(ip, iC, iq, out);
-            } else if ((edgeP === E_AB && edgeQ === E_BC) || (edgeQ === E_AB && edgeP === E_BC)) {
-                // Cut near vertex B
-                emit(iB, ip, iq, out);
-                emit(iA, ip, iq, out);
-                emit(iA, iq, iC, out);
-            } else if ((edgeP === E_BC && edgeQ === E_CA) || (edgeQ === E_BC && edgeP === E_CA)) {
-                // Cut near vertex C
-                emit(iC, ip, iq, out);
-                emit(iA, iB, ip, out);
-                emit(iA, ip, iq, out);
-            } else if (edgeP !== edgeQ) {
-                // Different edges - create diagonal split
-                emit(ip, iq, iA, out);
-                emit(ip, iq, iB, out);
-                emit(ip, iq, iC, out);
-                // Add remaining coverage
-                if (edgeP === E_AB && edgeQ === E_BC) {
-                    emit(iA, ip, iq, out);
-                    emit(iq, iC, iA, out);
-                } // Add other combinations as needed
+        for (const loop of loops) {
+            for (const tri of triangulateLoop(loop)) {
+                const a = localPoints[tri[0]], b = localPoints[tri[1]], c = localPoints[tri[2]];
+                if (triangleArea3(a.p3, b.p3, c.p3) <= areaEps) continue;
+                const triNormal = vec.cross(vec.sub(b.p3, a.p3), vec.sub(c.p3, a.p3));
+                if (vec.dot(triNormal, sourceNormal) < 0) out.push([a.global, c.global, b.global]);
+                else out.push([a.global, b.global, c.global]);
             }
         }
-
-        // Require at least 2 triangles for a valid split
-        return out.length >= 2 ? out : null;
+        return out.length ? out : [[record.indices[0], record.indices[1], record.indices[2]]];
     };
 
-    // Build an adjacency set of triangle pairs that share an edge
-    const buildAdjacencyPairs = () => {
-        const triCount = (this._triVerts.length / 3) | 0;
-        const nv = (this._vertProperties.length / 3) | 0;
-        const NV = BigInt(Math.max(1, nv));
-        const ukey = (a, b) => {
-            const A = BigInt(a), B = BigInt(b);
-            return (A < B) ? (A * NV + B) : (B * NV + A);
-        };
-        const e2t = new Map();
+    const newTV = [];
+    const newIDs = [];
+    let touchedTriangles = 0;
+    for (let t = 0; t < triCount0; t++) {
+        const record = records[t];
+        const tris = retriangulateRecord(record);
+        if (record.segments.length || record.pointsOnly.length) touchedTriangles++;
+        for (const tri of tris) {
+            newTV.push(tri[0], tri[1], tri[2]);
+            newIDs.push(record.id);
+        }
+    }
+
+    this._triVerts = newTV;
+    this._triIDs = newIDs;
+    this._dirty = true;
+    this._faceIndex = null;
+    this._manifold = null;
+
+    try { this.removeDegenerateTriangles(); } catch { /* best effort */ }
+
+    const removeDuplicateTriangles = () => {
+        const tv = this._triVerts || [];
+        const vp = this._vertProperties || [];
+        const ids = this._triIDs || [];
+        const triCount = (tv.length / 3) | 0;
+        const seen = new Set();
+        const keepTV = [];
+        const keepIDs = [];
+        let removed = 0;
         for (let t = 0; t < triCount; t++) {
-            const b = t * 3;
-            const i0 = this._triVerts[b + 0] >>> 0;
-            const i1 = this._triVerts[b + 1] >>> 0;
-            const i2 = this._triVerts[b + 2] >>> 0;
-            const edges = [[i0, i1], [i1, i2], [i2, i0]];
-            for (let k = 0; k < 3; k++) {
-                const a = edges[k][0], c = edges[k][1];
-                const key = ukey(a, c);
-                let arr = e2t.get(key);
-                if (!arr) { arr = []; e2t.set(key, arr); }
-                arr.push(t);
+            const base = t * 3;
+            const verts = [tv[base + 0] >>> 0, tv[base + 1] >>> 0, tv[base + 2] >>> 0];
+            const key = verts
+                .map((index) => qPoint([vp[index * 3 + 0], vp[index * 3 + 1], vp[index * 3 + 2]]))
+                .sort()
+                .join("|");
+            if (seen.has(key)) {
+                removed++;
+                continue;
             }
+            seen.add(key);
+            keepTV.push(verts[0], verts[1], verts[2]);
+            keepIDs.push(ids[t]);
         }
-        const adj = new Set();
-        const pkey = (a, b) => a < b ? `${a},${b}` : `${b},${a}`;
-        for (const [, arr] of e2t.entries()) {
-            if (arr.length === 2) {
-                const a = arr[0], b = arr[1];
-                adj.add(pkey(a, b));
-            } else if (arr.length > 2) {
-                // Non-manifold edge: mark all pairs as adjacent so we don't split across it
-                for (let i = 0; i < arr.length; i++) for (let j = i + 1; j < arr.length; j++) adj.add(pkey(arr[i], arr[j]));
-            }
-        }
-        return adj;
+        if (!removed) return 0;
+        this._triVerts = keepTV;
+        this._triIDs = keepIDs;
+        this._dirty = true;
+        this._faceIndex = null;
+        this._manifold = null;
+        return removed;
     };
+    const duplicateRemovals = removeDuplicateTriangles();
 
-    let totalSplits = 0;
-    const seenSegments = new Set();
-    const Q = 1e-7;
-    const qpt = (P) => `${Math.round(P[0]/Q)},${Math.round(P[1]/Q)},${Math.round(P[2]/Q)}`;
-    const skey = (P, Qp) => {
-        const a = qpt(P), b = qpt(Qp);
-        return a < b ? `${a}__${b}` : `${b}__${a}`;
+    const compactVertices = () => {
+        const tv = this._triVerts || [];
+        const vp = this._vertProperties || [];
+        const nv = (vp.length / 3) | 0;
+        const used = new Uint8Array(nv);
+        for (const index of tv) used[index >>> 0] = 1;
+        const oldToNew = new Int32Array(nv);
+        for (let i = 0; i < nv; i++) oldToNew[i] = -1;
+        const compact = [];
+        let next = 0;
+        for (let i = 0; i < nv; i++) {
+            if (!used[i]) continue;
+            oldToNew[i] = next++;
+            compact.push(vp[i * 3 + 0], vp[i * 3 + 1], vp[i * 3 + 2]);
+        }
+        for (let i = 0; i < tv.length; i++) tv[i] = oldToNew[tv[i] >>> 0];
+        this._vertProperties = compact;
+        this._vertKeyToIndex = new Map();
+        for (let i = 0; i < compact.length; i += 3) {
+            this._vertKeyToIndex.set(`${compact[i]},${compact[i + 1]},${compact[i + 2]}`, (i / 3) | 0);
+        }
     };
-    
-    // Conservative iteration limit to prevent infinite loops
-    const maxIterations = Math.min(20, Math.max(3, triCount0));
+    compactVertices();
 
-    iteration: for (let pass = 0; pass < maxIterations; pass++) {
-        const triCount = (this._triVerts.length / 3) | 0;
-        if (triCount < 2) break;
-        
-        if (diagnostics) {
-            console.log(`\nPass ${pass + 1}: checking ${triCount} triangles`);
-        }
-
-        const adjPairs = buildAdjacencyPairs();
-        
-        if (diagnostics) {
-            console.log(`Adjacent pairs count: ${adjPairs.size}`);
-        }
-
-        // Standard AABB sweep setup
-        const tris = new Array(triCount);
-        for (let t = 0; t < triCount; t++) {
-            const b = t * 3;
-            const i0 = this._triVerts[b + 0] >>> 0;
-            const i1 = this._triVerts[b + 1] >>> 0;
-            const i2 = this._triVerts[b + 2] >>> 0;
-            const A = pointOf(i0), B = pointOf(i1), C = pointOf(i2);
-            const minX = Math.min(A[0], B[0], C[0]);
-            const minY = Math.min(A[1], B[1], C[1]);
-            const minZ = Math.min(A[2], B[2], C[2]);
-            const maxX = Math.max(A[0], B[0], C[0]);
-            const maxY = Math.max(A[1], B[1], C[1]);
-            const maxZ = Math.max(A[2], B[2], C[2]);
-            tris[t] = { t, i0, i1, i2, A, B, C, minX, minY, minZ, maxX, maxY, maxZ };
-        }
-        const order = Array.from({ length: triCount }, (_, i) => i);
-        order.sort((p, q) => tris[p].minX - tris[q].minX);
-
-        const pairKey = (a, b) => a < b ? `${a},${b}` : `${b},${a}`;
-        const tried = new Set();
-        let splitsThisPass = 0;
-
-        let checkedPairs = 0;
-        let adjacentSkips = 0;
-        let intersectionTests = 0;
-        let intersectionHits = 0;
-
-        for (let ii = 0; ii < order.length && splitsThisPass < 5; ii++) {
-            const ai = order[ii];
-            const A = tris[ai];
-            
-            for (let jj = ii + 1; jj < order.length; jj++) {
-                const bi = order[jj];
-                const B = tris[bi];
-                if (B.minX > A.maxX + 1e-12) break; // sweep prune by X
-                if (B.maxY < A.minY - 1e-12 || B.minY > A.maxY + 1e-12) continue;
-                if (B.maxZ < A.minZ - 1e-12 || B.minZ > A.maxZ + 1e-12) continue;
-                
-                checkedPairs++;
-                
-                const pk = pairKey(A.t, B.t);
-                if (adjPairs.has(pk)) {
-                    adjacentSkips++;
-                    continue; // skip adjacent triangles sharing an edge
-                }
-                if (tried.has(pk)) continue; 
-                tried.add(pk);
-
-                intersectionTests++;
-                const seg = triTriIntersectSegment(A.A, A.B, A.C, B.A, B.B, B.C);
-                if (!seg) continue;
-                
-                intersectionHits++;
-                
-                const [P, Q] = seg;
-                const keySeg = skey(P, Q);
-                if (seenSegments.has(keySeg)) continue;
-                
-                const dPQ = Math.hypot(P[0] - Q[0], P[1] - Q[1], P[2] - Q[2]);
-                if (!(dPQ > EPS)) continue;
-
-                // Special handling for overlapping coplanar triangles
-                // Check if this is a coplanar containment case where P and Q are both vertices of one triangle
-                const isCoplanarContainment = (
-                    (vec.len(vec.sub(P, A.A)) < 1e-9 || vec.len(vec.sub(P, A.B)) < 1e-9 || vec.len(vec.sub(P, A.C)) < 1e-9) &&
-                    (vec.len(vec.sub(Q, A.A)) < 1e-9 || vec.len(vec.sub(Q, A.B)) < 1e-9 || vec.len(vec.sub(Q, A.C)) < 1e-9)
-                ) || (
-                    (vec.len(vec.sub(P, B.A)) < 1e-9 || vec.len(vec.sub(P, B.B)) < 1e-9 || vec.len(vec.sub(P, B.C)) < 1e-9) &&
-                    (vec.len(vec.sub(Q, B.A)) < 1e-9 || vec.len(vec.sub(Q, B.B)) < 1e-9 || vec.len(vec.sub(Q, B.C)) < 1e-9)
-                );
-                
-                if (isCoplanarContainment) {
-                    // For coplanar overlapping triangles, we need to handle subdivision differently
-                    // Instead of trying to split both triangles with the same line,
-                    // we subdivide the containing triangle and keep overlapping triangles
-                    
-                    // Determine which triangle contains the other by checking vertices
-                    const pointInTriangle3D = (pt, [t1, t2, t3]) => {
-                        // Project to 2D for point-in-triangle test
-                        const n = vec.norm(vec.cross(vec.sub(t2, t1), vec.sub(t3, t1)));
-                        const absN = [Math.abs(n[0]), Math.abs(n[1]), Math.abs(n[2])];
-                        let dropAxis = 0;
-                        if (absN[1] > absN[dropAxis]) dropAxis = 1;
-                        if (absN[2] > absN[dropAxis]) dropAxis = 2;
-                        
-                        const project = (P) => {
-                            if (dropAxis === 0) return [P[1], P[2]];
-                            if (dropAxis === 1) return [P[0], P[2]];
-                            return [P[0], P[1]];
-                        };
-                        
-                        const pt2d = project(pt);
-                        const tri2d = [project(t1), project(t2), project(t3)];
-                        
-                        const v0 = [tri2d[2][0] - tri2d[0][0], tri2d[2][1] - tri2d[0][1]];
-                        const v1 = [tri2d[1][0] - tri2d[0][0], tri2d[1][1] - tri2d[0][1]];
-                        const v2 = [pt2d[0] - tri2d[0][0], pt2d[1] - tri2d[0][1]];
-                        
-                        const dot00 = v0[0] * v0[0] + v0[1] * v0[1];
-                        const dot01 = v0[0] * v1[0] + v0[1] * v1[1];
-                        const dot02 = v0[0] * v2[0] + v0[1] * v2[1];
-                        const dot11 = v1[0] * v1[0] + v1[1] * v1[1];
-                        const dot12 = v1[0] * v2[0] + v1[1] * v2[1];
-                        
-                        const denom = (dot00 * dot11 - dot01 * dot01);
-                        if (Math.abs(denom) < 1e-12) return false;
-                        
-                        const invDenom = 1 / denom;
-                        const u = (dot11 * dot02 - dot01 * dot12) * invDenom;
-                        const v = (dot00 * dot12 - dot01 * dot02) * invDenom;
-                        
-                        return (u >= -1e-10) && (v >= -1e-10) && (u + v <= 1 + 1e-10);
-                    };
-                    
-                    const bInA = pointInTriangle3D(B.A, [A.A, A.B, A.C]) && 
-                                 pointInTriangle3D(B.B, [A.A, A.B, A.C]) && 
-                                 pointInTriangle3D(B.C, [A.A, A.B, A.C]);
-                    
-                    if (bInA) {
-                        // Triangle B is contained in Triangle A
-                        // We need to actually subdivide triangle A around triangle B
-                        
-                        // For true subdivision, we need to create multiple triangles from A that exclude the B region
-                        // This requires complex triangulation - let's create a simpler approach first
-                        
-                        // Create new triangles that subdivide A around B
-                        const newTriangles = subdivideContainingTriangle(A, B);
-                        
-                        if (newTriangles && newTriangles.length > 0) {
-                            // Replace triangle A with the subdivision
-                            // Keep triangle B as-is to create the overlapping effect
-                            
-                            // CORRECTED: Build new arrays properly by copying all triangles except A,
-                            // then adding subdivided triangles in place of A
-                            const newTV = [];
-                            const newIDs = [];
-                            
-                            // Copy all triangles except A
-                            for (let t = 0; t < triCount; t++) {
-                                if (t === A.t) {
-                                    // Skip triangle A - we'll replace it with subdivisions
-                                    continue;
-                                }
-                                const base = t * 3;
-                                newTV.push(this._triVerts[base], this._triVerts[base + 1], this._triVerts[base + 2]);
-                                newIDs.push(this._triIDs[t]);
-                            }
-                            
-                            // Add subdivided triangles to replace triangle A
-                            for (const tri of newTriangles) {
-                                newTV.push(tri[0], tri[1], tri[2]);
-                                newIDs.push(this._triIDs[A.t]); // Preserve original face ID
-                            }
-                            
-                            this._triVerts = newTV;
-                            this._triIDs = newIDs;
-                            this._dirty = true;
-                            
-                            seenSegments.add(keySeg);
-                            splitsThisPass++;
-                            totalSplits++;
-                            continue iteration; // Restart with new triangle set
-                        }
-                        
-                        // If subdivision failed, fall through to normal splitting
-                    }
-                    
-                    // For other cases, continue with normal splitting
-                }
-
-                // Attempt to split both triangles
-                const newA = splitOneTriangle(A.i0, A.i1, A.i2, P, Q);
-                const newB = splitOneTriangle(B.i0, B.i1, B.i2, P, Q);
-                
-                if (diagnostics) {
-                    console.log(`\n=== Triangle Splitting Attempt ===`);
-                    console.log(`Triangle A (${A.t}): [${A.i0}, ${A.i1}, ${A.i2}] -> ${newA ? newA.length + ' new triangles' : 'FAILED'}`);
-                    if (newA) {
-                        newA.forEach((tri, i) => console.log(`  A${i}: [${tri[0]}, ${tri[1]}, ${tri[2]}]`));
-                    }
-                    console.log(`Triangle B (${B.t}): [${B.i0}, ${B.i1}, ${B.i2}] -> ${newB ? newB.length + ' new triangles' : 'FAILED'}`);
-                    if (newB) {
-                        newB.forEach((tri, i) => console.log(`  B${i}: [${tri[0]}, ${tri[1]}, ${tri[2]}]`));
-                    }
-                }
-                
-                if (!newA || !newB) continue;
-
-                // Manifold safety: ensure both splits are successful before applying
-                // Rebuild authoring arrays: replace triangles A.t and B.t with new splits
-                const newTV = [];
-                const newIDs = [];
-                
-                if (diagnostics) {
-                    console.log(`\n=== Rebuilding Triangle Arrays ===`);
-                    console.log(`Original triangle count: ${triCount}`);
-                    console.log(`Replacing triangle ${A.t} with ${newA.length} triangles`);
-                    console.log(`Replacing triangle ${B.t} with ${newB.length} triangles`);
-                }
-                
-                for (let t = 0; t < triCount; t++) {
-                    if (t === A.t) {
-                        if (diagnostics) console.log(`  Replacing triangle A(${A.t}) with subdivisions`);
-                        for (const tri of newA) {
-                            newTV.push(tri[0], tri[1], tri[2]);
-                            newIDs.push(this._triIDs[A.t]); // Preserve original face ID
-                        }
-                        continue;
-                    }
-                    if (t === B.t) {
-                        if (diagnostics) console.log(`  Replacing triangle B(${B.t}) with subdivisions`);
-                        for (const tri of newB) {
-                            newTV.push(tri[0], tri[1], tri[2]);
-                            newIDs.push(this._triIDs[B.t]); // Preserve original face ID
-                        }
-                        continue;
-                    }
-                    const base = t * 3;
-                    newTV.push(this._triVerts[base + 0] >>> 0, this._triVerts[base + 1] >>> 0, this._triVerts[base + 2] >>> 0);
-                    newIDs.push(this._triIDs[t]);
-                }
-
-                if (diagnostics) {
-                    console.log(`New triangle count: ${newTV.length / 3}`);
-                    console.log(`Net change: +${(newTV.length / 3) - triCount} triangles`);
-                }
-                
-                this._triVerts = newTV;
-                this._triIDs = newIDs;
-                // Update vertex key index
-                this._vertKeyToIndex = new Map();
-                for (let i = 0; i < this._vertProperties.length; i += 3) {
-                    const x = this._vertProperties[i], y = this._vertProperties[i + 1], z = this._vertProperties[i + 2];
-                    this._vertKeyToIndex.set(`${x},${y},${z}`, (i / 3) | 0);
-                }
-                this._dirty = true;
-                this._faceIndex = null;
-
-                totalSplits++;
-                splitsThisPass++;
-                seenSegments.add(keySeg);
-                
-                // Conservative restart: only restart if we found a critical intersection
-                break; // Process one split at a time for safety
-            }
-            
-            if (splitsThisPass > 0) {
-                // Restart iteration after any successful split
-                continue iteration;
-            }
-        }
-        
-        if (diagnostics) {
-            console.log(`  Pass ${pass + 1} results:`);
-            console.log(`    Checked pairs: ${checkedPairs}`);
-            console.log(`    Adjacent skips: ${adjacentSkips}`);  
-            console.log(`    Intersection tests: ${intersectionTests}`);
-            console.log(`    Intersection hits: ${intersectionHits}`);
-            console.log(`    Splits this pass: ${splitsThisPass}`);
-        }
-        
-        // If no splits this pass, we're done
-        if (splitsThisPass === 0) break;
+    if (logDiagnostics) {
+        console.log("[splitSelfIntersectingTriangles] complete", {
+            initialTriangles: triCount0,
+            finalTriangles: (this._triVerts.length / 3) | 0,
+            testedPairs,
+            pairIntersections,
+            pointIntersections,
+            touchedTriangles,
+            duplicateRemovals,
+        });
     }
 
-    if (totalSplits > 0) {
-        // CRITICAL: Ensure manifold properties are maintained after splitting
-        // 1. Fix triangle windings to ensure consistent orientation
-        this.fixTriangleWindingsByAdjacency();
-        
-        // 2. For overlapping triangle splitting, we intentionally allow non-manifold 
-        //    intermediate states where overlapping regions have triangles with opposite normals
-        //    This is expected and will be resolved by duplicate removal later
-        try {
-            // Test manifold creation without storing the object
-            this._manifoldize();
-            // If we get here, the mesh is still manifold
-        } catch (error) {
-            // For overlapping triangles, we expect non-manifold intermediate states
-            console.log('INFO: Non-manifold geometry detected after triangle splitting (expected for overlaps):', error.message);
-            // Continue execution - this is expected when splitting overlapping triangles
-        }
-    }
-    
-    if (diagnostics) {
-        const finalTriCount = (this._triVerts.length / 3) | 0;
-        console.log(`\n=== Final Results ===`);
-        console.log(`Total splits: ${totalSplits}`);
-        console.log(`Initial triangles: ${triCount0}`);
-        console.log(`Final triangles: ${finalTriCount}`);
-        console.log(`Net triangles added: ${finalTriCount - triCount0}`);
-        
-        if (totalSplits === 0) {
-            console.log(`\n❌ No triangles were split. Common reasons:`);
-            console.log(`  1. No overlapping coplanar triangles found`);
-            console.log(`  2. All overlapping triangles marked as adjacent (share vertices/edges)`);  
-            console.log(`  3. Coplanar threshold too strict for mesh precision`);
-            console.log(`  4. Intersection detection failing for real mesh geometry`);
-        }
-    }
-    
-    return totalSplits;
+    return totalIntersections;
 }
 
 /**
@@ -1896,9 +1929,7 @@ export function removeDegenerateTriangles() {
             newTriVerts.push(this._triVerts[triStart]);
             newTriVerts.push(this._triVerts[triStart + 1]);
             newTriVerts.push(this._triVerts[triStart + 2]);
-            newTriIDs.push(this._triIDs[triStart]);
-            newTriIDs.push(this._triIDs[triStart + 1]);
-            newTriIDs.push(this._triIDs[triStart + 2]);
+            newTriIDs.push(this._triIDs[i]);
         } else {
             removedCount++;
         }
@@ -1907,8 +1938,11 @@ export function removeDegenerateTriangles() {
     // Update arrays
     this._triVerts = newTriVerts;
     this._triIDs = newTriIDs;
-
-    console.log(`[removeDegenerateTriangles] Removed ${removedCount} degenerate triangles (${originalCount} → ${this._triVerts.length / 3})`);
+    if (removedCount > 0) {
+        this._dirty = true;
+        this._faceIndex = null;
+        this._manifold = null;
+    }
 
     return removedCount;
 }
@@ -2146,8 +2180,11 @@ export function removeInternalTrianglesByRaycast() {
  * @param {number} [options.crossingTolerance=0.05] tolerance for deciding inside/outside crossings
  */
 export function removeInternalTrianglesByWinding({ offsetScale = 1e-5, crossingTolerance = 0.05 } = {}) {
-    // Ensure local edge orientation is consistent to get meaningful normals
-    try { this.fixTriangleWindingsByAdjacency(); } catch { }
+    // Do not run adjacency winding repair before classification here. A
+    // self-intersecting mesh is non-manifold by definition, and adjacency repair
+    // can propagate orientation across crossing/intersection edges in a way that
+    // makes exterior pieces look internal. Classify using the authored triangle
+    // orientations; repair the remaining shell after culling.
     const vp = this._vertProperties;
     const tv = this._triVerts;
     const ids = this._triIDs;
@@ -2234,8 +2271,8 @@ export function removeInternalTrianglesByWinding({ offsetScale = 1e-5, crossingT
         const Pminus = [C[0] - N[0] * eps, C[1] - N[1] * eps, C[2] - N[2] * eps];
         const wPlus = winding(Pplus);
         const wMinus = winding(Pminus);
-        const a = wPlus - 0.5;
-        const b = wMinus - 0.5;
+        const a = Math.abs(wPlus) - 0.5;
+        const b = Math.abs(wMinus) - 0.5;
         const crosses = (a < -tau && b > tau) || (a > tau && b < -tau) || (a * b < -tau * tau);
         if (!crosses) { keepTri[t] = 0; removed++; }
     }

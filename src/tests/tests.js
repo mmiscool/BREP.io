@@ -74,6 +74,14 @@ import {
     test_generated_history_20260418030116,
 } from './test_generated_history_20260418030116.js';
 import {
+    afterRun_generated_history_20260427005357,
+    afterRun_generated_history_20260427005357_nine_face_thicken,
+    afterRun_generated_history_20260427005357_three_face_thicken,
+    test_generated_history_20260427005357,
+    test_generated_history_20260427005357_nine_face_thicken,
+    test_generated_history_20260427005357_three_face_thicken,
+} from './test_generated_history_20260427005357.js';
+import {
     afterRun_fillet_preserves_original_face_names,
     test_fillet_preserves_original_face_names,
 } from './test_fillet_preserves_original_face_names.js';
@@ -118,6 +126,11 @@ import {
     test_import3d_planar_extraction_merges_sliver_bridge,
 } from './test_import3dPlanarExtraction.js';
 import { test_mirror } from './test_mirror.js';
+import {
+    test_mesh_cleanup_split_crossing_triangles_inserts_intersection_edges,
+    test_mesh_cleanup_split_point_intersection_inserts_vertex,
+    test_mesh_cleanup_split_then_winding_removes_internal_overlap,
+} from './test_meshCleanupSelfIntersection.js';
 import {
     afterRun_fillet_face_names_and_merge_metadata_survive_native_manifold_rebuild,
     test_cppNative_prepareManifoldMesh_matches_legacy_js_reference,
@@ -181,14 +194,17 @@ import {
     test_offsetFace_preserves_individual_edges,
 } from './test_offsetFace_preserves_individual_edges.js';
 import {
+    afterRun_thicken_feature_connected_faces_remain_individual_solids,
     afterRun_thicken_feature_multiple_faces_produce_multiple_solids,
     afterRun_thicken_feature_serializes_and_replays_planar_profile,
     test_face_thicken_curved_cylinder_side,
+    test_face_thicken_boundary_uses_smooth_adjacent_face_normals,
     test_face_thicken_filleted_planar_face_keeps_clean_boundaries,
     test_face_thicken_hole_profile,
     test_face_thicken_partial_torus_side_avoids_internal_voids,
     test_face_thicken_planar_profile,
     test_face_thicken_self_overlap_cylinder_side,
+    test_thicken_feature_connected_faces_remain_individual_solids,
     test_thicken_feature_multiple_faces_produce_multiple_solids,
     test_thicken_feature_serializes_and_replays_planar_profile,
 } from './test_thickenFeature.js';
@@ -357,6 +373,9 @@ export const testFunctions = [
     { test: test_primitivePyramid, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_primitiveCylinder, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_face_source_feature_seed, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_mesh_cleanup_split_crossing_triangles_inserts_intersection_edges, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_mesh_cleanup_split_point_intersection_inserts_vertex, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_mesh_cleanup_split_then_winding_removes_internal_overlap, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     {
         test: test_offsetFace_preserves_individual_edges,
         afterRun: afterRun_offsetFace_preserves_individual_edges,
@@ -369,6 +388,7 @@ export const testFunctions = [
     { test: test_face_thicken_hole_profile, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_face_thicken_curved_cylinder_side, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_face_thicken_partial_torus_side_avoids_internal_voids, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_face_thicken_boundary_uses_smooth_adjacent_face_normals, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_face_thicken_filleted_planar_face_keeps_clean_boundaries, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_face_thicken_self_overlap_cylinder_side, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_thicken_feature_is_available_in_modeling_and_surfacing_workbenches, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -383,6 +403,14 @@ export const testFunctions = [
     {
         test: test_thicken_feature_multiple_faces_produce_multiple_solids,
         afterRun: afterRun_thicken_feature_multiple_faces_produce_multiple_solids,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_thicken_feature_connected_faces_remain_individual_solids,
+        afterRun: afterRun_thicken_feature_connected_faces_remain_individual_solids,
         printArtifacts: false,
         exportFaces: false,
         exportSolids: false,
@@ -595,6 +623,30 @@ export const testFunctions = [
     {
         test: test_generated_history_20260418030116,
         afterRun: afterRun_generated_history_20260418030116,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_generated_history_20260427005357,
+        afterRun: afterRun_generated_history_20260427005357,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_generated_history_20260427005357_three_face_thicken,
+        afterRun: afterRun_generated_history_20260427005357_three_face_thicken,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_generated_history_20260427005357_nine_face_thicken,
+        afterRun: afterRun_generated_history_20260427005357_nine_face_thicken,
         printArtifacts: false,
         exportFaces: false,
         exportSolids: false,

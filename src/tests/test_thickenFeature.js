@@ -1,4 +1,5 @@
 import { PartHistory } from '../PartHistory.js';
+import { Solid } from '../BREP/BetterSolid.js';
 
 function assert(condition, message) {
   if (!condition) throw new Error(message || 'Assertion failed.');
@@ -206,8 +207,8 @@ export async function test_face_thicken_planar_profile(partHistory) {
 
   const diagnostics = solid?.__thickenDiagnostics || {};
   assert(
-    String(diagnostics.classificationMethod || '').startsWith('propagated_face_ids'),
-    '[thicken-planar] Expected propagated face IDs.',
+    diagnostics.buildMethod === 'triangle_split_cull',
+    `[thicken-planar] Expected triangle split/cull build path, received ${diagnostics.buildMethod || 'unknown'}.`,
   );
   const volume = typeof solid.volume === 'function' ? solid.volume() : NaN;
   assert(Math.abs(volume - 120) <= 1e-3, `[thicken-planar] Expected volume 120, received ${volume}.`);
@@ -242,8 +243,8 @@ export async function test_face_thicken_hole_profile(partHistory) {
 
   const diagnostics = solid?.__thickenDiagnostics || {};
   assert(
-    String(diagnostics.classificationMethod || '').startsWith('propagated_face_ids'),
-    '[thicken-hole] Expected propagated face IDs.',
+    diagnostics.buildMethod === 'triangle_split_cull',
+    `[thicken-hole] Expected triangle split/cull build path, received ${diagnostics.buildMethod || 'unknown'}.`,
   );
   const volume = typeof solid.volume === 'function' ? solid.volume() : NaN;
   assert(Math.abs(volume - 128) <= 1e-3, `[thicken-hole] Expected volume 128, received ${volume}.`);
@@ -270,8 +271,8 @@ export async function test_face_thicken_curved_cylinder_side(partHistory) {
   );
   const diagnostics = solid?.__thickenDiagnostics || {};
   assert(
-    String(diagnostics.classificationMethod || '').startsWith('propagated_face_ids'),
-    '[thicken-curved] Expected propagated face IDs.',
+    diagnostics.buildMethod === 'triangle_split_cull',
+    `[thicken-curved] Expected triangle split/cull build path, received ${diagnostics.buildMethod || 'unknown'}.`,
   );
 }
 
@@ -295,18 +296,34 @@ export async function test_face_thicken_filleted_planar_face_keeps_clean_boundar
 
   const diagnostics = solid?.__thickenDiagnostics || {};
   assert(
-    String(diagnostics.classificationMethod || '').startsWith('propagated_face_ids'),
-    '[thicken-filleted-planar] Expected propagated face IDs.',
+    diagnostics.buildMethod === 'triangle_split_cull',
+    `[thicken-filleted-planar] Expected triangle split/cull build path, received ${diagnostics.buildMethod || 'unknown'}.`,
   );
 }
 
 export async function test_face_thicken_self_overlap_cylinder_side(partHistory) {
-  const face = await buildCylinderSideFace(partHistory, 'THICK_SELF_SRC', 1, 6, 72);
+  const face = await buildCylinderSideFace(partHistory, 'THICK_SELF_SRC', 1, 6, 32);
   const solid = face.thicken(-1.25, { featureId: 'THICK_SELF' });
   assertClosedManifold(solid, 'thicken-self-overlap');
 
   const diagnostics = solid?.__thickenDiagnostics || null;
-  assert(diagnostics && Number.isFinite(diagnostics.primitiveCount), '[thicken-self-overlap] Missing diagnostics.');
+  assert(diagnostics && Number.isFinite(diagnostics.sourceTriangleCount), '[thicken-self-overlap] Missing diagnostics.');
+  assert(
+    diagnostics.buildMethod === 'triangle_split_cull',
+    `[thicken-self-overlap] Expected triangle split/cull build path, received ${diagnostics.buildMethod || 'unknown'}.`,
+  );
+  assert(
+    (diagnostics.triangleSplitCount || 0) > 0,
+    '[thicken-self-overlap] Expected triangle intersections to be split.',
+  );
+  assert(
+    (diagnostics.culledTriangleCount || 0) > 0,
+    '[thicken-self-overlap] Expected internal triangles to be culled.',
+  );
+  assert(
+    (diagnostics.boundaryCapTriangleCount || 0) > 0,
+    '[thicken-self-overlap] Expected split/cull boundary loops to be capped with triangles.',
+  );
   assert((typeof solid.volume === 'function' ? solid.volume() : 0) > 0, '[thicken-self-overlap] Expected a positive-volume solid.');
 }
 
@@ -325,16 +342,51 @@ export async function test_face_thicken_partial_torus_side_avoids_internal_voids
 
   const diagnostics = solid?.__thickenDiagnostics || {};
   assert(
-    String(diagnostics.buildMethod || '').startsWith('stitched_shell'),
-    `[thicken-partial-torus] Expected stitched shell build path, received ${diagnostics.buildMethod || 'unknown'}.`,
+    diagnostics.buildMethod === 'triangle_split_cull',
+    `[thicken-partial-torus] Expected triangle split/cull build path, received ${diagnostics.buildMethod || 'unknown'}.`,
   );
   assert(
-    String(diagnostics.classificationMethod || '').startsWith('propagated_face_ids'),
-    '[thicken-partial-torus] Expected propagated face IDs.',
+    Number.isFinite(Number(diagnostics.splitCullPasses)) && diagnostics.splitCullPasses >= 1,
+    '[thicken-partial-torus] Expected triangle split/cull diagnostics.',
   );
 
   const volume = typeof solid.volume === 'function' ? solid.volume() : NaN;
   assert(Number.isFinite(volume) && volume > 1000, `[thicken-partial-torus] Expected positive torus-shell volume, received ${volume}.`);
+}
+
+export async function test_face_thicken_boundary_uses_smooth_adjacent_face_normals() {
+  const parent = new Solid();
+  const tilt = Math.tan(Math.PI / 9);
+  parent.addTriangle('SMOOTH_A', [0, 0, 0], [1, 0, 0], [1, 1, 0]);
+  parent.addTriangle('SMOOTH_A', [0, 0, 0], [1, 1, 0], [0, 1, 0]);
+  parent.addTriangle('SMOOTH_B', [1, 0, 0], [2, 0, tilt], [2, 1, tilt]);
+  parent.addTriangle('SMOOTH_B', [1, 0, 0], [2, 1, tilt], [1, 1, 0]);
+  parent.visualize({ authoringOnly: true, showEdges: false });
+
+  const face = parent.getObjectByName('SMOOTH_A');
+  assert(face?.type === 'FACE', '[thicken-smooth-boundary] Expected authored source face.');
+
+  const solid = face.thicken(2, { featureId: 'THICK_SMOOTH_BOUNDARY' });
+  assertClosedManifold(solid, 'thicken-smooth-boundary');
+
+  const diagnostics = solid?.__thickenDiagnostics || {};
+  assert(
+    (diagnostics.adjacentBoundaryNormalContributionCount || 0) >= 2,
+    '[thicken-smooth-boundary] Expected tangent adjacent face normals to contribute at the boundary.',
+  );
+
+  const endFace = typeof solid.getFace === 'function' ? solid.getFace('SMOOTH_A_END') : [];
+  const endXs = [];
+  for (const tri of endFace || []) {
+    for (const point of [tri?.p1, tri?.p2, tri?.p3]) {
+      if (Array.isArray(point) && point.length >= 3) endXs.push(point[0]);
+    }
+  }
+  const maxEndX = Math.max(...endXs);
+  assert(
+    maxEndX < 0.9,
+    `[thicken-smooth-boundary] Expected the offset boundary to follow the smooth neighbor normal field; max x=${maxEndX}.`,
+  );
 }
 
 export async function test_thicken_feature_serializes_and_replays_planar_profile(partHistory) {
@@ -361,6 +413,21 @@ export async function test_thicken_feature_multiple_faces_produce_multiple_solid
   thicken.inputParams.id = 'THICK_MULTI';
   thicken.inputParams.face = ['THICK_MULTI_SRC_PZ', 'THICK_MULTI_SRC_NZ'];
   thicken.inputParams.distance = 1.25;
+
+  return partHistory;
+}
+
+export async function test_thicken_feature_connected_faces_remain_individual_solids(partHistory) {
+  const cube = await partHistory.newFeature('P.CU');
+  cube.inputParams.id = 'THICK_PATCH_SRC';
+  cube.inputParams.sizeX = 4;
+  cube.inputParams.sizeY = 3;
+  cube.inputParams.sizeZ = 2;
+
+  const thicken = await partHistory.newFeature('THK');
+  thicken.inputParams.id = 'THICK_PATCH';
+  thicken.inputParams.face = ['THICK_PATCH_SRC_PZ', 'THICK_PATCH_SRC_PX'];
+  thicken.inputParams.distance = 1;
 
   return partHistory;
 }
@@ -439,5 +506,49 @@ export async function afterRun_thicken_feature_multiple_faces_produce_multiple_s
   assert(
     JSON.stringify(replayNames) === JSON.stringify(expectedNames),
     `[thicken-feature-multi] Replay names mismatch. Expected ${JSON.stringify(expectedNames)}, received ${JSON.stringify(replayNames)}.`,
+  );
+}
+
+export async function afterRun_thicken_feature_connected_faces_remain_individual_solids(partHistory) {
+  const featureEntry = (partHistory.features || []).find((entry) => String(entry?.inputParams?.id || '').trim() === 'THICK_PATCH');
+  assert(featureEntry, '[thicken-feature-patch] Expected THICK_PATCH feature entry.');
+  const featureId = String(featureEntry?.inputParams?.featureID || featureEntry?.inputParams?.id || '').trim();
+  assert(featureId, '[thicken-feature-patch] Missing feature id.');
+
+  const solids = (partHistory.scene?.children || [])
+    .filter((obj) => obj?.type === 'SOLID' && obj?.owningFeatureID === featureId)
+    .slice()
+    .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || '')));
+  assert(solids.length === 2, `[thicken-feature-patch] Expected two individual solids, received ${solids.length}.`);
+
+  const expectedNames = [
+    'THICK_PATCH_01_THICK_PATCH_SRC_PZ',
+    'THICK_PATCH_02_THICK_PATCH_SRC_PX',
+  ];
+  const actualNames = solids.map((solid) => String(solid?.name || ''));
+  assert(
+    JSON.stringify(actualNames) === JSON.stringify(expectedNames),
+    `[thicken-feature-patch] Expected solid names ${JSON.stringify(expectedNames)}, received ${JSON.stringify(actualNames)}.`,
+  );
+  for (const solid of solids) {
+    assertClosedManifold(solid, `thicken-feature-patch:${solid.name}`);
+    const diagnostics = solid?.__thickenDiagnostics || {};
+    assert(diagnostics.buildMethod === 'triangle_split_cull', `[thicken-feature-patch] ${solid.name} did not use triangle split/cull.`);
+    assert(diagnostics.sourceFaceCount === 1, `[thicken-feature-patch] Expected one source face for ${solid.name}.`);
+  }
+  assert(Array.isArray(featureEntry?.persistentData?.results), '[thicken-feature-patch] Expected persistentData.results.');
+  assert(featureEntry.persistentData.results.length === 2, '[thicken-feature-patch] Expected two persistent result records.');
+
+  const json = await partHistory.toJSON();
+  const replay = new PartHistory();
+  await replay.fromJSON(json);
+  await replay.runHistory();
+  const replayNames = (replay.scene?.children || [])
+    .filter((obj) => obj?.type === 'SOLID' && obj?.owningFeatureID === featureId)
+    .map((solid) => String(solid?.name || ''))
+    .sort();
+  assert(
+    JSON.stringify(replayNames) === JSON.stringify(expectedNames),
+    `[thicken-feature-patch] Replay names mismatch. Expected ${JSON.stringify(expectedNames)}, received ${JSON.stringify(replayNames)}.`,
   );
 }
