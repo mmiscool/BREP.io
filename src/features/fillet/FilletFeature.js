@@ -5,15 +5,6 @@ import {
 } from "../edgeFeatureUtils.js";
 import { runSheetMetalCornerFillet } from "../sheetMetal/sheetMetalEngineBridge.js";
 
-const DEBUG_MODE_NONE = "NONE";
-const DEBUG_MODE_WEDGE_AND_TUBE = "WEDGE AND TUBE";
-const DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEAN = "WEDGE AND TUBE AFTER BOOLEAN";
-const DEBUG_MODE_COMBINED_BEFORE_TARGET = "COMBINED FILLET BEFORE TARGET BOOLEAN";
-const FINAL_FILLET_SIMPLIFY_TOLERANCE = 0.0009;
-const FILLET_NATIVE_TINY_FACE_ISLAND_CLEANUP_AREA = 0.01;
-const FILLET_POST_COLLAPSE_TINY_TRIANGLE_THRESHOLD = 0.001;
-const FILLET_POST_COLLAPSE_TINY_FACE_ISLAND_CLEANUP_AREA = 0.01;
-
 const inputParamsSchema = {
     id: {
         type: "string",
@@ -33,98 +24,7 @@ const inputParamsSchema = {
         default_value: 1,
         hint: "Fillet radius",
     },
-    resolution: {
-        type: "number",
-        step: 1,
-        default_value: "resolution",
-        hint: "Segments around the fillet tube circumference",
-    },
-    inflate: {
-        type: "number",
-        step: 0.1,
-        default_value: 0.1,
-        hint: "Grow the cutting solid by this amount (units). Keep tiny (e.g. 0.0005). Closed loops ignore inflation to avoid self‑intersection.",
-    },
-    nudgeFaceDistance: {
-        type: "number",
-        step: 0.0001,
-        default_value: 0.0001,
-        hint: "Push fillet wedge end caps outward by this amount before booleaning (0 disables).",
-    },
-    simplifyResult: {
-        type: "boolean",
-        default_value: true,
-        hint: "Run the final simplify pass on the fillet result.",
-    },
-    cleanupNativeTinyFaceIslands: {
-        type: "boolean",
-        default_value: true,
-        hint: "Run the native tiny-face island cleanup during fillet combine.",
-    },
-    mergeCoplanarEndCaps: {
-        type: "boolean",
-        default_value: true,
-        hint: "Merge coplanar fillet end caps into adjacent host faces.",
-    },
-    reassignSliverTriangles: {
-        type: "boolean",
-        default_value: true,
-        hint: "Reassign tiny fillet sidewall sliver triangles into planar neighbors.",
-    },
-    collapseTinyTriangles: {
-        type: "boolean",
-        default_value: true,
-        hint: "Collapse tiny triangles on the final fillet result.",
-    },
-    cleanupPostCollapseTinyFaceIslands: {
-        type: "boolean",
-        default_value: true,
-        hint: "Clean up tiny face islands after collapsing tiny triangles.",
-    },
-    direction: {
-        type: "options",
-        options: ["AUTO", "INSET", "OUTSET"],
-        default_value: "AUTO",
-        hint: "AUTO classifies each selected edge as inside/outside and applies subtract/union automatically.",
-    },
-    debug: {
-        type: "options",
-        options: [
-            DEBUG_MODE_NONE,
-            DEBUG_MODE_WEDGE_AND_TUBE,
-            DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEAN,
-            DEBUG_MODE_COMBINED_BEFORE_TARGET,
-        ],
-        default_value: DEBUG_MODE_NONE,
-        hint: "Controls which fillet debug solids are emitted.",
-    },
 };
-
-function resolveDebugMode(rawValue) {
-    const normalized = String(rawValue).trim().toUpperCase();
-    if (normalized === DEBUG_MODE_NONE) return DEBUG_MODE_NONE;
-    if (normalized === DEBUG_MODE_WEDGE_AND_TUBE) return DEBUG_MODE_WEDGE_AND_TUBE;
-    if (normalized === DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEAN) {
-        return DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEAN;
-    }
-    if (normalized === DEBUG_MODE_COMBINED_BEFORE_TARGET) {
-        return DEBUG_MODE_COMBINED_BEFORE_TARGET;
-    }
-    return DEBUG_MODE_NONE;
-}
-
-function getDebugConfig(debugMode) {
-    if (debugMode === DEBUG_MODE_WEDGE_AND_TUBE) {
-        return { enabled: true, solidsLevel: 0, showCombinedBeforeTarget: false };
-    }
-    if (debugMode === DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEAN) {
-        return { enabled: true, solidsLevel: 1, showCombinedBeforeTarget: false };
-    }
-    if (debugMode === DEBUG_MODE_COMBINED_BEFORE_TARGET) {
-        return { enabled: true, solidsLevel: -1, showCombinedBeforeTarget: true };
-    }
-    return { enabled: false, solidsLevel: -1, showCombinedBeforeTarget: false };
-}
 
 function normalizeSelectionToken(token) {
     const raw = String(token || '').trim();
@@ -517,22 +417,9 @@ export class FilletFeature {
     }
 
     async run(partHistory) {
-        const debugMode = resolveDebugMode(this.inputParams?.debug);
-        const debugConfig = getDebugConfig(debugMode);
-        const debugEnabled = !!debugConfig.enabled;
-        const configuredDebugLevel = Number(debugConfig.solidsLevel);
-        const debugShowCombinedBeforeTarget = !!debugConfig.showCombinedBeforeTarget;
         console.log('[FilletFeature] Starting fillet run...', {
             featureID: this.inputParams?.featureID,
-            direction: this.inputParams?.direction,
             radius: this.inputParams?.radius,
-            resolution: this.inputParams?.resolution,
-            inflate: this.inputParams?.inflate,
-            nudgeFaceDistance: this.inputParams?.nudgeFaceDistance,
-            debug: debugEnabled,
-            debugMode,
-            debugSolidsLevel: configuredDebugLevel,
-            debugShowCombinedBeforeTarget,
         });
         const added = [];
         const removed = [];
@@ -569,7 +456,6 @@ export class FilletFeature {
             edgeNames: edgeObjs.map(e => e?.name).filter(Boolean),
         });
 
-        const dir = String(this.inputParams.direction || 'AUTO').toUpperCase();
         const r = Number(this.inputParams.radius);
         if (!Number.isFinite(r) || !(r > 0)) {
             console.warn('[FilletFeature] Invalid radius supplied; aborting.', { radius: this.inputParams.radius });
@@ -585,7 +471,6 @@ export class FilletFeature {
                 selections: rawInputSelections,
                 edgeSelections: edgeObjs,
                 radius: r,
-                resolution: this.inputParams?.resolution,
                 featureID: fid || "SM_FILLET",
                 showFlatPattern: true,
             });
@@ -612,47 +497,11 @@ export class FilletFeature {
         }
 
         let result = null;
-        const simplifyResult = this.inputParams?.simplifyResult !== false;
-        const cleanupNativeTinyFaceIslands = this.inputParams?.cleanupNativeTinyFaceIslands !== false;
-        const mergeCoplanarEndCaps = this.inputParams?.mergeCoplanarEndCaps !== false;
-        const reassignSliverTriangles = this.inputParams?.reassignSliverTriangles !== false;
-        const collapseTinyTriangles = this.inputParams?.collapseTinyTriangles !== false;
-        const cleanupPostCollapseTinyFaceIslands = this.inputParams?.cleanupPostCollapseTinyFaceIslands !== false;
         result = await targetSolid.fillet({
             radius: r,
-            resolution: this.inputParams?.resolution,
             edges: edgeObjs,
             featureID: fid,
-            direction: dir,
-            inflate: Number(this.inputParams.inflate) || 0,
-            nudgeFaceDistance: this.inputParams?.nudgeFaceDistance,
-            cleanupTinyFaceIslandsArea: cleanupNativeTinyFaceIslands
-                ? FILLET_NATIVE_TINY_FACE_ISLAND_CLEANUP_AREA
-                : 0,
-            mergeCoplanarEndCaps,
-            reassignSliverTriangles,
-            debug: debugEnabled,
-            debugSolidsLevel: configuredDebugLevel,
-            debugShowCombinedBeforeTarget,
         });
-        try {
-            result.__filletFinalSimplifyEnabled = simplifyResult;
-            result.__filletNativeTinyFaceIslandCleanupEnabled = cleanupNativeTinyFaceIslands;
-            result.__filletPostCollapseTinyTriangleCollapseEnabled = collapseTinyTriangles;
-            result.__filletPostCollapseTinyFaceIslandCleanupEnabled = cleanupPostCollapseTinyFaceIslands;
-        } catch { }
-        const collectDebugSolids = (res) => {
-            const out = [];
-            if (!Array.isArray(res?.__debugAddedSolids)) return out;
-            for (const dbg of res.__debugAddedSolids) {
-                if (!dbg) continue;
-                try { dbg.name = `${fid}_${dbg.name || 'DEBUG'}`; } catch { }
-                console.log('[FilletFeature] Adding fillet debug solid', { featureID: fid, name: dbg.name });
-                out.push(dbg);
-            }
-            return out;
-        };
-        const debugSolids = collectDebugSolids(result);
         const edgeDirectionDecision = result?.__filletDirectionDecision || null;
         const cornerBridgeCountRaw = Number(result?.__filletCornerBridgeCount);
         const cornerBridgeCount = Number.isFinite(cornerBridgeCountRaw) ? Math.max(0, Math.trunc(cornerBridgeCountRaw)) : 0;
@@ -668,22 +517,10 @@ export class FilletFeature {
         if (!result) {
             throw new Error(`[FilletFeature] Fillet returned no result for feature ${fid || '(unknown)'}.`);
         }
-        if (simplifyResult && typeof result.simplify === 'function') {
-            try {
-                result.simplify(FINAL_FILLET_SIMPLIFY_TOLERANCE, true);
-            } catch (e) {
-                console.warn('[FilletFeature] Final simplify cleanup failed; keeping unsimplified fillet result.', {
-                    featureID: fid,
-                    tolerance: FINAL_FILLET_SIMPLIFY_TOLERANCE,
-                    error: e,
-                });
-            }
-        }
         const { triCount, vertCount } = getSolidGeometryCounts(result);
         if (triCount === 0 || vertCount === 0) {
             throw new Error(`[FilletFeature] Fillet produced empty geometry for feature ${fid || '(unknown)'}. `
-                + `(triangles=${triCount}, vertices=${vertCount}, direction=${dir}, radius=${r}, `
-                + `inflate=${this.inputParams.inflate})`);
+                + `(triangles=${triCount}, vertices=${vertCount}, radius=${r})`);
         }
         console.log('[FilletFeature] Fillet succeeded; replacing target solid.', {
             featureID: fid,
@@ -692,33 +529,15 @@ export class FilletFeature {
             edgeDirectionDecision: edgeDirectionDecision || null,
         });
         added.push(result);
-        added.push(...debugSolids);
         // Replace the original geometry in the scene
         removed.push(targetSolid);
 
-
-
-
-        // loop over all added objects and set the epsilon vale on the solid
         for (const obj of added) {
-            if (obj && typeof obj === 'object' && typeof obj.setEpsilon === 'function') {
+            if (obj && typeof obj === 'object' && typeof obj.visualize === 'function') {
                 try {
-                    if (collapseTinyTriangles) {
-                        await obj.collapseTinyTriangles(FILLET_POST_COLLAPSE_TINY_TRIANGLE_THRESHOLD);
-                    }
-                    obj.__filletPostCollapseTinyTriangleCollapseEnabled = collapseTinyTriangles;
-                    if (cleanupPostCollapseTinyFaceIslands && typeof obj.cleanupTinyFaceIslands === 'function') {
-                        obj.__filletPostCollapseTinyFaceIslandCleanupCount = Math.max(
-                            0,
-                            Number(obj.cleanupTinyFaceIslands(FILLET_POST_COLLAPSE_TINY_FACE_ISLAND_CLEANUP_AREA) || 0),
-                        );
-                    } else {
-                        obj.__filletPostCollapseTinyFaceIslandCleanupCount = 0;
-                    }
-                    obj.__filletPostCollapseTinyFaceIslandCleanupEnabled = cleanupPostCollapseTinyFaceIslands;
                     obj.visualize()
                 } catch (e) {
-                    console.warn('[FilletFeature] Failed to set epsilon on fillet result solid.', { error: e });
+                    console.warn('[FilletFeature] Failed to visualize fillet result solid.', { error: e });
                 }
             }
         }

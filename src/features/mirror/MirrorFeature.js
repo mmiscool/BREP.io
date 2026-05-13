@@ -77,18 +77,12 @@ export class MirrorFeature {
             const mirrored = src.mirrorAcrossPlane(plane.point, plane.normal);
             // mutate face names so they are distinct for this feature
             try {
-                const idToFaceName = mirrored._idToFaceName instanceof Map ? mirrored._idToFaceName : new Map();
-                const mutatedIdToFace = new Map();
-                const mutatedFaceToId = new Map();
-                for (const [fid, fname] of idToFaceName.entries()) {
+                const faceNames = typeof mirrored.getFaceNames === 'function' ? mirrored.getFaceNames() : [];
+                for (const fname of faceNames) {
                     const base = String(fname ?? 'Face');
                     const feat = String(featureID ?? 'MIRROR');
-                    const newName = `${base}::${feat}`;
-                    mutatedIdToFace.set(fid, newName);
-                    mutatedFaceToId.set(newName, fid);
+                    mirrored.renameFace(base, `${base}::${feat}`);
                 }
-                mirrored._idToFaceName = mutatedIdToFace;
-                mirrored._faceNameToID = mutatedFaceToId;
             } catch (_) { }
             mirrored.name = `${featureID}:${src.name}:M`;
             // Build face/edge meshes for interaction/visibility

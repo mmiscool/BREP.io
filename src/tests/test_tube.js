@@ -33,13 +33,11 @@ export async function test_tube(partHistory) {
     solidTube.inputParams.path = [`${edgePrefix}G200`, `${edgePrefix}G201`];
     solidTube.inputParams.radius = 4;
     solidTube.inputParams.innerRadius = 0;
-    solidTube.inputParams.resolution = 32;
 
     const hollowTube = await partHistory.newFeature("TU");
     hollowTube.inputParams.path = [`${edgePrefix}G200`, `${edgePrefix}G201`];
     hollowTube.inputParams.radius = 5;
     hollowTube.inputParams.innerRadius = 2;
-    hollowTube.inputParams.resolution = 48;
 
     return partHistory;
 }

@@ -1,19 +1,13 @@
-import { Tube, tubeHasNativeBuilder } from "../BREP/Tube.js";
-import { manifoldBuildSource } from "../BREP/setupManifold.js";
+import { Tube } from "../BREP/Tube.js";
 
 function assert(condition, message) {
     if (!condition) throw new Error(message || "Assertion failed.");
 }
 
 export async function test_cppTube_open_tube_preserves_expected_face_labels() {
-    if (manifoldBuildSource !== "local" || !tubeHasNativeBuilder()) {
-        return;
-    }
-
     const tube = new Tube({
         points: [[0, 0, 0], [0, 20, 0], [10, 20, 0]],
         radius: 2,
-        resolution: 24,
         closed: false,
         name: "CPP_TUBE_OPEN",
     });
@@ -27,15 +21,10 @@ export async function test_cppTube_open_tube_preserves_expected_face_labels() {
 }
 
 export async function test_cppTube_closed_hollow_tube_preserves_expected_face_labels() {
-    if (manifoldBuildSource !== "local" || !tubeHasNativeBuilder()) {
-        return;
-    }
-
     const tube = new Tube({
         points: [[0, 0, 0], [20, 0, 0], [20, 20, 0], [0, 20, 0], [0, 0, 0]],
         radius: 3,
         innerRadius: 1,
-        resolution: 24,
         closed: true,
         name: "CPP_TUBE_CLOSED",
     });
@@ -50,22 +39,32 @@ export async function test_cppTube_closed_hollow_tube_preserves_expected_face_la
     assert(tube.getTriangleCount() > 0, "Expected closed native tube to contain triangles.");
 }
 
-export async function test_cppTube_union_preserves_distinct_face_labels_across_native_snapshots() {
-    if (manifoldBuildSource !== "local" || !tubeHasNativeBuilder()) {
-        return;
-    }
+export async function test_cppTube_hollow_tube_visualizes_distinct_inner_and_outer_faces() {
+    const tube = new Tube({
+        points: [[0, 0, 0], [0, 20, 0], [10, 20, 0]],
+        radius: 3,
+        innerRadius: 1,
+        closed: false,
+        name: "CPP_TUBE_HOLLOW_DISTINCT",
+    });
 
+    tube.visualize({ showEdges: true });
+    const faceMeshes = tube.children.filter((child) => child?.type === "FACE");
+    const faceNames = new Set(faceMeshes.map((child) => child.name));
+    assert(faceNames.has("CPP_TUBE_HOLLOW_DISTINCT_Outer"), "Expected hollow tube to visualize an Outer sidewall face.");
+    assert(faceNames.has("CPP_TUBE_HOLLOW_DISTINCT_Inner"), "Expected hollow tube to visualize an Inner sidewall face.");
+}
+
+export async function test_cppTube_union_preserves_distinct_face_labels_across_native_snapshots() {
     const tubeA = new Tube({
         points: [[0, 0, 0], [0, 12, 0]],
         radius: 1.5,
-        resolution: 24,
         closed: false,
         name: "CPP_TUBE_UNION_A",
     });
     const tubeB = new Tube({
         points: [[20, 0, 0], [20, 12, 0]],
         radius: 1.5,
-        resolution: 24,
         closed: false,
         name: "CPP_TUBE_UNION_B",
     });
@@ -78,57 +77,77 @@ export async function test_cppTube_union_preserves_distinct_face_labels_across_n
     assert(faceNames.has("CPP_TUBE_UNION_B_CapEnd"), "Expected unioned native tubes to preserve tube B CapEnd face.");
 }
 
-export async function test_cppTube_native_builder_reports_selected_build_mode() {
-    if (manifoldBuildSource !== "local" || !tubeHasNativeBuilder()) {
-        return;
-    }
-
-    const points = [[0, 0, 0], [0, 20, 0]];
+export async function test_cppTube_hollow_spline_path_visualizes_side_faces() {
+    const pathCurve = {
+        type: "hermite-extension-spline",
+        bendRadius: 1,
+        spline: {
+            points: [
+                { id: "p0", position: [0, 0, 0], rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1], forwardDistance: 10, backwardDistance: 1, flipDirection: false },
+                { id: "p1", position: [20, 10, 0], rotation: [0, 1, 0, -1, 0, 0, 0, 0, 1], forwardDistance: 10, backwardDistance: 10, flipDirection: false },
+                { id: "p2", position: [40, 0, 10], rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1], forwardDistance: 1, backwardDistance: 10, flipDirection: false },
+            ],
+        },
+    };
     const tube = new Tube({
-        points,
-        radius: 2,
-        resolution: 24,
-        closed: false,
-        name: "CPP_TUBE_MODE",
-        preferFast: true,
+        points: [[0, 0, 0], [10, 0, 0], [20, 10, 0], [20, 0, 0], [30, 0, 5], [40, 0, 10]],
+        radius: 1,
+        innerRadius: 0.8,
+        name: "CPP_TUBE_SPLINE",
+        pathCurve,
     });
 
-    assert(tube._tubeBuildMode === "fast", `Expected default tube generate() path to use native build-mode annotation, got ${tube._tubeBuildMode}.`);
-
-    const fastSnapshot = tube.buildNativeSnapshot({ preferFast: true, allowSlowFallback: false });
-    assert(fastSnapshot?.buildMode === "fast", `Expected explicit fast native tube build, got ${fastSnapshot?.buildMode}.`);
-    assert(fastSnapshot?.requestedFast === true, "Expected explicit fast native tube build to record requestedFast=true.");
-    assert(fastSnapshot?.fallbackFromFast === false, "Did not expect explicit fast native tube build to mark fallbackFromFast.");
-
-    const slowSnapshot = tube.buildNativeSnapshot({ preferFast: false });
-    assert(slowSnapshot?.buildMode === "slow", `Expected explicit slow native tube build, got ${slowSnapshot?.buildMode}.`);
-    assert(slowSnapshot?.requestedFast === false, "Expected explicit slow native tube build to record requestedFast=false.");
-    assert(slowSnapshot?.fallbackFromFast === false, "Did not expect explicit slow native tube build to mark fallbackFromFast.");
+    tube.visualize({ showEdges: true });
+    const faceMeshes = tube.children.filter((child) => child?.type === "FACE");
+    const sideFace = faceMeshes.find((child) => (child?.geometry?.index?.count || 0) > 300);
+    assert(faceMeshes.length >= 3, "Expected hollow spline tube to visualize cap and side face meshes.");
+    assert(sideFace, "Expected hollow spline tube to visualize a side face mesh, not just end rings.");
+    assert(sideFace.material?.side === 2, "Expected OpenCascade tube side face to render double-sided.");
 }
 
-export async function test_cppTube_native_auto_falls_back_to_slow_on_foldback_path() {
-    if (manifoldBuildSource !== "local" || !tubeHasNativeBuilder()) {
-        return;
+export async function test_cppTube_spline_solid_has_three_faces_and_no_cross_section_edges() {
+    const points = [];
+    for (let i = 0; i < 35; i++) {
+        const t = i / 34;
+        points.push([
+            Math.sin(t * Math.PI * 3) * 8,
+            t * 80,
+            Math.cos(t * Math.PI * 1.5) * 2,
+        ]);
     }
-
-    const points = [[0, 0, 0], [10, 0, 0], [10, 2, 0], [0, 2, 0]];
-    const autoTube = new Tube({
+    const tube = new Tube({
         points,
-        radius: 1.5,
-        resolution: 24,
-        closed: false,
-        name: "CPP_TUBE_FOLDBACK",
-        preferFast: true,
+        radius: 1,
+        innerRadius: 0,
+        name: "CPP_TUBE_SPLINE_SOLID",
+        pathCurve: {
+            type: "hermite-extension-spline",
+            spline: { points: [{ position: points[0] }, { position: points[points.length - 1] }] },
+        },
     });
 
-    assert(autoTube._tubeBuildMode === "slow", `Expected native auto tube build to fall back to slow for foldback path, got ${autoTube._tubeBuildMode}.`);
+    tube.visualize({ showEdges: true });
+    const faceNames = tube.getFaceNames();
+    assert(faceNames.length === 3, `Expected non-hollow spline tube to have exactly 3 faces, got ${faceNames.join(", ")}.`);
+    assert(faceNames.includes("CPP_TUBE_SPLINE_SOLID_Outer"), "Expected solid spline tube outer face.");
+    assert(faceNames.includes("CPP_TUBE_SPLINE_SOLID_CapStart"), "Expected solid spline tube start cap.");
+    assert(faceNames.includes("CPP_TUBE_SPLINE_SOLID_CapEnd"), "Expected solid spline tube end cap.");
 
-    const autoSnapshot = autoTube.buildNativeSnapshot({ preferFast: true, allowSlowFallback: true });
-    assert(autoSnapshot?.buildMode === "slow", `Expected native auto tube snapshot to fall back to slow, got ${autoSnapshot?.buildMode}.`);
-    assert(autoSnapshot?.fallbackFromFast === true, "Expected native auto tube snapshot to record fallbackFromFast=true.");
-    assert(autoSnapshot?.fallbackReason === "path_foldback_proximity", `Expected path_foldback_proximity fallback, got ${autoSnapshot?.fallbackReason}.`);
+    const faceMeshes = tube.children.filter((child) => child?.type === "FACE");
+    assert(faceMeshes.length === 3, `Expected exactly 3 visible face meshes, got ${faceMeshes.length}.`);
+    const crossSectionEdges = tube.children.filter((child) => child?.type === "EDGE" && String(child.name || "").includes("_Outer|CPP_TUBE_SPLINE_SOLID_Outer"));
+    assert(crossSectionEdges.length === 0, "Did not expect same-face cross-section edges on a smooth spline tube.");
 
-    const forcedFastSnapshot = autoTube.buildNativeSnapshot({ preferFast: true, allowSlowFallback: false });
-    assert(forcedFastSnapshot?.buildMode === "fast", `Expected explicit force-fast tube build, got ${forcedFastSnapshot?.buildMode}.`);
-    assert(forcedFastSnapshot?.selfUnionStats?.pathFoldbackLikely === true, "Expected force-fast tube build to expose the same pathFoldbackLikely signal.");
+    const startCap = faceMeshes.find((child) => child.name === "CPP_TUBE_SPLINE_SOLID_CapStart");
+    const tangent = [
+        points[1][0] - points[0][0],
+        points[1][1] - points[0][1],
+        points[1][2] - points[0][2],
+    ];
+    const tangentLength = Math.hypot(...tangent);
+    const normal = startCap?.getAverageNormal?.();
+    const dot = Math.abs(
+        ((normal?.x || 0) * tangent[0] + (normal?.y || 0) * tangent[1] + (normal?.z || 0) * tangent[2]) / tangentLength,
+    );
+    assert(dot > 0.85, `Expected start cap normal to align with path tangent; dot=${dot}.`);
 }

@@ -719,27 +719,17 @@ class Tube extends Solid {
   }
 
   generate() {
-    // Generate the tube, preferring a fast native path and falling back to the slower native rebuild if needed.
+    // Generate the tube with the OpenCascade pipe builder.
     return notImplemented();
   }
 
-  generateFast() {
-    // Generate the tube using the fast native tube builder path.
+  buildNativeSnapshot() {
+    // Build the OpenCascade authoring-state snapshot for the current tube parameters.
     return notImplemented();
   }
 
-  generateSlow() {
-    // Generate the tube using the slower native path intended for harder or self-intersecting cases.
-    return notImplemented();
-  }
-
-  buildNativeSnapshot(overrides = {}) {
-    // Build the native authoring-state snapshot for the current tube parameters.
-    return notImplemented();
-  }
-
-  generateNative(overrides = {}) {
-    // Rebuild this tube directly from a native snapshot generated from its current parameters.
+  generateNative() {
+    // Rebuild this tube directly from its current OpenCascade pipe state.
     return notImplemented();
   }
 }

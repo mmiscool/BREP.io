@@ -1,56 +1,14 @@
 // Solid.fillet implementation: consolidates fillet logic so features call this API.
 // Usage: solid.fillet({ radius, edges, featureID, direction, inflate, resolution, debug, debugSolidsLevel, debugShowCombinedBeforeTarget })
 import { resolveEdgesFromInputs } from './edgeResolution.js';
-import {
-  applySolidAuthoringStateSnapshot,
-  buildSolidAuthoringStateSnapshot,
-  getSyncedCppSolidCore,
-  syncSolidAuthoringStateFromCpp,
-} from '../CppSolidCore.js';
-import { manifold } from '../setupManifold.js';
-
-function hasNativeFilletCombinedBuilder() {
-  return typeof manifold?.buildFilletCombinedAuthoringState === 'function';
-}
-
-function hasNativeFilletBatchBuilder() {
-  return typeof manifold?.buildFilletBatchAuthoringState === 'function';
-}
-
-function hasNativeFilletCornerBridgeBuilder() {
-  return typeof manifold?.buildFilletCornerBridgeAuthoringState === 'function';
-}
-
-function hasNativeFilletDirectionClassifier() {
-  return typeof manifold?.classifyFilletEdgeDirection === 'function';
-}
+import { filletOccSolid, hasOccShape, setOccState } from '../OpenCascadeKernel.js';
 
 function requireNativeFilletCombinedBuilder() {
-  if (!hasNativeFilletBatchBuilder()) {
-    throw new Error('Solid.fillet() requires the custom local manifold build with native fillet batch support.');
-  }
-  if (!hasNativeFilletCombinedBuilder()) {
-    throw new Error('Solid.fillet() requires the custom local manifold build with native fillet combine support.');
-  }
-  if (!hasNativeFilletCornerBridgeBuilder()) {
-    throw new Error('Solid.fillet() requires the custom local manifold build with native fillet corner-bridge support.');
-  }
-  if (!hasNativeFilletDirectionClassifier()) {
-    throw new Error('Solid.fillet() requires the custom local manifold build with native fillet direction classification support.');
-  }
+  throw new Error('Solid.fillet() requires an OpenCASCADE-backed solid; legacy Manifold fillet fallback has been removed.');
 }
 
 function solidFromSnapshot(snapshot, SolidClass, name = null) {
-  if (!snapshot || !SolidClass) return null;
-  const solid = new SolidClass();
-  applySolidAuthoringStateSnapshot(solid, snapshot);
-  solid._dirty = true;
-  solid._manifold = null;
-  solid._faceIndex = null;
-  if (typeof name === 'string' && name.length > 0) {
-    try { solid.name = name; } catch { }
-  }
-  return solid;
+  return null;
 }
 
 function deriveSolidToleranceFromVerts(solid, baseTol = 1e-5) {
@@ -731,7 +689,6 @@ function mergeCoplanarAdjacentFilletEndCaps(solid, opts = {}) {
   const distanceTolerance = Math.max(solidTol * 4, 2e-4, nudgeDistance * 3);
   const planarityTolerance = Math.max(distanceTolerance * 2, 2e-4, nudgeDistance * 4);
   const normalTolerance = Math.max(1e-6, Math.abs(Number(opts?.normalTolerance) || 2e-4));
-  const core = getSyncedCppSolidCore(solid);
   let mergedEndCaps = 0;
   const maxPasses = Math.max(1, (solid.getFaceNames() || []).length);
 
@@ -757,10 +714,12 @@ function mergeCoplanarAdjacentFilletEndCaps(solid, opts = {}) {
       });
       if (!target?.faceName) continue;
 
-      const targetMetadata = cloneFaceMetadataObject(core.getFaceMetadata(target.faceName) || {});
-      if (!core.renameFace(endCapFaceName, target.faceName)) continue;
-      core.setFaceMetadata(target.faceName, targetMetadata);
-      syncSolidAuthoringStateFromCpp(solid, core);
+      const targetMetadata = cloneFaceMetadataObject(
+        typeof solid.getFaceMetadata === 'function' ? (solid.getFaceMetadata(target.faceName) || {}) : {}
+      );
+      if (typeof solid.renameFace !== 'function') continue;
+      solid.renameFace(endCapFaceName, target.faceName);
+      if (typeof solid.setFaceMetadata === 'function') solid.setFaceMetadata(target.faceName, targetMetadata);
       solid._dirty = true;
       solid._faceIndex = null;
       try { if (solid._manifold && typeof solid._manifold.delete === 'function') solid._manifold.delete(); } catch { }
@@ -1280,11 +1239,30 @@ export { reassignTinyFilletSidewallSliverTriangles as __testOnlyReassignTinyFill
  * @returns {import('../BetterSolid.js').Solid}
  */
 export async function fillet(opts = {}) {
-  requireNativeFilletCombinedBuilder();
   const radius = Number(opts.radius);
   if (!Number.isFinite(radius) || radius <= 0) {
     throw new Error(`Solid.fillet: radius must be > 0, got ${opts.radius}`);
   }
+  if (hasOccShape(this)) {
+    const unique = resolveEdgesFromInputs(this, { edgeNames: opts.edgeNames, edges: opts.edges });
+    if (unique.length === 0) {
+      const c = this.clone();
+      try { c.name = this.name; } catch { }
+      return c;
+    }
+    const occState = filletOccSolid(this, unique, { radius, featureID: opts.featureID || 'FILLET' });
+    if (!occState) {
+      const c = this.clone();
+      try { c.name = this.name; } catch { }
+      return c;
+    }
+    const SolidClass = this?.constructor?.BaseSolid || this?.constructor || null;
+    const result = new SolidClass();
+    setOccState(result, occState);
+    try { result.name = this?.name || `${opts.featureID || 'FILLET'}_FINAL_FILLET`; } catch { }
+    return result;
+  }
+  requireNativeFilletCombinedBuilder();
   const directionMode = normalizeFilletDirectionMode(opts.direction);
   const autoDirection = directionMode === 'AUTO';
   const inflate = Number.isFinite(opts.inflate) ? Number(opts.inflate) : 0.1;
@@ -1318,7 +1296,7 @@ export async function fillet(opts = {}) {
     try { c.name = this.name; } catch { }
     return c;
   }
-  const baseSnapshot = buildSolidAuthoringStateSnapshot(this);
+  const baseSnapshot = null;
   const debugAdded = [];
   const buildFallbackResult = () => {
     const fallback = this.clone();
@@ -1361,7 +1339,9 @@ export async function fillet(opts = {}) {
 
   let nativeResult = null;
   try {
-    nativeResult = manifold.buildFilletAuthoringState({
+    throw new Error('Legacy Manifold fillet fallback has been removed.');
+    nativeResult = null;
+    nativeResult = ({
       snapshot: baseSnapshot,
       edges: edgePayload,
       radius,

@@ -1,3 +1,5 @@
+import { hasOccShape, offsetShellOccSolid, setOccState } from "../OpenCascadeKernel.js";
+
 function sanitizeToken(value, fallback = 'FACE') {
     const raw = value == null ? '' : String(value);
     const trimmed = raw.trim();
@@ -42,10 +44,43 @@ export function offsetShell(faces, distance, options = {}) {
             .filter(Boolean)
     );
 
-    const magnitude = Math.abs(Number(distance));
-    if (!Number.isFinite(magnitude) || magnitude === 0) return null;
+    const signedDistance = Number(distance);
+    if (!Number.isFinite(signedDistance) || signedDistance === 0) return null;
 
+    const magnitude = Math.abs(signedDistance);
     const thickenDistance = -magnitude;
+
+    if (hasOccShape(this)) {
+        const occState = offsetShellOccSolid(this, Array.from(excludedFaceNames), {
+            distance: signedDistance,
+            featureID: featureId,
+        });
+        if (!occState) return null;
+        const SolidClass = this?.constructor?.BaseSolid || this?.constructor || null;
+        const result = new SolidClass();
+        setOccState(result, occState);
+        try { result.name = newSolidName; } catch { /* ignore */ }
+        const buildMethod = excludedFaceNames.size ? "occ_make_thick_solid" : "occ_make_offset_shape";
+        result.__offsetMethod = buildMethod;
+        result.__offsetDiagnostics = {
+            buildMethod,
+            excludedFaceCount: excludedFaceNames.size,
+            removedFaceNames: Array.from(excludedFaceNames),
+            distance: signedDistance,
+        };
+        try {
+            result.userData = {
+                ...(result.userData || {}),
+                offsetShell: {
+                    buildMethod,
+                    excludedFaceNames: Array.from(excludedFaceNames),
+                    distance: signedDistance,
+                },
+            };
+        } catch { /* ignore */ }
+        return result;
+    }
+
     let faceObjects = [];
     try {
         faceObjects = Array.isArray(this.faces) ? this.faces.slice() : [];

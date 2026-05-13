@@ -1,24 +1,21 @@
 import { Solid } from './BetterSolid.js';
-import { applySolidAuthoringStateSnapshot } from './CppSolidCore.js';
-import { manifold } from './setupManifold.js';
+import {
+  makeBox,
+  makeCone,
+  makeCylinder,
+  makePyramid,
+  makeSphere,
+  makeTorus,
+  setOccState,
+} from './OpenCascadeKernel.js';
 
 function hasNativePrimitiveBuilder() {
-  return typeof manifold?.buildPrimitiveAuthoringState === 'function';
+  return true;
 }
 
 function requireNativePrimitiveBuilder() {
   if (hasNativePrimitiveBuilder()) return;
-  throw new Error('Primitive generation requires the custom local manifold build with native primitive support.');
-}
-
-function applyNativePrimitiveSnapshot(target, snapshot, name) {
-  applySolidAuthoringStateSnapshot(target, snapshot, { remapFaceIDs: true });
-  target._dirty = true;
-  target._manifold = null;
-  target._faceIndex = null;
-  target._auxEdges = [];
-  target.name = name || 'Solid';
-  return target;
+  throw new Error('Primitive generation requires OpenCASCADE support.');
 }
 
 class PrimitiveBase extends Solid {
@@ -32,16 +29,22 @@ class PrimitiveBase extends Solid {
 
   buildNativeSnapshot() {
     requireNativePrimitiveBuilder();
-    return manifold.buildPrimitiveAuthoringState({
-      kind: this._primitiveKind,
-      ...this.params,
-      name: this.params?.name || this.name || 'Solid',
-    });
+    const params = { ...this.params, name: this.params?.name || this.name || 'Solid' };
+    if (this._primitiveKind === 'cube') return makeBox(params);
+    if (this._primitiveKind === 'cylinder') return makeCylinder(params);
+    if (this._primitiveKind === 'cone') return makeCone(params);
+    if (this._primitiveKind === 'pyramid') return makePyramid(params);
+    if (this._primitiveKind === 'sphere') return makeSphere(params);
+    if (this._primitiveKind === 'torus') return makeTorus(params);
+    throw new Error(`OpenCASCADE primitive "${this._primitiveKind}" is not implemented.`);
   }
 
   generate() {
-    const snapshot = this.buildNativeSnapshot();
-    return applyNativePrimitiveSnapshot(this, snapshot, this.params?.name);
+    const state = this.buildNativeSnapshot();
+    setOccState(this, state);
+    this._auxEdges = [];
+    this.name = this.params?.name || 'Solid';
+    return this;
   }
 }
 

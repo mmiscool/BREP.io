@@ -35,7 +35,22 @@ export function resolveSingleSolidFromEdges(edges) {
 }
 
 export function getSolidGeometryCounts(solid) {
-  const triCount = Array.isArray(solid?._triVerts) ? (solid._triVerts.length / 3) : 0;
-  const vertCount = Array.isArray(solid?._vertProperties) ? (solid._vertProperties.length / 3) : 0;
+  let triVerts = solid?._triVerts;
+  let vertProperties = solid?._vertProperties;
+  if (
+    (!Array.isArray(triVerts) || triVerts.length === 0 || !Array.isArray(vertProperties) || vertProperties.length === 0)
+    && typeof solid?.getMesh === 'function'
+  ) {
+    try {
+      const mesh = solid.getMesh();
+      triVerts = mesh?.triVerts || triVerts;
+      vertProperties = mesh?.vertProperties || vertProperties;
+      try { if (mesh && typeof mesh.delete === 'function') mesh.delete(); } catch { }
+    } catch {
+      // Fall through to the legacy arrays below.
+    }
+  }
+  const triCount = triVerts && typeof triVerts.length === 'number' ? (triVerts.length / 3) : 0;
+  const vertCount = vertProperties && typeof vertProperties.length === 'number' ? (vertProperties.length / 3) : 0;
   return { triCount, vertCount };
 }

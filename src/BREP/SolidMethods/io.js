@@ -1,4 +1,5 @@
 import { generateSTEP } from '../../exporters/step.js';
+import { hasOccShape, occSTEP } from '../OpenCascadeKernel.js';
 
 /**
  * Export helpers (STL + STEP output).
@@ -82,6 +83,9 @@ export function toSTEP(name = undefined, options = {}) {
     const scale = Number.isFinite(opts.scale) ? opts.scale : 1;
     const applyWorldTransform = opts.applyWorldTransform !== false;
     const baseName = name || this?.name || 'part';
+    if (hasOccShape(this) && opts.useTessellatedFaces !== true && scale === 1 && applyWorldTransform) {
+        return occSTEP(this, baseName);
+    }
     const stepOpts = { ...opts, name: baseName, unit, precision, scale, applyWorldTransform };
     const { data } = generateSTEP([this], stepOpts);
     return data;

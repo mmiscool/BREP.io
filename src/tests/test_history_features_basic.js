@@ -105,11 +105,6 @@ export async function test_history_features_basic(partHistory) {
   overlap.inputParams.targetSolid = overlapBase.inputParams.featureID;
   overlap.inputParams.distance = 0.0005;
 
-  const pushFaceBase = await partHistory.newFeature("P.CU");
-  const pushFace = await partHistory.newFeature("PF");
-  pushFace.inputParams.faces = [`${pushFaceBase.inputParams.featureID}_PZ`];
-  pushFace.inputParams.distance = 0.5;
-
   const thickenBase = await partHistory.newFeature("P.CU");
   const thicken = await partHistory.newFeature("THK");
   thicken.inputParams.face = `${thickenBase.inputParams.featureID}_PZ`;
@@ -170,6 +165,5 @@ export async function afterRun_history_features_basic(partHistory) {
   requireFeatureObject("HX", "Helix");
   requireFeatureObject("LOFT", "Loft");
   requireFeatureObject("R", "Revolve");
-  requireFeatureOwnedObject("PF", "Push Face");
   requireFeatureOwnedObject("THK", "Thicken");
 }

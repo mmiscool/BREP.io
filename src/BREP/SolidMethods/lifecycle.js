@@ -34,6 +34,8 @@ export function constructorImpl() {
     this._freeTimer = null;           // handle for scheduled wasm cleanup
     this._cppSolidCore = null;        // optional reusable native authoring bridge
     this._cppSolidCoreSyncStamp = null;
+    this._kernel = "opencascade";
+    this._occ = null;                 // OpenCASCADE TopoDS_Shape-backed state
 
     this.type = 'SOLID';
     this.renderOrder = 1;
@@ -55,6 +57,14 @@ export function clone() {
     s._faceIndex = null;
     s._cppSolidCore = null;
     s._cppSolidCoreSyncStamp = null;
+    s._kernel = this._kernel || "opencascade";
+    s._occ = this._occ ? {
+        ...this._occ,
+        faceNames: Array.from(this._occ.faceNames || []),
+        faceMetadata: new Map(this._occ.faceMetadata instanceof Map ? this._occ.faceMetadata.entries() : []),
+        edgeMetadata: new Map(this._occ.edgeMetadata instanceof Map ? this._occ.edgeMetadata.entries() : []),
+        meshCache: null,
+    } : null;
     s.type = 'SOLID';
     s.renderOrder = this.renderOrder;
     return s;
@@ -81,6 +91,7 @@ export function free() {
             try { if (typeof this._cppSolidCore.dispose === 'function') this._cppSolidCore.dispose(); } catch (_) { }
             this._cppSolidCore = null;
         }
+        if (this._occ) this._occ.meshCache = null;
         this._cppSolidCoreSyncStamp = null;
         this._dirty = true;
         this._faceIndex = null;

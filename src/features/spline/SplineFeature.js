@@ -1666,6 +1666,11 @@ export class SplineFeature {
       edge.userData = {
         polylineLocal: polyline.map((p) => [p[0], p[1], p[2]]),
         polylineWorld: true,
+        splinePath: {
+          type: "hermite-extension-spline",
+          spline: cloneSplineData(evaluatedSpline),
+          bendRadius,
+        },
         splineFeatureId: featureId,
       };
       sceneGroup.add(edge);

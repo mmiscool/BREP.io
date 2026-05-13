@@ -2,8 +2,10 @@
  * Geometric measurements.
  */
 import { computeTriangleArea } from '../triangleUtils.js';
+import { hasOccShape, occSurfaceArea, occVolume } from '../OpenCascadeKernel.js';
 
 export function volume() {
+    if (hasOccShape(this)) return occVolume(this);
     const mesh = this.getMesh();
     try {
         const vp = mesh.vertProperties;
@@ -23,6 +25,7 @@ export function volume() {
 }
 
 export function surfaceArea() {
+    if (hasOccShape(this)) return occSurfaceArea(this);
     const mesh = this.getMesh();
     try {
         const vp = mesh.vertProperties;

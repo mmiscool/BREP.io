@@ -1,0 +1,6 @@
+[   34278ms] [WARNING] The keyword 'slider-vertical' specified to an 'appearance' property is not standardized. It will be removed in the future. Use <input type=range style="writing-mode: vertical-lr; direction: rtl"> instead. @ http://127.0.0.1:5174/@vite/client:1069
+[   34279ms] [WARNING] The keyword 'slider-vertical' specified to an 'appearance' property is not standardized. It will be removed in the future. Use <input type=range style="writing-mode: vertical-lr; direction: rtl"> instead. @ http://127.0.0.1:5174/@vite/client:1069
+[   34389ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:5174/index.html:0
+[   39834ms] [WARNING] The keyword 'slider-vertical' specified to an 'appearance' property is not standardized. It will be removed in the future. Use <input type=range style="writing-mode: vertical-lr; direction: rtl"> instead. @ http://127.0.0.1:5174/@vite/client:1069
+[   39835ms] [WARNING] The keyword 'slider-vertical' specified to an 'appearance' property is not standardized. It will be removed in the future. Use <input type=range style="writing-mode: vertical-lr; direction: rtl"> instead. @ http://127.0.0.1:5174/@vite/client:1069
+[   39956ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:5174/index.html:0

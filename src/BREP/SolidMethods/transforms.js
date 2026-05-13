@@ -10,6 +10,7 @@ import {
     syncSolidAuthoringStateFromCpp,
     syncSolidAuthoringStateToCpp,
 } from "../CppSolidCore.js";
+import { hasOccShape, setOccState, transformOccState } from "../OpenCascadeKernel.js";
 
 /**
  * Geometry transforms applied directly to authored data.
@@ -22,6 +23,11 @@ import {
 export function bakeTransform(matrix) {
     try {
         if (!matrix || typeof matrix.elements === 'undefined') return this;
+        if (hasOccShape(this)) {
+            const m = (matrix && matrix.isMatrix4) ? matrix : new THREE.Matrix4().fromArray(matrix.elements || matrix);
+            setOccState(this, transformOccState(this._occ, m));
+            return this;
+        }
         if (!Array.isArray(this._vertProperties) || this._vertProperties.length === 0) return this;
         const m = (matrix && matrix.isMatrix4) ? matrix : new THREE.Matrix4().fromArray(matrix.elements || matrix);
         requireCppSolidCoreCapability(cppSolidCoreHasAuthoringBridge, "Solid.bakeTransform()");
@@ -60,6 +66,22 @@ export function mirrorAcrossPlane(point, normal) {
     const n = (normal instanceof THREE.Vector3)
         ? normal.clone().normalize()
         : new THREE.Vector3(normal[0], normal[1], normal[2]).normalize();
+    const nx = n.x;
+    const ny = n.y;
+    const nz = n.z;
+    const planeDot = P0.dot(n);
+    const reflection = new THREE.Matrix4().set(
+        1 - (2 * nx * nx), -2 * nx * ny, -2 * nx * nz, 2 * planeDot * nx,
+        -2 * ny * nx, 1 - (2 * ny * ny), -2 * ny * nz, 2 * planeDot * ny,
+        -2 * nz * nx, -2 * nz * ny, 1 - (2 * nz * nz), 2 * planeDot * nz,
+        0, 0, 0, 1,
+    );
+
+    if (hasOccShape(this)) {
+        const mirrored = this.clone();
+        mirrored.bakeTransform(reflection);
+        return mirrored;
+    }
 
     const sourceSnapshot = getSolidAuthoringStateSnapshot(this);
     const mesh = this.getMesh();
@@ -142,16 +164,6 @@ export function mirrorAcrossPlane(point, normal) {
             requireCppSolidCoreCapability(
                 cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeMetadataTransform,
                 "Solid.mirrorAcrossPlane()",
-            );
-            const nx = n.x;
-            const ny = n.y;
-            const nz = n.z;
-            const planeDot = P0.dot(n);
-            const reflection = new THREE.Matrix4().set(
-                1 - (2 * nx * nx), -2 * nx * ny, -2 * nx * nz, 2 * planeDot * nx,
-                -2 * ny * nx, 1 - (2 * ny * ny), -2 * ny * nz, 2 * planeDot * ny,
-                -2 * nz * nx, -2 * nz * ny, 1 - (2 * nz * nz), 2 * planeDot * nz,
-                0, 0, 0, 1,
             );
             mirrored._cppSolidCore = mirrored._cppSolidCore || new CppSolidCore();
             syncSolidAuthoringStateToCpp(mirrored, mirrored._cppSolidCore);

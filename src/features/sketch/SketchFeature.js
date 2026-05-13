@@ -833,7 +833,7 @@ export class SketchFeature {
                     bw.x + edgeBias.x, bw.y + edgeBias.y, bw.z + edgeBias.z,
                 ]);
                 const edgeName = `${edgeNamePrefix}G${g.id}`;
-                const e = new BREP.Edge(lg); e.name = edgeName; e.userData = { polylineLocal:[[aw.x,aw.y,aw.z],[bw.x,bw.y,bw.z]], polylineWorld:true, sketchFeatureId: featureId, sketchGeometryId: g.id };
+                const e = new BREP.Edge(lg); e.name = edgeName; e.userData = { polylineLocal:[[aw.x,aw.y,aw.z],[bw.x,bw.y,bw.z]], polylineWorld:true, sketchGeomType:'line', sketchFeatureId: featureId, sketchGeometryId: g.id };
                 applySketchEdgeStyle(e);
                 edges.push(e); edgeBySegId.set(g.id, e);
             } else if (g.type==='arc' && g.points?.length===3) {
@@ -911,7 +911,11 @@ export class SketchFeature {
                 const flat=[]; const worldPts=[]; for(const p of pts){ const v=toWorld(p[0],p[1]); flat.push(v.x + edgeBias.x, v.y + edgeBias.y, v.z + edgeBias.z); worldPts.push([v.x,v.y,v.z]); }
                 const lg = new LineGeometry(); lg.setPositions(flat);
                 const edgeName = `${edgeNamePrefix}G${g.id}`;
-                const e = new BREP.Edge(lg); e.name = edgeName; e.userData = { polylineLocal: worldPts, polylineWorld:true, sketchFeatureId: featureId, sketchGeometryId: g.id };
+                const bezierPoles = ids.map((id) => pointById.get(id)).filter(Boolean).map((p) => {
+                    const v = toWorld(p.x, p.y);
+                    return [v.x, v.y, v.z];
+                });
+                const e = new BREP.Edge(lg); e.name = edgeName; e.userData = { polylineLocal: worldPts, polylineWorld:true, sketchGeomType:'bezier', bezierPoles, sketchFeatureId: featureId, sketchGeometryId: g.id };
                 applySketchEdgeStyle(e);
                 edges.push(e); edgeBySegId.set(g.id, e);
             }
@@ -1146,8 +1150,12 @@ export class SketchFeature {
             for (const grp of groups){
                 // Prepare contour and holes (remove duplicate last point for API)
                 let contour = normalizedLoops[grp.outer].slice(); contour.pop();
+                let contourSegmentIds = (loopSegIDs[grp.outer] || []).map((sid) => segs[sid]?.id).filter((id) => id !== undefined && id !== null);
                 // Earcut expects outer CW, holes CCW. Enforce CW for outer
-                if (signedArea([...contour, contour[0]]) > 0) contour = contour.slice().reverse();
+                if (signedArea([...contour, contour[0]]) > 0) {
+                    contour = contour.slice().reverse();
+                    contourSegmentIds = contourSegmentIds.slice().reverse();
+                }
                 // Record boundary edges for outer
                 for (const sid of (loopSegIDs[grp.outer] || [])) {
                     const e = edgeBySegId.get(segs[sid]?.id);
@@ -1158,8 +1166,12 @@ export class SketchFeature {
                 }
                 const holes = grp.holes.map(idx=>{
                     let h = normalizedLoops[idx].slice(); h.pop();
+                    let hSegmentIds = (loopSegIDs[idx] || []).map((sid) => segs[sid]?.id).filter((id) => id !== undefined && id !== null);
                     // Ensure CCW for holes (outer is CW per earcut convention)
-                    if (signedArea([...h, h[0]]) < 0) h = h.slice().reverse();
+                    if (signedArea([...h, h[0]]) < 0) {
+                        h = h.slice().reverse();
+                        hSegmentIds = hSegmentIds.slice().reverse();
+                    }
                     for (const sid of (loopSegIDs[idx] || [])) {
                         const e = edgeBySegId.get(segs[sid]?.id);
                         if (e) {
@@ -1167,6 +1179,7 @@ export class SketchFeature {
                             boundaryEdges.add(e);
                         }
                     }
+                    h.segmentIds = hSegmentIds;
                     return h;
                 });
 
@@ -1192,9 +1205,13 @@ export class SketchFeature {
                 const toW = (p)=> toWorld(p[0], p[1]);
                 const worldOuter = contour.map(p=>{ const v=toW(p); return [v.x,v.y,v.z]; });
                 const worldHoles = holes.map(h=> h.map(p=>{ const v=toW(p); return [v.x,v.y,v.z]; }));
-                boundaryLoopsWorld.push({ pts: worldOuter, isHole: false });
-                for (const h of worldHoles) boundaryLoopsWorld.push({ pts: h, isHole: true });
-                profileGroups.push({ contour2D: contour.slice(), holes2D: holes.map(h=>h.slice()), contourW: worldOuter.slice(), holesW: worldHoles.map(h=>h.slice()) });
+                const outerSegmentIds = contourSegmentIds.slice();
+                const holeSegmentIds = holes.map((hole) => Array.isArray(hole.segmentIds) ? hole.segmentIds.slice() : []);
+                boundaryLoopsWorld.push({ pts: worldOuter, isHole: false, segmentIds: outerSegmentIds.slice() });
+                for (let holeIndex = 0; holeIndex < worldHoles.length; holeIndex += 1) {
+                    boundaryLoopsWorld.push({ pts: worldHoles[holeIndex], isHole: true, segmentIds: (holeSegmentIds[holeIndex] || []).slice() });
+                }
+                profileGroups.push({ contour2D: contour.slice(), holes2D: holes.map(h=>h.slice()), contourW: worldOuter.slice(), holesW: worldHoles.map(h=>h.slice()), contourSegmentIds: outerSegmentIds.slice(), holeSegmentIds: holeSegmentIds.map((ids) => ids.slice()) });
             }
 
             const diagEdges = edges.map((e) => {

@@ -1,14 +1,8 @@
 import { Solid } from './BetterSolid.js';
 import * as THREE from 'three';
-import { applySolidAuthoringStateSnapshot } from './CppSolidCore.js';
 import { getEdgeLineEndpointsWorld, getEdgePolylineWorld } from './edgePolylineUtils.js';
 import { computeBoundaryLoopsFromFaceNative } from './Sweep.js';
-import { manifold } from './setupManifold.js';
-
-function requireNativeRevolveBuilder() {
-  if (typeof manifold?.buildRevolveAuthoringState === 'function') return;
-  throw new Error('Revolve generation requires the custom local manifold build with native revolve support.');
-}
+import { makeRevolution, setOccState } from './OpenCascadeKernel.js';
 
 function computeFaceCentroidWorld(faceObj) {
   try {
@@ -44,8 +38,52 @@ function computeFaceCentroidWorld(faceObj) {
   return null;
 }
 
+function cloneBoundaryLoopsWorld(face) {
+  const loops = Array.isArray(face?.userData?.boundaryLoopsWorld) && face.userData.boundaryLoopsWorld.length
+    ? face.userData.boundaryLoopsWorld
+    : null;
+  if (!loops) return null;
+  return loops.map((loop) => ({
+    pts: (Array.isArray(loop?.pts) ? loop.pts : loop).map((p) => [p[0], p[1], p[2]]),
+    isHole: !!loop?.isHole,
+    segmentIds: Array.isArray(loop?.segmentIds) ? loop.segmentIds.slice() : [],
+  }));
+}
+
+function cloneSketchEdgeInputsWorld(face) {
+  const inputs = Array.isArray(face?.userData?.sketchEdgeInputsWorld)
+    ? face.userData.sketchEdgeInputsWorld
+    : null;
+  if (!inputs) return null;
+  const faceToken = String(face?.name || face?.userData?.faceName || 'Face');
+  return inputs.map((edge, index) => {
+    const sourceName = String(edge?.name || edge?.metadata?.sourceEdgeName || edge?.sketchGeometryId || `EDGE_${index}`);
+    const metadata = (() => {
+      try {
+        const parsed = edge?.metadataJson ? JSON.parse(String(edge.metadataJson)) : {};
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch {
+        return {};
+      }
+    })();
+    if (sourceName) metadata.sourceEdgeName = sourceName;
+    return {
+      ...edge,
+      name: `${faceToken}:${sourceName}_RV`,
+      sketchGeometryId: edge?.sketchGeometryId ?? null,
+      polyline: (Array.isArray(edge?.polyline) ? edge.polyline : []).map((p) => [p[0], p[1], p[2]]),
+      curveType: edge?.curveType || edge?.sketchGeomType || null,
+      bezierPoles: Array.isArray(edge?.bezierPoles) ? edge.bezierPoles.map((p) => p.slice()) : null,
+      circleCenter: Array.isArray(edge?.circleCenter) ? edge.circleCenter.slice() : null,
+      circleRadius: Number.isFinite(Number(edge?.circleRadius)) ? Number(edge.circleRadius) : null,
+      arcCenter: Array.isArray(edge?.arcCenter) ? edge.arcCenter.slice() : null,
+      arcRadius: Number.isFinite(Number(edge?.arcRadius)) ? Number(edge.arcRadius) : null,
+      metadataJson: JSON.stringify(metadata),
+    };
+  }).filter((entry) => Array.isArray(entry.polyline) && entry.polyline.length >= 2);
+}
+
 function generateNativeRevolve(target, params = {}) {
-  requireNativeRevolveBuilder();
   const { face, axis, angle = 360, resolution = 64 } = params;
   if (!face || !face.geometry) return false;
 
@@ -63,9 +101,13 @@ function generateNativeRevolve(target, params = {}) {
   if (axisDir.lengthSq() < 1e-12) axisDir.set(0, 1, 0);
   axisDir.normalize();
 
-  const faceNormal = (typeof face.getAverageNormal === 'function')
-    ? face.getAverageNormal().clone()
-    : new THREE.Vector3(0, 1, 0);
+  const storedNormal = Array.isArray(face?.userData?.profileNormal) && face.userData.profileNormal.length >= 3
+    ? new THREE.Vector3(face.userData.profileNormal[0], face.userData.profileNormal[1], face.userData.profileNormal[2])
+    : null;
+  const faceNormal = storedNormal
+    || (typeof face.getAverageNormal === 'function'
+      ? face.getAverageNormal().clone()
+      : new THREE.Vector3(0, 1, 0));
   const faceCentroid = computeFaceCentroidWorld(face);
   if (faceNormal.lengthSq() < 1e-12) faceNormal.set(0, 1, 0);
   faceNormal.normalize();
@@ -78,17 +120,13 @@ function generateNativeRevolve(target, params = {}) {
     }
   }
 
-  const boundaryLoops = Array.isArray(face?.userData?.boundaryLoopsWorld) && face.userData.boundaryLoopsWorld.length
-    ? face.userData.boundaryLoopsWorld.map((loop) => ({
-        pts: (Array.isArray(loop?.pts) ? loop.pts : loop).map((p) => [p[0], p[1], p[2]]),
-        isHole: !!loop?.isHole,
-      }))
-    : computeBoundaryLoopsFromFaceNative(face);
+  const boundaryLoops = cloneBoundaryLoopsWorld(face) || computeBoundaryLoopsFromFaceNative(face);
   if (!boundaryLoops.length) {
     throw new Error('Revolve generation requires boundary loops on the source face.');
   }
 
-  const edgeInputs = (Array.isArray(face?.edges) ? face.edges : [])
+  const storedEdgeInputs = cloneSketchEdgeInputsWorld(face);
+  const edgeInputs = storedEdgeInputs || (Array.isArray(face?.edges) ? face.edges : [])
     .map((edge) => ({
       name: `${edge?.name || 'EDGE'}_RV`,
       polyline: getEdgePolylineWorld(edge, { dedupe: false }).map((p) => [p[0], p[1], p[2]]),
@@ -99,44 +137,20 @@ function generateNativeRevolve(target, params = {}) {
     }))
     .filter((entry) => Array.isArray(entry.polyline) && entry.polyline.length >= 2);
 
-  const snapshot = manifold.buildRevolveAuthoringState({
-    name: target.name || params.name || 'Revolve',
+  const occState = makeRevolution({
     faceName: face?.name || 'Face',
+    boundaryLoops,
     axisOrigin: [A.x, A.y, A.z],
     axisDirection: [axisDir.x, axisDir.y, axisDir.z],
-    angle: Number.isFinite(Number(angle)) ? Number(angle) : 360,
-    resolution: Number.isFinite(Number(resolution)) ? Number(resolution) : 64,
-    faceNormal: [faceNormal.x, faceNormal.y, faceNormal.z],
-    boundaryLoops,
-    edges: edgeInputs,
+    angleDegrees: Number.isFinite(Number(angle)) ? Number(angle) : 360,
+    edgeInputs,
+    normal: [faceNormal.x, faceNormal.y, faceNormal.z],
   });
-
-  applySolidAuthoringStateSnapshot(target, snapshot, { remapFaceIDs: true });
-  target._dirty = true;
-  target._manifold = null;
-  target._faceIndex = null;
-  try { target.setEpsilon(Number(snapshot?.suggestedEpsilon) || 1e-6); } catch {}
-
-  try {
-    const vp = Array.isArray(target._vertProperties) ? target._vertProperties : null;
-    if (vp && vp.length >= 6) {
-      const tmp = new THREE.Vector3();
-      let minT = Infinity;
-      let maxT = -Infinity;
-      for (let i = 0; i < vp.length; i += 3) {
-        tmp.set(vp[i], vp[i + 1], vp[i + 2]);
-        const t = tmp.clone().sub(A).dot(axisDir);
-        if (t < minT) minT = t;
-        if (t > maxT) maxT = t;
-      }
-      if (Number.isFinite(minT) && Number.isFinite(maxT) && maxT - minT > 1e-9) {
-        const p0 = A.clone().add(axisDir.clone().multiplyScalar(minT));
-        const p1 = A.clone().add(axisDir.clone().multiplyScalar(maxT));
-        target.addCenterline(p0, p1, `${target.name || 'Revolve'}_AXIS`, { polylineWorld: true });
-      }
-    }
-  } catch {}
-
+  setOccState(target, occState);
+  try { target.name = params.name || target.name || 'Revolve'; } catch {}
+  if (axisObj) {
+    try { target.addCenterline(A, B, `${target.name || 'Revolve'}_AXIS`, { polylineWorld: true }); } catch {}
+  }
   return true;
 }
 

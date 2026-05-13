@@ -1,17 +1,5 @@
 import { Solid } from './BetterSolid.js';
-import { applySolidAuthoringStateSnapshot } from './CppSolidCore.js';
-import { manifold } from './setupManifold.js';
-
-const DEFAULT_SEGMENTS = 32;
-
-function hasNativeTubeBuilder() {
-  return typeof manifold?.buildTubeAuthoringState === 'function';
-}
-
-function requireNativeTubeBuilder() {
-  if (hasNativeTubeBuilder()) return;
-  throw new Error('Tube generation requires the custom local manifold build with native tube support.');
-}
+import { makeTube, setOccState } from './OpenCascadeKernel.js';
 
 function sanitizePathPoints(points) {
   const out = [];
@@ -38,18 +26,12 @@ function addTubePathAuxEdge(target, pathPoints, name, closed) {
   });
 }
 
-function applyNativeTubeSnapshot(target, snapshot, name) {
-  applySolidAuthoringStateSnapshot(target, snapshot, { remapFaceIDs: true });
-  target._dirty = true;
-  target._manifold = null;
-  target._faceIndex = null;
+function applyNativeTubeState(target, state, name) {
+  setOccState(target, state);
   target._auxEdges = [];
-  target.debugSphereSolids = [];
-  target._selfUnionStats = snapshot?.selfUnionStats ?? null;
-  target._tubeBuildMode = typeof snapshot?.buildMode === 'string' ? snapshot.buildMode : null;
+  target._tubeBuildMode = 'occ_make_pipe';
   target.name = name || 'Tube';
-  target.params.closed = !!snapshot?.closed;
-  addTubePathAuxEdge(target, snapshot?.pathPoints || target.params?.points, target.name, target.params.closed);
+  addTubePathAuxEdge(target, target.params?.points, target.name, target.params.closed);
   return target;
 }
 
@@ -60,18 +42,14 @@ export class Tube extends Solid {
       points = [],
       radius = 1,
       innerRadius = 0,
-      resolution = DEFAULT_SEGMENTS,
       closed = false,
       name = 'Tube',
-      debugSpheres = false,
-      preferFast = true,
-      selfUnion = true,
       autoVisualize = false,
+      pathCurve = null,
+      endpointExtension = 0,
     } = opts;
-    this.params = { points, radius, innerRadius, resolution, closed, name, debugSpheres, preferFast, selfUnion };
+    this.params = { points, radius, innerRadius, closed, name, pathCurve, endpointExtension };
     this.name = name;
-    this.debugSphereSolids = [];
-    this._selfUnionStats = null;
 
     if (Array.isArray(points) && points.length >= 2) {
       const firstPoint = points[0];
@@ -84,67 +62,45 @@ export class Tube extends Solid {
       }
     }
 
-    try {
-      const hasPath = Array.isArray(points) && points.length >= 2;
-      const validRadius = Number(radius) > 0;
-      if (hasPath && validRadius) {
-        this.generate();
-        if (autoVisualize) this.visualize();
-      }
-    } catch {
-      // Fail-quietly to keep boolean reconstruction safe.
+    const hasPath = Array.isArray(points) && points.length >= 2;
+    const validRadius = Number(radius) > 0;
+    if (hasPath && validRadius) {
+      this.generate();
+      if (autoVisualize) this.visualize();
     }
   }
 
   generate() {
-    const preferFast = this.params?.preferFast !== false;
-    return this.generateNative({
-      preferFast,
-      allowSlowFallback: preferFast,
-    });
+    return this.generateNative();
   }
 
-  generateFast() {
-    return this.generateNative({ preferFast: true, allowSlowFallback: false });
-  }
-
-  generateSlow() {
-    return this.generateNative({ preferFast: false });
-  }
-
-  buildNativeSnapshot(overrides = {}) {
-    requireNativeTubeBuilder();
-
+  buildNativeSnapshot() {
     const {
       points,
       radius,
       innerRadius,
-      resolution,
       closed,
       name,
-      selfUnion,
+      pathCurve,
+      endpointExtension,
     } = this.params || {};
 
-    return manifold.buildTubeAuthoringState({
+    return makeTube({
       points: sanitizePathPoints(points),
       radius: Number(radius),
       innerRadius: Number(innerRadius) || 0,
-      resolution: Math.max(8, Math.floor(Number(resolution) || DEFAULT_SEGMENTS)),
       closed: !!closed,
-      preferFast: overrides.preferFast ?? true,
-      allowSlowFallback: overrides.allowSlowFallback ?? (overrides.preferFast ?? true),
-      selfUnion: overrides.selfUnion ?? (selfUnion !== false),
       name: name || 'Tube',
+      pathCurve,
+      endpointExtension: Number(endpointExtension) || 0,
     });
   }
 
-  generateNative(overrides = {}) {
+  generateNative() {
     if (typeof this.free === 'function') {
       try { this.free(); } catch { }
     }
-    const snapshot = this.buildNativeSnapshot(overrides);
-    return applyNativeTubeSnapshot(this, snapshot, this.params?.name);
+    const state = this.buildNativeSnapshot();
+    return applyNativeTubeState(this, state, this.params?.name);
   }
 }
-
-export { hasNativeTubeBuilder as tubeHasNativeBuilder };

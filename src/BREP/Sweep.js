@@ -1,14 +1,7 @@
 import * as THREE from 'three';
 import { Solid } from './BetterSolid.js';
-import { applySolidAuthoringStateSnapshot } from './CppSolidCore.js';
-import { computeBoundsFromVertices } from './boundsUtils.js';
 import { getEdgePolylineWorld } from './edgePolylineUtils.js';
-import { manifold } from './setupManifold.js';
-
-function requireNativeSweepBuilder() {
-  if (typeof manifold?.buildSweepAuthoringState === 'function') return;
-  throw new Error('Sweep generation requires the custom local manifold build with native sweep support.');
-}
+import { makeExtrusion, setOccState } from './OpenCascadeKernel.js';
 
 export function computeBoundaryLoopsFromFaceNative(faceObj) {
   const loops = [];
@@ -448,8 +441,13 @@ function isSyntheticSweepSourceEdgeName(name) {
   return /_REPAIR_\d+/.test(raw);
 }
 
+function safeExtrudeSideToken(value, fallback) {
+  const raw = String(value || '').trim();
+  const safe = raw.replace(/[^A-Za-z0-9_.:[\]-]+/g, '_').replace(/_+/g, '_');
+  return safe || fallback;
+}
+
 export function generateNativeSweep(target, params = {}) {
-  requireNativeSweepBuilder();
   const {
     face,
     distance = 1,
@@ -466,6 +464,7 @@ export function generateNativeSweep(target, params = {}) {
     ? face.userData.boundaryLoopsWorld.map((loop) => ({
         pts: (Array.isArray(loop?.pts) ? loop.pts : loop).map((p) => [p[0], p[1], p[2]]),
         isHole: !!loop?.isHole,
+        segmentIds: Array.isArray(loop?.segmentIds) ? loop.segmentIds.slice() : [],
       }))
     : computeBoundaryLoopsFromFaceNative(face);
   if (!boundaryLoops.length) {
@@ -479,21 +478,39 @@ export function generateNativeSweep(target, params = {}) {
   faceNormal.normalize();
 
   const sourceIsSketchFace = face?.parent?.type === 'SKETCH';
-  const relevantEdges = sourceIsSketchFace && Array.isArray(face?.edges)
-    ? face.edges.filter((edge) => {
+  const faceEdges = Array.isArray(face?.edges) ? face.edges : [];
+  const relevantEdges = faceEdges.length
+    ? faceEdges.filter((edge) => {
         const kind = edge?.userData?.sketchGeomType;
         if (kind === 'circle' || kind === 'arc') return true;
-        if (edge?.closedLoop) return false;
+        if (edge?.closedLoop && sourceIsSketchFace) return false;
         const sourceEdgeName = String(edge?.name || edge?.userData?.edgeName || '').trim();
-        return !isSyntheticSweepSourceEdgeName(sourceEdgeName);
+        return sourceIsSketchFace ? !isSyntheticSweepSourceEdgeName(sourceEdgeName) : true;
       })
     : [];
   const featureTag = name ? `${name}:` : '';
-  const edgeInputs = relevantEdges.map((edge) => ({
-    name: `${featureTag}${edge?.name || 'EDGE'}_SW`,
-    polyline: getEdgePolylineWorld(edge, { dedupe: false }).map((p) => [p[0], p[1], p[2]]),
-    metadataJson: buildSweepEdgeMetadataJson(edge, faceNormal, distance, distanceBack),
-  })).filter((entry) => Array.isArray(entry.polyline) && entry.polyline.length >= 2);
+  const faceToken = safeExtrudeSideToken(face?.name || face?.userData?.faceName || 'Face', 'Face');
+  const edgeInputs = relevantEdges.map((edge, index) => {
+    const sourceEdgeName = String(edge?.name || edge?.userData?.edgeName || '').trim();
+    const sideName = sourceIsSketchFace
+      ? `${featureTag}${safeExtrudeSideToken(sourceEdgeName || `EDGE_${index}`, `EDGE_${index}`)}_SW`
+      : `${featureTag}${faceToken}_SW_${index}`;
+    const metadata = JSON.parse(buildSweepEdgeMetadataJson(edge, faceNormal, distance, distanceBack) || '{}');
+    if (sourceEdgeName) metadata.sourceEdgeName = sourceEdgeName;
+    return {
+      name: sideName,
+      sketchGeometryId: edge?.userData?.sketchGeometryId ?? null,
+      polyline: getEdgePolylineWorld(edge, { dedupe: false }).map((p) => [p[0], p[1], p[2]]),
+      curveType: edge?.userData?.sketchGeomType || null,
+      isHole: !!edge?.userData?.isHole,
+      bezierPoles: Array.isArray(edge?.userData?.bezierPoles) ? edge.userData.bezierPoles.map((p) => p.slice()) : null,
+      circleCenter: Array.isArray(edge?.userData?.circleCenter) ? edge.userData.circleCenter.slice() : null,
+      circleRadius: Number.isFinite(Number(edge?.userData?.circleRadius)) ? Number(edge.userData.circleRadius) : null,
+      arcCenter: Array.isArray(edge?.userData?.arcCenter) ? edge.userData.arcCenter.slice() : null,
+      arcRadius: Number.isFinite(Number(edge?.userData?.arcRadius)) ? Number(edge.userData.arcRadius) : null,
+      metadataJson: JSON.stringify(metadata),
+    };
+  }).filter((entry) => Array.isArray(entry.polyline) && entry.polyline.length >= 2);
 
   let pathPoints = [];
   if (Array.isArray(sweepPathEdges) && sweepPathEdges.length) {
@@ -505,55 +522,28 @@ export function generateNativeSweep(target, params = {}) {
     ? [distance.x, distance.y, distance.z]
     : null;
 
-  const snapshot = manifold.buildSweepAuthoringState({
-    name,
-    faceName: face?.name || 'Face',
-    mode: mode === 'pathAlign' ? 'pathAlign' : 'translate',
-    distance: typeof distance === 'number' ? distance : 0,
-    distanceVector,
-    distanceBack: Number(distanceBack) || 0,
-    omitBaseCap: !!omitBaseCap,
-    twistAngle: Number.isFinite(Number(twistAngle)) ? Number(twistAngle) : 0,
-    faceNormal: [faceNormal.x, faceNormal.y, faceNormal.z],
-    boundaryLoops,
-    edges: edgeInputs,
-    pathPoints,
-  });
-
-  applySolidAuthoringStateSnapshot(target, snapshot, { remapFaceIDs: true });
-  target._dirty = true;
-  target._manifold = null;
-  target._faceIndex = null;
-  try { target.name = name || 'Sweep'; } catch {}
-
-  let eps = Number(snapshot?.suggestedEpsilon);
-  if (!(eps > 0) && Array.isArray(target._vertProperties) && target._vertProperties.length >= 6) {
-    const bounds = computeBoundsFromVertices(target._vertProperties);
-    const diag = (bounds && bounds.diag) ? bounds.diag : 1;
-    eps = Math.min(1e-4, Math.max(1e-7, diag * 1e-6));
+  if (mode !== 'pathAlign' && !pathPoints.length && Math.abs(Number(twistAngle) || 0) <= 1e-12) {
+    const dir = distanceVector || [
+      faceNormal.x * (Number(distance) || 0),
+      faceNormal.y * (Number(distance) || 0),
+      faceNormal.z * (Number(distance) || 0),
+    ];
+    const occState = makeExtrusion({
+      boundaryLoops,
+      faceName: face?.name || 'Face',
+      name,
+      direction: dir,
+      normal: [faceNormal.x, faceNormal.y, faceNormal.z],
+      distanceBack: Number(distanceBack) || 0,
+      edgeInputs,
+      omitBaseCap,
+    });
+    setOccState(target, occState);
+    try { target.name = name || 'Sweep'; } catch {}
+    return true;
   }
-  if (Number.isFinite(eps) && eps > 0) target.setEpsilon(eps);
 
-  let ok = false;
-  let attempt = 0;
-  let errLast = null;
-  while (!ok && attempt < 3) {
-    try {
-      const mesh = target.getMesh();
-      try { /* probe */ } finally { try { if (mesh && typeof mesh.delete === 'function') mesh.delete(); } catch {} }
-      ok = true;
-    } catch (error) {
-      errLast = error;
-      eps *= 2;
-      if (!(eps > 0) || eps > 5e-4) break;
-      try { target.setEpsilon(eps); } catch {}
-    }
-    attempt++;
-  }
-  if (!ok && errLast) {
-    console.warn('[Sweep] Manifold build failed after native rebuild retries:', errLast.message || errLast);
-  }
-  return true;
+  throw new Error('OpenCASCADE path sweep is not implemented yet; legacy Manifold sweep fallback has been removed.');
 }
 
 export class Sweep extends Solid {

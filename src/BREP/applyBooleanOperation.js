@@ -4,20 +4,7 @@
 
 import * as THREE from 'three';
 import { Solid } from "./BetterSolid.js";
-import { Manifold } from "./SolidShared.js";
-import {
-  applySolidAuthoringStateSnapshot,
-  getSyncedCppSolidCore,
-  getSolidAuthoringStateSnapshot,
-  syncSolidAuthoringStateFromCpp,
-} from "./CppSolidCore.js";
-import { MeshRepairer } from "./MeshRepairer.js";
 import { computeBoundsFromVertices } from "./boundsUtils.js";
-import { manifold } from "./setupManifold.js";
-import {
-  buildBooleanOverlapConditioningPlan,
-  SOLID_OVERLAP_DIAGNOSTIC_DEFAULTS,
-} from './solidOverlapDiagnosticsCore.js';
 
 const BOOLEAN_TINY_FACE_MAX_AREA = 0.001;
 
@@ -319,142 +306,13 @@ function __booleanApproxScale(solid) {
   }
 }
 
-function __booleanResolveConditioningOptions(scaleHint = 1) {
-  const scale = Math.max(1, Number(scaleHint) || 1);
-  return {
-    ...SOLID_OVERLAP_DIAGNOSTIC_DEFAULTS,
-    planeDistanceTolerance: Math.max(
-      SOLID_OVERLAP_DIAGNOSTIC_DEFAULTS.planeDistanceTolerance,
-      1e-6 * scale,
-    ),
-    scaleHint: scale,
-  };
-}
-
-function __booleanApplyFaceAdjustments(solid, faceAdjustments, debugLog, logContext = null) {
-  if (!solid || typeof solid.pushFace !== 'function' || !Array.isArray(faceAdjustments) || faceAdjustments.length === 0) {
-    return [];
-  }
-  const applied = [];
-  for (const adjustment of faceAdjustments) {
-    const faceName = String(adjustment?.faceName || '').trim();
-    const distance = Number(adjustment?.distance);
-    if (!faceName || !Number.isFinite(distance) || distance === 0) continue;
-    try {
-      solid.pushFace(faceName, distance, { warnMissing: false, warnInvalidNormal: false });
-      applied.push({
-        faceName,
-        distance,
-        sign: adjustment?.sign || Math.sign(distance) || 0,
-        overlapCount: adjustment?.overlapCount || 0,
-        overlapArea: adjustment?.overlapArea || 0,
-      });
-    } catch (err) {
-      debugLog?.('Failed to condition boolean face overlap', {
-        context: logContext,
-        faceName,
-        distance,
-        message: err?.message || err,
-      });
-    }
-  }
-  return applied;
-}
-
-function __booleanConditionOperands(op, stationarySolid, movingSolid, debugLog, context = null) {
-  const normalizedOp = String(op || '').toUpperCase();
-  if ((normalizedOp !== 'UNION' && normalizedOp !== 'SUBTRACT') || !stationarySolid || !movingSolid) {
-    return {
-      stationarySolid,
-      movingSolid,
-      conditioningApplied: false,
-      faceAdjustments: [],
-      fallbackFaceAdjustments: [],
-      plan: null,
-      fallbackPlan: null,
-    };
-  }
-
-  const scaleHint = Math.max(__booleanApproxScale(stationarySolid), __booleanApproxScale(movingSolid), 1);
-  const options = {
-    ...__booleanResolveConditioningOptions(scaleHint),
-    conditioningMode: normalizedOp,
-  };
-  const moveClone = typeof movingSolid.clone === 'function' ? movingSolid.clone() : movingSolid;
-  const plan = buildBooleanOverlapConditioningPlan(stationarySolid, moveClone, options);
-  const faceAdjustments = __booleanApplyFaceAdjustments(moveClone, plan?.faceAdjustments, debugLog, context);
-  if (faceAdjustments.length > 0) {
-    debugLog?.('Applied boolean overlap conditioning', {
-      context,
-      operation: normalizedOp,
-      overlapCount: plan?.overlapCount || 0,
-      adjustments: faceAdjustments,
-    });
-    return {
-      stationarySolid,
-      movingSolid: moveClone,
-      conditioningApplied: true,
-      faceAdjustments,
-      fallbackFaceAdjustments: [],
-      plan,
-      fallbackPlan: null,
-    };
-  }
-
-  if (normalizedOp !== 'UNION' || typeof stationarySolid.clone !== 'function') {
-    return {
-      stationarySolid,
-      movingSolid,
-      conditioningApplied: false,
-      faceAdjustments: [],
-      fallbackFaceAdjustments: [],
-      plan,
-      fallbackPlan: null,
-    };
-  }
-
-  const stationaryClone = stationarySolid.clone();
-  const fallbackPlan = buildBooleanOverlapConditioningPlan(movingSolid, stationaryClone, options);
-  const fallbackFaceAdjustments = __booleanApplyFaceAdjustments(stationaryClone, fallbackPlan?.faceAdjustments, debugLog, context);
-  if (fallbackFaceAdjustments.length > 0) {
-    debugLog?.('Applied boolean overlap conditioning via stationary fallback', {
-      context,
-      operation: normalizedOp,
-      overlapCount: fallbackPlan?.overlapCount || 0,
-      adjustments: fallbackFaceAdjustments,
-    });
-    return {
-      stationarySolid: stationaryClone,
-      movingSolid,
-      conditioningApplied: true,
-      faceAdjustments: [],
-      fallbackFaceAdjustments,
-      plan,
-      fallbackPlan,
-    };
-  }
-
-  return {
-    stationarySolid,
-    movingSolid,
-    conditioningApplied: false,
-    faceAdjustments: [],
-    fallbackFaceAdjustments: [],
-    plan,
-    fallbackPlan,
-  };
-}
-
 function __booleanCloneMetadataObject(metadata) {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return {};
   return { ...metadata };
 }
 
 function __booleanRefreshAuthoringStateFromNative(solid) {
-  if (!solid || typeof solid !== 'object') return;
-  const snapshot = getSolidAuthoringStateSnapshot(solid);
-  if (!snapshot || typeof snapshot !== 'object') return;
-  applySolidAuthoringStateSnapshot(solid, snapshot);
+  return;
 }
 
 function __booleanGetFaceFeatureId(faceName, metadata = null) {
@@ -721,9 +579,7 @@ function __booleanMergeCoplanarAdjacentIntersectSidewalls(solid, debugLog, conte
 
       const targetMetadata = __booleanCloneMetadataObject(solid.getFaceMetadata(best.faceName) || {});
       if (!solid.renameFace(faceName, best.faceName)) continue;
-      const core = getSyncedCppSolidCore(solid);
-      core.setFaceMetadata(best.faceName, targetMetadata);
-      syncSolidAuthoringStateFromCpp(solid, core);
+      if (typeof solid.setFaceMetadata === 'function') solid.setFaceMetadata(best.faceName, targetMetadata);
       __booleanInvalidateSolidCaches(solid);
       mergedFaces += 1;
       mergedThisPass = true;
@@ -985,7 +841,7 @@ function __booleanAssignFaceData(geometry, sourceMeta, debugLog, options = {}) {
         if (!faceName) faceName = nextFallbackName();
         let id = nameToID.get(faceName);
         if (!id) {
-          id = Manifold.reserveIDs(1);
+          id = nameToID.size + 1;
           nameToID.set(faceName, id);
           idToName.set(id, faceName);
         }
@@ -1057,7 +913,7 @@ function __booleanAssignFaceData(geometry, sourceMeta, debugLog, options = {}) {
       if (!faceName) faceName = nextFallbackName();
       let id = nameToID.get(faceName);
       if (!id) {
-        id = Manifold.reserveIDs(1);
+        id = nameToID.size + 1;
         nameToID.set(faceName, id);
         idToName.set(id, faceName);
       }
@@ -1072,9 +928,10 @@ function __booleanAssignFaceData(geometry, sourceMeta, debugLog, options = {}) {
 }
 
 function __booleanMakeSolidFromGeometry(geometry, faceIDs, idToFaceName, debugLog, ...sourceSolids) {
+  return null;
   try {
     if (!geometry || !faceIDs || !idToFaceName) return null;
-    if (typeof manifold?.buildSolidAuthoringStateFromMesh !== 'function') {
+    if (true) {
       throw new Error('Native mesh-to-solid rebuild helper is unavailable.');
     }
     const indexAttr = geometry.getIndex();
@@ -1082,7 +939,8 @@ function __booleanMakeSolidFromGeometry(geometry, faceIDs, idToFaceName, debugLo
     if (!indexAttr || !posAttr) return null;
     const metadataEntries = __booleanCollectMetadataEntries(...sourceSolids);
     const faceNameToID = Array.from(idToFaceName.entries(), ([id, faceName]) => [faceName, id]);
-    const snapshot = manifold.buildSolidAuthoringStateFromMesh({
+    const snapshot = null;
+    ({
       numProp: 3,
       vertProperties: Array.from(posAttr.array || []),
       triVerts: Array.from(indexAttr.array || []),
@@ -1383,14 +1241,12 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
     if (tools.length === 0) return { added: [baseSolid], removed: [] };
 
     const debugLog = __booleanDebugLogger(featureID, op, baseSolid, tools);
-    const overlapConditioningEnabled = booleanParam?.overlapConditioningEnabled !== false;
     debugLog('Starting boolean', {
       featureID,
       operation: op,
       base: __booleanDebugSummarizeSolid(baseSolid),
       tools: tools.map(__booleanDebugSummarizeSolid),
       targetCount: tools.length,
-      overlapConditioningEnabled,
     });
 
     // Apply selected boolean
@@ -1418,19 +1274,9 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
       for (const target of tools) {
         let conditionedTarget = target;
         let conditionedTool = baseSolid;
-        if (overlapConditioningEnabled) {
-          const conditioning = __booleanConditionOperands('SUBTRACT', target, baseSolid, debugLog, {
-            featureID,
-            target: target?.name || target?.uuid || null,
-            tool: baseSolid?.name || baseSolid?.uuid || null,
-          });
-          conditionedTarget = conditioning.stationarySolid || target;
-          conditionedTool = conditioning.movingSolid || baseSolid;
-        }
         let success = false;
         try {
           let out = conditionedTarget.subtract(conditionedTool);
-          out = __booleanRestoreFaceTrackingFromSources(out, debugLog, conditionedTarget, conditionedTool);
           await addResult(out, target);
           success = true;
         } catch (e1) {
@@ -1450,7 +1296,6 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
           preCleanLocal(a, eps);
           preCleanLocal(b, eps);
           let out = a.subtract(b);
-          out = __booleanRestoreFaceTrackingFromSources(out, debugLog, a, b);
           await addResult(out, target);
           success = true;
         } catch (e2) {
@@ -1489,15 +1334,6 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
 
       let workingResult = result;
       let workingTool = tool;
-      if (overlapConditioningEnabled && op === 'UNION') {
-        const conditioning = __booleanConditionOperands('UNION', result, tool, debugLog, {
-          featureID,
-          base: result?.name || result?.uuid || null,
-          tool: tool?.name || tool?.uuid || null,
-        });
-        workingResult = conditioning.stationarySolid || result;
-        workingTool = conditioning.movingSolid || tool;
-      }
 
       const scale = Math.max(1, __booleanApproxScale(workingResult));
       const eps = Math.max(1e-9, 1e-6 * scale);
@@ -1505,66 +1341,20 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
       try {
         // Attempt the boolean directly; repair fallback handles welding if needed.
         result = (op === 'UNION') ? workingResult.union(workingTool) : workingResult.intersect(workingTool);
-        result = __booleanRestoreFaceTrackingFromSources(result, debugLog, workingResult, workingTool);
       } catch (e1) {
         debugLog('Primary union/intersect failed; attempting welded fallback', {
           message: e1?.message || e1,
           tool: __booleanDebugSummarizeSolid(workingTool),
           epsilon: eps,
         });
-        let repaired = false;
-        try {
-          const repairedBase = __booleanAttemptRepairSolid(workingResult, eps, debugLog);
-          const repairedTool = __booleanAttemptRepairSolid(workingTool, eps, debugLog);
-          if (repairedBase || repairedTool) {
-            debugLog('Attempting repair fallback', {
-              repairedBase: !!repairedBase,
-              repairedTool: !!repairedTool,
-            });
-            const baseOperand = repairedBase || (typeof workingResult.clone === 'function' ? workingResult.clone() : workingResult);
-            const toolOperand = repairedTool || (typeof workingTool.clone === 'function' ? workingTool.clone() : workingTool);
-            preClean(baseOperand, eps);
-            preClean(toolOperand, eps);
-            result = (op === 'UNION') ? baseOperand.union(toolOperand) : baseOperand.intersect(toolOperand);
-            result = __booleanRestoreFaceTrackingFromSources(result, debugLog, baseOperand, toolOperand);
-            repaired = true;
-          }
-        } catch (repairErr) {
-          debugLog('Repair fallback failed', { message: repairErr?.message || repairErr });
-        }
-        if (repaired) continue;
-        // Fallback A: try on welded clones with tiny epsilon
+        // Retry once on cloned operands with the same OCCT boolean path.
         try {
           const a = typeof workingResult.clone === 'function' ? workingResult.clone() : workingResult;
           const b = typeof workingTool.clone === 'function' ? workingTool.clone() : workingTool;
           preClean(a, eps);
           preClean(b, eps);
           result = (op === 'UNION') ? a.union(b) : a.intersect(b);
-          result = __booleanRestoreFaceTrackingFromSources(result, debugLog, a, b);
         } catch (e2) {
-          let meshRecovered = false;
-          if (op === 'UNION') {
-            try {
-              const merged = __booleanMeshMergeUnion(workingResult, workingTool, eps, debugLog);
-              if (merged) {
-                debugLog('Mesh-merge fallback succeeded');
-                const repairedMerged = __booleanAttemptRepairSolid(merged, eps, debugLog);
-                const mergedHasTracking = __booleanHasMeaningfulFaceTracking(merged);
-                const repairedMergedHasTracking = __booleanHasMeaningfulFaceTracking(repairedMerged);
-                const finalMerged = (repairedMerged && (!mergedHasTracking || repairedMergedHasTracking))
-                  ? repairedMerged
-                  : merged;
-                if (finalMerged !== merged) {
-                  debugLog('Mesh-merge result repaired');
-                }
-                result = finalMerged;
-                meshRecovered = true;
-              }
-            } catch (meshErr) {
-              debugLog('Mesh-merge fallback failed', { message: meshErr?.message || meshErr });
-            }
-          }
-          if (meshRecovered) continue;
           throw e2;
         }
       }

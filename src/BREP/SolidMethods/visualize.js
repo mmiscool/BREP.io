@@ -89,59 +89,87 @@ export function visualize(options = {}) {
         for (const [faceName, triangles] of nameToTris.entries()) faces.push({ faceName, triangles });
     }
 
-    // Build Face meshes and index by name
-    const faceMap = new Map();
-    for (const { faceName, triangles } of faces) {
-        if (!triangles.length) continue;
-        const positions = new Float32Array(triangles.length * 9);
-        let w = 0;
+    const buildGeometryForTriangles = (triangles) => {
+        const positions = [];
+        const indices = [];
+        const sourceToLocal = new Map();
+        const addVertex = (sourceIndex, point) => {
+            if (Number.isFinite(sourceIndex)) {
+                const existing = sourceToLocal.get(sourceIndex);
+                if (existing != null) return existing;
+            }
+            const local = (positions.length / 3) | 0;
+            positions.push(point[0], point[1], point[2]);
+            if (Number.isFinite(sourceIndex)) sourceToLocal.set(sourceIndex, local);
+            return local;
+        };
+
         for (let t = 0; t < triangles.length; t++) {
             const tri = triangles[t];
-            const p0 = tri.p1, p1 = tri.p2, p2 = tri.p3;
+            const points = [tri.p1, tri.p2, tri.p3];
+            const triIndices = Array.isArray(tri.indices) && tri.indices.length >= 3
+                ? tri.indices
+                : [NaN, NaN, NaN];
 
             if (debugMode) {
-                // Validate triangle coordinates before adding to geometry
-                const coords = [p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], p2[0], p2[1], p2[2]];
+                const coords = [
+                    points[0][0], points[0][1], points[0][2],
+                    points[1][0], points[1][1], points[1][2],
+                    points[2][0], points[2][1], points[2][2],
+                ];
                 const hasInvalidCoords = coords.some(coord => !isFinite(coord));
 
                 if (hasInvalidCoords) {
-                    console.error(`Invalid triangle coordinates in face ${faceName}, triangle ${t}:`);
-                    console.error('p0:', p0, 'p1:', p1, 'p2:', p2);
+                    console.error(`Invalid triangle coordinates in face ${tri.faceName || ''}, triangle ${t}:`);
+                    console.error('p0:', points[0], 'p1:', points[1], 'p2:', points[2]);
                     console.error('Triangle data:', tri);
-                    // Skip this triangle by not incrementing w and not setting positions
                     continue;
                 }
 
-                // Degenerate triangle check (area ~ 0) and log its points
-                // Compute squared area via cross product of edges (robust to uniform scale)
                 try {
-                    const ux = p1[0] - p0[0], uy = p1[1] - p0[1], uz = p1[2] - p0[2];
-                    const vx = p2[0] - p0[0], vy = p2[1] - p0[1], vz = p2[2] - p0[2];
+                    const ux = points[1][0] - points[0][0], uy = points[1][1] - points[0][1], uz = points[1][2] - points[0][2];
+                    const vx = points[2][0] - points[0][0], vy = points[2][1] - points[0][1], vz = points[2][2] - points[0][2];
                     const nx = uy * vz - uz * vy;
                     const ny = uz * vx - ux * vz;
                     const nz = ux * vy - uy * vx;
                     const area2 = nx * nx + ny * ny + nz * nz;
-                    // Use same threshold as viewer diagnostics
                     if (area2 <= 1e-30) {
-                        console.warn(`[Solid.visualize] Degenerate triangle in face ${faceName} @ index ${t}`);
-                        console.warn('points:', { p0, p1, p2 });
+                        console.warn(`[Solid.visualize] Degenerate triangle in face ${tri.faceName || ''} @ index ${t}`);
+                        console.warn('points:', { p0: points[0], p1: points[1], p2: points[2] });
                     }
                 } catch { /* best-effort logging only */ }
             }
 
-            positions[w++] = p0[0]; positions[w++] = p0[1]; positions[w++] = p0[2];
-            positions[w++] = p1[0]; positions[w++] = p1[1]; positions[w++] = p1[2];
-            positions[w++] = p2[0]; positions[w++] = p2[1]; positions[w++] = p2[2];
+            indices.push(
+                addVertex(Number(triIndices[0]), points[0]),
+                addVertex(Number(triIndices[1]), points[1]),
+                addVertex(Number(triIndices[2]), points[2]),
+            );
         }
 
         const geom = new THREE.BufferGeometry();
-        geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+        geom.setIndex(indices);
         geom.computeVertexNormals();
         geom.computeBoundingBox();
         geom.computeBoundingSphere();
+        return geom;
+    };
+
+    // Build Face meshes and index by name
+    const faceMap = new Map();
+    for (const { faceName, triangles } of faces) {
+        if (!triangles.length) continue;
+        const geom = buildGeometryForTriangles(triangles.map(tri => ({ ...tri, faceName })));
 
         const faceObj = new Face(geom);
         faceObj.name = faceName;
+        if (this._kernel === 'opencascade' && faceObj.material?.clone) {
+            const material = faceObj.material.clone();
+            try { material.side = THREE.DoubleSide; } catch { /* ignore */ }
+            try { material.flatShading = false; material.needsUpdate = true; } catch { /* ignore */ }
+            faceObj.material = material;
+        }
         faceObj.userData.faceName = faceName;
         faceObj.userData.__defaultMaterial = faceObj.material;
         try {
@@ -193,9 +221,9 @@ export function visualize(options = {}) {
                 const fa = faceMap.get(e.faceA);
                 const fb = faceMap.get(e.faceB);
                 if (fa) fa.edges.push(edgeObj);
-                if (fb) fb.edges.push(edgeObj);
+                if (fb && fb !== fa) fb.edges.push(edgeObj);
                 if (fa) edgeObj.faces.push(fa);
-                if (fb) edgeObj.faces.push(fb);
+                if (fb && fb !== fa) edgeObj.faces.push(fb);
                 this.add(edgeObj);
             }
         }
@@ -296,8 +324,8 @@ export function visualize(options = {}) {
                             annotateEdgeFromMetadata(edgeObj, this);
                             edgeObj.parentSolid = this;
                             const fa = faceMap.get(nameA); const fb = faceMap.get(nameB);
-                            if (fa) fa.edges.push(edgeObj); if (fb) fb.edges.push(edgeObj);
-                            if (fa) edgeObj.faces.push(fa); if (fb) edgeObj.faces.push(fb);
+                            if (fa) fa.edges.push(edgeObj); if (fb && fb !== fa) fb.edges.push(edgeObj);
+                            if (fa) edgeObj.faces.push(fa); if (fb && fb !== fa) edgeObj.faces.push(fb);
                             try { edgeObj.computeLineDistances(); } catch { }
                             this.add(edgeObj);
                         }
@@ -365,9 +393,9 @@ export function visualize(options = {}) {
                 const fa = aux?.faceA ? faceMap.get(aux.faceA) : null;
                 const fb = aux?.faceB ? faceMap.get(aux.faceB) : null;
                 if (fa) fa.edges.push(edgeObj);
-                if (fb) fb.edges.push(edgeObj);
+                if (fb && fb !== fa) fb.edges.push(edgeObj);
                 if (fa) edgeObj.faces.push(fa);
-                if (fb) edgeObj.faces.push(fb);
+                if (fb && fb !== fa) edgeObj.faces.push(fb);
                 try {
                     const fallbackKey = behavesLikeBoundary ? 'SECTION' : 'OVERLAY';
                     const requestedKey = (aux?.materialKey || fallbackKey).toUpperCase();
@@ -440,7 +468,7 @@ export function visualize(options = {}) {
 
             const addEP = (p) => {
                 if (!p || p.length !== 3) return;
-                const k = `${p[0]},${p[1]},${p[2]}`;
+                const k = `${Math.round(Number(p[0] || 0) * 1e8)},${Math.round(Number(p[1] || 0) * 1e8)},${Math.round(Number(p[2] || 0) * 1e8)}`;
                 if (!endpoints.has(k)) endpoints.set(k, p);
 
                 // Track which edges meet at this vertex position

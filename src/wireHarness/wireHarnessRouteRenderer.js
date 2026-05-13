@@ -96,10 +96,8 @@ function createBundleSolid(segment) {
     points: points.map((point) => [point.x, point.y, point.z]),
     radius,
     innerRadius: 0,
-    resolution: 14,
     closed: false,
     name: String(segment?.featureId || segment?.segmentId || 'Wire Bundle').trim() || 'Wire Bundle',
-    preferFast: true,
     autoVisualize: false,
   });
   if (!solid || solid.type !== 'SOLID') return null;

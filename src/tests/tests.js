@@ -86,6 +86,14 @@ import {
     test_fillet_preserves_original_face_names,
 } from './test_fillet_preserves_original_face_names.js';
 import {
+    afterRun_fillet_occ_top_loop_history,
+    test_fillet_occ_top_loop_history,
+} from './test_fillet_occ_top_loop_history.js';
+import {
+    afterRun_fillet_occ_closed_extrude_edge_history,
+    test_fillet_occ_closed_extrude_edge_history,
+} from './test_fillet_occ_closed_extrude_edge_history.js';
+import {
     afterRun_fillet_corner_bridge,
     test_fillet_corner_bridge,
 } from './test_fillet_corner_bridge.js';
@@ -176,15 +184,21 @@ import {
 } from './test_cppSolidNativeOps.js';
 import {
     test_cppTube_closed_hollow_tube_preserves_expected_face_labels,
-    test_cppTube_native_auto_falls_back_to_slow_on_foldback_path,
-    test_cppTube_native_builder_reports_selected_build_mode,
+    test_cppTube_hollow_tube_visualizes_distinct_inner_and_outer_faces,
+    test_cppTube_hollow_spline_path_visualizes_side_faces,
     test_cppTube_open_tube_preserves_expected_face_labels,
+    test_cppTube_spline_solid_has_three_faces_and_no_cross_section_edges,
     test_cppTube_union_preserves_distinct_face_labels_across_native_snapshots,
 } from './test_cppTube.js';
 import {
     test_cppPrimitive_cone_preserves_expected_face_labels_and_metadata,
+    test_cppExtrude_circle_profile_sidewall_visualizes_cap_edges_and_seam,
+    test_cppExtrude_sketch_bezier_edge_builds_single_sidewall,
+    test_cppExtrude_sketch_circle_hole_builds_distinct_analytic_sidewall,
+    test_cppRevolve_extruded_sketch_cap_reuses_analytic_profile,
     test_cppPrimitive_cube_preserves_expected_face_labels,
     test_cppPrimitive_cylinder_preserves_expected_face_labels_and_metadata,
+    test_cppPrimitive_cylinder_sidewall_visualizes_cap_edges_and_seam,
     test_cppPrimitive_sphere_preserves_single_face_label,
     test_cppPrimitive_torus_and_pyramid_preserve_face_labels,
 } from './test_cppPrimitives.js';
@@ -215,8 +229,6 @@ import { test_primitiveCylinder } from './test_primitiveCylinder.js';
 import { test_primitivePyramid } from './test_primitivePyramid.js';
 import { test_primitiveSphere } from './test_primitiveSphere.js';
 import { test_primitiveTorus } from './test_primitiveTorus.js';
-import { afterRun_pushFace_feature, test_pushFace_feature } from './test_pushFace_feature.js';
-import { afterRun_pushFace, test_pushFace } from './test_pushFace.js';
 import { test_sheetMetal_corner_fillet } from './test_sheetMetal_corner_fillet.js';
 import { test_sheetMetal_corner_fillet_face_cylindrical_metadata } from './test_sheetMetal_corner_fillet_face_cylindrical_metadata.js';
 import { test_sheetMetal_bend_face_cylindrical_metadata } from './test_sheetMetal_bend_face_cylindrical_metadata.js';
@@ -358,11 +370,17 @@ export const testFunctions = [
     { test: test_cppSolidNative_reassignTinyFilletSidewallSliverTriangles_merges_triangle_whose_vertices_lie_on_single_planar_face_boundary, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_open_tube_preserves_expected_face_labels, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_closed_hollow_tube_preserves_expected_face_labels, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppTube_hollow_tube_visualizes_distinct_inner_and_outer_faces, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_union_preserves_distinct_face_labels_across_native_snapshots, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_cppTube_native_builder_reports_selected_build_mode, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_cppTube_native_auto_falls_back_to_slow_on_foldback_path, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppTube_hollow_spline_path_visualizes_side_faces, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppTube_spline_solid_has_three_faces_and_no_cross_section_edges, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppPrimitive_cube_preserves_expected_face_labels, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppPrimitive_cylinder_preserves_expected_face_labels_and_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppPrimitive_cylinder_sidewall_visualizes_cap_edges_and_seam, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppExtrude_circle_profile_sidewall_visualizes_cap_edges_and_seam, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppExtrude_sketch_circle_hole_builds_distinct_analytic_sidewall, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppExtrude_sketch_bezier_edge_builds_single_sidewall, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppRevolve_extruded_sketch_cap_reuses_analytic_profile, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppPrimitive_cone_preserves_expected_face_labels_and_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppPrimitive_torus_and_pyramid_preserve_face_labels, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppPrimitive_sphere_preserves_single_face_label, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -661,6 +679,22 @@ export const testFunctions = [
         resetHistory: true,
     },
     {
+        test: test_fillet_occ_top_loop_history,
+        afterRun: afterRun_fillet_occ_top_loop_history,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_fillet_occ_closed_extrude_edge_history,
+        afterRun: afterRun_fillet_occ_closed_extrude_edge_history,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
         test: test_fillet_face_names_and_merge_metadata_survive_native_manifold_rebuild,
         afterRun: afterRun_fillet_face_names_and_merge_metadata_survive_native_manifold_rebuild,
         printArtifacts: false,
@@ -691,8 +725,6 @@ export const testFunctions = [
     { test: test_hole_counterbore, afterRun: afterRun_hole_counterbore, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_thread_symbolic, afterRun: afterRun_hole_thread_symbolic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_thread_modeled, afterRun: afterRun_hole_thread_modeled, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
-    { test: test_pushFace_feature, afterRun: afterRun_pushFace_feature, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
-    { test: test_pushFace, afterRun: afterRun_pushFace, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_mirror, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_history_features_basic, afterRun: afterRun_history_features_basic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_history_expand_does_not_dirty, afterRun: afterRun_history_expand_does_not_dirty, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

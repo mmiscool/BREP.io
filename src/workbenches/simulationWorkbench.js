@@ -19,7 +19,6 @@ export const SIMULATION_WORKBENCH = {
     'F',
     'CH',
     'H',
-    'PF',
     'PATLIN',
     'PATRAD',
     'PATTERN',

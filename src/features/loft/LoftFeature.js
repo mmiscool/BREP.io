@@ -1,4 +1,5 @@
 import { BREP } from "../../BREP/BREP.js";
+import { makeLoft, setOccState } from "../../BREP/OpenCascadeKernel.js";
 import { selectionHasSketch } from "../selectionUtils.js";
 const THREE = BREP.THREE;
 
@@ -474,7 +475,13 @@ export class LoftFeature {
       const pts = seg.pts || []; if (pts.length===0) return [0,0,0];
       const a = pts[0], b = pts[pts.length-1]; return [(a[0]+b[0])/2,(a[1]+b[1])/2,(a[2]+b[2])/2];
     });
-    const sumDist = (A,B)=>{ let s=0; for(let i=0;i<A.length;i++){ const p=A[i], q=B[i]; const dx=p[0]-q[0], dy=p[1]-q[1], dz=p[2]-q[2]; s += Math.hypot(dx,dy,dz); } return s; };
+    const sumDist = (A,B)=>{
+      const n = Math.min(Array.isArray(A) ? A.length : 0, Array.isArray(B) ? B.length : 0);
+      if (n <= 0) return +Infinity;
+      let s=0;
+      for(let i=0;i<n;i++){ const p=A[i], q=B[i]; const dx=p[0]-q[0], dy=p[1]-q[1], dz=p[2]-q[2]; s += Math.hypot(dx,dy,dz); }
+      return s + Math.abs((A?.length || 0) - (B?.length || 0)) * 1e-6;
+    };
     const rotateRing = (ring, off)=>{ const n=ring.length; const k=((off%n)+n)%n; return ring.slice(k).concat(ring.slice(0,k)); };
     const bestAlignRings = (ringA, ringB) => {
       // Try both orientations; choose rotation minimizing mid-point distance
@@ -513,6 +520,68 @@ export class LoftFeature {
       if (al.rev) ring = reverseEdgeRing(ring);
       ring = rotateRing(ring, al.off);
       alignedRings[j] = ring;
+    }
+
+    try {
+      const sections = loopsAligned
+        .map((faceLoops) => faceLoops?.[0]?.pts || [])
+        .map((pts) => toOpen(pts))
+        .filter((pts) => Array.isArray(pts) && pts.length >= 3);
+      const sectionWireInputs = faces.map((face, index) => {
+        const rawLoops = (loopsByFace[index] || [])
+          .map((loop) => ({ isHole: !!loop?.isHole, pts: toOpen(loop?.pts || []) }))
+          .filter((loop) => Array.isArray(loop.pts) && loop.pts.length >= 3);
+        const normal = (() => {
+          try {
+            const n = typeof face?.getAverageNormal === 'function' ? face.getAverageNormal() : null;
+            if (n && Number.isFinite(n.x) && Number.isFinite(n.y) && Number.isFinite(n.z) && n.lengthSq() > 1e-20) {
+              return [n.x, n.y, n.z];
+            }
+          } catch {}
+          return [0, 0, 1];
+        })();
+        const edgeInputs = (Array.isArray(face?.edges) ? face.edges : [])
+          .map((edge) => {
+            const ud = edge?.userData || {};
+            return {
+              name: edge?.name || null,
+              curveType: ud.sketchGeomType || ud.curveType || null,
+              sketchGeomType: ud.sketchGeomType || null,
+              polyline: collectEdgePolylineWorld(edge),
+              circleCenter: Array.isArray(ud.circleCenter) ? ud.circleCenter.slice() : null,
+              circleRadius: Number.isFinite(Number(ud.circleRadius)) ? Number(ud.circleRadius) : null,
+              arcCenter: Array.isArray(ud.arcCenter) ? ud.arcCenter.slice() : null,
+              arcRadius: Number.isFinite(Number(ud.arcRadius)) ? Number(ud.arcRadius) : null,
+            };
+          });
+        return { loops: rawLoops, edgeInputs, normal };
+      });
+      const sideNames = refRing.map((edge, index) => `${edge?.name || `EDGE_${index}`}_LF`);
+      if (sections.length >= 2 && sideNames.length >= 3) {
+        const occState = makeLoft({
+          sections,
+          sectionWireInputs,
+          sideNames,
+          startName: `${faces[0].name || 'Face'}_START`,
+          endName: `${faces[faces.length - 1].name || 'Face'}_END`,
+          featureID: this.inputParams.featureID || this.inputParams.id || 'LOFT',
+        });
+        const occLoft = new BREP.Solid();
+        occLoft.name = this.inputParams.featureID || this.inputParams.id || 'Loft';
+        setOccState(occLoft, occState);
+        occLoft.__loftMethod = 'occ_thru_sections';
+        occLoft.visualize();
+        const effects = await BREP.applyBooleanOperation(partHistory || {}, occLoft, this.inputParams.boolean, this.inputParams.featureID);
+        const booleanRemoved = Array.isArray(effects.removed) ? effects.removed : [];
+        const removedArtifacts = [...removed, ...booleanRemoved];
+        try { for (const obj of removedArtifacts) { if (obj) obj.__removeFlag = true; } } catch {}
+        return {
+          added: Array.isArray(effects.added) ? effects.added : [],
+          removed: removedArtifacts,
+        };
+      }
+    } catch (err) {
+      console.warn('[LoftFeature] OpenCASCADE loft failed; falling back to triangulated loft:', err?.message || err);
     }
 
     for (let i = 0; i < faces.length - 1; i++) {

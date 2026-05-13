@@ -1,5 +1,4 @@
 import { BREP } from "../../BREP/BREP.js";
-import { Manifold } from "../../BREP/SolidShared.js";
 const THREE = BREP.THREE;
 
 const inputParamsSchema = {
@@ -90,40 +89,8 @@ function toVec3(v, dx, dy, dz) {
 
 function retagSolidFaces(solid, suffix) {
   if (!solid || !suffix) return;
-  try {
-    const oldIdToFace = (solid._idToFaceName instanceof Map) ? solid._idToFaceName : new Map();
-    const triIDs = Array.isArray(solid._triIDs) ? solid._triIDs : [];
-    // Build set of IDs present (prefer map keys, fall back to triIDs)
-    const presentIDs = new Set();
-    for (const k of oldIdToFace.keys()) presentIDs.add(k);
-    if (presentIDs.size === 0 && triIDs.length) { for (const id of triIDs) presentIDs.add(id >>> 0); }
-
-    // Map oldID -> newID; and build new maps with tagged names
-    const idRemap = new Map();
-    const newIdToFace = new Map();
-    const newFaceToId = new Map();
-    for (const oldID of presentIDs) {
-      const fname = oldIdToFace.get(oldID);
-      const base = (fname != null) ? String(fname) : `FACE_${oldID}`;
-      const tagged = `${base}::${suffix}`;
-      const newID = Manifold.reserveIDs(1);
-      idRemap.set(oldID, newID);
-      newIdToFace.set(newID, tagged);
-      newFaceToId.set(tagged, newID);
-    }
-
-    // Remap per-triangle IDs
-    if (triIDs.length && idRemap.size) {
-      for (let i = 0; i < triIDs.length; i++) {
-        const oldID = triIDs[i] >>> 0;
-        const mapped = idRemap.get(oldID);
-        if (mapped !== undefined) triIDs[i] = mapped;
-      }
-      solid._triIDs = triIDs;
-      solid._dirty = true; // force rebuild so MeshGL.faceID updates
-    }
-
-    solid._idToFaceName = newIdToFace;
-    solid._faceNameToID = newFaceToId;
-  } catch (_) { /* best-effort */ }
+  if (typeof solid.renameFace === 'function' && typeof solid.getFaceNames === 'function') {
+    const names = solid.getFaceNames();
+    for (const name of names) solid.renameFace(name, `${String(name ?? 'Face')}::${suffix}`);
+  }
 }

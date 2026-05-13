@@ -24,22 +24,6 @@ const inputParamsSchema = {
     default_value: 0,
     hint: 'Optional inner radius for hollow tubes (0 for solid)'
   },
-  resolution: {
-    type: 'number',
-    default_value: "resolution",
-    hint: 'Segments around the tube circumference'
-  },
-  mode: {
-    type: 'options',
-    options: ['Light (fast)', 'Heavy (slow)'],
-    default_value: 'Light (fast)',
-    hint: 'Light uses the native auto tube builder; Heavy forces the slower robust build'
-  },
-  debug: {
-    type: 'boolean',
-    default_value: false,
-    hint: 'Log path points and parameters for debugging'
-  },
   boolean: {
     type: 'boolean_operation',
     default_value: { targets: [], operation: 'NONE' },
@@ -104,6 +88,16 @@ function collectEdgePolylines(edges) {
     }
   }
   return { polys, edges: validEdges };
+}
+
+function clonePathCurveForEdge(edgeObj) {
+  const curve = edgeObj?.userData?.splinePath;
+  if (!curve || typeof curve !== 'object') return null;
+  try {
+    return JSON.parse(JSON.stringify(curve));
+  } catch {
+    return null;
+  }
 }
 
 function combinePathPolylinesWithUsage(edges, tol = 1e-5) {
@@ -313,40 +307,6 @@ function dedupePoints(points, eps = 1e-7) {
   return out;
 }
 
-function extendPathEndpoints(points, extension = 0) {
-  if (!Array.isArray(points) || points.length < 2 || !(extension > 0)) {
-    return Array.isArray(points) ? points.map(p => Array.isArray(p) ? [p[0], p[1], p[2]] : p) : points;
-  }
-  const extended = points.map(p => [p[0], p[1], p[2]]);
-  const start = extended[0];
-  const next = extended[1];
-  const sx = next[0] - start[0];
-  const sy = next[1] - start[1];
-  const sz = next[2] - start[2];
-  const startLen = Math.hypot(sx, sy, sz);
-  if (startLen > 1e-9) {
-    const inv = extension / startLen;
-    start[0] -= sx * inv;
-    start[1] -= sy * inv;
-    start[2] -= sz * inv;
-  }
-
-  const end = extended[extended.length - 1];
-  const prev = extended[extended.length - 2];
-  const ex = end[0] - prev[0];
-  const ey = end[1] - prev[1];
-  const ez = end[2] - prev[2];
-  const endLen = Math.hypot(ex, ey, ez);
-  if (endLen > 1e-9) {
-    const inv = extension / endLen;
-    end[0] += ex * inv;
-    end[1] += ey * inv;
-    end[2] += ez * inv;
-  }
-
-  return extended;
-}
-
 export class TubeFeature {
   static shortName = 'TU';
   static longName = 'Tube';
@@ -370,7 +330,7 @@ export class TubeFeature {
   }
 
   async run(partHistory) {
-    const { featureID, path, radius, innerRadius, resolution, debug, mode } = this.inputParams;
+    const { featureID, path, radius, innerRadius } = this.inputParams;
     const radiusValue = Number(radius);
     if (!(radiusValue > 0)) {
       throw new Error('Tube requires a positive radius.');
@@ -396,13 +356,18 @@ export class TubeFeature {
     for (const group of edgeGroups) {
       const { points, unusedEdges } = combinePathPolylinesWithUsage(group);
       if (Array.isArray(points) && points.length >= 2) {
-        tubeTasks.push({ points, edge: group[0] || null });
+        const edge = group[0] || null;
+        tubeTasks.push({
+          points,
+          edge,
+          pathCurve: group.length === 1 ? clonePathCurveForEdge(edge) : null,
+        });
       }
       if (Array.isArray(unusedEdges) && unusedEdges.length) {
         for (const edge of unusedEdges) {
           const edgePoints = extractPathPolylineWorld(edge);
           if (edgePoints.length >= 2) {
-            tubeTasks.push({ points: edgePoints, edge });
+            tubeTasks.push({ points: edgePoints, edge, pathCurve: clonePathCurveForEdge(edge) });
           }
         }
       }
@@ -412,15 +377,7 @@ export class TubeFeature {
       throw new Error('Unable to build a connected path for the tube.');
     }
 
-    const baseResolution = Math.max(8, Math.floor(Number(resolution) || 32));
-    const modeSelection = typeof mode === 'string'
-      ? mode
-      : (mode == null ? inputParamsSchema.mode.default_value : String(mode));
-    const preferFast = String(modeSelection || '').toLowerCase().startsWith('light');
-    const TubeBuilder = BREP.Tube;
-    const outerSolids = [];
-    const innerSolids = [];
-    const debugExtras = [];
+    const baseSolids = [];
     for (let i = 0; i < tubeTasks.length; i++) {
       const task = tubeTasks[i];
       const pathPoints = dedupePoints(task.points);
@@ -442,10 +399,9 @@ export class TubeFeature {
 
       const finalPoints = isClosedLoop ? pathPoints.slice(0, -1) : pathPoints;
       const tubeName = (() => {
-        if (!featureID) return featureID;
+        if (!featureID) return 'Tube';
         if (tubeTasks.length === 1) return featureID;
 
-        // get the name of the first edge in the group if possible
         const edgeRef = task.edge;
         if (edgeRef) {
           const edgeName = edgeRef.name || edgeRef.id || edgeRef.userData?.edgeName;
@@ -457,63 +413,18 @@ export class TubeFeature {
         return `${featureID}_${i + 1}`;
       })();
 
-      if (debug) {
-        console.log('[TubeFeature debug] params', {
-          featureID,
-          radius: radiusValue,
-          innerRadius: inner,
-          resolution: baseResolution,
-          mode: modeSelection,
-          builder: preferFast ? 'Tube (native auto)' : 'Tube (slow)',
-          groupIndex: i,
-          isClosedLoop,
-          pathPointCount: finalPoints.length,
-          points: finalPoints
-        });
-      }
-
-      const outerTube = new TubeBuilder({
+      const tube = new BREP.Tube({
         points: finalPoints,
         radius: radiusValue,
-        innerRadius: 0,
-        resolution: baseResolution,
+        innerRadius: inner,
         closed: isClosedLoop,
         name: tubeName,
-        debugSpheres: !!debug,
-        preferFast,
+        pathCurve: task.pathCurve,
       });
-      if (debug && Array.isArray(outerTube.debugSphereSolids)) {
-        debugExtras.push(...outerTube.debugSphereSolids);
-      }
-      outerSolids.push(outerTube);
-
-      if (inner > 0) {
-        const innerName = tubeName ? `${tubeName}_Inner` : null;
-        const baseScale = Math.max(radiusValue, inner);
-        const capExtension = (!isClosedLoop && baseScale > 0)
-          ? Math.max(baseScale * 5e-3, 1e-4)
-          : 0;
-        const innerPoints = (!isClosedLoop && capExtension > 0)
-          ? extendPathEndpoints(finalPoints, capExtension)
-          : finalPoints;
-        const innerTube = new TubeBuilder({
-          points: innerPoints,
-          radius: inner,
-          innerRadius: 0,
-          resolution: baseResolution,
-          closed: isClosedLoop,
-          name: innerName,
-          debugSpheres: !!debug,
-          preferFast,
-        });
-        if (debug && Array.isArray(innerTube.debugSphereSolids)) {
-          debugExtras.push(...innerTube.debugSphereSolids);
-        }
-        innerSolids.push(innerTube);
-      }
+      baseSolids.push(tube);
     }
 
-    if (!outerSolids.length) {
+    if (!baseSolids.length) {
       throw new Error('Unable to build a connected path for the tube.');
     }
 
@@ -525,10 +436,6 @@ export class TubeFeature {
         }
         return solids[0];
       }
-      console.log('Attempting union of solids:', solids);
-
-
-
       try {
         let result = solids[0];
 
@@ -554,87 +461,6 @@ export class TubeFeature {
     const booleanOp = String(booleanParam?.operation || 'NONE').toUpperCase();
     const booleanTargets = Array.isArray(booleanParam?.targets) ? booleanParam.targets.filter(Boolean) : [];
     const shouldApplyBoolean = booleanOp !== 'NONE' && booleanTargets.length > 0;
-
-    // Always attempt to union outer segments into one solid when possible
-    const outerUnionLabel = featureID || outerSolids[0]?.name || 'TubeUnion';
-    const outerUnion = (outerSolids.length > 1) ? attemptUnionSolids(outerSolids, outerUnionLabel) : (outerSolids[0] || null);
-
-    // Always attempt to union inner segments into one cutter when inside radius is set
-    const innerUnionLabel = featureID ? `${featureID}_InnerUnion` : (innerSolids[0]?.name || null);
-    const innerUnion = (inner > 0 && innerSolids.length > 0)
-      ? ((innerSolids.length > 1) ? attemptUnionSolids(innerSolids, innerUnionLabel) : innerSolids[0])
-      : null;
-
-    // Build the base (hollow) shell per required pipeline:
-    // final = union(outer) minus union(inner)
-    let baseSolids = [];
-    if (inner > 0) {
-      // Preferred path: single subtract of the two unions
-      if (outerUnion && innerUnion) {
-        try {
-          baseSolids = [outerUnion.subtract(innerUnion)];
-        } catch (e) {
-          console.warn('[TubeFeature] Subtract of unioned inner from unioned outer failed; falling back:', e?.message || e);
-        }
-      }
-
-      // Fallbacks if the preferred single subtract was not possible
-      if (!baseSolids.length) {
-        if (outerUnion && innerSolids.length > 0) {
-          // Subtract each inner from the outer union
-          let shell = outerUnion;
-          for (const cutter of innerUnion ? [innerUnion] : innerSolids) {
-            try { if (cutter) shell = shell.subtract(cutter); } catch (err) {
-              console.warn('[TubeFeature] Fallback subtract (outerUnion - cutter) failed:', err?.message || err);
-            }
-          }
-          baseSolids = [shell];
-        } else if (!outerUnion && innerUnion && outerSolids.length > 0) {
-          // Subtract inner union from each outer, then try to union the result
-          const shells = [];
-          for (const outer of outerSolids) {
-            try { shells.push(outer.subtract(innerUnion)); } catch (err) {
-              console.warn('[TubeFeature] Fallback subtract (outer - innerUnion) failed:', err?.message || err);
-              shells.push(outer);
-            }
-          }
-          const unifiedShell = attemptUnionSolids(shells, outerUnionLabel) || null;
-          baseSolids = unifiedShell ? [unifiedShell] : shells.filter(Boolean);
-        } else {
-          // Last resort: pairwise subtract matching inners when available
-          const shells = [];
-          for (let i = 0; i < outerSolids.length; i++) {
-            const outer = outerSolids[i];
-            const cutter = innerSolids[i] || innerUnion || null;
-            if (outer) {
-              try {
-                shells.push(cutter ? outer.subtract(cutter) : outer);
-              } catch (err) {
-                console.warn(`[TubeFeature] Pairwise subtract failed for segment ${i}:`, err?.message || err);
-                shells.push(outer);
-              }
-            }
-          }
-          const unifiedShell = attemptUnionSolids(shells, outerUnionLabel) || null;
-          baseSolids = unifiedShell ? [unifiedShell] : shells.filter(Boolean);
-        }
-      }
-    } else {
-      // Solid tube (no inner). Prefer a unified outer shell if available
-      baseSolids = outerUnion ? [outerUnion] : outerSolids.slice();
-    }
-
-    baseSolids = baseSolids.filter(Boolean);
-
-    if (debug && debugExtras.length) {
-      for (const s of debugExtras) {
-        try { s.visualize(); } catch (_) { }
-      }
-    }
-
-    if (!baseSolids.length) {
-      throw new Error('Tube generation failed to produce a valid solid.');
-    }
 
     for (const solid of baseSolids) {
       if (!solid) continue;
@@ -673,14 +499,9 @@ export class TubeFeature {
           }
         }
       }
-      if (debug && debugExtras.length) {
-        added.push(...debugExtras);
-      }
       return { added, removed };
     }
 
-    const added = [...baseSolids];
-    if (debug && debugExtras.length) added.push(...debugExtras);
-    return { added, removed: [] };
+    return { added: baseSolids, removed: [] };
   }
 }

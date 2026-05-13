@@ -19,7 +19,6 @@ export const MODELING_WORKBENCH = {
     'F',
     'CH',
     'H',
-    'PF',
     'THK',
     'PATLIN',
     'PATRAD',

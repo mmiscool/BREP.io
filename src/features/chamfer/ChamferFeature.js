@@ -3,8 +3,6 @@ import {
     getSolidGeometryCounts,
     resolveSingleSolidFromEdges,
 } from "../edgeFeatureUtils.js";
-import { BREP } from "../../BREP/BREP.js";
-import { SelectionState } from "../../UI/SelectionState.js";
 
 const inputParamsSchema = {
     id: {
@@ -25,174 +23,7 @@ const inputParamsSchema = {
         default_value: 1,
         hint: "Chamfer distance (equal offset along both faces)",
     },
-    inflate: {
-        type: "number",
-        default_value: 0.1,
-        step: 0.1,
-        hint: "Grow the cutting solid by this amount (units). Very small values (e.g., 0.0005) help avoid residual slivers after CSG.",
-    },
-    direction: {
-        type: "options",
-        options: ["AUTO", "INSET", "OUTSET"],
-        default_value: "AUTO",
-        hint: "Choose chamfer side automatically (AUTO) or force INSET/OUTSET",
-    },
-    debug: {
-        type: "options",
-        options: [
-            "NONE",
-            "TRIANGLE CROSS SECTIONS ONLY",
-            "CHAMFER SOLID ONLY",
-            "CHAMFER SOLID AND CROSS SECTIONS",
-        ],
-        default_value: "NONE",
-        hint: "Choose which chamfer debug geometry to draw",
-    }
 };
-
-function normalizeChamferDebugMode(rawValue) {
-    if (rawValue === true) return "CHAMFER SOLID AND CROSS SECTIONS";
-    if (rawValue === false || rawValue == null) return "NONE";
-    const value = String(rawValue).trim().toLowerCase();
-    if (value === "triangle cross sections only") return "TRIANGLE CROSS SECTIONS ONLY";
-    if (value === "chamfer solid only") return "CHAMFER SOLID ONLY";
-    if (value === "chamfer solid and cross sections") return "CHAMFER SOLID AND CROSS SECTIONS";
-    if (value === "none") return "NONE";
-    return "NONE";
-}
-
-function isSectionDebugSolid(debugSolid) {
-    return /_SECTION_\d+$/.test(String(debugSolid?.name || ""))
-        || String(debugSolid?.__debugChamferKind || "") === "chamferCrossSection";
-}
-
-function shouldIncludeChamferDebugSolid(debugMode, debugSolid) {
-    const isSection = isSectionDebugSolid(debugSolid);
-    switch (debugMode) {
-        case "TRIANGLE CROSS SECTIONS ONLY":
-            return isSection;
-        case "CHAMFER SOLID ONLY":
-            return !isSection;
-        case "CHAMFER SOLID AND CROSS SECTIONS":
-            return true;
-        case "NONE":
-        default:
-            return false;
-    }
-}
-
-function buildSketchBasisFromFace(face) {
-    const pos = face?.geometry?.getAttribute?.("position");
-    if (!pos || pos.count < 3) return null;
-    const THREE = BREP.THREE;
-    const origin = new THREE.Vector3(pos.getX(0), pos.getY(0), pos.getZ(0));
-    const px = new THREE.Vector3(pos.getX(1), pos.getY(1), pos.getZ(1)).sub(origin);
-    const py = new THREE.Vector3(pos.getX(2), pos.getY(2), pos.getZ(2)).sub(origin);
-    const x = px.clone().normalize();
-    if (x.lengthSq() < 1e-20) return null;
-    const normal = x.clone().cross(py).normalize();
-    if (normal.lengthSq() < 1e-20) return null;
-    const y = new THREE.Vector3().crossVectors(normal, x).normalize();
-    if (y.lengthSq() < 1e-20) return null;
-    return {
-        origin: [origin.x, origin.y, origin.z],
-        x: [x.x, x.y, x.z],
-        y: [y.x, y.y, y.z],
-        z: [normal.x, normal.y, normal.z],
-    };
-}
-
-function applySketchProfileFaceStyle(face) {
-    if (!face) return;
-    try {
-        const sketchMat = (face.material && typeof face.material.clone === "function")
-            ? face.material.clone()
-            : null;
-        if (!sketchMat) return;
-        sketchMat.side = BREP.THREE.DoubleSide;
-        sketchMat.polygonOffset = true;
-        sketchMat.polygonOffsetFactor = -2;
-        sketchMat.polygonOffsetUnits = 1;
-        sketchMat.needsUpdate = true;
-        SelectionState.setBaseMaterial(face, sketchMat, { force: false });
-    } catch { /* ignore style overrides for debug sketch faces */ }
-}
-
-function buildDebugSketchGroupFromSectionSolid(sectionSolid) {
-    if (!sectionSolid || typeof sectionSolid.visualize !== "function") return null;
-    try { sectionSolid.visualize({ showEdges: true, authoringOnly: true }); } catch { return null; }
-
-    const faceNames = (typeof sectionSolid.getFaceNames === "function") ? sectionSolid.getFaceNames() : [];
-    if (!Array.isArray(faceNames) || faceNames.length !== 1) return null;
-    const sourceFaceName = String(faceNames[0] || "");
-    if (!sourceFaceName) return null;
-
-    let faceMetadata = null;
-    try {
-        faceMetadata = (typeof sectionSolid.getFaceMetadata === "function")
-            ? (sectionSolid.getFaceMetadata(sourceFaceName) || null)
-            : null;
-    } catch {
-        faceMetadata = null;
-    }
-    if (!faceMetadata || faceMetadata.debugSketchFace !== true) return null;
-
-    const children = Array.isArray(sectionSolid.children) ? [...sectionSolid.children] : [];
-    const profileFace = children.find((child) => child?.type === "FACE" && String(child?.name || "") === sourceFaceName);
-    if (!profileFace) return null;
-
-    const group = new BREP.THREE.Group();
-    group.name = sectionSolid.name || sourceFaceName;
-    group.type = "SKETCH";
-    group.onClick = () => {};
-    group.userData = group.userData || {};
-
-    const profileFaceName = `${group.name}:PROFILE`;
-    profileFace.name = profileFaceName;
-    profileFace.parentSolid = null;
-    profileFace.userData = {
-        ...(profileFace.userData || {}),
-        faceName: profileFaceName,
-        sketchFeatureId: group.name,
-        sourceFaceName,
-    };
-    applySketchProfileFaceStyle(profileFace);
-    const basis = buildSketchBasisFromFace(profileFace);
-    if (basis) group.userData.sketchBasis = basis;
-
-    const childEdges = [];
-    const childVertices = [];
-    for (const child of children) {
-        if (!child) continue;
-        if (child.type === "EDGE") {
-            child.parentSolid = null;
-            child.userData = child.userData || {};
-            if (child.userData.faceA === sourceFaceName) child.userData.faceA = profileFaceName;
-            if (child.userData.faceB === sourceFaceName) child.userData.faceB = profileFaceName;
-            child.userData.sketchFeatureId = group.name;
-            childEdges.push(child);
-        } else if (child.type === "VERTEX") {
-            child.parentSolid = null;
-            child.userData = child.userData || {};
-            child.userData.sketchFeatureId = group.name;
-            childVertices.push(child);
-        }
-    }
-    profileFace.edges = childEdges;
-    for (const edge of childEdges) {
-        if (Array.isArray(edge.faces)) {
-            edge.faces = edge.faces.map((face) => (face === profileFace || String(face?.name || "") === sourceFaceName) ? profileFace : face)
-                .filter(Boolean);
-        } else {
-            edge.faces = [profileFace];
-        }
-    }
-
-    group.add(profileFace);
-    for (const edge of childEdges) group.add(edge);
-    for (const vertex of childVertices) group.add(vertex);
-    return group;
-}
 
 export class ChamferFeature {
     static shortName = "CH";
@@ -233,7 +64,6 @@ export class ChamferFeature {
             }
             return { added: [], removed: [] };
         }
-        const direction = String(this.inputParams.direction || "AUTO").toUpperCase();
         const distance = Number(this.inputParams.distance);
         if (!Number.isFinite(distance) || !(distance > 0)) {
             console.warn("Invalid chamfer distance supplied; aborting.", { distance: this.inputParams.distance });
@@ -241,13 +71,9 @@ export class ChamferFeature {
         }
 
         const fid = this.inputParams.featureID;
-        const debugMode = normalizeChamferDebugMode(this.inputParams.debug);
         const result = await targetSolid.chamfer({
             distance,
             edges: edgeObjs,
-            direction,
-            inflate: Number(this.inputParams.inflate),
-            debug: debugMode !== "NONE",
             featureID: fid,
         });
 
@@ -257,9 +83,7 @@ export class ChamferFeature {
                 featureID: fid,
                 triangleCount: triCount,
                 vertexCount: vertCount,
-                direction,
                 distance,
-                inflate: this.inputParams.inflate,
             });
             return { added: [], removed: [] };
         }
@@ -269,20 +93,6 @@ export class ChamferFeature {
         result.visualize();
 
         const added = [result];
-        if (debugMode !== "NONE" && Array.isArray(result.__debugChamferSolids)) {
-            for (const dbg of result.__debugChamferSolids) {
-                if (!dbg) continue;
-                if (!shouldIncludeChamferDebugSolid(debugMode, dbg)) continue;
-                try { dbg.name = `${fid || "CHAMFER"}_${dbg.name || "DEBUG"}`; } catch {}
-                const debugSketch = buildDebugSketchGroupFromSectionSolid(dbg);
-                if (debugSketch) {
-                    added.push(debugSketch);
-                    continue;
-                }
-                try { dbg.visualize({ showEdges: true, authoringOnly: true }); } catch {}
-                added.push(dbg);
-            }
-        }
         return { added, removed: [targetSolid] };
     }
 }
