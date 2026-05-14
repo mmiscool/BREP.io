@@ -282,6 +282,7 @@ export class WorkspaceFileBrowserWidget {
     onEmptyTrash = null,
     createFileActionsMenu = null,
     createFolderActionsMenu = null,
+    buildFileHref = null,
     bindFileDragSource = null,
     bindDropTarget = null,
     onDropFiles = null,
@@ -308,6 +309,7 @@ export class WorkspaceFileBrowserWidget {
     this.onEmptyTrash = typeof onEmptyTrash === 'function' ? onEmptyTrash : null;
     this.createFileActionsMenu = typeof createFileActionsMenu === 'function' ? createFileActionsMenu : null;
     this.createFolderActionsMenu = typeof createFolderActionsMenu === 'function' ? createFolderActionsMenu : null;
+    this.buildFileHref = typeof buildFileHref === 'function' ? buildFileHref : null;
     this.bindFileDragSource = typeof bindFileDragSource === 'function' ? bindFileDragSource : null;
     this.bindDropTarget = typeof bindDropTarget === 'function' ? bindDropTarget : null;
     this.onDropFiles = typeof onDropFiles === 'function' ? onDropFiles : null;
@@ -930,6 +932,8 @@ export class WorkspaceFileBrowserWidget {
       }
       .wfb-open-target {
         cursor: pointer;
+        color: inherit;
+        text-decoration: none;
       }
       .wfb-open-target:focus-visible {
         outline: 2px solid rgba(122, 162, 247, 0.75);
@@ -1473,6 +1477,15 @@ export class WorkspaceFileBrowserWidget {
     }
   }
 
+  _buildFileHref(entry) {
+    if (!entry || !this.buildFileHref) return '';
+    try {
+      return String(this.buildFileHref(entry) || '').trim();
+    } catch {
+      return '';
+    }
+  }
+
   _createEntryActionsMenu(type, entry, { tile = false } = {}) {
     try {
       if (type === 'file' && this.createFileActionsMenu) {
@@ -1910,6 +1923,7 @@ export class WorkspaceFileBrowserWidget {
       if (!pathValue) return null;
       const displayName = getEntryDisplayName(entry);
       const fullPath = getEntryFullPathTooltip(entry) || getEntryModelPathWithExtension(entry);
+      const fileHref = this._buildFileHref(entry);
       const pickFile = (event) => {
         event?.preventDefault?.();
         event?.stopPropagation?.();
@@ -1938,8 +1952,12 @@ export class WorkspaceFileBrowserWidget {
         tile.appendChild(actionBtn);
       }
 
-      const preview = document.createElement('span');
+      const preview = document.createElement(fileHref ? 'a' : 'span');
       preview.className = 'wfb-tile-preview';
+      if (fileHref) {
+        preview.href = fileHref;
+        preview.draggable = false;
+      }
       const icon = document.createElement('span');
       icon.className = 'wfb-tile-icon';
       icon.textContent = '📄';
@@ -1954,15 +1972,33 @@ export class WorkspaceFileBrowserWidget {
       tile.appendChild(preview);
       preview.classList.add('wfb-open-target');
       preview.title = `Open ${displayName}`;
-      preview.addEventListener('click', pickFile);
+      preview.addEventListener('click', fileHref ? (event) => {
+        event.stopPropagation();
+      } : pickFile);
+      if (fileHref) {
+        preview.addEventListener('keydown', (event) => {
+          event.stopPropagation();
+        });
+      }
       void this._hydrateThumbnail(entry, thumb);
 
-      const label = document.createElement('div');
+      const label = document.createElement(fileHref ? 'a' : 'div');
       label.className = 'wfb-tile-name';
       label.classList.add('wfb-open-target');
       label.textContent = displayName;
       label.title = fullPath || displayName;
-      label.addEventListener('click', pickFile);
+      if (fileHref) {
+        label.href = fileHref;
+        label.draggable = false;
+      }
+      label.addEventListener('click', fileHref ? (event) => {
+        event.stopPropagation();
+      } : pickFile);
+      if (fileHref) {
+        label.addEventListener('keydown', (event) => {
+          event.stopPropagation();
+        });
+      }
       tile.appendChild(label);
       this._attachFileDragSource(tile, entry);
       this._attachCurrentFolderDropTarget(tile);
@@ -2096,6 +2132,7 @@ export class WorkspaceFileBrowserWidget {
       if (!pathValue) return null;
       const displayName = getEntryDisplayName(entry);
       const fullPath = getEntryFullPathTooltip(entry) || getEntryModelPathWithExtension(entry);
+      const fileHref = this._buildFileHref(entry);
       row.title = fullPath;
       row.addEventListener('dblclick', () => { void this._handleActivateFile(entry); });
       const actionsMenu = this._createEntryActionsMenu('file', entry, { tile: false });
@@ -2111,8 +2148,12 @@ export class WorkspaceFileBrowserWidget {
         });
       }
 
-      const preview = document.createElement('span');
+      const preview = document.createElement(fileHref ? 'a' : 'span');
       preview.className = 'wfb-preview';
+      if (fileHref) {
+        preview.href = fileHref;
+        preview.draggable = false;
+      }
       const icon = document.createElement('span');
       icon.className = 'wfb-preview-icon';
       icon.textContent = '📄';
@@ -2125,18 +2166,26 @@ export class WorkspaceFileBrowserWidget {
       preview.appendChild(thumb);
       preview.classList.add('wfb-open-target');
       preview.title = `Open ${displayName}`;
-      preview.addEventListener('click', (event) => {
+      preview.addEventListener('click', fileHref ? (event) => {
+        event.stopPropagation();
+      } : (event) => {
         event.preventDefault();
         event.stopPropagation();
         void this._handleActivateFile(entry);
       });
       nameCell.appendChild(preview);
 
-      const name = document.createElement('span');
+      const name = document.createElement(fileHref ? 'a' : 'span');
       name.className = 'wfb-name-text';
       name.classList.add('wfb-open-target');
       name.textContent = displayName;
-      name.addEventListener('click', (event) => {
+      if (fileHref) {
+        name.href = fileHref;
+        name.draggable = false;
+      }
+      name.addEventListener('click', fileHref ? (event) => {
+        event.stopPropagation();
+      } : (event) => {
         event.preventDefault();
         event.stopPropagation();
         void this._handleActivateFile(entry);

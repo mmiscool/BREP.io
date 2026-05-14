@@ -51,8 +51,19 @@ export async function afterRun_fillet_occ_top_loop_history(partHistory) {
     throw new Error(`Expected OCC fillet result to tessellate, got triangles=${triCount}, vertices=${vertCount}.`);
   }
 
-  const filletFaces = result.getFaceNames().filter((name) => /^F2_FILLET_FACE_/.test(name));
-  if (filletFaces.length < 4) {
-    throw new Error(`Expected at least four OCC fillet faces for the cube top loop, got ${filletFaces.length}.`);
+  const faceNames = result.getFaceNames();
+  const fallbackFilletFaces = faceNames.filter((name) => /^F2_FILLET_FACE_/.test(name));
+  if (fallbackFilletFaces.length > 0) {
+    throw new Error(`Expected OCC fillet faces to use source edge names, found fallback labels: ${fallbackFilletFaces.join(", ")}`);
+  }
+  const expectedEdgeFaceNames = [
+    "P.CU1_PY|P.CU1_PZ[0]",
+    "P.CU1_PX|P.CU1_PY[0]",
+    "P.CU1_NZ|P.CU1_PY[0]",
+    "P.CU1_NX|P.CU1_PY[0]",
+  ];
+  const missing = expectedEdgeFaceNames.filter((name) => !faceNames.includes(name));
+  if (missing.length > 0) {
+    throw new Error(`Expected OCC fillet blend faces named from selected edges, missing: ${missing.join(", ")}`);
   }
 }

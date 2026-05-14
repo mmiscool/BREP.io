@@ -91,9 +91,20 @@ export async function afterRun_fillet_occ_closed_extrude_edge_history(partHistor
   if (!result) throw new Error("Expected closed extrude-edge fillet history to produce the F4 result solid.");
 
   const faceNames = result.getFaceNames();
-  const filletFaces = faceNames.filter((name) => /^F4_FILLET_FACE_/.test(name));
-  if (filletFaces.length !== 6) {
-    throw new Error(`Expected analytic OCC fillet to create six blend faces for this selection, got ${filletFaces.length}.`);
+  const fallbackFilletFaces = faceNames.filter((name) => /^F4_FILLET_FACE_/.test(name));
+  if (fallbackFilletFaces.length > 0) {
+    throw new Error(`Expected analytic OCC fillet faces to use source edge names, found fallback labels: ${fallbackFilletFaces.join(", ")}`);
+  }
+  const expectedEdgeFaceNames = [
+    "E6:S5:G1_SW|P.CU1_PY[0]",
+    "P.CU1_NZ|P.CU1_PY[0]",
+    "P.CU1_NX|P.CU1_PY[0]",
+    "P.CU1_PY|P.CU1_PZ[0]",
+    "P.CU1_PX|P.CU1_PY[0]",
+  ];
+  const missingEdgeNames = expectedEdgeFaceNames.filter((name) => !faceNames.includes(name));
+  if (missingEdgeNames.length > 0) {
+    throw new Error(`Expected analytic OCC fillet blend faces named from selected edges, missing: ${missingEdgeNames.join(", ")}`);
   }
   if (!faceNames.includes("P.CU1_PY") || !faceNames.includes("E6:S5:G1_SW") || !faceNames.includes("E6:S5:PROFILE_END")) {
     throw new Error("Expected analytic OCC fillet to preserve adjacent source face names.");

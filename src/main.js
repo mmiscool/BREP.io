@@ -1851,6 +1851,20 @@ async function openEntryOnGithub(entry) {
   if (repoFull) window.open(`https://github.com/${repoFull}`, '_blank', 'noopener,noreferrer');
 }
 
+function buildEntryCadHref(entry) {
+  const source = normalizeStorageSource(entry?.source);
+  const repoFull = String(entry?.repoFull || '').trim();
+  const branch = String(entry?.branch || '').trim();
+  const name = String(entry?.name || '').trim();
+  const path = getEntryCadLaunchModelPath(entry) || name;
+  return buildCadUrl({
+    source,
+    repoFull,
+    branch,
+    path,
+  });
+}
+
 function createBrowserFileTile(entry) {
   const name = String(entry?.name || '').trim();
   if (!name) return null;
@@ -1862,6 +1876,7 @@ function createBrowserFileTile(entry) {
   const displayName = getEntryModelDisplayName(entry);
   const fullModelPath = getEntryFullPathTooltip(entry) || getEntryModelPathWithExtension(entry) || ensureModelExtension(name);
   const cadModelPath = getEntryCadLaunchModelPath(entry) || name;
+  const fileHref = buildEntryCadHref(entry);
   const openFile = (event) => {
     event?.preventDefault?.();
     event?.stopPropagation?.();
@@ -1885,18 +1900,31 @@ function createBrowserFileTile(entry) {
     previewClass: 'hub-browser-tile-preview',
     iconClass: 'hub-browser-tile-icon',
     thumbClass: 'hub-browser-tile-thumb',
+    href: fileHref,
   });
   preview.classList.add('hub-browser-open-target');
   preview.title = `Open ${displayName || name}`;
-  preview.addEventListener('click', openFile);
+  preview.addEventListener('click', (event) => {
+    event.stopPropagation();
+  });
+  preview.addEventListener('keydown', (event) => {
+    event.stopPropagation();
+  });
   tile.appendChild(preview);
 
-  const label = document.createElement('div');
+  const label = document.createElement('a');
   label.className = 'hub-browser-tile-name';
   label.textContent = displayName || name;
   label.title = fullModelPath || name;
+  label.href = fileHref;
+  label.draggable = false;
   label.classList.add('hub-browser-open-target');
-  label.addEventListener('click', openFile);
+  label.addEventListener('click', (event) => {
+    event.stopPropagation();
+  });
+  label.addEventListener('keydown', (event) => {
+    event.stopPropagation();
+  });
   tile.appendChild(label);
 
   bindExplorerFileKeyboard(tile, entry, openFile);
@@ -1910,12 +1938,17 @@ function createModelPreview(entry, {
   iconClass = 'hub-browser-icon',
   thumbClass = 'hub-browser-thumb',
   iconGlyph = '📄',
+  href = '',
 } = {}) {
   const name = String(entry?.name || '').trim();
   const displayName = getEntryModelDisplayName(entry) || name || 'Model';
 
-  const preview = document.createElement('span');
+  const preview = document.createElement(href ? 'a' : 'span');
   preview.className = previewClass;
+  if (href) {
+    preview.href = href;
+    preview.draggable = false;
+  }
 
   const icon = document.createElement('span');
   icon.className = iconClass;
@@ -2029,6 +2062,7 @@ function createFolderExplorer(roots, term = '') {
     createFileActionsMenu: (entry, { tile = false } = {}) => createFileActionsMenu(entry, {
       extraClass: tile ? 'hub-browser-tile-menu' : '',
     }),
+    buildFileHref: buildEntryCadHref,
     createFolderActionsMenu: (entry, { tile = false, source, repoFull } = {}) => createFolderActionsMenu(entry, {
       source: normalizeStorageSource(source || 'local'),
       repoFull: String(repoFull || '').trim(),

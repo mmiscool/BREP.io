@@ -205,11 +205,19 @@ function conditionSketchPointMapForNativeProfiles(sketch, pointById) {
     };
     const allLinePairs = new Set();
     const profileLinePairs = new Set();
+    const axisAlignedLinePairs = new Set();
+    const lineEndpointsByKey = new Map();
     for (const g of (Array.isArray(sketch.geometries) ? sketch.geometries : [])) {
         if (g?.type !== 'line' || !Array.isArray(g.points) || g.points.length !== 2) continue;
         const key = pairKey(g.points[0], g.points[1]);
         allLinePairs.add(key);
+        lineEndpointsByKey.set(key, [g.points[0], g.points[1]]);
         if (g.construction !== true) profileLinePairs.add(key);
+    }
+    for (const c of constraints) {
+        if ((c?.type === '━' || c?.type === '│') && Array.isArray(c.points) && c.points.length >= 2) {
+            axisAlignedLinePairs.add(pairKey(c.points[0], c.points[1]));
+        }
     }
     const relationUsesLines = (ids, pairs) => (
         Array.isArray(ids)
@@ -340,6 +348,69 @@ function conditionSketchPointMapForNativeProfiles(sketch, pointById) {
             setGroup(dId, c.x + dx, c.y + dy);
         }
     };
+    const normalizeAngle = (angle) => {
+        let out = angle % Math.PI;
+        if (out < 0) out += Math.PI;
+        return out;
+    };
+    const relatedLineConstraints = constraints
+        .filter((c) => {
+            if (!Array.isArray(c?.points) || c.points.length < 4) return false;
+            if (c.type === '⟂') return relationUsesLines(c.points, allLinePairs);
+            if (c.type === '∥') return relationUsesLines(c.points, profileLinePairs);
+            return false;
+        })
+        .map((c) => ({
+            first: pairKey(c.points[0], c.points[1]),
+            second: pairKey(c.points[2], c.points[3]),
+            perpendicular: c.type === '⟂',
+        }));
+    const applyPropagatedLineOrientations = () => {
+        const orientation = new Map();
+        for (const c of constraints) {
+            if (!Array.isArray(c?.points) || c.points.length < 2) continue;
+            const key = pairKey(c.points[0], c.points[1]);
+            if (!allLinePairs.has(key)) continue;
+            if (c.type === '━') orientation.set(key, 0);
+            else if (c.type === '│') orientation.set(key, Math.PI / 2);
+        }
+        for (let pass = 0; pass < 16; pass += 1) {
+            let changed = false;
+            for (const relation of relatedLineConstraints) {
+                const propagate = (from, to, perpendicular) => {
+                    if (!orientation.has(from) || orientation.has(to)) return;
+                    orientation.set(to, normalizeAngle(orientation.get(from) + (perpendicular ? Math.PI / 2 : 0)));
+                    changed = true;
+                };
+                propagate(relation.first, relation.second, relation.perpendicular);
+                propagate(relation.second, relation.first, relation.perpendicular);
+            }
+            if (!changed) break;
+        }
+        for (const [key, angle] of orientation.entries()) {
+            const ids = lineEndpointsByKey.get(key);
+            if (!ids) continue;
+            const a = get(ids[0]);
+            const b = get(ids[1]);
+            if (!a || !b) continue;
+            const len = Math.hypot(b.x - a.x, b.y - a.y);
+            if (len <= 1e-12) continue;
+            let dx = Math.cos(angle);
+            let dy = Math.sin(angle);
+            if (dx * (b.x - a.x) + dy * (b.y - a.y) < 0) {
+                dx = -dx;
+                dy = -dy;
+            }
+            dx *= len;
+            dy *= len;
+            if (groupFixed(ids[1]) && !groupFixed(ids[0])) {
+                setGroup(ids[0], b.x - dx, b.y - dy);
+            } else {
+                setGroup(ids[1], a.x + dx, a.y + dy);
+            }
+        }
+        averageCoincidentGroups();
+    };
 
     averageCoincidentGroups();
     for (let pass = 0; pass < 24; pass += 1) {
@@ -348,15 +419,20 @@ function conditionSketchPointMapForNativeProfiles(sketch, pointById) {
             if (c.type === '━') setHorizontal(c.points[0], c.points[1]);
             else if (c.type === '│') setVertical(c.points[0], c.points[1]);
             else if (c.type === '∥' && relationUsesLines(c.points, profileLinePairs)) {
-                setRelatedLine(c.points, false);
-                setRelatedLine([c.points[2], c.points[3], c.points[0], c.points[1]], false);
+                const firstLocked = axisAlignedLinePairs.has(pairKey(c.points[0], c.points[1]));
+                const secondLocked = axisAlignedLinePairs.has(pairKey(c.points[2], c.points[3]));
+                if (!secondLocked || firstLocked) setRelatedLine(c.points, false);
+                if (!firstLocked || secondLocked) setRelatedLine([c.points[2], c.points[3], c.points[0], c.points[1]], false);
             } else if (c.type === '⟂' && relationUsesLines(c.points, allLinePairs)) {
-                setRelatedLine(c.points, true);
-                setRelatedLine([c.points[2], c.points[3], c.points[0], c.points[1]], true);
+                const firstLocked = axisAlignedLinePairs.has(pairKey(c.points[0], c.points[1]));
+                const secondLocked = axisAlignedLinePairs.has(pairKey(c.points[2], c.points[3]));
+                if (!secondLocked || firstLocked) setRelatedLine(c.points, true);
+                if (!firstLocked || secondLocked) setRelatedLine([c.points[2], c.points[3], c.points[0], c.points[1]], true);
             }
         }
         averageCoincidentGroups();
     }
+    applyPropagatedLineOrientations();
     return pointById;
 }
 

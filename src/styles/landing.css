@@ -1062,6 +1062,8 @@ body {
 
 .hub-browser-open-target {
   cursor: pointer;
+  color: inherit;
+  text-decoration: none;
 }
 
 .hub-browser-open-target:focus-visible {

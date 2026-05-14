@@ -581,6 +581,12 @@ function averageDistanceToPath(pointsToClassify, pathPoints, closed = false) {
 function loopSegmentsWithNames(boundaryLoops, edgeInputs, defaultName, normal = [0, 0, 1]) {
   const segments = [];
   const named = Array.isArray(edgeInputs) ? edgeInputs : [];
+  const namedSegmentIds = new Set(
+    named
+      .map((edge) => edge?.sketchGeometryId)
+      .filter((id) => id !== undefined && id !== null)
+      .map((id) => String(id)),
+  );
   const circleLoopCovered = new Set();
   for (const edge of named) {
     const pts = Array.isArray(edge?.polyline) ? edge.polyline : [];
@@ -612,6 +618,8 @@ function loopSegmentsWithNames(boundaryLoops, edgeInputs, defaultName, normal = 
   for (let loopIndex = 0; loopIndex < (boundaryLoops || []).length; loopIndex += 1) {
     if (circleLoopCovered.has(loopIndex)) continue;
     const loop = boundaryLoops[loopIndex];
+    const segmentIds = Array.isArray(loop?.segmentIds) ? loop.segmentIds : [];
+    if (segmentIds.length && segmentIds.every((id) => namedSegmentIds.has(String(id)))) continue;
     const pts = Array.isArray(loop?.pts) ? loop.pts : loop;
     if (!Array.isArray(pts) || pts.length < 2) continue;
     for (let i = 0; i < pts.length; i += 1) {
@@ -1139,10 +1147,80 @@ function classifyRevolveSideFace(stats, params) {
   return best?.segment?.name || params.defaultSideName;
 }
 
+function edgeInputSegments(edgeInput) {
+  const pts = Array.isArray(edgeInput?.polyline) ? edgeInput.polyline : [];
+  const segments = [];
+  for (let i = 0; i + 1 < pts.length; i += 1) {
+    if (pointDistanceSq(pts[i], pts[i + 1]) > 1e-16) segments.push([pts[i], pts[i + 1]]);
+  }
+  return segments;
+}
+
+function matchEdgeInputToOccEdge(edgeInputs, occEdge) {
+  let best = null;
+  for (const edgeInput of edgeInputs || []) {
+    const name = String(edgeInput?.name || "").trim();
+    if (!name) continue;
+    const segments = edgeInputSegments(edgeInput);
+    if (!segments.length) continue;
+    let score = curvePolylineMatchScore(segments, occEdge);
+    const endpoints = occEdgeEndpoints(occEdge);
+    const pts = Array.isArray(edgeInput?.polyline) ? edgeInput.polyline : [];
+    const inputClosed = pts.length > 2 && pointDistanceSq(pts[0], pts[pts.length - 1]) <= 1e-16;
+    if (endpoints && !inputClosed) {
+      const endpointScore = Math.min(
+        pointDistanceSq(pts[0], endpoints[0]) + pointDistanceSq(pts[pts.length - 1], endpoints[1]),
+        pointDistanceSq(pts[0], endpoints[1]) + pointDistanceSq(pts[pts.length - 1], endpoints[0]),
+      );
+      score = Math.min(score, endpointScore);
+    }
+    if (!best || score < best.score) best = { name, score };
+  }
+  return best?.name || null;
+}
+
+function collectNamedSourceEdges(sourceFace, edgeInputs) {
+  if (!sourceFace || !Array.isArray(edgeInputs) || !edgeInputs.length) return [];
+  const out = [];
+  const used = new Set();
+  try {
+    const explorer = new oc.TopExp_Explorer_2(
+      sourceFace,
+      oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+      oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+    );
+    for (; explorer.More(); explorer.Next()) {
+      const edge = oc.TopoDS.Edge_1(explorer.Current());
+      const name = matchEdgeInputToOccEdge(edgeInputs, edge);
+      if (!name) continue;
+      const key = `${name}:${out.length}`;
+      if (used.has(key)) continue;
+      used.add(key);
+      out.push({ edge, name });
+    }
+  } catch {
+    return [];
+  }
+  return out;
+}
+
+function generatedFaceNameFromSourceEdges(resultFace, namedSourceEdges, operation) {
+  if (!operation || typeof operation.Generated !== "function") return null;
+  for (const source of namedSourceEdges || []) {
+    try {
+      if (listContainsSameShape(operation.Generated(source.edge), resultFace)) return source.name;
+    } catch {
+      // Fall back to geometric naming below.
+    }
+  }
+  return null;
+}
+
 function bindRevolveFaceNames(state, params) {
   state.faceNameByIndex = [];
   new oc.BRepMesh_IncrementalMesh_2(state.shape, DEFAULT_DEFLECTION, false, DEFAULT_ANGLE, false);
   const full = Math.abs(params.angleDegrees) >= 360 - 1e-6;
+  const namedSourceEdges = collectNamedSourceEdges(params.sourceFace, params.edgeInputs);
   let faceIndex = 0;
   const explorer = new oc.TopExp_Explorer_2(
     state.shape,
@@ -1151,6 +1229,11 @@ function bindRevolveFaceNames(state, params) {
   );
   for (; explorer.More(); explorer.Next(), faceIndex += 1) {
     const face = oc.TopoDS.Face_1(explorer.Current());
+    const generatedName = generatedFaceNameFromSourceEdges(face, namedSourceEdges, params.operation);
+    if (generatedName) {
+      state.faceNameByIndex[faceIndex] = generatedName;
+      continue;
+    }
     const stats = statsFromOccFace(face);
     if (!full) {
       const startPlaneDistance = Math.abs(dot(sub(stats.centroid, params.startOrigin), params.startNormal));
@@ -1247,6 +1330,9 @@ export function makeRevolution({
     feature: { kind: "revolve", faceName },
   });
   bindRevolveFaceNames(state, {
+    sourceFace: face,
+    edgeInputs,
+    operation: revol,
     startName,
     endName,
     defaultSideName,
@@ -2296,6 +2382,39 @@ function listContainsSameShape(list, shape) {
   return false;
 }
 
+function occVerticesForShape(shape) {
+  const vertices = [];
+  if (!shape) return vertices;
+  try {
+    const explorer = new oc.TopExp_Explorer_2(
+      shape,
+      oc.TopAbs_ShapeEnum.TopAbs_VERTEX,
+      oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+    );
+    for (; explorer.More(); explorer.Next()) {
+      vertices.push(oc.TopoDS.Vertex_1(explorer.Current()));
+    }
+  } catch {
+    return [];
+  }
+  return vertices;
+}
+
+function occVertexPoint(vertex) {
+  if (!vertex) return null;
+  try {
+    const p = oc.BRep_Tool.Pnt(vertex);
+    return [p.X(), p.Y(), p.Z()];
+  } catch {
+    return null;
+  }
+}
+
+function occVertexKey(vertex) {
+  const point = occVertexPoint(vertex);
+  return point ? pointKeyFromArray(point) : null;
+}
+
 function historyMapsShapeToResult(history, sourceShape, resultShape) {
   if (!history || !sourceShape || !resultShape) return false;
   try {
@@ -2401,6 +2520,75 @@ function chooseUnusedSourceFaceName(resultFace, sources, usedNames = new Set()) 
     if (!best || score > best.score) best = { name: source.name, score };
   }
   return best?.name || null;
+}
+
+function normalizedGeneratedEdgeSources(edgeSources) {
+  const out = [];
+  const seen = new Set();
+  for (const source of Array.isArray(edgeSources) ? edgeSources : []) {
+    const name = String(source?.name || "").trim();
+    if (!name || !source?.edge) continue;
+    const key = `${name}:${occEdgeKey(source.edge) || out.length}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ edge: source.edge, name, order: out.length });
+  }
+  return out;
+}
+
+function collectGeneratedVertexSources(edgeSources) {
+  const byKey = new Map();
+  for (const source of edgeSources || []) {
+    for (const vertex of occVerticesForShape(source.edge)) {
+      const key = occVertexKey(vertex);
+      if (!key) continue;
+      let entry = byKey.get(key);
+      if (!entry) {
+        entry = { vertex, names: new Set(), firstOrder: source.order };
+        byKey.set(key, entry);
+      }
+      entry.names.add(source.name);
+      entry.firstOrder = Math.min(entry.firstOrder, source.order);
+    }
+  }
+  return Array.from(byKey.values())
+    .map((entry) => ({
+      vertex: entry.vertex,
+      names: Array.from(entry.names).sort(),
+      firstOrder: entry.firstOrder,
+    }))
+    .sort((a, b) => a.firstOrder - b.firstOrder);
+}
+
+function combinedGeneratedVertexFaceName(names) {
+  const unique = Array.from(new Set((Array.isArray(names) ? names : [])
+    .map((name) => String(name || "").trim())
+    .filter(Boolean)))
+    .sort();
+  if (unique.length >= 3) return unique.join("+");
+  return unique[0] || null;
+}
+
+function generatedFaceNameFromEdgeSources(resultFace, edgeSources, operation) {
+  if (!operation || typeof operation.Generated !== "function") return null;
+  const sources = normalizedGeneratedEdgeSources(edgeSources);
+  for (const source of sources) {
+    try {
+      if (listContainsSameShape(operation.Generated(source.edge), resultFace)) return source.name;
+    } catch {
+      // Some OCCT history calls are optional in the wasm binding.
+    }
+  }
+
+  for (const source of collectGeneratedVertexSources(sources)) {
+    try {
+      if (!listContainsSameShape(operation.Generated(source.vertex), resultFace)) continue;
+      return combinedGeneratedVertexFaceName(source.names);
+    } catch {
+      // Continue with the next source vertex.
+    }
+  }
+  return null;
 }
 
 function bindBooleanFaceNames(state, left, right, booleanOp, operation) {
@@ -2849,7 +3037,7 @@ export function occAxisFromSelectedEdge(edgeObj) {
   };
 }
 
-function bindFeatureResultFaceNames(state, sourceSolid, featureFacePrefix, operation) {
+function bindFeatureResultFaceNames(state, sourceSolid, featureFacePrefix, operation, options = {}) {
   const sourceFaces = collectNamedOccFaces(sourceSolid);
   state.faceNameByIndex = [];
   let created = 0;
@@ -2881,12 +3069,15 @@ function bindFeatureResultFaceNames(state, sourceSolid, featureFacePrefix, opera
         }
       } catch { }
     }
+    if (!name) {
+      name = generatedFaceNameFromEdgeSources(face, options.generatedEdgeSources, operation);
+    }
     state.faceNameByIndex[faceIndex] = name || `${featureFacePrefix}_${created++}`;
   }
   state.faceNames = uniqueNames(state.faceNameByIndex);
 }
 
-function featureResultStateFromOperation(solid, operation, featureID, kind) {
+function featureResultStateFromOperation(solid, operation, featureID, kind, options = {}) {
   if (typeof operation.Build === "function") operation.Build();
   if (typeof operation.IsDone === "function" && !operation.IsDone()) {
     throw new Error(`OpenCASCADE ${kind} failed.`);
@@ -2898,7 +3089,7 @@ function featureResultStateFromOperation(solid, operation, featureID, kind) {
     edgeMetadata: solid?._edgeMetadata instanceof Map ? new Map(solid._edgeMetadata.entries()) : new Map(),
     feature: { kind, featureID },
   });
-  bindFeatureResultFaceNames(state, solid, `${featureID}_${String(kind || "FEATURE").toUpperCase()}_FACE`, operation);
+  bindFeatureResultFaceNames(state, solid, `${featureID}_${String(kind || "FEATURE").toUpperCase()}_FACE`, operation, options);
   return state;
 }
 
@@ -2908,15 +3099,18 @@ export function filletOccSolid(solid, edgeObjs = [], { radius, featureID = "FILL
   if (!Number.isFinite(r) || r <= 0) throw new Error(`OpenCASCADE fillet radius must be > 0, got ${radius}`);
   const op = new oc.BRepFilletAPI_MakeFillet(solid._occ.shape, oc.ChFi3d_FilletShape.ChFi3d_Rational);
   let added = 0;
+  const generatedEdgeSources = [];
   for (const edgeObj of edgeObjs || []) {
     const edges = findOccEdgesForSelection(solid, edgeObj);
+    const sourceName = String(edgeObj?.name || edgeObj?.userData?.edgeName || "").trim();
     for (const edge of edges || []) {
       op.Add_2(r, edge);
       added += 1;
+      if (sourceName) generatedEdgeSources.push({ edge, name: sourceName });
     }
   }
   if (!added) return null;
-  return featureResultStateFromOperation(solid, op, featureID, "fillet");
+  return featureResultStateFromOperation(solid, op, featureID, "fillet", { generatedEdgeSources });
 }
 
 export function chamferOccSolid(solid, edgeObjs = [], { distance, featureID = "CHAMFER" } = {}) {
@@ -3329,14 +3523,14 @@ export function occBoundaryEdgePolylines(solid, options = {}) {
     let faceA = uniqueNames[0];
     let faceB = uniqueNames[1] || uniqueNames[0];
     [faceA, faceB] = edgePairName(faceA, faceB);
-    const pairKey = `${faceA}|${faceB}`;
+    const pairKey = JSON.stringify([faceA, faceB]);
     if (!pairEdges.has(pairKey)) pairEdges.set(pairKey, []);
     pairEdges.get(pairKey).push(polygon.positions);
   }
 
   const out = [];
   for (const [pairKey, polylinesForPair] of pairEdges.entries()) {
-    const [faceA, faceB] = pairKey.split("|");
+    const [faceA, faceB] = JSON.parse(pairKey);
     polylinesForPair.forEach((positions, index) => {
       if (positions.length < 2) return;
       const closedLoop = pointDistanceSq(positions[0], positions[positions.length - 1]) <= 1e-12;
