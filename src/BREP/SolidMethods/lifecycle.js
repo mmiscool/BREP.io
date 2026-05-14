@@ -1,22 +1,18 @@
 /**
  * Solid lifecycle helpers: constructor, cloning, resource cleanup.
  */
-import {
-    applySolidAuthoringStateSnapshot,
-    getSolidAuthoringStateSnapshot,
-} from "../CppSolidCore.js";
 
 export function constructorImpl() {
-    // Geometry data (MeshGL layout, but we build incrementally in JS arrays)
+    // Legacy authoring buffers retained for metadata, aux-edge, and compatibility paths.
     this._numProp = 3;                // x,y,z
     this._vertProperties = [];        // flat [x0,y0,z0, x1,y1,z1, ...]
     this._triVerts = [];              // flat [i0,i1,i2, i3,i4,i5, ...]
-    this._triIDs = [];                // per-triangle Manifold ID (mapped from faceName)
+    this._triIDs = [];                // per-triangle face ID (mapped from faceName)
 
     // Vertex uniquing
     this._vertKeyToIndex = new Map(); // "x,y,z" -> index
 
-    // Face name <-> Manifold ID
+    // Face name <-> stable face ID
     this._faceNameToID = new Map();
     this._idToFaceName = new Map();
 
@@ -27,13 +23,10 @@ export function constructorImpl() {
     this._edgeMetadataVersion = 0;
 
     // Laziness & caching
-    this._dirty = true;               // arrays changed and manifold needs rebuild
-    this._manifold = null;            // cached Manifold object built from arrays
+    this._dirty = true;
     this._faceIndex = null;           // lazy cache: id -> [triIndices]
     this._epsilon = 0;                // optional vertex weld tolerance (off by default)
     this._freeTimer = null;           // handle for scheduled wasm cleanup
-    this._cppSolidCore = null;        // optional reusable native authoring bridge
-    this._cppSolidCoreSyncStamp = null;
     this._kernel = "opencascade";
     this._occ = null;                 // OpenCASCADE TopoDS_Shape-backed state
 
@@ -51,12 +44,25 @@ export function constructorImpl() {
 export function clone() {
     const Solid = this.constructor;
     const s = new Solid();
-    applySolidAuthoringStateSnapshot(s, getSolidAuthoringStateSnapshot(this));
+    s._numProp = this._numProp || 3;
+    s._vertProperties = Array.from(this._vertProperties || []);
+    s._triVerts = Array.from(this._triVerts || []);
+    s._triIDs = Array.from(this._triIDs || []);
+    s._vertKeyToIndex = new Map(this._vertKeyToIndex instanceof Map ? this._vertKeyToIndex.entries() : []);
+    s._faceNameToID = new Map(this._faceNameToID instanceof Map ? this._faceNameToID.entries() : []);
+    s._idToFaceName = new Map(this._idToFaceName instanceof Map ? this._idToFaceName.entries() : []);
+    s._faceMetadata = new Map(this._faceMetadata instanceof Map ? this._faceMetadata.entries() : []);
+    s._edgeMetadata = new Map(this._edgeMetadata instanceof Map ? this._edgeMetadata.entries() : []);
+    s._faceMetadataVersion = this._faceMetadataVersion || 0;
+    s._edgeMetadataVersion = this._edgeMetadataVersion || 0;
+    s._auxEdges = Array.isArray(this._auxEdges)
+        ? this._auxEdges.map((edge) => ({
+            ...(edge || {}),
+            points: Array.isArray(edge?.points) ? edge.points.map((p) => Array.from(p || [])) : [],
+        }))
+        : [];
     s._dirty = true;
-    s._manifold = null;
     s._faceIndex = null;
-    s._cppSolidCore = null;
-    s._cppSolidCoreSyncStamp = null;
     s._kernel = this._kernel || "opencascade";
     s._occ = this._occ ? {
         ...this._occ,
@@ -71,28 +77,14 @@ export function clone() {
 }
 
 /**
- * Free wasm resources associated with this Solid.
- *
- * Disposes the underlying Manifold instance (if any) to prevent
- * accumulating wasm memory across rebuilds. After calling free(),
- * the Solid remains usable - any subsequent call that needs the
- * manifold will trigger a fresh _manifoldize().
+ * Free cached resources associated with this Solid.
  */
 export function free() {
     try {
         // Clear any pending auto-free timer first
         try { if (this._freeTimer) { clearTimeout(this._freeTimer); } } catch (_) { }
         this._freeTimer = null;
-        if (this._manifold) {
-            try { if (typeof this._manifold.delete === 'function') this._manifold.delete(); } catch (_) { }
-            this._manifold = null;
-        }
-        if (this._cppSolidCore) {
-            try { if (typeof this._cppSolidCore.dispose === 'function') this._cppSolidCore.dispose(); } catch (_) { }
-            this._cppSolidCore = null;
-        }
         if (this._occ) this._occ.meshCache = null;
-        this._cppSolidCoreSyncStamp = null;
         this._dirty = true;
         this._faceIndex = null;
     } catch (_) { /* noop */ }

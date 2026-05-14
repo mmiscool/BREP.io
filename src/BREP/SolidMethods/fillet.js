@@ -4,10 +4,10 @@ import { resolveEdgesFromInputs } from './edgeResolution.js';
 import { filletOccSolid, hasOccShape, setOccState } from '../OpenCascadeKernel.js';
 
 function requireNativeFilletCombinedBuilder() {
-  throw new Error('Solid.fillet() requires an OpenCASCADE-backed solid; legacy Manifold fillet fallback has been removed.');
+  throw new Error('Solid.fillet() requires an OpenCASCADE-backed solid; legacy mesh fillet fallback has been removed.');
 }
 
-function solidFromSnapshot(snapshot, SolidClass, name = null) {
+function solidFromSnapshot(_snapshot, _SolidClass, _name = null) {
   return null;
 }
 
@@ -722,8 +722,6 @@ function mergeCoplanarAdjacentFilletEndCaps(solid, opts = {}) {
       if (typeof solid.setFaceMetadata === 'function') solid.setFaceMetadata(target.faceName, targetMetadata);
       solid._dirty = true;
       solid._faceIndex = null;
-      try { if (solid._manifold && typeof solid._manifold.delete === 'function') solid._manifold.delete(); } catch { }
-      solid._manifold = null;
       mergedEndCaps += 1;
       mergedThisPass = true;
 
@@ -1192,8 +1190,6 @@ function reassignTinyFilletSidewallSliverTriangles(solid, opts = {}) {
   pruneUnusedFaceLabelsFromTriangles(solid);
   solid._faceIndex = null;
   solid._dirty = true;
-  try { if (solid._manifold && typeof solid._manifold.delete === 'function') solid._manifold.delete(); } catch { }
-  solid._manifold = null;
 
   if (debug && mutationDetails.length > 0) {
     console.log('[Solid.fillet] Reassigned tiny fillet sliver triangles into planar neighbors.', {
@@ -1265,21 +1261,21 @@ export async function fillet(opts = {}) {
   requireNativeFilletCombinedBuilder();
   const directionMode = normalizeFilletDirectionMode(opts.direction);
   const autoDirection = directionMode === 'AUTO';
-  const inflate = Number.isFinite(opts.inflate) ? Number(opts.inflate) : 0.1;
+  const _inflate = Number.isFinite(opts.inflate) ? Number(opts.inflate) : 0.1;
   const nudgeFaceDistanceRaw = Number(opts.nudgeFaceDistance);
   const nudgeFaceDistance = Number.isFinite(nudgeFaceDistanceRaw) ? nudgeFaceDistanceRaw : 0.0001;
   const debug = !!opts.debug;
   const debugSolidsLevelRaw = Number(opts.debugSolidsLevel);
-  const debugSolidsLevel = Number.isFinite(debugSolidsLevelRaw)
+  const _debugSolidsLevel = Number.isFinite(debugSolidsLevelRaw)
     ? Math.max(-1, Math.min(2, Math.floor(debugSolidsLevelRaw)))
     : 0;
-  const debugShowCombinedBeforeTarget = !!opts.debugShowCombinedBeforeTarget;
+  const _debugShowCombinedBeforeTarget = !!opts.debugShowCombinedBeforeTarget;
   const resolutionRaw = Number(opts.resolution);
-  const resolution = (Number.isFinite(resolutionRaw) && resolutionRaw > 0)
+  const _resolution = (Number.isFinite(resolutionRaw) && resolutionRaw > 0)
     ? Math.max(8, Math.floor(resolutionRaw))
     : 32;
   const cleanupTinyFaceIslandsAreaRaw = Number(opts.cleanupTinyFaceIslandsArea);
-  const cleanupTinyFaceIslandsArea = Number.isFinite(cleanupTinyFaceIslandsAreaRaw)
+  const _cleanupTinyFaceIslandsArea = Number.isFinite(cleanupTinyFaceIslandsAreaRaw)
     ? cleanupTinyFaceIslandsAreaRaw
     : 0.01;
   const mergeCoplanarEndCaps = opts.mergeCoplanarEndCaps !== false;
@@ -1296,7 +1292,7 @@ export async function fillet(opts = {}) {
     try { c.name = this.name; } catch { }
     return c;
   }
-  const baseSnapshot = null;
+  const _baseSnapshot = null;
   const debugAdded = [];
   const buildFallbackResult = () => {
     const fallback = this.clone();
@@ -1339,23 +1335,7 @@ export async function fillet(opts = {}) {
 
   let nativeResult = null;
   try {
-    throw new Error('Legacy Manifold fillet fallback has been removed.');
     nativeResult = null;
-    nativeResult = ({
-      snapshot: baseSnapshot,
-      edges: edgePayload,
-      radius,
-      directionMode,
-      inflate,
-      nudgeFaceDistance,
-      resolution,
-      featureID,
-      name: this?.name || `${featureID}_FINAL_FILLET`,
-      cleanupTinyFaceIslandsArea,
-      debug: !!debug,
-      debugSolidsLevel,
-      debugShowCombinedBeforeTarget,
-    });
   } catch (err) {
     console.error('[Solid.fillet] Native fillet build failed; returning clone.', {
       featureID,

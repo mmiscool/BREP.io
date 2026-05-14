@@ -183,6 +183,68 @@ export async function afterRun_hole_thread_modeled(partHistory) {
   }
 }
 
+export async function test_hole_thread_modeled_point_thread_face_reference(partHistory) {
+  partHistory.expressions = "resolution = 32;\n";
+
+  const cube = await partHistory.newFeature("P.CU");
+  Object.assign(cube.inputParams, {
+    id: "P.CU1",
+    sizeX: 200,
+    sizeY: 200,
+    sizeZ: 50,
+  });
+
+  const sketch = await partHistory.newFeature("S");
+  Object.assign(sketch.inputParams, {
+    id: "S2",
+    sketchPlane: "P.CU1_PZ",
+    curveResolution: "resolution",
+  });
+  buildSketchWithPoints(sketch, [
+    [-41.206767, -26.831219],
+    [40.457565, -47.434602],
+    [37.086096, 44.344106],
+    [-47.575089, 46.966344],
+  ]);
+
+  const hole = await partHistory.newFeature("H");
+  Object.assign(hole.inputParams, {
+    id: "H3",
+    face: "S2:P2_THREAD_FACE:CAP_END|S2:P2_THREAD_FACE:FLANK_A[0]",
+    holeType: "THREADED",
+    depth: 10,
+    throughAll: false,
+    threadStandard: "ISO_METRIC",
+    threadDesignation: "M5x0.8",
+    threadMode: "MODELED",
+    threadSegmentsPerTurn: 32,
+    debugShowSolid: true,
+    boolean: {
+      targets: [],
+      operation: "SUBTRACT",
+      overlapConditioningEnabled: true,
+    },
+  });
+
+  return partHistory;
+}
+
+export async function afterRun_hole_thread_modeled_point_thread_face_reference(partHistory) {
+  const holeFeature = findHoleFeature(partHistory);
+  if (!holeFeature) throw new Error("[hole_thread_modeled_point_thread_face_reference] Hole feature missing");
+  const holes = holeFeature.persistentData?.holes || [];
+  if (holes.length !== 1) {
+    throw new Error(`[hole_thread_modeled_point_thread_face_reference] Expected one hole from S2:P2 reference, got ${holes.length}`);
+  }
+  const record = holes[0];
+  if (record?.sourceName !== "S2:P2") {
+    throw new Error(`[hole_thread_modeled_point_thread_face_reference] Expected sourceName S2:P2, got ${record?.sourceName}`);
+  }
+  if (!record?.thread || String(record.thread.mode || "").toUpperCase() !== "MODELED") {
+    throw new Error("[hole_thread_modeled_point_thread_face_reference] Expected modeled thread metadata");
+  }
+}
+
 export async function test_hole_countersink(partHistory) {
   const cube = await partHistory.newFeature("P.CU");
   cube.inputParams.sizeX = CUBE_SIZE;

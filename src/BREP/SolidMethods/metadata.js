@@ -2,12 +2,6 @@
  * Face and edge metadata helpers.
  */
 
-import {
-    cppSolidCoreHasAuthoringBridge,
-    getSyncedCppSolidCore,
-    requireCppSolidCoreCapability,
-    syncSolidAuthoringStateFromCpp,
-} from "../CppSolidCore.js";
 import { hasOccShape } from "../OpenCascadeKernel.js";
 
 /** Set metadata for a face (e.g., radius for cylindrical faces). */
@@ -24,12 +18,10 @@ export function setFaceMetadata(faceName, metadata) {
         this._faceMetadataVersion = (this._faceMetadataVersion || 0) + 1;
         return this;
     }
-    requireCppSolidCoreCapability(cppSolidCoreHasAuthoringBridge, "Solid.setFaceMetadata");
-    const core = getSyncedCppSolidCore(this);
-    const existing = core.getFaceMetadata(faceName);
-    const base = existing && typeof existing === 'object' ? existing : {};
-    core.setFaceMetadata(faceName, { ...base, ...metadata });
-    syncSolidAuthoringStateFromCpp(this, core);
+    const existing = this._faceMetadata instanceof Map ? (this._faceMetadata.get(faceName) || {}) : {};
+    if (!(this._faceMetadata instanceof Map)) this._faceMetadata = new Map();
+    this._faceMetadata.set(faceName, { ...existing, ...metadata });
+    this._faceMetadataVersion = (this._faceMetadataVersion || 0) + 1;
     return this;
 }
 
@@ -38,9 +30,7 @@ export function getFaceMetadata(faceName) {
     if (this._faceMetadata instanceof Map) {
         return this._faceMetadata.get(faceName) || {};
     }
-    if (hasOccShape(this)) return {};
-    requireCppSolidCoreCapability(cppSolidCoreHasAuthoringBridge, "Solid.getFaceMetadata");
-    try { return this._cppSolidCore?.getFaceMetadata(faceName) || {}; } catch { return {}; }
+    return {};
 }
 
 /** Convenience: list all face names present in this solid. */
@@ -52,8 +42,7 @@ export function getFaceNames() {
         return Array.from(this._idToFaceName.values());
     }
     if (hasOccShape(this)) return Array.from(this._occ?.faceNames || []);
-    requireCppSolidCoreCapability(cppSolidCoreHasAuthoringBridge, "Solid.getFaceNames");
-    try { return this._cppSolidCore?.getFaceNames() || []; } catch { return []; }
+    return [];
 }
 
 /** Rename a face; if newName exists, merge triangles/metadata into it. */
@@ -82,22 +71,16 @@ export function renameFace(oldName, newName) {
         this._faceIndex = null;
         return this;
     }
-    requireCppSolidCoreCapability(cppSolidCoreHasAuthoringBridge, "Solid.renameFace");
-    const core = getSyncedCppSolidCore(this);
-    const hadOldMetadata = this._faceMetadata instanceof Map && this._faceMetadata.has(oldName);
-    const oldMetadata = hadOldMetadata ? (core.getFaceMetadata(oldName) || {}) : null;
-    const existingMetadata = (this._faceMetadata instanceof Map && this._faceMetadata.has(newName))
-        ? (core.getFaceMetadata(newName) || {})
-        : null;
-    const renamed = core.renameFace(oldName, newName);
-    if (!renamed) return this;
-    syncSolidAuthoringStateFromCpp(this, core);
-    if (hadOldMetadata) {
-        core.setFaceMetadata(newName, {
-            ...(existingMetadata && typeof existingMetadata === 'object' ? existingMetadata : {}),
-            ...(oldMetadata && typeof oldMetadata === 'object' ? oldMetadata : {}),
-        });
-        syncSolidAuthoringStateFromCpp(this, core);
+    const id = this._faceNameToID?.get?.(oldName);
+    if (id == null) return this;
+    this._faceNameToID.delete(oldName);
+    this._faceNameToID.set(newName, id);
+    this._idToFaceName.set(id, newName);
+    if (this._faceMetadata instanceof Map && this._faceMetadata.has(oldName)) {
+        const oldMetadata = this._faceMetadata.get(oldName);
+        const existing = this._faceMetadata.get(newName) || {};
+        this._faceMetadata.delete(oldName);
+        this._faceMetadata.set(newName, { ...existing, ...oldMetadata });
     }
     this._dirty = true;
     this._faceIndex = null;
@@ -118,12 +101,10 @@ export function setEdgeMetadata(edgeName, metadata) {
         this._edgeMetadataVersion = (this._edgeMetadataVersion || 0) + 1;
         return this;
     }
-    requireCppSolidCoreCapability(cppSolidCoreHasAuthoringBridge, "Solid.setEdgeMetadata");
-    const core = getSyncedCppSolidCore(this);
-    const existing = core.getEdgeMetadata(edgeName);
-    const base = existing && typeof existing === 'object' ? existing : {};
-    core.setEdgeMetadata(edgeName, { ...base, ...metadata });
-    syncSolidAuthoringStateFromCpp(this, core);
+    const existing = this._edgeMetadata instanceof Map ? (this._edgeMetadata.get(edgeName) || {}) : {};
+    if (!(this._edgeMetadata instanceof Map)) this._edgeMetadata = new Map();
+    this._edgeMetadata.set(edgeName, { ...existing, ...metadata });
+    this._edgeMetadataVersion = (this._edgeMetadataVersion || 0) + 1;
     return this;
 }
 
@@ -132,9 +113,7 @@ export function getEdgeMetadata(edgeName) {
     if (this._edgeMetadata instanceof Map) {
         return this._edgeMetadata.get(edgeName) || null;
     }
-    if (hasOccShape(this)) return null;
-    requireCppSolidCoreCapability(cppSolidCoreHasAuthoringBridge, "Solid.getEdgeMetadata");
-    try { return this._cppSolidCore?.getEdgeMetadata(edgeName) || null; } catch { return null; }
+    return null;
 }
 
 /** Combine face metadata maps across two solids. */

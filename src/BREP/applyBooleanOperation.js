@@ -2,10 +2,6 @@
 // Helper to apply a boolean operation between a newly created base solid and
 // a list of scene solids referenced by name via the boolean param widget.
 
-import * as THREE from 'three';
-import { Solid } from "./BetterSolid.js";
-import { computeBoundsFromVertices } from "./boundsUtils.js";
-
 const BOOLEAN_TINY_FACE_MAX_AREA = 0.001;
 
 const __booleanDebugConfig = (() => {
@@ -232,57 +228,11 @@ function __booleanCloneMetadataValue(value) {
 }
 
 function __booleanCollectMetadataEntries(...sourceSolids) {
-  const faceMetadata = new Map();
-  const edgeMetadata = new Map();
-  const auxEdges = [];
-  for (const source of sourceSolids) {
-    if (!source) continue;
-    const snapshot = getSolidAuthoringStateSnapshot(source);
-    const faceEntries = snapshot?.faceMetadataJson instanceof Map
-      ? snapshot.faceMetadataJson.entries()
-      : Array.isArray(snapshot?.faceMetadataJson) ? snapshot.faceMetadataJson : [];
-    for (const [faceName, metadataJson] of faceEntries) {
-      const normalizedName = String(faceName || '').trim();
-      if (!normalizedName) continue;
-      let normalizedJson = String(metadataJson || '').trim();
-      if (!normalizedJson) {
-        normalizedJson = JSON.stringify({});
-      } else {
-        try {
-          normalizedJson = JSON.stringify(__booleanCloneMetadataValue(JSON.parse(normalizedJson)) || {});
-        } catch {
-          normalizedJson = JSON.stringify({});
-        }
-      }
-      faceMetadata.set(normalizedName, normalizedJson);
-    }
-    const edgeEntries = snapshot?.edgeMetadataJson instanceof Map
-      ? snapshot.edgeMetadataJson.entries()
-      : Array.isArray(snapshot?.edgeMetadataJson) ? snapshot.edgeMetadataJson : [];
-    for (const [edgeName, metadataJson] of edgeEntries) {
-      const normalizedName = String(edgeName || '').trim();
-      if (!normalizedName) continue;
-      let normalizedJson = String(metadataJson || '').trim();
-      if (!normalizedJson) {
-        normalizedJson = JSON.stringify({});
-      } else {
-        try {
-          normalizedJson = JSON.stringify(__booleanCloneMetadataValue(JSON.parse(normalizedJson)) || {});
-        } catch {
-          normalizedJson = JSON.stringify({});
-        }
-      }
-      edgeMetadata.set(normalizedName, normalizedJson);
-    }
-    const aux = Array.isArray(snapshot?.auxEdges) ? snapshot.auxEdges : null;
-    if (aux && aux.length > 0) {
-      for (const entry of aux) auxEdges.push(entry);
-    }
-  }
+  void sourceSolids;
   return {
-    faceMetadataJson: Array.from(faceMetadata.entries()),
-    edgeMetadataJson: Array.from(edgeMetadata.entries()),
-    auxEdges,
+    faceMetadataJson: [],
+    edgeMetadataJson: [],
+    auxEdges: [],
   };
 }
 
@@ -311,7 +261,7 @@ function __booleanCloneMetadataObject(metadata) {
   return { ...metadata };
 }
 
-function __booleanRefreshAuthoringStateFromNative(solid) {
+function __booleanRefreshAuthoringStateFromNative(_solid) {
   return;
 }
 
@@ -345,8 +295,6 @@ function __booleanInvalidateSolidCaches(solid) {
   if (!solid || typeof solid !== 'object') return;
   solid._dirty = true;
   solid._faceIndex = null;
-  try { if (solid._manifold && typeof solid._manifold.delete === 'function') solid._manifold.delete(); } catch { }
-  solid._manifold = null;
 }
 
 function __booleanDeriveSolidToleranceFromVerts(solid, baseTol = 1e-5) {
@@ -659,78 +607,8 @@ function __booleanResolveFoldNameSource(baseSolid, tools, featureID) {
 }
 
 function __booleanSolidToGeometry(solid) {
-  try {
-    if (!solid || typeof solid !== 'object') return null;
-    const vp = solid._vertProperties;
-    const tv = solid._triVerts;
-    const ids = solid._triIDs;
-    if (!Array.isArray(vp) || vp.length < 9) return null;
-    if (!Array.isArray(tv) || tv.length < 3) return null;
-    if (!Array.isArray(ids) || ids.length !== (tv.length / 3)) return null;
-
-    const vertArray = Float32Array.from(vp);
-    const triArray = Uint32Array.from(tv);
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute('position', new THREE.BufferAttribute(vertArray, 3));
-    geom.setIndex(new THREE.BufferAttribute(triArray, 1));
-
-    const bounds = computeBoundsFromVertices(vertArray);
-    const size = bounds ? bounds.size : [0, 0, 0];
-    const diag = bounds ? bounds.diag : 0;
-    const dx = size[0], dy = size[1], dz = size[2];
-    const scale = Math.max(diag || 0, Math.abs(dx), Math.abs(dy), Math.abs(dz), 1);
-
-    const idToFaceName = solid._idToFaceName instanceof Map ? solid._idToFaceName : new Map();
-    const solidLabel = solid.name || solid.owningFeatureID || 'SOLID';
-    const triangles = [];
-
-    for (let t = 0; t < triArray.length; t += 3) {
-      const triIndex = t / 3;
-      const i0 = triArray[t];
-      const i1 = triArray[t + 1];
-      const i2 = triArray[t + 2];
-      const ax = vertArray[i0 * 3], ay = vertArray[i0 * 3 + 1], az = vertArray[i0 * 3 + 2];
-      const bx = vertArray[i1 * 3], by = vertArray[i1 * 3 + 1], bz = vertArray[i1 * 3 + 2];
-      const cx = vertArray[i2 * 3], cy = vertArray[i2 * 3 + 1], cz = vertArray[i2 * 3 + 2];
-
-      const centerX = (ax + bx + cx) / 3;
-      const centerY = (ay + by + cy) / 3;
-      const centerZ = (az + bz + cz) / 3;
-
-      const ux = bx - ax;
-      const uy = by - ay;
-      const uz = bz - az;
-      const vx = cx - ax;
-      const vy = cy - ay;
-      const vz = cz - az;
-      let nx = uy * vz - uz * vy;
-      let ny = uz * vx - ux * vz;
-      let nz = ux * vy - uy * vx;
-      const len = Math.hypot(nx, ny, nz);
-      if (len > 0) {
-        nx /= len; ny /= len; nz /= len;
-      } else {
-        nx = 0; ny = 0; nz = 1;
-      }
-
-      const rawName = idToFaceName.get(ids[triIndex]);
-      const faceName = rawName ? String(rawName) : `${solidLabel}_FACE_${ids[triIndex] ?? triIndex}`;
-      triangles.push({
-        center: [centerX, centerY, centerZ],
-        normal: [nx, ny, nz],
-        faceName,
-      });
-    }
-
-    return {
-      geometry: geom,
-      triangles,
-      scale,
-      fallbackPrefix: `${solidLabel}_REPAIR`,
-    };
-  } catch {
-    return null;
-  }
+  void solid;
+  return null;
 }
 
 function __booleanAssignFaceData(geometry, sourceMeta, debugLog, options = {}) {
@@ -928,54 +806,12 @@ function __booleanAssignFaceData(geometry, sourceMeta, debugLog, options = {}) {
 }
 
 function __booleanMakeSolidFromGeometry(geometry, faceIDs, idToFaceName, debugLog, ...sourceSolids) {
+  void geometry;
+  void faceIDs;
+  void idToFaceName;
+  void debugLog;
+  void sourceSolids;
   return null;
-  try {
-    if (!geometry || !faceIDs || !idToFaceName) return null;
-    if (true) {
-      throw new Error('Native mesh-to-solid rebuild helper is unavailable.');
-    }
-    const indexAttr = geometry.getIndex();
-    const posAttr = geometry.getAttribute('position');
-    if (!indexAttr || !posAttr) return null;
-    const metadataEntries = __booleanCollectMetadataEntries(...sourceSolids);
-    const faceNameToID = Array.from(idToFaceName.entries(), ([id, faceName]) => [faceName, id]);
-    const snapshot = null;
-    ({
-      numProp: 3,
-      vertProperties: Array.from(posAttr.array || []),
-      triVerts: Array.from(indexAttr.array || []),
-      faceID: Array.from(faceIDs instanceof Uint32Array ? faceIDs : Uint32Array.from(faceIDs)),
-      faceNameToID,
-      idToFaceName: Array.from(idToFaceName.entries()),
-      faceMetadataJson: metadataEntries.faceMetadataJson,
-      edgeMetadataJson: metadataEntries.edgeMetadataJson,
-      auxEdges: metadataEntries.auxEdges,
-    });
-    const rebuilt = new Solid();
-    applySolidAuthoringStateSnapshot(rebuilt, snapshot);
-    const restoredIdToFaceName = new Map(idToFaceName);
-    if (restoredIdToFaceName.size > 0) {
-      rebuilt._idToFaceName = restoredIdToFaceName;
-      rebuilt._faceNameToID = new Map(Array.from(restoredIdToFaceName.entries(), ([id, faceName]) => [faceName, id]));
-      rebuilt._faceMetadata = new Map(
-        Array.from(metadataEntries.faceMetadataJson || [], ([faceName, raw]) => {
-          try { return [faceName, JSON.parse(raw || "{}")]; } catch { return [faceName, {}]; }
-        }).filter(([faceName]) => rebuilt._faceNameToID.has(faceName))
-      );
-      rebuilt._edgeMetadata = new Map(
-        Array.from(metadataEntries.edgeMetadataJson || [], ([edgeName, raw]) => {
-          try { return [edgeName, JSON.parse(raw || "{}")]; } catch { return [edgeName, {}]; }
-        })
-      );
-    }
-    rebuilt._dirty = true;
-    rebuilt._manifold = null;
-    rebuilt._faceIndex = null;
-    return rebuilt;
-  } catch (err) {
-    debugLog?.('Solid rebuild failed', { message: err?.message || err });
-    return null;
-  }
 }
 
 function __booleanRestoreFaceTrackingFromSources(solid, debugLog, ...sourceSolids) {
@@ -1056,150 +892,17 @@ function __booleanRestoreFaceTrackingFromSources(solid, debugLog, ...sourceSolid
 }
 
 function __booleanAttemptRepairSolid(solid, eps, debugLog) {
-  const source = __booleanSolidToGeometry(solid);
-  if (!source) return null;
-
-  const baseGeom = source.geometry;
-  const repairer = new MeshRepairer();
-  const baseWeld = Math.max(1e-5, Math.abs(eps || 0) * 10);
-  const attemptScales = [1, 4, 16];
-
-  try {
-    for (const scale of attemptScales) {
-      const weld = baseWeld * scale;
-      const line = Math.max(1e-5, weld);
-      const grid = Math.max(1e-4, weld * 2);
-
-      const workingGeom = baseGeom.clone();
-      let repairedGeom;
-      try {
-        repairedGeom = repairer.repairAll(workingGeom, { weldEps: weld, lineEps: line, gridCell: grid }) || workingGeom;
-      } catch (err) {
-        debugLog?.('Repair attempt failed', {
-          attemptScale: scale,
-          message: err?.message || err,
-        });
-        try { workingGeom.dispose(); } catch { }
-        continue;
-      }
-
-      const faceData = __booleanAssignFaceData(repairedGeom, source, debugLog, {
-        targetTriangles: source?.triangles,
-      });
-      if (!faceData) {
-        try { repairedGeom.dispose(); } catch { }
-        continue;
-      }
-
-      const rebuilt = __booleanMakeSolidFromGeometry(
-        repairedGeom, faceData.faceIDs, faceData.idToFaceName, debugLog, solid,
-      );
-      try { repairedGeom.dispose(); } catch { }
-      if (rebuilt) {
-        try {
-          rebuilt.name = solid.name || rebuilt.name;
-          rebuilt.owningFeatureID = solid.owningFeatureID || rebuilt.owningFeatureID;
-        } catch { }
-        return rebuilt;
-      }
-    }
-  } finally {
-    try { baseGeom.dispose(); } catch { }
-  }
-
+  void solid;
+  void eps;
+  void debugLog;
   return null;
 }
 
 function __booleanMeshMergeUnion(baseSolid, toolSolid, eps, debugLog) {
-  const srcA = __booleanSolidToGeometry(baseSolid);
-  const srcB = __booleanSolidToGeometry(toolSolid);
-  if (!srcA || !srcB) {
-    try { srcA?.geometry?.dispose?.(); } catch { }
-    try { srcB?.geometry?.dispose?.(); } catch { }
-    return null;
-  }
-
-  const geomA = srcA.geometry;
-  const geomB = srcB.geometry;
-
-  const posA = geomA.getAttribute('position')?.array;
-  const posB = geomB.getAttribute('position')?.array;
-  const idxA = geomA.getIndex()?.array;
-  const idxB = geomB.getIndex()?.array;
-  if (!posA || !posB || !idxA || !idxB) {
-    try { geomA.dispose(); } catch { }
-    try { geomB.dispose(); } catch { }
-    return null;
-  }
-
-  const mergedPosBase = new Float32Array(posA.length + posB.length);
-  mergedPosBase.set(posA, 0);
-  mergedPosBase.set(posB, posA.length);
-
-  const mergedIdxBase = new Uint32Array(idxA.length + idxB.length);
-  mergedIdxBase.set(idxA, 0);
-  const offset = (posA.length / 3) >>> 0;
-  for (let i = 0; i < idxB.length; i++) {
-    mergedIdxBase[idxA.length + i] = idxB[i] + offset;
-  }
-
-  try { geomA.dispose(); } catch { }
-  try { geomB.dispose(); } catch { }
-
-  const sourceMeta = {
-    triangles: [...srcA.triangles, ...srcB.triangles],
-    scale: Math.max(srcA.scale || 1, srcB.scale || 1),
-    fallbackPrefix: `${baseSolid?.name || toolSolid?.name || 'UNION'}_REPAIR`,
-  };
-
-  const repairer = new MeshRepairer();
-  const baseWeld = Math.max(1e-5, Math.abs(eps || 0) * 10);
-  const attemptScales = [1, 4, 16];
-
-  const buildGeometry = () => {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(mergedPosBase.slice(), 3));
-    g.setIndex(new THREE.BufferAttribute(mergedIdxBase.slice(), 1));
-    return g;
-  };
-
-  for (const scale of attemptScales) {
-    const weld = baseWeld * scale;
-    const line = Math.max(1e-5, weld);
-    const grid = Math.max(1e-4, weld * 2);
-
-    const workingGeom = buildGeometry();
-    let repairedGeom;
-    try {
-      repairedGeom = repairer.repairAll(workingGeom, { weldEps: weld, lineEps: line, gridCell: grid }) || workingGeom;
-    } catch (err) {
-      debugLog?.('Mesh-merge repair attempt failed', {
-        attemptScale: scale,
-        message: err?.message || err,
-      });
-      try { workingGeom.dispose(); } catch { }
-      continue;
-    }
-
-    const faceData = __booleanAssignFaceData(repairedGeom, sourceMeta, debugLog);
-    if (!faceData) {
-      try { repairedGeom.dispose(); } catch { }
-      continue;
-    }
-
-    const rebuilt = __booleanMakeSolidFromGeometry(
-      repairedGeom, faceData.faceIDs, faceData.idToFaceName, debugLog, baseSolid, toolSolid,
-    );
-    try { repairedGeom.dispose(); } catch { }
-    if (rebuilt) {
-      try {
-        rebuilt.name = baseSolid?.name || rebuilt.name;
-        rebuilt.owningFeatureID = baseSolid?.owningFeatureID || rebuilt.owningFeatureID;
-      } catch { }
-      return rebuilt;
-    }
-  }
-
+  void baseSolid;
+  void toolSolid;
+  void eps;
+  void debugLog;
   return null;
 }
 
@@ -1255,11 +958,6 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
       // FROM each selected target solid. Add robust fallbacks similar to UNION.
       const results = [];
       let idx = 0;
-      const preCleanLocal = (solid, eps) => {
-        try { if (typeof solid.setEpsilon === 'function') solid.setEpsilon(eps); } catch {}
-        try { if (typeof solid.fixTriangleWindingsByAdjacency === 'function') solid.fixTriangleWindingsByAdjacency(); } catch {}
-      };
-
       const addResult = async (solid, target) => {
         solid = await __booleanPostTinyFaceCleanup(solid, debugLog, { op: 'SUBTRACT', featureID });
         const inheritedName = target?.name || target?.uuid || null;
@@ -1291,10 +989,6 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
         try {
           const a = typeof conditionedTarget.clone === 'function' ? conditionedTarget.clone() : conditionedTarget;
           const b = typeof conditionedTool.clone === 'function' ? conditionedTool.clone() : conditionedTool;
-          const scale = Math.max(1, __booleanApproxScale(a));
-          const eps = Math.max(1e-9, 1e-6 * scale);
-          preCleanLocal(a, eps);
-          preCleanLocal(b, eps);
           let out = a.subtract(b);
           await addResult(out, target);
           success = true;
@@ -1318,12 +1012,6 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
       return { added: results.length ? results : [baseSolid], removed };
     }
 
-    // Helper: light pre-clean in authoring space (no manifold build)
-    const preClean = (solid, eps) => {
-      try { if (typeof solid.fixTriangleWindingsByAdjacency === 'function') solid.fixTriangleWindingsByAdjacency(); } catch {}
-      try { if (typeof solid.setEpsilon === 'function') solid.setEpsilon(eps); } catch (e) {console.warn(e, solid)}
-    };
-
     // UNION / INTERSECT: fold tools into the new baseSolid and replace base
     let result = baseSolid;
     for (const tool of tools) {
@@ -1335,28 +1023,18 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
       let workingResult = result;
       let workingTool = tool;
 
-      const scale = Math.max(1, __booleanApproxScale(workingResult));
-      const eps = Math.max(1e-9, 1e-6 * scale);
-
       try {
         // Attempt the boolean directly; repair fallback handles welding if needed.
-        result = (op === 'UNION') ? workingResult.union(workingTool) : workingResult.intersect(workingTool);
+        result = (op === 'UNION') ? workingTool.union(workingResult) : workingResult.intersect(workingTool);
       } catch (e1) {
         debugLog('Primary union/intersect failed; attempting welded fallback', {
           message: e1?.message || e1,
           tool: __booleanDebugSummarizeSolid(workingTool),
-          epsilon: eps,
         });
         // Retry once on cloned operands with the same OCCT boolean path.
-        try {
-          const a = typeof workingResult.clone === 'function' ? workingResult.clone() : workingResult;
-          const b = typeof workingTool.clone === 'function' ? workingTool.clone() : workingTool;
-          preClean(a, eps);
-          preClean(b, eps);
-          result = (op === 'UNION') ? a.union(b) : a.intersect(b);
-        } catch (e2) {
-          throw e2;
-        }
+        const a = typeof workingResult.clone === 'function' ? workingResult.clone() : workingResult;
+        const b = typeof workingTool.clone === 'function' ? workingTool.clone() : workingTool;
+        result = (op === 'UNION') ? b.union(a) : a.intersect(b);
       }
     }
     result = await __booleanPostTinyFaceCleanup(result, debugLog, { op, featureID });

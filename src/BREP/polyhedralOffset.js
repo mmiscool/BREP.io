@@ -8,7 +8,7 @@ import {
   syncSolidAuthoringStateFromCpp,
 } from './CppSolidCore.js';
 import { MeshRepairer } from './MeshRepairer.js';
-import { Manifold } from './SolidShared.js';
+import { reserveFaceID } from './faceIdAllocator.js';
 import { manifold } from './setupManifold.js';
 
 const PLANE_EPS = 1e-5;
@@ -603,7 +603,7 @@ function _assignFaceDataByTriangleProximity(geometry, sourceMeta) {
     let faceName = String(bestName || '').trim() || nextFallbackName();
     let id = nameToID.get(faceName);
     if (!id) {
-      id = Manifold.reserveIDs(1);
+      id = reserveFaceID();
       nameToID.set(faceName, id);
       idToName.set(id, faceName);
     }

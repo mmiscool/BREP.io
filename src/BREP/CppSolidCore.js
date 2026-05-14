@@ -1,5 +1,5 @@
-import { Manifold } from "./SolidShared.js";
 import { manifold } from "./setupManifold.js";
+import { reserveFaceID } from "./faceIdAllocator.js";
 
 const parseMetadataJson = (raw) => {
     if (!raw) return {};
@@ -471,7 +471,7 @@ const remapSnapshotFaceIDsToReservedRange = (snapshot) => {
     const ensureReservedID = (rawId, fallbackName = "") => {
         const key = Number(rawId);
         if (idRemap.has(key)) return idRemap.get(key);
-        const reservedID = Manifold.reserveIDs(1);
+        const reservedID = reserveFaceID();
         idRemap.set(key, reservedID);
         const faceName = String(sourceIDToFaceName.get(rawId) ?? fallbackName ?? "").trim() || `FACE_${reservedID}`;
         remappedIDToFaceName.set(reservedID, faceName);

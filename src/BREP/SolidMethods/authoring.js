@@ -1,11 +1,4 @@
-import { Manifold } from "../SolidShared.js";
-import {
-    cppSolidCoreHasAuthoringBridge,
-    cppSolidCoreHasNativeAuxEdgeMutation,
-    getSyncedCppSolidCore,
-    requireCppSolidCoreCapability,
-    syncSolidAuxEdgesFromCpp,
-} from "../CppSolidCore.js";
+import { reserveFaceID } from "../faceIdAllocator.js";
 
 /**
  * Solid authoring helpers: vertex/face ID management and convenience geometry.
@@ -50,10 +43,10 @@ export function _getPointIndex(p) {
     return idx;
 }
 
-/** Map face name to unique Manifold ID, creating one if absent. */
+/** Map face name to unique face ID, creating one if absent. */
 export function _getOrCreateID(faceName) {
     if (!this._faceNameToID.has(faceName)) {
-        const id = Manifold.reserveIDs(1); // globally unique, propagates through CSG
+        const id = reserveFaceID();
         this._faceNameToID.set(faceName, id);
         this._idToFaceName.set(id, faceName);
     }
@@ -89,38 +82,33 @@ export function addTriangle(faceName, v1, v2, v3) {
  * @param {'OVERLAY'|'BASE'|string} [options.materialKey='OVERLAY'] Material tag for visualization
  */
 export function addAuxEdge(name, points, options = {}) {
-    try {
-        const toArr = (p) => {
-            if (Array.isArray(p) && p.length === 3) return [p[0], p[1], p[2]];
-            if (p && typeof p === 'object') {
-                const x = +p.x, y = +p.y, z = +p.z;
-                if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) return [x, y, z];
-            }
-            return null;
-        };
-        const pts = Array.isArray(points)
-            ? points.map(toArr).filter(Boolean)
-            : [];
-        if (pts.length < 2) return this;
-        const label = name || 'EDGE';
-        const hasCenterlineOption = Object.prototype.hasOwnProperty.call(options || {}, 'centerline');
-        const inferredCenterline = typeof label === 'string' && /centerline/i.test(label);
-        const centerline = hasCenterlineOption ? !!options.centerline : inferredCenterline;
-        requireCppSolidCoreCapability(
-            cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeAuxEdgeMutation,
-            'Solid.addAuxEdge()',
-        );
-        const core = getSyncedCppSolidCore(this);
-        core.addAuxEdge(label, pts, {
-            closedLoop: !!options.closedLoop,
-            polylineWorld: !!options.polylineWorld,
-            materialKey: options.materialKey || 'OVERLAY',
-            centerline,
-            faceA: options.faceA || '',
-            faceB: options.faceB || '',
-        });
-        syncSolidAuxEdgesFromCpp(this, core);
-    } catch { /* ignore */ }
+    const toArr = (p) => {
+        if (Array.isArray(p) && p.length === 3) return [p[0], p[1], p[2]];
+        if (p && typeof p === 'object') {
+            const x = +p.x, y = +p.y, z = +p.z;
+            if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) return [x, y, z];
+        }
+        return null;
+    };
+    const pts = Array.isArray(points)
+        ? points.map(toArr).filter(Boolean)
+        : [];
+    if (pts.length < 2) return this;
+    const label = name || 'EDGE';
+    const hasCenterlineOption = Object.prototype.hasOwnProperty.call(options || {}, 'centerline');
+    const inferredCenterline = typeof label === 'string' && /centerline/i.test(label);
+    const centerline = hasCenterlineOption ? !!options.centerline : inferredCenterline;
+    this._auxEdges = Array.isArray(this._auxEdges) ? this._auxEdges : [];
+    this._auxEdges.push({
+        name: label,
+        points: pts,
+        closedLoop: !!options.closedLoop,
+        polylineWorld: !!options.polylineWorld,
+        materialKey: options.materialKey || 'OVERLAY',
+        centerline,
+        faceA: options.faceA || '',
+        faceB: options.faceB || '',
+    });
     return this;
 }
 

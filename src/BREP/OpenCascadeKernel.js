@@ -1,7 +1,16 @@
 import { OpenCascade as oc } from "./setupOpenCascade.js";
+import {
+  DEFAULT_OCC_TRIANGULATION_ANGLE,
+  DEFAULT_OCC_TRIANGULATION_DEFLECTION,
+  DEFAULT_OCC_VISUALIZATION_CURVE_SAMPLES,
+  MAX_OCC_VISUALIZATION_CURVE_SAMPLES,
+} from "./occTriangulationSettings.js";
 
-const DEFAULT_DEFLECTION = 0.15;
-const DEFAULT_ANGLE = 0.5;
+const DEFAULT_DEFLECTION = DEFAULT_OCC_TRIANGULATION_DEFLECTION;
+const DEFAULT_ANGLE = DEFAULT_OCC_TRIANGULATION_ANGLE;
+const OCC_BOOLEAN_UNIFY_EDGES = true;
+const OCC_BOOLEAN_UNIFY_FACES = true;
+const OCC_BOOLEAN_UNIFY_ANGULAR_TOLERANCE = 1e-7;
 
 const cloneMap = (value) => new Map(value instanceof Map ? value.entries() : []);
 
@@ -25,7 +34,6 @@ export function setOccState(solid, state) {
   solid._kernel = "opencascade";
   solid._occ = createOccState(state);
   solid._dirty = false;
-  solid._manifold = null;
   solid._faceIndex = null;
   solid._vertProperties = [];
   solid._triVerts = [];
@@ -464,17 +472,15 @@ function makeFaceFromBoundaryLoops(loops, edgeInputs = [], normal = [0, 0, 1]) {
   const outer = normalized.find((loop) => !loop.isHole) || normalized[0];
   if (!outer) throw new Error("OpenCASCADE extrusion requires at least one closed boundary loop.");
   const plane = makePlaneFromLoop(outer, normal);
-  const maker = plane
-    ? new oc.BRepBuilderAPI_MakeFace_16(plane, makePolygonWire(outer.pts), true)
-    : new oc.BRepBuilderAPI_MakeFace_15(makePolygonWire(outer.pts), true);
-  for (const loop of normalized) {
-    if (loop === outer || !loop.isHole) continue;
-    maker.Add(makePolygonWire(loop.pts));
-  }
-  if (typeof maker.IsDone === "function" && !maker.IsDone()) {
+  const face = makeFaceFromOuterAndHoleWires(
+    makePolygonWire(outer.pts),
+    normalized.filter((loop) => loop !== outer && loop.isHole).map((loop) => makePolygonWire(loop.pts)),
+    plane,
+  );
+  if (!face) {
     throw new Error("OpenCASCADE could not build a face from extrusion boundary loops.");
   }
-  return oc.TopoDS.Face_1(maker.Shape());
+  return face;
 }
 
 function parseJsonObject(value) {
@@ -671,6 +677,37 @@ function bindPrismFaceNames(state, params) {
   state.faceNames = uniqueNames(state.faceNameByIndex);
 }
 
+function bindSingleFacePrismFaceNames(state, params) {
+  state.faceNameByIndex = [];
+  new oc.BRepMesh_IncrementalMesh_2(state.shape, DEFAULT_DEFLECTION, false, DEFAULT_ANGLE, false);
+  const dir = params.direction || [0, 0, 1];
+  const len = Math.hypot(dir[0], dir[1], dir[2]);
+  const unit = len > 1e-12 ? [dir[0] / len, dir[1] / len, dir[2] / len] : [0, 0, 1];
+  const sourceStats = params.sourceFace ? statsFromOccFace(params.sourceFace) : null;
+  const startOrigin = sourceStats?.centroid || [0, 0, 0];
+  const capTol = Math.max(1e-6, len * 1e-5);
+  let sideIndex = 0;
+  let faceIndex = 0;
+  const explorer = new oc.TopExp_Explorer_2(
+    state.shape,
+    oc.TopAbs_ShapeEnum.TopAbs_FACE,
+    oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+  );
+  for (; explorer.More(); explorer.Next(), faceIndex += 1) {
+    const face = oc.TopoDS.Face_1(explorer.Current());
+    const stats = statsFromOccFace(face);
+    const t = dot(sub(stats.centroid, startOrigin), unit);
+    if (Math.abs(t) <= capTol) {
+      state.faceNameByIndex[faceIndex] = params.startName;
+    } else if (Math.abs(t - len) <= capTol) {
+      state.faceNameByIndex[faceIndex] = params.endName;
+    } else {
+      state.faceNameByIndex[faceIndex] = `${params.sidePrefix}_E${sideIndex++}_SW`;
+    }
+  }
+  state.faceNames = uniqueNames(state.faceNameByIndex);
+}
+
 function bindLoftFaceNames(state, params) {
   state.faceNameByIndex = [];
   new oc.BRepMesh_IncrementalMesh_2(state.shape, DEFAULT_DEFLECTION, false, DEFAULT_ANGLE, false);
@@ -847,6 +884,81 @@ export function makeLoft({
   return state;
 }
 
+function makeHelixWireOnSurface({ radius, radiusEnd = radius, length, turns, phase = 0, leftHanded = false } = {}) {
+  const r = Math.max(1e-9, Number(radius) || 0);
+  const rEnd = Math.max(1e-9, Number(radiusEnd) || r);
+  const h = Math.max(1e-9, Number(length) || 0);
+  const nTurns = Math.max(1e-9, Math.abs(Number(turns) || 0));
+  const u0 = Number(phase) || 0;
+  const u1 = u0 + (leftHanded ? -1 : 1) * Math.PI * 2 * nTurns;
+  const ax3 = new oc.gp_Ax3_3(
+    new oc.gp_Pnt_3(0, 0, 0),
+    new oc.gp_Dir_4(0, 0, 1),
+    new oc.gp_Dir_4(1, 0, 0),
+  );
+  const taper = (rEnd - r) / h;
+  const semiAngle = Math.atan(taper);
+  const v1 = Math.abs(taper) > 1e-12 ? h / Math.cos(semiAngle) : h;
+  const surfaceObject = Math.abs(taper) > 1e-12
+    ? new oc.Geom_ConicalSurface_1(ax3, semiAngle, r)
+    : new oc.Geom_CylindricalSurface_1(ax3, r);
+  const surface = new oc.Handle_Geom_Surface_2(surfaceObject);
+  const dir = new oc.gp_Dir2d_4(u1 - u0, v1);
+  const line = new oc.Geom2d_Line_1(new oc.gp_Ax2d_2(new oc.gp_Pnt2d_3(u0, 0), dir));
+  const curve = new oc.Handle_Geom2d_Curve_2(line);
+  const edge = new oc.BRepBuilderAPI_MakeEdge_31(curve, surface, 0, Math.hypot(u1 - u0, v1)).Edge();
+  oc.BRepLib.BuildCurve3d(edge, 1e-7, oc.GeomAbs_Shape.GeomAbs_C1, 14, 1000);
+  oc.BRepLib.BuildCurves3d_2(edge);
+  return new oc.BRepBuilderAPI_MakeWire_2(edge).Wire();
+}
+
+export function makeHelicalPipe({
+  radius = 1,
+  radiusEnd = radius,
+  length = 1,
+  turns = 1,
+  profilePoints = [],
+  phase = 0,
+  leftHanded = false,
+  sideNames = [],
+  startName = "PIPE_START",
+  endName = "PIPE_END",
+  featureID = "PIPE",
+} = {}) {
+  const normalizedProfile = (Array.isArray(profilePoints) ? profilePoints : [])
+    .filter((point) => Array.isArray(point) && point.length >= 3)
+    .map((point) => [Number(point[0]) || 0, Number(point[1]) || 0, Number(point[2]) || 0]);
+  if (normalizedProfile.length < 3) {
+    throw new Error("OpenCASCADE helical pipe requires a closed profile with at least three points.");
+  }
+
+  const spine = makeHelixWireOnSurface({ radius, radiusEnd, length, turns, phase, leftHanded });
+  const profileWire = makePolygonWire(normalizedProfile);
+  const profileFace = new oc.BRepBuilderAPI_MakeFace_15(profileWire, true).Face();
+  const pipe = new oc.BRepOffsetAPI_MakePipe_2(
+    spine,
+    profileFace,
+    oc.GeomFill_Trihedron.GeomFill_IsFrenet,
+    false,
+  );
+  pipe.Build();
+  const normalizedSideNames = Array.isArray(sideNames) && sideNames.length
+    ? sideNames.map((name, index) => String(name || `${featureID}_SIDE_${index}`))
+    : Array.from({ length: normalizedProfile.length }, (_, index) => `${featureID}_SIDE_${index}`);
+  const faceMetadata = new Map([
+    [startName, { faceType: "STARTCAP" }],
+    [endName, { faceType: "ENDCAP" }],
+  ]);
+  for (const name of normalizedSideNames) faceMetadata.set(name, { faceType: "SIDEWALL" });
+  return createOccState({
+    shape: pipe.Shape(),
+    faceNames: uniqueNames([startName, endName, ...normalizedSideNames]),
+    faceMetadata,
+    meshOptions: { deflection: 0.02, angle: 0.18 },
+    feature: { kind: "helicalPipe", featureID, radius, radiusEnd, length, turns, phase, leftHanded },
+  });
+}
+
 export function makeExtrusion({
   boundaryLoops = [],
   faceName = "Face",
@@ -921,6 +1033,63 @@ export function makeExtrusion({
     state.faceNames = state.faceNames.filter((entry) => entry !== startName);
     state.faceNameByIndex = state.faceNameByIndex.map((entry) => entry === startName ? defaultSideName : entry);
   }
+  return state;
+}
+
+export function makeFacePrismFromOccSolid(solid, faceName, {
+  distance,
+  sourceFaceName = faceName,
+  featureID = "THICKEN",
+} = {}) {
+  if (!hasOccShape(solid)) return null;
+  const selectedFaceName = String(faceName || "").trim();
+  if (!selectedFaceName) return null;
+  const source = String(sourceFaceName || selectedFaceName).trim() || selectedFaceName;
+  const d = Number(distance);
+  if (!Number.isFinite(d) || Math.abs(d) <= 1e-12) {
+    throw new Error(`OpenCASCADE face thicken distance must be non-zero, got ${distance}`);
+  }
+  const face = findOccFaceByName(solid, selectedFaceName);
+  if (!face) return null;
+  const surfaceType = occFaceSurfaceTypeValue(face);
+  const planeSurfaceType = Number(
+    oc.GeomAbs_SurfaceType.GeomAbs_Plane?.value
+    ?? oc.GeomAbs_SurfaceType.GeomAbs_Plane,
+  );
+  if (!sameOccSurfaceType(surfaceType, planeSurfaceType)) {
+    throw new Error("OpenCASCADE face thicken currently requires a planar BREP face.");
+  }
+  const normal = surfaceNormalFromOccFace(face) || occFaceNormal(solid, selectedFaceName)?.normal || [0, 0, 1];
+  const direction = [normal[0] * d, normal[1] * d, normal[2] * d];
+  const prism = new oc.BRepPrimAPI_MakePrism_1(face, new oc.gp_Vec_4(direction[0], direction[1], direction[2]), false, true);
+  if (typeof prism.IsDone === "function" && !prism.IsDone()) {
+    throw new Error("OpenCASCADE face prism thicken failed.");
+  }
+  const startName = `${source}_START`;
+  const endName = `${source}_END`;
+  const faceMetadata = new Map([
+    [startName, { faceType: "STARTCAP", sourceFaceName: source, profileNormal: normal }],
+    [endName, { faceType: "ENDCAP", sourceFaceName: source, profileNormal: normal }],
+  ]);
+  const state = createOccState({
+    shape: prism.Shape(),
+    faceNames: [startName, endName],
+    faceMetadata,
+    feature: { kind: "faceThicken", featureID, sourceFaceName: source, distance: d },
+  });
+  bindSingleFacePrismFaceNames(state, {
+    sourceFace: face,
+    startName,
+    endName,
+    sidePrefix: source,
+    direction,
+  });
+  for (const name of state.faceNames || []) {
+    if (name !== startName && name !== endName && !faceMetadata.has(name)) {
+      faceMetadata.set(name, { faceType: "SIDEWALL", sourceFaceName: source });
+    }
+  }
+  state.faceMetadata = faceMetadata;
   return state;
 }
 
@@ -1004,6 +1173,7 @@ function bindRevolveFaceNames(state, params) {
 }
 
 export function makeRevolution({
+  sourceFace = null,
   boundaryLoops = [],
   faceName = "Face",
   axisOrigin = [0, 0, 0],
@@ -1012,7 +1182,7 @@ export function makeRevolution({
   edgeInputs = [],
   normal = [0, 0, 1],
 } = {}) {
-  const face = makeFaceFromBoundaryLoops(boundaryLoops, edgeInputs, normal);
+  const face = sourceFace || makeFaceFromBoundaryLoops(boundaryLoops, edgeInputs, normal);
   const axisLen = Math.hypot(axisDirection[0], axisDirection[1], axisDirection[2]) || 1;
   const ax = new oc.gp_Ax1_2(
     new oc.gp_Pnt_3(axisOrigin[0], axisOrigin[1], axisOrigin[2]),
@@ -1504,6 +1674,295 @@ function makePipeShape(spine, profile) {
   return pipe.Shape();
 }
 
+function centroidOfLoops(loops) {
+  const points = [];
+  for (const loop of loops || []) {
+    const arr = Array.isArray(loop?.pts) ? loop.pts : loop;
+    if (!Array.isArray(arr)) continue;
+    for (const point of arr) {
+      if (Array.isArray(point) && point.length >= 3) points.push(point);
+    }
+  }
+  if (!points.length) return [0, 0, 0];
+  const sum = [0, 0, 0];
+  for (const point of points) {
+    sum[0] += Number(point[0]) || 0;
+    sum[1] += Number(point[1]) || 0;
+    sum[2] += Number(point[2]) || 0;
+  }
+  return [sum[0] / points.length, sum[1] / points.length, sum[2] / points.length];
+}
+
+function cross(a, b) {
+  return [
+    (Number(a?.[1] || 0) * Number(b?.[2] || 0)) - (Number(a?.[2] || 0) * Number(b?.[1] || 0)),
+    (Number(a?.[2] || 0) * Number(b?.[0] || 0)) - (Number(a?.[0] || 0) * Number(b?.[2] || 0)),
+    (Number(a?.[0] || 0) * Number(b?.[1] || 0)) - (Number(a?.[1] || 0) * Number(b?.[0] || 0)),
+  ];
+}
+
+function rotateVectorBetween(point, fromNormal, toNormal, origin) {
+  const from = normalizeVector(fromNormal);
+  const to = normalizeVector(toNormal);
+  const p = sub(point, origin);
+  const fromLen = Math.hypot(from[0], from[1], from[2]);
+  const toLen = Math.hypot(to[0], to[1], to[2]);
+  if (fromLen <= 1e-12 || toLen <= 1e-12) return point.slice();
+
+  const c = Math.max(-1, Math.min(1, dot(from, to)));
+  if (c > 1 - 1e-12) return point.slice();
+
+  let axis = cross(from, to);
+  let s = Math.hypot(axis[0], axis[1], axis[2]);
+  if (s <= 1e-12) {
+    axis = Math.abs(from[0]) < 0.8 ? cross(from, [1, 0, 0]) : cross(from, [0, 1, 0]);
+    s = Math.hypot(axis[0], axis[1], axis[2]);
+  }
+  axis = [axis[0] / s, axis[1] / s, axis[2] / s];
+  const angle = Math.acos(c);
+  const cosA = Math.cos(angle);
+  const sinA = Math.sin(angle);
+  const axisDot = dot(axis, p);
+  const axisCrossP = cross(axis, p);
+  return [
+    origin[0] + (p[0] * cosA) + (axisCrossP[0] * sinA) + (axis[0] * axisDot * (1 - cosA)),
+    origin[1] + (p[1] * cosA) + (axisCrossP[1] * sinA) + (axis[1] * axisDot * (1 - cosA)),
+    origin[2] + (p[2] * cosA) + (axisCrossP[2] * sinA) + (axis[2] * axisDot * (1 - cosA)),
+  ];
+}
+
+function rotateAroundAxis(point, axisOrigin, axisDirection, angleRadians) {
+  const axis = normalizeVector(axisDirection);
+  if (Math.hypot(axis[0], axis[1], axis[2]) <= 1e-12 || Math.abs(angleRadians) <= 1e-12) return point.slice();
+  const p = sub(point, axisOrigin);
+  const cosA = Math.cos(angleRadians);
+  const sinA = Math.sin(angleRadians);
+  const axisDot = dot(axis, p);
+  const axisCrossP = cross(axis, p);
+  return [
+    axisOrigin[0] + (p[0] * cosA) + (axisCrossP[0] * sinA) + (axis[0] * axisDot * (1 - cosA)),
+    axisOrigin[1] + (p[1] * cosA) + (axisCrossP[1] * sinA) + (axis[1] * axisDot * (1 - cosA)),
+    axisOrigin[2] + (p[2] * cosA) + (axisCrossP[2] * sinA) + (axis[2] * axisDot * (1 - cosA)),
+  ];
+}
+
+function transformPointForSweep(point, profileCentroid, targetStart, sourceNormal, targetNormal, rotateProfile) {
+  const rotated = rotateProfile
+    ? rotateVectorBetween(point, sourceNormal, targetNormal, profileCentroid)
+    : point.slice();
+  return [
+    rotated[0] + targetStart[0] - profileCentroid[0],
+    rotated[1] + targetStart[1] - profileCentroid[1],
+    rotated[2] + targetStart[2] - profileCentroid[2],
+  ];
+}
+
+function transformSweepLoops(loops, profileCentroid, targetStart, sourceNormal, targetNormal, rotateProfile) {
+  return (Array.isArray(loops) ? loops : []).map((loop) => ({
+    ...loop,
+    pts: (Array.isArray(loop?.pts) ? loop.pts : loop || [])
+      .map((point) => transformPointForSweep(point, profileCentroid, targetStart, sourceNormal, targetNormal, rotateProfile)),
+  }));
+}
+
+function transformSweepEdgeInputs(edgeInputs, profileCentroid, targetStart, sourceNormal, targetNormal, rotateProfile) {
+  const xform = (point) => (
+    Array.isArray(point) && point.length >= 3
+      ? transformPointForSweep(point, profileCentroid, targetStart, sourceNormal, targetNormal, rotateProfile)
+      : point
+  );
+  return (Array.isArray(edgeInputs) ? edgeInputs : []).map((edge) => ({
+    ...edge,
+    polyline: (Array.isArray(edge?.polyline) ? edge.polyline : []).map(xform),
+    bezierPoles: Array.isArray(edge?.bezierPoles) ? edge.bezierPoles.map(xform) : edge?.bezierPoles,
+    circleCenter: xform(edge?.circleCenter),
+    arcCenter: xform(edge?.arcCenter),
+  }));
+}
+
+function sweepPathPointsForMode(pathPoints, profileCentroid, mode) {
+  const pts = normalizePathPoints(pathPoints);
+  if (pts.length < 2) throw new Error("OpenCASCADE sweep requires at least two path points.");
+  if (mode === "pathAlign") return pts;
+  const start = pts[0];
+  return pts.map((point) => [
+    profileCentroid[0] + point[0] - start[0],
+    profileCentroid[1] + point[1] - start[1],
+    profileCentroid[2] + point[2] - start[2],
+  ]);
+}
+
+function sweepSideNames(edgeInputs, featureID) {
+  const out = [];
+  for (let i = 0; i < (edgeInputs || []).length; i += 1) {
+    const edge = edgeInputs[i];
+    const raw = String(edge?.name || edge?.sketchGeometryId || "").trim();
+    out.push(raw || `${featureID}_SIDE_${i}`);
+  }
+  return uniqueNames(out);
+}
+
+function pathSegmentLengths(points) {
+  const lengths = [];
+  let total = 0;
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const len = Math.hypot(...sub(points[i + 1], points[i]));
+    lengths.push(len);
+    total += len;
+  }
+  return { lengths, total };
+}
+
+function sampleSweepPath(points, count) {
+  const { lengths, total } = pathSegmentLengths(points);
+  if (!(total > 1e-12)) return [];
+  const samples = [];
+  const sampleCount = Math.max(2, Math.floor(count) || 2);
+  for (let i = 0; i < sampleCount; i += 1) {
+    const t = sampleCount === 1 ? 0 : i / (sampleCount - 1);
+    let distance = total * t;
+    let segIndex = 0;
+    while (segIndex < lengths.length - 1 && distance > lengths[segIndex]) {
+      distance -= lengths[segIndex];
+      segIndex += 1;
+    }
+    const a = points[segIndex];
+    const b = points[segIndex + 1];
+    const len = lengths[segIndex] || 1;
+    const u = Math.max(0, Math.min(1, distance / len));
+    const point = [
+      a[0] + (b[0] - a[0]) * u,
+      a[1] + (b[1] - a[1]) * u,
+      a[2] + (b[2] - a[2]) * u,
+    ];
+    samples.push({
+      t,
+      point,
+      tangent: normalizeVector(sub(b, a)),
+    });
+  }
+  return samples;
+}
+
+function makeTwistedSweepLoftForLoop(loop, normal, spinePoints, mode, twistAngle, name) {
+  const profileCentroid = centroidOfLoops([loop]);
+  const sourceNormal = finiteNormalOrFallback(normal, loop.pts);
+  const { total } = pathSegmentLengths(spinePoints);
+  const sectionCount = Math.min(80, Math.max(6, Math.ceil(total / 2) + 1, Math.ceil(Math.abs(twistAngle) / 12) + 2));
+  const samples = sampleSweepPath(spinePoints, sectionCount);
+  if (samples.length < 2) throw new Error("OpenCASCADE twisted sweep path is too short.");
+
+  const op = new oc.BRepOffsetAPI_ThruSections(true, false, 1e-6);
+  for (const sample of samples) {
+    const targetNormal = mode === "pathAlign" ? sample.tangent : sourceNormal;
+    const aligned = loop.pts.map((point) => (
+      transformPointForSweep(point, profileCentroid, sample.point, sourceNormal, targetNormal, mode === "pathAlign")
+    ));
+    const twisted = aligned.map((point) => rotateAroundAxis(point, sample.point, targetNormal, (twistAngle * Math.PI / 180) * sample.t));
+    op.AddWire(makeLoftSectionWire(twisted, { loops: [{ pts: twisted, isHole: false }], normal: targetNormal }));
+  }
+  op.Build();
+  if (typeof op.IsDone === "function" && !op.IsDone()) {
+    throw new Error("OpenCASCADE twisted sweep loft failed.");
+  }
+  const shape = op.Shape();
+  if (!shape || shape.IsNull?.()) throw new Error(`OpenCASCADE twisted sweep "${name || "Sweep"}" produced an empty shape.`);
+  return shape;
+}
+
+function makeTwistedSweepShape({ boundaryLoops, normal, spinePoints, mode, twistAngle, name }) {
+  const loops = (Array.isArray(boundaryLoops) ? boundaryLoops : [])
+    .map((loop) => ({ ...loop, pts: Array.isArray(loop?.pts) ? loop.pts : loop }))
+    .filter((loop) => Array.isArray(loop.pts) && loop.pts.length >= 3);
+  const solidLoops = loops.filter((loop) => !loop.isHole);
+  const holeLoops = loops.filter((loop) => !!loop.isHole);
+  if (solidLoops.length !== 1) {
+    throw new Error("OpenCASCADE twisted sweep requires one solid profile loop at a time.");
+  }
+
+  let shape = makeTwistedSweepLoftForLoop(solidLoops[0], normal, spinePoints, mode, twistAngle, name);
+  for (const holeLoop of holeLoops) {
+    const holeShape = makeTwistedSweepLoftForLoop(holeLoop, normal, spinePoints, mode, twistAngle, `${name || "Sweep"}_HOLE`);
+    const cut = new oc.BRepAlgoAPI_Cut_3(shape, holeShape);
+    cut.Build();
+    if (typeof cut.IsDone === "function" && !cut.IsDone()) {
+      throw new Error("OpenCASCADE twisted sweep hole cut failed.");
+    }
+    const nextShape = cut.Shape();
+    if (!nextShape || nextShape.IsNull?.()) throw new Error("OpenCASCADE twisted sweep hole cut produced an empty shape.");
+    shape = nextShape;
+  }
+  return shape;
+}
+
+export function makePathSweep({
+  boundaryLoops = [],
+  edgeInputs = [],
+  normal = [0, 0, 1],
+  pathPoints = [],
+  mode = "translate",
+  name = "Sweep",
+  faceName = "Face",
+  omitBaseCap = false,
+  twistAngle = 0,
+} = {}) {
+  const normalizedPath = normalizePathPoints(pathPoints);
+  if (normalizedPath.length < 2) throw new Error("OpenCASCADE path sweep requires a path edge.");
+  const twist = Number(twistAngle) || 0;
+
+  const profileCentroid = centroidOfLoops(boundaryLoops);
+  const pathMode = mode === "pathAlign" ? "pathAlign" : "translate";
+  const spinePoints = sweepPathPointsForMode(normalizedPath, profileCentroid, pathMode);
+  const sourceNormal = finiteNormalOrFallback(normal, boundaryLoops?.[0]?.pts || boundaryLoops?.[0] || []);
+  const closed = pointDistanceSq(spinePoints[0], spinePoints[spinePoints.length - 1]) <= 1e-18;
+  let shape = null;
+  if (Math.abs(twist) > 1e-12) {
+    shape = makeTwistedSweepShape({
+      boundaryLoops,
+      normal: sourceNormal,
+      spinePoints,
+      mode: pathMode,
+      twistAngle: twist,
+      name,
+    });
+  } else {
+    const targetStart = spinePoints[0];
+    const startTangent = normalizeVector(sub(spinePoints[1], spinePoints[0]));
+    const targetNormal = pathMode === "pathAlign" ? startTangent : sourceNormal;
+    const rotateProfile = pathMode === "pathAlign";
+    const profileLoops = transformSweepLoops(boundaryLoops, profileCentroid, targetStart, sourceNormal, targetNormal, rotateProfile);
+    const profileEdges = transformSweepEdgeInputs(edgeInputs, profileCentroid, targetStart, sourceNormal, targetNormal, rotateProfile);
+    const profileFace = makeFaceFromBoundaryLoops(profileLoops, profileEdges, targetNormal);
+    const spine = makeTubeSpineWire(spinePoints, closed, null);
+    shape = makePipeShape(spine.wire, profileFace);
+  }
+  const featureTag = name ? `${name}:` : "";
+  const startName = `${featureTag}${faceName}_START`;
+  const endName = `${featureTag}${faceName}_END`;
+  const sideNames = sweepSideNames(edgeInputs, name || "SWEEP");
+  const capNames = closed || omitBaseCap ? [] : [startName, endName];
+  const faceMetadata = new Map();
+  for (const sideName of sideNames) faceMetadata.set(sideName, { faceType: "SIDEWALL" });
+  if (!closed && !omitBaseCap) {
+    faceMetadata.set(startName, { faceType: "STARTCAP" });
+    faceMetadata.set(endName, { faceType: "ENDCAP" });
+  }
+  return createOccState({
+    shape,
+    faceNames: uniqueNames([...capNames, ...sideNames]),
+    faceMetadata,
+    meshOptions: { deflection: 0.08, angle: 0.35 },
+    feature: {
+      kind: "sweep",
+      name,
+      faceName,
+      mode: pathMode,
+      pathPoints: spinePoints,
+      profileCentroid,
+    },
+  });
+}
+
 export function makeTube({ points = [], radius = 1, innerRadius = 0, closed = false, name = "Tube", pathCurve = null, endpointExtension = 0 } = {}) {
   const pathPoints = normalizePathPoints(points);
   const outerRadius = Number(radius);
@@ -1580,6 +2039,20 @@ function cloneMetadataMaps(left, right) {
       ...(right?._edgeMetadata instanceof Map ? right._edgeMetadata.entries() : []),
     ]),
   };
+}
+
+function cloneMetadataMapsMany(solids) {
+  const faceMetadata = new Map();
+  const edgeMetadata = new Map();
+  for (const solid of solids || []) {
+    for (const entry of solid?._faceMetadata instanceof Map ? solid._faceMetadata.entries() : []) {
+      faceMetadata.set(entry[0], entry[1]);
+    }
+    for (const entry of solid?._edgeMetadata instanceof Map ? solid._edgeMetadata.entries() : []) {
+      edgeMetadata.set(entry[0], entry[1]);
+    }
+  }
+  return { faceMetadata, edgeMetadata };
 }
 
 function getFaceNameForIndex(state, index, stats = null) {
@@ -1696,11 +2169,40 @@ function pointWithLocation(point, location) {
   return [point.X(), point.Y(), point.Z()];
 }
 
+function occFaceIsForward(face) {
+  try {
+    return face.Orientation_1() === oc.TopAbs_Orientation.TopAbs_FORWARD;
+  } catch {
+    return true;
+  }
+}
+
+function occFaceNeedsTriangleReverse(face) {
+  return !occFaceIsForward(face);
+}
+
+function occFaceTriangulation(face, location) {
+  try {
+    return oc.BRep_Tool.Triangulation(face, location, 0);
+  } catch {
+    return oc.BRep_Tool.Triangulation(face, location);
+  }
+}
+
+function cleanOccTriangulation(shape) {
+  try {
+    if (shape && typeof oc.BRepTools?.Clean === "function") oc.BRepTools.Clean(shape);
+  } catch {
+    // Some OCCT.js builds may omit this binding; remeshing still works when the
+    // shape has no cached Poly_Triangulation yet.
+  }
+}
+
 function statsFromOccFace(face) {
   const points = [];
   try {
     const location = new oc.TopLoc_Location_1();
-    const handle = oc.BRep_Tool.Triangulation(face, location);
+    const handle = occFaceTriangulation(face, location);
     if (!handle || handle.IsNull()) return { centroid: [0, 0, 0], points: [], normal: surfaceNormalFromOccFace(face) || [0, 0, 0] };
     const triangulation = handle.get();
     for (let i = 1; i <= triangulation.NbNodes(); i += 1) {
@@ -1755,11 +2257,11 @@ function finiteNormalOrFallback(normal, fallbackPoints) {
   return [0, 0, 1];
 }
 
-function collectNamedOccFaces(solid) {
+function collectNamedOccFaces(solid, options = {}) {
   const state = solid?._occ;
   if (!state?.shape) return [];
   state.faceNameToID = solid._faceNameToID;
-  tessellateOccState(state);
+  tessellateOccState(state, options);
 
   const faces = [];
   let faceIndex = 0;
@@ -1794,6 +2296,21 @@ function listContainsSameShape(list, shape) {
   return false;
 }
 
+function historyMapsShapeToResult(history, sourceShape, resultShape) {
+  if (!history || !sourceShape || !resultShape) return false;
+  try {
+    if (listContainsSameShape(history.Modified(sourceShape), resultShape)) return true;
+  } catch {
+    // Optional history API.
+  }
+  try {
+    if (listContainsSameShape(history.Generated(sourceShape), resultShape)) return true;
+  } catch {
+    // Optional history API.
+  }
+  return false;
+}
+
 function sameOccSurfaceType(a, b) {
   const av = Number(a);
   const bv = Number(b);
@@ -1807,11 +2324,7 @@ function chooseSourceFaceName(resultFace, sources, booleanOp = null) {
     } catch {
       // Continue with history/geometric matching.
     }
-    try {
-      if (booleanOp && listContainsSameShape(booleanOp.Modified(source.face), resultFace)) return source.name;
-    } catch {
-      // Continue with geometric matching.
-    }
+    if (historyMapsShapeToResult(booleanOp, source.face, resultFace)) return source.name;
   }
 
   const stats = statsFromOccFace(resultFace);
@@ -1828,9 +2341,45 @@ function chooseSourceFaceName(resultFace, sources, booleanOp = null) {
       stats.centroid[2] - source.centroid[2],
     );
     const score = dot - Math.min(dist, 1000) * 1e-4;
-    if (!best || score > best.score) best = { name: source.name, score };
+    if (!best || score > best.score + 1e-9) best = { name: source.name, score };
   }
   return best?.name || null;
+}
+
+function simplifyOccBooleanResult(booleanOp) {
+  if (!booleanOp || typeof booleanOp.Shape !== "function") {
+    return { shape: null, history: booleanOp };
+  }
+  if (typeof booleanOp.SimplifyResult === "function") {
+    try {
+      booleanOp.SimplifyResult(
+        OCC_BOOLEAN_UNIFY_EDGES,
+        OCC_BOOLEAN_UNIFY_FACES,
+        OCC_BOOLEAN_UNIFY_ANGULAR_TOLERANCE,
+      );
+      return { shape: booleanOp.Shape(), history: booleanOp };
+    } catch {
+      // Fall back to explicit same-domain unification below.
+    }
+  }
+
+  const shape = booleanOp.Shape();
+  if (!shape || typeof oc.ShapeUpgrade_UnifySameDomain_2 !== "function") {
+    return { shape, history: booleanOp };
+  }
+  try {
+    const unify = new oc.ShapeUpgrade_UnifySameDomain_2(
+      shape,
+      OCC_BOOLEAN_UNIFY_EDGES,
+      OCC_BOOLEAN_UNIFY_FACES,
+      true,
+    );
+    try { unify.SetAngularTolerance(OCC_BOOLEAN_UNIFY_ANGULAR_TOLERANCE); } catch { /* optional OCCT binding */ }
+    unify.Build();
+    return { shape: unify.Shape(), history: unify };
+  } catch {
+    return { shape, history: booleanOp };
+  }
 }
 
 function chooseUnusedSourceFaceName(resultFace, sources, usedNames = new Set()) {
@@ -1874,31 +2423,101 @@ function bindBooleanFaceNames(state, left, right, booleanOp, operation) {
   state.faceNames = uniqueNames(state.faceNameByIndex);
 }
 
+function makeTopToolsShapeList(shapes) {
+  const list = new oc.TopTools_ListOfShape_1();
+  for (const shape of shapes || []) {
+    if (shape) list.Append_1(shape);
+  }
+  return list;
+}
+
+function makeOccBooleanOperation(opName, argumentShapes, toolShapes) {
+  let booleanOp;
+  if (opName === "SUBTRACT" || opName === "DIFFERENCE") {
+    booleanOp = new oc.BRepAlgoAPI_Cut_1();
+  } else if (opName === "INTERSECT" || opName === "COMMON") {
+    booleanOp = new oc.BRepAlgoAPI_Common_1();
+  } else {
+    booleanOp = new oc.BRepAlgoAPI_Fuse_1();
+  }
+  booleanOp.SetArguments(makeTopToolsShapeList(argumentShapes));
+  booleanOp.SetTools(makeTopToolsShapeList(toolShapes));
+  try { booleanOp.SetToFillHistory(true); } catch { /* optional OCCT binding */ }
+  try { booleanOp.SetNonDestructive(false); } catch { /* optional OCCT binding */ }
+  try { booleanOp.SetCheckInverted(false); } catch { /* optional OCCT binding */ }
+  try { booleanOp.SetGlue(oc.BOPAlgo_GlueEnum.BOPAlgo_GlueShift); } catch { /* optional OCCT binding */ }
+  booleanOp.Build();
+  return booleanOp;
+}
+
+function bindBooleanFaceNamesFromSources(state, sourceFaces, booleanOp, operation) {
+  state.faceNameByIndex = [];
+  let faceIndex = 0;
+  const opName = String(operation || "").toUpperCase();
+  const explorer = new oc.TopExp_Explorer_2(
+    state.shape,
+    oc.TopAbs_ShapeEnum.TopAbs_FACE,
+    oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+  );
+  for (; explorer.More(); explorer.Next(), faceIndex += 1) {
+    const face = oc.TopoDS.Face_1(explorer.Current());
+    state.faceNameByIndex[faceIndex] = chooseSourceFaceName(face, sourceFaces || [], booleanOp) || `${opName || "BOOLEAN"}_FACE_${faceIndex + 1}`;
+  }
+  state.faceNames = uniqueNames(state.faceNameByIndex);
+}
+
 export function booleanOccSolids(left, right, operation = "UNION") {
   if (!hasOccShape(left) || !hasOccShape(right)) return null;
   const opName = String(operation || "UNION").toUpperCase();
   const leftShape = left._occ.shape;
   const rightShape = right._occ.shape;
-  let booleanOp;
-  if (opName === "SUBTRACT" || opName === "DIFFERENCE") {
-    booleanOp = new oc.BRepAlgoAPI_Cut_3(leftShape, rightShape);
-  } else if (opName === "INTERSECT" || opName === "COMMON") {
-    booleanOp = new oc.BRepAlgoAPI_Common_3(leftShape, rightShape);
-  } else {
-    booleanOp = new oc.BRepAlgoAPI_Fuse_3(leftShape, rightShape);
-  }
+  const booleanOp = makeOccBooleanOperation(opName, [leftShape], [rightShape]);
   if (typeof booleanOp.IsDone === "function" && !booleanOp.IsDone()) {
     throw new Error(`OpenCASCADE ${opName} boolean failed.`);
   }
+  const simplified = simplifyOccBooleanResult(booleanOp);
   const { faceMetadata, edgeMetadata } = cloneMetadataMaps(left, right);
   const state = createOccState({
-    shape: booleanOp.Shape(),
+    shape: simplified.shape || booleanOp.Shape(),
     faceNames: uniqueNames([...(left._occ.faceNames || []), ...(right._occ.faceNames || [])]),
     faceMetadata,
     edgeMetadata,
     booleanOperation: opName,
   });
-  bindBooleanFaceNames(state, left, right, booleanOp, opName);
+  bindBooleanFaceNames(state, left, right, simplified.history || booleanOp, opName);
+  return state;
+}
+
+export function subtractOccSolidTools(target, toolSolids = []) {
+  const tools = (Array.isArray(toolSolids) ? toolSolids : []).filter((solid) => hasOccShape(solid));
+  if (!hasOccShape(target) || !tools.length) return null;
+  const cut = new oc.BRepAlgoAPI_Cut_1();
+  cut.SetArguments(makeTopToolsShapeList([target._occ.shape]));
+  cut.SetTools(makeTopToolsShapeList(tools.map((solid) => solid._occ.shape)));
+  try { cut.SetToFillHistory(true); } catch { /* optional OCCT binding */ }
+  try { cut.SetNonDestructive(false); } catch { /* optional OCCT binding */ }
+  try { cut.SetCheckInverted(false); } catch { /* optional OCCT binding */ }
+  try { cut.SetGlue(oc.BOPAlgo_GlueEnum.BOPAlgo_GlueShift); } catch { /* optional OCCT binding */ }
+  cut.Build();
+  if (typeof cut.IsDone === "function" && !cut.IsDone()) {
+    throw new Error("OpenCASCADE multi-tool subtract failed.");
+  }
+  const simplified = simplifyOccBooleanResult(cut);
+  const allSolids = [target, ...tools];
+  const { faceMetadata, edgeMetadata } = cloneMetadataMapsMany(allSolids);
+  const state = createOccState({
+    shape: simplified.shape || cut.Shape(),
+    faceNames: uniqueNames(allSolids.flatMap((solid) => solid?._occ?.faceNames || [])),
+    faceMetadata,
+    edgeMetadata,
+    booleanOperation: "SUBTRACT",
+  });
+  bindBooleanFaceNamesFromSources(
+    state,
+    allSolids.flatMap((solid) => collectNamedOccFaces(solid)),
+    simplified.history || cut,
+    "SUBTRACT",
+  );
   return state;
 }
 
@@ -1982,7 +2601,61 @@ function occEdgeEndpoints(edge) {
   return [pts[0], pts[pts.length - 1]];
 }
 
-function occEdgeSamplePoints(edge, count = 17) {
+function clampOccEdgeSampleCount(value) {
+  const count = Math.floor(Number(value));
+  if (!Number.isFinite(count)) return DEFAULT_OCC_VISUALIZATION_CURVE_SAMPLES;
+  return Math.max(2, Math.min(MAX_OCC_VISUALIZATION_CURVE_SAMPLES, count));
+}
+
+function polylineApproxLength(points) {
+  let length = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    const a = points[i - 1];
+    const b = points[i];
+    length += Math.hypot(
+      Number(b?.[0] || 0) - Number(a?.[0] || 0),
+      Number(b?.[1] || 0) - Number(a?.[1] || 0),
+      Number(b?.[2] || 0) - Number(a?.[2] || 0),
+    );
+  }
+  return length;
+}
+
+function pointToLineDistanceSq(point, a, b) {
+  const px = Number(point?.[0] || 0);
+  const py = Number(point?.[1] || 0);
+  const pz = Number(point?.[2] || 0);
+  const ax = Number(a?.[0] || 0);
+  const ay = Number(a?.[1] || 0);
+  const az = Number(a?.[2] || 0);
+  const bx = Number(b?.[0] || 0);
+  const by = Number(b?.[1] || 0);
+  const bz = Number(b?.[2] || 0);
+  const abx = bx - ax;
+  const aby = by - ay;
+  const abz = bz - az;
+  const len2 = abx * abx + aby * aby + abz * abz;
+  if (len2 <= 1e-24) return (px - ax) ** 2 + (py - ay) ** 2 + (pz - az) ** 2;
+  const t = Math.max(0, Math.min(1, ((px - ax) * abx + (py - ay) * aby + (pz - az) * abz) / len2));
+  const qx = ax + abx * t;
+  const qy = ay + aby * t;
+  const qz = az + abz * t;
+  return (px - qx) ** 2 + (py - qy) ** 2 + (pz - qz) ** 2;
+}
+
+function isPolylineNearlyLinear(points, length) {
+  if (!Array.isArray(points) || points.length < 3) return true;
+  const first = points[0];
+  const last = points[points.length - 1];
+  const tolerance = Math.max(1e-7, Math.max(1, Number(length) || 0) * 1e-6);
+  const toleranceSq = tolerance * tolerance;
+  for (let i = 1; i < points.length - 1; i += 1) {
+    if (pointToLineDistanceSq(points[i], first, last) > toleranceSq) return false;
+  }
+  return true;
+}
+
+function sampleOccEdgeCurve(edge, count) {
   const points = [];
   try {
     const curve = new oc.BRepAdaptor_Curve_2(edge);
@@ -2000,6 +2673,34 @@ function occEdgeSamplePoints(edge, count = 17) {
     // Some edge kinds do not expose a usable adaptor in the wasm binding.
   }
   return points;
+}
+
+function occEdgeSampleCount(edge, options = {}) {
+  if (Number.isFinite(options?.edgeSampleCount)) return clampOccEdgeSampleCount(options.edgeSampleCount);
+
+  const coarse = sampleOccEdgeCurve(edge, 17);
+  if (coarse.length < 2) return DEFAULT_OCC_VISUALIZATION_CURVE_SAMPLES;
+
+  const length = polylineApproxLength(coarse);
+  if (isPolylineNearlyLinear(coarse, length)) return 2;
+
+  const deflection = Number(options?.deflection);
+  const angle = Number(options?.angle);
+  const byDeflection = Number.isFinite(deflection) && deflection > 0
+    ? Math.ceil(length / Math.max(deflection * 0.25, 0.001))
+    : DEFAULT_OCC_VISUALIZATION_CURVE_SAMPLES;
+  const byAngle = Number.isFinite(angle) && angle > 0
+    ? Math.ceil(DEFAULT_OCC_VISUALIZATION_CURVE_SAMPLES * Math.max(1, DEFAULT_ANGLE / angle))
+    : DEFAULT_OCC_VISUALIZATION_CURVE_SAMPLES;
+
+  return clampOccEdgeSampleCount(Math.max(DEFAULT_OCC_VISUALIZATION_CURVE_SAMPLES, byDeflection, byAngle));
+}
+
+function occEdgeSamplePoints(edge, countOrOptions = 17) {
+  const count = typeof countOrOptions === "number"
+    ? countOrOptions
+    : occEdgeSampleCount(edge, countOrOptions || {});
+  return sampleOccEdgeCurve(edge, count);
 }
 
 function selectedEdgeMatchScore(edgeObj, occEdge) {
@@ -2048,6 +2749,29 @@ function sameOccShape(a, b) {
   }
 }
 
+function occEdgeTriangulationPolyline(face, edge) {
+  try {
+    const location = new oc.TopLoc_Location_1();
+    const handle = occFaceTriangulation(face, location);
+    if (!handle || handle.IsNull()) return [];
+    const polygon = oc.BRep_Tool.PolygonOnTriangulation_1(edge, handle, location);
+    if (!polygon || polygon.IsNull()) return [];
+
+    const triangulation = handle.get();
+    const nodes = polygon.get().Nodes();
+    const length = Number(nodes.Length?.() || 0);
+    const positions = [];
+    for (let i = 1; i <= length; i += 1) {
+      const nodeIndex = Number(nodes.Value(i));
+      if (!Number.isFinite(nodeIndex) || nodeIndex < 1 || nodeIndex > triangulation.NbNodes()) continue;
+      positions.push(pointWithLocation(triangulation.Node(nodeIndex), location));
+    }
+    return positions;
+  } catch {
+    return [];
+  }
+}
+
 function findOccEdgesForSelection(solid, edgeObj, tolerance = 1e-4) {
   if (!hasOccShape(solid) || !edgeObj) return null;
   const tol2 = tolerance * tolerance;
@@ -2081,6 +2805,48 @@ function findOccEdgesForSelection(solid, edgeObj, tolerance = 1e-4) {
   }
   if (matches.length) return matches;
   return best && best.score <= tol2 * 2 ? [best.edge] : [];
+}
+
+function findOccOwnerSolidForEdgeObject(edgeObj) {
+  let obj = edgeObj?.parent || null;
+  while (obj) {
+    if (hasOccShape(obj)) return obj;
+    obj = obj.parent || null;
+  }
+  return null;
+}
+
+function findOccOwnerSolidForFaceObject(faceObj) {
+  let obj = faceObj?.parent || null;
+  while (obj) {
+    if (hasOccShape(obj)) return obj;
+    obj = obj.parent || null;
+  }
+  return null;
+}
+
+export function occFaceFromSelectedFace(faceObj) {
+  const owner = findOccOwnerSolidForFaceObject(faceObj);
+  const faceName = String(faceObj?.name || faceObj?.userData?.faceName || "").trim();
+  if (!owner || !faceName) return null;
+  const face = findOccFaceByName(owner, faceName);
+  return face ? { owner, face, faceName } : null;
+}
+
+export function occAxisFromSelectedEdge(edgeObj) {
+  const owner = findOccOwnerSolidForEdgeObject(edgeObj);
+  if (!owner) return null;
+  const edges = findOccEdgesForSelection(owner, edgeObj);
+  const edge = Array.isArray(edges) && edges.length === 1 ? edges[0] : null;
+  if (!edge) return null;
+  const endpoints = occEdgeEndpoints(edge);
+  if (!endpoints || endpoints.length < 2) return null;
+  const axis = sub(endpoints[1], endpoints[0]);
+  if (Math.hypot(...axis) <= 1e-12) return null;
+  return {
+    start: endpoints[0],
+    end: endpoints[1],
+  };
 }
 
 function bindFeatureResultFaceNames(state, sourceSolid, featureFacePrefix, operation) {
@@ -2247,7 +3013,6 @@ export function offsetShellOccSolid(solid, removedFaceNames = [], { distance, fe
 
 export function tessellateOccState(state, options = {}) {
   if (!state?.shape) return { numProp: 3, vertProperties: new Float32Array(), triVerts: new Uint32Array(), faceID: new Uint32Array(), delete() {} };
-  if (state.meshCache) return state.meshCache;
 
   const meshOptions = state.meshOptions || {};
   const deflection = Number.isFinite(options.deflection)
@@ -2256,6 +3021,9 @@ export function tessellateOccState(state, options = {}) {
   const angle = Number.isFinite(options.angle)
     ? options.angle
     : (Number.isFinite(meshOptions.angle) ? meshOptions.angle : DEFAULT_ANGLE);
+  const cacheKey = `${deflection}:${angle}`;
+  if (state.meshCache && state.meshCacheKey === cacheKey) return state.meshCache;
+  cleanOccTriangulation(state.shape);
   new oc.BRepMesh_IncrementalMesh_2(state.shape, deflection, false, angle, false);
 
   const vertices = [];
@@ -2271,7 +3039,7 @@ export function tessellateOccState(state, options = {}) {
   for (; explorer.More(); explorer.Next(), faceIndex += 1) {
     const face = oc.TopoDS.Face_1(explorer.Current());
     const location = new oc.TopLoc_Location_1();
-    const handle = oc.BRep_Tool.Triangulation(face, location);
+    const handle = occFaceTriangulation(face, location);
     if (!handle || handle.IsNull()) continue;
     const triangulation = handle.get();
     const base = (vertices.length / 3) | 0;
@@ -2288,13 +3056,7 @@ export function tessellateOccState(state, options = {}) {
       normal: surfaceNormalFromOccFace(face) || [0, 0, 0],
     });
     const faceID = state.faceNameToID?.get?.(faceName) ?? faceIndex + 1;
-    const isReversed = (() => {
-      try {
-        return face.Orientation_1() === oc.TopAbs_Orientation.TopAbs_REVERSED;
-      } catch {
-        return false;
-      }
-    })();
+    const isReversed = occFaceNeedsTriangleReverse(face);
     for (let i = 1; i <= triangulation.NbTriangles(); i += 1) {
       const tri = triangulation.Triangle(i);
       const i0 = base + tri.Value(1) - 1;
@@ -2313,14 +3075,15 @@ export function tessellateOccState(state, options = {}) {
     faceID: new Uint32Array(faceIDs),
     delete() {},
   };
+  state.meshCacheKey = cacheKey;
   return state.meshCache;
 }
 
-export function occFaces(solid) {
+export function occFaces(solid, options = {}) {
   const state = solid?._occ;
   if (!state?.shape) return null;
   state.faceNameToID = solid._faceNameToID;
-  const mesh = tessellateOccState(state);
+  const mesh = tessellateOccState(state, options);
   const faces = new Map();
   const vp = mesh.vertProperties;
   const tv = mesh.triVerts;
@@ -2380,7 +3143,7 @@ function surfaceNormalFromOccFace(face) {
     if (!props.IsNormalDefined()) return null;
     const normal = props.Normal();
     let out = normalizeVector([normal.X(), normal.Y(), normal.Z()]);
-    if (face.Orientation_1() === oc.TopAbs_Orientation.TopAbs_REVERSED) {
+    if (occFaceNeedsTriangleReverse(face)) {
       out = [-out[0], -out[1], -out[2]];
     }
     return out;
@@ -2517,10 +3280,10 @@ function buildPolylinesFromSegments(segments) {
   return polylines;
 }
 
-export function occBoundaryEdgePolylines(solid) {
+export function occBoundaryEdgePolylines(solid, options = {}) {
   const state = solid?._occ;
   if (!state?.shape) return [];
-  const faces = collectNamedOccFaces(solid);
+  const faces = collectNamedOccFaces(solid, options);
   const edges = [];
   const explorer = new oc.TopExp_Explorer_2(
     state.shape,
@@ -2531,7 +3294,7 @@ export function occBoundaryEdgePolylines(solid) {
     const edge = oc.TopoDS.Edge_1(explorer.Current());
     let entry = edges.find((candidate) => sameOccShape(candidate.edge, edge));
     if (!entry) {
-      entry = { edge, faceUses: [] };
+      entry = { edge, faceUses: [], polygons: [] };
       edges.push(entry);
     }
   }
@@ -2545,7 +3308,13 @@ export function occBoundaryEdgePolylines(solid) {
     for (; faceExplorer.More(); faceExplorer.Next()) {
       const faceEdge = oc.TopoDS.Edge_1(faceExplorer.Current());
       const edgeEntry = edges.find((candidate) => sameOccShape(candidate.edge, faceEdge));
-      if (edgeEntry) edgeEntry.faceUses.push(faceEntry.name);
+      if (edgeEntry) {
+        edgeEntry.faceUses.push(faceEntry.name);
+        const positions = occEdgeTriangulationPolyline(faceEntry.face, faceEdge);
+        if (positions.length >= 2) {
+          edgeEntry.polygons.push({ faceName: faceEntry.name, positions });
+        }
+      }
     }
   }
 
@@ -2553,21 +3322,22 @@ export function occBoundaryEdgePolylines(solid) {
   for (const entry of edges) {
     const names = (entry.faceUses || []).filter(Boolean);
     if (!names.length) continue;
+    const polygon = (entry.polygons || []).find((item) => Array.isArray(item.positions) && item.positions.length >= 2);
+    if (!polygon) continue;
     const uniqueNames = Array.from(new Set(names));
-    if (uniqueNames.length < 2 && names.length < 2) continue;
+    if (uniqueNames.length < 2) continue;
     let faceA = uniqueNames[0];
     let faceB = uniqueNames[1] || uniqueNames[0];
     [faceA, faceB] = edgePairName(faceA, faceB);
     const pairKey = `${faceA}|${faceB}`;
     if (!pairEdges.has(pairKey)) pairEdges.set(pairKey, []);
-    pairEdges.get(pairKey).push(entry.edge);
+    pairEdges.get(pairKey).push(polygon.positions);
   }
 
   const out = [];
-  for (const [pairKey, edgesForPair] of pairEdges.entries()) {
+  for (const [pairKey, polylinesForPair] of pairEdges.entries()) {
     const [faceA, faceB] = pairKey.split("|");
-    edgesForPair.forEach((edge, index) => {
-      const positions = occEdgeSamplePoints(edge, 65);
+    polylinesForPair.forEach((positions, index) => {
       if (positions.length < 2) return;
       const closedLoop = pointDistanceSq(positions[0], positions[positions.length - 1]) <= 1e-12;
       out.push({

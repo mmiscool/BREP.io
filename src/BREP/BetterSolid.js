@@ -1,61 +1,7 @@
-
 /**
- * Solid: Authoring wrapper around manifold-3d Mesh/Manifold
- *
- * Requirements
- * - Environment: ES modules. For disk export (`writeSTL`) a Node.js runtime is required.
- * - Dependency: `setupManifold.js` must provide a ready-to-use `manifold` module
- *   exposing `{ Manifold, Mesh }` from `manifold-3d`.
- * - Geometry: Input triangles must describe a closed, watertight, 2‑manifold.
- *   The class includes helpers to fix triangle adjacency winding and will flip
- *   the entire mesh if overall orientation is inward, but it cannot repair
- *   topological holes or self-intersections.
- * - Vertex uniqueness: Vertices are uniqued by exact coordinate match
- *   (string key of `x,y,z`). If you author with floating tolerances, you must
- *   supply identical numeric values for shared vertices or change `_key()` to
- *   implement a tolerance strategy.
- *
- * Theory of Operation
- * - Authoring model:
- *   - Add triangles via `addTriangle(faceName, v1, v2, v3)`.
- *   - Each triangle stores three vertex indices in `_triVerts` and a per‑triangle
- *     face label ID in `_triIDs`. Face labels are mapped to globally unique
- *     IDs from `Manifold.reserveIDs()` so provenance persists through CSG.
- *   - Vertices are stored in `_vertProperties` in MeshGL layout `[x,y,z,...]`.
- *
- * - Manifold build (`_manifoldize`):
- *   - Before building, `fixTriangleWindingsByAdjacency()` enforces opposite
- *     orientation across shared edges; then a signed‑volume check flips all
- *     triangles if the mesh is inward‑facing.
- *   - A `Mesh` is constructed with `{ numProp, vertProperties, triVerts, faceID }`,
- *     where `faceID` is the per‑triangle label array. `mesh.merge()` is called
- *     to fill merge vectors when needed, then `new Manifold(mesh)` is created
- *     and cached until the authoring arrays change.
- *
- * - Provenance & queries:
- *   - After any boolean operation, Manifold propagates `faceID` so each output
- *     triangle keeps the original face label. `getFace(name)` and `getFaces()`
- *     read `mesh.faceID` to enumerate triangles by label (no planar grouping or
- *     merging), which supports faces comprised of many non‑coplanar triangles
- *     (e.g., cylinder side walls).
- *
- * - Boolean CSG:
- *   - `union`, `subtract`, `intersect` call Manifold’s CSG APIs on the cached
- *     Manifold objects and then rebuild a new Solid from the result. Face ID →
- *     name maps from both inputs are merged so all original labels remain
- *     available in the output.
- *
- * - Export:
- *   - `toSTL()` returns an ASCII STL string from the current Manifold mesh.
- *   - `writeSTL(path)` writes the STL to disk using a dynamic `fs` import so
- *     the module stays browser‑safe.
- *   - `toSTEP()` returns a triangulated STEP (faceted BREP) string.
- *   - `writeSTEP(path)` writes the STEP file to disk in Node.js environments.
- *
- * Performance Notes
- * - Manifoldization is cached and only recomputed when authoring arrays change
- *   (`_dirty`). Face queries iterate triangles and filter by `faceID`, which is
- *   linear in triangle count.
+ * Solid: OpenCASCADE-backed CAD solid wrapper.
+ * Legacy triangle buffers remain only as compatibility data for metadata,
+ * visualization snapshots, and older serialized documents.
  */
 import * as SolidMethods from "./SolidMethods/index.js";
 import {
@@ -66,13 +12,12 @@ export { Edge, Face, Vertex } from "./SolidShared.js";
 /**
  * Solid
  * - Add triangles with a face name.
- * - Data is stored in Manifold's MeshGL layout (vertProperties, triVerts, faceID).
- * - Face names are mapped to globally-unique Manifold IDs so they propagate through boolean ops.
- * - Query triangles for a given face name after any CSG by reading runs back from MeshGL.
+ * - OCCT state is authoritative for modeling operations.
+ * - Face names are mapped to stable IDs for visualization and metadata.
  */
 export class Solid extends THREE.Group {
     // Always reconstruct booleans as this base Solid (not subclasses) to avoid
-    // re-running primitive generate() when rebuilding from Manifold.
+    // re-running primitive generate() when rebuilding from kernel results.
     static BaseSolid = Solid;
     /**
      * Construct an empty Solid with authoring buffers, face/edge metadata, and aux-edge storage initialized.
@@ -83,7 +28,7 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Bake a Matrix4 into authored vertices (and aux edges/metadata), marking the manifold dirty.
+     * Bake a Matrix4 into authored vertices or OCCT state.
      * @param {THREE.Matrix4|{elements:number[]}} matrix Matrix or matrix-like object
      * @returns {Solid}
      */
@@ -119,7 +64,7 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Internal: map a face name to a globally unique Manifold ID (creates if missing).
+     * Internal: map a face name to a stable face ID (creates if missing).
      * @param {string} faceName
      * @returns {number}
      */
@@ -307,7 +252,7 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Flip all triangle windings to invert normals and rebuild the manifold.
+     * Removed legacy mesh operation.
      * @returns {Solid}
      */
     invertNormals(..._args) {
@@ -320,14 +265,6 @@ export class Solid extends THREE.Group {
      */
     fixTriangleWindingsByAdjacency(..._args) {
         return SolidMethods.fixTriangleWindingsByAdjacency.apply(this, arguments);
-    }
-
-    /**
-     * Check whether the authored mesh is a coherently oriented manifold.
-     * @returns {boolean}
-     */
-    _isCoherentlyOrientedManifold(..._args) {
-        return SolidMethods._isCoherentlyOrientedManifold.apply(this, arguments);
     }
 
     /**
@@ -357,23 +294,14 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Build (or reuse) the cached Manifold from authored arrays, fixing winding/orientation first.
-     * @returns {import('./SolidShared.js').Manifold}
-     */
-    _manifoldize(..._args) {
-        return SolidMethods._manifoldize.apply(this, arguments);
-    }
-
-    /**
-     * Get a fresh MeshGL snapshot (`vertProperties`, `triVerts`, `faceID`) from the manifold.
-     * @returns {import('./SolidShared.js').ManifoldMesh}
+     * Get a visualization mesh snapshot from the OCCT shape.
      */
     getMesh(..._args) {
         return SolidMethods.getMesh.apply(this, arguments);
     }
 
     /**
-     * Dispose the cached Manifold to free wasm memory and mark the solid dirty.
+     * Dispose cached resources and mark the solid dirty.
      * @returns {Solid}
      */
     free(..._args) {
@@ -406,7 +334,7 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Generate an ASCII STL string for the current manifold mesh.
+     * Generate an ASCII STL string from the current visualization mesh.
      * @param {string} [name='solid']
      * @param {number} [precision=6]
      * @returns {string}
@@ -460,8 +388,8 @@ export class Solid extends THREE.Group {
      * Build per-face meshes and boundary edges as children for visualization.
      * @param {object} [options]
      * @param {boolean} [options.showEdges=true] include boundary edge polylines
-     * @param {boolean} [options.forceAuthoring=false] force authoring arrays instead of manifold mesh
-     * @param {boolean} [options.authoringOnly=false] skip manifold path entirely (fallback visualization)
+     * @param {boolean} [options.forceAuthoring=false] force legacy authoring arrays
+     * @param {boolean} [options.authoringOnly=false] use only legacy authoring arrays
      * @returns {void}
      */
     visualize(..._args) {
@@ -495,25 +423,6 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Static helper: expand face IDs from a MeshGL into a JS array (or zeros when absent).
-     * @param {import('./SolidShared.js').ManifoldMesh} mesh
-     * @returns {number[]}
-     */
-    static _expandTriIDsFromMesh(..._args) {
-        return SolidMethods._expandTriIDsFromMeshStatic.apply(this, arguments);
-    }
-
-    /**
-     * Static helper: build a Solid from an existing Manifold and ID -> face-name map.
-     * @param {import('./SolidShared.js').Manifold} manifoldObj
-     * @param {Map<number,string>} idToFaceName
-     * @returns {Solid}
-     */
-    static _fromManifold(..._args) {
-        return SolidMethods._fromManifoldStatic.apply(this, arguments);
-    }
-
-    /**
      * Boolean union with another solid; merges face labels, metadata, and aux edges.
      * @param {Solid} other
      * @returns {Solid}
@@ -541,7 +450,7 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Boolean difference alias using Manifold.difference (same as subtract).
+     * Boolean difference alias.
      * @param {Solid} other
      * @returns {Solid}
      */
@@ -550,7 +459,7 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Simplify the manifold (optionally with tolerance and in-place update).
+     * Simplify the solid representation where supported.
      * @param {number} [tolerance]
      * @param {boolean} [updateInPlace] when true, mutate this solid instead of returning a clone
      * @returns {Solid}
@@ -560,7 +469,7 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Rebuild with Manifold tolerance applied, returning a new Solid.
+     * Return a clone with tolerance metadata applied where supported.
      * @param {number} tolerance
      * @returns {Solid}
      */
@@ -569,7 +478,7 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Compute volume from the current manifold mesh.
+     * Compute volume from the current solid.
      * @returns {number}
      */
     volume(..._args) {
@@ -577,7 +486,7 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Compute total surface area from the current manifold mesh.
+     * Compute total surface area from the current solid.
      * @returns {number}
      */
     surfaceArea(..._args) {
@@ -585,7 +494,7 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Count triangles in the current manifold mesh.
+     * Count triangles in the current visualization mesh.
      * @returns {number}
      */
     getTriangleCount(..._args) {
@@ -610,7 +519,7 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Rebuild authoring arrays from the manifold’s exterior surface, dropping internal faces.
+     * Removed legacy mesh cleanup operation.
      * @returns {number} triangles removed
      */
     removeInternalTriangles(..._args) {
@@ -618,7 +527,7 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Remove internal triangles via centroid ray tests without needing manifoldization.
+     * Removed legacy mesh cleanup operation.
      * @returns {number} triangles removed
      */
     removeInternalTrianglesByRaycast(..._args) {
@@ -762,15 +671,14 @@ const __solidProfilingLogTiming = (prefix, methodName, phase, durationMs) => {
 };
 
 // --- Method-level time profiling for Solid -----------------------------------
-// Wrap all prototype methods (except constructor and _manifoldize, which is
-// already instrumented) to log execution time when debugMode is true, and
+// Wrap prototype methods to log execution time when debugMode is true, and
 // always flag calls that exceed __solidSlowMethodThresholdMs.
 (() => {
     try {
         if (Solid.__profiled) return;
         Solid.__profiled = true;
         const nowMs = () => (typeof performance !== 'undefined' && performance?.now ? performance.now() : Date.now());
-        const skip = new Set(['constructor', '_manifoldize']);
+        const skip = new Set(['constructor']);
         const proto = Solid.prototype;
         for (const name of Object.getOwnPropertyNames(proto)) {
             if (skip.has(name)) continue;

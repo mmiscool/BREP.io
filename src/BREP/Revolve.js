@@ -2,7 +2,7 @@ import { Solid } from './BetterSolid.js';
 import * as THREE from 'three';
 import { getEdgeLineEndpointsWorld, getEdgePolylineWorld } from './edgePolylineUtils.js';
 import { computeBoundaryLoopsFromFaceNative } from './Sweep.js';
-import { makeRevolution, setOccState } from './OpenCascadeKernel.js';
+import { makeRevolution, occAxisFromSelectedEdge, occFaceFromSelectedFace, setOccState } from './OpenCascadeKernel.js';
 
 function computeFaceCentroidWorld(faceObj) {
   try {
@@ -86,15 +86,22 @@ function cloneSketchEdgeInputsWorld(face) {
 function generateNativeRevolve(target, params = {}) {
   const { face, axis, angle = 360, resolution = 64 } = params;
   if (!face || !face.geometry) return false;
+  const occFaceInfo = occFaceFromSelectedFace(face);
 
   const axisObj = Array.isArray(axis) ? (axis[0] || null) : (axis || null);
   const A = new THREE.Vector3(0, 0, 0);
   const B = new THREE.Vector3(0, 1, 0);
   if (axisObj) {
-    const endpoints = getEdgeLineEndpointsWorld(axisObj);
-    if (endpoints) {
-      A.copy(endpoints.start);
-      B.copy(endpoints.end);
+    const occAxis = occAxisFromSelectedEdge(axisObj);
+    if (occAxis) {
+      A.set(occAxis.start[0], occAxis.start[1], occAxis.start[2]);
+      B.set(occAxis.end[0], occAxis.end[1], occAxis.end[2]);
+    } else {
+      const endpoints = getEdgeLineEndpointsWorld(axisObj);
+      if (endpoints) {
+        A.copy(endpoints.start);
+        B.copy(endpoints.end);
+      }
     }
   }
   let axisDir = B.clone().sub(A);
@@ -121,7 +128,7 @@ function generateNativeRevolve(target, params = {}) {
   }
 
   const boundaryLoops = cloneBoundaryLoopsWorld(face) || computeBoundaryLoopsFromFaceNative(face);
-  if (!boundaryLoops.length) {
+  if (!boundaryLoops.length && !occFaceInfo?.face) {
     throw new Error('Revolve generation requires boundary loops on the source face.');
   }
 
@@ -138,6 +145,7 @@ function generateNativeRevolve(target, params = {}) {
     .filter((entry) => Array.isArray(entry.polyline) && entry.polyline.length >= 2);
 
   const occState = makeRevolution({
+    sourceFace: occFaceInfo?.face || null,
     faceName: face?.name || 'Face',
     boundaryLoops,
     axisOrigin: [A.x, A.y, A.z],

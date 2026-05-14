@@ -6,6 +6,10 @@ import {
     writeBrowserStorageValue,
     removeBrowserStorageValue,
 } from '../utils/browserStorage.js';
+import {
+    getOccVisualizationQuality,
+    setOccVisualizationQuality,
+} from '../BREP/occTriangulationSettings.js';
 
 // CADmaterials for each entity type
 
@@ -295,6 +299,25 @@ export class CADmaterialWidget {
         this.uiElement.appendChild(rendererRow);
         this._rendererSelect = rendererSelect;
         try { this.viewer?.setRendererMode?.(initialMode); } catch { }
+
+        const storedOccQuality = this._settings['__OCCT_VISUALIZATION_QUALITY__'];
+        const initialOccQuality = setOccVisualizationQuality(storedOccQuality ?? getOccVisualizationQuality());
+        const qualityRow = this._createRangeRow({
+            label: 'Visualization Quality',
+            min: 0.25,
+            max: 20,
+            step: 0.25,
+            value: initialOccQuality,
+            onInput: (value) => {
+                const next = setOccVisualizationQuality(value);
+                this._settings['__OCCT_VISUALIZATION_QUALITY__'] = next;
+                this._saveAllSettings();
+                this._refreshOccVisuals();
+            },
+        });
+        this.uiElement.appendChild(qualityRow.row);
+        this._occQualityInput = qualityRow.input;
+        this._occQualityBubble = qualityRow.bubble;
 
         const resetRow = makeRightSpan();
         const resetLabel = document.createElement('label');
@@ -591,6 +614,12 @@ export class CADmaterialWidget {
         if (this._hoverInput) this._hoverInput.value = hoverColor;
 
         this._setSidebarWidthUi(this._defaultSidebarWidth);
+        const occQuality = setOccVisualizationQuality(1);
+        if (this._occQualityInput) {
+            this._occQualityInput.value = String(occQuality);
+            if (this._occQualityBubble) this._updateRangeBubble(this._occQualityInput, this._occQualityBubble);
+        }
+        this._refreshOccVisuals();
 
         for (const [labelText, defaults] of Object.entries(this._materialDefaults || {})) {
             const material = this._materialMap.get(labelText);
@@ -598,6 +627,31 @@ export class CADmaterialWidget {
             this._applyMaterialSettings(material, defaults);
             this._syncMaterialControls(labelText, material);
         }
+    }
+    _refreshOccVisuals() {
+        const scene = this.viewer?.partHistory?.scene || this.viewer?.scene || null;
+        if (!scene || typeof scene.traverse !== 'function') {
+            try { this.viewer?.render?.(); } catch { }
+            return;
+        }
+        const solids = [];
+        scene.traverse((obj) => {
+            if (obj?.type === 'SOLID') solids.push(obj);
+        });
+        for (const solid of solids) {
+            try {
+                if (solid._occ) {
+                    solid._occ.meshCache = null;
+                    solid._occ.meshCacheKey = null;
+                }
+                solid._faceIndex = null;
+                solid.visualize?.();
+            } catch (error) {
+                console.warn('[CADmaterialWidget] Failed to refresh OCCT visualization:', error?.message || error);
+            }
+        }
+        try { this.viewer?.applyMetadataColors?.(); } catch { }
+        try { this.viewer?.render?.(); } catch { }
     }
     _getMatKey(labelText) {
         return String(labelText);

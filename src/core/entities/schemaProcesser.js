@@ -103,7 +103,6 @@ export async function sanitizeInputParams(schema, inputParams, expressionsEvalua
                     operation: op ?? 'NONE',
                     targets,
                     biasDistance: Number.isFinite(bias) ? bias : 0.1,
-                    overlapConditioningEnabled: raw.overlapConditioningEnabled !== false,
                 };
                 // Optional: simplification controls
                 try {

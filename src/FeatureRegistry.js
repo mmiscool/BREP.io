@@ -1,7 +1,5 @@
 import { BooleanFeature } from './features/boolean/BooleanFeature.js';
 import { ChamferFeature } from './features/chamfer/ChamferFeature.js';
-import { CollapseEdgeFeature } from './features/collapseEdge/CollapseEdgeFeature.js';
-import { EdgeSmoothFeature } from './features/edgeSmooth/EdgeSmoothFeature.js';
 import { DatiumFeature } from './features/datium/DatiumFeature.js';
 import { ExtrudeFeature } from './features/extrude/ExtrudeFeature.js';
 import { FilletFeature } from './features/fillet/FilletFeature.js';
@@ -16,14 +14,11 @@ import { PrimitiveSphereFeature } from './features/primitiveSphere/primitiveSphe
 import { PrimitiveTorusFeature } from './features/primitiveTorus/primitiveTorusFeature.js';
 import { RevolveFeature } from './features/revolve/RevolveFeature.js';
 import { SketchFeature } from './features/sketch/SketchFeature.js';
-import { Import3dModelFeature } from './features/import3dModel/Import3dModelFeature.js';
 import { SweepFeature } from './features/sweep/SweepFeature.js';
-import { RemeshFeature } from './features/remesh/RemeshFeature.js';
 import { ImageToFaceFeature } from './features/imageToFace/ImageToFaceFeature.js';
 import { ImageHeightmapSolidFeature } from './features/imageHeightSolid/ImageHeightmapSolidFeature.js';
 import { TextToFaceFeature } from './features/textToFace/TextToFaceFeature.js';
 import { TransformFeature } from './features/transform/TransformFeature.js';
-import { OverlapCleanupFeature } from './features/overlapCleanup/OverlapCleanupFeature.js';
 import { HelixFeature } from './features/helix/HelixFeature.js';
 import { HoleFeature } from './features/hole/HoleFeature.js';
 import { PatternFeature } from './features/pattern/PatternFeature.js';
@@ -36,7 +31,6 @@ import { OffsetFaceFeature } from './features/offsetFace/OffsetFaceFeature.js';
 import { ThickenFeature } from './features/thicken/ThickenFeature.js';
 import { NurbsFaceSolidFeature } from './features/nurbsFaceSolid/NurbsFaceSolidFeature.js';
 import { PolygonSolidFeature } from './features/polygonSolid/PolygonSolidFeature.js';
-import { SmoothWithSubdivisionFeature } from './features/smoothWithSubdivision/SmoothWithSubdivisionFeature.js';
 import { SplineFeature } from './features/spline/SplineFeature.js';
 import { PortFeature } from './features/port/PortFeature.js';
 import { SheetMetalTabFeature } from './features/sheetMetal/SheetMetalTabFeature.js';
@@ -86,7 +80,6 @@ export class FeatureRegistry {
     this.register(PrimitiveSphereFeature);
     this.register(PrimitiveTorusFeature);
     this.register(PrimitivePyramidFeature);
-    this.register(Import3dModelFeature);
     this.register(SketchFeature);
     this.register(SplineFeature);
     this.register(PortFeature);
@@ -95,14 +88,11 @@ export class FeatureRegistry {
     this.register(BooleanFeature);
     this.register(FilletFeature);
     this.register(ChamferFeature);
-    this.register(CollapseEdgeFeature);
-    this.register(EdgeSmoothFeature);
     this.register(OffsetShellFeature);
     this.register(OffsetFaceFeature);
     this.register(ThickenFeature);
     this.register(NurbsFaceSolidFeature);
     this.register(PolygonSolidFeature);
-    this.register(SmoothWithSubdivisionFeature);
     this.register(SheetMetalTabFeature);
     this.register(SheetMetalContourFlangeFeature);
     this.register(SheetMetalFlangeFeature);
@@ -114,12 +104,10 @@ export class FeatureRegistry {
     this.register(SweepFeature);
     this.register(HoleFeature);
     this.register(TubeFeature);
-    this.register(RemeshFeature);
     this.register(ImageToFaceFeature);
     this.register(ImageHeightmapSolidFeature);
     this.register(TextToFaceFeature);
     this.register(TransformFeature);
-    this.register(OverlapCleanupFeature);
     this.register(PatternLinearFeature);
     this.register(PatternRadialFeature);
     this.register(AssemblyComponentFeature);
@@ -135,23 +123,9 @@ export class FeatureRegistry {
     this.aliases.set('HEIGHTMAP', ImageHeightmapSolidFeature);
     this.aliases.set('HEIGHT MAP', ImageHeightmapSolidFeature);
     this.aliases.set('IMAGE HEIGHTMAP', ImageHeightmapSolidFeature);
-    // Import 3D Model (formerly STL Import)
-    this.aliases.set('STL', Import3dModelFeature);
-    this.aliases.set('STL IMPORT', Import3dModelFeature);
-    this.aliases.set('STLIMPORT', Import3dModelFeature);
-    this.aliases.set('STLIMPORTFEATURE', Import3dModelFeature);
     // Text-to-Face variations
     this.aliases.set('TEXT TO FACE', TextToFaceFeature);
     this.aliases.set('TEXTTOFACE', TextToFaceFeature);
-    // Collapse Edge typo/spacing variations
-    this.aliases.set('COLAPSE EDGE', CollapseEdgeFeature);
-    this.aliases.set('COLLAPSEEDGE', CollapseEdgeFeature);
-    // Edge smooth spacing variations
-    this.aliases.set('EDGE SMOOTH', EdgeSmoothFeature);
-    this.aliases.set('EDGESMOOTH', EdgeSmoothFeature);
-    // Smooth With Subdivision spacing variations
-    this.aliases.set('SMOOTHWITHSUBDIVISION', SmoothWithSubdivisionFeature);
-    this.aliases.set('SMOOTH SUBDIVISION', SmoothWithSubdivisionFeature);
     // Thicken variations
     this.aliases.set('THICKEN', ThickenFeature);
   }

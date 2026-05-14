@@ -1,5 +1,12 @@
 import { SelectionState } from "../../UI/SelectionState.js";
 import {
+    hasOccShape,
+} from "../OpenCascadeKernel.js";
+import {
+    getOccVisualizationCurveSampleCount,
+    getOccVisualizationTriangulationOptions,
+} from "../occTriangulationSettings.js";
+import {
     CADmaterials,
     debugMode,
     Edge,
@@ -8,6 +15,123 @@ import {
     THREE,
     Vertex
 } from "../SolidShared.js";
+
+function distance3(a, b) {
+    return Math.hypot(
+        Number(b?.[0] || 0) - Number(a?.[0] || 0),
+        Number(b?.[1] || 0) - Number(a?.[1] || 0),
+        Number(b?.[2] || 0) - Number(a?.[2] || 0),
+    );
+}
+
+function interpolatePoint(a, b, t) {
+    return [
+        Number(a?.[0] || 0) + (Number(b?.[0] || 0) - Number(a?.[0] || 0)) * t,
+        Number(a?.[1] || 0) + (Number(b?.[1] || 0) - Number(a?.[1] || 0)) * t,
+        Number(a?.[2] || 0) + (Number(b?.[2] || 0) - Number(a?.[2] || 0)) * t,
+    ];
+}
+
+function resamplePolylineForVisualization(points, sampleCount, closedLoop = false) {
+    const src = Array.isArray(points) ? points.filter(p => Array.isArray(p) && p.length === 3) : [];
+    if (src.length < 2) return src;
+    const count = Math.max(2, Math.floor(Number(sampleCount) || src.length));
+    const path = src.slice();
+    if (closedLoop && distance3(path[0], path[path.length - 1]) > 1e-12) path.push(path[0]);
+    const cumulative = [0];
+    for (let i = 1; i < path.length; i += 1) cumulative.push(cumulative[i - 1] + distance3(path[i - 1], path[i]));
+    const total = cumulative[cumulative.length - 1];
+    if (!(total > 1e-12)) return src;
+
+    const out = [];
+    const wanted = closedLoop ? count : Math.max(2, count);
+    const denom = closedLoop ? wanted : Math.max(1, wanted - 1);
+    let seg = 1;
+    for (let i = 0; i < wanted; i += 1) {
+        const target = total * (i / denom);
+        while (seg < cumulative.length - 1 && cumulative[seg] < target) seg += 1;
+        const aLen = cumulative[seg - 1];
+        const bLen = cumulative[seg];
+        const t = bLen > aLen ? (target - aLen) / (bLen - aLen) : 0;
+        out.push(interpolatePoint(path[seg - 1], path[seg], t));
+    }
+    if (closedLoop && out.length && distance3(out[0], out[out.length - 1]) > 1e-12) out.push(out[0]);
+    return out;
+}
+
+function circularizeClosedPolylineForVisualization(points, sampleCount) {
+    const src = Array.isArray(points) ? points.filter(p => Array.isArray(p) && p.length === 3) : [];
+    if (src.length < 4) return null;
+    const open = distance3(src[0], src[src.length - 1]) <= 1e-12 ? src.slice(0, -1) : src.slice();
+    if (open.length < 4) return null;
+
+    const center = open.reduce((acc, p) => {
+        acc[0] += Number(p[0] || 0);
+        acc[1] += Number(p[1] || 0);
+        acc[2] += Number(p[2] || 0);
+        return acc;
+    }, [0, 0, 0]).map(v => v / open.length);
+
+    const radii = open.map(p => distance3(p, center));
+    const radius = radii.reduce((sum, v) => sum + v, 0) / radii.length;
+    if (!(radius > 1e-9)) return null;
+    const maxRadialError = radii.reduce((max, v) => Math.max(max, Math.abs(v - radius)), 0);
+    if (maxRadialError > Math.max(1e-6, radius * 0.03)) return null;
+
+    const normal = [0, 0, 0];
+    for (let i = 0; i < open.length; i += 1) {
+        const a = open[i];
+        const b = open[(i + 1) % open.length];
+        normal[0] += (a[1] - b[1]) * (a[2] + b[2]);
+        normal[1] += (a[2] - b[2]) * (a[0] + b[0]);
+        normal[2] += (a[0] - b[0]) * (a[1] + b[1]);
+    }
+    const nLen = Math.hypot(normal[0], normal[1], normal[2]);
+    if (!(nLen > 1e-12)) return null;
+    normal[0] /= nLen; normal[1] /= nLen; normal[2] /= nLen;
+
+    let u = [
+        Number(open[0][0] || 0) - center[0],
+        Number(open[0][1] || 0) - center[1],
+        Number(open[0][2] || 0) - center[2],
+    ];
+    const uLen = Math.hypot(u[0], u[1], u[2]);
+    if (!(uLen > 1e-12)) return null;
+    u = u.map(v => v / uLen);
+    const v = [
+        normal[1] * u[2] - normal[2] * u[1],
+        normal[2] * u[0] - normal[0] * u[2],
+        normal[0] * u[1] - normal[1] * u[0],
+    ];
+
+    const count = Math.max(8, Math.floor(Number(sampleCount) || src.length));
+    const out = [];
+    for (let i = 0; i < count; i += 1) {
+        const a = (i / count) * Math.PI * 2;
+        const c = Math.cos(a);
+        const s = Math.sin(a);
+        out.push([
+            center[0] + radius * (u[0] * c + v[0] * s),
+            center[1] + radius * (u[1] * c + v[1] * s),
+            center[2] + radius * (u[2] * c + v[2] * s),
+        ]);
+    }
+    out.push(out[0]);
+    return out;
+}
+
+function prepareAuxPolylineForVisualization(points, aux) {
+    const closedLoop = !!aux?.closedLoop;
+    const sampleCount = getOccVisualizationCurveSampleCount(closedLoop ? 65 : Math.max(2, points?.length || 2));
+    if (closedLoop) {
+        const circular = circularizeClosedPolylineForVisualization(points, sampleCount);
+        if (circular) return circular;
+    }
+    if (closedLoop || (Array.isArray(points) && points.length > 2)) {
+        return resamplePolylineForVisualization(points, sampleCount, closedLoop);
+    }
+    return points;
+}
 
 
 
@@ -53,10 +177,11 @@ export function visualize(options = {}) {
     }
 
     const { showEdges = true, forceAuthoring = false, authoringOnly = false } = options;
+    const occVisualizationOptions = hasOccShape(this) ? getOccVisualizationTriangulationOptions() : {};
     let faces; let usedFallback = false;
     if (!forceAuthoring && !authoringOnly) {
         try {
-            faces = this.getFaces(false);
+            faces = this.getFaces(false, occVisualizationOptions);
         } catch (err) {
             console.warn('[Solid.visualize] getFaces failed, falling back to raw arrays:', err?.message || err);
             usedFallback = true;
@@ -188,7 +313,7 @@ export function visualize(options = {}) {
     if (showEdges) {
         if (!usedFallback) {
             let polylines = [];
-            try { polylines = this.getBoundaryEdgePolylines() || []; } catch { polylines = []; }
+            try { polylines = this.getBoundaryEdgePolylines(occVisualizationOptions) || []; } catch { polylines = []; }
             // Safety net: if manifold-based extraction yielded no edges (e.g., faceID missing),
             // fall back to authoring-based boundary extraction so we still visualize edges.
             if (!Array.isArray(polylines) || polylines.length === 0) {
@@ -343,7 +468,9 @@ export function visualize(options = {}) {
     try {
         if (Array.isArray(this._auxEdges) && this._auxEdges.length) {
             for (const aux of this._auxEdges) {
-                const pts = Array.isArray(aux?.points) ? aux.points.filter(p => Array.isArray(p) && p.length === 3) : [];
+                const sourcePts = Array.isArray(aux?.points) ? aux.points.filter(p => Array.isArray(p) && p.length === 3) : [];
+                if (sourcePts.length < 2) continue;
+                const pts = prepareAuxPolylineForVisualization(sourcePts, aux);
                 if (pts.length < 2) continue;
                 const flat = [];
                 for (const p of pts) { flat.push(p[0], p[1], p[2]); }

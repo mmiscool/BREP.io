@@ -1,7 +1,8 @@
 // threadGeometry.js
 // Unified thread geometry helper for multiple standards in a single ES6 class.
 import { Solid } from "./BetterSolid.js";
-import { Manifold, THREE } from "./SolidShared.js";
+import { THREE } from "./SolidShared.js";
+import { makeLoft, setOccState } from "./OpenCascadeKernel.js";
 
 export const ThreadStandard = {
   ISO_METRIC: "ISO_METRIC",              // 60° V, ISO 68-1 style basic metric
@@ -15,6 +16,11 @@ export const ThreadStandard = {
 
 const DEG_TO_RAD = Math.PI / 180;
 const EPS = 1e-9;
+const DEBUG_THREAD_GEOMETRY = false;
+
+const threadDebugLog = (...args) => {
+  if (DEBUG_THREAD_GEOMETRY) console.log(...args);
+};
 
 const computeInternalOverlap = (thread) => {
   const pitch = Math.abs(thread?.pitch || 0);
@@ -23,14 +29,6 @@ const computeInternalOverlap = (thread) => {
   const cap = depth > 0 ? depth * 0.25 : base;
   const minVal = pitch > 0 ? pitch * 0.01 : 0.01;
   return Math.max(EPS * 10, Math.min(cap, base) || minVal);
-};
-
-const safeDelete = (obj) => {
-  try {
-    if (obj && typeof obj.delete === "function") obj.delete();
-  } catch {
-    /* ignore */
-  }
 };
 
 const vecFrom = (v, fallback = [0, 0, 0]) => {
@@ -60,87 +58,38 @@ const buildPlacementMatrix = ({ axis, axisDirection, xDirection, origin } = {}) 
   return m;
 };
 
-const manifoldToSolid = (manifold, name = "Thread", faceName = "THREAD", idToFaceName = null) => {
-  if (!manifold) return null;
+const occStateToSolid = (state, name = "Thread") => {
+  if (!state) return null;
   const solid = new Solid();
   solid.name = name;
-
-  const faceIdMap = (() => {
-    if (idToFaceName instanceof Map) return new Map(idToFaceName);
-    if (idToFaceName && typeof idToFaceName === "object") return new Map(Object.entries(idToFaceName));
-    return new Map();
-  })();
-
-  const mesh = manifold.getMesh();
-  let addedCount = 0;
-  let failedCount = 0;
-  try {
-    const vp = mesh.vertProperties;
-    const tv = mesh.triVerts;
-    const triCount = Math.floor(tv.length / 3);
-    const faceIDs = mesh.faceID && mesh.faceID.length === triCount ? mesh.faceID : null;
-
-    if (faceIdMap.size === 0) {
-      if (faceIDs) {
-        const seen = new Set();
-        for (let t = 0; t < triCount; t++) {
-          const fid = faceIDs[t] >>> 0;
-          if (seen.has(fid)) continue;
-          seen.add(fid);
-          faceIdMap.set(fid, faceName || `FACE_${fid}`);
-        }
-      } else {
-        faceIdMap.set(0, faceName || "FACE_0");
-      }
-    }
-
-    console.log('[ThreadGeometry] manifoldToSolid: converting', triCount, 'triangles to solid with', faceIdMap.size, 'face labels');
-    for (let t = 0; t < triCount; t++) {
-      const i0 = tv[3 * t + 0] >>> 0;
-      const i1 = tv[3 * t + 1] >>> 0;
-      const i2 = tv[3 * t + 2] >>> 0;
-      const p0 = [vp[i0 * 3 + 0], vp[i0 * 3 + 1], vp[i0 * 3 + 2]];
-      const p1 = [vp[i1 * 3 + 0], vp[i1 * 3 + 1], vp[i1 * 3 + 2]];
-      const p2 = [vp[i2 * 3 + 0], vp[i2 * 3 + 1], vp[i2 * 3 + 2]];
-
-      const fid = faceIDs ? (faceIDs[t] >>> 0) : 0;
-      let triFaceName = faceIdMap.get(fid);
-      if (!triFaceName) {
-        const fallbackName = faceIdMap.size === 0 ? (faceName || `FACE_${fid}`) : `FACE_${fid}`;
-        triFaceName = fallbackName;
-        faceIdMap.set(fid, triFaceName);
-      }
-
-      try {
-        solid.addTriangle(triFaceName, p0, p1, p2);
-        addedCount++;
-      } catch (err) {
-        failedCount++;
-        if (failedCount <= 3) {
-          console.warn('[ThreadGeometry] Failed to add triangle', t, ':', err.message, { p0, p1, p2, face: triFaceName });
-        }
-      }
-    }
-    console.log('[ThreadGeometry] manifoldToSolid: added', addedCount, 'triangles, failed', failedCount);
-    console.log('[ThreadGeometry] manifoldToSolid: solid internals:', {
-      triVertsLength: solid._triVerts?.length,
-      triIDsLength: solid._triIDs?.length,
-      vertPropertiesLength: solid._vertProperties?.length,
-      faceCount: solid._faceNameToID?.size,
-    });
-    // Force manifoldization to catch any issues early
-    try {
-      solid._manifoldize();
-      console.log('[ThreadGeometry] manifoldToSolid: manifoldization successful');
-    } catch (err) {
-      console.warn('[ThreadGeometry] manifoldToSolid: manifoldization failed:', err);
-    }
-  } finally {
-    safeDelete(mesh);
-    safeDelete(manifold);
-  }
+  setOccState(solid, state);
   return solid;
 };
+
+const makeCircularSection = (radius, z, resolution) => {
+  const points = [];
+  const count = Math.max(8, Math.floor(Number(resolution) || 64));
+  for (let i = 0; i < count; i += 1) {
+    const a = (i / count) * Math.PI * 2;
+    points.push([radius * Math.cos(a), radius * Math.sin(a), z]);
+  }
+  return points;
+};
+
+const makeThreadLoftSolid = ({
+  sections,
+  sideNames,
+  startName,
+  endName,
+  featureID,
+  name,
+}) => occStateToSolid(makeLoft({
+  sections,
+  sideNames,
+  startName,
+  endName,
+  featureID,
+}), name);
 
 const buildThreadProfilePolygon = (thread, radialOffset = 0) => {
   const external = thread.isExternal === true;
@@ -159,17 +108,17 @@ const buildThreadProfilePolygon = (thread, radialOffset = 0) => {
   // The profile should be positioned at the thread radius and shaped like the tooth cross-section
   
   const pitch = thread.pitch || 1;
-  const halfPitch = pitch / 2;
+  const halfPitch = pitch * 0.49;
   
   let crestRad = crestR;
   if (!external) {
     const overlap = computeInternalOverlap(thread);
     const targetCrest = crestR - overlap;
     crestRad = Math.max(EPS, Math.min(targetCrest, rootR - EPS));
-    console.log('[ThreadGeometry] Applying internal overlap:', { overlap, crestR, crestRad, rootR });
+    threadDebugLog('[ThreadGeometry] Applying internal overlap:', { overlap, crestR, crestRad, rootR });
   }
 
-  console.log('[ThreadGeometry] Profile polygon params:', {
+  threadDebugLog('[ThreadGeometry] Profile polygon params:', {
     external,
     crestR,
     crestRad,
@@ -193,7 +142,7 @@ const buildThreadProfilePolygon = (thread, radialOffset = 0) => {
     [halfPitch, crestRad],          // Top: inner surface
   ];
   
-  console.log('[ThreadGeometry] Profile polygon points [axial, radius]:', pts);
+  threadDebugLog('[ThreadGeometry] Profile polygon points [axial, radius]:', pts);
   return pts; // Return as-is, no need for CCW check in this format
 };
 
@@ -206,9 +155,9 @@ const applyPlacement = (solid, opts = {}) => {
   }
   if (transform && (transform.position || transform.rotationEuler || transform.scale || transform.t || transform.rDeg)) {
     solid.bakeTRS({
-      t: transform.position || transform.t,
-      rDeg: transform.rotationEuler || transform.rDeg,
-      s: transform.scale || transform.s,
+      position: transform.position || transform.t,
+      rotationEuler: transform.rotationEuler || transform.rDeg,
+      scale: transform.scale || transform.s,
     });
     return solid;
   }
@@ -465,7 +414,7 @@ export class ThreadGeometry {
       case ThreadStandard.WHITWORTH: {
         // Whitworth:
         // included angle = 55°
-        // fundamental triangle height H ≈ 0.96049106 * P
+        // fundamental profile height H ~= 0.96049106 * P
         // actual depth h ≈ 0.64032738 * P
         // crest/root rounding radius r ≈ 0.13732908 * P
         // rounding height e ≈ 0.073917569 * P
@@ -554,8 +503,7 @@ export class ThreadGeometry {
    * @param {boolean} [options.modeled] Shortcut for mode='modeled'
    * @param {number} [options.radialOffset=0] Radial offset/clearance applied to crest/root
    * @param {number} [options.resolution=64] Circular resolution for symbolic/core geometry
-   * @param {number} [options.segmentsPerTurn=12] Vertical divisions per revolution for modeled threads
-   * @param {boolean} [options.includeCore=true] Include the core cylinder/cone (set false to emit ridges only)
+   * @param {boolean} [options.includeCore=false] Kept for compatibility; modeled threads emit ridges only.
    * @param {'crest'|'root'|'pitch'} [options.symbolicRadius='crest'] Which diameter to use for symbolic threads
    * @param {string} [options.name='Thread'] Solid name
    * @param {string} [options.faceName='THREAD'] Face label
@@ -660,10 +608,20 @@ export class ThreadGeometry {
       const overlap = computeInternalOverlap(this);
       r0 = Math.max(EPS, r0 - overlap);
       r1 = Math.max(EPS, r1 - overlap);
-      console.log('[ThreadGeometry] Applying internal overlap to symbolic thread:', { overlap, r0, r1, radialOffset });
+      threadDebugLog('[ThreadGeometry] Applying internal overlap to symbolic thread:', { overlap, r0, r1, radialOffset });
     }
-    const manifold = Manifold.cylinder(length, r0, r1, res, false);
-    const solid = manifoldToSolid(manifold, name, faceName);
+    const sections = [
+      makeCircularSection(r0, 0, res),
+      makeCircularSection(r1, length, res),
+    ];
+    const solid = makeThreadLoftSolid({
+      sections,
+      sideNames: Array.from({ length: sections[0].length }, () => faceName),
+      startName: `${faceName}:CAP_START`,
+      endName: `${faceName}:CAP_END`,
+      featureID: faceName,
+      name,
+    });
 
     // Add centerline through the symbolic thread (matches minor diameter cylinder axis)
     solid.addAuxEdge(`${faceName}:CENTERLINE`, [
@@ -697,13 +655,17 @@ export class ThreadGeometry {
     const name = options.name || "Thread";
     const faceName = options.faceName || "THREAD";
     const radialOffset = Number(options.radialOffset ?? options.clearance ?? 0);
-    const includeCore = options.includeCore !== false;
-    const res = Math.max(8, Math.floor(Number(options.resolution) || 64));
-    const segmentsPerTurn = Math.max(4, Math.floor(Number(options.segmentsPerTurn ?? options.divisionsPerTurn ?? 12)));
-    const turns = Math.max(EPS, length / Math.max(this.lead, EPS));
-    const nDiv = Math.max(1, Math.round(turns * segmentsPerTurn));
+    const segmentsPerTurn = Math.max(8, Math.floor(Number(options.segmentsPerTurn ?? options.divisionsPerTurn ?? 16)));
+    const toothProfilePts = buildThreadProfilePolygon(this, radialOffset);
+    const axialValues = toothProfilePts.map((pt) => Number(pt?.[0]) || 0);
+    const minAxial = Math.min(...axialValues);
+    const maxAxial = Math.max(...axialValues);
+    const axialSpan = Math.max(0, maxAxial - minAxial);
+    const sweepLength = Math.max(EPS, length - axialSpan);
+    const turns = Math.max(EPS, sweepLength / Math.max(this.lead, EPS));
+    const nDiv = Math.max(2, Math.ceil(turns * segmentsPerTurn));
 
-    console.log('[ThreadGeometry] Building modeled solid procedurally with triangles:', {
+    threadDebugLog('[ThreadGeometry] Building modeled solid with OCCT helical loft:', {
       length,
       turns,
       nDiv,
@@ -716,16 +678,10 @@ export class ThreadGeometry {
       effectiveThreadDepth: this.effectiveThreadDepth,
     });
 
-    // Get the 2D profile polygon (trapezoidal cross-section of thread tooth)
-    const profilePts = buildThreadProfilePolygon(this, radialOffset);
-    console.log('[ThreadGeometry] Thread profile (side view):', profilePts);
-    console.log('[ThreadGeometry] Profile point 0:', profilePts[0]);
-    
-    // Build thread geometry procedurally by sweeping profile along helix
-    const threadSolid = new Solid({ name, faceName });
-    
-    // Profile has points in [axial_offset, radius] format
-    // We'll sweep this profile around the cylinder axis along a helical path
+    const profilePts = toothProfilePts;
+    threadDebugLog('[ThreadGeometry] Thread profile (side view):', profilePts);
+    threadDebugLog('[ThreadGeometry] Profile point 0:', profilePts[0]);
+
     const numProfilePts = profilePts.length;
 
     // Give each profile edge its own face label so swept surfaces stay distinct
@@ -746,141 +702,101 @@ export class ThreadGeometry {
       start: { name: `${faceName}:CAP_START`, role: "start_cap" },
       end: { name: `${faceName}:CAP_END`, role: "end_cap" },
     };
-    
-    // Store profile vertices at each step for end capping
-    const profileRings = [];
-    
-    for (let i = 0; i <= nDiv; i++) { // Note: <= to include final position
-      const t = i / nDiv;
-      const angle = t * 360 * turns; // degrees
-      const z = t * length;
-      const rad = angle * Math.PI / 180;
-      
-      // Transform all profile points to 3D at this angle
-      const ring = [];
-      for (let j = 0; j < numProfilePts; j++) {
-        const [axial, r] = profilePts[j];
-        ring.push([
-          r * Math.cos(rad),
-          r * Math.sin(rad),
-          z + axial
-        ]);
-      }
-      profileRings.push(ring);
-      
-      // Create quads between this ring and previous ring
-      if (i > 0) {
-        const prevRing = profileRings[i - 1];
-        const currRing = profileRings[i];
-        
-        for (let j = 0; j < numProfilePts; j++) {
-          const j_next = (j + 1) % numProfilePts;
-          
-          const p0 = prevRing[j];
-          const p1 = prevRing[j_next];
-          const p2 = currRing[j];
-          const p3 = currRing[j_next];
-          const quadFaceName = segmentDescriptors[j]?.name || `${faceName}:EDGE_${j}`;
-          
-          // Create two triangles for this quad (CCW winding)
-          threadSolid.addTriangle(quadFaceName, p0, p1, p2);
-          threadSolid.addTriangle(quadFaceName, p1, p3, p2);
-        }
-      }
-    }
-    
-    // Add end caps to close the geometry
-    // The profile is a quadrilateral, so we need to triangulate it properly
-    // Start cap (at i=0) - fan triangulation from first vertex
-    const startRing = profileRings[0];
-    for (let j = 1; j < numProfilePts - 1; j++) {
-      threadSolid.addTriangle(capDescriptors.start.name, startRing[0], startRing[j + 1], startRing[j]);
-    }
-    
-    // End cap (at i=nDiv) - fan triangulation from first vertex (opposite winding)
-    const endRing = profileRings[nDiv];
-    for (let j = 1; j < numProfilePts - 1; j++) {
-      threadSolid.addTriangle(capDescriptors.end.name, endRing[0], endRing[j], endRing[j + 1]);
-    }
-    
-    const numTriangles = threadSolid._triVerts ? threadSolid._triVerts.length / 3 : 0;
-    console.log('[ThreadGeometry] Generated', numTriangles, 'triangles procedurally (including end caps)');
-    
-    const faceIdToName = new Map(threadSolid._idToFaceName);
+
     const threadFaceNames = { segments: segmentDescriptors, caps: capDescriptors };
 
-    let manifold = threadSolid._manifoldize();
-    if (!manifold) {
-      console.error('[ThreadGeometry] Failed to manifoldize procedurally generated thread');
-      return threadSolid;
-    }
-
-    if (this.isTapered && Math.abs(this.taperPerLengthOnDiameter) > EPS) {
-      const radialDeltaPerLen = 0.5 * this.taperPerLengthOnDiameter * this.taperDirection;
-      const warped = manifold.warp((vert) => {
-        const z = vert[2];
-        const deltaR = radialDeltaPerLen * z;
-        const r = Math.hypot(vert[0], vert[1]);
-        if (r > EPS) {
-          const s = (r + deltaR) / r;
-          vert[0] *= s;
-          vert[1] *= s;
+    if (!this.isExternal) {
+      const angularSegments = Math.max(24, Math.floor(Number(options.resolution) || 64));
+      const axialSections = Math.max(3, nDiv + 1);
+      const lead = Math.max(this.lead, EPS);
+      const pitch = Math.max(this.pitch, EPS);
+      const profile = profilePts
+        .map(([axial, radius]) => [Number(axial) || 0, Math.max(EPS, Number(radius) || 0)])
+        .sort((a, b) => a[0] - b[0]);
+      const minA = profile[0][0];
+      const maxA = profile[profile.length - 1][0];
+      const spanA = Math.max(EPS, maxA - minA);
+      const radiusAtPhase = (phase) => {
+        let a = ((phase - minA) % pitch + pitch) % pitch + minA;
+        if (a > maxA) a -= pitch;
+        for (let i = 0; i < profile.length - 1; i += 1) {
+          const p0 = profile[i];
+          const p1 = profile[i + 1];
+          if (a >= p0[0] - EPS && a <= p1[0] + EPS) {
+            const t = Math.max(0, Math.min(1, (a - p0[0]) / Math.max(EPS, p1[0] - p0[0])));
+            return p0[1] + (p1[1] - p0[1]) * t;
+          }
         }
-      });
-      safeDelete(manifold);
-      manifold = warped;
-    }
-
-    if (this.starts && this.starts > 1) {
-      const base = manifold;
-      let combined = base;
-      for (let k = 1; k < this.starts; k++) {
-        const angle = (360 * k) / this.starts;
-        const rotated = base.rotate(0, 0, angle);
-        const next = combined.add(rotated);
-        safeDelete(rotated);
-        if (combined !== base) safeDelete(combined);
-        combined = next;
+        const wrapped = a < minA + spanA * 0.5 ? profile[0] : profile[profile.length - 1];
+        return wrapped[1];
+      };
+      const taperRadiusAt = (z) => {
+        if (!this.isTapered || Math.abs(this.taperPerLengthOnDiameter || 0) <= EPS) return 0;
+        return 0.5 * this.taperPerLengthOnDiameter * this.taperDirection * z;
+      };
+      const handed = options.leftHanded === true ? -1 : 1;
+      const sections = [];
+      for (let i = 0; i < axialSections; i += 1) {
+        const z = (length * i) / Math.max(1, axialSections - 1);
+        const section = [];
+        for (let j = 0; j < angularSegments; j += 1) {
+          const theta = (Math.PI * 2 * j) / angularSegments;
+          const phase = z - handed * (theta / (Math.PI * 2)) * lead;
+          const radius = Math.max(EPS, radiusAtPhase(phase) + taperRadiusAt(z));
+          section.push([radius * Math.cos(theta), radius * Math.sin(theta), z]);
+        }
+        sections.push(section);
       }
-      if (combined !== base) safeDelete(base);
-      manifold = combined;
-    }
-
-    if (includeCore) {
-      const d0 = this.diametersAtZ(0);
-      const d1 = this.diametersAtZ(length);
-      // For internal threads, the core needs to be slightly smaller than crest radius
-      // to avoid overlapping geometry. Use 95% of the minor diameter.
-      const coreR0 = Math.max(
-        EPS,
-        (d0.minor * 0.5 + radialOffset) * 0.95,
-      );
-      const coreR1 = Math.max(
-        EPS,
-        (d1.minor * 0.5 + radialOffset) * 0.95,
-      );
-      console.log('[ThreadGeometry] Adding core cylinder:', {
-        isExternal: this.isExternal,
-        coreR0,
-        coreR1,
-        minorDiameter0: d0.minor,
-        majorDiameter0: d0.major,
-        crestRadius: this.crestRadius,
+      const solid = makeThreadLoftSolid({
+        sections,
+        sideNames: Array.from({ length: angularSegments }, (_, index) => `${faceName}:SIDE_${index}`),
+        startName: capDescriptors.start.name,
+        endName: capDescriptors.end.name,
+        featureID: faceName,
+        name,
       });
-      try {
-        const core = Manifold.cylinder(length, coreR0, coreR1, res, false);
-        const merged = manifold.add(core);
-        safeDelete(core);
-        safeDelete(manifold);
-        manifold = merged;
-        console.log('[ThreadGeometry] Core added successfully');
-      } catch (err) {
-        console.warn('[ThreadGeometry] Failed to add core, continuing with thread ridges only:', err.message);
-        // Continue with just the thread ridges if core addition fails
-      }
+      applyPlacement(solid, options);
+      solid.threadFaceNames = threadFaceNames;
+      return solid;
     }
 
-    const solid = manifoldToSolid(manifold, name, faceName, faceIdToName);
+    const makeOneStart = (startIndex) => {
+      const phase = (Math.PI * 2 * startIndex) / Math.max(1, this.starts || 1);
+      const handed = options.leftHanded === true ? -1 : 1;
+      const taperRadiusAt = (z) => {
+        if (!this.isTapered || Math.abs(this.taperPerLengthOnDiameter || 0) <= EPS) return 0;
+        return 0.5 * this.taperPerLengthOnDiameter * this.taperDirection * z;
+      };
+      const sections = [];
+      for (let i = 0; i <= nDiv; i += 1) {
+        const t = i / nDiv;
+        const angle = phase + handed * Math.PI * 2 * turns * t;
+        const c = Math.cos(angle);
+        const s = Math.sin(angle);
+        const zBase = -minAxial + sweepLength * t;
+        const section = profilePts.map(([axialRaw, radiusRaw]) => {
+          const axial = Number(axialRaw) || 0;
+          const z = zBase + axial;
+          const radius = Math.max(EPS, (Number(radiusRaw) || 0) + taperRadiusAt(z));
+          return [radius * c, radius * s, z];
+        });
+        sections.push(section);
+      }
+      return makeThreadLoftSolid({
+        sections,
+        sideNames: segmentDescriptors.map((entry) => entry.name),
+        startName: capDescriptors.start.name,
+        endName: capDescriptors.end.name,
+        featureID: faceName,
+        name: startIndex === 0 ? name : `${name}_START_${startIndex + 1}`,
+      });
+    };
+
+    let solid = makeOneStart(0);
+    for (let k = 1; k < Math.max(1, this.starts || 1); k += 1) {
+      solid = solid.union(makeOneStart(k));
+    }
+
     applyPlacement(solid, options);
     solid.threadFaceNames = threadFaceNames;
     return solid;

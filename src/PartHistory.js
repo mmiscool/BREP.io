@@ -1762,7 +1762,6 @@ export class PartHistory {
             operation: op ?? 'NONE',
             targets,
             biasDistance: Number.isFinite(bias) ? bias : 0.1,
-            overlapConditioningEnabled: raw.overlapConditioningEnabled !== false,
           };
           if (offsetCapFlag !== undefined) out.offsetCoplanarCap = offsetCapFlag;
           if (Number.isFinite(offsetDistance)) out.offsetDistance = offsetDistance;

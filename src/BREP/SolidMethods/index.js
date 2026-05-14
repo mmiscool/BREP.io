@@ -24,13 +24,11 @@ export {
     pushFace,
 } from "./transforms.js";
 export {
-    _manifoldize,
     setEpsilon,
     _weldVerticesByEpsilon,
     fixTriangleWindingsByAdjacency,
-    _isCoherentlyOrientedManifold,
     invertNormals,
-} from "./manifoldOps.js";
+} from "./legacyMeshOps.js";
 export {
     removeSmallIslands,
     removeSmallInternalIslands,
@@ -45,7 +43,7 @@ export {
     removeInternalTrianglesByRaycast,
     removeInternalTrianglesByWinding,
     mergeTinyFaces,
-} from "./meshCleanup.js";
+} from "./meshCleanupStubs.js";
 export {
     getMesh,
     _ensureFaceIndex,
@@ -60,8 +58,6 @@ export {
     intersect,
     difference,
     _combineIdMaps,
-    _expandTriIDsFromMesh as _expandTriIDsFromMeshStatic,
-    _fromManifold as _fromManifoldStatic,
     setTolerance,
     simplify,
 } from "./booleanOps.js";

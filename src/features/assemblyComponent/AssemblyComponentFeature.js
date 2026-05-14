@@ -1,6 +1,5 @@
 import JSZip from 'jszip';
 import { ThreeMFLoader } from 'three/examples/jsm/loaders/3MFLoader.js';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { BREP } from '../../BREP/BREP.js';
 import { createPortGroupFromDefinition, normalizePortDefinition } from '../port/portUtils.js';
 import { base64ToUint8Array, getComponentRecord } from '../../services/componentLibrary.js';
@@ -509,56 +508,7 @@ export class AssemblyComponentFeature {
     }
 
     if (!solids.length && meshes.length) {
-      try {
-        const worldGeometries = [];
-        for (const mesh of meshes) {
-          const geom = mesh?.geometry;
-          if (!geom || typeof geom.clone !== 'function') continue;
-          try { mesh.updateWorldMatrix(true, false); }
-          catch { }
-          const cloned = geom.clone();
-          try { cloned.applyMatrix4(mesh.matrixWorld); }
-          catch { /* ignore transform issues */ }
-          worldGeometries.push(cloned);
-        }
-        if (worldGeometries.length) {
-          const merged = mergeGeometries(worldGeometries, false);
-          if (merged) {
-            try {
-              const fallbackSolid = new BREP.MeshToBrep(merged, 30, 1e-5);
-              const fallbackKey = metadataMap && Object.keys(metadataMap).length === 1
-                ? Object.keys(metadataMap)[0]
-                : (facetInfo && Object.keys(facetInfo).length === 1 ? Object.keys(facetInfo)[0] : null);
-              const solidName = fallbackKey || this._resolveSolidName('', componentName, 1);
-              fallbackSolid.name = solidName;
-              console.warn(`[AssemblyComponentFeature] Using merged-geometry fallback for component "${componentName}" (mesh count: ${meshes.length}).`);
-
-              if (facetInfo && facetInfo[solidName] && typeof fallbackSolid.setFaceMetadata === 'function') {
-                for (const key of Object.keys(facetInfo[solidName])) {
-                  try { fallbackSolid.setFaceMetadata(key, facetInfo[solidName][key]); }
-                  catch { /* ignore */ }
-                }
-              }
-
-              if (metadataMap && metadataMap[solidName]) {
-                this._mergeSolidMetadata(fallbackSolid, metadataMap[solidName]);
-              }
-              this._applyFaceMetadataFromMap(fallbackSolid, metadataMap);
-
-              solids.push(fallbackSolid);
-            } catch (err) {
-              console.warn('[AssemblyComponentFeature] Merged-geometry fallback failed:', err);
-            } finally {
-              try { merged.dispose(); } catch { }
-            }
-          }
-        }
-        for (const g of worldGeometries) {
-          try { g.dispose(); } catch { }
-        }
-      } catch (err) {
-        console.warn('[AssemblyComponentFeature] Unable to merge component meshes for fallback:', err);
-      }
+      console.warn(`[AssemblyComponentFeature] Component "${componentName}" contains mesh-only fallback data; OCCT-only mode skipped mesh-to-solid conversion.`);
     }
 
     if (!solids.length) {
@@ -947,18 +897,8 @@ export class AssemblyComponentFeature {
     }
   }
 
-  _fallbackSolidFromMesh(mesh) {
-    try {
-      const geometry = mesh?.geometry;
-      const posAttr = geometry?.getAttribute?.('position');
-      if (!geometry || !posAttr || posAttr.count < 3) return null;
-      const cloned = geometry.clone();
-      cloned.applyMatrix4(mesh.matrixWorld);
-      return new BREP.MeshToBrep(cloned, 30, 1e-5);
-    } catch (err) {
-      console.warn('[AssemblyComponentFeature] Fallback MeshToBrep conversion failed:', err);
-      return null;
-    }
+  _fallbackSolidFromMesh(_mesh) {
+    return null;
   }
 
   async _rebuildSolidsFromHistory(componentData, componentName) {

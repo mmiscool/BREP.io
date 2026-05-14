@@ -132,18 +132,6 @@ export class Edge extends Line2 {
         solid._dirty = true;
         solid._faceIndex = null;
         try {
-            if (solid._manifold && typeof solid._manifold.delete === "function") {
-                solid._manifold.delete();
-            }
-        } catch { /* ignore stale-manifold cleanup errors */ }
-        solid._manifold = null;
-
-        try {
-            if (typeof solid._manifoldize === "function") solid._manifoldize();
-        } catch (error) {
-            console.warn(`[Edge.collapseToPoint] Manifold rebuild failed for edge "${this.name || "UNKNOWN"}":`, error?.message || error);
-        }
-        try {
             if (typeof solid.visualize === "function") solid.visualize();
         } catch (error) {
             console.warn(`[Edge.collapseToPoint] Solid visualize failed for edge "${this.name || "UNKNOWN"}":`, error?.message || error);

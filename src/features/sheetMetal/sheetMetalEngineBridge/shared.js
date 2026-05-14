@@ -106,7 +106,6 @@ function isSolidLikeObject(value) {
       String(value.type || "").toUpperCase() === "SOLID"
       || typeof value.subtract === "function"
       || typeof value.union === "function"
-      || typeof value._manifoldize === "function"
     )
   );
 }
@@ -195,7 +194,6 @@ function solidFromSnapshot(snapshot, name = "SheetMetalCutout:CUTTER") {
   solid._edgeMetadata = new Map();
   solid._auxEdges = [];
   solid._dirty = true;
-  solid._manifold = null;
   solid._faceIndex = null;
   return solid;
 }

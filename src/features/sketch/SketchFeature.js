@@ -190,6 +190,176 @@ function normalizeSketchPointAttributes(sketch, externalRefPointIds = null) {
     }
 }
 
+function conditionSketchPointMapForNativeProfiles(sketch, pointById) {
+    if (!sketch || !(pointById instanceof Map)) return pointById;
+    const points = Array.isArray(sketch.points) ? sketch.points : [];
+    const constraints = Array.isArray(sketch.constraints) ? sketch.constraints : [];
+    if (!points.length || !constraints.length) return pointById;
+
+    const parent = new Map();
+    const fixed = new Set();
+    const pairKey = (a, b) => {
+        const left = String(a);
+        const right = String(b);
+        return left < right ? `${left}|${right}` : `${right}|${left}`;
+    };
+    const allLinePairs = new Set();
+    const profileLinePairs = new Set();
+    for (const g of (Array.isArray(sketch.geometries) ? sketch.geometries : [])) {
+        if (g?.type !== 'line' || !Array.isArray(g.points) || g.points.length !== 2) continue;
+        const key = pairKey(g.points[0], g.points[1]);
+        allLinePairs.add(key);
+        if (g.construction !== true) profileLinePairs.add(key);
+    }
+    const relationUsesLines = (ids, pairs) => (
+        Array.isArray(ids)
+        && ids.length >= 4
+        && pairs.has(pairKey(ids[0], ids[1]))
+        && pairs.has(pairKey(ids[2], ids[3]))
+    );
+    for (const p of points) {
+        if (p?.id == null || !pointById.has(p.id)) continue;
+        parent.set(p.id, p.id);
+        if (p.fixed === true || p.externalReference === true) fixed.add(p.id);
+    }
+    const find = (id) => {
+        if (!parent.has(id)) parent.set(id, id);
+        let root = parent.get(id);
+        while (parent.get(root) !== root) root = parent.get(root);
+        let cur = id;
+        while (parent.get(cur) !== cur) {
+            const next = parent.get(cur);
+            parent.set(cur, root);
+            cur = next;
+        }
+        return root;
+    };
+    const union = (a, b) => {
+        if (!parent.has(a) || !parent.has(b)) return;
+        const ra = find(a);
+        const rb = find(b);
+        if (ra !== rb) parent.set(rb, ra);
+    };
+
+    for (const c of constraints) {
+        if (c?.type !== '≡' || !Array.isArray(c.points) || c.points.length < 2) continue;
+        const first = c.points[0];
+        for (let i = 1; i < c.points.length; i += 1) union(first, c.points[i]);
+    }
+
+    const groups = () => {
+        const out = new Map();
+        for (const id of pointById.keys()) {
+            const root = find(id);
+            if (!out.has(root)) out.set(root, []);
+            out.get(root).push(id);
+        }
+        return out;
+    };
+    const setGroup = (id, x, y) => {
+        const ids = groups().get(find(id)) || [id];
+        for (const pid of ids) {
+            const p = pointById.get(pid);
+            if (!p) continue;
+            p.x = x;
+            p.y = y;
+        }
+    };
+    const groupFixed = (id) => {
+        const ids = groups().get(find(id)) || [id];
+        return ids.some((pid) => fixed.has(pid));
+    };
+    const averageCoincidentGroups = () => {
+        for (const ids of groups().values()) {
+            let sx = 0;
+            let sy = 0;
+            let count = 0;
+            for (const id of ids) {
+                const p = pointById.get(id);
+                if (!p) continue;
+                sx += Number(p.x) || 0;
+                sy += Number(p.y) || 0;
+                count += 1;
+            }
+            if (!count) continue;
+            const x = sx / count;
+            const y = sy / count;
+            for (const id of ids) {
+                const p = pointById.get(id);
+                if (p) { p.x = x; p.y = y; }
+            }
+        }
+    };
+    const get = (id) => pointById.get(id) || null;
+    const setHorizontal = (aId, bId) => {
+        const a = get(aId);
+        const b = get(bId);
+        if (!a || !b) return;
+        const y = (a.y + b.y) * 0.5;
+        setGroup(aId, a.x, y);
+        setGroup(bId, b.x, y);
+    };
+    const setVertical = (aId, bId) => {
+        const a = get(aId);
+        const b = get(bId);
+        if (!a || !b) return;
+        const x = (a.x + b.x) * 0.5;
+        setGroup(aId, x, a.y);
+        setGroup(bId, x, b.y);
+    };
+    const setRelatedLine = (ids, perpendicular) => {
+        if (!Array.isArray(ids) || ids.length < 4) return;
+        const [aId, bId, cId, dId] = ids;
+        const a = get(aId);
+        const b = get(bId);
+        const c = get(cId);
+        const d = get(dId);
+        if (!a || !b || !c || !d) return;
+        const vx = b.x - a.x;
+        const vy = b.y - a.y;
+        const wx = d.x - c.x;
+        const wy = d.y - c.y;
+        const vLen = Math.hypot(vx, vy);
+        const wLen = Math.hypot(wx, wy);
+        if (vLen <= 1e-12 || wLen <= 1e-12) return;
+        let tx = perpendicular ? -vy : vx;
+        let ty = perpendicular ? vx : vy;
+        const tLen = Math.hypot(tx, ty);
+        if (tLen <= 1e-12) return;
+        tx /= tLen;
+        ty /= tLen;
+        if ((tx * wx + ty * wy) < 0) {
+            tx = -tx;
+            ty = -ty;
+        }
+        const dx = tx * wLen;
+        const dy = ty * wLen;
+        if (groupFixed(dId) && !groupFixed(cId)) {
+            setGroup(cId, d.x - dx, d.y - dy);
+        } else {
+            setGroup(dId, c.x + dx, c.y + dy);
+        }
+    };
+
+    averageCoincidentGroups();
+    for (let pass = 0; pass < 24; pass += 1) {
+        for (const c of constraints) {
+            if (!Array.isArray(c?.points) || c.points.length < 2) continue;
+            if (c.type === '━') setHorizontal(c.points[0], c.points[1]);
+            else if (c.type === '│') setVertical(c.points[0], c.points[1]);
+            else if (c.type === '∥' && relationUsesLines(c.points, profileLinePairs)) {
+                setRelatedLine(c.points, false);
+                setRelatedLine([c.points[2], c.points[3], c.points[0], c.points[1]], false);
+            } else if (c.type === '⟂' && relationUsesLines(c.points, allLinePairs)) {
+                setRelatedLine(c.points, true);
+                setRelatedLine([c.points[2], c.points[3], c.points[0], c.points[1]], true);
+            }
+        }
+        averageCoincidentGroups();
+    }
+    return pointById;
+}
+
 function computeObjectWorldCentroid(object) {
     if (!object) return null;
     try { object.updateWorldMatrix?.(true, true); } catch { /* ignore */ }
@@ -813,7 +983,10 @@ export class SketchFeature {
         // Do not add curve preview lines in scene; editor handles those.
 
         // ---- Build PROFILE face from sketch with loop detection + holes ----
-        const pointById = new Map(sketch.points.map(p => [p.id, { x: p.x, y: p.y }]));
+        const pointById = conditionSketchPointMapForNativeProfiles(
+            sketch,
+            new Map(sketch.points.map(p => [p.id, { x: p.x, y: p.y }])),
+        );
         const segs = [];
         const edges = [];
         const openChains = [];

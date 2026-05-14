@@ -82,12 +82,6 @@ export async function test_history_features_basic(partHistory) {
   revolve.inputParams.angle = 180;
   revolve.inputParams.resolution = 32;
 
-  const remeshBase = await partHistory.newFeature("P.CU");
-  const remesh = await partHistory.newFeature("RM");
-  remesh.inputParams.targetSolid = remeshBase.inputParams.featureID;
-  remesh.inputParams.mode = "Simplify";
-  remesh.inputParams.tolerance = 0.05;
-
   const smoothSubdivisionBase = await partHistory.newFeature("P.CU");
   const smoothSubdivision = await partHistory.newFeature("SWS");
   smoothSubdivision.inputParams.targetSolid = smoothSubdivisionBase.inputParams.featureID;

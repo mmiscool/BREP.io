@@ -3,11 +3,6 @@
  */
 
 import {
-    cppSolidCoreHasNativeTopologyQueries,
-    getSyncedCppSolidCore,
-    requireCppSolidCoreCapability,
-} from "../CppSolidCore.js";
-import {
     hasOccShape,
     occBoundaryEdgePolylines,
     occFaceNormal,
@@ -21,7 +16,7 @@ export function getMesh() {
         this._occ.faceNameToID = this._faceNameToID;
         return tessellateOccState(this._occ);
     }
-    return this._manifoldize().getMesh();
+    throw new Error("Solid.getMesh() requires an OpenCASCADE-backed solid.");
 }
 
 /** Build a cache: faceID -> array of triangle indices. */
@@ -51,8 +46,7 @@ export function getFace(name) {
     if (hasOccShape(this)) {
         return (occFaces(this) || []).find((entry) => entry.faceName === name) || { faceName: name, triangles: [] };
     }
-    requireCppSolidCoreCapability(cppSolidCoreHasNativeTopologyQueries, "Solid.getFace");
-    return getSyncedCppSolidCore(this).getFace(name);
+    throw new Error("Solid.getFace() requires an OpenCASCADE-backed solid.");
 }
 
 /**
@@ -61,16 +55,15 @@ export function getFace(name) {
  */
 export function getFaceNormal(name) {
     if (hasOccShape(this)) return occFaceNormal(this, name);
-    requireCppSolidCoreCapability(cppSolidCoreHasNativeTopologyQueries, "Solid.getFaceNormal");
-    return getSyncedCppSolidCore(this).getFaceNormal(name);
+    throw new Error("Solid.getFaceNormal() requires an OpenCASCADE-backed solid.");
 }
 
 /**
  * Enumerate faces with their triangles in one pass.
  */
-export function getFaces(includeEmpty = false) {
+export function getFaces(includeEmpty = false, options = {}) {
     if (hasOccShape(this)) {
-        const faces = occFaces(this) || [];
+        const faces = occFaces(this, options) || [];
         if (!includeEmpty) return faces.filter((face) => face.triangles?.length);
         const seen = new Set(faces.map((face) => face.faceName));
         for (const name of this.getFaceNames()) {
@@ -78,15 +71,13 @@ export function getFaces(includeEmpty = false) {
         }
         return faces;
     }
-    requireCppSolidCoreCapability(cppSolidCoreHasNativeTopologyQueries, "Solid.getFaces");
-    return getSyncedCppSolidCore(this).getFaces(includeEmpty);
+    throw new Error("Solid.getFaces() requires an OpenCASCADE-backed solid.");
 }
 
 /**
  * Compute connected polylines for boundary edges between pairs of face labels.
  */
-export function getBoundaryEdgePolylines() {
-    if (hasOccShape(this)) return occBoundaryEdgePolylines(this);
-    requireCppSolidCoreCapability(cppSolidCoreHasNativeTopologyQueries, "Solid.getBoundaryEdgePolylines");
-    return getSyncedCppSolidCore(this).getBoundaryEdgePolylines();
+export function getBoundaryEdgePolylines(options = {}) {
+    if (hasOccShape(this)) return occBoundaryEdgePolylines(this, options);
+    throw new Error("Solid.getBoundaryEdgePolylines() requires an OpenCASCADE-backed solid.");
 }

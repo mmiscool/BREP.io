@@ -5,6 +5,20 @@ function assert(condition, message) {
   if (!condition) throw new Error(message || 'Assertion failed.');
 }
 
+function assertThrowsMessage(fn, pattern, label) {
+  let thrown = null;
+  try {
+    fn();
+  } catch (error) {
+    thrown = error;
+  }
+  assert(thrown, `[${label}] Expected operation to throw.`);
+  assert(
+    pattern.test(String(thrown?.message || thrown)),
+    `[${label}] Unexpected error message: ${String(thrown?.message || thrown)}`,
+  );
+}
+
 function analyzeMeshTopology(solid) {
   const triVerts = Array.isArray(solid?._triVerts) ? solid._triVerts : [];
   const triCount = (triVerts.length / 3) | 0;
@@ -69,24 +83,6 @@ function assertSidewallsConnectToCaps(solid, label, startFaceName, endFaceName, 
       `[${label}] Expected sidewall "${sidewallName}" to meet end cap "${endFaceName}".`,
     );
   }
-}
-
-function averageFaceTriangleRadiusXZ(solid, faceName, yBand = null) {
-  const face = typeof solid?.getFace === 'function' ? solid.getFace(faceName) : null;
-  assert(Array.isArray(face) && face.length > 0, `Expected face "${faceName}" to exist on solid "${solid?.name || ''}".`);
-  let sum = 0;
-  let count = 0;
-  for (const tri of face) {
-    const points = [tri?.p1, tri?.p2, tri?.p3];
-    if (!points.every((point) => Array.isArray(point) && point.length >= 3)) continue;
-    const cx = (points[0][0] + points[1][0] + points[2][0]) / 3;
-    const cy = (points[0][1] + points[1][1] + points[2][1]) / 3;
-    const cz = (points[0][2] + points[1][2] + points[2][2]) / 3;
-    if (Number.isFinite(yBand) && Math.abs(cy) > yBand) continue;
-    sum += Math.hypot(cx, cz);
-    count += 1;
-  }
-  return count ? (sum / count) : 0;
 }
 
 function makeRectSketch(x0, y0, x1, y1, geomBase = 100) {
@@ -207,8 +203,8 @@ export async function test_face_thicken_planar_profile(partHistory) {
 
   const diagnostics = solid?.__thickenDiagnostics || {};
   assert(
-    diagnostics.buildMethod === 'triangle_split_cull',
-    `[thicken-planar] Expected triangle split/cull build path, received ${diagnostics.buildMethod || 'unknown'}.`,
+    diagnostics.buildMethod === 'occ_prism',
+    `[thicken-planar] Expected OpenCascade prism build path, received ${diagnostics.buildMethod || 'unknown'}.`,
   );
   const volume = typeof solid.volume === 'function' ? solid.volume() : NaN;
   assert(Math.abs(volume - 120) <= 1e-3, `[thicken-planar] Expected volume 120, received ${volume}.`);
@@ -243,8 +239,8 @@ export async function test_face_thicken_hole_profile(partHistory) {
 
   const diagnostics = solid?.__thickenDiagnostics || {};
   assert(
-    diagnostics.buildMethod === 'triangle_split_cull',
-    `[thicken-hole] Expected triangle split/cull build path, received ${diagnostics.buildMethod || 'unknown'}.`,
+    diagnostics.buildMethod === 'occ_prism',
+    `[thicken-hole] Expected OpenCascade prism build path, received ${diagnostics.buildMethod || 'unknown'}.`,
   );
   const volume = typeof solid.volume === 'function' ? solid.volume() : NaN;
   assert(Math.abs(volume - 128) <= 1e-3, `[thicken-hole] Expected volume 128, received ${volume}.`);
@@ -252,27 +248,10 @@ export async function test_face_thicken_hole_profile(partHistory) {
 
 export async function test_face_thicken_curved_cylinder_side(partHistory) {
   const face = await buildCylinderSideFace(partHistory, 'THICK_CURVED_SRC', 3, 8, 64);
-  const solid = face.thicken(0.75, { featureId: 'THICK_CURVED' });
-  assertClosedManifold(solid, 'thicken-curved');
-
-  const faceNames = getFaceNamesSet(solid);
-  assert(faceNames.has('THICK_CURVED_SRC_S_START'), '[thicken-curved] Missing start face.');
-  assert(faceNames.has('THICK_CURVED_SRC_S_END'), '[thicken-curved] Missing end face.');
-  const outerSidewalls = listFaceNamesByRegex(solid, /^THICK_CURVED_SRC_S_E\d+_SW$/);
-  const innerSidewalls = listFaceNamesByRegex(solid, /^THICK_CURVED_SRC_S_L1_E\d+_SW$/);
-  assert(outerSidewalls.length > 0, '[thicken-curved] Expected per-edge sidewalls on the first boundary loop.');
-  assert(innerSidewalls.length > 0, '[thicken-curved] Expected per-edge sidewalls on the second boundary loop.');
-
-  const sourceRadius = averageFaceTriangleRadiusXZ(solid, 'THICK_CURVED_SRC_S_START');
-  const offsetRadius = averageFaceTriangleRadiusXZ(solid, 'THICK_CURVED_SRC_S_END');
-  assert(
-    offsetRadius > sourceRadius + 0.45,
-    `[thicken-curved] Expected offset face to sit radially outside the source face, received ${sourceRadius} vs ${offsetRadius}.`,
-  );
-  const diagnostics = solid?.__thickenDiagnostics || {};
-  assert(
-    diagnostics.buildMethod === 'triangle_split_cull',
-    `[thicken-curved] Expected triangle split/cull build path, received ${diagnostics.buildMethod || 'unknown'}.`,
+  assertThrowsMessage(
+    () => face.thicken(0.75, { featureId: 'THICK_CURVED' }),
+    /requires a planar BREP face/i,
+    'thicken-curved',
   );
 }
 
@@ -296,62 +275,27 @@ export async function test_face_thicken_filleted_planar_face_keeps_clean_boundar
 
   const diagnostics = solid?.__thickenDiagnostics || {};
   assert(
-    diagnostics.buildMethod === 'triangle_split_cull',
-    `[thicken-filleted-planar] Expected triangle split/cull build path, received ${diagnostics.buildMethod || 'unknown'}.`,
+    diagnostics.buildMethod === 'occ_prism',
+    `[thicken-filleted-planar] Expected OpenCascade prism build path, received ${diagnostics.buildMethod || 'unknown'}.`,
   );
 }
 
 export async function test_face_thicken_self_overlap_cylinder_side(partHistory) {
   const face = await buildCylinderSideFace(partHistory, 'THICK_SELF_SRC', 1, 6, 32);
-  const solid = face.thicken(-1.25, { featureId: 'THICK_SELF' });
-  assertClosedManifold(solid, 'thicken-self-overlap');
-
-  const diagnostics = solid?.__thickenDiagnostics || null;
-  assert(diagnostics && Number.isFinite(diagnostics.sourceTriangleCount), '[thicken-self-overlap] Missing diagnostics.');
-  assert(
-    diagnostics.buildMethod === 'triangle_split_cull',
-    `[thicken-self-overlap] Expected triangle split/cull build path, received ${diagnostics.buildMethod || 'unknown'}.`,
+  assertThrowsMessage(
+    () => face.thicken(-1.25, { featureId: 'THICK_SELF' }),
+    /requires a planar BREP face/i,
+    'thicken-self-overlap',
   );
-  assert(
-    (diagnostics.triangleSplitCount || 0) > 0,
-    '[thicken-self-overlap] Expected triangle intersections to be split.',
-  );
-  assert(
-    (diagnostics.culledTriangleCount || 0) > 0,
-    '[thicken-self-overlap] Expected internal triangles to be culled.',
-  );
-  assert(
-    (diagnostics.boundaryCapTriangleCount || 0) > 0,
-    '[thicken-self-overlap] Expected split/cull boundary loops to be capped with triangles.',
-  );
-  assert((typeof solid.volume === 'function' ? solid.volume() : 0) > 0, '[thicken-self-overlap] Expected a positive-volume solid.');
 }
 
 export async function test_face_thicken_partial_torus_side_avoids_internal_voids(partHistory) {
   const face = await buildTorusSideFace(partHistory, 'THICK_TORUS_SRC', 10, 4, 201, 32);
-  const solid = face.thicken(3, { featureId: 'THICK_TORUS' });
-  assertClosedManifold(solid, 'thicken-partial-torus');
-
-  const faceNames = getFaceNamesSet(solid);
-  assert(faceNames.has('THICK_TORUS_SRC_Side_START'), '[thicken-partial-torus] Missing start face.');
-  assert(faceNames.has('THICK_TORUS_SRC_Side_END'), '[thicken-partial-torus] Missing end face.');
-  const outerSidewalls = listFaceNamesByRegex(solid, /^THICK_TORUS_SRC_Side_E\d+_SW$/);
-  const innerSidewalls = listFaceNamesByRegex(solid, /^THICK_TORUS_SRC_Side_L1_E\d+_SW$/);
-  assert(outerSidewalls.length > 0, '[thicken-partial-torus] Expected per-edge sidewalls on the first boundary loop.');
-  assert(innerSidewalls.length > 0, '[thicken-partial-torus] Expected per-edge sidewalls on the second boundary loop.');
-
-  const diagnostics = solid?.__thickenDiagnostics || {};
-  assert(
-    diagnostics.buildMethod === 'triangle_split_cull',
-    `[thicken-partial-torus] Expected triangle split/cull build path, received ${diagnostics.buildMethod || 'unknown'}.`,
+  assertThrowsMessage(
+    () => face.thicken(3, { featureId: 'THICK_TORUS' }),
+    /requires a planar BREP face/i,
+    'thicken-partial-torus',
   );
-  assert(
-    Number.isFinite(Number(diagnostics.splitCullPasses)) && diagnostics.splitCullPasses >= 1,
-    '[thicken-partial-torus] Expected triangle split/cull diagnostics.',
-  );
-
-  const volume = typeof solid.volume === 'function' ? solid.volume() : NaN;
-  assert(Number.isFinite(volume) && volume > 1000, `[thicken-partial-torus] Expected positive torus-shell volume, received ${volume}.`);
 }
 
 export async function test_face_thicken_boundary_uses_smooth_adjacent_face_normals() {
@@ -366,26 +310,10 @@ export async function test_face_thicken_boundary_uses_smooth_adjacent_face_norma
   const face = parent.getObjectByName('SMOOTH_A');
   assert(face?.type === 'FACE', '[thicken-smooth-boundary] Expected authored source face.');
 
-  const solid = face.thicken(2, { featureId: 'THICK_SMOOTH_BOUNDARY' });
-  assertClosedManifold(solid, 'thicken-smooth-boundary');
-
-  const diagnostics = solid?.__thickenDiagnostics || {};
-  assert(
-    (diagnostics.adjacentBoundaryNormalContributionCount || 0) >= 2,
-    '[thicken-smooth-boundary] Expected tangent adjacent face normals to contribute at the boundary.',
-  );
-
-  const endFace = typeof solid.getFace === 'function' ? solid.getFace('SMOOTH_A_END') : [];
-  const endXs = [];
-  for (const tri of endFace || []) {
-    for (const point of [tri?.p1, tri?.p2, tri?.p3]) {
-      if (Array.isArray(point) && point.length >= 3) endXs.push(point[0]);
-    }
-  }
-  const maxEndX = Math.max(...endXs);
-  assert(
-    maxEndX < 0.9,
-    `[thicken-smooth-boundary] Expected the offset boundary to follow the smooth neighbor normal field; max x=${maxEndX}.`,
+  assertThrowsMessage(
+    () => face.thicken(2, { featureId: 'THICK_SMOOTH_BOUNDARY' }),
+    /requires an OpenCascade BREP face or authored boundary loops/i,
+    'thicken-smooth-boundary',
   );
 }
 
@@ -533,7 +461,7 @@ export async function afterRun_thicken_feature_connected_faces_remain_individual
   for (const solid of solids) {
     assertClosedManifold(solid, `thicken-feature-patch:${solid.name}`);
     const diagnostics = solid?.__thickenDiagnostics || {};
-    assert(diagnostics.buildMethod === 'triangle_split_cull', `[thicken-feature-patch] ${solid.name} did not use triangle split/cull.`);
+    assert(diagnostics.buildMethod === 'occ_prism', `[thicken-feature-patch] ${solid.name} did not use OpenCascade prism thicken.`);
     assert(diagnostics.sourceFaceCount === 1, `[thicken-feature-patch] Expected one source face for ${solid.name}.`);
   }
   assert(Array.isArray(featureEntry?.persistentData?.results), '[thicken-feature-patch] Expected persistentData.results.');

@@ -6,11 +6,7 @@ import { Revolve } from "./Revolve.js";
 import { Tube } from "./Tube.js";
 import { ChamferSolid } from "./chamfer.js";
 import { ExtrudeSolid } from "./Extrude.js";
-import { computeFilletCenterlineForEdge } from "./CppSolidCore.js";
-import { filletSolid, attachFilletCenterlineAuxEdge } from "./fillets/fillet.js";
 import { applyBooleanOperation } from "./applyBooleanOperation.js";
-import { MeshToBrep } from "./meshToBrep.js";
-import { MeshRepairer } from "./MeshRepairer.js";
 import { AssemblyComponent } from "./AssemblyComponent.js";
 import { buildHelixPolyline } from "./helix.js";
 import * as THREE from 'three';
@@ -32,12 +28,7 @@ export const BREP = {
     Revolve,
     ExtrudeSolid,
     ChamferSolid,
-    filletSolid,
-    computeFilletCenterline: computeFilletCenterlineForEdge,
-    attachFilletCenterlineAuxEdge,
     applyBooleanOperation,
-    MeshToBrep,
-    MeshRepairer,
     AssemblyComponent,
     buildHelixPolyline,
 

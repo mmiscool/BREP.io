@@ -1,5 +1,6 @@
 import { BREP } from '../../BREP/BREP.js';
 import { ThreadGeometry, ThreadStandard } from '../../BREP/threadGeometry.js';
+import { hasOccShape, setOccState, subtractOccSolidTools } from '../../BREP/OpenCascadeKernel.js';
 import { getClearanceDiameter } from './screwClearance.js';
 
 const inputParamsSchema = {
@@ -128,14 +129,6 @@ const inputParamsSchema = {
     step: 0.01,
     hint: 'Optional clearance (+) or interference (-) applied to the thread profile',
   },
-  threadSegmentsPerTurn: {
-    type: 'number',
-    label: 'Thread segments/turn',
-    default_value: 32,
-    min: 4,
-    step: 1,
-    hint: 'Resolution for modeled threads (ignored for symbolic)',
-  },
   debugShowSolid: {
     type: 'boolean',
     label: 'Debug: show tool solid',
@@ -151,6 +144,11 @@ const inputParamsSchema = {
 };
 
 const THREE = BREP.THREE;
+const DEBUG_HOLE_FEATURE = false;
+
+function holeDebugLog(...args) {
+  if (DEBUG_HOLE_FEATURE) console.log(...args);
+}
 
 function fallbackVector(v, def = new THREE.Vector3()) {
   if (!v || typeof v.x !== 'number' || typeof v.y !== 'number' || typeof v.z !== 'number') return def.clone();
@@ -181,6 +179,33 @@ function boxDiagonalLength(obj) {
   return 0;
 }
 
+function boxExitDistanceAlongDirection(obj, origin, direction) {
+  if (!obj || !origin || !direction || direction.lengthSq() < 1e-12) return 0;
+  try {
+    const box = new THREE.Box3().setFromObject(obj);
+    if (box.isEmpty()) return 0;
+    const dir = direction.clone().normalize();
+    let best = Infinity;
+    const axes = ['x', 'y', 'z'];
+    for (const axis of axes) {
+      const d = dir[axis];
+      if (Math.abs(d) <= 1e-12) continue;
+      const plane = d > 0 ? box.max[axis] : box.min[axis];
+      const t = (plane - origin[axis]) / d;
+      if (t < -1e-9 || t >= best) continue;
+      const p = origin.clone().addScaledVector(dir, t);
+      const inside =
+        p.x >= box.min.x - 1e-7 && p.x <= box.max.x + 1e-7 &&
+        p.y >= box.min.y - 1e-7 && p.y <= box.max.y + 1e-7 &&
+        p.z >= box.min.z - 1e-7 && p.z <= box.max.z + 1e-7;
+      if (inside) best = t;
+    }
+    return Number.isFinite(best) ? Math.max(0, best) : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function parseNumberLike(value) {
   if (value == null) return NaN;
   const raw = String(value).trim();
@@ -209,171 +234,106 @@ function unionSolids(solids) {
     console.warn('[HoleFeature] unionSolids: no solids provided');
     return null;
   }
-  console.log('[HoleFeature] unionSolids: combining', solids.length, 'solids');
+  holeDebugLog('[HoleFeature] unionSolids: combining', solids.length, 'solids');
   let current = solids[0];
   if (!current) {
     console.warn('[HoleFeature] unionSolids: first solid is null/undefined');
     return null;
   }
-  console.log('[HoleFeature] unionSolids: first solid type:', current?.constructor?.name);
+  holeDebugLog('[HoleFeature] unionSolids: first solid type:', current?.constructor?.name);
   for (let i = 1; i < solids.length; i++) {
     const next = solids[i];
     if (!next) continue;
     try { 
-      console.log('[HoleFeature] unionSolids: unioning with solid', i, 'type:', next?.constructor?.name);
+      holeDebugLog('[HoleFeature] unionSolids: unioning with solid', i, 'type:', next?.constructor?.name);
       current = current.union(next); 
     }
     catch (error) { console.warn('[HoleFeature] Union failed:', error); }
   }
-  console.log('[HoleFeature] unionSolids: final result type:', current?.constructor?.name);
+  holeDebugLog('[HoleFeature] unionSolids: final result type:', current?.constructor?.name);
   return current;
 }
 
-function triangleArea(tri) {
-  const p0 = tri?.p1;
-  const p1 = tri?.p2;
-  const p2 = tri?.p3;
-  if (!Array.isArray(p0) || !Array.isArray(p1) || !Array.isArray(p2)) return 0;
-  const ux = p1[0] - p0[0];
-  const uy = p1[1] - p0[1];
-  const uz = p1[2] - p0[2];
-  const vx = p2[0] - p0[0];
-  const vy = p2[1] - p0[1];
-  const vz = p2[2] - p0[2];
-  const cx = uy * vz - uz * vy;
-  const cy = uz * vx - ux * vz;
-  const cz = ux * vy - uy * vx;
-  return 0.5 * Math.hypot(cx, cy, cz);
-}
-
-function faceComponentStats(solid, faceName) {
-  let tris = [];
-  try {
-    tris = typeof solid?.getFace === 'function' ? solid.getFace(faceName) : [];
-  } catch {
-    tris = [];
-  }
-  if (!Array.isArray(tris) || tris.length === 0) {
-    return { componentCount: 0, componentAreas: [], totalArea: 0 };
+async function subtractHoleToolsSequentially(partHistory, tools, booleanParam, featureID) {
+  const rawTargets = Array.isArray(booleanParam?.targets) ? booleanParam.targets.filter(Boolean) : [];
+  if (!tools.length) return { added: [], removed: [] };
+  if (!rawTargets.length) {
+    const combinedTool = tools.length === 1 ? tools[0] : unionSolids(tools);
+    return BREP.applyBooleanOperation(partHistory || {}, combinedTool, booleanParam, featureID);
   }
 
-  const edgeToTri = new Map();
-  const triAdj = Array.from({ length: tris.length }, () => []);
-  const areas = new Float64Array(tris.length);
-  const edgeKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  let currentTargets = rawTargets;
+  const removed = new Set();
+  let lastEffects = { added: rawTargets, removed: [] };
 
-  for (let t = 0; t < tris.length; t++) {
-    const tri = tris[t];
-    areas[t] = triangleArea(tri);
-    const idx = Array.isArray(tri?.indices) && tri.indices.length === 3 ? tri.indices : null;
-    if (!idx) continue;
-    const i0 = Number(idx[0]);
-    const i1 = Number(idx[1]);
-    const i2 = Number(idx[2]);
-    if (!Number.isFinite(i0) || !Number.isFinite(i1) || !Number.isFinite(i2)) continue;
-    const edges = [[i0, i1], [i1, i2], [i2, i0]];
-    for (const [a, b] of edges) {
-      const key = edgeKey(a, b);
-      let arr = edgeToTri.get(key);
-      if (!arr) {
-        arr = [];
-        edgeToTri.set(key, arr);
-      }
-      arr.push(t);
-    }
-  }
-
-  for (const triList of edgeToTri.values()) {
-    if (!Array.isArray(triList) || triList.length !== 2) continue;
-    const a = triList[0];
-    const b = triList[1];
-    triAdj[a].push(b);
-    triAdj[b].push(a);
-  }
-
-  const seen = new Uint8Array(tris.length);
-  const componentAreas = [];
-  for (let i = 0; i < tris.length; i++) {
-    if (seen[i]) continue;
-    const stack = [i];
-    seen[i] = 1;
-    let area = 0;
-    while (stack.length) {
-      const t = stack.pop();
-      area += areas[t] || 0;
-      const nbrs = triAdj[t];
-      for (let j = 0; j < nbrs.length; j++) {
-        const u = nbrs[j];
-        if (seen[u]) continue;
-        seen[u] = 1;
-        stack.push(u);
-      }
-    }
-    componentAreas.push(area);
-  }
-
-  componentAreas.sort((a, b) => b - a);
-  const totalArea = componentAreas.reduce((sum, a) => sum + a, 0);
-  return { componentCount: componentAreas.length, componentAreas, totalArea };
-}
-
-function cleanupModeledThreadFaceIslands(tool, faceNames, pitch) {
-  if (!tool || typeof tool.cleanupTinyFaceIslands !== 'function') return null;
-  const names = Array.isArray(faceNames) ? faceNames.filter(Boolean) : [];
-  if (!names.length) return null;
-
-  const collectStats = () => names.map((name) => {
-    const s = faceComponentStats(tool, name);
-    return {
-      name,
-      components: s.componentCount,
-      totalArea: s.totalArea,
-      largestComponentArea: s.componentAreas[0] || 0,
-      smallestIslandArea: s.componentAreas.length > 1 ? s.componentAreas[s.componentAreas.length - 1] : 0,
+  for (let i = 0; i < tools.length; i += 1) {
+    const tool = tools[i];
+    const stepParam = {
+      ...booleanParam,
+      operation: 'SUBTRACT',
+      targets: currentTargets,
     };
-  });
-
-  const p = Math.max(1e-4, Math.abs(Number(pitch) || 0));
-  let areaThreshold = Math.max(1e-9, p * p * 1e-4);
-  const maxThreshold = Math.max(areaThreshold, p * p * 0.05);
-  const before = collectStats();
-  let passes = 0;
-  let totalReassigned = 0;
-
-  for (let pass = 0; pass < 6; pass++) {
-    passes = pass + 1;
-    const stats = names.map((name) => ({ name, ...faceComponentStats(tool, name) }));
-    const worstComponents = stats.reduce((m, s) => Math.max(m, s.componentCount), 0);
-    if (worstComponents <= 1) break;
-
-    const smallAreas = [];
-    for (const s of stats) {
-      if (s.componentAreas.length <= 1) continue;
-      for (let i = 1; i < s.componentAreas.length; i++) {
-        const a = Number(s.componentAreas[i]);
-        if (Number.isFinite(a) && a > 0) smallAreas.push(a);
-      }
+    lastEffects = await BREP.applyBooleanOperation(partHistory || {}, tool, stepParam, featureID);
+    for (const item of lastEffects.removed || []) {
+      if (item) removed.add(item);
     }
-    smallAreas.sort((a, b) => a - b);
-    const suggested = smallAreas.length ? Math.max(areaThreshold, smallAreas[0] * 1.5) : areaThreshold;
-    const useThreshold = Math.min(maxThreshold, suggested);
-    const reassigned = Number(tool.cleanupTinyFaceIslands(useThreshold) || 0);
-    totalReassigned += reassigned > 0 ? reassigned : 0;
-    if (reassigned <= 0) {
-      areaThreshold = Math.min(maxThreshold, areaThreshold * 4);
-      if (areaThreshold >= maxThreshold) break;
-    } else {
-      areaThreshold = Math.min(maxThreshold, Math.max(areaThreshold * 1.25, useThreshold));
+    const nextTargets = Array.isArray(lastEffects.added) ? lastEffects.added.filter(Boolean) : [];
+    if (!nextTargets.length) break;
+    currentTargets = nextTargets;
+  }
+
+  return {
+    added: Array.isArray(lastEffects.added) ? lastEffects.added : [],
+    removed: Array.from(removed),
+  };
+}
+
+async function subtractHoleToolGroupsTogether(partHistory, toolGroups, booleanParam, featureID) {
+  const groups = (Array.isArray(toolGroups) ? toolGroups : [])
+    .map((group) => (Array.isArray(group) ? group.filter(Boolean) : []))
+    .filter((group) => group.length > 0);
+  const tools = groups.flat();
+  const rawTargets = Array.isArray(booleanParam?.targets) ? booleanParam.targets.filter(Boolean) : [];
+  if (!tools.length) return { added: [], removed: [] };
+  if (!rawTargets.length || !rawTargets.every((target) => hasOccShape(target)) || !tools.every((tool) => hasOccShape(tool))) {
+    return subtractHoleToolsSequentially(partHistory, tools, booleanParam, featureID);
+  }
+
+  const added = [];
+  const removed = [...rawTargets, ...tools];
+  for (const target of rawTargets) {
+    try {
+      let current = target;
+      for (const group of groups) {
+        const occState = subtractOccSolidTools(current, group);
+        if (!occState) throw new Error('OpenCASCADE multi-tool subtract returned no result.');
+        const IntermediateCtor = target?.constructor || BREP.Solid;
+        const intermediate = new IntermediateCtor();
+        setOccState(intermediate, occState);
+        intermediate._auxEdges = [
+          ...(Array.isArray(current?._auxEdges) ? current._auxEdges : []),
+          ...group.flatMap((tool) => (Array.isArray(tool?._auxEdges) ? tool._auxEdges : [])),
+        ];
+        try { intermediate.name = target?.name || current?.name || 'RESULT'; } catch { /* ignore */ }
+        try { if (target?.owningFeatureID) intermediate.owningFeatureID = target.owningFeatureID; } catch { /* ignore */ }
+        current = intermediate;
+      }
+      const SolidCtor = target?.constructor || BREP.Solid;
+      const result = new SolidCtor();
+      setOccState(result, current._occ);
+      result._auxEdges = [
+        ...(Array.isArray(current?._auxEdges) ? current._auxEdges : []),
+      ];
+      try { result.name = target?.name || (featureID ? `${featureID}_RESULT` : 'RESULT'); } catch { /* ignore */ }
+      try { if (target?.owningFeatureID) result.owningFeatureID = target.owningFeatureID; } catch { /* ignore */ }
+      added.push(result);
+    } catch (err) {
+      console.warn('[HoleFeature] Multi-tool subtract failed; falling back to sequential subtract:', err);
+      return subtractHoleToolsSequentially(partHistory, tools, booleanParam, featureID);
     }
   }
-  const after = collectStats();
-  return {
-    before,
-    after,
-    passes,
-    totalReassigned,
-    finalAreaThreshold: areaThreshold,
-  };
+
+  return { added, removed };
 }
 
 function getWorldPosition(obj) {
@@ -440,8 +400,8 @@ function collectSceneSolids(scene) {
       obj.userData?.isSolid
       || obj.isSolid
       || obj.type === 'Solid'
+      || obj.type === 'SOLID'
       || obj.constructor?.name === 'Solid'
-      || typeof obj._manifoldize === 'function'
       || typeof obj.union === 'function';
     if (solidLike) solids.push(obj);
   };
@@ -510,6 +470,92 @@ function collectSketchVerticesByName(scene, sketchName) {
   };
   walk(scene);
   return verts;
+}
+
+function getSceneObjectByName(partHistory, name) {
+  if (!partHistory || !name) return null;
+  try {
+    if (typeof partHistory.getObjectByName === 'function') {
+      const obj = partHistory.getObjectByName(name);
+      if (obj) return obj;
+    }
+  } catch { /* ignore */ }
+  try {
+    return partHistory.scene?.getObjectByName?.(name) || null;
+  } catch {
+    return null;
+  }
+}
+
+function findSceneObjectByName(partHistory, name, predicate = null) {
+  const direct = getSceneObjectByName(partHistory, name);
+  if (direct && (!predicate || predicate(direct))) return direct;
+  const scene = partHistory?.scene;
+  if (!scene || typeof scene.traverse !== 'function') return null;
+  let found = null;
+  try {
+    scene.traverse((obj) => {
+      if (found || !obj || obj.name !== name) return;
+      if (!predicate || predicate(obj)) found = obj;
+    });
+  } catch { /* ignore */ }
+  return found;
+}
+
+function isSketchObject(obj) {
+  return String(obj?.type || '').toUpperCase() === 'SKETCH';
+}
+
+function parseSketchPointReference(value) {
+  const raw = typeof value === 'string'
+    ? value
+    : (typeof value?.name === 'string' ? value.name : '');
+  const text = raw.trim();
+  if (!text) return null;
+  const match = text.match(/^([^:|[\]>/]+):P(\d+)(?=$|[_:|[\]>/])/);
+  if (!match) return null;
+  const sketchName = match[1];
+  const pointName = `${sketchName}:P${match[2]}`;
+  return { sketchName, pointName };
+}
+
+function parseSketchReferenceName(value) {
+  const raw = typeof value === 'string'
+    ? value
+    : (typeof value?.name === 'string' ? value.name : '');
+  const text = raw.trim();
+  if (!text) return null;
+  const pointRef = parseSketchPointReference(text);
+  if (pointRef?.sketchName) return pointRef.sketchName;
+  const base = text.split(/[:|[\]>/]/, 1)[0];
+  return base || null;
+}
+
+function resolveSketchSelection(selectionRaw, partHistory) {
+  const requestedPointNames = new Set();
+  let sketch = null;
+
+  for (const item of selectionRaw) {
+    if (!item) continue;
+    const pointRef = parseSketchPointReference(item);
+    if (pointRef?.pointName) requestedPointNames.add(pointRef.pointName);
+
+    if (!sketch && isSketchObject(item)) sketch = item;
+    if (!sketch && isSketchObject(item?.parent)) sketch = item.parent;
+    if (!sketch && typeof item === 'string') {
+      const direct = findSceneObjectByName(partHistory, item, isSketchObject);
+      if (direct) sketch = direct;
+    }
+    if (!sketch) {
+      const sketchName = parseSketchReferenceName(item);
+      if (sketchName) {
+        const resolved = findSceneObjectByName(partHistory, sketchName, isSketchObject);
+        if (resolved) sketch = resolved;
+      }
+    }
+  }
+
+  return { sketch, requestedPointNames };
 }
 
 function dedupePlacementsByPosition(placements, tolerance = 1e-7) {
@@ -782,7 +828,7 @@ export class HoleFeature {
     const hide = (...keys) => { for (const key of keys) exclude.add(key); };
     const hideCountersink = () => hide('countersinkDiameter', 'countersinkAngle');
     const hideCounterbore = () => hide('counterboreDiameter', 'counterboreDepth');
-    const hideThread = () => hide('threadStandard', 'threadDesignation', 'threadMode', 'threadRadialOffset', 'threadSegmentsPerTurn');
+    const hideThread = () => hide('threadStandard', 'threadDesignation', 'threadMode', 'threadRadialOffset');
 
     if (t === 'THREADED') {
       hideCountersink();
@@ -812,7 +858,7 @@ export class HoleFeature {
     const params = this.inputParams || {};
     const featureID = params.featureID || params.id || null;
     const selectionRaw = Array.isArray(params.face) ? params.face.filter(Boolean) : (params.face ? [params.face] : []);
-    const sketch = selectionRaw.find((o) => o && o.type === 'SKETCH') || null;
+    const { sketch, requestedPointNames } = resolveSketchSelection(selectionRaw, partHistory);
     if (!sketch) throw new Error('HoleFeature requires a sketch selection; individual vertex picks are not supported.');
 
     const pointObjs = [];
@@ -820,7 +866,11 @@ export class HoleFeature {
     let pointPlacements = [];
 
     // Use sketch-defined points as hole centers (construction points are excluded).
-    const extraPts = collectSketchVertices(sketch);
+    const filterRequestedPoints = (items) => {
+      if (!(requestedPointNames instanceof Set) || requestedPointNames.size === 0) return items;
+      return items.filter((item) => requestedPointNames.has(item?.name || ''));
+    };
+    const extraPts = filterRequestedPoints(collectSketchVertices(sketch));
     if (extraPts.length) {
       pointObjs.push(...extraPts);
       pointPlacements = pointObjs
@@ -828,7 +878,7 @@ export class HoleFeature {
         .filter((entry) => !!entry.position);
     }
     if (!pointPlacements.length && partHistory?.scene && sketch?.name) {
-      const fallbackPts = collectSketchVerticesByName(partHistory.scene, sketch.name);
+      const fallbackPts = filterRequestedPoints(collectSketchVerticesByName(partHistory.scene, sketch.name));
       if (fallbackPts.length) {
         pointObjs.push(...fallbackPts);
         pointPlacements = pointObjs
@@ -839,7 +889,7 @@ export class HoleFeature {
     const uniquePointPlacements = dedupePlacementsByPosition(pointPlacements);
     if (pointPlacements.length > uniquePointPlacements.length) {
       const skipped = pointPlacements.length - uniquePointPlacements.length;
-      console.log('[HoleFeature] Skipping duplicate coincident hole points:', skipped);
+      holeDebugLog('[HoleFeature] Skipping duplicate coincident hole points:', skipped);
     }
 
     const hasPoints = uniquePointPlacements.length > 0;
@@ -862,7 +912,6 @@ export class HoleFeature {
     const threadDesignation = String(params.threadDesignation || params.threadSize || '').trim();
     const threadMode = String(params.threadMode || 'SYMBOLIC').toUpperCase();
     const threadRadialOffset = Number(params.threadRadialOffset ?? 0);
-    const threadSegmentsPerTurn = Math.max(4, Math.floor(Number(params.threadSegmentsPerTurn ?? (threadMode === 'MODELED' ? 32 : 12))));
     let threadGeom = null;
     if (threaded && threadStandard !== 'NONE' && threadDesignation) {
       try {
@@ -935,24 +984,32 @@ export class HoleFeature {
       }
     }
     const diag = primaryTarget ? boxDiagonalLength(primaryTarget) : boxDiagonalLength(chooseNearestSolid(sceneSolids, center));
-    const straightDepth = throughAll ? Math.max(straightDepthInput, diag * 1.5 || 50) : straightDepthInput;
+    const straightDepth = throughAll ? Math.max(straightDepthInput, diag || 50) : straightDepthInput;
 
     const res = 48;
-    const backOffset = 1e-5; // small pullback to avoid coincident faces in booleans
+    const backOffset = 0;
     const centers = hasPoints ? uniquePointPlacements.map((entry) => entry.position) : [center];
     const sourceNames = hasPoints ? uniquePointPlacements.map((entry) => entry?.pointObj?.name || entry?.pointObj?.uuid || null) : [null];
     const tools = [];
+    const coreTools = [];
+    const threadTools = [];
+    const otherTools = [];
     const holeRecords = [];
-    const debugVisualizationObjects = []; // Store debug viz objects separately
+    const debugToolSolids = [];
     centers.forEach((c, idx) => {
       const pointName = sourceNames[idx] || null;
       const holeFacePrefix = pointName || (featureID ? `${featureID}_${idx}` : `HOLE_${idx}`);
-      let modeledThreadFaceNames = null;
-      let modeledThreadPitch = null;
+      const basePos = (c || center).clone();
+      const localThroughDepth = throughAll && primaryTarget
+        ? boxExitDistanceAlongDirection(primaryTarget, basePos, normal)
+        : 0;
+      const depthForHole = throughAll
+        ? Math.max(straightDepthInput, localThroughDepth || straightDepth)
+        : straightDepth;
       const { solids: toolSolids, descriptors } = makeHoleTool({
         holeType,
         radius,
-        straightDepthTotal: straightDepth,
+        straightDepthTotal: depthForHole,
         sinkDia,
         sinkAngle,
         boreDia,
@@ -963,7 +1020,6 @@ export class HoleFeature {
       });
       // annotate faces with hole metadata before union so labels propagate
       const descriptor = descriptors[0] || null;
-      const basePos = (c || center).clone();
       const originPos = basePos.clone().addScaledVector(normal, -backOffset);
       if (descriptor) {
         if (holeType === 'THREADED') descriptor.type = 'THREADED';
@@ -993,7 +1049,7 @@ export class HoleFeature {
           threadStart = Math.max(0, threadStart - axialBlend);
           threadLength = Math.max(0, threadLength + axialBlend);
           if (threadLength > 0) {
-            console.log('[HoleFeature] Generating thread:', {
+            holeDebugLog('[HoleFeature] Generating thread:', {
               mode: threadMode,
               length: threadLength,
               threadStart,
@@ -1004,12 +1060,11 @@ export class HoleFeature {
               pitch: threadGeom.pitch,
               isExternal: threadGeom.isExternal,
               radialOffset: threadRadialOffset,
-              segmentsPerTurn: threadSegmentsPerTurn,
             });
             // Scale the thread geometry to millimeters if needed
             let threadGeomScaled = threadGeom;
             if (threadUnitScale !== 1) {
-              console.log('[HoleFeature] Creating scaled thread geometry with scale factor', threadUnitScale);
+              holeDebugLog('[HoleFeature] Creating scaled thread geometry with scale factor', threadUnitScale);
               // Create a new ThreadGeometry with scaled dimensions
               threadGeomScaled = new ThreadGeometry({
                 standard: threadGeom.standard,
@@ -1020,8 +1075,8 @@ export class HoleFeature {
                 taperDirection: threadGeom.taperDirection,
               });
             }
-            // Extend one full pitch past both start and end to avoid flats for modeled threads only
-            const extraThreadLength = Math.max(0, threadGeomScaled.pitch || threadGeom.pitch || 0);
+            // Extend modeled cutters enough to avoid end flats without doubling boolean work.
+            const extraThreadLength = 0;
             const threadStartEffective = threadMode === 'MODELED'
               ? threadStart - extraThreadLength
               : threadStart;
@@ -1035,9 +1090,9 @@ export class HoleFeature {
               mode: threadMode === 'MODELED' ? 'modeled' : 'symbolic',
               radialOffset: threadRadialOffset,
               symbolicRadius: 'crest',
-              includeCore: false, // Core disabled - helical surface only for now
+              includeCore: false,
               resolution: res,
-              segmentsPerTurn: threadSegmentsPerTurn,
+              segmentsPerTurn: params.threadSegmentsPerTurn,
               name: `${holeFacePrefix}_THREAD`,
               faceName: threadCutFaceName,
               axis: [0, 1, 0],
@@ -1047,37 +1102,24 @@ export class HoleFeature {
             const canonicalCoreFaceName = `${holeFacePrefix}_THREAD_CORE`;
             if (threadMode === 'MODELED') {
               try {
-                modeledThreadPitch = Number(threadGeomScaled?.pitch || threadGeom?.pitch || 0);
-                modeledThreadFaceNames = [
-                  `${threadCutFaceName}:FLANK_A`,
-                  `${threadCutFaceName}:ROOT`,
-                  `${threadCutFaceName}:FLANK_B`,
-                  canonicalCoreFaceName,
-                ];
-                const mergeIntoCore = [
-                  `${threadCutFaceName}:CREST`,
-                  `${threadCutFaceName}:CAP_START`,
-                  `${threadCutFaceName}:CAP_END`,
-                ];
-                for (const fromName of mergeIntoCore) {
-                  threadSolid.renameFace(fromName, canonicalCoreFaceName);
-                }
                 if (descriptor) {
-                  threadSolid.setFaceMetadata(canonicalCoreFaceName, { hole: { ...descriptor } });
+                  const threadFaceNames = typeof threadSolid.getFaceNames === 'function' ? threadSolid.getFaceNames() : [];
+                  for (const faceName of threadFaceNames) {
+                    if (String(faceName || '').startsWith(threadCutFaceName)) {
+                      threadSolid.setFaceMetadata(faceName, { hole: { ...descriptor } });
+                    }
+                  }
                 }
               } catch {
                 /* best-effort */
               }
             }
-            console.log('[HoleFeature] Thread solid created:', {
+            holeDebugLog('[HoleFeature] Thread solid created:', {
               type: threadSolid?.constructor?.name,
-              hasGeometry: !!threadSolid?.geometry,
-              vertexCount: threadSolid?.geometry?.attributes?.position?.count,
-              triangleCount: threadSolid?.triangles?.length,
               faceCount: threadSolid?.faces?.size,
             });
             
-            // Add a core solid at the minor diameter so the threaded hole removes material fully.
+            // Symbolic threads still need a separate minor-diameter core cutter.
             const minorRadiusAt = (z) => {
               try {
                 const d = typeof threadGeomScaled.diametersAtZ === 'function'
@@ -1093,11 +1135,9 @@ export class HoleFeature {
             const coreR0 = minorRadiusAt(0);
             const coreR1 = minorRadiusAt(threadLengthEffective);
             const coreName = `${holeFacePrefix}_THREAD_CORE`;
-            const coreResolution = threadMode === 'MODELED'
-              ? Math.max(8, Math.min(res, threadSegmentsPerTurn * 2))
-              : res;
+            const coreResolution = res;
             const coreHeight = threadLengthEffective;
-            if (coreHeight > 0) {
+            if (coreHeight > 0 && threadMode !== 'MODELED') {
               const coreSolid = threadGeomScaled.isTapered && Math.abs(coreR0 - coreR1) > 1e-6
                 ? new BREP.Cone({
                   r1: coreR0,
@@ -1120,6 +1160,7 @@ export class HoleFeature {
               if (descriptor) {
                 try { coreSolid.setFaceMetadata(`${coreName}_S`, { hole: { ...descriptor } }); } catch { /* best-effort */ }
               }
+              coreSolid.userData = { ...(coreSolid.userData || {}), holeToolRole: 'core' };
               if (threadMode === 'MODELED') {
                 try {
                   const coreFaces = typeof coreSolid.getFaceNames === 'function' ? coreSolid.getFaceNames() : [];
@@ -1137,92 +1178,9 @@ export class HoleFeature {
               toolSolids.push(coreSolid);
             }
             
+            threadSolid.userData = { ...(threadSolid.userData || {}), holeToolRole: threadMode === 'MODELED' ? 'thread' : 'core' };
             toolSolids.push(threadSolid);
             
-            if (debugShowSolid) {
-              try {
-                console.log('[HoleFeature] Creating profile cross-section visualization using primitives...');
-                
-                // Get the profile points from the thread geometry
-                const crestR = threadGeomScaled.crestRadius;
-                const rootR = threadGeomScaled.rootRadius;
-                const pitch = threadGeomScaled.pitch;
-                const halfPitch = pitch / 2;
-                
-                console.log('[HoleFeature] Profile dimensions:', {
-                  crestR,
-                  rootR,
-                  pitch,
-                  halfPitch,
-                  depth: rootR - crestR,
-                });
-                
-                // Create small spheres at each corner of the profile to visualize it
-                const markerSize = Math.max(0.5, pitch * 0.2);
-                const vizCenterZ = threadLengthEffective + 5; // Place it above the thread
-                
-                // Profile corners in [R, Z] cylindrical coords (R=radial, Z=axial position in thread)
-                // We need to display this as a cross-section shape oriented perpendicular to hole axis
-                // Map: axial variation (Z in profile) -> X, radial distance (R) -> Y, depth -> Z
-                const profileCorners = [
-                  [-halfPitch, crestR, vizCenterZ],        // X=axial, Y=radial, Z=depth
-                  [-halfPitch * 0.3, rootR, vizCenterZ],
-                  [halfPitch * 0.3, rootR, vizCenterZ],
-                  [halfPitch, crestR, vizCenterZ],
-                ];
-                
-                // Create a marker at each corner - store separately for debug viz
-                for (let i = 0; i < profileCorners.length; i++) {
-                  const corner = profileCorners[i];
-                  const marker = new BREP.Sphere({
-                    radius: markerSize,
-                    resolution: 16,
-                    name: `PROFILE_MARKER_${featureID}_${idx}_${i}`,
-                  });
-                  marker.bakeTRS({
-                    position: corner,
-                    rotationEuler: [0, 0, 0],
-                    scale: [1, 1, 1],
-                  });
-                  debugVisualizationObjects.push(marker);
-                  console.log(`[HoleFeature] Added profile marker ${i} at`, corner);
-                }
-                
-                // Also create connecting cylinders to show the edges
-                for (let i = 0; i < profileCorners.length; i++) {
-                  const p1 = profileCorners[i];
-                  const p2 = profileCorners[(i + 1) % profileCorners.length];
-                  const dx = p2[0] - p1[0];
-                  const dy = p2[1] - p1[1];
-                  const dz = p2[2] - p1[2];
-                  const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
-                  
-                  if (length > 0.01) {
-                    const edge = new BREP.Cylinder({
-                      radius: markerSize * 0.3,
-                      height: length,
-                      resolution: 12,
-                      name: `PROFILE_EDGE_${featureID}_${idx}_${i}`,
-                    });
-                    
-                    // Position and orient the cylinder to connect the points
-                    const midpoint = [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2, (p1[2] + p2[2]) / 2];
-                    const angleY = Math.atan2(dx, dy);
-                    const angleX = Math.atan2(Math.sqrt(dx * dx + dz * dz), dy);
-                    
-                    edge.bakeTRS({
-                      position: midpoint,
-                      rotationEuler: [angleX * 180 / Math.PI, 0, angleY * 180 / Math.PI],
-                      scale: [1, 1, 1],
-                    });
-                    debugVisualizationObjects.push(edge);
-                  }
-                }
-                
-              } catch (err) {
-                console.warn('[HoleFeature] Profile visualization creation failed:', err);
-              }
-            }
             if (descriptor) {
               descriptor.thread = {
                 standard: threadStandard,
@@ -1244,67 +1202,68 @@ export class HoleFeature {
         holeRecords.push({ ...descriptor });
       }
 
-      console.log('[HoleFeature] Unioning', toolSolids.length, 'solids for hole tool');
-      console.log('[HoleFeature] Unioning', toolSolids.length, 'solids for hole tool');
-      const tool = unionSolids(toolSolids);
-      if (!tool) return;
-      if (threadMode === 'MODELED' && modeledThreadFaceNames?.length) {
-        try {
-          const cleanupSummary = cleanupModeledThreadFaceIslands(tool, modeledThreadFaceNames, modeledThreadPitch);
-          if (cleanupSummary) {
-            console.log('[HoleFeature] Modeled thread face cleanup summary:', cleanupSummary);
-          }
-        } catch (cleanupErr) {
-          console.warn('[HoleFeature] Modeled thread face island cleanup failed:', cleanupErr);
-        }
-      }
-      if (debugShowSolid) {
-        try {
-          tool.visualize();
-        } catch (err) {
-          console.warn('[HoleFeature] Debug visualize failed:', err);
-        }
-      }
+      holeDebugLog('[HoleFeature] Preparing', toolSolids.length, 'tool solids for hole');
       const basis = buildBasisFromNormal(normal);
       basis.setPosition(originPos);
-      try { tool.bakeTransform(basis); }
-      catch (error) { console.warn('[HoleFeature] Failed to transform tool:', error); }
+      for (const solid of toolSolids) {
+        try { solid.bakeTransform(basis); }
+        catch (error) { console.warn('[HoleFeature] Failed to transform tool solid:', error); }
+      }
       // add centerline for PMI/visualization
       const totalDepth = descriptor?.totalDepth || straightDepth || 1;
       const start = originPos;
       const end = start.clone().add(normal.clone().multiplyScalar(totalDepth));
       try {
-        tool.addCenterline([start.x, start.y, start.z], [end.x, end.y, end.z], featureID ? `${featureID}_AXIS_${idx}` : `HOLE_AXIS_${idx}`, { materialKey: 'OVERLAY' });
+        toolSolids[0]?.addCenterline?.([start.x, start.y, start.z], [end.x, end.y, end.z], featureID ? `${featureID}_AXIS_${idx}` : `HOLE_AXIS_${idx}`, { materialKey: 'OVERLAY' });
       } catch { /* best-effort */ }
-      tools.push(tool);
+      if (debugShowSolid) {
+        try {
+          const tool = unionSolids(toolSolids);
+          if (!tool) return;
+          const debugTool = typeof tool.clone === 'function' ? tool.clone() : tool;
+          debugTool.name = `${holeFacePrefix}_DEBUG_TOOL`;
+          debugTool.userData = {
+            ...(debugTool.userData || {}),
+            isDebugVisualization: true,
+            isHoleDebugTool: true,
+            sourceHoleName: holeFacePrefix,
+          };
+          debugToolSolids.push(debugTool);
+        } catch (err) {
+          console.warn('[HoleFeature] Failed to create debug tool solid:', err);
+        }
+      }
+      for (const solid of toolSolids.filter(Boolean)) {
+        tools.push(solid);
+        const role = String(solid?.userData?.holeToolRole || '').toLowerCase();
+        if (role === 'core') coreTools.push(solid);
+        else if (role === 'thread') threadTools.push(solid);
+        else otherTools.push(solid);
+      }
     });
 
     if (!tools.length) throw new Error('HoleFeature could not build cutting tool geometry.');
-    const combinedTool = tools.length === 1 ? tools[0] : unionSolids(tools);
-
-    const effects = await BREP.applyBooleanOperation(partHistory || {}, combinedTool, booleanParam, featureID);
+    const useSequentialSubtract = threadTools.length > 0;
+    const subtractTools = useSequentialSubtract
+      ? [...otherTools, ...threadTools, ...coreTools]
+      : tools;
+    const effects = String(booleanParam?.operation || '').toUpperCase() === 'SUBTRACT'
+      ? (useSequentialSubtract
+        ? await subtractHoleToolsSequentially(partHistory || {}, subtractTools, booleanParam, featureID)
+        : await subtractHoleToolGroupsTogether(partHistory || {}, [otherTools, coreTools, threadTools], booleanParam, featureID))
+      : await BREP.applyBooleanOperation(
+        partHistory || {},
+        tools.length === 1 ? tools[0] : unionSolids(tools),
+        booleanParam,
+        featureID,
+      );
     try { this.persistentData.holes = holeRecords; } catch { }
-    
-    // Add debug visualization objects to the effects if they exist
-    if (debugShowSolid && debugVisualizationObjects.length > 0) {
-      console.log('[HoleFeature] Adding', debugVisualizationObjects.length, 'debug visualization objects to scene');
-      if (!effects.additions) effects.additions = [];
-      
-      // Convert each solid to a mesh and add to additions
-      for (const vizObj of debugVisualizationObjects) {
-        try {
-          // Convert to mesh and add type/name metadata
-          const mesh = vizObj.toMesh ? vizObj.toMesh() : vizObj;
-          mesh.type = 'DEBUG_VIZ';
-          mesh.name = vizObj.name || 'DEBUG_VIZ';
-          mesh.userData = mesh.userData || {};
-          mesh.userData.isDebugVisualization = true;
-          effects.additions.push(mesh);
-          console.log('[HoleFeature] Added debug viz:', mesh.name, 'to scene');
-        } catch (err) {
-          console.warn('[HoleFeature] Failed to convert debug viz to mesh:', err);
-        }
-      }
+
+    if (debugShowSolid && debugToolSolids.length > 0) {
+      effects.added = [
+        ...(Array.isArray(effects.added) ? effects.added : []),
+        ...debugToolSolids,
+      ];
     }
     
     return effects;

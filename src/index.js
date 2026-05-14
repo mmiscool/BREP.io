@@ -2,7 +2,6 @@
 // Expose the core BREP kernel and part history classes
 
 export { BREP } from './BREP/BREP.js';
-export { CppSolidCore } from './BREP/CppSolidCore.js';
 
 // Part history API
 export { PartHistory, extractDefaultValues } from './PartHistory.js';
@@ -25,4 +24,3 @@ export { sketchToSVG, sketchToSVGPaths, sketchToDXF, sketchTo3DPolylines } from 
 
 // Full CAD app embed (iframe-based)
 export { CadEmbed, CADEmbed, bootCadFrame, bootCADFrame } from './UI/cad/CadEmbed.js';
-export { manifoldPlusSum } from './BREP/setupManifold.js';

@@ -9,13 +9,6 @@ import {
     test_boolean_operation_target_name_preserved,
 } from './test_boolean_operation_target_name.js';
 import { test_boolean_face_metadata_preserved } from './test_boolean_face_metadata_preserved.js';
-import {
-    test_boolean_overlap_conditioning_subtract_expands_tool_entry_cap_outward,
-    test_boolean_overlap_conditioning_subtract_can_be_disabled,
-    test_boolean_overlap_conditioning_subtract_enabled_by_default,
-    test_boolean_overlap_conditioning_union_can_be_disabled,
-    test_boolean_overlap_conditioning_union_enabled_by_default,
-} from './test_boolean_overlap_conditioning.js';
 import { test_Chamfer } from './test_chamfer.js';
 import {
     test_cppChamfer_auto_direction_uses_native_classifier,
@@ -26,13 +19,6 @@ import {
     test_cppChamfer_single_edge_builds_native_named_tool_and_result,
     test_cppChamfer_stabilizes_tiny_terminal_segments_before_offsetting,
 } from './test_cppChamfer.js';
-import {
-    test_edge_smooth_constraints_prevent_triangle_foldback,
-    test_edge_smooth_curve_fit,
-    test_edge_smooth_curve_fit_closed_loop,
-    test_edge_smooth_face_selection,
-    test_edge_smooth_whole_solid_selection,
-} from './test_edge_smooth_curve_fit.js';
 import {
     afterRun_extrude_negative_distance_cap_alignment,
     test_extrude_negative_distance_cap_alignment,
@@ -105,11 +91,13 @@ import {
     afterRun_hole_counterbore,
     afterRun_hole_countersink,
     afterRun_hole_thread_modeled,
+    afterRun_hole_thread_modeled_point_thread_face_reference,
     afterRun_hole_thread_symbolic,
     afterRun_hole_through,
     test_hole_counterbore,
     test_hole_countersink,
     test_hole_thread_modeled,
+    test_hole_thread_modeled_point_thread_face_reference,
     test_hole_thread_symbolic,
     test_hole_through,
 } from './test_hole.js';
@@ -321,7 +309,6 @@ import {
 import { test_thicken_feature_is_available_in_modeling_and_surfacing_workbenches } from './test_workbenchFeatureVisibility.js';
 import { test_sketch_feature_scene_visibility } from './test_sketchFeatureVisibility.js';
 import { test_revolve_feature_resolves_face_and_edge_string_references } from './test_revolveFeature.js';
-import { test_remesh_simplify_welds_by_tolerance_before_simplify } from './test_remeshFeature.js';
 import { test_revolve_after_union_preserves_face_reference_resolution } from './test_revolve_after_union_face_reference.js';
 import {
     afterRun_primitive_boolean_union_preserves_face_grouping,
@@ -346,7 +333,6 @@ export const testFunctions = [
     { test: test_cppSolidBakeTransform_updates_solid_authoring_state, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidMirror_preserves_face_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_revolve_feature_resolves_face_and_edge_string_references, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_remesh_simplify_welds_by_tolerance_before_simplify, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_revolve_after_union_preserves_face_reference_resolution, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_setEpsilon_welds_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_setEpsilon_merges_cell_boundary_pair_and_rebuilds_manifold, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -712,11 +698,6 @@ export const testFunctions = [
     { test: test_cppChamfer_projects_open_end_caps_back_to_endpoint_plane, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppChamfer_debug_emits_cross_section_face_per_sample, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppChamfer_debug_sections_materialize_as_sketch_profiles, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_edge_smooth_curve_fit, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_edge_smooth_curve_fit_closed_loop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_edge_smooth_constraints_prevent_triangle_foldback, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_edge_smooth_whole_solid_selection, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_edge_smooth_face_selection, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_smooth_with_subdivision_replaces_source_solid, afterRun: afterRun_smooth_with_subdivision_replaces_source_solid, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_smooth_with_subdivision_preserves_centered_ring_symmetry, afterRun: afterRun_smooth_with_subdivision_preserves_centered_ring_symmetry, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_smooth_with_subdivision_preserves_mirrored_union_symmetry, afterRun: afterRun_smooth_with_subdivision_preserves_mirrored_union_symmetry, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -725,6 +706,7 @@ export const testFunctions = [
     { test: test_hole_counterbore, afterRun: afterRun_hole_counterbore, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_thread_symbolic, afterRun: afterRun_hole_thread_symbolic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_thread_modeled, afterRun: afterRun_hole_thread_modeled, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_hole_thread_modeled_point_thread_face_reference, afterRun: afterRun_hole_thread_modeled_point_thread_face_reference, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_mirror, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_history_features_basic, afterRun: afterRun_history_features_basic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_history_expand_does_not_dirty, afterRun: afterRun_history_expand_does_not_dirty, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -732,11 +714,6 @@ export const testFunctions = [
     { test: test_solid_overlap_diagnostics_detects_coplanar_overlap, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_solid_overlap_diagnostics_ignores_boundary_touching_faces, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_solid_overlap_diagnostics_detects_cross_solid_overlap, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_boolean_overlap_conditioning_union_enabled_by_default, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_boolean_overlap_conditioning_union_can_be_disabled, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_boolean_overlap_conditioning_subtract_enabled_by_default, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_boolean_overlap_conditioning_subtract_expands_tool_entry_cap_outward, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_boolean_overlap_conditioning_subtract_can_be_disabled, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_visibility_hidden_state_persistence, afterRun: afterRun_visibility_hidden_state_persistence, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_feature_scene_visibility, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_textToFace, afterRun: afterRun_textToFace, printArtifacts: false, exportFaces: true, exportSolids: false, resetHistory: true },

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Solid } from './BetterSolid.js';
 import { getEdgePolylineWorld } from './edgePolylineUtils.js';
-import { makeExtrusion, setOccState } from './OpenCascadeKernel.js';
+import { makeExtrusion, makePathSweep, setOccState } from './OpenCascadeKernel.js';
 
 export function computeBoundaryLoopsFromFaceNative(faceObj) {
   const loops = [];
@@ -543,7 +543,31 @@ export function generateNativeSweep(target, params = {}) {
     return true;
   }
 
-  throw new Error('OpenCASCADE path sweep is not implemented yet; legacy Manifold sweep fallback has been removed.');
+  if (pathPoints.length) {
+    const occState = makePathSweep({
+      boundaryLoops,
+      edgeInputs,
+      faceName: face?.name || 'Face',
+      name,
+      normal: [faceNormal.x, faceNormal.y, faceNormal.z],
+      pathPoints,
+      mode: mode === 'pathAlign' ? 'pathAlign' : 'translate',
+      omitBaseCap,
+      twistAngle: Number(twistAngle) || 0,
+    });
+    setOccState(target, occState);
+    try { target.name = name || 'Sweep'; } catch {}
+    try {
+      target.addAuxEdge(`${name || 'Sweep'}_PATH`, pathPoints.map((p) => [p[0], p[1], p[2]]), {
+        polylineWorld: true,
+        materialKey: 'OVERLAY',
+        centerline: true,
+      });
+    } catch { /* optional path overlay */ }
+    return true;
+  }
+
+  throw new Error('OpenCASCADE sweep requires either a straight extrusion distance or a path edge.');
 }
 
 export class Sweep extends Solid {

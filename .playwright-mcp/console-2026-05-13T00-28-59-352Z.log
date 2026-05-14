@@ -1,0 +1,3 @@
+[ 6326155ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5174/src/BREP/faceThicken.js?t=1778638464606:0
+[ 7584527ms] The requested module '/src/BREP/OpenCascadeKernel.js?t=1778639722592' does not provide an export named 'getOccVisualizationQuality'
+[ 7587738ms] The requested module '/src/BREP/OpenCascadeKernel.js?t=1778639722592' does not provide an export named 'getOccVisualizationQuality'
