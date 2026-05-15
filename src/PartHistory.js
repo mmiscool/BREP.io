@@ -1106,13 +1106,184 @@ export class PartHistory {
     return { added, removed };
   }
 
+  #isActiveDialogFeature(featureID) {
+    if (featureID == null || this.currentHistoryStepId == null) return false;
+    return String(this.currentHistoryStepId) === String(featureID);
+  }
+
+  #isObjectInSceneGraph(obj) {
+    if (!obj || !this.scene) return false;
+    let current = obj;
+    while (current) {
+      if (current === this.scene) return true;
+      current = current.parent || null;
+    }
+    return false;
+  }
+
+  #makePreviewMaterial(material, opacity = 0.28, target = null) {
+    if (!material) return material;
+    if (Array.isArray(material)) return material.map((mat) => this.#makePreviewMaterial(mat, opacity, target));
+    let clone = material;
+    try {
+      if (material && typeof material.clone === 'function') clone = material.clone();
+    } catch {
+      clone = material;
+    }
+    try {
+      if (clone && typeof clone === 'object') {
+        const type = String(target?.type || '').toUpperCase();
+        const isEdgeLike = type.includes('EDGE') || type.includes('LINE');
+        const isPointLike = type.includes('VERTEX') || type.includes('POINT');
+        clone.transparent = true;
+        clone.opacity = isEdgeLike || isPointLike ? Math.max(0.78, opacity) : opacity;
+        clone.depthWrite = false;
+        clone.depthTest = false;
+        clone.polygonOffset = true;
+        clone.polygonOffsetFactor = -1;
+        clone.polygonOffsetUnits = -1;
+        clone.side = THREE.DoubleSide;
+        if (clone.color && typeof clone.color.set === 'function' && (isEdgeLike || isPointLike)) {
+          clone.color.set('#9fe7ff');
+        }
+        if (typeof clone.linewidth === 'number') clone.linewidth = Math.max(clone.linewidth, 3);
+        clone.needsUpdate = true;
+      }
+    } catch { /* ignore material preview failures */ }
+    return clone;
+  }
+
+  #setPreviewBaseMaterial(target, material) {
+    if (!target || !material) return;
+    try { target.material = material; } catch { }
+    try {
+      target.userData = target.userData || {};
+      target.userData.__baseMaterial = material;
+      target.userData.__defaultMaterial = material;
+      delete target.userData.__selectedMat;
+      delete target.userData.__selectedMatBase;
+      delete target.userData.__selectedColor;
+      delete target.userData.__hoverMatApplied;
+      delete target.userData.__hoverOrigMat;
+      delete target.userData.__hoverMat;
+    } catch { /* ignore selection material cache failures */ }
+  }
+
+  #markScenePreviewObject(obj, featureID, role = 'preview', { selectable = false } = {}) {
+    if (!obj || typeof obj !== 'object') return;
+    const normalizedFeatureId = featureID == null ? null : String(featureID);
+    const markOne = (target) => {
+      if (!target || typeof target !== 'object') return;
+      try {
+        target.userData = target.userData || {};
+        if (selectable) {
+          delete target.userData.excludeFromSelection;
+        } else {
+          target.userData.excludeFromSelection = true;
+        }
+        target.userData.featureDialogPreview = true;
+        target.userData.featureDialogPreviewRole = role;
+        if (normalizedFeatureId) target.userData.previewFeatureID = normalizedFeatureId;
+      } catch { /* ignore metadata failures */ }
+      if (!selectable) {
+        try { target.selected = false; } catch { }
+        try { target.hovered = false; } catch { }
+      }
+      if (role === 'removed') {
+        try { target.renderOrder = 10080; } catch { }
+      }
+    };
+    try {
+      if (typeof obj.traverse === 'function') obj.traverse(markOne);
+      else markOne(obj);
+    } catch {
+      markOne(obj);
+    }
+  }
+
+  #clearScenePreviewObject(obj) {
+    if (!obj || typeof obj !== 'object') return;
+    const clearOne = (target) => {
+      if (!target || typeof target !== 'object') return;
+      let wasPreview = false;
+      try {
+        const ud = target.userData || null;
+        if (ud) {
+          wasPreview = !!ud.featureDialogPreview;
+          delete ud.excludeFromSelection;
+          delete ud.featureDialogPreview;
+          delete ud.featureDialogPreviewRole;
+          delete ud.previewFeatureID;
+        }
+      } catch { /* ignore metadata cleanup failures */ }
+      if (wasPreview) {
+        try {
+          const ownRaycast = Object.prototype.hasOwnProperty.call(target, 'raycast');
+          if (ownRaycast) delete target.raycast;
+        } catch { /* ignore raycast cleanup failures */ }
+      }
+    };
+    try {
+      if (typeof obj.traverse === 'function') obj.traverse(clearOne);
+      else clearOne(obj);
+    } catch {
+      clearOne(obj);
+    }
+  }
+
+  async #createRemovalPreviewObject(obj, featureID) {
+    if (!obj || !this.#isObjectInSceneGraph(obj)) return null;
+    try {
+      obj.updateMatrixWorld?.(true);
+    } catch { /* ignore matrix refresh failures */ }
+    try {
+      const hasDrawableChildren = Array.isArray(obj.children) && obj.children.some((child) => (
+        child?.isObject3D && (child.geometry || child.material || child.type === 'FACE' || child.type === 'EDGE')
+      ));
+      if (!hasDrawableChildren && typeof obj.visualize === 'function') {
+        await obj.visualize();
+      }
+    } catch { /* keep whatever visualization already exists */ }
+
+    try {
+      obj.traverse?.((node) => {
+        if (!node || typeof node !== 'object') return;
+        if (node.material) {
+          const previewMaterial = this.#makePreviewMaterial(node.material, 0.24, node);
+          this.#setPreviewBaseMaterial(node, previewMaterial);
+        }
+      });
+      this.#markScenePreviewObject(obj, featureID, 'removed', { selectable: true });
+    } catch {
+      this.#markScenePreviewObject(obj, featureID, 'removed', { selectable: true });
+    }
+    try { SelectionFilter.ensureSelectionHandlers(obj, { deep: true }); } catch { }
+    try {
+      obj.traverse?.((node) => {
+        if (!node || typeof node !== 'object') return;
+        if (node.__selectionState) node.__selectionState.selected = false;
+        if (node.__selectionState) node.__selectionState.hovered = false;
+        if (typeof node.selected !== 'undefined') node.selected = false;
+        if (typeof node.hovered !== 'undefined') node.hovered = false;
+      });
+    } catch { /* ignore selection reset failures */ }
+    try { obj.renderOrder = 10080; } catch { }
+    return obj;
+  }
+
 
   async applyFeatureEffects(effects, featureID, feature) {
     if (!effects || typeof effects !== 'object') return;
     const added = Array.isArray(effects.added) ? effects.added : [];
     const removed = Array.isArray(effects.removed) ? effects.removed : [];
+    const activeDialogFeature = this.#isActiveDialogFeature(featureID);
+    const removalPreviews = [];
 
     for (const r of removed) {
+      if (activeDialogFeature) {
+        const ghost = await this.#createRemovalPreviewObject(r, featureID);
+        if (ghost) removalPreviews.push(ghost);
+      }
       await this._safeRemove(r);
     }
 
@@ -1123,6 +1294,12 @@ export class PartHistory {
         // Free first to force rebuild from latest arrays, then visualize
         try { await a.free(); } catch { }
         try { await a.visualize(); } catch { }
+        if (activeDialogFeature) {
+          try { this.#markScenePreviewObject(a, featureID, 'added'); } catch { }
+        } else {
+          try { this.#clearScenePreviewObject(a); } catch { }
+        }
+        try { SelectionFilter.ensureSelectionHandlers(a, { deep: true }); } catch { }
         await this.scene.add(a);
         // make sure the flag for removal is cleared
         try { a.__removeFlag = false; } catch { }
@@ -1148,9 +1325,17 @@ export class PartHistory {
       }
     }
 
+    if (activeDialogFeature && removalPreviews.length) {
+      for (const ghost of removalPreviews) {
+        try { await this.scene.add(ghost); } catch { /* ignore preview add failures */ }
+      }
+    }
+
     // apply the featureID to all added/removed items for traceability
     try { for (const obj of added) { if (obj) obj.owningFeatureID = featureID; } } catch { }
-    try { for (const obj of removed) { if (obj) obj.owningFeatureID = featureID; } } catch { }
+    if (!activeDialogFeature) {
+      try { for (const obj of removed) { if (obj) obj.owningFeatureID = featureID; } } catch { }
+    }
 
 
   }

@@ -10,11 +10,11 @@ import {
     tessellateOccState,
 } from "../OpenCascadeKernel.js";
 
-/** Return the underlying MeshGL (fresh from Manifold so it reflects any CSG). */
-export function getMesh() {
+/** Return a tessellated mesh snapshot of the OCCT-backed solid. */
+export function getMesh(options = {}) {
     if (hasOccShape(this)) {
         this._occ.faceNameToID = this._faceNameToID;
-        return tessellateOccState(this._occ);
+        return tessellateOccState(this._occ, options);
     }
     throw new Error("Solid.getMesh() requires an OpenCASCADE-backed solid.");
 }

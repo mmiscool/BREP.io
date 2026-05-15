@@ -1,7 +1,6 @@
 import { fs } from "../fs.proxy.js";
 import { CppSolidCore } from "../BREP/CppSolidCore.js";
-import { ManifoldMesh } from "../BREP/SolidShared.js";
-import { manifoldBuildSource } from "../BREP/setupManifold.js";
+import { ManifoldMesh, manifoldBuildSource } from "../BREP/setupManifold.js";
 
 const MEDIUM_FILLET_PART_PATH = "src/tests/partFiles/medium_fillets.BREP.json";
 

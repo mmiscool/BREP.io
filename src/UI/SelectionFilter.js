@@ -64,6 +64,15 @@ export class SelectionFilter {
 
     static get TYPES() { return [this.SOLID, this.COMPONENT, this.FACE, this.PLANE, this.SKETCH, this.DATUM, this.HELIX, this.EDGE, this.LOOP, this.VERTEX, this.ALL]; }
 
+    static isSelectionExcluded(obj) {
+        let current = obj || null;
+        while (current) {
+            if (current?.userData?.excludeFromSelection || current?.userData?.refPreview) return true;
+            current = current.parent || null;
+        }
+        return false;
+    }
+
     // Convenience: return the list of selectable types for the dropdown (excludes ALL)
     static getAvailableTypes() {
         if (SelectionFilter.allowedSelectionTypes === SelectionFilter.ALL) {
@@ -256,6 +265,7 @@ export class SelectionFilter {
         let changed = false;
         const attach = (target) => {
             if (!target || typeof target !== 'object') return;
+            if (SelectionFilter.isSelectionExcluded(target)) return;
             SelectionState.attach(target);
             SelectionFilter._installOnClickWatcher(target);
             if (typeof target.onClick === 'function') return;
@@ -372,6 +382,7 @@ export class SelectionFilter {
         const keyFor = (obj) => obj?.uuid || obj?.id || obj?.name || obj;
         for (const obj of list) {
             if (!obj) continue;
+            if (SelectionFilter.isSelectionExcluded(obj)) continue;
             const key = keyFor(obj);
             if (seen.has(key)) continue;
             seen.add(key);

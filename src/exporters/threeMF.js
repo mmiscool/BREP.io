@@ -5,6 +5,19 @@
 
 import JSZip from 'jszip';
 
+const DEFAULT_EXPORT_MESH_OPTIONS = Object.freeze({
+  deflection: 0.03,
+  angle: 0.12,
+});
+
+function _resolveMeshOptions(opts = {}) {
+  const source = opts.meshOptions && typeof opts.meshOptions === 'object' ? opts.meshOptions : {};
+  const out = { ...DEFAULT_EXPORT_MESH_OPTIONS };
+  if (Number.isFinite(source.deflection) && source.deflection > 0) out.deflection = source.deflection;
+  if (Number.isFinite(source.angle) && source.angle > 0) out.angle = source.angle;
+  return out;
+}
+
 function _parseDataUrl(dataUrl) {
   try {
     if (typeof dataUrl !== 'string') return null;
@@ -362,7 +375,7 @@ export function computeTriangleMaterialIndices(solid, mesh, opts = {}) {
 /**
  * Build the core 3MF model XML for one or more solids.
  * @param {Array} solids Array of SOLID-like objects that expose getMesh() and name.
- * @param {{unit?: 'millimeter'|'inch'|'foot'|'meter'|'centimeter'|'micron', precision?: number, scale?: number, metadataManager?: any, useMetadataColors?: boolean, includeFaceTags?: boolean, applyWorldTransform?: boolean, defaultFaceColor?: any}} opts
+ * @param {{unit?: 'millimeter'|'inch'|'foot'|'meter'|'centimeter'|'micron', precision?: number, scale?: number, metadataManager?: any, useMetadataColors?: boolean, includeFaceTags?: boolean, applyWorldTransform?: boolean, defaultFaceColor?: any, meshOptions?: {deflection?: number, angle?: number}}} opts
  * @returns {string}
  */
 export function build3MFModelXML(solids, opts = {}) {
@@ -373,6 +386,7 @@ export function build3MFModelXML(solids, opts = {}) {
   const includeFaceTags = opts.includeFaceTags !== false; // default on
   const useMetadataColors = opts.useMetadataColors !== false;
   const applyWorldTransform = opts.applyWorldTransform !== false;
+  const meshOptions = _resolveMeshOptions(opts);
 
   const lines = [];
   lines.push('<?xml version="1.0" encoding="UTF-8"?>');
@@ -392,7 +406,7 @@ export function build3MFModelXML(solids, opts = {}) {
   let solidIdx = 0;
   for (const s of (solids || [])) {
     if (!s || typeof s.getMesh !== 'function') continue;
-    const mesh = s.getMesh();
+    const mesh = s.getMesh(meshOptions);
     try {
     if (!mesh || !mesh.vertProperties || !mesh.triVerts) continue;
     const rawName = s.name || `solid_${solidIdx + 1}`;
@@ -677,7 +691,7 @@ function rootRelsXML({ thumbnailPath, viewImages, attachments } = {}) {
 /**
  * Generate a 3MF zip archive as Uint8Array.
  * @param {Array} solids Array of SOLID-like objects that expose getMesh() and name.
- * @param {{unit?: string, precision?: number, scale?: number, metadataManager?: any, useMetadataColors?: boolean, includeFaceTags?: boolean, applyWorldTransform?: boolean, defaultFaceColor?: any}} opts
+ * @param {{unit?: string, precision?: number, scale?: number, metadataManager?: any, useMetadataColors?: boolean, includeFaceTags?: boolean, applyWorldTransform?: boolean, defaultFaceColor?: any, meshOptions?: {deflection?: number, angle?: number}}} opts
  * @returns {Promise<Uint8Array>}
  */
 export async function generate3MF(solids, opts = {}) {

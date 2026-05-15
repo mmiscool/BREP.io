@@ -3633,6 +3633,7 @@ export class Viewer {
 
     _mapIntersectionToTarget(intersection, options = {}) {
         if (!intersection || !intersection.object) return null;
+        if (typeof SelectionFilter.isSelectionExcluded === 'function' && SelectionFilter.isSelectionExcluded(intersection.object)) return null;
         const { allowAnyAllowedType = false, ignoreSelectionFilter = false } = options;
         const isAllowed = (type) => {
             if (!type) return false;
@@ -3657,6 +3658,7 @@ export class Viewer {
         while (target && typeof target.onClick !== 'function' && target.visible) target = target.parent;
         if (!target) target = obj;
         if (!target) return null;
+        if (typeof SelectionFilter.isSelectionExcluded === 'function' && SelectionFilter.isSelectionExcluded(target)) return null;
 
         // Respect selection filter: ensure target is a permitted type, or ALL
         if (typeof isAllowed === 'function') {
