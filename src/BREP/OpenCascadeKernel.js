@@ -396,22 +396,16 @@ function makeWireFromSketchLoop(loop, edgeInputs, normal) {
 }
 
 function makeFaceFromOuterAndHoleWires(outerWire, holeWires, plane = null) {
-  const attempts = [true, false];
-  for (const reverseHoles of attempts) {
-    try {
-      const maker = plane
-        ? new oc.BRepBuilderAPI_MakeFace_16(plane, outerWire, true)
-        : new oc.BRepBuilderAPI_MakeFace_15(outerWire, true);
-      for (const wire of holeWires || []) {
-        maker.Add(reverseHoles ? reverseWire(wire) : wire);
-      }
-      if (typeof maker.IsDone === "function" && !maker.IsDone()) continue;
-      return oc.TopoDS.Face_1(maker.Shape());
-    } catch {
-      // Try the other orientation.
-    }
+  try {
+    const maker = plane
+      ? new oc.BRepBuilderAPI_MakeFace_16(plane, outerWire, true)
+      : new oc.BRepBuilderAPI_MakeFace_15(outerWire, true);
+    for (const wire of holeWires || []) maker.Add(wire);
+    if (typeof maker.IsDone === "function" && !maker.IsDone()) return null;
+    return oc.TopoDS.Face_1(maker.Shape());
+  } catch {
+    return null;
   }
-  return null;
 }
 
 function makeAnalyticFaceFromBoundaryLoops(loops, edgeInputs, normal) {
@@ -445,7 +439,7 @@ function makeAnalyticFaceFromBoundaryLoops(loops, edgeInputs, normal) {
       : (loop.segmentIds.length ? makeWireFromSketchLoop(loop, edgeInputs, normal) : makePolygonWire(loop.pts));
     if (!wire) return null;
     if (holeCircle) used.add(holeCircle);
-    holeWires.push(wire);
+    holeWires.push(holeCircle ? reverseWire(wire) : wire);
   }
   return makeFaceFromOuterAndHoleWires(outerWire, holeWires, makePlaneFromLoop(outerLoops[0], normal));
 }
@@ -458,10 +452,6 @@ function makeFaceFromBoundaryLoops(loops, edgeInputs = [], normal = [0, 0, 1]) {
     analytic = null;
   }
   if (analytic) return analytic;
-  const requiresAnalyticSketch = (loops || []).some((loop) => Array.isArray(loop?.segmentIds) && loop.segmentIds.length);
-  if (requiresAnalyticSketch) {
-    throw new Error("OpenCASCADE sketch face construction failed for authored curve geometry.");
-  }
   const normalized = (loops || [])
     .map((loop) => ({
       pts: Array.isArray(loop?.pts) ? loop.pts : loop,
@@ -469,6 +459,10 @@ function makeFaceFromBoundaryLoops(loops, edgeInputs = [], normal = [0, 0, 1]) {
       segmentIds: Array.isArray(loop?.segmentIds) ? loop.segmentIds.slice() : [],
     }))
     .filter((loop) => Array.isArray(loop.pts) && loop.pts.length >= 3);
+  const requiresAnalyticSketch = normalized.some((loop) => Array.isArray(loop?.segmentIds) && loop.segmentIds.length);
+  if (requiresAnalyticSketch) {
+    throw new Error("OpenCASCADE sketch face construction failed for authored curve geometry.");
+  }
   const outer = normalized.find((loop) => !loop.isHole) || normalized[0];
   if (!outer) throw new Error("OpenCASCADE extrusion requires at least one closed boundary loop.");
   const plane = makePlaneFromLoop(outer, normal);

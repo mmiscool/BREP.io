@@ -40,6 +40,10 @@ import {
     test_sketch_profile_tolerant_loop_join,
 } from './test_sketch_profile_tolerant_loop_join.js';
 import {
+    afterRun_sketch_inner_loop_extrude_repro_20260515,
+    test_sketch_inner_loop_extrude_repro_20260515,
+} from './test_sketch_inner_loop_extrude.js';
+import {
     afterRun_fillet_compound_snapshot_resolution,
     test_fillet_compound_snapshot_resolution,
 } from './test_fillet_compound_snapshot_resolution.js';
@@ -587,6 +591,14 @@ export const testFunctions = [
     {
         test: test_sketch_profile_tolerant_loop_join,
         afterRun: afterRun_sketch_profile_tolerant_loop_join,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_sketch_inner_loop_extrude_repro_20260515,
+        afterRun: afterRun_sketch_inner_loop_extrude_repro_20260515,
         printArtifacts: false,
         exportFaces: false,
         exportSolids: false,
