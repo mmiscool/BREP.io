@@ -760,7 +760,32 @@ function mergeCoplanarAdjacentFilletEndCaps(solid, opts = {}) {
       if (!target?.faceName) continue;
 
       const targetMetadata = cloneFaceMetadataObject(core.getFaceMetadata(target.faceName) || {});
-      if (!core.renameFace(endCapFaceName, target.faceName)) continue;
+      console.log('[Solid.fillet] Renaming fillet face.', {
+        featureID,
+        operation: 'merge coplanar end cap',
+        fromFaceName: endCapFaceName,
+        toFaceName: target.faceName,
+        sharedLength: target.sharedLength,
+        area: target.area,
+        distanceTolerance,
+        planarityTolerance,
+        normalTolerance,
+      });
+      if (!core.renameFace(endCapFaceName, target.faceName)) {
+        console.log('[Solid.fillet] Fillet face rename failed.', {
+          featureID,
+          operation: 'merge coplanar end cap',
+          fromFaceName: endCapFaceName,
+          toFaceName: target.faceName,
+        });
+        continue;
+      }
+      console.log('[Solid.fillet] Fillet face rename succeeded.', {
+        featureID,
+        operation: 'merge coplanar end cap',
+        fromFaceName: endCapFaceName,
+        toFaceName: target.faceName,
+      });
       core.setFaceMetadata(target.faceName, targetMetadata);
       syncSolidAuthoringStateFromCpp(solid, core);
       solid._dirty = true;
@@ -1439,6 +1464,7 @@ export { collapseFilletSideWallFaces as __testOnlyCollapseFilletSideWallFaces };
  * @param {number} [opts.resolution=32] Tube resolution (segments around circumference)
  * @param {number} [opts.cleanupTinyFaceIslandsArea=0.01] area threshold for reassigning tiny enclosed face-label islands (<= 0 disables)
  * @param {boolean} [opts.mergeCoplanarEndCaps=true] merge coplanar fillet end caps into adjacent host faces
+ * @param {boolean} [opts.renameFaces=true] allow fillet cleanup to rename/relabel generated faces
  * @param {boolean} [opts.reassignSliverTriangles=true] reassign tiny fillet sidewall sliver triangles into planar neighbors
  * @param {boolean} [opts.collapseFilletSideWalls=false] collapse deterministic fillet side-wall faces so adjacent faces meet directly
  * @param {boolean} [opts.debug=false] Enable debug visuals in fillet builder
@@ -1472,7 +1498,8 @@ export async function fillet(opts = {}) {
   const cleanupTinyFaceIslandsArea = Number.isFinite(cleanupTinyFaceIslandsAreaRaw)
     ? cleanupTinyFaceIslandsAreaRaw
     : 0.01;
-  const mergeCoplanarEndCaps = opts.mergeCoplanarEndCaps !== false;
+  const renameFaces = opts.renameFaces !== false;
+  const mergeCoplanarEndCaps = opts.mergeCoplanarEndCaps !== false && renameFaces;
   const reverseEndCapNudge = mergeCoplanarEndCaps;
   const collapseFilletSideWalls = opts.collapseFilletSideWalls === true;
   const reassignSliverTriangles = opts.reassignSliverTriangles !== false && !collapseFilletSideWalls;
@@ -1545,6 +1572,8 @@ export async function fillet(opts = {}) {
       debugSolidsLevel,
       debugShowCombinedBeforeTarget,
       preserveFilletSideWallFaces: collapseFilletSideWalls,
+      enableFaceRenaming: renameFaces,
+      profile: opts.profile !== false,
     });
   } catch (err) {
     console.error('[Solid.fillet] Native fillet build failed; returning clone.', {

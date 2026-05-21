@@ -4,6 +4,10 @@ import {
     resolveSingleSolidFromEdges,
 } from "../edgeFeatureUtils.js";
 import { runSheetMetalCornerFillet } from "../sheetMetal/sheetMetalEngineBridge.js";
+import {
+    applySolidAuthoringStateSnapshot,
+    buildSolidAuthoringStateSnapshot,
+} from "../../BREP/CppSolidCore.js";
 
 const DEBUG_MODE_NONE = "NONE";
 const DEBUG_MODE_WEDGE_AND_TUBE = "WEDGE AND TUBE";
@@ -13,6 +17,7 @@ const FINAL_FILLET_SIMPLIFY_TOLERANCE = 0.0009;
 const FILLET_NATIVE_TINY_FACE_ISLAND_CLEANUP_AREA = 0.01;
 const FILLET_POST_COLLAPSE_TINY_TRIANGLE_THRESHOLD = 0.001;
 const FILLET_POST_COLLAPSE_TINY_FACE_ISLAND_CLEANUP_AREA = 0.01;
+const FILLET_CACHE_VERSION = 1;
 
 const inputParamsSchema = {
     id: {
@@ -55,6 +60,11 @@ const inputParamsSchema = {
         type: "boolean",
         default_value: false,
         hint: "Collapse deterministic fillet side-wall faces so adjacent faces meet directly.",
+    },
+    renameFaces: {
+        type: "boolean",
+        default_value: true,
+        hint: "Allow fillet cleanup to rename/relabel generated faces.",
     },
     direction: {
         type: "options",
@@ -99,6 +109,202 @@ function getDebugConfig(debugMode) {
         return { enabled: true, solidsLevel: -1, showCombinedBeforeTarget: true };
     }
     return { enabled: false, solidsLevel: -1, showCombinedBeforeTarget: false };
+}
+
+function nowMs() {
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+        return performance.now();
+    }
+    return Date.now();
+}
+
+function createFilletProfiler(featureID) {
+    const steps = [];
+    const starts = new Map();
+    const totalStart = nowMs();
+    const start = (name) => {
+        starts.set(name, nowMs());
+    };
+    const end = (name, extra = null) => {
+        const startedAt = starts.get(name);
+        if (!Number.isFinite(startedAt)) return;
+        starts.delete(name);
+        const entry = {
+            name,
+            ms: Number((nowMs() - startedAt).toFixed(3)),
+        };
+        if (extra && typeof extra === 'object') entry.extra = extra;
+        steps.push(entry);
+    };
+    const instant = (name, startedAt, extra = null) => {
+        const entry = {
+            name,
+            ms: Number((nowMs() - startedAt).toFixed(3)),
+        };
+        if (extra && typeof extra === 'object') entry.extra = extra;
+        steps.push(entry);
+    };
+    const finish = (extra = null) => ({
+        featureID: featureID || null,
+        totalMs: Number((nowMs() - totalStart).toFixed(3)),
+        steps,
+        ...(extra && typeof extra === 'object' ? extra : {}),
+    });
+    return { start, end, instant, finish };
+}
+
+function stableStringHash32(value = '') {
+    const text = String(value == null ? '' : value);
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i += 1) {
+        hash ^= text.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function appendHashToken(parts, value) {
+    if (typeof value === 'number') {
+        if (Number.isFinite(value)) parts.push(Number(value).toPrecision(12));
+        else parts.push('NaN');
+        return;
+    }
+    if (Array.isArray(value)) {
+        parts.push('[');
+        for (const item of value) appendHashToken(parts, item);
+        parts.push(']');
+        return;
+    }
+    if (value && typeof value === 'object') {
+        parts.push('{');
+        for (const key of Object.keys(value).sort()) {
+            parts.push(key);
+            appendHashToken(parts, value[key]);
+        }
+        parts.push('}');
+        return;
+    }
+    parts.push(String(value));
+}
+
+function stableValueHash(value) {
+    const parts = [];
+    appendHashToken(parts, value);
+    return stableStringHash32(parts.join('|'));
+}
+
+function cloneAuthoringSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return null;
+    return {
+        numProp: Number(snapshot.numProp ?? 3),
+        vertProperties: Array.from(snapshot.vertProperties ?? []),
+        triVerts: Array.from(snapshot.triVerts ?? []),
+        triIDs: Array.from(snapshot.triIDs ?? []),
+        faceNameToID: Array.from(snapshot.faceNameToID ?? [], (entry) => [entry?.[0], entry?.[1]]),
+        idToFaceName: Array.from(snapshot.idToFaceName ?? [], (entry) => [entry?.[0], entry?.[1]]),
+        faceMetadataJson: Array.from(snapshot.faceMetadataJson ?? [], (entry) => [entry?.[0], entry?.[1]]),
+        edgeMetadataJson: Array.from(snapshot.edgeMetadataJson ?? [], (entry) => [entry?.[0], entry?.[1]]),
+        auxEdges: Array.from(snapshot.auxEdges ?? [], (entry) => ({
+            ...entry,
+            points: Array.from(entry?.points ?? [], (point) => Array.from(point ?? [])),
+        })),
+    };
+}
+
+function solidFromCachedSnapshot(snapshot, SolidClass, name = null) {
+    const cloned = cloneAuthoringSnapshot(snapshot);
+    if (!cloned || !SolidClass) return null;
+    const solid = new SolidClass();
+    applySolidAuthoringStateSnapshot(solid, cloned);
+    solid._dirty = true;
+    solid._manifold = null;
+    solid._faceIndex = null;
+    if (typeof name === 'string' && name) {
+        try { solid.name = name; } catch { /* ignore */ }
+    }
+    return solid;
+}
+
+function getEdgeFaceNamesForCache(edgeObj) {
+    const faceAName = edgeObj?.faces?.[0]?.name || edgeObj?.userData?.faceA || null;
+    const faceBName = edgeObj?.faces?.[1]?.name || edgeObj?.userData?.faceB || null;
+    return { faceAName, faceBName };
+}
+
+function hashFaceState(solid, faceName) {
+    if (!solid || !faceName) return null;
+    let triangles = null;
+    try {
+        triangles = typeof solid.getFace === 'function' ? solid.getFace(faceName) : null;
+    } catch {
+        triangles = null;
+    }
+    let metadata = null;
+    try {
+        metadata = typeof solid.getFaceMetadata === 'function' ? solid.getFaceMetadata(faceName) : null;
+    } catch {
+        metadata = null;
+    }
+    return stableValueHash({
+        faceName,
+        triangles: Array.isArray(triangles) ? triangles : [],
+        metadata: metadata && typeof metadata === 'object' ? metadata : {},
+    });
+}
+
+function buildFilletEdgeDependencySignature(edge, targetSolid) {
+    const edgeName = typeof edge?.name === 'string' ? edge.name : '';
+    const edgePolyline = Array.isArray(edge?.userData?.polylineLocal) ? edge.userData.polylineLocal : [];
+    const { faceAName, faceBName } = getEdgeFaceNamesForCache(edge);
+    return {
+        edgeName,
+        edgeHash: stableValueHash({
+            name: edgeName,
+            polyline: edgePolyline,
+            closedLoop: !!(edge?.closedLoop || edge?.userData?.closedLoop),
+        }),
+        faceAName,
+        faceAHash: hashFaceState(targetSolid, faceAName),
+        faceBName,
+        faceBHash: hashFaceState(targetSolid, faceBName),
+    };
+}
+
+function buildFilletCacheKey({
+    targetSolid,
+    edgeObjs,
+    radius,
+    resolution,
+    direction,
+    inflate,
+    nudgeFaceDistance,
+    collapseFilletSideWalls,
+}) {
+    const edgeSignatures = (Array.isArray(edgeObjs) ? edgeObjs : [])
+        .map((edge) => buildFilletEdgeDependencySignature(edge, targetSolid));
+    return {
+        version: FILLET_CACHE_VERSION,
+        targetName: targetSolid?.name || null,
+        optionsHash: stableValueHash({
+            radius,
+            resolution,
+            direction,
+            inflate,
+            nudgeFaceDistance,
+            collapseFilletSideWalls,
+        }),
+        edgeSignatures,
+        dependencyHash: stableValueHash(edgeSignatures),
+    };
+}
+
+function filletCacheMatches(cacheEntry, cacheKey) {
+    return !!cacheEntry
+        && cacheEntry.version === FILLET_CACHE_VERSION
+        && cacheEntry.optionsHash === cacheKey.optionsHash
+        && cacheEntry.dependencyHash === cacheKey.dependencyHash
+        && Array.isArray(cacheEntry.edgeSignatures)
+        && cacheEntry.edgeSignatures.length === cacheKey.edgeSignatures.length;
 }
 
 function normalizeSelectionToken(token) {
@@ -492,6 +698,8 @@ export class FilletFeature {
     }
 
     async run(partHistory) {
+        const fid = this.inputParams.featureID;
+        const profiler = createFilletProfiler(fid);
         const debugMode = resolveDebugMode(this.inputParams?.debug);
         const debugConfig = getDebugConfig(debugMode);
         const debugEnabled = !!debugConfig.enabled;
@@ -513,13 +721,20 @@ export class FilletFeature {
         const removed = [];
 
         // Resolve inputs from sanitizeInputParams()
+        profiler.start('resolve inputs');
         const rawInputSelections = Array.isArray(this.inputParams.edges) ? this.inputParams.edges.filter(Boolean) : [];
         const previewSnapshots = this.persistentData?.__refPreviewSnapshots?.edges || null;
         const expanded = expandReferenceSelections(rawInputSelections, partHistory, previewSnapshots);
         const inputObjects = expanded.selections;
         const edgeObjs = collectEdgesFromSelection(inputObjects);
         const sheetCarrierFromRefs = resolveSheetMetalCarrierFromSelections(rawInputSelections, partHistory);
+        profiler.end('resolve inputs', {
+            rawSelections: rawInputSelections.length,
+            resolvedSelections: inputObjects.length,
+            edges: edgeObjs.length,
+        });
 
+        profiler.start('resolve target solid');
         let { solid: targetSolid, solids } = resolveSingleSolidFromEdges(edgeObjs);
         if (sheetCarrierFromRefs) {
             targetSolid = sheetCarrierFromRefs;
@@ -536,8 +751,15 @@ export class FilletFeature {
                     rawSelectionCount: rawInputSelections.length,
                 });
             }
+            const profile = profiler.finish({ cacheStatus: 'abort:no-target' });
+            this.persistentData = {
+                ...(this.persistentData || {}),
+                filletProfiler: profile,
+            };
+            console.log('[FilletFeature] Profile', profile);
             return { added: [], removed: [] };
         }
+        profiler.end('resolve target solid', { target: targetSolid?.name || null });
         console.log('[FilletFeature] Target solid resolved', {
             name: targetSolid?.name,
             edgeCount: edgeObjs.length,
@@ -548,13 +770,18 @@ export class FilletFeature {
         const r = Number(this.inputParams.radius);
         if (!Number.isFinite(r) || !(r > 0)) {
             console.warn('[FilletFeature] Invalid radius supplied; aborting.', { radius: this.inputParams.radius });
+            const profile = profiler.finish({ cacheStatus: 'abort:invalid-radius' });
+            this.persistentData = {
+                ...(this.persistentData || {}),
+                filletProfiler: profile,
+            };
+            console.log('[FilletFeature] Profile', profile);
             return { added: [], removed: [] };
         }
 
-        const fid = this.inputParams.featureID;
-
         const isSheetMetalCarrier = !!targetSolid?.userData?.sheetMetalModel?.tree;
         if (isSheetMetalCarrier) {
+            profiler.start('sheet metal fillet');
             const sheetResult = runSheetMetalCornerFillet({
                 sourceCarrier: targetSolid,
                 selections: rawInputSelections,
@@ -583,27 +810,89 @@ export class FilletFeature {
                     summary: sheetResult?.summary || null,
                 });
             }
+            profiler.end('sheet metal fillet', { applied: sheetResult?.summary?.applied || 0 });
+            const profile = profiler.finish({ cacheStatus: 'sheet-metal' });
+            this.persistentData = {
+                ...(this.persistentData || {}),
+                filletProfiler: profile,
+            };
+            console.log('[FilletFeature] Profile', profile);
             return { added, removed };
         }
 
         let result = null;
         const collapseFilletSideWalls = this.inputParams?.collapseFilletSideWalls === true;
-        result = await targetSolid.fillet({
+        const renameFaces = this.inputParams?.renameFaces !== false;
+        const inflate = Number(this.inputParams.inflate) || 0;
+        const nudgeFaceDistance = this.inputParams?.nudgeFaceDistance;
+        profiler.start('build dependency signature');
+        const cacheKey = buildFilletCacheKey({
+            targetSolid,
+            edgeObjs,
             radius: r,
             resolution: this.inputParams?.resolution,
-            edges: edgeObjs,
-            featureID: fid,
             direction: dir,
-            inflate: Number(this.inputParams.inflate) || 0,
-            nudgeFaceDistance: this.inputParams?.nudgeFaceDistance,
-            cleanupTinyFaceIslandsArea: FILLET_NATIVE_TINY_FACE_ISLAND_CLEANUP_AREA,
-            mergeCoplanarEndCaps: true,
-            reassignSliverTriangles: true,
+            inflate,
+            nudgeFaceDistance,
             collapseFilletSideWalls,
-            debug: debugEnabled,
-            debugSolidsLevel: configuredDebugLevel,
-            debugShowCombinedBeforeTarget,
         });
+        profiler.end('build dependency signature', { edges: cacheKey.edgeSignatures.length });
+        const cacheEntry = this.persistentData?.filletSolidCache || null;
+        const hasCachedDebugSnapshots = Array.isArray(cacheEntry?.debugSnapshots) && cacheEntry.debugSnapshots.length > 0;
+        const debugCacheMatches = hasCachedDebugSnapshots && cacheEntry?.debugMode === debugMode;
+        const cacheHit = filletCacheMatches(cacheEntry, cacheKey) && (!debugEnabled || debugCacheMatches);
+        const SolidClass = targetSolid?.constructor?.BaseSolid || targetSolid?.constructor || null;
+        if (cacheHit) {
+            profiler.start('restore cached solid');
+            result = solidFromCachedSnapshot(cacheEntry?.finalSnapshot, SolidClass, targetSolid?.name || `${fid}_FINAL_FILLET`);
+            if (result && cacheEntry?.edgeDirectionDecision) {
+                try { result.__filletDirectionDecision = cacheEntry.edgeDirectionDecision; } catch { /* ignore */ }
+            }
+            if (result && Number.isFinite(Number(cacheEntry?.cornerBridgeCount))) {
+                try { result.__filletCornerBridgeCount = Number(cacheEntry.cornerBridgeCount); } catch { /* ignore */ }
+            }
+            if (debugEnabled && result && debugCacheMatches) {
+                const debugAdded = [];
+                for (const entry of cacheEntry.debugSnapshots) {
+                    const debugSolid = solidFromCachedSnapshot(entry?.snapshot, SolidClass, String(entry?.name || 'FILLET_DEBUG'));
+                    if (debugSolid) debugAdded.push(debugSolid);
+                }
+                if (debugAdded.length > 0) {
+                    try { result.__debugAddedSolids = debugAdded; } catch { /* ignore */ }
+                }
+            }
+            profiler.end('restore cached solid', {
+                debugSnapshots: Array.isArray(cacheEntry?.debugSnapshots) ? cacheEntry.debugSnapshots.length : 0,
+            });
+            console.log('[FilletFeature] Reused cached fillet solid.', {
+                featureID: fid,
+                edges: edgeObjs.length,
+                debugMode,
+                renameFacesRequested: renameFaces,
+                cachedRenameFaces: cacheEntry?.renameFaces,
+            });
+        }
+        if (!result) {
+            profiler.start('native fillet build');
+            result = await targetSolid.fillet({
+                radius: r,
+                resolution: this.inputParams?.resolution,
+                edges: edgeObjs,
+                featureID: fid,
+                direction: dir,
+                inflate,
+                nudgeFaceDistance,
+                cleanupTinyFaceIslandsArea: FILLET_NATIVE_TINY_FACE_ISLAND_CLEANUP_AREA,
+                mergeCoplanarEndCaps: true,
+                renameFaces,
+                reassignSliverTriangles: true,
+                collapseFilletSideWalls,
+                debug: debugEnabled,
+                debugSolidsLevel: configuredDebugLevel,
+                debugShowCombinedBeforeTarget,
+            });
+            profiler.end('native fillet build', { cacheMiss: true });
+        }
         try {
             result.__filletFinalSimplifyEnabled = true;
             result.__filletNativeTinyFaceIslandCleanupEnabled = true;
@@ -616,13 +905,18 @@ export class FilletFeature {
             if (!Array.isArray(res?.__debugAddedSolids)) return out;
             for (const dbg of res.__debugAddedSolids) {
                 if (!dbg) continue;
-                try { dbg.name = `${fid}_${dbg.name || 'DEBUG'}`; } catch { }
+                try {
+                    const rawName = String(dbg.name || 'DEBUG');
+                    dbg.name = rawName.startsWith(`${fid}_`) ? rawName : `${fid}_${rawName}`;
+                } catch { }
                 console.log('[FilletFeature] Adding fillet debug solid', { featureID: fid, name: dbg.name });
                 out.push(dbg);
             }
             return out;
         };
+        profiler.start('collect debug solids');
         const debugSolids = collectDebugSolids(result);
+        profiler.end('collect debug solids', { debugSolids: debugSolids.length });
         const edgeDirectionDecision = result?.__filletDirectionDecision || null;
         const cornerBridgeCountRaw = Number(result?.__filletCornerBridgeCount);
         const cornerBridgeCount = Number.isFinite(cornerBridgeCountRaw) ? Math.max(0, Math.trunc(cornerBridgeCountRaw)) : 0;
@@ -638,9 +932,11 @@ export class FilletFeature {
         if (!result) {
             throw new Error(`[FilletFeature] Fillet returned no result for feature ${fid || '(unknown)'}.`);
         }
-        if (typeof result.simplify === 'function') {
+        if (!cacheHit && typeof result.simplify === 'function') {
             try {
+                const simplifyStart = nowMs();
                 result.simplify(FINAL_FILLET_SIMPLIFY_TOLERANCE, true);
+                profiler.instant('final simplify', simplifyStart, { tolerance: FINAL_FILLET_SIMPLIFY_TOLERANCE });
             } catch (e) {
                 console.warn('[FilletFeature] Final simplify cleanup failed; keeping unsimplified fillet result.', {
                     featureID: fid,
@@ -670,37 +966,85 @@ export class FilletFeature {
 
 
         // loop over all added objects and set the epsilon vale on the solid
-        for (const obj of added) {
-            if (obj && typeof obj === 'object' && typeof obj.setEpsilon === 'function') {
-                try {
-                    const sideWallCollapseCount = Math.max(
-                        0,
-                        Number(obj.__filletSideWallCollapseCount || 0),
-                    );
-                    const runPostTinyTriangleCollapse = !(collapseFilletSideWalls && sideWallCollapseCount > 0);
-                    if (runPostTinyTriangleCollapse) {
-                        await obj.collapseTinyTriangles(FILLET_POST_COLLAPSE_TINY_TRIANGLE_THRESHOLD);
-                    }
-                    obj.__filletPostCollapseTinyTriangleCollapseEnabled = runPostTinyTriangleCollapse;
-                    const runPostTinyFaceIslandCleanup = runPostTinyTriangleCollapse || !collapseFilletSideWalls;
-                    if (runPostTinyFaceIslandCleanup && typeof obj.cleanupTinyFaceIslands === 'function') {
-                        obj.__filletPostCollapseTinyFaceIslandCleanupCount = Math.max(
+        if (!cacheHit) {
+            profiler.start('post cleanup and visualize');
+            for (const obj of added) {
+                if (obj && typeof obj === 'object' && typeof obj.setEpsilon === 'function') {
+                    try {
+                        const sideWallCollapseCount = Math.max(
                             0,
-                            Number(obj.cleanupTinyFaceIslands(FILLET_POST_COLLAPSE_TINY_FACE_ISLAND_CLEANUP_AREA) || 0),
+                            Number(obj.__filletSideWallCollapseCount || 0),
                         );
-                    } else {
-                        obj.__filletPostCollapseTinyFaceIslandCleanupCount = 0;
+                        const runPostTinyTriangleCollapse = !(collapseFilletSideWalls && sideWallCollapseCount > 0);
+                        if (runPostTinyTriangleCollapse) {
+                            await obj.collapseTinyTriangles(FILLET_POST_COLLAPSE_TINY_TRIANGLE_THRESHOLD);
+                        }
+                        obj.__filletPostCollapseTinyTriangleCollapseEnabled = runPostTinyTriangleCollapse;
+                        const runPostTinyFaceIslandCleanup = runPostTinyTriangleCollapse || !collapseFilletSideWalls;
+                        if (runPostTinyFaceIslandCleanup && typeof obj.cleanupTinyFaceIslands === 'function') {
+                            obj.__filletPostCollapseTinyFaceIslandCleanupCount = Math.max(
+                                0,
+                                Number(obj.cleanupTinyFaceIslands(FILLET_POST_COLLAPSE_TINY_FACE_ISLAND_CLEANUP_AREA) || 0),
+                            );
+                        } else {
+                            obj.__filletPostCollapseTinyFaceIslandCleanupCount = 0;
+                        }
+                        obj.__filletPostCollapseTinyFaceIslandCleanupEnabled = runPostTinyFaceIslandCleanup;
+                        obj.visualize();
+                    } catch (e) {
+                        console.warn('[FilletFeature] Failed to set epsilon on fillet result solid.', { error: e });
                     }
-                    obj.__filletPostCollapseTinyFaceIslandCleanupEnabled = runPostTinyFaceIslandCleanup;
-                    obj.visualize()
-                } catch (e) {
-                    console.warn('[FilletFeature] Failed to set epsilon on fillet result solid.', { error: e });
                 }
             }
+            profiler.end('post cleanup and visualize', { objects: added.length });
         }
 
-
-
+        profiler.start('write fillet cache');
+        const debugSnapshotsForCache = [];
+        for (const dbg of debugSolids) {
+            try {
+                debugSnapshotsForCache.push({
+                    name: dbg?.name || 'FILLET_DEBUG',
+                    snapshot: cloneAuthoringSnapshot(buildSolidAuthoringStateSnapshot(dbg)),
+                });
+            } catch { /* ignore */ }
+        }
+        if (debugSnapshotsForCache.length === 0 && cacheHit && hasCachedDebugSnapshots) {
+            debugSnapshotsForCache.push(...cacheEntry.debugSnapshots);
+        }
+        const debugModeForCache = debugSnapshotsForCache.length > 0
+            ? (debugSolids.length > 0 ? debugMode : (cacheEntry?.debugMode || debugMode))
+            : null;
+        try {
+            this.persistentData = {
+                ...(this.persistentData || {}),
+                filletSolidCache: {
+                    version: FILLET_CACHE_VERSION,
+                    optionsHash: cacheKey.optionsHash,
+                    dependencyHash: cacheKey.dependencyHash,
+                    edgeSignatures: cacheKey.edgeSignatures,
+                    renameFaces,
+                    finalSnapshot: cloneAuthoringSnapshot(buildSolidAuthoringStateSnapshot(result)),
+                    debugSnapshots: debugSnapshotsForCache,
+                    debugMode: debugModeForCache,
+                    edgeDirectionDecision,
+                    cornerBridgeCount,
+                    cachedAt: new Date().toISOString(),
+                },
+            };
+        } catch (error) {
+            console.warn('[FilletFeature] Failed to write fillet cache.', {
+                featureID: fid,
+                error: error?.message || error,
+            });
+        }
+        profiler.end('write fillet cache', { debugSnapshots: debugSnapshotsForCache.length });
+        const profile = profiler.finish({ cacheStatus: cacheHit ? 'hit' : 'miss' });
+        this.persistentData = {
+            ...(this.persistentData || {}),
+            filletProfiler: profile,
+        };
+        console.log('[FilletFeature] Profile', profile);
 
         return { added, removed };
     }

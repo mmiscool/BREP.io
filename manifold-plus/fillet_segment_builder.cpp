@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cctype>
 #include <cstdint>
@@ -592,6 +593,54 @@ bool JsonContains(const std::string& json, const std::string& needle) {
   return !json.empty() && json.find(needle) != std::string::npos;
 }
 
+double NativeNowMs() {
+  using Clock = std::chrono::steady_clock;
+  return std::chrono::duration<double, std::milli>(
+             Clock::now().time_since_epoch())
+      .count();
+}
+
+bool ReadBoolOption(const emscripten::val& options, const char* key,
+                    bool fallback = false) {
+  const emscripten::val value = options[key];
+  if (value.isUndefined() || value.isNull()) return fallback;
+  return value.as<bool>();
+}
+
+void LogNativeFilletProfile(const std::string& feature_id,
+                            const std::string& step, double ms,
+                            const emscripten::val& extra =
+                                emscripten::val::undefined()) {
+  try {
+    emscripten::val detail = emscripten::val::object();
+    detail.set("featureID", feature_id);
+    detail.set("step", step);
+    detail.set("ms", ms);
+    if (!extra.isUndefined() && !extra.isNull()) {
+      detail.set("extra", extra);
+    }
+    emscripten::val::global("console").call<void>(
+        "log", std::string("[Native fillet profile]"), detail);
+  } catch (...) {
+  }
+}
+
+void LogFilletFaceRename(const std::string& operation,
+                         const std::string& feature_id,
+                         const std::string& from_face_name,
+                         const std::string& to_face_name) {
+  try {
+    emscripten::val detail = emscripten::val::object();
+    detail.set("featureID", feature_id);
+    detail.set("operation", operation);
+    detail.set("fromFaceName", from_face_name);
+    detail.set("toFaceName", to_face_name);
+    emscripten::val::global("console").call<void>(
+        "log", std::string("[Native fillet] Renaming face."), detail);
+  } catch (...) {
+  }
+}
+
 int ScoreFallbackRenameTarget(const std::string& face_name,
                               const std::string& metadata_json,
                               const std::string& feature_id) {
@@ -719,6 +768,16 @@ void RelabelFallbackFacesByAdjacency(
         }
       }
       if (best_length <= 0.0) continue;
+      const std::string fallback_face_name =
+          id_to_face_name.count(fallback_id)
+              ? id_to_face_name.at(fallback_id)
+              : ("FACE_" + std::to_string(fallback_id));
+      const std::string target_face_name =
+          id_to_face_name.count(best_id)
+              ? id_to_face_name.at(best_id)
+              : ("FACE_" + std::to_string(best_id));
+      LogFilletFaceRename("fallback adjacency relabel", feature_id,
+                          fallback_face_name, target_face_name);
       ReplaceFaceId(mesh, fallback_id, best_id);
       renamed_this_pass++;
     }
@@ -3294,7 +3353,10 @@ bool PointInsideMesh(const manifold::MeshGL& mesh, const Vec3& point) {
 }  // namespace
 
 emscripten::val BuildFilletSegmentAuthoringState(const emscripten::val& options) {
+  const double total_start_ms = NativeNowMs();
   const std::string name = ReadString(options["name"], "fillet");
+  const std::string feature_id = ReadString(options["featureID"], "FILLET");
+  const bool profile = ReadBoolOption(options, "profile", false);
   const std::vector<Vec3> centerline = ReadPoints(options["centerline"], "centerline");
   const std::vector<Vec3> tangent_a = ReadPoints(options["tangentA"], "tangentA");
   const std::vector<Vec3> tangent_b = ReadPoints(options["tangentB"], "tangentB");
@@ -3330,6 +3392,7 @@ emscripten::val BuildFilletSegmentAuthoringState(const emscripten::val& options)
       std::min(centerline.size(), tangent_a.size()),
       std::min(tangent_b.size(), edge_points.size()));
 
+  const double wedge_mesh_start_ms = NativeNowMs();
   if (closed) {
     for (size_t i = 0; i + 1 < sample_count; ++i) {
       const Vec3& c1 = centerline[i];
@@ -3407,14 +3470,28 @@ emscripten::val BuildFilletSegmentAuthoringState(const emscripten::val& options)
   }
 
   emscripten::val wedge_snapshot = BuildSnapshot(wedge_builder);
+  if (profile) {
+    emscripten::val extra = emscripten::val::object();
+    extra.set("name", name);
+    extra.set("sampleCount", static_cast<uint32_t>(sample_count));
+    extra.set("closedLoop", closed);
+    extra.set("wedgeTriangles", static_cast<uint32_t>(wedge_builder.tri_verts.size() / 3));
+    LogNativeFilletProfile(feature_id, "segment build wedge mesh",
+                           NativeNowMs() - wedge_mesh_start_ms, extra);
+  }
   std::vector<std::pair<std::string, double>> wedge_push_faces;
   if (!closed) {
     wedge_push_faces.push_back({name + "_END_CAP_1", nudge_face_distance});
     wedge_push_faces.push_back({name + "_END_CAP_2", nudge_face_distance});
   }
+  const double wedge_metadata_start_ms = NativeNowMs();
   wedge_snapshot = ApplyFaceOpsAndMetadata(
       wedge_snapshot, wedge_push_faces,
       BuildWedgeMetadata(wedge_snapshot, name, closed));
+  if (profile) {
+    LogNativeFilletProfile(feature_id, "segment wedge metadata/push",
+                           NativeNowMs() - wedge_metadata_start_ms);
+  }
 
   emscripten::val tube_options = emscripten::val::object();
   tube_options.set("points",
@@ -3428,14 +3505,33 @@ emscripten::val BuildFilletSegmentAuthoringState(const emscripten::val& options)
   tube_options.set("preferFast", true);
   tube_options.set("selfUnion", true);
   tube_options.set("name", name + "_TUBE");
+  tube_options.set("featureID", feature_id);
+  tube_options.set("profile", profile);
+  const double tube_build_start_ms = NativeNowMs();
   emscripten::val tube_snapshot = BuildTubeAuthoringState(tube_options);
+  if (profile) {
+    LogNativeFilletProfile(feature_id, "segment tube build",
+                           NativeNowMs() - tube_build_start_ms);
+  }
+  const double tube_metadata_start_ms = NativeNowMs();
   tube_snapshot = ApplyFaceOpsAndMetadata(
       tube_snapshot, {},
       BuildTubeMetadata(tube_snapshot, name, radius, requested_radius,
                         edge_reference, closed));
+  if (profile) {
+    LogNativeFilletProfile(feature_id, "segment tube metadata",
+                           NativeNowMs() - tube_metadata_start_ms);
+  }
 
+  const double final_boolean_start_ms = NativeNowMs();
   emscripten::val final_snapshot =
       BuildBooleanResultSnapshot(wedge_snapshot, tube_snapshot, name);
+  if (profile) {
+    LogNativeFilletProfile(feature_id, "segment wedge/tube boolean",
+                           NativeNowMs() - final_boolean_start_ms);
+    LogNativeFilletProfile(feature_id, "segment total",
+                           NativeNowMs() - total_start_ms);
+  }
 
   emscripten::val result = emscripten::val::object();
   result.set("wedgeSnapshot", wedge_snapshot);
@@ -5526,6 +5622,7 @@ emscripten::val BuildChamferWorkflowAuthoringState(const emscripten::val& option
 }
 
 emscripten::val BuildFilletEdgeAuthoringState(const emscripten::val& options) {
+  const double total_start_ms = NativeNowMs();
   const emscripten::val snapshot = options["snapshot"];
   if (snapshot.isUndefined() || snapshot.isNull()) {
     throw std::runtime_error("buildFilletEdgeAuthoringState requires snapshot.");
@@ -5571,6 +5668,8 @@ emscripten::val BuildFilletEdgeAuthoringState(const emscripten::val& options) {
       side_mode == "OUTSET" ? 0.0 : nudge_face_distance;
   const std::string name = ReadString(options["name"], "fillet");
   const std::string edge_reference = ReadString(options["edgeReference"], "");
+  const std::string feature_id = ReadString(options["featureID"], "FILLET");
+  const bool profile = ReadBoolOption(options, "profile", false);
 
   if (!(radius > 0.0)) {
     throw std::runtime_error("buildFilletEdgeAuthoringState requires a positive radius.");
@@ -5591,9 +5690,15 @@ emscripten::val BuildFilletEdgeAuthoringState(const emscripten::val& options) {
   centerline_options.set("radius", radius);
   centerline_options.set("sideMode", side_mode);
   centerline_options.set("closedLoop", closed);
+  const double centerline_start_ms = NativeNowMs();
   const emscripten::val centerline_result =
       ComputeFilletCenterline(centerline_options);
+  if (profile) {
+    LogNativeFilletProfile(feature_id, "edge centerline",
+                           NativeNowMs() - centerline_start_ms);
+  }
 
+  const double read_centerline_start_ms = NativeNowMs();
   std::vector<Vec3> centerline =
       ReadPoints(centerline_result["points"], "centerline.points");
   std::vector<Vec3> tangent_a =
@@ -5606,6 +5711,13 @@ emscripten::val BuildFilletEdgeAuthoringState(const emscripten::val& options) {
       !(centerline_result["closedLoop"].isUndefined() ||
         centerline_result["closedLoop"].isNull()) &&
       centerline_result["closedLoop"].as<bool>();
+  if (profile) {
+    emscripten::val extra = emscripten::val::object();
+    extra.set("centerlinePoints", static_cast<uint32_t>(centerline.size()));
+    extra.set("closedLoop", result_closed);
+    LogNativeFilletProfile(feature_id, "edge read centerline result",
+                           NativeNowMs() - read_centerline_start_ms, extra);
+  }
 
   if (centerline.size() < 2 || tangent_a.size() < 2 || tangent_b.size() < 2 ||
       edge_points.size() < 2) {
@@ -5624,6 +5736,7 @@ emscripten::val BuildFilletEdgeAuthoringState(const emscripten::val& options) {
     throw std::runtime_error("Degenerate centerline: all points are identical.");
   }
 
+  const double sanitize_start_ms = NativeNowMs();
   std::vector<Vec3> tangent_a_copy =
       SanitizeFilletTangentPolyline(centerline, tangent_a, result_closed, 1.0);
   std::vector<Vec3> tangent_b_copy =
@@ -5643,6 +5756,10 @@ emscripten::val BuildFilletEdgeAuthoringState(const emscripten::val& options) {
     tangent_b_copy =
         SanitizeFilletTangentPolyline(centerline, tangent_b_copy, result_closed, 0.0);
   }
+  if (profile) {
+    LogNativeFilletProfile(feature_id, "edge tangent sanitize and offset",
+                           NativeNowMs() - sanitize_start_ms);
+  }
 
   const double outset_inset_magnitude =
       std::max(1e-4, std::min(0.05, std::abs(radius) * 0.05));
@@ -5651,11 +5768,19 @@ emscripten::val BuildFilletEdgeAuthoringState(const emscripten::val& options) {
                     : (side_mode == "INSET" ? std::abs(inflate)
                                             : outset_inset_magnitude);
   if (wedge_inset_magnitude > 0.0) {
+    const double wedge_inset_start_ms = NativeNowMs();
     SnapshotInfo info = ReadSnapshotInfo(snapshot);
     const bool use_inside_check = side_mode == "OUTSET";
     const int default_dir_sign = side_mode == "OUTSET" ? 1 : -1;
     ApplyWedgeInset(edge_wedge, centerline, info.mesh, wedge_inset_magnitude,
                     use_inside_check, default_dir_sign);
+    if (profile) {
+      emscripten::val extra = emscripten::val::object();
+      extra.set("wedgeInsetMagnitude", wedge_inset_magnitude);
+      extra.set("useInsideCheck", use_inside_check);
+      LogNativeFilletProfile(feature_id, "edge wedge inset",
+                             NativeNowMs() - wedge_inset_start_ms, extra);
+    }
   }
 
   emscripten::val segment_options = emscripten::val::object();
@@ -5670,9 +5795,17 @@ emscripten::val BuildFilletEdgeAuthoringState(const emscripten::val& options) {
   segment_options.set("resolution", resolution_raw);
   segment_options.set("closedLoop", result_closed);
   segment_options.set("edgeReference", edge_reference);
+  segment_options.set("featureID", feature_id);
+  segment_options.set("profile", profile);
+  const double segment_start_ms = NativeNowMs();
   const emscripten::val segment_result =
       BuildFilletSegmentAuthoringState(segment_options);
+  if (profile) {
+    LogNativeFilletProfile(feature_id, "edge segment build",
+                           NativeNowMs() - segment_start_ms);
+  }
 
+  const double cap_points_start_ms = NativeNowMs();
   emscripten::val tube_cap_points = emscripten::val::object();
   tube_cap_points.set("start", emscripten::val::array());
   tube_cap_points.set("end", emscripten::val::array());
@@ -5685,6 +5818,15 @@ emscripten::val BuildFilletEdgeAuthoringState(const emscripten::val& options) {
         "end",
         ToPointArray(CollectUniqueFacePoints(
             segment_result["tubeSnapshot"], name + "_TUBE_CapEnd", 1e-7)));
+  }
+  if (profile) {
+    LogNativeFilletProfile(feature_id, "edge collect cap points",
+                           NativeNowMs() - cap_points_start_ms);
+    emscripten::val extra = emscripten::val::object();
+    extra.set("edgeReference", edge_reference);
+    extra.set("name", name);
+    LogNativeFilletProfile(feature_id, "edge total",
+                           NativeNowMs() - total_start_ms, extra);
   }
 
   emscripten::val result = emscripten::val::object();
@@ -5710,6 +5852,7 @@ emscripten::val BuildFilletEdgeAuthoringState(const emscripten::val& options) {
 }
 
 emscripten::val BuildFilletBatchAuthoringState(const emscripten::val& options) {
+  const double total_start_ms = NativeNowMs();
   const emscripten::val snapshot = options["snapshot"];
   if (snapshot.isUndefined() || snapshot.isNull()) {
     throw std::runtime_error("buildFilletBatchAuthoringState requires snapshot.");
@@ -5740,6 +5883,8 @@ emscripten::val BuildFilletBatchAuthoringState(const emscripten::val& options) {
       direction_mode_raw == "INSET" || direction_mode_raw == "OUTSET"
           ? direction_mode_raw
           : "AUTO";
+  const std::string feature_id = ReadString(options["featureID"], "FILLET");
+  const bool profile = ReadBoolOption(options, "profile", false);
   const std::string fallback_direction =
       direction_mode == "OUTSET" ? "OUTSET" : "INSET";
   const bool auto_direction = direction_mode == "AUTO";
@@ -5759,6 +5904,7 @@ emscripten::val BuildFilletBatchAuthoringState(const emscripten::val& options) {
   uint32_t out_index = 0;
 
   for (uint32_t i = 0; i < edge_count; ++i) {
+    const double edge_start_ms = NativeNowMs();
     const emscripten::val edge = edges[i];
     if (edge.isUndefined() || edge.isNull()) continue;
 
@@ -5783,7 +5929,9 @@ emscripten::val BuildFilletBatchAuthoringState(const emscripten::val& options) {
     std::string edge_direction = fallback_direction;
     std::string direction_reason = auto_direction ? "fallback" : "explicit";
     emscripten::val direction_detail = emscripten::val::null();
+    double classify_ms = 0.0;
     if (auto_direction) {
+      const double classify_start_ms = NativeNowMs();
       emscripten::val classify_options = emscripten::val::object();
       classify_options.set("snapshot", snapshot);
       classify_options.set("faceAName", face_a_name);
@@ -5800,6 +5948,7 @@ emscripten::val BuildFilletBatchAuthoringState(const emscripten::val& options) {
         edge_direction = fallback_direction;
         direction_reason = "native_classifier_error";
       }
+      classify_ms = NativeNowMs() - classify_start_ms;
       const bool is_classified =
           direction_reason == "classified" || direction_reason == "signed_dihedral";
       if (!is_classified) {
@@ -5831,6 +5980,8 @@ emscripten::val BuildFilletBatchAuthoringState(const emscripten::val& options) {
                           edge["closedLoop"].as<bool>());
     build_options.set("name", ReadString(edge["name"], edge_name.c_str()));
     build_options.set("edgeReference", edge_name);
+    build_options.set("featureID", feature_id);
+    build_options.set("profile", profile);
     if (!face_a_name.empty()) build_options.set("faceAName", face_a_name);
     if (!face_b_name.empty()) build_options.set("faceBName", face_b_name);
     if (has_segment_face_pairs) {
@@ -5838,12 +5989,30 @@ emscripten::val BuildFilletBatchAuthoringState(const emscripten::val& options) {
     }
 
     emscripten::val edge_result = emscripten::val::object();
+    double edge_build_ms = 0.0;
     try {
+      const double edge_build_start_ms = NativeNowMs();
       edge_result = BuildFilletEdgeAuthoringState(build_options);
+      edge_build_ms = NativeNowMs() - edge_build_start_ms;
     } catch (const std::exception& error) {
+      edge_build_ms = NativeNowMs() - edge_start_ms - classify_ms;
       edge_result.set("error", std::string(error.what()));
     } catch (...) {
+      edge_build_ms = NativeNowMs() - edge_start_ms - classify_ms;
       edge_result.set("error", "native_fillet_edge_error");
+    }
+    if (profile) {
+      emscripten::val extra = emscripten::val::object();
+      extra.set("edgeIndex", i);
+      extra.set("edgeReference", edge_name);
+      extra.set("edgeDirection", edge_direction);
+      extra.set("directionReason", direction_reason);
+      extra.set("classifyMs", classify_ms);
+      extra.set("edgeBuildMs", edge_build_ms);
+      extra.set("hasError", !edge_result["error"].isUndefined() &&
+                                !edge_result["error"].isNull());
+      LogNativeFilletProfile(feature_id, "batch edge",
+                             NativeNowMs() - edge_start_ms, extra);
     }
     edge_result.set("index", i);
     edge_result.set("name", ReadString(build_options["name"], edge_name.c_str()));
@@ -5867,10 +6036,21 @@ emscripten::val BuildFilletBatchAuthoringState(const emscripten::val& options) {
   out.set("entries", out_entries);
   out.set("directionDecision", direction_decision);
   out.set("nativeKernel", true);
+  if (profile) {
+    emscripten::val extra = emscripten::val::object();
+    extra.set("edgeCount", edge_count);
+    extra.set("insetEdges", inset_edges);
+    extra.set("outsetEdges", outset_edges);
+    extra.set("fallbackEdges", fallback_edges);
+    extra.set("ambiguousEdges", ambiguous_edges);
+    LogNativeFilletProfile(feature_id, "batch total",
+                           NativeNowMs() - total_start_ms, extra);
+  }
   return out;
 }
 
 emscripten::val BuildFilletAuthoringState(const emscripten::val& options) {
+  const double total_start_ms = NativeNowMs();
   const emscripten::val snapshot = options["snapshot"];
   if (snapshot.isUndefined() || snapshot.isNull()) {
     throw std::runtime_error("buildFilletAuthoringState requires snapshot.");
@@ -5896,6 +6076,11 @@ emscripten::val BuildFilletAuthoringState(const emscripten::val& options) {
       !(options["preserveFilletSideWallFaces"].isUndefined() ||
         options["preserveFilletSideWallFaces"].isNull()) &&
       options["preserveFilletSideWallFaces"].as<bool>();
+  const bool enable_face_renaming =
+      options["enableFaceRenaming"].isUndefined() ||
+      options["enableFaceRenaming"].isNull() ||
+      options["enableFaceRenaming"].as<bool>();
+  const bool profile = ReadBoolOption(options, "profile", false);
   const double resolution =
       options["resolution"].isUndefined() || options["resolution"].isNull()
           ? 32.0
@@ -5910,11 +6095,18 @@ emscripten::val BuildFilletAuthoringState(const emscripten::val& options) {
   batch_options.set("nudgeFaceDistance", options["nudgeFaceDistance"]);
   batch_options.set("resolution", options["resolution"]);
   batch_options.set("featureID", feature_id);
+  batch_options.set("profile", profile);
+  const double batch_start_ms = NativeNowMs();
   const emscripten::val batch_result = BuildFilletBatchAuthoringState(batch_options);
+  if (profile) {
+    LogNativeFilletProfile(feature_id, "authoring batch",
+                           NativeNowMs() - batch_start_ms);
+  }
 
   std::vector<BuiltFilletEntry> built_entries;
   emscripten::val debug_snapshots = emscripten::val::array();
   uint32_t debug_index = 0;
+  const double collect_entries_start_ms = NativeNowMs();
   const emscripten::val batch_entries = batch_result["entries"];
   if (!batch_entries.isUndefined() && !batch_entries.isNull()) {
     const uint32_t length = batch_entries["length"].as<uint32_t>();
@@ -5980,6 +6172,12 @@ emscripten::val BuildFilletAuthoringState(const emscripten::val& options) {
       }
     }
   }
+  if (profile) {
+    emscripten::val extra = emscripten::val::object();
+    extra.set("builtEntries", static_cast<uint32_t>(built_entries.size()));
+    LogNativeFilletProfile(feature_id, "authoring collect batch entries",
+                           NativeNowMs() - collect_entries_start_ms, extra);
+  }
 
   const double radius_abs = std::abs(radius);
   const double endpoint_tol = std::max(1e-6, radius_abs * 1e-4);
@@ -5987,6 +6185,8 @@ emscripten::val BuildFilletAuthoringState(const emscripten::val& options) {
   const double tangent_dot_threshold = 0.995;
   std::unordered_set<std::string> emitted_corner_keys;
 
+  const double corner_bridge_start_ms = NativeNowMs();
+  uint32_t corner_bridge_count = 0;
   for (size_t i = 0; i < built_entries.size(); ++i) {
     const BuiltFilletEntry& entry_a = built_entries[i];
     if (entry_a.corner_bridge) continue;
@@ -6151,6 +6351,7 @@ emscripten::val BuildFilletAuthoringState(const emscripten::val& options) {
       corner_entry.tube_snapshot = native_corner["tubeSnapshot"];
       corner_entry.final_snapshot = native_corner["finalSnapshot"];
       built_entries.push_back(corner_entry);
+      corner_bridge_count++;
 
       if (debug) {
         emscripten::val wedge_debug = emscripten::val::object();
@@ -6173,7 +6374,16 @@ emscripten::val BuildFilletAuthoringState(const emscripten::val& options) {
       }
     }
   }
+  if (profile) {
+    emscripten::val extra = emscripten::val::object();
+    extra.set("cornerBridgeCount", corner_bridge_count);
+    extra.set("entryCountAfterCorners", static_cast<uint32_t>(built_entries.size()));
+    LogNativeFilletProfile(feature_id, "authoring corner bridges",
+                           NativeNowMs() - corner_bridge_start_ms, extra);
+  }
 
+  const double sidewall_group_start_ms = NativeNowMs();
+  uint32_t sidewall_group_count = 0;
   for (BuiltFilletEntry& entry : built_entries) {
     if (entry.corner_bridge || entry.final_snapshot.isUndefined() ||
         entry.final_snapshot.isNull()) {
@@ -6237,8 +6447,9 @@ emscripten::val BuildFilletAuthoringState(const emscripten::val& options) {
     const std::string side_merge_target_face_name =
         BuildEdgeDerivedSideWallFaceName(entry.edge_reference, feature_id);
 
-    if (!preserve_fillet_side_wall_faces &&
+    if (enable_face_renaming && !preserve_fillet_side_wall_faces &&
         (!tube_merge_face_names.empty() || !side_merge_face_names.empty())) {
+      sidewall_group_count++;
       BrepSolidCore core;
       core.SetAuthoringState(entry.final_snapshot);
       auto apply_merge_group = [&](const std::string& target_face_name,
@@ -6247,6 +6458,8 @@ emscripten::val BuildFilletAuthoringState(const emscripten::val& options) {
         if (target_face_name.empty() || source_face_names.empty()) return;
         for (const std::string& source_face_name : source_face_names) {
           if (source_face_name.empty() || source_face_name == target_face_name) continue;
+          LogFilletFaceRename("side wall merge", feature_id, source_face_name,
+                              target_face_name);
           core.RenameFace(source_face_name, target_face_name);
         }
         if (!metadata_json.empty()) {
@@ -6280,6 +6493,14 @@ emscripten::val BuildFilletAuthoringState(const emscripten::val& options) {
           grouped_info.aux_edges, ReadString(grouped_snapshot["name"], ""));
     }
   }
+  if (profile) {
+    emscripten::val extra = emscripten::val::object();
+    extra.set("sidewallGroupCount", sidewall_group_count);
+    extra.set("enableFaceRenaming", enable_face_renaming);
+    extra.set("preserveFilletSideWallFaces", preserve_fillet_side_wall_faces);
+    LogNativeFilletProfile(feature_id, "authoring sidewall grouping",
+                           NativeNowMs() - sidewall_group_start_ms, extra);
+  }
 
   emscripten::val combine_options = emscripten::val::object();
   combine_options.set("targetSnapshot", snapshot);
@@ -6288,6 +6509,8 @@ emscripten::val BuildFilletAuthoringState(const emscripten::val& options) {
   combine_options.set("cleanupTinyFaceIslandsArea",
                       cleanup_tiny_face_islands_area);
   combine_options.set("debug", debug);
+  combine_options.set("enableFaceRenaming", enable_face_renaming);
+  combine_options.set("profile", profile);
   emscripten::val combine_entries = emscripten::val::array();
   uint32_t combine_index = 0;
   for (const BuiltFilletEntry& entry : built_entries) {
@@ -6311,14 +6534,25 @@ emscripten::val BuildFilletAuthoringState(const emscripten::val& options) {
     combine_entries.set(combine_index++, combine_entry);
   }
   combine_options.set("entries", combine_entries);
+  const double combine_start_ms = NativeNowMs();
   const emscripten::val final_snapshot =
       BuildFilletCombinedAuthoringState(combine_options);
+  if (profile) {
+    LogNativeFilletProfile(feature_id, "authoring combine",
+                           NativeNowMs() - combine_start_ms);
+  }
 
   emscripten::val result = emscripten::val::object();
   result.set("finalSnapshot", final_snapshot);
   result.set("directionDecision", batch_result["directionDecision"]);
   result.set("entryCount", static_cast<uint32_t>(built_entries.size()));
   result.set("nativeKernel", true);
+  if (profile) {
+    emscripten::val extra = emscripten::val::object();
+    extra.set("entryCount", static_cast<uint32_t>(built_entries.size()));
+    LogNativeFilletProfile(feature_id, "authoring total",
+                           NativeNowMs() - total_start_ms, extra);
+  }
   if (debug) {
     const emscripten::val combine_debug_snapshots = final_snapshot["debugSnapshots"];
     if (!combine_debug_snapshots.isUndefined() &&
@@ -6533,6 +6767,7 @@ emscripten::val BuildFilletCornerBridgeAuthoringState(
 }
 
 emscripten::val BuildFilletCombinedAuthoringState(const emscripten::val& options) {
+  const double total_start_ms = NativeNowMs();
   const emscripten::val target_snapshot = options["targetSnapshot"];
   if (target_snapshot.isUndefined() || target_snapshot.isNull()) {
     throw std::runtime_error("buildFilletCombinedAuthoringState requires targetSnapshot.");
@@ -6550,7 +6785,13 @@ emscripten::val BuildFilletCombinedAuthoringState(const emscripten::val& options
   const bool debug =
       !(options["debug"].isUndefined() || options["debug"].isNull()) &&
       options["debug"].as<bool>();
+  const bool enable_face_renaming =
+      options["enableFaceRenaming"].isUndefined() ||
+      options["enableFaceRenaming"].isNull() ||
+      options["enableFaceRenaming"].as<bool>();
+  const bool profile = ReadBoolOption(options, "profile", false);
 
+  const double read_target_start_ms = NativeNowMs();
   SnapshotInfo target_info = ReadBooleanReadySnapshotInfo(target_snapshot, name);
   manifold::Manifold result_manifold(target_info.mesh);
   std::unordered_map<uint32_t, std::string> merged_id_to_face_name =
@@ -6560,6 +6801,12 @@ emscripten::val BuildFilletCombinedAuthoringState(const emscripten::val& options
   std::vector<AuxEdgeRecord> merged_aux_edges = target_info.aux_edges;
   emscripten::val debug_snapshots = emscripten::val::array();
   uint32_t debug_index = 0;
+  if (profile) {
+    emscripten::val extra = emscripten::val::object();
+    extra.set("targetTriangles", static_cast<uint32_t>(target_info.mesh.triVerts.size() / 3));
+    LogNativeFilletProfile(feature_id, "combine read target",
+                           NativeNowMs() - read_target_start_ms, extra);
+  }
   auto append_debug_snapshot = [&](const std::string& kind,
                                    const std::string& snapshot_name,
                                    const emscripten::val& snapshot) {
@@ -6599,6 +6846,7 @@ emscripten::val BuildFilletCombinedAuthoringState(const emscripten::val& options
   if (!entries.isUndefined() && !entries.isNull()) {
     const uint32_t length = entries["length"].as<uint32_t>();
     for (uint32_t i = 0; i < length; ++i) {
+      const double entry_start_ms = NativeNowMs();
       const emscripten::val entry = entries[i];
       if (entry.isUndefined() || entry.isNull()) continue;
       const emscripten::val snapshot = entry["snapshot"];
@@ -6614,16 +6862,19 @@ emscripten::val BuildFilletCombinedAuthoringState(const emscripten::val& options
           !(merge_face_names.isUndefined() || merge_face_names.isNull()) &&
           merge_face_names["length"].as<uint32_t>() > 0;
       const bool has_merge_metadata = !merge_face_metadata_json.empty();
-      if (has_merge_target && (has_merge_face_names || has_merge_metadata)) {
+      if (has_merge_target && ((enable_face_renaming && has_merge_face_names) ||
+                               has_merge_metadata)) {
         BrepSolidCore core;
         core.SetAuthoringState(snapshot);
-        if (has_merge_face_names) {
+        if (enable_face_renaming && has_merge_face_names) {
           const uint32_t merge_count = merge_face_names["length"].as<uint32_t>();
           for (uint32_t merge_idx = 0; merge_idx < merge_count; ++merge_idx) {
             const emscripten::val merge_name_val = merge_face_names[merge_idx];
             if (merge_name_val.isUndefined() || merge_name_val.isNull()) continue;
             const std::string merge_name = merge_name_val.as<std::string>();
             if (merge_name.empty() || merge_name == merge_target_face_name) continue;
+            LogFilletFaceRename("combine entry merge", feature_id, merge_name,
+                                merge_target_face_name);
             core.RenameFace(merge_name, merge_target_face_name);
           }
         }
@@ -6646,6 +6897,7 @@ emscripten::val BuildFilletCombinedAuthoringState(const emscripten::val& options
       const std::string direction = ReadString(entry["direction"], "INSET");
       GroupState& group =
           (direction == "OUTSET") ? outset_group : inset_group;
+      const double group_boolean_start_ms = NativeNowMs();
       if (!group.manifold) {
         group.manifold = std::make_unique<manifold::Manifold>(entry_manifold);
         group.id_to_face_name = info.id_to_face_name;
@@ -6659,23 +6911,50 @@ emscripten::val BuildFilletCombinedAuthoringState(const emscripten::val& options
         MergeMetadataMaps(group.metadata, info.face_metadata_json);
         MergeAuxEdges(merged_aux_edges, info.aux_edges);
       }
+      const double group_boolean_ms = NativeNowMs() - group_boolean_start_ms;
+      if (profile) {
+        emscripten::val extra = emscripten::val::object();
+        extra.set("entryIndex", i);
+        extra.set("direction", direction);
+        extra.set("triangles", static_cast<uint32_t>(info.mesh.triVerts.size() / 3));
+        extra.set("groupBooleanMs", group_boolean_ms);
+        LogNativeFilletProfile(feature_id, "combine entry",
+                               NativeNowMs() - entry_start_ms, extra);
+      }
     }
   }
 
   if (inset_group.manifold) {
+    const double inset_start_ms = NativeNowMs();
     result_manifold = result_manifold - (*inset_group.manifold);
+    if (profile) {
+      LogNativeFilletProfile(feature_id, "combine inset subtract",
+                             NativeNowMs() - inset_start_ms);
+    }
     merged_id_to_face_name =
         CombineIdMaps(merged_id_to_face_name, inset_group.id_to_face_name);
     MergeMetadataMaps(merged_metadata, inset_group.metadata);
   }
   if (outset_group.manifold) {
+    const double outset_start_ms = NativeNowMs();
     result_manifold = result_manifold + (*outset_group.manifold);
+    if (profile) {
+      LogNativeFilletProfile(feature_id, "combine outset union",
+                             NativeNowMs() - outset_start_ms);
+    }
     merged_id_to_face_name =
         CombineIdMaps(merged_id_to_face_name, outset_group.id_to_face_name);
     MergeMetadataMaps(merged_metadata, outset_group.metadata);
   }
 
+  const double get_mesh_start_ms = NativeNowMs();
   manifold::MeshGL final_mesh = result_manifold.GetMeshGL();
+  if (profile) {
+    emscripten::val extra = emscripten::val::object();
+    extra.set("finalTriangles", static_cast<uint32_t>(final_mesh.triVerts.size() / 3));
+    LogNativeFilletProfile(feature_id, "combine get mesh",
+                           NativeNowMs() - get_mesh_start_ms, extra);
+  }
   std::unordered_map<std::string, uint32_t> merged_face_name_to_id;
   for (const auto& entry : merged_id_to_face_name) {
     merged_face_name_to_id[entry.second] = entry.first;
@@ -6685,24 +6964,43 @@ emscripten::val BuildFilletCombinedAuthoringState(const emscripten::val& options
                              feature_id + "_COMBINE_PRE_RELABEL", final_mesh,
                              merged_id_to_face_name, merged_face_name_to_id,
                              merged_metadata);
-  RelabelFallbackFacesByAdjacency(final_mesh, merged_id_to_face_name,
-                                  merged_face_name_to_id, merged_metadata,
-                                  feature_id);
+  if (enable_face_renaming) {
+    const double relabel_start_ms = NativeNowMs();
+    RelabelFallbackFacesByAdjacency(final_mesh, merged_id_to_face_name,
+                                    merged_face_name_to_id, merged_metadata,
+                                    feature_id);
+    if (profile) {
+      LogNativeFilletProfile(feature_id, "combine relabel fallback faces",
+                             NativeNowMs() - relabel_start_ms);
+    }
+  }
   append_debug_mesh_snapshot("combinePostRelabel",
                              feature_id + "_COMBINE_POST_RELABEL", final_mesh,
                              merged_id_to_face_name, merged_face_name_to_id,
                              merged_metadata);
+  const double cleanup_start_ms = NativeNowMs();
   CleanupTinyFaceIslands(final_mesh, merged_id_to_face_name,
                          merged_face_name_to_id, merged_metadata,
                          cleanup_tiny_face_islands_area);
+  if (profile) {
+    LogNativeFilletProfile(feature_id, "combine cleanup tiny islands",
+                           NativeNowMs() - cleanup_start_ms);
+  }
   append_debug_mesh_snapshot("combinePostCleanup",
                              feature_id + "_COMBINE_POST_CLEANUP", final_mesh,
                              merged_id_to_face_name, merged_face_name_to_id,
                              merged_metadata);
 
+  const double build_snapshot_start_ms = NativeNowMs();
   emscripten::val final_snapshot = BuildSnapshotFromMesh(
       final_mesh, merged_id_to_face_name, merged_face_name_to_id,
       merged_metadata, {}, merged_aux_edges, name);
+  if (profile) {
+    LogNativeFilletProfile(feature_id, "combine build final snapshot",
+                           NativeNowMs() - build_snapshot_start_ms);
+    LogNativeFilletProfile(feature_id, "combine total",
+                           NativeNowMs() - total_start_ms);
+  }
   if (debug) {
     final_snapshot.set("debugSnapshots", debug_snapshots);
   }

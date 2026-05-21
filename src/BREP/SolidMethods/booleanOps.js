@@ -248,13 +248,31 @@ export function setTolerance(tolerance) {
     });
     return out;
 }
-export function simplify(tolerance = undefined, updateInPlace = false) {
+export function simplify(tolerance = undefined, updateInPlace = false, options = {}) {
+    if (updateInPlace && typeof updateInPlace === "object") {
+        options = updateInPlace;
+        updateInPlace = false;
+    }
     const Solid = this.constructor;
     const m = this._manifoldize();
     const authoringSnapshot = getSolidAuthoringStateSnapshot(this);
+    const condenseCoplanarFaces = !!(
+        options?.asOriginal
+        || options?.condenseCoplanarFaces
+        || options?.collapseCoplanarEdges
+    );
 
-    // Run simplify on the manifold
-    const outM = (tolerance === undefined) ? m.simplify() : m.simplify(tolerance);
+    // Run simplify on the manifold. asOriginal() is deliberately opt-in: it
+    // condenses coplanar relation faces, but Manifold also regenerates faceIDs.
+    const simplifySource = condenseCoplanarFaces ? m.asOriginal() : m;
+    let outM;
+    try {
+        outM = (tolerance === undefined) ? simplifySource.simplify() : simplifySource.simplify(tolerance);
+    } finally {
+        if (condenseCoplanarFaces) {
+            try { if (simplifySource && simplifySource !== m && typeof simplifySource.delete === "function") simplifySource.delete(); } catch { }
+        }
+    }
     const outSnapshot = buildNativeSnapshotFromManifold(outM, this._idToFaceName, {
         faceMetadataJson: authoringSnapshot?.faceMetadataJson,
         edgeMetadataJson: authoringSnapshot?.edgeMetadataJson,

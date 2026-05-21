@@ -3,6 +3,7 @@
 #include <manifold/manifold.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -101,8 +102,35 @@ struct TubeBuildOptions {
   bool prefer_fast = true;
   bool allow_slow_fallback = true;
   bool self_union = true;
+  bool profile = false;
   std::string name = "Tube";
+  std::string feature_id = "TUBE";
 };
+
+double NativeNowMs() {
+  using Clock = std::chrono::steady_clock;
+  return std::chrono::duration<double, std::milli>(
+             Clock::now().time_since_epoch())
+      .count();
+}
+
+void LogNativeTubeProfile(const TubeBuildOptions& options,
+                          const std::string& step, double ms,
+                          const emscripten::val& extra =
+                              emscripten::val::undefined()) {
+  if (!options.profile) return;
+  try {
+    emscripten::val detail = emscripten::val::object();
+    detail.set("featureID", options.feature_id);
+    detail.set("tubeName", options.name);
+    detail.set("step", step);
+    detail.set("ms", ms);
+    if (!extra.isUndefined() && !extra.isNull()) detail.set("extra", extra);
+    emscripten::val::global("console").call<void>(
+        "log", std::string("[Native tube profile]"), detail);
+  } catch (...) {
+  }
+}
 
 bool FastTubeNeedsSlowFallback(const FastTubeResult& fast_result,
                                const TubeBuildOptions& options) {
@@ -624,6 +652,7 @@ void BuildRingVertices(AuthoringBuffers& buffers, const Vec3& center,
 }
 
 FastTubeResult BuildFastTube(const TubeBuildOptions& options) {
+  const double total_start_ms = NativeNowMs();
   FastTubeResult result;
   const TubeFaceLabels labels = MakeTubeFaceLabels(
       options.name, options.closed, options.inner_radius > 0.0);
@@ -654,7 +683,10 @@ FastTubeResult BuildFastTube(const TubeBuildOptions& options) {
     is_closed = true;
   }
 
+  const double smooth_start_ms = NativeNowMs();
   std::vector<Vec3> smoothed = SmoothPath(vec_points, options.radius);
+  LogNativeTubeProfile(options, "fast smooth path",
+                       NativeNowMs() - smooth_start_ms);
   if (smoothed.size() < 2) {
     std::ostringstream msg;
     msg << "Tube path collapsed after smoothing; check input. Original: "
@@ -675,7 +707,10 @@ FastTubeResult BuildFastTube(const TubeBuildOptions& options) {
   std::vector<Vec3> tangents;
   std::vector<Vec3> normals;
   std::vector<Vec3> binormals;
+  const double frames_start_ms = NativeNowMs();
   ComputeFrames(smoothed, is_closed, tangents, normals, binormals);
+  LogNativeTubeProfile(options, "fast compute frames",
+                       NativeNowMs() - frames_start_ms);
   if (tangents.size() < 2 || normals.size() != smoothed.size() ||
       binormals.size() != smoothed.size()) {
     throw std::runtime_error("Unable to compute frames for tube path.");
@@ -751,6 +786,7 @@ FastTubeResult BuildFastTube(const TubeBuildOptions& options) {
     }
   }
 
+  const double rings_start_ms = NativeNowMs();
   if (is_closed) {
     const Vec3 close_dir = Normalize(Subtract(smoothed.front(), smoothed.back()));
     for (int j = 0; j < segments; ++j) {
@@ -810,9 +846,21 @@ FastTubeResult BuildFastTube(const TubeBuildOptions& options) {
       }
     }
   }
+  if (options.profile) {
+    emscripten::val extra = emscripten::val::object();
+    extra.set("pathPoints", static_cast<uint32_t>(smoothed.size()));
+    extra.set("resolution", options.resolution);
+    extra.set("preTriangles",
+              static_cast<uint32_t>(result.buffers.tri_verts.size() / 3));
+    LogNativeTubeProfile(options, "fast build rings",
+                         NativeNowMs() - rings_start_ms, extra);
+  }
 
+  const double foldback_start_ms = NativeNowMs();
   const PathFoldbackAnalysis foldback =
       AnalyzeTubePathFoldback(smoothed, is_closed, options.radius);
+  LogNativeTubeProfile(options, "fast analyze foldback",
+                       NativeNowMs() - foldback_start_ms);
   result.path_points = smoothed;
   result.closed = is_closed;
   result.pre_triangles =
@@ -824,6 +872,7 @@ FastTubeResult BuildFastTube(const TubeBuildOptions& options) {
       foldback.min_non_adjacent_segment_distance;
 
   if (options.self_union) {
+    const double self_union_start_ms = NativeNowMs();
     manifold::MeshGL mesh;
     mesh.numProp = kNumProp;
     mesh.vertProperties = result.buffers.vert_properties;
@@ -845,8 +894,26 @@ FastTubeResult BuildFastTube(const TubeBuildOptions& options) {
     } catch (...) {
       result.union_succeeded = false;
     }
+    if (options.profile) {
+      emscripten::val extra = emscripten::val::object();
+      extra.set("preTriangles", result.pre_triangles);
+      extra.set("postTriangles", result.post_triangles);
+      extra.set("unionSucceeded", result.union_succeeded);
+      LogNativeTubeProfile(options, "fast self union",
+                           NativeNowMs() - self_union_start_ms, extra);
+    }
   }
 
+  if (options.profile) {
+    emscripten::val extra = emscripten::val::object();
+    extra.set("pathPoints", static_cast<uint32_t>(smoothed.size()));
+    extra.set("closedLoop", result.closed);
+    extra.set("preTriangles", result.pre_triangles);
+    extra.set("postTriangles", result.post_triangles);
+    extra.set("pathFoldbackLikely", result.path_foldback_likely);
+    LogNativeTubeProfile(options, "fast total", NativeNowMs() - total_start_ms,
+                         extra);
+  }
   return result;
 }
 
@@ -1210,6 +1277,7 @@ emscripten::val BuildSnapshotFromMesh(const manifold::MeshGL& mesh,
 }  // namespace
 
 emscripten::val BuildTubeAuthoringState(const emscripten::val& options) {
+  const double total_start_ms = NativeNowMs();
   TubeBuildOptions build_options;
   build_options.raw_points = ReadPoints(options["points"]);
   build_options.radius = ReadFiniteNumber(options["radius"], "radius");
@@ -1259,6 +1327,13 @@ emscripten::val BuildTubeAuthoringState(const emscripten::val& options) {
     build_options.name = options["name"].as<std::string>();
     if (build_options.name.empty()) build_options.name = "Tube";
   }
+  build_options.profile =
+      !(options["profile"].isUndefined() || options["profile"].isNull()) &&
+      options["profile"].as<bool>();
+  if (!(options["featureID"].isUndefined() || options["featureID"].isNull())) {
+    build_options.feature_id = options["featureID"].as<std::string>();
+    if (build_options.feature_id.empty()) build_options.feature_id = "TUBE";
+  }
 
   bool fallback_from_fast = false;
   std::string fallback_reason;
@@ -1266,8 +1341,12 @@ emscripten::val BuildTubeAuthoringState(const emscripten::val& options) {
 
   if (build_options.prefer_fast) {
     try {
+      const double fast_start_ms = NativeNowMs();
       FastTubeResult fast = BuildFastTube(build_options);
+      LogNativeTubeProfile(build_options, "build fast result",
+                           NativeNowMs() - fast_start_ms);
       if (!FastTubeNeedsSlowFallback(fast, build_options)) {
+        const double snapshot_start_ms = NativeNowMs();
         const TubeFaceLabels labels = MakeTubeFaceLabels(
             build_options.name, fast.closed, build_options.inner_radius > 0.0);
         emscripten::val snapshot =
@@ -1282,6 +1361,10 @@ emscripten::val BuildTubeAuthoringState(const emscripten::val& options) {
         AnnotateTubeSnapshotBuildDecision(snapshot, "fast",
                                           build_options.prefer_fast, false, "",
                                           "");
+        LogNativeTubeProfile(build_options, "build fast snapshot",
+                             NativeNowMs() - snapshot_start_ms);
+        LogNativeTubeProfile(build_options, "build tube total",
+                             NativeNowMs() - total_start_ms);
         return snapshot;
       }
       fallback_from_fast = true;
@@ -1303,7 +1386,11 @@ emscripten::val BuildTubeAuthoringState(const emscripten::val& options) {
 
   std::vector<Vec3> path_points;
   bool closed = false;
+  const double slow_start_ms = NativeNowMs();
   manifold::MeshGL mesh = BuildSlowTubeMesh(build_options, path_points, closed);
+  LogNativeTubeProfile(build_options, "build slow mesh",
+                       NativeNowMs() - slow_start_ms);
+  const double slow_snapshot_start_ms = NativeNowMs();
   const TubeFaceLabels labels = MakeTubeFaceLabels(
       build_options.name, closed, build_options.inner_radius > 0.0);
   emscripten::val snapshot =
@@ -1312,6 +1399,10 @@ emscripten::val BuildTubeAuthoringState(const emscripten::val& options) {
                                     build_options.prefer_fast,
                                     fallback_from_fast, fallback_reason,
                                     fast_error);
+  LogNativeTubeProfile(build_options, "build slow snapshot",
+                       NativeNowMs() - slow_snapshot_start_ms);
+  LogNativeTubeProfile(build_options, "build tube total",
+                       NativeNowMs() - total_start_ms);
   return snapshot;
 }
 
