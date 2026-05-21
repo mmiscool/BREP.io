@@ -51,35 +51,10 @@ const inputParamsSchema = {
         default_value: 0.0001,
         hint: "Push fillet wedge end caps outward by this amount before booleaning (0 disables).",
     },
-    simplifyResult: {
+    collapseFilletSideWalls: {
         type: "boolean",
-        default_value: true,
-        hint: "Run the final simplify pass on the fillet result.",
-    },
-    cleanupNativeTinyFaceIslands: {
-        type: "boolean",
-        default_value: true,
-        hint: "Run the native tiny-face island cleanup during fillet combine.",
-    },
-    mergeCoplanarEndCaps: {
-        type: "boolean",
-        default_value: true,
-        hint: "Merge coplanar fillet end caps into adjacent host faces.",
-    },
-    reassignSliverTriangles: {
-        type: "boolean",
-        default_value: true,
-        hint: "Reassign tiny fillet sidewall sliver triangles into planar neighbors.",
-    },
-    collapseTinyTriangles: {
-        type: "boolean",
-        default_value: true,
-        hint: "Collapse tiny triangles on the final fillet result.",
-    },
-    cleanupPostCollapseTinyFaceIslands: {
-        type: "boolean",
-        default_value: true,
-        hint: "Clean up tiny face islands after collapsing tiny triangles.",
+        default_value: false,
+        hint: "Collapse deterministic fillet side-wall faces so adjacent faces meet directly.",
     },
     direction: {
         type: "options",
@@ -612,12 +587,7 @@ export class FilletFeature {
         }
 
         let result = null;
-        const simplifyResult = this.inputParams?.simplifyResult !== false;
-        const cleanupNativeTinyFaceIslands = this.inputParams?.cleanupNativeTinyFaceIslands !== false;
-        const mergeCoplanarEndCaps = this.inputParams?.mergeCoplanarEndCaps !== false;
-        const reassignSliverTriangles = this.inputParams?.reassignSliverTriangles !== false;
-        const collapseTinyTriangles = this.inputParams?.collapseTinyTriangles !== false;
-        const cleanupPostCollapseTinyFaceIslands = this.inputParams?.cleanupPostCollapseTinyFaceIslands !== false;
+        const collapseFilletSideWalls = this.inputParams?.collapseFilletSideWalls === true;
         result = await targetSolid.fillet({
             radius: r,
             resolution: this.inputParams?.resolution,
@@ -626,20 +596,20 @@ export class FilletFeature {
             direction: dir,
             inflate: Number(this.inputParams.inflate) || 0,
             nudgeFaceDistance: this.inputParams?.nudgeFaceDistance,
-            cleanupTinyFaceIslandsArea: cleanupNativeTinyFaceIslands
-                ? FILLET_NATIVE_TINY_FACE_ISLAND_CLEANUP_AREA
-                : 0,
-            mergeCoplanarEndCaps,
-            reassignSliverTriangles,
+            cleanupTinyFaceIslandsArea: FILLET_NATIVE_TINY_FACE_ISLAND_CLEANUP_AREA,
+            mergeCoplanarEndCaps: true,
+            reassignSliverTriangles: true,
+            collapseFilletSideWalls,
             debug: debugEnabled,
             debugSolidsLevel: configuredDebugLevel,
             debugShowCombinedBeforeTarget,
         });
         try {
-            result.__filletFinalSimplifyEnabled = simplifyResult;
-            result.__filletNativeTinyFaceIslandCleanupEnabled = cleanupNativeTinyFaceIslands;
-            result.__filletPostCollapseTinyTriangleCollapseEnabled = collapseTinyTriangles;
-            result.__filletPostCollapseTinyFaceIslandCleanupEnabled = cleanupPostCollapseTinyFaceIslands;
+            result.__filletFinalSimplifyEnabled = true;
+            result.__filletNativeTinyFaceIslandCleanupEnabled = true;
+            result.__filletSideWallCollapseEnabled = collapseFilletSideWalls;
+            result.__filletPostCollapseTinyTriangleCollapseEnabled = true;
+            result.__filletPostCollapseTinyFaceIslandCleanupEnabled = true;
         } catch { }
         const collectDebugSolids = (res) => {
             const out = [];
@@ -668,7 +638,7 @@ export class FilletFeature {
         if (!result) {
             throw new Error(`[FilletFeature] Fillet returned no result for feature ${fid || '(unknown)'}.`);
         }
-        if (simplifyResult && typeof result.simplify === 'function') {
+        if (typeof result.simplify === 'function') {
             try {
                 result.simplify(FINAL_FILLET_SIMPLIFY_TOLERANCE, true);
             } catch (e) {
@@ -703,11 +673,17 @@ export class FilletFeature {
         for (const obj of added) {
             if (obj && typeof obj === 'object' && typeof obj.setEpsilon === 'function') {
                 try {
-                    if (collapseTinyTriangles) {
+                    const sideWallCollapseCount = Math.max(
+                        0,
+                        Number(obj.__filletSideWallCollapseCount || 0),
+                    );
+                    const runPostTinyTriangleCollapse = !(collapseFilletSideWalls && sideWallCollapseCount > 0);
+                    if (runPostTinyTriangleCollapse) {
                         await obj.collapseTinyTriangles(FILLET_POST_COLLAPSE_TINY_TRIANGLE_THRESHOLD);
                     }
-                    obj.__filletPostCollapseTinyTriangleCollapseEnabled = collapseTinyTriangles;
-                    if (cleanupPostCollapseTinyFaceIslands && typeof obj.cleanupTinyFaceIslands === 'function') {
+                    obj.__filletPostCollapseTinyTriangleCollapseEnabled = runPostTinyTriangleCollapse;
+                    const runPostTinyFaceIslandCleanup = runPostTinyTriangleCollapse || !collapseFilletSideWalls;
+                    if (runPostTinyFaceIslandCleanup && typeof obj.cleanupTinyFaceIslands === 'function') {
                         obj.__filletPostCollapseTinyFaceIslandCleanupCount = Math.max(
                             0,
                             Number(obj.cleanupTinyFaceIslands(FILLET_POST_COLLAPSE_TINY_FACE_ISLAND_CLEANUP_AREA) || 0),
@@ -715,7 +691,7 @@ export class FilletFeature {
                     } else {
                         obj.__filletPostCollapseTinyFaceIslandCleanupCount = 0;
                     }
-                    obj.__filletPostCollapseTinyFaceIslandCleanupEnabled = cleanupPostCollapseTinyFaceIslands;
+                    obj.__filletPostCollapseTinyFaceIslandCleanupEnabled = runPostTinyFaceIslandCleanup;
                     obj.visualize()
                 } catch (e) {
                     console.warn('[FilletFeature] Failed to set epsilon on fillet result solid.', { error: e });

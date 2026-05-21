@@ -9,6 +9,8 @@ import {
 } from '../CppSolidCore.js';
 import { manifold } from '../setupManifold.js';
 
+const FILLET_SIDEWALL_COLLAPSE_SIMPLIFY_TOLERANCE = 0.0009;
+
 function hasNativeFilletCombinedBuilder() {
   return typeof manifold?.buildFilletCombinedAuthoringState === 'function';
 }
@@ -951,6 +953,7 @@ function computeTriangleGeometryFromAuthoringState(vertProperties, triVerts, tri
   return {
     vertexIndices: [i0, i1, i2],
     points: [p0, p1, p2],
+    edgeLengths: [edge01, edge12, edge20],
     area,
     longestEdge,
     minHeight,
@@ -1002,6 +1005,169 @@ function pruneUnusedFaceLabelsFromTriangles(solid) {
     removed += 1;
   }
   return removed;
+}
+
+function collapseFilletSideWallFaces(solid, opts = {}) {
+  const tv = Array.isArray(solid?._triVerts) ? solid._triVerts : null;
+  const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : null;
+  const ids = Array.isArray(solid?._triIDs) ? solid._triIDs : null;
+  const faceToId = solid?._faceNameToID instanceof Map ? solid._faceNameToID : null;
+  if (!solid || !tv || !vp || !ids || !faceToId) {
+    return { collapsedEdges: 0, collapsedTriangles: 0 };
+  }
+
+  const featureID = String(opts?.featureID || '').trim();
+  const debug = !!opts?.debug;
+  const forcedCollapseFaceIDs = new Set();
+  const opportunisticCollapseFaceIDs = new Set();
+  const collapseFaceNames = [];
+  const sideWallNameNeedle = featureID ? `${featureID}_FILLET_SIDEWALL_` : '_FILLET_SIDEWALL_';
+  const hostSideWallPattern = /_(?:FACE_A|FACE_B|SIDE_A|SIDE_B)(?:$|_)/u;
+  const wedgeSurfaceSideWallPattern = /_(?:SURFACE_CA|SURFACE_CB|WEDGE_A|WEDGE_B)(?:$|_)/u;
+  for (const [faceNameRaw, faceIDRaw] of faceToId.entries()) {
+    const faceName = String(faceNameRaw || '').trim();
+    const faceID = faceIDRaw >>> 0;
+    if (!faceName) continue;
+    const metadata = (typeof solid.getFaceMetadata === 'function')
+      ? (solid.getFaceMetadata(faceName) || {})
+      : {};
+    const isDeterministicSideWall = featureID
+      ? faceName.startsWith(sideWallNameNeedle)
+      : faceName.includes(sideWallNameNeedle);
+    const isPreservedIntermediateSideWall = featureID
+      && faceName.startsWith(`${featureID}_`)
+      && hostSideWallPattern.test(faceName);
+    const isPreservedWedgeSurfaceSideWall = featureID
+      && faceName.startsWith(`${featureID}_`)
+      && wedgeSurfaceSideWallPattern.test(faceName);
+    const isRoundPipeFace = faceName.endsWith('_TUBE_Outer');
+    if (
+      (!isDeterministicSideWall && !isPreservedIntermediateSideWall && !isPreservedWedgeSurfaceSideWall)
+      || isRoundPipeFace
+      || metadata?.filletRoundFace === faceName
+    ) continue;
+    if (isPreservedWedgeSurfaceSideWall) opportunisticCollapseFaceIDs.add(faceID);
+    else forcedCollapseFaceIDs.add(faceID);
+    collapseFaceNames.push(faceName);
+  }
+  if (forcedCollapseFaceIDs.size === 0 && opportunisticCollapseFaceIDs.size === 0) {
+    return { collapsedEdges: 0, collapsedTriangles: 0 };
+  }
+
+  const triCount = Math.min(ids.length, (tv.length / 3) | 0);
+  const vertexCount = (vp.length / 3) | 0;
+  if (triCount <= 0 || vertexCount <= 0) {
+    return { collapsedEdges: 0, collapsedTriangles: 0 };
+  }
+
+  const parent = new Int32Array(vertexCount);
+  for (let i = 0; i < vertexCount; i += 1) parent[i] = i;
+  const find = (index) => {
+    let i = index;
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]];
+      i = parent[i];
+    }
+    return i;
+  };
+  const unite = (a, b) => {
+    let ra = find(a);
+    let rb = find(b);
+    if (ra === rb) return false;
+    if (rb < ra) {
+      const tmp = ra;
+      ra = rb;
+      rb = tmp;
+    }
+    parent[rb] = ra;
+    return true;
+  };
+
+  const collapseCandidates = [];
+  for (let triIndex = 0; triIndex < triCount; triIndex += 1) {
+    const faceID = ids[triIndex] >>> 0;
+    const forced = forcedCollapseFaceIDs.has(faceID);
+    const opportunistic = opportunisticCollapseFaceIDs.has(faceID);
+    if (!forced && !opportunistic) continue;
+    const geometry = computeTriangleGeometryFromAuthoringState(vp, tv, triIndex);
+    const [i0, i1, i2] = geometry.vertexIndices;
+    const [edge01, edge12, edge20] = geometry.edgeLengths;
+    let a = i0;
+    let b = i1;
+    let minLength = edge01;
+    if (edge12 < minLength) {
+      minLength = edge12;
+      a = i1;
+      b = i2;
+    }
+    if (edge20 < minLength) {
+      minLength = edge20;
+      a = i2;
+      b = i0;
+    }
+    collapseCandidates.push({
+      triIndex,
+      a,
+      b,
+      forced,
+    });
+  }
+
+  let collapsedEdges = 0;
+  let collapsedTriangles = 0;
+  let collapsedWedgeSurfaceTriangles = 0;
+  for (const candidate of collapseCandidates) {
+    if (unite(candidate.a, candidate.b)) collapsedEdges += 1;
+    collapsedTriangles += 1;
+    if (!candidate.forced) collapsedWedgeSurfaceTriangles += 1;
+  }
+  if (collapsedEdges === 0 && collapsedTriangles === 0) {
+    return { collapsedEdges: 0, collapsedTriangles: 0 };
+  }
+
+  const rootCoords = new Map();
+  for (let i = 0; i < vertexCount; i += 1) {
+    const root = find(i);
+    if (rootCoords.has(root)) continue;
+    rootCoords.set(root, [
+      vp[root * 3 + 0],
+      vp[root * 3 + 1],
+      vp[root * 3 + 2],
+    ]);
+  }
+  for (let i = 0; i < vertexCount; i += 1) {
+    const coords = rootCoords.get(find(i));
+    vp[i * 3 + 0] = coords[0];
+    vp[i * 3 + 1] = coords[1];
+    vp[i * 3 + 2] = coords[2];
+  }
+
+  solid._vertKeyToIndex = new Map();
+  for (let i = 0; i < vp.length; i += 3) {
+    solid._vertKeyToIndex.set(`${vp[i]},${vp[i + 1]},${vp[i + 2]}`, (i / 3) | 0);
+  }
+  solid._faceIndex = null;
+  solid._dirty = true;
+  try { if (solid._manifold && typeof solid._manifold.delete === 'function') solid._manifold.delete(); } catch { }
+  solid._manifold = null;
+  solid._cppSolidCoreSyncStamp = null;
+
+  const summary = {
+    collapsedEdges,
+    collapsedTriangles,
+    removedSideWallTriangles: 0,
+    removedDegenerateTriangles: 0,
+    removedDuplicateTriangles: 0,
+    collapsedWedgeSurfaceTriangles,
+    sideWallFaceNames: collapseFaceNames,
+  };
+  if (debug) {
+    console.log('[Solid.fillet] Collapsed fillet side-wall face vertices onto shortest edges.', {
+      featureID,
+      ...summary,
+    });
+  }
+  return summary;
 }
 
 function reassignTinyFilletSidewallSliverTriangles(solid, opts = {}) {
@@ -1258,6 +1424,7 @@ function reassignTinyFilletSidewallSliverTriangles(solid, opts = {}) {
 export { reversePostBooleanFilletEndCapNudge as __testOnlyReversePostBooleanFilletEndCapNudge };
 export { mergeCoplanarAdjacentFilletEndCaps as __testOnlyMergeCoplanarAdjacentFilletEndCaps };
 export { reassignTinyFilletSidewallSliverTriangles as __testOnlyReassignTinyFilletSidewallSliverTriangles };
+export { collapseFilletSideWallFaces as __testOnlyCollapseFilletSideWallFaces };
 
 /**
  * Apply fillets to this Solid and return a new Solid with the result.
@@ -1273,6 +1440,7 @@ export { reassignTinyFilletSidewallSliverTriangles as __testOnlyReassignTinyFill
  * @param {number} [opts.cleanupTinyFaceIslandsArea=0.01] area threshold for reassigning tiny enclosed face-label islands (<= 0 disables)
  * @param {boolean} [opts.mergeCoplanarEndCaps=true] merge coplanar fillet end caps into adjacent host faces
  * @param {boolean} [opts.reassignSliverTriangles=true] reassign tiny fillet sidewall sliver triangles into planar neighbors
+ * @param {boolean} [opts.collapseFilletSideWalls=false] collapse deterministic fillet side-wall faces so adjacent faces meet directly
  * @param {boolean} [opts.debug=false] Enable debug visuals in fillet builder
  * @param {number} [opts.debugSolidsLevel=0] -1=none, 0=tube+wedge, 1=edge fillet boolean result, 2=all intermediate solids
  * @param {boolean} [opts.debugShowCombinedBeforeTarget=false] Emit the combined fillet solid before target boolean
@@ -1306,7 +1474,8 @@ export async function fillet(opts = {}) {
     : 0.01;
   const mergeCoplanarEndCaps = opts.mergeCoplanarEndCaps !== false;
   const reverseEndCapNudge = mergeCoplanarEndCaps;
-  const reassignSliverTriangles = opts.reassignSliverTriangles !== false;
+  const collapseFilletSideWalls = opts.collapseFilletSideWalls === true;
+  const reassignSliverTriangles = opts.reassignSliverTriangles !== false && !collapseFilletSideWalls;
   const featureID = opts.featureID || 'FILLET';
 
   // Resolve pre-selected edge objects.
@@ -1375,6 +1544,7 @@ export async function fillet(opts = {}) {
       debug: !!debug,
       debugSolidsLevel,
       debugShowCombinedBeforeTarget,
+      preserveFilletSideWallFaces: collapseFilletSideWalls,
     });
   } catch (err) {
     console.error('[Solid.fillet] Native fillet build failed; returning clone.', {
@@ -1468,6 +1638,48 @@ export async function fillet(opts = {}) {
     }
   } else {
     result.__filletSliverTriangleReassignCount = 0;
+  }
+  result.__filletSideWallCollapseEnabled = collapseFilletSideWalls;
+  if (collapseFilletSideWalls) {
+    try {
+      const sideWallCollapseSummary = collapseFilletSideWallFaces(result, {
+        featureID,
+        debug,
+      });
+      result.__filletSideWallCollapseSummary = sideWallCollapseSummary;
+      result.__filletSideWallCollapseCount = Math.max(0, Number(sideWallCollapseSummary?.collapsedEdges || 0));
+      result.__filletSideWallCollapseRemovedTriangles = Math.max(0, Number(sideWallCollapseSummary?.removedSideWallTriangles || 0));
+      result.__filletSideWallCollapseSimplifySucceeded = false;
+      result.__filletSideWallCollapseSimplifyError = null;
+      if (result.__filletSideWallCollapseCount > 0 && typeof result.simplify === 'function') {
+        try {
+          result.simplify(FILLET_SIDEWALL_COLLAPSE_SIMPLIFY_TOLERANCE, true);
+          result.__filletSideWallCollapseSimplifySucceeded = true;
+        } catch (simplifyError) {
+          result.__filletSideWallCollapseSimplifyError = simplifyError?.message || String(simplifyError);
+          if (debug) {
+            console.warn('[Solid.fillet] Failed to simplify after fillet side-wall vertex collapse.', {
+              featureID,
+              error: result.__filletSideWallCollapseSimplifyError,
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('[Solid.fillet] Failed to collapse fillet side-wall faces.', {
+        featureID,
+        error: error?.message || error,
+      });
+      result.__filletSideWallCollapseCount = 0;
+      result.__filletSideWallCollapseRemovedTriangles = 0;
+      result.__filletSideWallCollapseSimplifySucceeded = false;
+      result.__filletSideWallCollapseSimplifyError = error?.message || String(error);
+    }
+  } else {
+    result.__filletSideWallCollapseCount = 0;
+    result.__filletSideWallCollapseRemovedTriangles = 0;
+    result.__filletSideWallCollapseSimplifySucceeded = false;
+    result.__filletSideWallCollapseSimplifyError = null;
   }
   return result;
 }

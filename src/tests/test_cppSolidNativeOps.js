@@ -2,6 +2,7 @@ import { Solid } from "../BREP/BetterSolid.js";
 import {
     __testOnlyMergeCoplanarAdjacentFilletEndCaps,
     __testOnlyReversePostBooleanFilletEndCapNudge,
+    __testOnlyCollapseFilletSideWallFaces,
     __testOnlyReassignTinyFilletSidewallSliverTriangles,
 } from "../BREP/SolidMethods/fillet.js";
 import {
@@ -804,6 +805,63 @@ export async function test_cppSolidNative_reassignTinyFilletSidewallSliverTriang
     const metadata = solid.getFaceMetadata("MAIN") || {};
     if (metadata.marker !== "main-face" || metadata.sourceFeatureId !== "BASE") {
         throw new Error("Expected MAIN metadata to survive sliver-triangle reassignment.");
+    }
+}
+
+export async function test_cppSolidNative_collapseFilletSideWallFaces_collapses_strip_vertices() {
+    const solid = new Solid();
+    const sideWallName = "F_TEST_FILLET_SIDEWALL_EDGE_abcd1234";
+    solid
+        .addTriangle("MAIN_A", [0, 0, 0], [2, 0, 0], [2, 1, 0])
+        .addTriangle("MAIN_A", [0, 0, 0], [2, 1, 0], [0, 1, 0])
+        .addTriangle(sideWallName, [0, 1, 0], [2, 1, 0], [2, 1.1, 0])
+        .addTriangle(sideWallName, [0, 1, 0], [2, 1.1, 0], [0, 1.1, 0])
+        .addTriangle("MAIN_B", [0, 1.1, 0], [2, 1.1, 0], [2, 2, 0])
+        .addTriangle("MAIN_B", [0, 1.1, 0], [2, 2, 0], [0, 2, 0]);
+
+    solid.setFaceMetadata("MAIN_A", { marker: "a" });
+    solid.setFaceMetadata("MAIN_B", { marker: "b" });
+    solid.setFaceMetadata(sideWallName, {
+        filletSideWall: true,
+        filletMergedSideWall: true,
+        filletSideWallEdge: "EDGE",
+        sourceFeatureId: "F_TEST",
+    });
+
+    const summary = __testOnlyCollapseFilletSideWallFaces(solid, { featureID: "F_TEST" });
+    if (Number(summary?.collapsedTriangles || 0) !== 2) {
+        throw new Error(`Expected two side-wall triangles to be collapsed, received ${summary?.collapsedTriangles}.`);
+    }
+    if (!(Number(summary?.collapsedEdges || 0) >= 2)) {
+        throw new Error(`Expected at least two side-wall edge collapses, received ${summary?.collapsedEdges}.`);
+    }
+
+    const faceNames = new Set(solid.getFaceNames?.() || []);
+    if (!faceNames.has(sideWallName)) {
+        throw new Error("Expected coordinate-only side-wall collapse to leave cleanup to simplify.");
+    }
+    if (!faceNames.has("MAIN_A") || !faceNames.has("MAIN_B")) {
+        throw new Error("Expected adjacent faces to survive side-wall collapse.");
+    }
+
+    const mainBID = solid._faceNameToID.get("MAIN_B");
+    const yValues = [];
+    for (let triIndex = 0; triIndex < solid._triIDs.length; triIndex += 1) {
+        if ((solid._triIDs[triIndex] >>> 0) !== (mainBID >>> 0)) continue;
+        const base = triIndex * 3;
+        for (const vertexIndex of [
+            solid._triVerts[base + 0],
+            solid._triVerts[base + 1],
+            solid._triVerts[base + 2],
+        ]) {
+            yValues.push(solid._vertProperties[(vertexIndex * 3) + 1]);
+        }
+    }
+    if (!yValues.some((y) => approx(y, 1, 1e-9))) {
+        throw new Error("Expected MAIN_B boundary vertices to move onto MAIN_A boundary at y=1.");
+    }
+    if (yValues.some((y) => approx(y, 1.1, 1e-9))) {
+        throw new Error("Expected old side-wall boundary y=1.1 to be eliminated from MAIN_B.");
     }
 }
 

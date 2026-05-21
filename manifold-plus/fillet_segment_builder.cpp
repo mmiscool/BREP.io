@@ -5892,6 +5892,10 @@ emscripten::val BuildFilletAuthoringState(const emscripten::val& options) {
   const bool debug =
       !(options["debug"].isUndefined() || options["debug"].isNull()) &&
       options["debug"].as<bool>();
+  const bool preserve_fillet_side_wall_faces =
+      !(options["preserveFilletSideWallFaces"].isUndefined() ||
+        options["preserveFilletSideWallFaces"].isNull()) &&
+      options["preserveFilletSideWallFaces"].as<bool>();
   const double resolution =
       options["resolution"].isUndefined() || options["resolution"].isNull()
           ? 32.0
@@ -6233,7 +6237,8 @@ emscripten::val BuildFilletAuthoringState(const emscripten::val& options) {
     const std::string side_merge_target_face_name =
         BuildEdgeDerivedSideWallFaceName(entry.edge_reference, feature_id);
 
-    if (!tube_merge_face_names.empty() || !side_merge_face_names.empty()) {
+    if (!preserve_fillet_side_wall_faces &&
+        (!tube_merge_face_names.empty() || !side_merge_face_names.empty())) {
       BrepSolidCore core;
       core.SetAuthoringState(entry.final_snapshot);
       auto apply_merge_group = [&](const std::string& target_face_name,

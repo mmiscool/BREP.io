@@ -141,6 +141,13 @@ export function visualize(options = {}) {
         geom.computeBoundingSphere();
 
         const faceObj = new Face(geom);
+        if (usedFallback && faceObj.material) {
+            try {
+                faceObj.material = faceObj.material.clone();
+                faceObj.material.side = THREE.DoubleSide;
+                faceObj.material.needsUpdate = true;
+            } catch { /* keep default material if cloning fails */ }
+        }
         faceObj.name = faceName;
         faceObj.userData.faceName = faceName;
         faceObj.userData.__defaultMaterial = faceObj.material;
