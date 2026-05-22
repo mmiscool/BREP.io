@@ -401,6 +401,13 @@ double TriangleArea(const Vec3& a, const Vec3& b, const Vec3& c) {
   return Length(Cross(Subtract(b, a), Subtract(c, a)));
 }
 
+void AddTriangleIfNonDegenerate(SnapshotBuilder& builder,
+                                const std::string& face_name, const Vec3& a,
+                                const Vec3& b, const Vec3& c) {
+  if (!(TriangleArea(a, b, c) > 1e-18)) return;
+  builder.AddTriangle(face_name, a, b, c);
+}
+
 void AddQuad(SnapshotBuilder& builder, const std::string& face_name,
              const Vec3& a0, const Vec3& b0, const Vec3& b1, const Vec3& a1,
              bool is_hole) {
@@ -410,21 +417,28 @@ void AddQuad(SnapshotBuilder& builder, const std::string& face_name,
 
   if (area_d2 > area_d1) {
     if (is_hole) {
-      builder.AddTriangle(face_name, a0, a1, b0);
-      builder.AddTriangle(face_name, b0, a1, b1);
+      AddTriangleIfNonDegenerate(builder, face_name, a0, a1, b0);
+      AddTriangleIfNonDegenerate(builder, face_name, b0, a1, b1);
     } else {
-      builder.AddTriangle(face_name, a0, b0, a1);
-      builder.AddTriangle(face_name, b0, b1, a1);
+      AddTriangleIfNonDegenerate(builder, face_name, a0, b0, a1);
+      AddTriangleIfNonDegenerate(builder, face_name, b0, b1, a1);
     }
   } else {
     if (is_hole) {
-      builder.AddTriangle(face_name, a0, b1, b0);
-      builder.AddTriangle(face_name, a0, a1, b1);
+      AddTriangleIfNonDegenerate(builder, face_name, a0, b1, b0);
+      AddTriangleIfNonDegenerate(builder, face_name, a0, a1, b1);
     } else {
-      builder.AddTriangle(face_name, a0, b0, b1);
-      builder.AddTriangle(face_name, a0, b1, a1);
+      AddTriangleIfNonDegenerate(builder, face_name, a0, b0, b1);
+      AddTriangleIfNonDegenerate(builder, face_name, a0, b1, a1);
     }
   }
+}
+
+double DistanceSqToAxis(const Vec3& point, const Vec3& origin,
+                        const Vec3& unit_axis) {
+  const Vec3 v = Subtract(point, origin);
+  const Vec3 axial = Scale(unit_axis, Dot(v, unit_axis));
+  return LengthSq(Subtract(v, axial));
 }
 
 Vec3 ComputeCentroid(const std::vector<Vec3>& pts) {
@@ -944,6 +958,10 @@ emscripten::val BuildRevolveAuthoringState(const emscripten::val& options) {
       std::max(3, static_cast<int>(std::ceil((std::abs(angle) / 360.0) *
                                              static_cast<double>(base_resolution))));
   const double d_angle = sweep_rad / static_cast<double>(steps);
+  const double full_turns = std::abs(angle) / 360.0;
+  const bool is_closed_revolution =
+      std::abs(angle) > 1e-9 &&
+      std::abs(full_turns - std::round(full_turns)) <= 1e-9;
   const std::string start_name = face_name + "_START";
   const std::string end_name = face_name + "_END";
   const std::string default_side_name = face_name + "_RV";
@@ -983,6 +1001,11 @@ emscripten::val BuildRevolveAuthoringState(const emscripten::val& options) {
       const Vec3& a = base[i];
       const Vec3& b = base[i + 1];
       if (DistanceSq(a, b) <= 1e-24) continue;
+      const bool a_on_axis =
+          DistanceSqToAxis(a, axis_origin, axis_direction) <= 1e-18;
+      const bool b_on_axis =
+          DistanceSqToAxis(b, axis_origin, axis_direction) <= 1e-18;
+      if (a_on_axis && b_on_axis) continue;
       const std::string face_name_for_seg =
           ResolveSegmentFaceName(a, b, default_side_name, point_to_edge_names);
       face_metadata_json.try_emplace(face_name_for_seg,
@@ -992,17 +1015,18 @@ emscripten::val BuildRevolveAuthoringState(const emscripten::val& options) {
       double ang0 = 0.0;
       for (int s = 0; s < steps; ++s, ang0 += d_angle) {
         const double ang1 = (s == steps - 1) ? sweep_rad : (ang0 + d_angle);
+        const bool snap_final_ring = is_closed_revolution && s == steps - 1;
         const Vec3 a0 = RotateAroundAxis(a, axis_origin, axis_direction, ang0);
-        const Vec3 a1 = RotateAroundAxis(a, axis_origin, axis_direction, ang1);
+        const Vec3 a1 = snap_final_ring
+                            ? a
+                            : RotateAroundAxis(a, axis_origin, axis_direction,
+                                               ang1);
         const Vec3 b0 = RotateAroundAxis(b, axis_origin, axis_direction, ang0);
-        const Vec3 b1 = RotateAroundAxis(b, axis_origin, axis_direction, ang1);
-        if (is_hole) {
-          builder.AddTriangle(face_name_for_seg, a0, b1, b0);
-          builder.AddTriangle(face_name_for_seg, a0, a1, b1);
-        } else {
-          builder.AddTriangle(face_name_for_seg, a0, b0, b1);
-          builder.AddTriangle(face_name_for_seg, a0, b1, a1);
-        }
+        const Vec3 b1 = snap_final_ring
+                            ? b
+                            : RotateAroundAxis(b, axis_origin, axis_direction,
+                                               ang1);
+        AddQuad(builder, face_name_for_seg, a0, b0, b1, a1, is_hole);
       }
     }
   }

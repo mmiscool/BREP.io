@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <sstream>
@@ -49,6 +50,12 @@ struct SegmentCacheEntry {
   double dy = 0.0;
   double dz = 0.0;
   double len_sq = 0.0;
+  double min_x = 0.0;
+  double min_y = 0.0;
+  double min_z = 0.0;
+  double max_x = 0.0;
+  double max_y = 0.0;
+  double max_z = 0.0;
 };
 
 struct AuthoringBuffers {
@@ -311,6 +318,68 @@ PathData NormalizePath(const std::vector<Vec3>& points, bool requested_closed,
     out.points.pop_back();
   }
   return out;
+}
+
+bool IsCollinearMiddlePoint(const Vec3& prev, const Vec3& curr,
+                            const Vec3& next, double tolerance_sq) {
+  const Vec3 span = Subtract(next, prev);
+  const double span_len_sq = LengthSq(span);
+  if (span_len_sq <= kEpsSq) return false;
+
+  const Vec3 from_prev = Subtract(curr, prev);
+  const Vec3 to_next = Subtract(next, curr);
+  if (LengthSq(from_prev) <= kEpsSq || LengthSq(to_next) <= kEpsSq) return true;
+  if (Dot(from_prev, to_next) < 0.0) return false;
+
+  const double projection = Dot(from_prev, span);
+  if (projection < -kEps || projection > span_len_sq + kEps) return false;
+
+  const double cross_len_sq = LengthSq(Cross(from_prev, span));
+  return cross_len_sq <= tolerance_sq * span_len_sq;
+}
+
+std::vector<Vec3> SimplifyCollinearPath(const std::vector<Vec3>& points,
+                                         bool closed, double tolerance) {
+  const size_t min_points = closed ? 3u : 2u;
+  if (points.size() <= min_points) return points;
+
+  const double tolerance_sq = tolerance * tolerance;
+  if (!closed) {
+    std::vector<Vec3> simplified;
+    simplified.reserve(points.size());
+    for (const Vec3& point : points) {
+      simplified.push_back(point);
+      while (simplified.size() >= 3) {
+        const size_t n = simplified.size();
+        if (!IsCollinearMiddlePoint(simplified[n - 3], simplified[n - 2],
+                                    simplified[n - 1], tolerance_sq)) {
+          break;
+        }
+        simplified[n - 2] = simplified[n - 1];
+        simplified.pop_back();
+      }
+    }
+    return simplified.size() >= min_points ? simplified : points;
+  }
+
+  std::vector<Vec3> simplified = points;
+  bool changed = true;
+  while (changed && simplified.size() > min_points) {
+    changed = false;
+    for (size_t i = 0; i < simplified.size() && simplified.size() > min_points;
+         ++i) {
+      const size_t prev = (i + simplified.size() - 1) % simplified.size();
+      const size_t next = (i + 1) % simplified.size();
+      if (!IsCollinearMiddlePoint(simplified[prev], simplified[i],
+                                  simplified[next], tolerance_sq)) {
+        continue;
+      }
+      simplified.erase(simplified.begin() + static_cast<std::ptrdiff_t>(i));
+      changed = true;
+      if (i > 0) --i;
+    }
+  }
+  return simplified.size() >= min_points ? simplified : points;
 }
 
 std::vector<Vec3> CalculateTubeIntersectionTrimming(
@@ -932,8 +1001,9 @@ void ApplyTrimPlaneSequentially(std::vector<manifold::Manifold>& spheres,
   const int start = iterate_forward ? 0 : static_cast<int>(spheres.size()) - 1;
   const int end = iterate_forward ? static_cast<int>(spheres.size()) : -1;
   const int step = iterate_forward ? 1 : -1;
+  const double radius_sq = radius * radius;
   for (int idx = start; idx != end; idx += step) {
-    if (std::sqrt(DistanceSq(points[idx], plane.anchor)) > radius) break;
+    if (DistanceSq(points[idx], plane.anchor) > radius_sq) break;
     spheres[idx] =
         spheres[idx].TrimByPlane(ToManifoldVec3(plane.normal), plane.offset);
   }
@@ -962,11 +1032,12 @@ manifold::Manifold BuildHullChain(const std::vector<Vec3>& points, double radius
   const size_t segment_count = closed ? points.size() : points.size() - 1;
   std::vector<manifold::Manifold> hulls;
   hulls.reserve(segment_count);
+  std::vector<manifold::Manifold> pair;
+  pair.reserve(2);
   for (size_t i = 0; i < segment_count; ++i) {
     const size_t next = (i + 1) % points.size();
     if (DistanceSq(points[i], points[next]) <= kEpsSq) continue;
-    std::vector<manifold::Manifold> pair;
-    pair.reserve(2);
+    pair.clear();
     pair.push_back(spheres[i]);
     pair.push_back(spheres[next]);
     hulls.push_back(manifold::Manifold::Hull(pair));
@@ -1010,9 +1081,38 @@ std::vector<SegmentCacheEntry> BuildSegmentCache(
     const double dy = b.y - a.y;
     const double dz = b.z - a.z;
     const double len_sq = dx * dx + dy * dy + dz * dz;
-    segments.push_back({a.x, a.y, a.z, dx, dy, dz, len_sq});
+    segments.push_back({a.x,
+                        a.y,
+                        a.z,
+                        dx,
+                        dy,
+                        dz,
+                        len_sq,
+                        std::min(a.x, b.x),
+                        std::min(a.y, b.y),
+                        std::min(a.z, b.z),
+                        std::max(a.x, b.x),
+                        std::max(a.y, b.y),
+                        std::max(a.z, b.z)});
   }
   return segments;
+}
+
+double DistanceSqToAABB(double px, double py, double pz,
+                        const SegmentCacheEntry& segment) {
+  const double dx = px < segment.min_x ? segment.min_x - px
+                    : px > segment.max_x
+                        ? px - segment.max_x
+                        : 0.0;
+  const double dy = py < segment.min_y ? segment.min_y - py
+                    : py > segment.max_y
+                        ? py - segment.max_y
+                        : 0.0;
+  const double dz = pz < segment.min_z ? segment.min_z - pz
+                    : pz > segment.max_z
+                        ? pz - segment.max_z
+                        : 0.0;
+  return dx * dx + dy * dy + dz * dz;
 }
 
 double MinDistanceToPolylineSq(double px, double py, double pz,
@@ -1022,6 +1122,7 @@ double MinDistanceToPolylineSq(double px, double py, double pz,
   double min_sq = std::numeric_limits<double>::infinity();
   for (const SegmentCacheEntry& segment : segments) {
     if (segment.len_sq <= kEpsSq) continue;
+    if (DistanceSqToAABB(px, py, pz, segment) > break_at_sq) continue;
     const double apx = px - segment.ax;
     const double apy = py - segment.ay;
     const double apz = pz - segment.az;
@@ -1043,12 +1144,11 @@ double MinDistanceToPolylineSq(double px, double py, double pz,
   return min_sq;
 }
 
-manifold::MeshGL RelabelSlowMesh(const manifold::MeshGL& input_mesh,
+manifold::MeshGL RelabelSlowMesh(manifold::MeshGL mesh,
                                  const std::vector<Vec3>& path_points,
                                  bool closed, double outer_radius,
                                  double inner_radius,
                                  const TubeFaceLabels& labels) {
-  manifold::MeshGL mesh = input_mesh;
   const uint32_t tri_count = mesh.NumTri();
   mesh.faceID.resize(tri_count);
 
@@ -1119,6 +1219,7 @@ manifold::MeshGL BuildSlowTubeMesh(const TubeBuildOptions& options,
                                    bool& out_closed) {
   const double tolerance = std::max(1e-7, options.radius * 1e-5);
   PathData path = NormalizePath(options.raw_points, options.closed, tolerance);
+  path.points = SimplifyCollinearPath(path.points, path.closed, tolerance);
   if (path.points.size() < 2) {
     std::ostringstream msg;
     msg << "Tube requires at least two distinct path points. Got "

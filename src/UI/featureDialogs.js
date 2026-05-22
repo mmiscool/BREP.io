@@ -273,7 +273,7 @@ export class SchemaForm {
         const stopIfOtherControl = (target) => {
             try {
                 // If the active input is not the current focus target, stop selection
-                const active = SchemaForm.__activeRefInput || null;
+                const active = SchemaForm.__activeRefInput || window.__BREP_activeRefInput || null;
                 if (!active) return;
                 if (target === active) return;
                 // If target is inside the same active element (e.g., clicking within the input), skip
@@ -2070,7 +2070,7 @@ export class SchemaForm {
 
     _stopActiveReferenceSelection() {
         // Clear global active if it belongs to this instance
-        const activeInput = SchemaForm.__activeRefInput || null;
+        const activeInput = SchemaForm.__activeRefInput || window.__BREP_activeRefInput || null;
         try {
             if (activeInput) {
                 try { activeInput.style.filter = 'none'; } catch (_) { }
@@ -2090,7 +2090,11 @@ export class SchemaForm {
             }
         } catch (_) { }
         SchemaForm.__activeRefInput = null;
-        try { if (window.__BREP_activeRefInput === undefined || window.__BREP_activeRefInput === SchemaForm.__activeRefInput) window.__BREP_activeRefInput = null; } catch (_) { }
+        try {
+            if (!activeInput || window.__BREP_activeRefInput === activeInput) {
+                window.__BREP_activeRefInput = null;
+            }
+        } catch (_) { }
         if (hadActive) {
             try {
                 const scene = this._getReferenceSelectionScene();

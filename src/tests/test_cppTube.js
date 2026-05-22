@@ -1,5 +1,6 @@
 import { Tube, tubeHasNativeBuilder } from "../BREP/Tube.js";
 import { manifoldBuildSource } from "../BREP/setupManifold.js";
+import { __testOnlyTubeFeatureInternals } from "../features/tube/TubeFeature.js";
 
 function assert(condition, message) {
     if (!condition) throw new Error(message || "Assertion failed.");
@@ -131,4 +132,32 @@ export async function test_cppTube_native_auto_falls_back_to_slow_on_foldback_pa
     const forcedFastSnapshot = autoTube.buildNativeSnapshot({ preferFast: true, allowSlowFallback: false });
     assert(forcedFastSnapshot?.buildMode === "fast", `Expected explicit force-fast tube build, got ${forcedFastSnapshot?.buildMode}.`);
     assert(forcedFastSnapshot?.selfUnionStats?.pathFoldbackLikely === true, "Expected force-fast tube build to expose the same pathFoldbackLikely signal.");
+}
+
+export async function test_cppTube_feature_inner_cutter_nudges_open_end_caps() {
+    if (manifoldBuildSource !== "local" || !tubeHasNativeBuilder()) {
+        return;
+    }
+
+    const tube = new Tube({
+        points: [[0, 0, 0], [0, 10, 0]],
+        radius: 1,
+        resolution: 24,
+        closed: false,
+        name: "CPP_TUBE_INNER_NUDGE",
+    });
+    const amount = 0.2;
+    assert(__testOnlyTubeFeatureInternals.tubeEndCapNudgeDistance() === 0.001, "Expected tube feature inner cutter cap nudge distance to be 0.001.");
+    __testOnlyTubeFeatureInternals.nudgeTubeEndCaps(tube, "CPP_TUBE_INNER_NUDGE", amount, {
+        pathPoints: [[0, 0, 0], [0, 10, 0]],
+    });
+
+    const yValues = [];
+    for (let i = 1; i < tube._vertProperties.length; i += 3) {
+        yValues.push(tube._vertProperties[i]);
+    }
+    const minY = Math.min(...yValues);
+    const maxY = Math.max(...yValues);
+    assert(minY < -amount * 0.9, `Expected nudged start cap to move before y=0, got minY=${minY}.`);
+    assert(maxY > 10 + amount * 0.9, `Expected nudged end cap to move after y=10, got maxY=${maxY}.`);
 }

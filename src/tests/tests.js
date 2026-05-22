@@ -177,6 +177,7 @@ import {
 } from './test_cppSolidNativeOps.js';
 import {
     test_cppTube_closed_hollow_tube_preserves_expected_face_labels,
+    test_cppTube_feature_inner_cutter_nudges_open_end_caps,
     test_cppTube_native_auto_falls_back_to_slow_on_foldback_path,
     test_cppTube_native_builder_reports_selected_build_mode,
     test_cppTube_open_tube_preserves_expected_face_labels,
@@ -309,8 +310,14 @@ import {
 } from './test_visibility_hidden_state_persistence.js';
 import { test_thicken_feature_is_available_in_modeling_and_surfacing_workbenches } from './test_workbenchFeatureVisibility.js';
 import { test_sketch_feature_scene_visibility } from './test_sketchFeatureVisibility.js';
-import { test_revolve_feature_resolves_face_and_edge_string_references } from './test_revolveFeature.js';
-import { test_remesh_simplify_welds_by_tolerance_before_simplify } from './test_remeshFeature.js';
+import {
+    test_revolve_feature_resolves_face_and_edge_string_references,
+    test_revolve_generates_manifold_native_faces_for_axis_edge_profile,
+} from './test_revolveFeature.js';
+import {
+    test_remesh_simplify_welds_by_tolerance_before_simplify,
+    test_solid_simplify_preserves_face_tags_and_metadata,
+} from './test_remeshFeature.js';
 import { test_revolve_after_union_preserves_face_reference_resolution } from './test_revolve_after_union_face_reference.js';
 import {
     afterRun_primitive_boolean_union_preserves_face_grouping,
@@ -335,7 +342,9 @@ export const testFunctions = [
     { test: test_cppSolidBakeTransform_updates_solid_authoring_state, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidMirror_preserves_face_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_revolve_feature_resolves_face_and_edge_string_references, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_revolve_generates_manifold_native_faces_for_axis_edge_profile, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_remesh_simplify_welds_by_tolerance_before_simplify, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_solid_simplify_preserves_face_tags_and_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_revolve_after_union_preserves_face_reference_resolution, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_setEpsilon_welds_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_setEpsilon_merges_cell_boundary_pair_and_rebuilds_manifold, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -363,6 +372,7 @@ export const testFunctions = [
     { test: test_cppTube_union_preserves_distinct_face_labels_across_native_snapshots, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_native_builder_reports_selected_build_mode, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_native_auto_falls_back_to_slow_on_foldback_path, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppTube_feature_inner_cutter_nudges_open_end_caps, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppPrimitive_cube_preserves_expected_face_labels, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppPrimitive_cylinder_preserves_expected_face_labels_and_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppPrimitive_cone_preserves_expected_face_labels_and_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

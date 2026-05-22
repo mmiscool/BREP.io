@@ -265,8 +265,8 @@ class Solid {
     return notImplemented();
   }
 
-  simplify(tolerance, updateInPlace, options = {}) {
-    // Simplify the manifold geometry, optionally using asOriginal() to condense coplanar faces.
+  simplify(tolerance, updateInPlace) {
+    // Simplify the manifold geometry.
     return notImplemented();
   }
 

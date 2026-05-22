@@ -122,33 +122,229 @@ function toNativeBooleanSnapshot(snapshot) {
     };
 }
 
-function buildNativeSnapshotFromManifold(manifoldObj, idToFaceName, opts = {}) {
+function buildNativeSnapshotFromMesh(mesh, idToFaceName, opts = {}) {
     requireCppSolidCoreCapability(
         typeof manifold?.buildSolidAuthoringStateFromMesh === "function",
         "Solid._fromManifold",
     );
+    const resolvedIdToFaceName = new Map(idToFaceName instanceof Map ? idToFaceName : []);
+    const faceNameToID = new Map();
+    for (const [id, name] of resolvedIdToFaceName.entries()) {
+        if (!faceNameToID.has(name)) faceNameToID.set(name, id);
+    }
+    return manifold.buildSolidAuthoringStateFromMesh({
+        numProp: Number(mesh?.numProp ?? 3),
+        vertProperties: Array.from(mesh?.vertProperties ?? []),
+        triVerts: Array.from(mesh?.triVerts ?? []),
+        faceID: Array.from(mesh?.faceID ?? []),
+        faceNameToID: Array.from(faceNameToID.entries()),
+        idToFaceName: Array.from(resolvedIdToFaceName.entries()),
+        faceMetadataJson: toMetadataJsonEntries(opts?.faceMetadataJson),
+        edgeMetadataJson: toMetadataJsonEntries(opts?.edgeMetadataJson),
+        auxEdges: Array.isArray(opts?.auxEdges) ? opts.auxEdges : [],
+        name: opts?.name || "",
+    });
+}
+
+function buildNativeSnapshotFromManifold(manifoldObj, idToFaceName, opts = {}) {
     const mesh = manifoldObj.getMesh();
     try {
-        const resolvedIdToFaceName = new Map(idToFaceName instanceof Map ? idToFaceName : []);
-        const faceNameToID = new Map();
-        for (const [id, name] of resolvedIdToFaceName.entries()) {
-            if (!faceNameToID.has(name)) faceNameToID.set(name, id);
-        }
-        return manifold.buildSolidAuthoringStateFromMesh({
-            numProp: Number(mesh?.numProp ?? 3),
-            vertProperties: Array.from(mesh?.vertProperties ?? []),
-            triVerts: Array.from(mesh?.triVerts ?? []),
-            faceID: Array.from(mesh?.faceID ?? []),
-            faceNameToID: Array.from(faceNameToID.entries()),
-            idToFaceName: Array.from(resolvedIdToFaceName.entries()),
-            faceMetadataJson: toMetadataJsonEntries(opts?.faceMetadataJson),
-            edgeMetadataJson: toMetadataJsonEntries(opts?.edgeMetadataJson),
-            auxEdges: Array.isArray(opts?.auxEdges) ? opts.auxEdges : [],
-            name: opts?.name || "",
-        });
+        return buildNativeSnapshotFromMesh(mesh, idToFaceName, opts);
     } finally {
         try { if (mesh && typeof mesh.delete === "function") mesh.delete(); } catch { }
     }
+}
+
+function _vec3FromMesh(mesh, vertIndex) {
+    const stride = Number(mesh?.numProp ?? 3) || 3;
+    const base = (vertIndex >>> 0) * stride;
+    const vp = mesh?.vertProperties ?? [];
+    return [Number(vp[base + 0]) || 0, Number(vp[base + 1]) || 0, Number(vp[base + 2]) || 0];
+}
+
+function _triangleNormalAndArea(a, b, c) {
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    let nx = uy * vz - uz * vy;
+    let ny = uz * vx - ux * vz;
+    let nz = ux * vy - uy * vx;
+    const len = Math.hypot(nx, ny, nz);
+    if (!(len > 0)) return { normal: [0, 0, 0], area2: 0 };
+    nx /= len; ny /= len; nz /= len;
+    return { normal: [nx, ny, nz], area2: len };
+}
+
+function _pointSegmentDistanceSq(p, a, b) {
+    const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
+    const apx = p[0] - a[0], apy = p[1] - a[1], apz = p[2] - a[2];
+    const denom = abx * abx + aby * aby + abz * abz;
+    const t = denom > 0 ? Math.max(0, Math.min(1, (apx * abx + apy * aby + apz * abz) / denom)) : 0;
+    const dx = apx - abx * t, dy = apy - aby * t, dz = apz - abz * t;
+    return dx * dx + dy * dy + dz * dz;
+}
+
+function _pointTriangleDistanceSq(p, a, b, c) {
+    const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
+    const acx = c[0] - a[0], acy = c[1] - a[1], acz = c[2] - a[2];
+    const apx = p[0] - a[0], apy = p[1] - a[1], apz = p[2] - a[2];
+    const d00 = abx * abx + aby * aby + abz * abz;
+    const d01 = abx * acx + aby * acy + abz * acz;
+    const d11 = acx * acx + acy * acy + acz * acz;
+    const d20 = apx * abx + apy * aby + apz * abz;
+    const d21 = apx * acx + apy * acy + apz * acz;
+    const denom = d00 * d11 - d01 * d01;
+    if (Math.abs(denom) > 1e-18) {
+        const v = (d11 * d20 - d01 * d21) / denom;
+        const w = (d00 * d21 - d01 * d20) / denom;
+        const u = 1 - v - w;
+        if (u >= 0 && v >= 0 && w >= 0) {
+            const qx = a[0] + abx * v + acx * w;
+            const qy = a[1] + aby * v + acy * w;
+            const qz = a[2] + abz * v + acz * w;
+            const dx = p[0] - qx, dy = p[1] - qy, dz = p[2] - qz;
+            return dx * dx + dy * dy + dz * dz;
+        }
+    }
+    return Math.min(
+        _pointSegmentDistanceSq(p, a, b),
+        _pointSegmentDistanceSq(p, b, c),
+        _pointSegmentDistanceSq(p, c, a),
+    );
+}
+
+function _buildTaggedSourceTrianglesFromSolid(solid) {
+    const source = {
+        numProp: Number(solid?._numProp ?? 3) || 3,
+        vertProperties: solid?._vertProperties ?? [],
+        triVerts: solid?._triVerts ?? [],
+        faceID: solid?._triIDs ?? [],
+    };
+    const triCount = Math.min(
+        (source.triVerts.length / 3) | 0,
+        source.faceID.length | 0,
+    );
+    const triangles = [];
+    for (let tri = 0; tri < triCount; tri++) {
+        const base = tri * 3;
+        const a = _vec3FromMesh(source, source.triVerts[base + 0]);
+        const b = _vec3FromMesh(source, source.triVerts[base + 1]);
+        const c = _vec3FromMesh(source, source.triVerts[base + 2]);
+        const { normal, area2 } = _triangleNormalAndArea(a, b, c);
+        if (!(area2 > 0)) continue;
+        triangles.push({
+            a,
+            b,
+            c,
+            id: source.faceID[tri] >>> 0,
+            normal,
+            centroid: [
+                (a[0] + b[0] + c[0]) / 3,
+                (a[1] + b[1] + c[1]) / 3,
+                (a[2] + b[2] + c[2]) / 3,
+            ],
+        });
+    }
+    return triangles;
+}
+
+function _buildRetagCandidateIndex(sourceTriangles) {
+    if (!Array.isArray(sourceTriangles) || sourceTriangles.length < 512) {
+        return { all: sourceTriangles, candidatesForPoint: () => sourceTriangles };
+    }
+
+    const min = [Infinity, Infinity, Infinity];
+    const max = [-Infinity, -Infinity, -Infinity];
+    for (const triangle of sourceTriangles) {
+        const c = triangle.centroid;
+        for (let axis = 0; axis < 3; axis++) {
+            if (c[axis] < min[axis]) min[axis] = c[axis];
+            if (c[axis] > max[axis]) max[axis] = c[axis];
+        }
+    }
+    const extent = [
+        Math.max(1e-9, max[0] - min[0]),
+        Math.max(1e-9, max[1] - min[1]),
+        Math.max(1e-9, max[2] - min[2]),
+    ];
+    const targetCellsPerAxis = Math.max(4, Math.min(64, Math.ceil(Math.cbrt(sourceTriangles.length))));
+    const cellSize = [
+        extent[0] / targetCellsPerAxis,
+        extent[1] / targetCellsPerAxis,
+        extent[2] / targetCellsPerAxis,
+    ];
+    const cells = new Map();
+    const cellCoord = (point, axis) => Math.max(0, Math.min(targetCellsPerAxis - 1, Math.floor((point[axis] - min[axis]) / cellSize[axis])));
+    const cellKey = (ix, iy, iz) => `${ix},${iy},${iz}`;
+    for (const triangle of sourceTriangles) {
+        const ix = cellCoord(triangle.centroid, 0);
+        const iy = cellCoord(triangle.centroid, 1);
+        const iz = cellCoord(triangle.centroid, 2);
+        const key = cellKey(ix, iy, iz);
+        let bucket = cells.get(key);
+        if (!bucket) {
+            bucket = [];
+            cells.set(key, bucket);
+        }
+        bucket.push(triangle);
+    }
+
+    return {
+        all: sourceTriangles,
+        candidatesForPoint(point) {
+            const cx = cellCoord(point, 0);
+            const cy = cellCoord(point, 1);
+            const cz = cellCoord(point, 2);
+            const candidates = [];
+            for (let radius = 0; radius <= 3 && candidates.length < 32; radius++) {
+                for (let ix = Math.max(0, cx - radius); ix <= Math.min(targetCellsPerAxis - 1, cx + radius); ix++) {
+                    for (let iy = Math.max(0, cy - radius); iy <= Math.min(targetCellsPerAxis - 1, cy + radius); iy++) {
+                        for (let iz = Math.max(0, cz - radius); iz <= Math.min(targetCellsPerAxis - 1, cz + radius); iz++) {
+                            const bucket = cells.get(cellKey(ix, iy, iz));
+                            if (bucket) candidates.push(...bucket);
+                        }
+                    }
+                }
+            }
+            return candidates.length ? candidates : sourceTriangles;
+        },
+    };
+}
+
+function retagSimplifiedMeshFromSourceSolid(mesh, sourceSolid) {
+    const sourceTriangles = _buildTaggedSourceTrianglesFromSolid(sourceSolid);
+    const triCount = (mesh?.triVerts?.length / 3) | 0;
+    if (!triCount || sourceTriangles.length === 0) return mesh;
+    const sourceIndex = _buildRetagCandidateIndex(sourceTriangles);
+
+    const faceID = new Uint32Array(triCount);
+    for (let tri = 0; tri < triCount; tri++) {
+        const base = tri * 3;
+        const a = _vec3FromMesh(mesh, mesh.triVerts[base + 0]);
+        const b = _vec3FromMesh(mesh, mesh.triVerts[base + 1]);
+        const c = _vec3FromMesh(mesh, mesh.triVerts[base + 2]);
+        const centroid = [
+            (a[0] + b[0] + c[0]) / 3,
+            (a[1] + b[1] + c[1]) / 3,
+            (a[2] + b[2] + c[2]) / 3,
+        ];
+        const { normal, area2 } = _triangleNormalAndArea(a, b, c);
+        let bestID = sourceTriangles[0].id;
+        let bestScore = Infinity;
+        for (const candidate of sourceIndex.candidatesForPoint(centroid)) {
+            const distanceSq = _pointTriangleDistanceSq(centroid, candidate.a, candidate.b, candidate.c);
+            const normalDot = area2 > 0
+                ? Math.max(-1, Math.min(1, normal[0] * candidate.normal[0] + normal[1] * candidate.normal[1] + normal[2] * candidate.normal[2]))
+                : 1;
+            const score = distanceSq + (1 - normalDot) * 1e-6;
+            if (score < bestScore) {
+                bestScore = score;
+                bestID = candidate.id;
+            }
+        }
+        faceID[tri] = bestID >>> 0;
+    }
+    mesh.faceID = faceID;
+    return mesh;
 }
 
 function buildNativeBooleanResult(left, right, operation, SolidCtor) {
@@ -248,37 +444,27 @@ export function setTolerance(tolerance) {
     });
     return out;
 }
-export function simplify(tolerance = undefined, updateInPlace = false, options = {}) {
+export function simplify(tolerance = undefined, updateInPlace = false) {
     if (updateInPlace && typeof updateInPlace === "object") {
-        options = updateInPlace;
         updateInPlace = false;
     }
     const Solid = this.constructor;
     const m = this._manifoldize();
     const authoringSnapshot = getSolidAuthoringStateSnapshot(this);
-    const condenseCoplanarFaces = !!(
-        options?.asOriginal
-        || options?.condenseCoplanarFaces
-        || options?.collapseCoplanarEdges
-    );
-
-    // Run simplify on the manifold. asOriginal() is deliberately opt-in: it
-    // condenses coplanar relation faces, but Manifold also regenerates faceIDs.
-    const simplifySource = condenseCoplanarFaces ? m.asOriginal() : m;
-    let outM;
+    const outM = (tolerance === undefined) ? m.simplify() : m.simplify(tolerance);
+    let outSnapshot = null;
+    const outMesh = outM.getMesh();
     try {
-        outM = (tolerance === undefined) ? simplifySource.simplify() : simplifySource.simplify(tolerance);
+        retagSimplifiedMeshFromSourceSolid(outMesh, this);
+        outSnapshot = buildNativeSnapshotFromMesh(outMesh, this._idToFaceName, {
+            faceMetadataJson: authoringSnapshot?.faceMetadataJson,
+            edgeMetadataJson: authoringSnapshot?.edgeMetadataJson,
+            auxEdges: authoringSnapshot?.auxEdges,
+            name: this?.name || "",
+        });
     } finally {
-        if (condenseCoplanarFaces) {
-            try { if (simplifySource && simplifySource !== m && typeof simplifySource.delete === "function") simplifySource.delete(); } catch { }
-        }
+        try { if (outMesh && typeof outMesh.delete === "function") outMesh.delete(); } catch { }
     }
-    const outSnapshot = buildNativeSnapshotFromManifold(outM, this._idToFaceName, {
-        faceMetadataJson: authoringSnapshot?.faceMetadataJson,
-        edgeMetadataJson: authoringSnapshot?.edgeMetadataJson,
-        auxEdges: authoringSnapshot?.auxEdges,
-        name: this?.name || "",
-    });
 
     applySolidAuthoringStateSnapshot(this, outSnapshot);
     try { if (this._manifold && this._manifold !== outM && typeof this._manifold.delete === 'function') this._manifold.delete(); } catch { }

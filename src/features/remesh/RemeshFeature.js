@@ -84,9 +84,8 @@ export class RemeshFeature {
         }
       }
       try {
-        const simplifyOptions = { condenseCoplanarFaces: true };
-        if (tol === undefined) outSolid.simplify(undefined, true, simplifyOptions);
-        else outSolid.simplify(tol, true, simplifyOptions);
+        if (tol === undefined) outSolid.simplify(undefined, true);
+        else outSolid.simplify(tol, true);
       } catch (e) {
         console.warn('[RemeshFeature] Simplify failed; returning original clone.', e);
       }

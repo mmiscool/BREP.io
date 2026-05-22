@@ -313,39 +313,100 @@ function dedupePoints(points, eps = 1e-7) {
   return out;
 }
 
-function extendPathEndpoints(points, extension = 0) {
-  if (!Array.isArray(points) || points.length < 2 || !(extension > 0)) {
-    return Array.isArray(points) ? points.map(p => Array.isArray(p) ? [p[0], p[1], p[2]] : p) : points;
-  }
-  const extended = points.map(p => [p[0], p[1], p[2]]);
-  const start = extended[0];
-  const next = extended[1];
-  const sx = next[0] - start[0];
-  const sy = next[1] - start[1];
-  const sz = next[2] - start[2];
-  const startLen = Math.hypot(sx, sy, sz);
-  if (startLen > 1e-9) {
-    const inv = extension / startLen;
-    start[0] -= sx * inv;
-    start[1] -= sy * inv;
-    start[2] -= sz * inv;
-  }
-
-  const end = extended[extended.length - 1];
-  const prev = extended[extended.length - 2];
-  const ex = end[0] - prev[0];
-  const ey = end[1] - prev[1];
-  const ez = end[2] - prev[2];
-  const endLen = Math.hypot(ex, ey, ez);
-  if (endLen > 1e-9) {
-    const inv = extension / endLen;
-    end[0] += ex * inv;
-    end[1] += ey * inv;
-    end[2] += ez * inv;
-  }
-
-  return extended;
+function tubeEndCapNudgeDistance() {
+  return 0.001;
 }
+
+function unitVectorBetween(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b)) return null;
+  const x = Number(b[0]) - Number(a[0]);
+  const y = Number(b[1]) - Number(a[1]);
+  const z = Number(b[2]) - Number(a[2]);
+  const length = Math.hypot(x, y, z);
+  return length > 1e-12 ? [x / length, y / length, z / length] : null;
+}
+
+function faceProjectionAverage(solid, faceName, direction) {
+  if (!solid || !faceName || !Array.isArray(direction)) return null;
+  const faceID = solid._faceNameToID instanceof Map ? solid._faceNameToID.get(faceName) : undefined;
+  const triIDs = Array.isArray(solid._triIDs) ? solid._triIDs : null;
+  const triVerts = Array.isArray(solid._triVerts) ? solid._triVerts : null;
+  const verts = Array.isArray(solid._vertProperties) ? solid._vertProperties : null;
+  if (!Number.isFinite(faceID) || !triIDs || !triVerts || !verts) return null;
+
+  const vertexIndices = new Set();
+  for (let triIndex = 0; triIndex < triIDs.length; triIndex += 1) {
+    if (triIDs[triIndex] !== faceID) continue;
+    const base = triIndex * 3;
+    vertexIndices.add(triVerts[base + 0]);
+    vertexIndices.add(triVerts[base + 1]);
+    vertexIndices.add(triVerts[base + 2]);
+  }
+  if (!vertexIndices.size) return null;
+
+  let sum = 0;
+  let count = 0;
+  for (const vertexIndex of vertexIndices) {
+    const base = vertexIndex * 3;
+    const x = Number(verts[base + 0]);
+    const y = Number(verts[base + 1]);
+    const z = Number(verts[base + 2]);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+    sum += (x * direction[0]) + (y * direction[1]) + (z * direction[2]);
+    count += 1;
+  }
+  return count > 0 ? sum / count : null;
+}
+
+function pushTubeCapOutward(tubeSolid, faceName, amount, direction, expectedSign, debug) {
+  const before = faceProjectionAverage(tubeSolid, faceName, direction);
+  tubeSolid.pushFace(faceName, amount, { warnMissing: !!debug, warnInvalidNormal: !!debug });
+  const after = faceProjectionAverage(tubeSolid, faceName, direction);
+  if (before == null || after == null) return true;
+
+  const delta = after - before;
+  if ((expectedSign < 0 && delta < 0) || (expectedSign > 0 && delta > 0)) {
+    return true;
+  }
+
+  tubeSolid.pushFace(faceName, -amount * 2, { warnMissing: !!debug, warnInvalidNormal: !!debug });
+  return true;
+}
+
+function nudgeTubeEndCaps(tubeSolid, tubeName, distance, { closed = false, debug = false, pathPoints = null } = {}) {
+  const amount = Number(distance);
+  if (!tubeSolid || closed || !tubeName || !(amount > 0) || typeof tubeSolid.pushFace !== 'function') {
+    return false;
+  }
+  const points = Array.isArray(pathPoints) ? pathPoints : [];
+  const startDirection = points.length >= 2 ? unitVectorBetween(points[0], points[1]) : null;
+  const endDirection = points.length >= 2 ? unitVectorBetween(points[points.length - 2], points[points.length - 1]) : null;
+  const capInfos = [
+    { name: `${tubeName}_CapStart`, direction: startDirection, expectedSign: -1 },
+    { name: `${tubeName}_CapEnd`, direction: endDirection, expectedSign: 1 },
+  ];
+  let nudged = false;
+  for (const capInfo of capInfos) {
+    try {
+      if (capInfo.direction) {
+        pushTubeCapOutward(tubeSolid, capInfo.name, amount, capInfo.direction, capInfo.expectedSign, debug);
+      } else {
+        tubeSolid.pushFace(capInfo.name, amount, { warnMissing: !!debug, warnInvalidNormal: !!debug });
+      }
+      nudged = true;
+    } catch (error) {
+      if (debug) {
+        console.warn('[TubeFeature] Failed to nudge inner tube cap:', capInfo.name, error?.message || error);
+      }
+    }
+  }
+  return nudged;
+}
+
+export const __testOnlyTubeFeatureInternals = {
+  tubeEndCapNudgeDistance,
+  nudgeTubeEndCaps,
+};
 
 export class TubeFeature {
   static shortName = 'TU';
@@ -489,15 +550,8 @@ export class TubeFeature {
 
       if (inner > 0) {
         const innerName = tubeName ? `${tubeName}_Inner` : null;
-        const baseScale = Math.max(radiusValue, inner);
-        const capExtension = (!isClosedLoop && baseScale > 0)
-          ? Math.max(baseScale * 5e-3, 1e-4)
-          : 0;
-        const innerPoints = (!isClosedLoop && capExtension > 0)
-          ? extendPathEndpoints(finalPoints, capExtension)
-          : finalPoints;
         const innerTube = new TubeBuilder({
-          points: innerPoints,
+          points: finalPoints,
           radius: inner,
           innerRadius: 0,
           resolution: baseResolution,
@@ -505,6 +559,11 @@ export class TubeFeature {
           name: innerName,
           debugSpheres: !!debug,
           preferFast,
+        });
+        nudgeTubeEndCaps(innerTube, innerName, tubeEndCapNudgeDistance(radiusValue, inner), {
+          closed: isClosedLoop,
+          debug: !!debug,
+          pathPoints: finalPoints,
         });
         if (debug && Array.isArray(innerTube.debugSphereSolids)) {
           debugExtras.push(...innerTube.debugSphereSolids);
