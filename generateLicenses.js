@@ -1763,11 +1763,8 @@ function generateDocsSite() {
       readmeBody += `\n\n<h2>Documentation</h2>\n<ul class="doc-list">${listItems}</ul>`;
     }
 
-    // Add license information sections
-    readmeBody += `\n\n</div>
-  </section>
-
-  <section class="card">
+    // Add license information sections inside the same scrollable doc page card.
+    readmeBody += `\n\n<section class="license">
     <h1>This project's license</h1>
     <div style="white-space: pre-wrap;">${escapeHTML(licenseText)}</div>
   </section>
@@ -1818,8 +1815,7 @@ function generateDocsSite() {
   </section>
 `;
 
-    readmeBody += `<div class="footer">${dependencySourceHtml}</div>
-    <div class="prose">`;
+    readmeBody += `<div class="footer">${dependencySourceHtml}</div>`;
 
     const readmeSidebar = buildDocsSidebar({ currentSourcePath: "index", pageMetaBySourcePath, homeMeta: readmeMeta });
     const indexHtml = docTemplate(readmeTitle, readmeBody, { relativeRoot: ".", showTitle: false, sidebar: readmeSidebar });
