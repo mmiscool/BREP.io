@@ -165,7 +165,8 @@ export async function test_edge_smooth_constraints_prevent_triangle_foldback() {
   }
 }
 
-function makeMockSolidFromPolyline(polylinePoints) {
+function makeMockSolidFromPolyline(polylinePoints, options = {}) {
+  const closedLoop = !!options.closedLoop;
   const sourcePolyline = Array.isArray(polylinePoints)
     ? polylinePoints.map((p) => [p[0], p[1], p[2]])
     : [];
@@ -184,7 +185,9 @@ function makeMockSolidFromPolyline(polylinePoints) {
         faceA: "FACE_A",
         faceB: "FACE_B",
         polylineLocal: poly.map((p) => [p[0], p[1], p[2]]),
+        closedLoop,
       },
+      closedLoop,
       parent: null,
       parentSolid: null,
     };
@@ -209,9 +212,9 @@ function makeMockSolidFromPolyline(polylinePoints) {
           name: edge.name,
           faceA: edge.userData.faceA,
           faceB: edge.userData.faceB,
-          indices: [0, 1, 2, 3, 4],
+          indices: poly.map((_, i) => i),
           positions: poly.map((p) => [p[0], p[1], p[2]]),
-          closedLoop: false,
+          closedLoop,
         }];
       },
       clone() {
@@ -235,6 +238,61 @@ function makeMockSolidFromPolyline(polylinePoints) {
   };
 
   return createSolid(vertProperties, sourcePolyline);
+}
+
+export async function test_edge_smooth_closed_loop_feature_selection() {
+  const source = [
+    [1.0, 0.0, 0.0],
+    [0.45, 0.95, 0.02],
+    [-0.55, 0.8, -0.03],
+    [-1.0, 0.0, 0.0],
+    [-0.45, -0.85, 0.03],
+    [0.55, -0.75, -0.02],
+  ];
+  const sourceSolid = makeMockSolidFromPolyline(source, { closedLoop: true });
+
+  const feature = new EdgeSmoothFeature();
+  feature.inputParams = {
+    edges: [sourceSolid],
+    fitStrength: 1,
+    id: "EDGE_SMOOTH_CLOSED_LOOP_TEST",
+  };
+
+  const result = await feature.run();
+  if (!result || !Array.isArray(result.added) || result.added.length !== 1) {
+    throw new Error("EdgeSmoothFeature should add one smoothed solid when selecting a closed-loop edge set.");
+  }
+  if (!Array.isArray(result.removed) || result.removed.length !== 1 || result.removed[0] !== sourceSolid) {
+    throw new Error("Closed-loop smoothing should replace exactly the selected source solid.");
+  }
+
+  const outSolid = result.added[0];
+  const vp = Array.isArray(outSolid?._vertProperties) ? outSolid._vertProperties : [];
+  if (vp.length < source.length * 3) {
+    throw new Error("Closed-loop smoothing output is missing expected vertex properties.");
+  }
+
+  const outPolyline = [];
+  for (let i = 0; i < source.length; i++) {
+    const base = i * 3;
+    outPolyline.push([vp[base + 0], vp[base + 1], vp[base + 2]]);
+  }
+
+  if (hasLocalBacktrackingAgainstSourceClosed(source, outPolyline)) {
+    throw new Error("Closed-loop feature smoothing should not create local edge backtracking.");
+  }
+
+  let movedCount = 0;
+  for (let i = 0; i < source.length; i++) {
+    if (pointDistanceSq(source[i], outPolyline[i]) > 1e-12) movedCount++;
+  }
+  if (movedCount <= 0) {
+    throw new Error("Closed-loop feature smoothing should move at least one edge point.");
+  }
+
+  if (!feature.persistentData || feature.persistentData.totalFittedEdges < 1) {
+    throw new Error("Feature metadata should record the closed-loop edge as fitted.");
+  }
 }
 
 export async function test_edge_smooth_whole_solid_selection() {

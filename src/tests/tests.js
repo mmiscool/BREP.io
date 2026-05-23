@@ -28,6 +28,7 @@ import {
 } from './test_cppChamfer.js';
 import {
     test_edge_smooth_constraints_prevent_triangle_foldback,
+    test_edge_smooth_closed_loop_feature_selection,
     test_edge_smooth_curve_fit,
     test_edge_smooth_curve_fit_closed_loop,
     test_edge_smooth_face_selection,
@@ -701,6 +702,7 @@ export const testFunctions = [
     { test: test_edge_smooth_curve_fit, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_edge_smooth_curve_fit_closed_loop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_edge_smooth_constraints_prevent_triangle_foldback, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_edge_smooth_closed_loop_feature_selection, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_edge_smooth_whole_solid_selection, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_edge_smooth_face_selection, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_smooth_with_subdivision_replaces_source_solid, afterRun: afterRun_smooth_with_subdivision_replaces_source_solid, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

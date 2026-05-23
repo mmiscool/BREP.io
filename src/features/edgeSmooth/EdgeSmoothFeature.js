@@ -1,7 +1,10 @@
 import {
     getSolidGeometryCounts,
 } from "../edgeFeatureUtils.js";
-import { fitAndSnapOpenEdgePolyline } from "./edgeCurveFit.js";
+import {
+    fitAndSnapClosedEdgePolyline,
+    fitAndSnapOpenEdgePolyline,
+} from "./edgeCurveFit.js";
 import { applyConstrainedVertexTargets } from "./vertexTargetConstraints.js";
 
 const DEFAULT_FIT_STRENGTH = 1;
@@ -360,22 +363,13 @@ function collectCurveTargetsForEdge(edgeObj, solid, options) {
         };
     }
 
-    if (polyline.closedLoop) {
-        return {
-            eligible: false,
-            closedLoop: true,
-            endpointIndices: [],
-            targets: [],
-        };
-    }
-
     const indices = Array.isArray(polyline.indices) ? polyline.indices : [];
     const positions = Array.isArray(polyline.positions) ? polyline.positions : [];
     const count = Math.min(indices.length, positions.length);
     if (count < 3) {
         return {
             eligible: false,
-            closedLoop: false,
+            closedLoop: !!polyline.closedLoop,
             endpointIndices: [],
             targets: [],
         };
@@ -393,26 +387,33 @@ function collectCurveTargetsForEdge(edgeObj, solid, options) {
     if (cleanedIndices.length < 3) {
         return {
             eligible: false,
-            closedLoop: false,
+            closedLoop: !!polyline.closedLoop,
             endpointIndices: [],
             targets: [],
         };
     }
 
-    const snapped = fitAndSnapOpenEdgePolyline(cleanedPositions, {
-        fitStrength: options?.fitStrength,
-    });
+    const closedLoop = !!polyline.closedLoop;
+    const snapped = closedLoop
+        ? fitAndSnapClosedEdgePolyline(cleanedPositions, {
+            fitStrength: options?.fitStrength,
+        })
+        : fitAndSnapOpenEdgePolyline(cleanedPositions, {
+            fitStrength: options?.fitStrength,
+        });
     if (!Array.isArray(snapped) || snapped.length !== cleanedPositions.length) {
         return {
             eligible: true,
-            closedLoop: false,
-            endpointIndices: [cleanedIndices[0], cleanedIndices[cleanedIndices.length - 1]],
+            closedLoop,
+            endpointIndices: closedLoop ? [] : [cleanedIndices[0], cleanedIndices[cleanedIndices.length - 1]],
             targets: [],
         };
     }
 
     const targets = [];
-    for (let i = 1; i < cleanedIndices.length - 1; i++) {
+    const start = closedLoop ? 0 : 1;
+    const end = closedLoop ? cleanedIndices.length : cleanedIndices.length - 1;
+    for (let i = start; i < end; i++) {
         const idx = cleanedIndices[i];
         const point = snapped[i];
         if (!Number.isInteger(idx) || idx < 0 || !isPoint3(point)) continue;
@@ -421,8 +422,8 @@ function collectCurveTargetsForEdge(edgeObj, solid, options) {
 
     return {
         eligible: true,
-        closedLoop: false,
-        endpointIndices: [cleanedIndices[0], cleanedIndices[cleanedIndices.length - 1]],
+        closedLoop,
+        endpointIndices: closedLoop ? [] : [cleanedIndices[0], cleanedIndices[cleanedIndices.length - 1]],
         targets,
     };
 }
@@ -449,10 +450,6 @@ function collectTargetsForDescriptors(outSolid, descriptors, options) {
 
         matchedEdges++;
         const fitInfo = collectCurveTargetsForEdge(liveEdge, outSolid, options);
-        if (fitInfo.closedLoop) {
-            skippedClosedLoops++;
-            continue;
-        }
         if (!fitInfo.eligible) continue;
 
         eligibleEdges++;
