@@ -1032,6 +1032,217 @@ function pruneUnusedFaceLabelsFromTriangles(solid) {
   return removed;
 }
 
+function cleanupSingleNeighborFilletFaceIslands(solid, opts = {}) {
+  const tv = Array.isArray(solid?._triVerts) ? solid._triVerts : null;
+  const ids = Array.isArray(solid?._triIDs) ? solid._triIDs : null;
+  const idToFace = solid?._idToFaceName instanceof Map ? solid._idToFaceName : null;
+  if (!solid || !tv || !ids || !idToFace) {
+    return { reassignedTriangles: 0, reassignedComponents: 0 };
+  }
+
+  const featureID = String(opts?.featureID || '').trim();
+  const debug = !!opts?.debug;
+  const triCount = Math.min(ids.length, Math.floor(tv.length / 3));
+  if (triCount <= 0) {
+    return { reassignedTriangles: 0, reassignedComponents: 0 };
+  }
+
+  const getFaceMetadata = (faceName) => (typeof solid.getFaceMetadata === 'function')
+    ? (solid.getFaceMetadata(faceName) || {})
+    : {};
+  const isFilletRoundFace = (faceName) => {
+    const name = String(faceName || '').trim();
+    if (!name) return false;
+    const metadata = getFaceMetadata(name);
+    return metadata?.filletSideWall === true
+      || metadata?.filletMergedSideWall === true
+      || metadata?.filletRoundFace === name
+      || (typeof metadata?.filletRoundFace === 'string' && metadata.filletRoundFace.length > 0)
+      || name.endsWith('_TUBE_Outer')
+      || (featureID && name.startsWith(`${featureID}_FILLET_SIDEWALL_`));
+  };
+  const isFilletEndCap = (faceName) => getFaceMetadata(faceName)?.filletEndCap === true;
+
+  const edgeKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  const edgeToTris = new Map();
+  for (let triIndex = 0; triIndex < triCount; triIndex += 1) {
+    const base = triIndex * 3;
+    const i0 = tv[base + 0] >>> 0;
+    const i1 = tv[base + 1] >>> 0;
+    const i2 = tv[base + 2] >>> 0;
+    for (const [a, b] of [[i0, i1], [i1, i2], [i2, i0]]) {
+      const key = edgeKey(a, b);
+      let list = edgeToTris.get(key);
+      if (!list) {
+        list = [];
+        edgeToTris.set(key, list);
+      }
+      list.push(triIndex);
+    }
+  }
+
+  const adjacency = Array.from({ length: triCount }, () => []);
+  for (const list of edgeToTris.values()) {
+    if (list.length !== 2) continue;
+    adjacency[list[0]].push(list[1]);
+    adjacency[list[1]].push(list[0]);
+  }
+
+  const seen = new Uint8Array(triCount);
+  const components = [];
+  const faceComponentCounts = new Map();
+  const faceLargestComponentSize = new Map();
+  for (let seed = 0; seed < triCount; seed += 1) {
+    if (seen[seed]) continue;
+    const faceID = ids[seed] >>> 0;
+    const stack = [seed];
+    const tris = [];
+    const neighborIDs = new Set();
+    seen[seed] = 1;
+
+    while (stack.length > 0) {
+      const triIndex = stack.pop();
+      tris.push(triIndex);
+      for (const neighborIndex of adjacency[triIndex]) {
+        const neighborFaceID = ids[neighborIndex] >>> 0;
+        if (neighborFaceID === faceID) {
+          if (seen[neighborIndex]) continue;
+          seen[neighborIndex] = 1;
+          stack.push(neighborIndex);
+        } else {
+          neighborIDs.add(neighborFaceID);
+        }
+      }
+    }
+
+    components.push({ faceID, tris, neighborIDs });
+    faceComponentCounts.set(faceID, (faceComponentCounts.get(faceID) || 0) + 1);
+    faceLargestComponentSize.set(
+      faceID,
+      Math.max(faceLargestComponentSize.get(faceID) || 0, tris.length),
+    );
+  }
+
+  const countContactEdgeChains = (component, neighborID) => {
+    const componentTris = new Set(component.tris);
+    const vertexAdj = new Map();
+    let contactEdgeCount = 0;
+    const addVertexEdge = (a, b) => {
+      let aSet = vertexAdj.get(a);
+      if (!aSet) {
+        aSet = new Set();
+        vertexAdj.set(a, aSet);
+      }
+      let bSet = vertexAdj.get(b);
+      if (!bSet) {
+        bSet = new Set();
+        vertexAdj.set(b, bSet);
+      }
+      aSet.add(b);
+      bSet.add(a);
+    };
+
+    for (const triIndex of component.tris) {
+      const base = triIndex * 3;
+      for (const [a, b] of [
+        [tv[base + 0] >>> 0, tv[base + 1] >>> 0],
+        [tv[base + 1] >>> 0, tv[base + 2] >>> 0],
+        [tv[base + 2] >>> 0, tv[base + 0] >>> 0],
+      ]) {
+        const triList = edgeToTris.get(edgeKey(a, b)) || [];
+        let touchesTargetNeighbor = false;
+        for (const otherTriIndex of triList) {
+          if (componentTris.has(otherTriIndex)) continue;
+          if ((ids[otherTriIndex] >>> 0) !== neighborID) continue;
+          touchesTargetNeighbor = true;
+          break;
+        }
+        if (!touchesTargetNeighbor) continue;
+        contactEdgeCount += 1;
+        addVertexEdge(a, b);
+      }
+    }
+
+    if (contactEdgeCount === 0) return { contactEdgeCount: 0, chainCount: 0 };
+
+    let chainCount = 0;
+    const visited = new Set();
+    for (const vertex of vertexAdj.keys()) {
+      if (visited.has(vertex)) continue;
+      chainCount += 1;
+      const stack = [vertex];
+      visited.add(vertex);
+      while (stack.length > 0) {
+        const current = stack.pop();
+        for (const next of vertexAdj.get(current) || []) {
+          if (visited.has(next)) continue;
+          visited.add(next);
+          stack.push(next);
+        }
+      }
+    }
+    return { contactEdgeCount, chainCount };
+  };
+
+  let reassignedTriangles = 0;
+  let reassignedComponents = 0;
+  const details = [];
+  for (const component of components) {
+    if ((faceComponentCounts.get(component.faceID) || 0) <= 1) continue;
+    if (component.tris.length >= (faceLargestComponentSize.get(component.faceID) || 0)) continue;
+    if (component.neighborIDs.size !== 1) continue;
+
+    const neighborID = Array.from(component.neighborIDs)[0] >>> 0;
+    if (neighborID === component.faceID) continue;
+    const sourceFaceName = String(idToFace.get(component.faceID) || '').trim();
+    const neighborFaceName = String(idToFace.get(neighborID) || '').trim();
+    if (!sourceFaceName || !neighborFaceName) continue;
+    if (isFilletEndCap(sourceFaceName) || isFilletEndCap(neighborFaceName)) continue;
+
+    const sourceIsRound = isFilletRoundFace(sourceFaceName);
+    const neighborIsRound = isFilletRoundFace(neighborFaceName);
+    if (sourceIsRound === neighborIsRound) continue;
+
+    const contact = countContactEdgeChains(component, neighborID);
+    if (contact.chainCount !== 1) continue;
+
+    for (const triIndex of component.tris) {
+      if ((ids[triIndex] >>> 0) !== component.faceID) continue;
+      ids[triIndex] = neighborID;
+      reassignedTriangles += 1;
+    }
+    reassignedComponents += 1;
+    details.push({
+      fromFaceName: sourceFaceName,
+      toFaceName: neighborFaceName,
+      triangles: component.tris.length,
+      contactEdgeCount: contact.contactEdgeCount,
+    });
+  }
+
+  if (reassignedTriangles > 0) {
+    pruneUnusedFaceLabelsFromTriangles(solid);
+    solid._dirty = true;
+    solid._faceIndex = null;
+    try { if (solid._manifold && typeof solid._manifold.delete === 'function') solid._manifold.delete(); } catch { }
+    solid._manifold = null;
+    if (debug) {
+      console.log('[Solid.fillet] Cleaned single-neighbor fillet face islands.', {
+        featureID,
+        reassignedTriangles,
+        reassignedComponents,
+        details,
+      });
+    }
+  }
+
+  return { reassignedTriangles, reassignedComponents, details };
+}
+
+export function cleanupFilletSingleNeighborIslands(solid, opts = {}) {
+  return cleanupSingleNeighborFilletFaceIslands(solid, opts);
+}
+
 function collapseFilletSideWallFaces(solid, opts = {}) {
   const tv = Array.isArray(solid?._triVerts) ? solid._triVerts : null;
   const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : null;
@@ -1709,6 +1920,43 @@ export async function fillet(opts = {}) {
     result.__filletSideWallCollapseRemovedTriangles = 0;
     result.__filletSideWallCollapseSimplifySucceeded = false;
     result.__filletSideWallCollapseSimplifyError = null;
+  }
+  const runPostFilletTinyFaceIslandCleanup = collapseFilletSideWalls && cleanupTinyFaceIslandsArea > 0;
+  result.__filletTinyFaceIslandCleanupEnabled = runPostFilletTinyFaceIslandCleanup;
+  result.__filletTinyFaceIslandCleanupCount = 0;
+  if (runPostFilletTinyFaceIslandCleanup && typeof result.cleanupTinyFaceIslands === 'function') {
+    try {
+      result.__filletTinyFaceIslandCleanupCount = Math.max(
+        0,
+        Number(result.cleanupTinyFaceIslands(cleanupTinyFaceIslandsArea) || 0),
+      );
+    } catch (error) {
+      console.warn('[Solid.fillet] Failed to clean up tiny face islands after fillet post-processing.', {
+        featureID,
+        error: error?.message || error,
+      });
+    }
+  }
+  result.__filletSingleNeighborIslandCleanupCount = 0;
+  result.__filletSingleNeighborIslandCleanupComponentCount = 0;
+  try {
+    const singleNeighborIslandSummary = cleanupSingleNeighborFilletFaceIslands(result, {
+      featureID,
+      debug,
+    });
+    result.__filletSingleNeighborIslandCleanupCount = Math.max(
+      0,
+      Number(singleNeighborIslandSummary?.reassignedTriangles || 0),
+    );
+    result.__filletSingleNeighborIslandCleanupComponentCount = Math.max(
+      0,
+      Number(singleNeighborIslandSummary?.reassignedComponents || 0),
+    );
+  } catch (error) {
+    console.warn('[Solid.fillet] Failed to clean up single-neighbor fillet face islands.', {
+      featureID,
+      error: error?.message || error,
+    });
   }
   return result;
 }

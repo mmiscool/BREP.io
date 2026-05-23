@@ -8,6 +8,7 @@ import {
     applySolidAuthoringStateSnapshot,
     buildSolidAuthoringStateSnapshot,
 } from "../../BREP/CppSolidCore.js";
+import { cleanupFilletSingleNeighborIslands } from "../../BREP/SolidMethods/fillet.js";
 
 const DEBUG_MODE_NONE = "NONE";
 const DEBUG_MODE_WEDGE_AND_TUBE = "WEDGE AND TUBE";
@@ -17,7 +18,7 @@ const FINAL_FILLET_SIMPLIFY_TOLERANCE = 0.0009;
 const FILLET_NATIVE_TINY_FACE_ISLAND_CLEANUP_AREA = 0.01;
 const FILLET_POST_COLLAPSE_TINY_TRIANGLE_THRESHOLD = 0.001;
 const FILLET_POST_COLLAPSE_TINY_FACE_ISLAND_CLEANUP_AREA = 0.01;
-const FILLET_CACHE_VERSION = 1;
+const FILLET_CACHE_VERSION = 2;
 
 const inputParamsSchema = {
     id: {
@@ -980,8 +981,8 @@ export class FilletFeature {
                             await obj.collapseTinyTriangles(FILLET_POST_COLLAPSE_TINY_TRIANGLE_THRESHOLD);
                         }
                         obj.__filletPostCollapseTinyTriangleCollapseEnabled = runPostTinyTriangleCollapse;
-                        const runPostTinyFaceIslandCleanup = runPostTinyTriangleCollapse || !collapseFilletSideWalls;
-                        if (runPostTinyFaceIslandCleanup && typeof obj.cleanupTinyFaceIslands === 'function') {
+                        const runPostTinyFaceIslandCleanup = true;
+                        if (typeof obj.cleanupTinyFaceIslands === 'function') {
                             obj.__filletPostCollapseTinyFaceIslandCleanupCount = Math.max(
                                 0,
                                 Number(obj.cleanupTinyFaceIslands(FILLET_POST_COLLAPSE_TINY_FACE_ISLAND_CLEANUP_AREA) || 0),
@@ -990,6 +991,14 @@ export class FilletFeature {
                             obj.__filletPostCollapseTinyFaceIslandCleanupCount = 0;
                         }
                         obj.__filletPostCollapseTinyFaceIslandCleanupEnabled = runPostTinyFaceIslandCleanup;
+                        const singleNeighborIslandSummary = cleanupFilletSingleNeighborIslands(obj, {
+                            featureID: fid,
+                            debug: debugEnabled,
+                        });
+                        obj.__filletPostSingleNeighborIslandCleanupCount = Math.max(
+                            0,
+                            Number(singleNeighborIslandSummary?.reassignedTriangles || 0),
+                        );
                         obj.visualize();
                     } catch (e) {
                         console.warn('[FilletFeature] Failed to set epsilon on fillet result solid.', { error: e });
