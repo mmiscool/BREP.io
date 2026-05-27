@@ -39,6 +39,8 @@ build.ninja
 *.tsbuildinfo
 
 # Local tool state
+/.codex
+/.playwright-mcp/
 /.claude/
 /.aiCoder/llmConfig*
 /.aiCoder/backups/
