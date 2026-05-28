@@ -1046,17 +1046,36 @@ const isTreeNodeAncestor = (node, currentSourcePath = "") => {
   return current.startsWith(`${node.path}/`);
 };
 
-const compareTreeNodes = (a, b) => {
+const sidebarRootSectionOrder = new Map([
+  ["workbenches", 0],
+  ["modes", 1],
+  ["features", 2],
+  ["assembly-constraints", 3],
+  ["pmi-annotations", 4],
+  ["developer", 5],
+  ["api", 6],
+]);
+
+const compareTreeNodes = (a, b, parentNode = null) => {
   const aIsSection = Boolean(a?.children?.size || a?.indexPage);
   const bIsSection = Boolean(b?.children?.size || b?.indexPage);
   if (aIsSection !== bIsSection) return aIsSection ? -1 : 1;
+  if (parentNode?.path === "" && aIsSection && bIsSection) {
+    const aOrder = sidebarRootSectionOrder.get(a?.segment || "");
+    const bOrder = sidebarRootSectionOrder.get(b?.segment || "");
+    if (aOrder != null || bOrder != null) {
+      if (aOrder == null) return 1;
+      if (bOrder == null) return -1;
+      if (aOrder !== bOrder) return aOrder - bOrder;
+    }
+  }
   const aLabel = (a?.indexPage?.title || a?.page?.title || toBreadcrumbLabel(a?.segment || "")).toLowerCase();
   const bLabel = (b?.indexPage?.title || b?.page?.title || toBreadcrumbLabel(b?.segment || "")).toLowerCase();
   return aLabel.localeCompare(bLabel);
 };
 
 const renderSidebarTreeNodes = (node, currentSourcePath = "") => {
-  const children = Array.from(node?.children?.values?.() || []).sort(compareTreeNodes);
+  const children = Array.from(node?.children?.values?.() || []).sort((a, b) => compareTreeNodes(a, b, node));
   if (!children.length) return "";
   const items = children.map((child) => {
     const isCurrent = child?.indexPage?.sourcePath === currentSourcePath || child?.page?.sourcePath === currentSourcePath;

@@ -80,37 +80,35 @@ Grouped constraints that touch the same points share a single anchor and render 
 ## Context Toolbar
 A floating context toolbar follows the sketch viewport and updates itself based on the active selection. It offers only the constraints and actions that apply to the selected entities, making it quick to add intent without digging through menus.
 
-- **Adaptive constraints** – Select two line segments and the toolbar lights up `Parallel ∥`, `Perpendicular ⟂`, `Angle ∠`, and `Equal Distance ⇌`. Pick a line and an arc and it switches to the tangent option. Single, double, or triple point selections surface the matching point-based constraints (`H ━`, `V │`, `Coincident ≡`, `Distance ⟺`, `Line to Point Distance ↥`, `Colinear ⏛`, etc.).
-- **Line-to-point dimensions** – With one line and one point selected, the toolbar shows `↥`. The dimension stays perpendicular to the line and extends to the closest point on the selected line segment so the extension does not visually gap from the segment.
-- **Radial dimensions** – Selecting a single circle or arc reveals `Radius` and `Diameter` dimension buttons so you can drop the right measurement without changing tools.
-- **Construction toggle** – Any time geometry is highlighted the toolbar shows a toggle that flips the selection between regular sketch curves and construction geometry. Construction curves remain in the sketch for constraints but are ignored when profiles are consumed by downstream features.
-- **Fix / Unfix** – When one or more points are selected the toolbar offers a fast fix toggle, adding or removing `⏚` constraints without opening the constraint picker.
-- **Cleanup & delete** – The toolbar always offers a cleanup button (🧹) to remove orphan points, and shows delete actions when a selection is active.
-
-### Context Toolbar Workflow
-Use selection as the main driver of what appears:
-
-1. Select geometry or points first.
-2. Read the toolbar options that appear for that exact selection.
-3. Apply one constraint/dimension at a time.
-4. Drag a point to verify behavior, then add the next constraint.
-5. Use cleanup/delete/construction toggles as needed before finishing.
-
-Typical passes:
-
-1. `Two lines` -> add `∥`, `⟂`, `∠`, or `⇌` to establish relationships.
-2. `One line + one point` -> add `↥` for perpendicular offset control.
-3. `One arc/circle` -> add `R` or `⌀` to lock radial intent.
-4. `Points` -> add `⏚`, `━`, `│`, `≡`, `⟺`, `⋯` based on the design intent.
+Use selection as the main driver of what appears: select geometry, points, or constraints first, then apply one context action at a time and drag-test the result before adding the next constraint.
 
 ### Context Action Icons
-| Icon | Action | Notes |
+| Icon | Action | Selection context | Notes |
 | --- | --- | --- |
-| ◐ | Construction toggle | Switch selected curves between construction and regular geometry. |
-| 🧹 | Cleanup | Remove orphan points that are unused by geometry and lightly constrained. |
-| 🗑 | Delete | Remove the current selection. |
-| R | Radius | Create a radius dimension on an arc/circle. |
-| ⌀ | Diameter | Create a diameter dimension on an arc/circle. |
+| 🧹 | Cleanup | Always available. | Remove orphan points that are unused by geometry and lightly constrained. |
+| 🗑 | Delete | Any selected point, curve, or constraint. | Remove the current selection. |
+| Fix / Unfix | Ground toggle | One or more selected points. | Adds or removes `⏚` ground constraints on the selected points. |
+| ◐ | Construction toggle | One or more selected points or one or more selected curves. | Switch the selected points or curves between construction and regular sketch entities. |
+| R | Radius | One selected arc or circle. | Create a radius dimension using a `⟺` distance constraint with radius display style. |
+| ⌀ | Diameter | One selected arc or circle. | Create a diameter dimension using a `⟺` distance constraint with diameter display style. |
+| ⏚ | Ground | One selected point. | Fix the point in place. |
+| ━ | Horizontal | Two selected points, or one selected line. | Force the two points to share the same `y` value. |
+| │ | Vertical | Two selected points, or one selected line. | Force the two points to share the same `x` value. |
+| ≡ | Coincident | Two selected points, or one selected line. | Merge the two points so they occupy the same coordinates. |
+| ⟺ | Distance | Two selected points or one selected line. | Add a numeric point-to-point distance dimension. For arc/circle radial dimensions use `R` or `⌀`. |
+| ⋯ | Midpoint | Three-point context, such as three selected points or one selected line plus one selected point. | Centers the third point between the first two points. |
+| ⏛ | Point on Line | Three-point context, such as one selected line plus one selected point. | Constrains the third point onto the line through the first two points. |
+| ⏛ | Point on Line | Two selected lines. | Adds point-on-line constraints that keep both endpoints of the second line collinear with the first line. |
+| ↥ | Line to Point Distance | Three-point context, usually one selected line plus one selected point. | Add a perpendicular distance dimension from the point to the line. |
+| ∠ | Angle | Three selected points, or one selected line plus one selected point. | Add an angle dimension for the three-point context. |
+| ∥ | Parallel | Two selected lines. | Keep both line directions parallel. |
+| ⟂ | Perpendicular | Two selected lines, or one selected line plus two selected points. | Enforce a 90 degree relationship. |
+| ∠ | Angle | Two selected lines. | Add an explicit angle dimension between the lines. |
+| ⇌ | Equal Distance | Two selected lines. | Make the two segment lengths equal. |
+| ⇌ | Equal Radius | Two selected arcs/circles. | Make both radii equal. |
+| ⟠ | Tangent | One selected line and one selected arc/circle. | Creates a `⟂` constraint between the line and the relevant radius so the line stays tangent. |
+| Reverse Angle | Reverse angle | One selected `∠` constraint. | Swap the angle measurement to the opposite side. |
+| Alternative Angle | Alternative angle | One selected `∠` constraint. | Flip the first line direction and measure the other arc. |
 
 ## Trim Tool
 Trim removes the clicked segment of a curve using the closest intersection(s) around the cursor.
