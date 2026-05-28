@@ -66,7 +66,7 @@ export {
     simplify,
 } from "./booleanOps.js";
 export { toSTL, writeSTL, toSTEP, writeSTEP } from "./io.js";
-export { volume, surfaceArea, getTriangleCount } from "./metrics.js";
+export { volume, surfaceArea, minGapToPoint, getTriangleCount } from "./metrics.js";
 export { visualize } from "./visualize.js";
 export { fillet } from "./fillet.js";
 export { chamfer } from "./chamfer.js";

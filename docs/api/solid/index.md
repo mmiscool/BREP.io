@@ -69,6 +69,7 @@ Related pages:
 - [getTriangleCount()](./getTriangleCount.md)
 - [volume()](./volume.md)
 - [surfaceArea()](./surfaceArea.md)
+- [minGapToPoint(point, searchLength)](./minGapToPoint.md)
 
 ## Booleans and reconstruction
 

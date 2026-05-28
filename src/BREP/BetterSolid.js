@@ -585,6 +585,17 @@ export class Solid extends THREE.Group {
     }
 
     /**
+     * Return mesh-surface proximity records between this solid and a point.
+     * Includes every triangle within searchLength, sorted nearest first.
+     * @param {number[]|{x:number,y:number,z:number}} point
+     * @param {number} [searchLength=Infinity]
+     * @returns {Array<{inside:boolean,distance:number,directionVector:{x:number,y:number,z:number}}>}
+     */
+    minGapToPoint(..._args) {
+        return SolidMethods.minGapToPoint.apply(this, arguments);
+    }
+
+    /**
      * Count triangles in the current manifold mesh.
      * @returns {number}
      */

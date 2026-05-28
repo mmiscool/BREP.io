@@ -245,6 +245,7 @@ import {
     test_sketch_solver_topology_rect_shared_points,
 } from './test_sketch_solver_topology_stability.js';
 import { afterRun_solidMetrics, test_solidMetrics } from './test_solidMetrics.js';
+import { test_solidPointMinGap } from './test_solidPointMinGap.js';
 import { test_stlLoader } from './test_stlLoader.js';
 import { test_selection_owning_feature_resolution } from './test_selection_owning_feature.js';
 import {
@@ -738,6 +739,7 @@ export const testFunctions = [
     { test: test_sheetMetal_corner_fillet_face_cylindrical_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_corner_fillet_selection_resolution, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_corner_fillet_compound_reference, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_solidPointMinGap, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_solidMetrics, afterRun: afterRun_solidMetrics, printArtifacts: true, exportFaces: true, exportSolids: true, resetHistory: true },
 
 ];
