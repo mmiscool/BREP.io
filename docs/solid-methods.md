@@ -67,7 +67,6 @@ Use:
 - [union()](./api/solid/union.md)
 - [subtract()](./api/solid/subtract.md)
 - [intersect()](./api/solid/intersect.md)
-- [difference()](./api/solid/difference.md)
 - [chamfer()](./api/solid/chamfer.md)
 - [fillet()](./api/solid/fillet.md)
 
@@ -76,9 +75,7 @@ Use:
 Use:
 - [visualize()](./api/solid/visualize.md)
 - [toSTL()](./api/solid/toSTL.md)
-- [writeSTL()](./api/solid/writeSTL.md)
 - [toSTEP()](./api/solid/toSTEP.md)
-- [writeSTEP()](./api/solid/writeSTEP.md)
 
 ## Related Pages
 

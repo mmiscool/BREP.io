@@ -188,20 +188,3 @@ export function _isCoherentlyOrientedManifold() {
     syncSolidAuthoringStateToCpp(this, this._cppSolidCore);
     return this._cppSolidCore.isCoherentlyOrientedManifold();
 }
-
-export function invertNormals() {
-    requireCppSolidCoreCapability(
-        cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeManifoldPrep,
-        "Solid.invertNormals()"
-    );
-    this._cppSolidCore = this._cppSolidCore || new CppSolidCore();
-    syncSolidAuthoringStateToCpp(this, this._cppSolidCore);
-    this._cppSolidCore.invertNormals();
-    syncSolidAuthoringStateFromCpp(this, this._cppSolidCore);
-    this._dirty = true;
-    this._faceIndex = null;
-    try { if (this._manifold && typeof this._manifold.delete === 'function') this._manifold.delete(); } catch { }
-    this._manifold = null;
-    this._manifoldize();
-    return this;
-}

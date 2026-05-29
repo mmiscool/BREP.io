@@ -8,6 +8,16 @@ import {
     syncSolidAuthoringStateFromCpp,
 } from "../CppSolidCore.js";
 
+const alertSolidCleanupJsFallback = (methodName) => {
+    const message = `Solid.${methodName} is using the JavaScript cleanup fallback.`;
+    try {
+        if (typeof alert === "function") alert(message);
+        else if (typeof console !== "undefined" && typeof console.warn === "function") console.warn(message);
+    } catch {
+        // Keep cleanup behavior unchanged if alerting is blocked.
+    }
+};
+
 /**
  * Mesh cleanup and refinement utilities.
  */
@@ -31,6 +41,8 @@ export function removeSmallIslands({ maxTriangles = 30, removeInternal = true, r
         }
         return removed;
     }
+
+    alertSolidCleanupJsFallback("removeSmallIslands()");
 
     const tv = this._triVerts;
     const vp = this._vertProperties;
@@ -223,11 +235,6 @@ export function removeSmallIslands({ maxTriangles = 30, removeInternal = true, r
     this._dirty = true;
     this._faceIndex = null;
     return removed;
-}
-
-/** Backwards-compatible wrapper that removes only internal small islands. */
-export function removeSmallInternalIslands(maxTriangles = 30) {
-    return this.removeSmallIslands({ maxTriangles, removeInternal: true, removeExternal: false });
 }
 
 /**
@@ -1965,6 +1972,12 @@ export function removeInternalTriangles(options = {}) {
         ? options
         : { fallback: options };
     const fallback = (opts.fallback || 'winding').toString().toLowerCase();
+    let alertedJsFallback = false;
+    const alertFallback = () => {
+        if (alertedJsFallback) return;
+        alertedJsFallback = true;
+        alertSolidCleanupJsFallback("removeInternalTriangles()");
+    };
 
     try {
         if (cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeInternalTriangleCleanup) {
@@ -1977,6 +1990,8 @@ export function removeInternalTriangles(options = {}) {
             this._manifold = null;
             return removed > 0 ? removed : 0;
         }
+
+        alertFallback();
 
         let mesh = null;
         try {
@@ -2018,6 +2033,7 @@ export function removeInternalTriangles(options = {}) {
     }
 
     // Fallback path for non-manifold/self-intersecting meshes
+    alertFallback();
     if (fallback === 'ray' || fallback === 'raycast') {
         return this.removeInternalTrianglesByRaycast();
     }
@@ -2347,6 +2363,8 @@ export function cleanupTinyFaceIslands(size) {
         return reassigned;
     }
 
+    alertSolidCleanupJsFallback("cleanupTinyFaceIslands()");
+
     const tv = this._triVerts;
     const vp = this._vertProperties;
     const ids = this._triIDs;
@@ -2598,6 +2616,8 @@ export function mergeTinyFaces(maxArea = 0.001) {
         }
         return this;
     }
+
+    alertSolidCleanupJsFallback("mergeTinyFaces()");
 
     if (typeof this.getFaceNames !== 'function' || typeof this.getBoundaryEdgePolylines !== 'function') return this;
     const faceNames = this.getFaceNames() || [];

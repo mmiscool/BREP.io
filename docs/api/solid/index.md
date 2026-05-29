@@ -42,11 +42,9 @@ Related pages:
 - [_weldVerticesByEpsilon(epsilon)](./_weldVerticesByEpsilon.md)
 - [fixTriangleWindingsByAdjacency()](./fixTriangleWindingsByAdjacency.md)
 - [_isCoherentlyOrientedManifold()](./_isCoherentlyOrientedManifold.md)
-- [invertNormals()](./invertNormals.md)
 - [_manifoldize()](./_manifoldize.md)
 - [remesh(options)](./remesh.md)
 - [removeSmallIslands(options)](./removeSmallIslands.md)
-- [removeSmallInternalIslands(maxTriangles)](./removeSmallInternalIslands.md)
 - [removeOppositeSingleEdgeFaces(options)](./removeOppositeSingleEdgeFaces.md)
 - [removeTinyBoundaryTriangles(areaThreshold, maxIterations)](./removeTinyBoundaryTriangles.md)
 - [collapseTinyTriangles(lengthThreshold)](./collapseTinyTriangles.md)
@@ -73,23 +71,16 @@ Related pages:
 
 ## Booleans and reconstruction
 
-- [_combineIdMaps(other)](./_combineIdMaps.md)
-- [_combineFaceMetadata(other)](./_combineFaceMetadata.md)
 - [_expandTriIDsFromMesh(mesh)](./_expandTriIDsFromMesh.md)
-- [_fromManifold(manifoldObj, idToFaceName, options)](./_fromManifold.md)
 - [union(other)](./union.md)
 - [subtract(other)](./subtract.md)
 - [intersect(other)](./intersect.md)
-- [difference(other)](./difference.md)
 - [simplify(tolerance, updateInPlace)](./simplify.md)
-- [setTolerance(tolerance)](./setTolerance.md)
 
 ## Export, visualization, and feature builders
 
 - [toSTL(name, precision)](./toSTL.md)
-- [writeSTL(filePath, name, precision)](./writeSTL.md)
 - [toSTEP(name, options)](./toSTEP.md)
-- [writeSTEP(filePath, name, options)](./writeSTEP.md)
 - [visualize(options)](./visualize.md)
 - [chamfer(options)](./chamfer.md)
 - [fillet(options)](./fillet.md)

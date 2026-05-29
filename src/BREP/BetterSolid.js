@@ -3,7 +3,7 @@
  * Solid: Authoring wrapper around manifold-3d Mesh/Manifold
  *
  * Requirements
- * - Environment: ES modules. For disk export (`writeSTL`) a Node.js runtime is required.
+ * - Environment: ES modules.
  * - Dependency: `setupManifold.js` must provide a ready-to-use `manifold` module
  *   exposing `{ Manifold, Mesh }` from `manifold-3d`.
  * - Geometry: Input triangles must describe a closed, watertight, 2‑manifold.
@@ -47,10 +47,7 @@
  *
  * - Export:
  *   - `toSTL()` returns an ASCII STL string from the current Manifold mesh.
- *   - `writeSTL(path)` writes the STL to disk using a dynamic `fs` import so
- *     the module stays browser‑safe.
  *   - `toSTEP()` returns a triangulated STEP (faceted BREP) string.
- *   - `writeSTEP(path)` writes the STEP file to disk in Node.js environments.
  *
  * Performance Notes
  * - Manifoldization is cached and only recomputed when authoring arrays change
@@ -240,15 +237,6 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Remove only small internal islands (wrapper around removeSmallIslands).
-     * @param {number} [maxTriangles=30]
-     * @returns {number}
-     */
-    removeSmallInternalIslands(..._args) {
-        return SolidMethods.removeSmallInternalIslands.apply(this, arguments);
-    }
-
-    /**
      * Remove faces that only connect via a single shared edge chain to an opposite-facing neighbor.
      * @param {object} [options]
      * @param {number} [options.normalDotThreshold=-0.95] dot-product threshold for opposite normals
@@ -304,14 +292,6 @@ export class Solid extends THREE.Group {
      */
     collapseTinyTriangles(..._args) {
         return SolidMethods.collapseTinyTriangles.apply(this, arguments);
-    }
-
-    /**
-     * Flip all triangle windings to invert normals and rebuild the manifold.
-     * @returns {Solid}
-     */
-    invertNormals(..._args) {
-        return SolidMethods.invertNormals.apply(this, arguments);
     }
 
     /**
@@ -416,17 +396,6 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Write an ASCII STL file to disk (Node.js only).
-     * @param {string} filePath
-     * @param {string} [name='solid']
-     * @param {number} [precision=6]
-     * @returns {Promise<string>} resolves with file path
-     */
-    async writeSTL(..._args) {
-        return SolidMethods.writeSTL.apply(this, arguments);
-    }
-
-    /**
      * Generate a triangulated STEP string for this solid.
      * @param {string} [name=this.name||'part']
      * @param {{unit?: string, precision?: number, scale?: number, applyWorldTransform?: boolean}} [options]
@@ -434,17 +403,6 @@ export class Solid extends THREE.Group {
      */
     toSTEP(..._args) {
         return SolidMethods.toSTEP.apply(this, arguments);
-    }
-
-    /**
-     * Write a triangulated STEP file to disk (Node.js only).
-     * @param {string} filePath
-     * @param {string} [name=this.name||'part']
-     * @param {{unit?: string, precision?: number, scale?: number, applyWorldTransform?: boolean}} [options]
-     * @returns {Promise<string>} resolves with file path
-     */
-    async writeSTEP(..._args) {
-        return SolidMethods.writeSTEP.apply(this, arguments);
     }
 
     /**
@@ -477,40 +435,12 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Internal: merge face ID -> name maps from two solids (used during booleans).
-     * @param {Solid} other
-     * @returns {Map<number,string>}
-     */
-    _combineIdMaps(..._args) {
-        return SolidMethods._combineIdMaps.apply(this, arguments);
-    }
-
-    /**
-     * Internal: merge face metadata maps from two solids.
-     * @param {Solid} other
-     * @returns {Map<string,object>}
-     */
-    _combineFaceMetadata(..._args) {
-        return SolidMethods._combineFaceMetadata.apply(this, arguments);
-    }
-
-    /**
      * Static helper: expand face IDs from a MeshGL into a JS array (or zeros when absent).
      * @param {import('./SolidShared.js').ManifoldMesh} mesh
      * @returns {number[]}
      */
     static _expandTriIDsFromMesh(..._args) {
         return SolidMethods._expandTriIDsFromMeshStatic.apply(this, arguments);
-    }
-
-    /**
-     * Static helper: build a Solid from an existing Manifold and ID -> face-name map.
-     * @param {import('./SolidShared.js').Manifold} manifoldObj
-     * @param {Map<number,string>} idToFaceName
-     * @returns {Solid}
-     */
-    static _fromManifold(..._args) {
-        return SolidMethods._fromManifoldStatic.apply(this, arguments);
     }
 
     /**
@@ -543,15 +473,6 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Boolean difference alias using Manifold.difference (same as subtract).
-     * @param {Solid} other
-     * @returns {Solid}
-     */
-    difference(..._args) {
-        return SolidMethods.difference.apply(this, arguments);
-    }
-
-    /**
      * Simplify the manifold (optionally with tolerance and in-place update).
      * @param {number} [tolerance]
      * @param {boolean} [updateInPlace] when true, mutate this solid instead of returning a clone
@@ -559,15 +480,6 @@ export class Solid extends THREE.Group {
      */
     simplify(..._args) {
         return SolidMethods.simplify.apply(this, arguments);
-    }
-
-    /**
-     * Rebuild with Manifold tolerance applied, returning a new Solid.
-     * @param {number} tolerance
-     * @returns {Solid}
-     */
-    setTolerance(..._args) {
-        return SolidMethods.setTolerance.apply(this, arguments);
     }
 
     /**

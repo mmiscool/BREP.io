@@ -12,10 +12,8 @@ export {
     getFaceMetadata,
     getFaceNames,
     renameFace,
-    _combineFaceMetadata,
     setEdgeMetadata,
     getEdgeMetadata,
-    _combineEdgeMetadata,
 } from "./metadata.js";
 export {
     bakeTransform,
@@ -29,11 +27,9 @@ export {
     _weldVerticesByEpsilon,
     fixTriangleWindingsByAdjacency,
     _isCoherentlyOrientedManifold,
-    invertNormals,
 } from "./manifoldOps.js";
 export {
     removeSmallIslands,
-    removeSmallInternalIslands,
     removeOppositeSingleEdgeFaces,
     removeTinyBoundaryTriangles,
     collapseTinyTriangles,
@@ -58,14 +54,10 @@ export {
     union,
     subtract,
     intersect,
-    difference,
-    _combineIdMaps,
     _expandTriIDsFromMesh as _expandTriIDsFromMeshStatic,
-    _fromManifold as _fromManifoldStatic,
-    setTolerance,
     simplify,
 } from "./booleanOps.js";
-export { toSTL, writeSTL, toSTEP, writeSTEP } from "./io.js";
+export { toSTL, toSTEP } from "./io.js";
 export { volume, surfaceArea, minGapToPoint, getTriangleCount } from "./metrics.js";
 export { visualize } from "./visualize.js";
 export { fillet } from "./fillet.js";

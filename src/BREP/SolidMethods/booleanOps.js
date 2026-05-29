@@ -25,47 +25,6 @@ function requireNativeBooleanCombinedBuilder(methodName) {
     throw new Error(`${methodName} requires the custom local manifold build with native boolean result reconstruction support.`);
 }
 
-function _isFallbackFaceName(name, idHint = null) {
-    if (name == null) return true;
-    const raw = String(name).trim();
-    if (!raw) return true;
-    if (raw === 'FACE') return true;
-    if (/^FACE_\d+$/.test(raw)) return true;
-    if (Number.isFinite(idHint) && raw === `FACE_${idHint >>> 0}`) return true;
-    return false;
-}
-
-export function _combineIdMaps(other) {
-    const left = (this?._idToFaceName instanceof Map) ? this._idToFaceName : new Map();
-    const right = (other?._idToFaceName instanceof Map) ? other._idToFaceName : new Map();
-    const merged = new Map(left);
-    for (const [id, name] of right.entries()) {
-        const incoming = (name == null) ? '' : String(name);
-        const existing = merged.get(id);
-        if (existing === undefined) {
-            merged.set(id, incoming);
-            continue;
-        }
-        if (existing === incoming) continue;
-
-        const idNum = Number(id);
-        const idHint = Number.isFinite(idNum) ? (idNum >>> 0) : null;
-        const existingIsFallback = _isFallbackFaceName(existing, idHint);
-        const incomingIsFallback = _isFallbackFaceName(incoming, idHint);
-
-        // Prefer descriptive names over fallback FACE_* labels.
-        if (existingIsFallback && !incomingIsFallback) {
-            merged.set(id, incoming);
-            continue;
-        }
-        if (!existingIsFallback && incomingIsFallback) continue;
-
-        // For true collisions between two descriptive labels, keep the left
-        // side name so target-solid face names remain stable through booleans.
-    }
-    return merged;
-}
-
 function baseSolidCtor(obj) {
     const ctor = obj && obj.constructor;
     return (ctor && ctor.BaseSolid) ? ctor.BaseSolid : ctor;
@@ -265,7 +224,7 @@ function toNativeBooleanSnapshot(snapshot) {
 function buildNativeSnapshotFromMesh(mesh, idToFaceName, opts = {}) {
     requireCppSolidCoreCapability(
         typeof manifold?.buildSolidAuthoringStateFromMesh === "function",
-        "Solid._fromManifold",
+        "Solid.simplify",
     );
     const resolvedIdToFaceName = new Map(idToFaceName instanceof Map ? idToFaceName : []);
     const faceNameToID = new Map();
@@ -284,15 +243,6 @@ function buildNativeSnapshotFromMesh(mesh, idToFaceName, opts = {}) {
         auxEdges: Array.isArray(opts?.auxEdges) ? opts.auxEdges : [],
         name: opts?.name || "",
     });
-}
-
-function buildNativeSnapshotFromManifold(manifoldObj, idToFaceName, opts = {}) {
-    const mesh = manifoldObj.getMesh();
-    try {
-        return buildNativeSnapshotFromMesh(mesh, idToFaceName, opts);
-    } finally {
-        try { if (mesh && typeof mesh.delete === "function") mesh.delete(); } catch { }
-    }
 }
 
 function _vec3FromMesh(mesh, vertIndex) {
@@ -566,30 +516,6 @@ export function intersect(other) {
     return _cleanupBooleanResult(out);
 }
 
-/**
- * Boolean difference A − B using Manifold's built-in API.
- * Equivalent to `subtract`, provided for semantic clarity.
- */
-export function difference(other) {
-    const Solid = baseSolidCtor(this);
-    const out = buildNativeBooleanResult(this, other, "DIFFERENCE", Solid);
-    try { out.owningFeatureID = this?.owningFeatureID || other?.owningFeatureID || out?.owningFeatureID || null; } catch { }
-    return _cleanupBooleanResult(out);
-}
-
-export function setTolerance(tolerance) {
-    const Solid = baseSolidCtor(this);
-    const m = this._manifoldize();
-    const outM = m.setTolerance(tolerance);
-    const authoringSnapshot = getSolidAuthoringStateSnapshot(this);
-    const out = Solid._fromManifold(outM, new Map(this._idToFaceName), {
-        faceMetadataJson: authoringSnapshot?.faceMetadataJson,
-        edgeMetadataJson: authoringSnapshot?.edgeMetadataJson,
-        auxEdges: authoringSnapshot?.auxEdges,
-        name: this?.name || "",
-    });
-    return out;
-}
 export function simplify(tolerance = undefined, updateInPlace = false) {
     if (updateInPlace && typeof updateInPlace === "object") {
         updateInPlace = false;
@@ -637,15 +563,4 @@ export function _expandTriIDsFromMesh(mesh) {
         return Array.from(mesh.faceID);
     }
     return new Array((mesh.triVerts.length / 3) | 0).fill(0);
-}
-
-export function _fromManifold(manifoldObj, idToFaceName, opts = {}) {
-    const Solid = this;
-    const solid = new Solid();
-    const snapshot = buildNativeSnapshotFromManifold(manifoldObj, idToFaceName, opts);
-    applySolidAuthoringStateSnapshot(solid, snapshot);
-    solid._manifold = manifoldObj;
-    solid._dirty = false;
-    solid._faceIndex = null;
-    return solid;
 }

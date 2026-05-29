@@ -87,25 +87,3 @@ export function getEdgeMetadata(edgeName) {
     }
     try { return this._cppSolidCore?.getEdgeMetadata(edgeName) || null; } catch { return null; }
 }
-
-/** Combine face metadata maps across two solids. */
-export function _combineFaceMetadata(other) {
-    const merged = new Map(this._faceMetadata);
-    if (other && other._faceMetadata) {
-        for (const [faceName, metadata] of other._faceMetadata.entries()) {
-            merged.set(faceName, { ...metadata });
-        }
-    }
-    return merged;
-}
-
-/** Combine edge metadata maps across two solids. */
-export function _combineEdgeMetadata(other) {
-    const merged = new Map(this._edgeMetadata);
-    if (other && other._edgeMetadata) {
-        for (const [edgeName, metadata] of other._edgeMetadata.entries()) {
-            merged.set(edgeName, { ...metadata });
-        }
-    }
-    return merged;
-}

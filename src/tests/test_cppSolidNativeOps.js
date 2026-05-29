@@ -281,7 +281,7 @@ export async function test_cppSolidNative_getFaceNormal_reports_planar_face_norm
     }
 }
 
-export async function test_cppSolidNative_invertNormals_and_manifoldize_rebuilds_coherent_mesh() {
+export async function test_cppSolidNative_manifoldize_repairs_incoherent_winding() {
     if (manifoldBuildSource !== "local" || !cppSolidCoreHasNativeManifoldPrep) {
         return;
     }

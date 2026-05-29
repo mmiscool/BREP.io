@@ -59,16 +59,6 @@ export function toSTL(name = "solid", precision = 6) {
     try { return parts.join("\n"); } finally { try { if (mesh && typeof mesh.delete === 'function') mesh.delete(); } catch { } }
 }
 
-export async function writeSTL(filePath, name = "solid", precision = 6) {
-    if (typeof window !== "undefined") {
-        throw new Error("writeSTL is only available in Node.js environments");
-    }
-    const { writeFile } = await import('node:fs/promises');
-    const stl = this.toSTL(name, precision);
-    await writeFile(filePath, stl, 'utf8');
-    return filePath;
-}
-
 /**
  * Generate a triangulated STEP (faceted BREP) string for this solid.
  * @param {string} [name=this.name||'part']
@@ -85,21 +75,4 @@ export function toSTEP(name = undefined, options = {}) {
     const stepOpts = { ...opts, name: baseName, unit, precision, scale, applyWorldTransform };
     const { data } = generateSTEP([this], stepOpts);
     return data;
-}
-
-/**
- * Write a triangulated STEP file to disk (Node.js only).
- * @param {string} filePath
- * @param {string} [name=this.name||'part']
- * @param {{unit?: string, precision?: number, scale?: number, applyWorldTransform?: boolean, useTessellatedFaces?: boolean}} [options]
- * @returns {Promise<string>} resolves with file path
- */
-export async function writeSTEP(filePath, name = undefined, options = {}) {
-    if (typeof window !== "undefined") {
-        throw new Error("writeSTEP is only available in Node.js environments");
-    }
-    const { writeFile } = await import('node:fs/promises');
-    const step = this.toSTEP(name, options);
-    await writeFile(filePath, step, 'utf8');
-    return filePath;
 }
