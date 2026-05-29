@@ -20,6 +20,7 @@ import {
 } from './solidOverlapDiagnosticsCore.js';
 
 const BOOLEAN_TINY_FACE_MAX_AREA = 0.001;
+const BOOLEAN_EDGE_POINT_PROXIMITY = 0.0001;
 
 const __booleanDebugConfig = (() => {
   try {
@@ -359,6 +360,167 @@ function __booleanApplyFaceAdjustments(solid, faceAdjustments, debugLog, logCont
     }
   }
   return applied;
+}
+
+function __booleanPointKey(point, precision = 12) {
+  return [
+    Number(point?.[0] || 0).toFixed(precision),
+    Number(point?.[1] || 0).toFixed(precision),
+    Number(point?.[2] || 0).toFixed(precision),
+  ].join(',');
+}
+
+function __booleanGetFaceBoundaryPoints(solid, faceName) {
+  if (!solid || typeof solid.getFace !== 'function' || !faceName) return [];
+  const triangles = solid.getFace(faceName) || [];
+  if (!Array.isArray(triangles) || triangles.length === 0) return [];
+
+  const edgeMap = new Map();
+  const addEdge = (a, b) => {
+    if (!Array.isArray(a) || !Array.isArray(b)) return;
+    const ka = __booleanPointKey(a);
+    const kb = __booleanPointKey(b);
+    const key = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+    const current = edgeMap.get(key);
+    if (current) {
+      current.count += 1;
+    } else {
+      edgeMap.set(key, {
+        count: 1,
+        points: [
+          [Number(a[0]) || 0, Number(a[1]) || 0, Number(a[2]) || 0],
+          [Number(b[0]) || 0, Number(b[1]) || 0, Number(b[2]) || 0],
+        ],
+      });
+    }
+  };
+
+  for (const triangle of triangles) {
+    const p1 = Array.isArray(triangle?.p1) ? triangle.p1 : null;
+    const p2 = Array.isArray(triangle?.p2) ? triangle.p2 : null;
+    const p3 = Array.isArray(triangle?.p3) ? triangle.p3 : null;
+    if (!p1 || !p2 || !p3) continue;
+    addEdge(p1, p2);
+    addEdge(p2, p3);
+    addEdge(p3, p1);
+  }
+
+  const out = [];
+  const seen = new Set();
+  for (const edge of edgeMap.values()) {
+    if (edge.count !== 1) continue;
+    for (const point of edge.points) {
+      const key = __booleanPointKey(point);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(point);
+    }
+  }
+  return out;
+}
+
+function __booleanFaceHasNearTargetEdgePoint(targetSolid, points, tolerance) {
+  if (!targetSolid || typeof targetSolid.minGapToPoint !== 'function') return false;
+  for (const point of points) {
+    const records = targetSolid.minGapToPoint(point, tolerance);
+    if (Array.isArray(records) && records.some((record) => Number(record?.distance) <= tolerance)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function __booleanScoreFaceSide(targetSolid, solid, faceName, desiredInside, sampleLimit = 8) {
+  if (!targetSolid || typeof targetSolid.minGapToPoint !== 'function') return -Infinity;
+  const points = __booleanGetFaceBoundaryPoints(solid, faceName);
+  if (points.length === 0) return -Infinity;
+  const stride = Math.max(1, Math.ceil(points.length / sampleLimit));
+  const searchLength = Math.max(__booleanApproxScale(targetSolid) * 2, BOOLEAN_EDGE_POINT_PROXIMITY * 10);
+  let score = 0;
+  let samples = 0;
+  for (let i = 0; i < points.length; i += stride) {
+    samples += 1;
+    const records = targetSolid.minGapToPoint(points[i], searchLength);
+    const inside = Array.isArray(records) && records.length > 0 ? records[0].inside === true : false;
+    if (inside === desiredInside) score += 1;
+  }
+  return samples > 0 ? score / samples : -Infinity;
+}
+
+function __booleanConditionEdgePointProximity(op, targetSolid, candidateSolid, debugLog, context = null) {
+  const normalizedOp = String(op || '').toUpperCase();
+  if (normalizedOp !== 'UNION' && normalizedOp !== 'SUBTRACT') {
+    return { solid: candidateSolid, applied: [] };
+  }
+  if (
+    !targetSolid
+    || !candidateSolid
+    || typeof targetSolid.minGapToPoint !== 'function'
+    || typeof candidateSolid.getFaceNames !== 'function'
+    || typeof candidateSolid.pushFace !== 'function'
+  ) {
+    return { solid: candidateSolid, applied: [] };
+  }
+
+  const desiredInside = normalizedOp === 'UNION';
+  const tolerance = BOOLEAN_EDGE_POINT_PROXIMITY;
+  const nudgeDistance = tolerance * 2;
+  const faceNames = candidateSolid.getFaceNames() || [];
+  const candidates = [];
+  for (const rawFaceName of faceNames) {
+    const faceName = String(rawFaceName || '').trim();
+    if (!faceName) continue;
+    const boundaryPoints = __booleanGetFaceBoundaryPoints(candidateSolid, faceName);
+    if (boundaryPoints.length === 0) continue;
+    if (!__booleanFaceHasNearTargetEdgePoint(targetSolid, boundaryPoints, tolerance)) continue;
+    candidates.push(faceName);
+  }
+  if (candidates.length === 0) return { solid: candidateSolid, applied: [] };
+
+  const working = typeof candidateSolid.clone === 'function' ? candidateSolid.clone() : candidateSolid;
+  const applied = [];
+  for (const faceName of candidates) {
+    let best = null;
+    for (const sign of [1, -1]) {
+      const probe = typeof working.clone === 'function' ? working.clone() : null;
+      if (!probe) continue;
+      try {
+        probe.pushFace(faceName, sign * nudgeDistance, { warnMissing: false, warnInvalidNormal: false });
+        const score = __booleanScoreFaceSide(targetSolid, probe, faceName, desiredInside);
+        if (!best || score > best.score) best = { sign, score };
+      } catch { /* ignore failed probe */ }
+    }
+    if (!best || !(best.score > -Infinity)) continue;
+    try {
+      working.pushFace(faceName, best.sign * nudgeDistance, { warnMissing: false, warnInvalidNormal: false });
+      applied.push({
+        faceName,
+        distance: best.sign * nudgeDistance,
+        desiredInside,
+        score: best.score,
+      });
+    } catch (err) {
+      debugLog?.('Failed to apply boolean edge-point proximity nudge', {
+        context,
+        operation: normalizedOp,
+        faceName,
+        message: err?.message || err,
+      });
+    }
+  }
+
+  if (applied.length > 0) {
+    debugLog?.('Applied boolean edge-point proximity nudge', {
+      context,
+      operation: normalizedOp,
+      desiredInside,
+      tolerance,
+      nudgeDistance,
+      adjustments: applied,
+    });
+    return { solid: working, applied };
+  }
+  return { solid: candidateSolid, applied: [] };
 }
 
 function __booleanConditionOperands(op, stationarySolid, movingSolid, debugLog, context = null) {
@@ -1419,17 +1581,23 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
         let conditionedTarget = target;
         let conditionedTool = baseSolid;
         if (overlapConditioningEnabled) {
-          const conditioning = __booleanConditionOperands('SUBTRACT', target, baseSolid, debugLog, {
+          const edgePointConditioning = __booleanConditionEdgePointProximity('SUBTRACT', conditionedTarget, conditionedTool, debugLog, {
             featureID,
-            target: target?.name || target?.uuid || null,
-            tool: baseSolid?.name || baseSolid?.uuid || null,
+            target: conditionedTarget?.name || conditionedTarget?.uuid || null,
+            tool: conditionedTool?.name || conditionedTool?.uuid || null,
           });
-          conditionedTarget = conditioning.stationarySolid || target;
-          conditionedTool = conditioning.movingSolid || baseSolid;
+          conditionedTool = edgePointConditioning.solid || conditionedTool;
+          const conditioning = __booleanConditionOperands('SUBTRACT', conditionedTarget, conditionedTool, debugLog, {
+            featureID,
+            target: conditionedTarget?.name || conditionedTarget?.uuid || null,
+            tool: conditionedTool?.name || conditionedTool?.uuid || null,
+          });
+          conditionedTarget = conditioning.stationarySolid || conditionedTarget;
+          conditionedTool = conditioning.movingSolid || conditionedTool;
         }
         let success = false;
         try {
-          let out = conditionedTarget.subtract(conditionedTool);
+          let out = conditionedTarget.subtract(conditionedTool, { overlapConditioningEnabled: false });
           out = __booleanRestoreFaceTrackingFromSources(out, debugLog, conditionedTarget, conditionedTool);
           await addResult(out, target);
           success = true;
@@ -1449,7 +1617,7 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
           const eps = Math.max(1e-9, 1e-6 * scale);
           preCleanLocal(a, eps);
           preCleanLocal(b, eps);
-          let out = a.subtract(b);
+          let out = a.subtract(b, { overlapConditioningEnabled: false });
           out = __booleanRestoreFaceTrackingFromSources(out, debugLog, a, b);
           await addResult(out, target);
           success = true;
@@ -1490,12 +1658,18 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
       let workingResult = result;
       let workingTool = tool;
       if (overlapConditioningEnabled && op === 'UNION') {
-        const conditioning = __booleanConditionOperands('UNION', result, tool, debugLog, {
+        const edgePointConditioning = __booleanConditionEdgePointProximity('UNION', workingTool, workingResult, debugLog, {
           featureID,
-          base: result?.name || result?.uuid || null,
-          tool: tool?.name || tool?.uuid || null,
+          base: workingResult?.name || workingResult?.uuid || null,
+          target: workingTool?.name || workingTool?.uuid || null,
         });
-        workingResult = conditioning.stationarySolid || result;
+        workingResult = edgePointConditioning.solid || workingResult;
+        const conditioning = __booleanConditionOperands('UNION', workingResult, workingTool, debugLog, {
+          featureID,
+          base: workingResult?.name || workingResult?.uuid || null,
+          tool: workingTool?.name || workingTool?.uuid || null,
+        });
+        workingResult = conditioning.stationarySolid || workingResult;
         workingTool = conditioning.movingSolid || tool;
       }
 
@@ -1504,7 +1678,7 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
 
       try {
         // Attempt the boolean directly; repair fallback handles welding if needed.
-        result = (op === 'UNION') ? workingResult.union(workingTool) : workingResult.intersect(workingTool);
+        result = (op === 'UNION') ? workingResult.union(workingTool, { overlapConditioningEnabled: false }) : workingResult.intersect(workingTool);
         result = __booleanRestoreFaceTrackingFromSources(result, debugLog, workingResult, workingTool);
       } catch (e1) {
         debugLog('Primary union/intersect failed; attempting welded fallback', {
@@ -1525,7 +1699,7 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
             const toolOperand = repairedTool || (typeof workingTool.clone === 'function' ? workingTool.clone() : workingTool);
             preClean(baseOperand, eps);
             preClean(toolOperand, eps);
-            result = (op === 'UNION') ? baseOperand.union(toolOperand) : baseOperand.intersect(toolOperand);
+            result = (op === 'UNION') ? baseOperand.union(toolOperand, { overlapConditioningEnabled: false }) : baseOperand.intersect(toolOperand);
             result = __booleanRestoreFaceTrackingFromSources(result, debugLog, baseOperand, toolOperand);
             repaired = true;
           }
@@ -1539,7 +1713,7 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
           const b = typeof workingTool.clone === 'function' ? workingTool.clone() : workingTool;
           preClean(a, eps);
           preClean(b, eps);
-          result = (op === 'UNION') ? a.union(b) : a.intersect(b);
+          result = (op === 'UNION') ? a.union(b, { overlapConditioningEnabled: false }) : a.intersect(b);
           result = __booleanRestoreFaceTrackingFromSources(result, debugLog, a, b);
         } catch (e2) {
           let meshRecovered = false;

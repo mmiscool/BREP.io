@@ -10,6 +10,8 @@ import {
 } from './test_boolean_operation_target_name.js';
 import { test_boolean_face_metadata_preserved } from './test_boolean_face_metadata_preserved.js';
 import {
+    test_boolean_overlap_conditioning_direct_api_can_be_disabled,
+    test_boolean_overlap_conditioning_direct_api_enabled_by_default,
     test_boolean_overlap_conditioning_subtract_expands_tool_entry_cap_outward,
     test_boolean_overlap_conditioning_subtract_can_be_disabled,
     test_boolean_overlap_conditioning_subtract_enabled_by_default,
@@ -158,6 +160,7 @@ import {
     test_cppSolidNative_booleanCombinedAuthoringState_preserves_face_names_and_metadata,
     test_cppSolidNative_booleanResults_apply_fixed_post_weld_epsilon,
     test_cppSolidNative_buildFilletEdgeAuthoringState_returns_standard_edge_snapshots,
+    test_cppSolidNative_collapseFilletSideWallFaces_collapses_away_from_round_face,
     test_cppSolidNative_collapseFilletSideWallFaces_collapses_strip_vertices,
     test_cppSolidNative_cleanupTinyFaceIslands_reassigns_small_face_and_prunes_metadata,
     test_cppSolidNative_filletEdge_finalSnapshot_preserves_face_names_and_metadata,
@@ -370,6 +373,7 @@ export const testFunctions = [
     { test: test_cppSolidNative_reversePostBooleanFilletEndCapNudge_skips_faces_that_share_vertices_with_fillet_sidewalls, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_reassignTinyFilletSidewallSliverTriangles_merges_triangle_whose_vertices_lie_on_single_planar_face_boundary, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_collapseFilletSideWallFaces_collapses_strip_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidNative_collapseFilletSideWallFaces_collapses_away_from_round_face, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_open_tube_preserves_expected_face_labels, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_closed_hollow_tube_preserves_expected_face_labels, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_union_preserves_distinct_face_labels_across_native_snapshots, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -728,6 +732,8 @@ export const testFunctions = [
     { test: test_boolean_overlap_conditioning_subtract_enabled_by_default, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_boolean_overlap_conditioning_subtract_expands_tool_entry_cap_outward, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_boolean_overlap_conditioning_subtract_can_be_disabled, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_boolean_overlap_conditioning_direct_api_enabled_by_default, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_boolean_overlap_conditioning_direct_api_can_be_disabled, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_visibility_hidden_state_persistence, afterRun: afterRun_visibility_hidden_state_persistence, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_feature_scene_visibility, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_textToFace, afterRun: afterRun_textToFace, printArtifacts: false, exportFaces: true, exportSolids: false, resetHistory: true },

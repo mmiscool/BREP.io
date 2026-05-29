@@ -88,12 +88,20 @@ export class BooleanFeature {
         if (op === 'SUBTRACT') {
             let toolUnion = tools[0];
             for (let i = 1; i < tools.length; i++) toolUnion = toolUnion.union(tools[i]);
-            const param = { operation: 'SUBTRACT', targets: [target] };
+            const param = {
+                operation: 'SUBTRACT',
+                targets: [target],
+                overlapConditioningEnabled: bool.overlapConditioningEnabled !== false,
+            };
             effects = await BREP.applyBooleanOperation(partHistory, toolUnion, param, this.inputParams.featureID);
             // Also consider original tools as removed
             effects.removed = [...tools, ...effects.removed];
         } else {
-            const param = { operation: op, targets: tools };
+            const param = {
+                operation: op,
+                targets: tools,
+                overlapConditioningEnabled: bool.overlapConditioningEnabled !== false,
+            };
             effects = await BREP.applyBooleanOperation(partHistory, target, param, this.inputParams.featureID);
             // Ensure original target is removed to avoid duplication
             effects.removed = [target, ...effects.removed];

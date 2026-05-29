@@ -516,6 +516,7 @@ export class Solid extends THREE.Group {
     /**
      * Boolean union with another solid; merges face labels, metadata, and aux edges.
      * @param {Solid} other
+     * @param {{overlapConditioningEnabled?: boolean}} [options]
      * @returns {Solid}
      */
     union(..._args) {
@@ -525,6 +526,7 @@ export class Solid extends THREE.Group {
     /**
      * Boolean subtraction (this minus other); merges face labels, metadata, and aux edges.
      * @param {Solid} other
+     * @param {{overlapConditioningEnabled?: boolean}} [options]
      * @returns {Solid}
      */
     subtract(..._args) {

@@ -1296,6 +1296,78 @@ function collapseFilletSideWallFaces(solid, opts = {}) {
     return { collapsedEdges: 0, collapsedTriangles: 0 };
   }
 
+  const idToFace = solid?._idToFaceName instanceof Map ? solid._idToFaceName : null;
+  const edgeKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  const edgeToFaceIDs = new Map();
+  for (let triIndex = 0; triIndex < triCount; triIndex += 1) {
+    const faceID = ids[triIndex] >>> 0;
+    const base = triIndex * 3;
+    const i0 = tv[base + 0] >>> 0;
+    const i1 = tv[base + 1] >>> 0;
+    const i2 = tv[base + 2] >>> 0;
+    for (const [a, b] of [[i0, i1], [i1, i2], [i2, i0]]) {
+      const key = edgeKey(a, b);
+      let faceIDs = edgeToFaceIDs.get(key);
+      if (!faceIDs) {
+        faceIDs = new Set();
+        edgeToFaceIDs.set(key, faceIDs);
+      }
+      faceIDs.add(faceID);
+    }
+  }
+
+  const collapseFaceIDs = new Set([...forcedCollapseFaceIDs, ...opportunisticCollapseFaceIDs]);
+  const roundFaceIDs = new Set();
+  if (idToFace) {
+    for (const [faceIDRaw, faceNameRaw] of idToFace.entries()) {
+      const faceID = faceIDRaw >>> 0;
+      if (collapseFaceIDs.has(faceID)) continue;
+      const faceName = String(faceNameRaw || '').trim();
+      if (!faceName) continue;
+      const metadata = (typeof solid.getFaceMetadata === 'function')
+        ? (solid.getFaceMetadata(faceName) || {})
+        : {};
+      if (
+        faceName.endsWith('_TUBE_Outer')
+        || metadata?.filletRoundFace === true
+        || metadata?.filletRoundFace === faceName
+      ) {
+        roundFaceIDs.add(faceID);
+      }
+    }
+  }
+  const edgeTouchesRoundFace = (a, b) => {
+    const faceIDs = edgeToFaceIDs.get(edgeKey(a, b));
+    if (!faceIDs) return false;
+    for (const faceID of faceIDs) {
+      if (roundFaceIDs.has(faceID >>> 0)) return true;
+    }
+    return false;
+  };
+  const edgeTouchesPreservedFace = (a, b) => {
+    const faceIDs = edgeToFaceIDs.get(edgeKey(a, b));
+    if (!faceIDs) return false;
+    for (const faceID of faceIDs) {
+      const id = faceID >>> 0;
+      if (!collapseFaceIDs.has(id) && !roundFaceIDs.has(id)) return true;
+    }
+    return false;
+  };
+  const protectedVertices = new Set();
+  for (let triIndex = 0; triIndex < triCount; triIndex += 1) {
+    const faceID = ids[triIndex] >>> 0;
+    if (!collapseFaceIDs.has(faceID)) continue;
+    const base = triIndex * 3;
+    const i0 = tv[base + 0] >>> 0;
+    const i1 = tv[base + 1] >>> 0;
+    const i2 = tv[base + 2] >>> 0;
+    for (const [a, b] of [[i0, i1], [i1, i2], [i2, i0]]) {
+      if (!edgeTouchesPreservedFace(a, b)) continue;
+      protectedVertices.add(a);
+      protectedVertices.add(b);
+    }
+  }
+
   const parent = new Int32Array(vertexCount);
   for (let i = 0; i < vertexCount; i += 1) parent[i] = i;
   const find = (index) => {
@@ -1306,20 +1378,27 @@ function collapseFilletSideWallFaces(solid, opts = {}) {
     }
     return i;
   };
-  const unite = (a, b) => {
-    let ra = find(a);
-    let rb = find(b);
-    if (ra === rb) return false;
-    if (rb < ra) {
-      const tmp = ra;
-      ra = rb;
-      rb = tmp;
-    }
-    parent[rb] = ra;
+  const uniteDirected = (source, target) => {
+    const rs = find(source);
+    const rt = find(target);
+    if (rs === rt) return false;
+    parent[rs] = rt;
     return true;
   };
 
   const collapseCandidates = [];
+  const pointForVertex = (vertexIndex) => ({
+    x: Number(vp[(vertexIndex * 3) + 0]) || 0,
+    y: Number(vp[(vertexIndex * 3) + 1]) || 0,
+    z: Number(vp[(vertexIndex * 3) + 2]) || 0,
+  });
+  const vertexDistanceSq = (a, b) => point3DistanceSq(pointForVertex(a), pointForVertex(b));
+  const pushCandidate = (source, target, forced, mode) => {
+    if (source == null || target == null || source === target) return false;
+    if (roundFaceIDs.size > 0 && protectedVertices.has(source)) return false;
+    collapseCandidates.push({ a: source >>> 0, b: target >>> 0, forced, mode });
+    return true;
+  };
   for (let triIndex = 0; triIndex < triCount; triIndex += 1) {
     const faceID = ids[triIndex] >>> 0;
     const forced = forcedCollapseFaceIDs.has(faceID);
@@ -1328,6 +1407,48 @@ function collapseFilletSideWallFaces(solid, opts = {}) {
     const geometry = computeTriangleGeometryFromAuthoringState(vp, tv, triIndex);
     const [i0, i1, i2] = geometry.vertexIndices;
     const [edge01, edge12, edge20] = geometry.edgeLengths;
+    const edges = [
+      { a: i0, b: i1, opposite: i2, length: edge01 },
+      { a: i1, b: i2, opposite: i0, length: edge12 },
+      { a: i2, b: i0, opposite: i1, length: edge20 },
+    ];
+
+    const hostEdges = edges.filter((edge) => edgeTouchesPreservedFace(edge.a, edge.b));
+    let addedDirected = false;
+    if (hostEdges.length > 0) {
+      hostEdges.sort((left, right) => right.length - left.length);
+      for (const edge of hostEdges) {
+        const source = edge.opposite;
+        const target = vertexDistanceSq(source, edge.a) <= vertexDistanceSq(source, edge.b)
+          ? edge.a
+          : edge.b;
+        if (pushCandidate(source, target, forced, 'toward-preserved-face')) {
+          addedDirected = true;
+          break;
+        }
+      }
+    }
+
+    if (!addedDirected) {
+      const roundEdges = edges.filter((edge) => edgeTouchesRoundFace(edge.a, edge.b));
+      roundEdges.sort((left, right) => left.length - right.length);
+      for (const edge of roundEdges) {
+        const sourceOptions = [edge.a, edge.b].filter((vertexIndex) => !protectedVertices.has(vertexIndex));
+        if (sourceOptions.length === 0) continue;
+        const source = sourceOptions.length === 1
+          ? sourceOptions[0]
+          : (vertexDistanceSq(sourceOptions[0], edge.opposite) <= vertexDistanceSq(sourceOptions[1], edge.opposite)
+            ? sourceOptions[0]
+            : sourceOptions[1]);
+        if (pushCandidate(source, edge.opposite, forced, 'away-from-round-face')) {
+          addedDirected = true;
+          break;
+        }
+      }
+    }
+
+    if (addedDirected) continue;
+
     let a = i0;
     let b = i1;
     let minLength = edge01;
@@ -1337,23 +1458,25 @@ function collapseFilletSideWallFaces(solid, opts = {}) {
       b = i2;
     }
     if (edge20 < minLength) {
-      minLength = edge20;
       a = i2;
       b = i0;
     }
-    collapseCandidates.push({
-      triIndex,
-      a,
-      b,
-      forced,
-    });
+    if (roundFaceIDs.size === 0) {
+      const source = a < b ? b : a;
+      const target = a < b ? a : b;
+      pushCandidate(source, target, forced, 'shortest-edge-fallback');
+    } else if (protectedVertices.has(a) && !protectedVertices.has(b)) {
+      pushCandidate(b, a, forced, 'shortest-edge-fallback');
+    } else {
+      pushCandidate(a, b, forced, 'shortest-edge-fallback');
+    }
   }
 
   let collapsedEdges = 0;
   let collapsedTriangles = 0;
   let collapsedWedgeSurfaceTriangles = 0;
   for (const candidate of collapseCandidates) {
-    if (unite(candidate.a, candidate.b)) collapsedEdges += 1;
+    if (uniteDirected(candidate.a, candidate.b)) collapsedEdges += 1;
     collapsedTriangles += 1;
     if (!candidate.forced) collapsedWedgeSurfaceTriangles += 1;
   }
@@ -1677,7 +1800,7 @@ export { collapseFilletSideWallFaces as __testOnlyCollapseFilletSideWallFaces };
  * @param {boolean} [opts.mergeCoplanarEndCaps=true] merge coplanar fillet end caps into adjacent host faces
  * @param {boolean} [opts.renameFaces=true] allow fillet cleanup to rename/relabel generated faces
  * @param {boolean} [opts.reassignSliverTriangles=true] reassign tiny fillet sidewall sliver triangles into planar neighbors
- * @param {boolean} [opts.collapseFilletSideWalls=false] collapse deterministic fillet side-wall faces so adjacent faces meet directly
+ * @param {boolean} [opts.collapseFilletSideWalls=true] collapse deterministic fillet side-wall faces so adjacent faces meet directly
  * @param {boolean} [opts.debug=false] Enable debug visuals in fillet builder
  * @param {number} [opts.debugSolidsLevel=0] -1=none, 0=tube+wedge, 1=edge fillet boolean result, 2=all intermediate solids
  * @param {boolean} [opts.debugShowCombinedBeforeTarget=false] Emit the combined fillet solid before target boolean
@@ -1712,7 +1835,7 @@ export async function fillet(opts = {}) {
   const renameFaces = opts.renameFaces !== false;
   const mergeCoplanarEndCaps = opts.mergeCoplanarEndCaps !== false && renameFaces;
   const reverseEndCapNudge = mergeCoplanarEndCaps;
-  const collapseFilletSideWalls = opts.collapseFilletSideWalls === true;
+  const collapseFilletSideWalls = opts.collapseFilletSideWalls !== false;
   const reassignSliverTriangles = opts.reassignSliverTriangles !== false && !collapseFilletSideWalls;
   const featureID = opts.featureID || 'FILLET';
 

@@ -60,7 +60,7 @@ export function renderBooleanOperationField({ ui, key, def, controlWrap }) {
     });
 
     const conditioningLabel = document.createElement('span');
-    conditioningLabel.textContent = 'Condition touching coplanar faces';
+    conditioningLabel.textContent = 'Condition near-touching faces';
 
     conditioningRow.appendChild(conditioningToggle);
     conditioningRow.appendChild(conditioningLabel);

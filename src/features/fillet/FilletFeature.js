@@ -59,7 +59,7 @@ const inputParamsSchema = {
     },
     collapseFilletSideWalls: {
         type: "boolean",
-        default_value: false,
+        default_value: true,
         hint: "Collapse deterministic fillet side-wall faces so adjacent faces meet directly.",
     },
     renameFaces: {
@@ -822,7 +822,7 @@ export class FilletFeature {
         }
 
         let result = null;
-        const collapseFilletSideWalls = this.inputParams?.collapseFilletSideWalls === true;
+        const collapseFilletSideWalls = this.inputParams?.collapseFilletSideWalls !== false;
         const renameFaces = this.inputParams?.renameFaces !== false;
         const inflate = Number(this.inputParams.inflate) || 0;
         const nudgeFaceDistance = this.inputParams?.nudgeFaceDistance;

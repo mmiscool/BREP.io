@@ -49,15 +49,17 @@ function makeFakePartHistory() {
   };
 }
 
-async function captureUnionOperandMinX(booleanParam) {
+async function captureUnionConditionedFaces(booleanParam) {
   const { base, tool } = makeTouchingCubePair('BASE', 'TOOL');
   const proto = Object.getPrototypeOf(base);
   const originalUnion = proto.union;
-  let observedMinX = null;
+  let observedBasePXMax = null;
+  let observedToolNXMin = null;
 
   proto.union = function patchedUnion(other) {
-    if (observedMinX === null) {
-      observedMinX = faceAxisMin(other, 'TOOL_NX', 0);
+    if (observedBasePXMax === null) {
+      observedBasePXMax = faceAxisMax(this, 'BASE_PX', 0);
+      observedToolNXMin = faceAxisMin(other, 'TOOL_NX', 0);
     }
     return originalUnion.call(this, other);
   };
@@ -72,7 +74,7 @@ async function captureUnionOperandMinX(booleanParam) {
     proto.union = originalUnion;
   }
 
-  return observedMinX;
+  return { observedBasePXMax, observedToolNXMin };
 }
 
 async function captureSubtractOperandMinX(booleanParam) {
@@ -131,21 +133,22 @@ async function captureSubtractOperandMinZForEntryCap(booleanParam) {
 }
 
 export async function test_boolean_overlap_conditioning_union_enabled_by_default() {
-  const observedMinX = await captureUnionOperandMinX({});
-  assert(Number.isFinite(observedMinX), 'Expected union test to observe the conditioned tool face.');
-  assert(observedMinX < 1 - 1e-7, `Expected default union conditioning to push TOOL_NX into the base solid, got minX=${observedMinX}`);
+  const { observedBasePXMax } = await captureUnionConditionedFaces({});
+  assert(Number.isFinite(observedBasePXMax), 'Expected union test to observe the conditioned base face.');
+  assert(observedBasePXMax > 1 + 1e-7, `Expected default union edge-point conditioning to push BASE_PX into the target solid, got maxX=${observedBasePXMax}`);
 }
 
 export async function test_boolean_overlap_conditioning_union_can_be_disabled() {
-  const observedMinX = await captureUnionOperandMinX({ overlapConditioningEnabled: false });
-  assert(Number.isFinite(observedMinX), 'Expected disabled union test to observe the tool face.');
-  assert(Math.abs(observedMinX - 1) <= 1e-12, `Expected disabled union conditioning to leave TOOL_NX at x=1, got minX=${observedMinX}`);
+  const { observedBasePXMax, observedToolNXMin } = await captureUnionConditionedFaces({ overlapConditioningEnabled: false });
+  assert(Number.isFinite(observedBasePXMax) && Number.isFinite(observedToolNXMin), 'Expected disabled union test to observe the faces.');
+  assert(Math.abs(observedBasePXMax - 1) <= 1e-12, `Expected disabled union conditioning to leave BASE_PX at x=1, got maxX=${observedBasePXMax}`);
+  assert(Math.abs(observedToolNXMin - 1) <= 1e-12, `Expected disabled union conditioning to leave TOOL_NX at x=1, got minX=${observedToolNXMin}`);
 }
 
 export async function test_boolean_overlap_conditioning_subtract_enabled_by_default() {
   const observedMinX = await captureSubtractOperandMinX({});
   assert(Number.isFinite(observedMinX), 'Expected subtract test to observe the conditioned cutter face.');
-  assert(observedMinX < 1 - 1e-7, `Expected default subtract conditioning to push CUTTER_NX into the target solid, got minX=${observedMinX}`);
+  assert(observedMinX > 1 + 1e-7, `Expected default subtract edge-point conditioning to push CUTTER_NX outside the target solid, got minX=${observedMinX}`);
 }
 
 export async function test_boolean_overlap_conditioning_subtract_expands_tool_entry_cap_outward() {
@@ -159,4 +162,39 @@ export async function test_boolean_overlap_conditioning_subtract_can_be_disabled
   const observedMinX = await captureSubtractOperandMinX({ overlapConditioningEnabled: false });
   assert(Number.isFinite(observedMinX), 'Expected disabled subtract test to observe the cutter face.');
   assert(Math.abs(observedMinX - 1) <= 1e-12, `Expected disabled subtract conditioning to leave CUTTER_NX at x=1, got minX=${observedMinX}`);
+}
+
+export async function test_boolean_overlap_conditioning_direct_api_enabled_by_default() {
+  const { base, tool } = makeTouchingCubePair('BASE_API', 'TOOL_API');
+  const result = base.union(tool);
+  assert(result, 'Expected direct union to return a result solid.');
+  assert(faceAxisMax(base, 'BASE_API_PX', 0) === 1, 'Direct union should not mutate the source solid.');
+
+  const target = new BREP.Cube({ x: 1, y: 1, z: 1, name: 'TARGET_API' });
+  const cutter = new BREP.Cube({ x: 1, y: 1, z: 1, name: 'CUTTER_API' });
+  cutter.bakeTRS({
+    position: [1, 0, 0],
+    rotationEuler: [0, 0, 0],
+    scale: [1, 1, 1],
+  });
+  const subtractResult = target.subtract(cutter);
+  assert(subtractResult, 'Expected direct subtract to return a result solid.');
+  assert(faceAxisMin(cutter, 'CUTTER_API_NX', 0) === 1, 'Direct subtract should not mutate the cutter solid.');
+}
+
+export async function test_boolean_overlap_conditioning_direct_api_can_be_disabled() {
+  const { base, tool } = makeTouchingCubePair('BASE_API_OFF', 'TOOL_API_OFF');
+  const proto = Object.getPrototypeOf(base);
+  const originalUnion = proto.union;
+  let observedBasePXMax = null;
+  proto.union = function patchedUnion(other, options) {
+    observedBasePXMax = faceAxisMax(this, 'BASE_API_OFF_PX', 0);
+    return originalUnion.call(this, other, options);
+  };
+  try {
+    base.union(tool, { overlapConditioningEnabled: false });
+  } finally {
+    proto.union = originalUnion;
+  }
+  assert(Math.abs(observedBasePXMax - 1) <= 1e-12, `Expected disabled direct union conditioning to leave BASE_API_OFF_PX at x=1, got ${observedBasePXMax}`);
 }

@@ -14,6 +14,7 @@ import { manifold } from "../setupManifold.js";
 
 const BOOLEAN_DISCONNECTED_ISLAND_MIN_VOLUME = 0.01;
 const BOOLEAN_RESULT_WELD_EPSILON = 0.0015;
+const BOOLEAN_EDGE_POINT_PROXIMITY = 0.0001;
 
 function hasNativeBooleanCombinedBuilder() {
     return typeof manifold?.buildBooleanCombinedAuthoringState === "function";
@@ -68,6 +69,145 @@ export function _combineIdMaps(other) {
 function baseSolidCtor(obj) {
     const ctor = obj && obj.constructor;
     return (ctor && ctor.BaseSolid) ? ctor.BaseSolid : ctor;
+}
+
+function booleanApproxScale(solid) {
+    const vp = solid && solid._vertProperties;
+    if (!Array.isArray(vp) || vp.length < 3) return 1;
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (let i = 0; i < vp.length; i += 3) {
+        const x = vp[i], y = vp[i + 1], z = vp[i + 2];
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+    return Math.max(Math.hypot(maxX - minX, maxY - minY, maxZ - minZ), 1);
+}
+
+function pointKey(point, precision = 12) {
+    return [
+        Number(point?.[0] || 0).toFixed(precision),
+        Number(point?.[1] || 0).toFixed(precision),
+        Number(point?.[2] || 0).toFixed(precision),
+    ].join(",");
+}
+
+function faceBoundaryPoints(solid, faceName) {
+    if (!solid || typeof solid.getFace !== "function" || !faceName) return [];
+    const triangles = solid.getFace(faceName) || [];
+    const edgeMap = new Map();
+    const addEdge = (a, b) => {
+        if (!Array.isArray(a) || !Array.isArray(b)) return;
+        const ka = pointKey(a);
+        const kb = pointKey(b);
+        const key = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+        const current = edgeMap.get(key);
+        if (current) {
+            current.count += 1;
+        } else {
+            edgeMap.set(key, {
+                count: 1,
+                points: [
+                    [Number(a[0]) || 0, Number(a[1]) || 0, Number(a[2]) || 0],
+                    [Number(b[0]) || 0, Number(b[1]) || 0, Number(b[2]) || 0],
+                ],
+            });
+        }
+    };
+    for (const triangle of triangles) {
+        const p1 = Array.isArray(triangle?.p1) ? triangle.p1 : null;
+        const p2 = Array.isArray(triangle?.p2) ? triangle.p2 : null;
+        const p3 = Array.isArray(triangle?.p3) ? triangle.p3 : null;
+        if (!p1 || !p2 || !p3) continue;
+        addEdge(p1, p2);
+        addEdge(p2, p3);
+        addEdge(p3, p1);
+    }
+    const out = [];
+    const seen = new Set();
+    for (const edge of edgeMap.values()) {
+        if (edge.count !== 1) continue;
+        for (const point of edge.points) {
+            const key = pointKey(point);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(point);
+        }
+    }
+    return out;
+}
+
+function hasNearTargetEdgePoint(targetSolid, points, tolerance) {
+    if (!targetSolid || typeof targetSolid.minGapToPoint !== "function") return false;
+    for (const point of points) {
+        const records = targetSolid.minGapToPoint(point, tolerance);
+        if (Array.isArray(records) && records.some((record) => Number(record?.distance) <= tolerance)) return true;
+    }
+    return false;
+}
+
+function scoreFaceSide(targetSolid, solid, faceName, desiredInside, sampleLimit = 8) {
+    const points = faceBoundaryPoints(solid, faceName);
+    if (!points.length || typeof targetSolid?.minGapToPoint !== "function") return -Infinity;
+    const stride = Math.max(1, Math.ceil(points.length / sampleLimit));
+    const searchLength = Math.max(booleanApproxScale(targetSolid) * 2, BOOLEAN_EDGE_POINT_PROXIMITY * 10);
+    let score = 0;
+    let samples = 0;
+    for (let i = 0; i < points.length; i += stride) {
+        samples += 1;
+        const records = targetSolid.minGapToPoint(points[i], searchLength);
+        const inside = Array.isArray(records) && records.length > 0 ? records[0].inside === true : false;
+        if (inside === desiredInside) score += 1;
+    }
+    return samples > 0 ? score / samples : -Infinity;
+}
+
+function conditionEdgePointProximity(operation, targetSolid, candidateSolid) {
+    const op = String(operation || "").toUpperCase();
+    if (op !== "UNION" && op !== "SUBTRACT") return candidateSolid;
+    if (
+        !targetSolid
+        || !candidateSolid
+        || typeof targetSolid.minGapToPoint !== "function"
+        || typeof candidateSolid.getFaceNames !== "function"
+        || typeof candidateSolid.pushFace !== "function"
+    ) {
+        return candidateSolid;
+    }
+
+    const desiredInside = op === "UNION";
+    const tolerance = BOOLEAN_EDGE_POINT_PROXIMITY;
+    const nudgeDistance = tolerance * 2;
+    const candidates = [];
+    for (const rawFaceName of candidateSolid.getFaceNames() || []) {
+        const faceName = String(rawFaceName || "").trim();
+        if (!faceName) continue;
+        const points = faceBoundaryPoints(candidateSolid, faceName);
+        if (points.length && hasNearTargetEdgePoint(targetSolid, points, tolerance)) candidates.push(faceName);
+    }
+    if (!candidates.length || typeof candidateSolid.clone !== "function") return candidateSolid;
+
+    const working = candidateSolid.clone();
+    let changed = false;
+    for (const faceName of candidates) {
+        let best = null;
+        for (const sign of [1, -1]) {
+            const probe = typeof working.clone === "function" ? working.clone() : null;
+            if (!probe) continue;
+            try {
+                probe.pushFace(faceName, sign * nudgeDistance, { warnMissing: false, warnInvalidNormal: false });
+                const score = scoreFaceSide(targetSolid, probe, faceName, desiredInside);
+                if (!best || score > best.score) best = { sign, score };
+            } catch { /* ignore failed probe */ }
+        }
+        if (!best || !(best.score > -Infinity)) continue;
+        try {
+            working.pushFace(faceName, best.sign * nudgeDistance, { warnMissing: false, warnInvalidNormal: false });
+            changed = true;
+        } catch { /* ignore failed push */ }
+    }
+    return changed ? working : candidateSolid;
 }
 
 function solidFromNativeBooleanSnapshot(SolidCtor, snapshot, name) {
@@ -398,16 +538,22 @@ function _cleanupBooleanResult(solid) {
     return _applyFixedBooleanResultWeld(solid);
 }
 
-export function union(other) {
+export function union(other, options = {}) {
     const Solid = baseSolidCtor(this);
-    const out = buildNativeBooleanResult(this, other, "UNION", Solid);
+    const left = options?.overlapConditioningEnabled === false
+        ? this
+        : conditionEdgePointProximity("UNION", other, this);
+    const out = buildNativeBooleanResult(left, other, "UNION", Solid);
     try { out.owningFeatureID = this?.owningFeatureID || other?.owningFeatureID || out?.owningFeatureID || null; } catch { }
     return _cleanupBooleanResult(out);
 }
 
-export function subtract(other) {
+export function subtract(other, options = {}) {
     const Solid = baseSolidCtor(this);
-    const out = buildNativeBooleanResult(this, other, "SUBTRACT", Solid);
+    const cutter = options?.overlapConditioningEnabled === false
+        ? other
+        : conditionEdgePointProximity("SUBTRACT", this, other);
+    const out = buildNativeBooleanResult(this, cutter, "SUBTRACT", Solid);
     try { out.owningFeatureID = this?.owningFeatureID || other?.owningFeatureID || out?.owningFeatureID || null; } catch { }
 
     return _cleanupBooleanResult(out);

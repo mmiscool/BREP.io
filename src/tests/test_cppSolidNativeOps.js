@@ -865,6 +865,66 @@ export async function test_cppSolidNative_collapseFilletSideWallFaces_collapses_
     }
 }
 
+export async function test_cppSolidNative_collapseFilletSideWallFaces_collapses_away_from_round_face() {
+    const solid = new Solid();
+    const sideWallName = "F_TEST_FILLET_SIDEWALL_EDGE_abcd1234";
+    const roundFaceName = "F_TEST_FILLET_EDGE_abcd1234_TUBE_Outer";
+    solid
+        .addTriangle("HOST", [0, 0, 0], [2, 0, 0], [2, 1, 0])
+        .addTriangle("HOST", [0, 0, 0], [2, 1, 0], [0, 1, 0])
+        .addTriangle(sideWallName, [0, 1, 0], [2, 1, 0], [2, 1.1, 0])
+        .addTriangle(sideWallName, [0, 1, 0], [2, 1.1, 0], [0, 1.1, 0])
+        .addTriangle(roundFaceName, [0, 1.1, 0], [2, 1.1, 0], [2, 2, 0])
+        .addTriangle(roundFaceName, [0, 1.1, 0], [2, 2, 0], [0, 2, 0]);
+
+    solid.setFaceMetadata("HOST", { marker: "preserve-me" });
+    solid.setFaceMetadata(roundFaceName, { filletRoundFace: true });
+    solid.setFaceMetadata(sideWallName, {
+        filletSideWall: true,
+        filletMergedSideWall: true,
+        filletSideWallEdge: "EDGE",
+        sourceFeatureId: "F_TEST",
+    });
+
+    const summary = __testOnlyCollapseFilletSideWallFaces(solid, { featureID: "F_TEST" });
+    if (Number(summary?.collapsedTriangles || 0) !== 2) {
+        throw new Error(`Expected two side-wall triangles to be collapsed, received ${summary?.collapsedTriangles}.`);
+    }
+
+    const collectYValuesForFace = (faceName) => {
+        const faceID = solid._faceNameToID.get(faceName);
+        const out = [];
+        for (let triIndex = 0; triIndex < solid._triIDs.length; triIndex += 1) {
+            if ((solid._triIDs[triIndex] >>> 0) !== (faceID >>> 0)) continue;
+            const base = triIndex * 3;
+            for (const vertexIndex of [
+                solid._triVerts[base + 0],
+                solid._triVerts[base + 1],
+                solid._triVerts[base + 2],
+            ]) {
+                out.push(solid._vertProperties[(vertexIndex * 3) + 1]);
+            }
+        }
+        return out;
+    };
+
+    const hostYValues = collectYValuesForFace("HOST");
+    if (hostYValues.some((y) => approx(y, 1.1, 1e-9))) {
+        throw new Error("Expected preserved host face vertices to stay away from the old round-face boundary y=1.1.");
+    }
+    if (!hostYValues.some((y) => approx(y, 1, 1e-9))) {
+        throw new Error("Expected preserved host boundary at y=1 to remain in place.");
+    }
+
+    const roundYValues = collectYValuesForFace(roundFaceName);
+    if (!roundYValues.some((y) => approx(y, 1, 1e-9))) {
+        throw new Error("Expected round-face boundary vertices to collapse toward the preserved host boundary at y=1.");
+    }
+    if (roundYValues.some((y) => approx(y, 1.1, 1e-9))) {
+        throw new Error("Expected old round-side sidewall boundary y=1.1 to be eliminated from the round face.");
+    }
+}
+
 export async function test_cppSolidNative_booleanCombinedAuthoringState_preserves_face_names_and_metadata() {
     if (manifoldBuildSource !== "local" || typeof manifold?.buildBooleanCombinedAuthoringState !== "function") {
         return;
