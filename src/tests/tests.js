@@ -100,11 +100,13 @@ import { afterRun_history_features_basic, test_history_features_basic } from './
 import {
     afterRun_hole_counterbore,
     afterRun_hole_countersink,
+    afterRun_hole_multi_point_cloned_cutter,
     afterRun_hole_thread_modeled,
     afterRun_hole_thread_symbolic,
     afterRun_hole_through,
     test_hole_counterbore,
     test_hole_countersink,
+    test_hole_multi_point_cloned_cutter,
     test_hole_thread_modeled,
     test_hole_thread_symbolic,
     test_hole_through,
@@ -716,6 +718,7 @@ export const testFunctions = [
     { test: test_hole_through, afterRun: afterRun_hole_through, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_countersink, afterRun: afterRun_hole_countersink, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_counterbore, afterRun: afterRun_hole_counterbore, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_hole_multi_point_cloned_cutter, afterRun: afterRun_hole_multi_point_cloned_cutter, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_thread_symbolic, afterRun: afterRun_hole_thread_symbolic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_thread_modeled, afterRun: afterRun_hole_thread_modeled, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_pushFace_feature, afterRun: afterRun_pushFace_feature, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
@@ -965,8 +968,10 @@ export async function runSingleTest(testFunction, partHistory = new PartHistory(
             throw e;
         }
     }
-    // sleep for 1 second to allow any async operations to complete
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    const settleMs = Math.max(0, Number(testFunction.settleMs) || 0);
+    if (settleMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, settleMs));
+    }
 
     return error;
 }

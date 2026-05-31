@@ -1,5 +1,5 @@
 // Solid.fillet implementation: consolidates fillet logic so features call this API.
-// Usage: solid.fillet({ radius, edges, featureID, direction, inflate, resolution, debug, debugSolidsLevel, debugShowCombinedBeforeTarget })
+// Usage: solid.fillet({ radius, edges, featureID, direction, inflate, resolution, debug, consoleLogProcess, debugSolidsLevel, debugShowCombinedBeforeTarget })
 import { resolveEdgesFromInputs } from './edgeResolution.js';
 import {
   applySolidAuthoringStateSnapshot,
@@ -728,6 +728,7 @@ function mergeCoplanarAdjacentFilletEndCaps(solid, opts = {}) {
 
   const featureID = String(opts?.featureID || '').trim();
   const debug = !!opts?.debug;
+  const logProcess = !!opts?.consoleLogProcess || debug;
   const nudgeDistance = Math.abs(Number(opts?.nudgeFaceDistance) || 0);
   const solidTol = deriveSolidToleranceFromVerts(solid, 1e-5);
   const distanceTolerance = Math.max(solidTol * 4, 2e-4, nudgeDistance * 3);
@@ -760,32 +761,38 @@ function mergeCoplanarAdjacentFilletEndCaps(solid, opts = {}) {
       if (!target?.faceName) continue;
 
       const targetMetadata = cloneFaceMetadataObject(core.getFaceMetadata(target.faceName) || {});
-      console.log('[Solid.fillet] Renaming fillet face.', {
-        featureID,
-        operation: 'merge coplanar end cap',
-        fromFaceName: endCapFaceName,
-        toFaceName: target.faceName,
-        sharedLength: target.sharedLength,
-        area: target.area,
-        distanceTolerance,
-        planarityTolerance,
-        normalTolerance,
-      });
+      if (logProcess) {
+        console.log('[Solid.fillet] Renaming fillet face.', {
+          featureID,
+          operation: 'merge coplanar end cap',
+          fromFaceName: endCapFaceName,
+          toFaceName: target.faceName,
+          sharedLength: target.sharedLength,
+          area: target.area,
+          distanceTolerance,
+          planarityTolerance,
+          normalTolerance,
+        });
+      }
       if (!core.renameFace(endCapFaceName, target.faceName)) {
-        console.log('[Solid.fillet] Fillet face rename failed.', {
+        if (logProcess) {
+          console.log('[Solid.fillet] Fillet face rename failed.', {
+            featureID,
+            operation: 'merge coplanar end cap',
+            fromFaceName: endCapFaceName,
+            toFaceName: target.faceName,
+          });
+        }
+        continue;
+      }
+      if (logProcess) {
+        console.log('[Solid.fillet] Fillet face rename succeeded.', {
           featureID,
           operation: 'merge coplanar end cap',
           fromFaceName: endCapFaceName,
           toFaceName: target.faceName,
         });
-        continue;
       }
-      console.log('[Solid.fillet] Fillet face rename succeeded.', {
-        featureID,
-        operation: 'merge coplanar end cap',
-        fromFaceName: endCapFaceName,
-        toFaceName: target.faceName,
-      });
       core.setFaceMetadata(target.faceName, targetMetadata);
       syncSolidAuthoringStateFromCpp(solid, core);
       solid._dirty = true;
@@ -1802,6 +1809,7 @@ export { collapseFilletSideWallFaces as __testOnlyCollapseFilletSideWallFaces };
  * @param {boolean} [opts.reassignSliverTriangles=true] reassign tiny fillet sidewall sliver triangles into planar neighbors
  * @param {boolean} [opts.collapseFilletSideWalls=true] collapse deterministic fillet side-wall faces so adjacent faces meet directly
  * @param {boolean} [opts.debug=false] Enable debug visuals in fillet builder
+ * @param {boolean} [opts.consoleLogProcess=false] Emit fillet process console logs without requiring debug visuals
  * @param {number} [opts.debugSolidsLevel=0] -1=none, 0=tube+wedge, 1=edge fillet boolean result, 2=all intermediate solids
  * @param {boolean} [opts.debugShowCombinedBeforeTarget=false] Emit the combined fillet solid before target boolean
  * @param {string} [opts.featureID='FILLET'] For naming of intermediates and result
@@ -1819,6 +1827,8 @@ export async function fillet(opts = {}) {
   const nudgeFaceDistanceRaw = Number(opts.nudgeFaceDistance);
   const nudgeFaceDistance = Number.isFinite(nudgeFaceDistanceRaw) ? nudgeFaceDistanceRaw : 0.0001;
   const debug = !!opts.debug;
+  const logProcess = !!opts.consoleLogProcess || debug;
+  const nativeProfile = opts.profile === true || logProcess;
   const debugSolidsLevelRaw = Number(opts.debugSolidsLevel);
   const debugSolidsLevel = Number.isFinite(debugSolidsLevelRaw)
     ? Math.max(-1, Math.min(2, Math.floor(debugSolidsLevelRaw)))
@@ -1907,7 +1917,7 @@ export async function fillet(opts = {}) {
       debugShowCombinedBeforeTarget,
       preserveFilletSideWallFaces: collapseFilletSideWalls,
       enableFaceRenaming: renameFaces,
-      profile: opts.profile !== false,
+      profile: nativeProfile,
     });
   } catch (err) {
     console.error('[Solid.fillet] Native fillet build failed; returning clone.', {
@@ -1917,7 +1927,7 @@ export async function fillet(opts = {}) {
     return buildFallbackResult();
   }
 
-  if (autoDirection && nativeResult?.directionDecision) {
+  if (logProcess && autoDirection && nativeResult?.directionDecision) {
     console.log('[Solid.fillet] AUTO direction classification complete.', {
       featureID,
       insetEdges: nativeResult.directionDecision.insetEdges,
@@ -1955,7 +1965,7 @@ export async function fillet(opts = {}) {
     try {
       const reversedEndCapNudgeSummary = reversePostBooleanFilletEndCapNudge(result, nudgeFaceDistance, {
         featureID,
-        debug,
+        debug: logProcess,
       });
       result.__filletEndCapReverseNudgeCount = Math.max(0, Number(reversedEndCapNudgeSummary?.reversedFaces || 0));
     } catch (error) {
@@ -1972,7 +1982,8 @@ export async function fillet(opts = {}) {
     try {
       const endCapMergeSummary = mergeCoplanarAdjacentFilletEndCaps(result, {
         featureID,
-        debug,
+        debug: logProcess,
+        consoleLogProcess: logProcess,
         nudgeFaceDistance,
       });
       result.__filletEndCapMergeCount = Math.max(0, Number(endCapMergeSummary?.mergedEndCaps || 0));
@@ -1990,7 +2001,7 @@ export async function fillet(opts = {}) {
     try {
       const sliverTriangleSummary = reassignTinyFilletSidewallSliverTriangles(result, {
         featureID,
-        debug,
+        debug: logProcess,
       });
       result.__filletSliverTriangleReassignCount = Math.max(0, Number(sliverTriangleSummary?.reassignedTriangles || 0));
     } catch (error) {
@@ -2007,7 +2018,7 @@ export async function fillet(opts = {}) {
     try {
       const sideWallCollapseSummary = collapseFilletSideWallFaces(result, {
         featureID,
-        debug,
+        debug: logProcess,
       });
       result.__filletSideWallCollapseSummary = sideWallCollapseSummary;
       result.__filletSideWallCollapseCount = Math.max(0, Number(sideWallCollapseSummary?.collapsedEdges || 0));
@@ -2020,7 +2031,7 @@ export async function fillet(opts = {}) {
           result.__filletSideWallCollapseSimplifySucceeded = true;
         } catch (simplifyError) {
           result.__filletSideWallCollapseSimplifyError = simplifyError?.message || String(simplifyError);
-          if (debug) {
+          if (logProcess) {
             console.warn('[Solid.fillet] Failed to simplify after fillet side-wall vertex collapse.', {
               featureID,
               error: result.__filletSideWallCollapseSimplifyError,
@@ -2065,7 +2076,7 @@ export async function fillet(opts = {}) {
   try {
     const singleNeighborIslandSummary = cleanupSingleNeighborFilletFaceIslands(result, {
       featureID,
-      debug,
+      debug: logProcess,
     });
     result.__filletSingleNeighborIslandCleanupCount = Math.max(
       0,

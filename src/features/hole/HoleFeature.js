@@ -229,6 +229,31 @@ function unionSolids(solids) {
   return current;
 }
 
+function renameSolidFacePrefix(solid, oldPrefix, newPrefix) {
+  if (!solid || !oldPrefix || !newPrefix || oldPrefix === newPrefix) return solid;
+  if (typeof solid.getFaceNames !== 'function' || typeof solid.renameFace !== 'function') return solid;
+  let faceNames = [];
+  try { faceNames = solid.getFaceNames() || []; } catch { faceNames = []; }
+  for (const faceNameRaw of faceNames) {
+    const faceName = String(faceNameRaw || '');
+    if (!faceName.startsWith(oldPrefix)) continue;
+    const renamed = `${newPrefix}${faceName.slice(oldPrefix.length)}`;
+    try { solid.renameFace(faceName, renamed); } catch { /* best-effort */ }
+  }
+  return solid;
+}
+
+function annotateHoleFaces(solid, descriptor) {
+  if (!solid || !descriptor || typeof solid.getFaceNames !== 'function' || typeof solid.setFaceMetadata !== 'function') return;
+  let faceNames = [];
+  try { faceNames = solid.getFaceNames() || []; } catch { faceNames = []; }
+  for (const faceNameRaw of faceNames) {
+    const faceName = String(faceNameRaw || '').trim();
+    if (!faceName) continue;
+    try { solid.setFaceMetadata(faceName, { hole: { ...descriptor } }); } catch { /* best-effort */ }
+  }
+}
+
 function triangleArea(tri) {
   const p0 = tri?.p1;
   const p1 = tri?.p2;
@@ -944,319 +969,215 @@ export class HoleFeature {
     const tools = [];
     const holeRecords = [];
     const debugVisualizationObjects = []; // Store debug viz objects separately
+    const masterFacePrefix = featureID ? `${featureID}_MASTER_HOLE` : 'MASTER_HOLE';
+    let modeledThreadFaceNames = null;
+    let modeledThreadPitch = null;
+    const { solids: masterToolSolids, descriptors } = makeHoleTool({
+      holeType,
+      radius,
+      straightDepthTotal: straightDepth,
+      sinkDia,
+      sinkAngle,
+      boreDia,
+      boreDepth,
+      res,
+      featureID: masterFacePrefix,
+      omitStraight: threaded,
+    });
+    const descriptorTemplate = descriptors[0] || null;
+    if (descriptorTemplate && holeType === 'THREADED') descriptorTemplate.type = 'THREADED';
+
+    if (threadGeom) {
+      try {
+        const axialBlend = 1e-4;
+        let threadLength = Math.max(
+          0,
+          descriptorTemplate?.straightDepth ?? descriptorTemplate?.totalDepth ?? straightDepth,
+        );
+        let threadStart = 0;
+        if (descriptorTemplate?.type === 'COUNTERSINK') threadStart = descriptorTemplate.countersinkHeight || 0;
+        else if (descriptorTemplate?.type === 'COUNTERBORE') threadStart = descriptorTemplate.counterboreDepth || 0;
+        threadStart = Math.max(0, threadStart - axialBlend);
+        threadLength = Math.max(0, threadLength + axialBlend);
+        if (threadLength > 0) {
+          console.log('[HoleFeature] Generating master thread:', {
+            mode: threadMode,
+            length: threadLength,
+            threadStart,
+            majorDiameter: threadGeom.majorDiameter,
+            minorDiameter: threadGeom.minorDiameter,
+            crestRadius: threadGeom.crestRadius,
+            rootRadius: threadGeom.rootRadius,
+            pitch: threadGeom.pitch,
+            isExternal: threadGeom.isExternal,
+            radialOffset: threadRadialOffset,
+            segmentsPerTurn: threadSegmentsPerTurn,
+          });
+          let threadGeomScaled = threadGeom;
+          if (threadUnitScale !== 1) {
+            console.log('[HoleFeature] Creating scaled thread geometry with scale factor', threadUnitScale);
+            threadGeomScaled = new ThreadGeometry({
+              standard: threadGeom.standard,
+              nominalDiameter: threadGeom.nominalDiameter * threadUnitScale,
+              pitch: threadGeom.pitch * threadUnitScale,
+              isExternal: threadGeom.isExternal,
+              starts: threadGeom.starts,
+              taperDirection: threadGeom.taperDirection,
+            });
+          }
+          const extraThreadLength = Math.max(0, threadGeomScaled.pitch || threadGeom.pitch || 0);
+          const threadStartEffective = threadMode === 'MODELED'
+            ? threadStart - extraThreadLength
+            : threadStart;
+          const threadLengthEffective = threadMode === 'MODELED'
+            ? Math.max(0, threadLength + extraThreadLength * 2)
+            : threadLength;
+          const threadCutFaceName = `${masterFacePrefix}_THREAD_FACE`;
+
+          const threadSolid = threadGeomScaled.toSolid({
+            length: threadLengthEffective,
+            mode: threadMode === 'MODELED' ? 'modeled' : 'symbolic',
+            radialOffset: threadRadialOffset,
+            symbolicRadius: 'crest',
+            includeCore: false,
+            resolution: res,
+            segmentsPerTurn: threadSegmentsPerTurn,
+            name: `${masterFacePrefix}_THREAD`,
+            faceName: threadCutFaceName,
+            axis: [0, 1, 0],
+            origin: [0, threadStartEffective, 0],
+            xDirection: [1, 0, 0],
+          });
+          const canonicalCoreFaceName = `${masterFacePrefix}_THREAD_CORE`;
+          if (threadMode === 'MODELED') {
+            try {
+              modeledThreadPitch = Number(threadGeomScaled?.pitch || threadGeom?.pitch || 0);
+              modeledThreadFaceNames = [
+                `${threadCutFaceName}:FLANK_A`,
+                `${threadCutFaceName}:ROOT`,
+                `${threadCutFaceName}:FLANK_B`,
+                canonicalCoreFaceName,
+              ];
+              const mergeIntoCore = [
+                `${threadCutFaceName}:CREST`,
+                `${threadCutFaceName}:CAP_START`,
+                `${threadCutFaceName}:CAP_END`,
+              ];
+              for (const fromName of mergeIntoCore) threadSolid.renameFace(fromName, canonicalCoreFaceName);
+            } catch {
+              /* best-effort */
+            }
+          }
+
+          const minorRadiusAt = (z) => {
+            try {
+              const d = typeof threadGeomScaled.diametersAtZ === 'function'
+                ? threadGeomScaled.diametersAtZ(z)
+                : null;
+              const minorDia = Number(d?.minor ?? threadGeomScaled.minorDiameter ?? threadGeomScaled.crestDiameter);
+              if (Number.isFinite(minorDia) && minorDia > 0) {
+                return Math.max(1e-4, minorDia * 0.5 + threadRadialOffset);
+              }
+            } catch { /* ignore */ }
+            return Math.max(1e-4, threadGeomScaled.crestRadius + threadRadialOffset);
+          };
+          const coreR0 = minorRadiusAt(0);
+          const coreR1 = minorRadiusAt(threadLengthEffective);
+          const coreName = `${masterFacePrefix}_THREAD_CORE`;
+          const coreResolution = threadMode === 'MODELED'
+            ? Math.max(8, Math.min(res, threadSegmentsPerTurn * 2))
+            : res;
+          const coreHeight = threadLengthEffective;
+          if (coreHeight > 0) {
+            const coreSolid = threadGeomScaled.isTapered && Math.abs(coreR0 - coreR1) > 1e-6
+              ? new BREP.Cone({
+                r1: coreR0,
+                r2: coreR1,
+                h: coreHeight,
+                resolution: coreResolution,
+                name: coreName,
+              })
+              : new BREP.Cylinder({
+                radius: coreR0,
+                height: coreHeight,
+                resolution: coreResolution,
+                name: coreName,
+              });
+            coreSolid.bakeTRS({
+              position: [0, threadStartEffective, 0],
+              rotationEuler: [0, 0, 0],
+              scale: [1, 1, 1],
+            });
+            if (threadMode === 'MODELED') {
+              try {
+                const coreFaces = typeof coreSolid.getFaceNames === 'function' ? coreSolid.getFaceNames() : [];
+                for (const coreFaceName of coreFaces) {
+                  if (!coreFaceName || coreFaceName === canonicalCoreFaceName) continue;
+                  coreSolid.renameFace(coreFaceName, canonicalCoreFaceName);
+                }
+              } catch {
+                /* best-effort */
+              }
+            }
+            masterToolSolids.push(coreSolid);
+          }
+
+          masterToolSolids.push(threadSolid);
+          if (descriptorTemplate) {
+            descriptorTemplate.thread = {
+              standard: threadStandard,
+              designation: threadDesignation,
+              series: threadGeom?.series || null,
+              mode: threadMode,
+              radialOffset: threadRadialOffset,
+              length: threadLengthEffective,
+              startOffset: threadStartEffective,
+            };
+          }
+        }
+      } catch (threadErr) {
+        console.warn('[HoleFeature] Thread generation failed:', threadErr);
+      }
+    }
+
+    console.log('[HoleFeature] Unioning', masterToolSolids.length, 'solids for master hole tool');
+    const masterTool = unionSolids(masterToolSolids);
+    if (!masterTool) throw new Error('HoleFeature could not build master cutting tool geometry.');
+    if (threadMode === 'MODELED' && modeledThreadFaceNames?.length) {
+      try {
+        const cleanupSummary = cleanupModeledThreadFaceIslands(masterTool, modeledThreadFaceNames, modeledThreadPitch);
+        if (cleanupSummary) {
+          console.log('[HoleFeature] Modeled thread face cleanup summary:', cleanupSummary);
+        }
+      } catch (cleanupErr) {
+        console.warn('[HoleFeature] Modeled thread face island cleanup failed:', cleanupErr);
+      }
+    }
+
     centers.forEach((c, idx) => {
       const pointName = sourceNames[idx] || null;
       const holeFacePrefix = pointName || (featureID ? `${featureID}_${idx}` : `HOLE_${idx}`);
-      let modeledThreadFaceNames = null;
-      let modeledThreadPitch = null;
-      const { solids: toolSolids, descriptors } = makeHoleTool({
-        holeType,
-        radius,
-        straightDepthTotal: straightDepth,
-        sinkDia,
-        sinkAngle,
-        boreDia,
-        boreDepth,
-        res,
-        featureID: holeFacePrefix,
-        omitStraight: threaded,
-      });
-      // annotate faces with hole metadata before union so labels propagate
-      const descriptor = descriptors[0] || null;
+      const descriptor = descriptorTemplate
+        ? {
+          ...descriptorTemplate,
+          thread: descriptorTemplate.thread ? { ...descriptorTemplate.thread } : undefined,
+        }
+        : null;
       const basePos = (c || center).clone();
       const originPos = basePos.clone().addScaledVector(normal, -backOffset);
+      const tool = typeof masterTool.clone === 'function' ? masterTool.clone() : null;
+      if (!tool) return;
+      try { tool.name = holeFacePrefix; } catch { /* best-effort */ }
+      renameSolidFacePrefix(tool, masterFacePrefix, holeFacePrefix);
       if (descriptor) {
-        if (holeType === 'THREADED') descriptor.type = 'THREADED';
         descriptor.center = [originPos.x, originPos.y, originPos.z];
         descriptor.normal = [normal.x, normal.y, normal.z];
         descriptor.throughAll = throughAll;
         descriptor.targetId = primaryTarget?.uuid || primaryTarget?.id || primaryTarget?.name || null;
         descriptor.featureId = featureID || null;
         descriptor.sourceName = sourceNames[idx] || null;
-        for (const solid of toolSolids) {
-          if (!solid || !solid.name) continue;
-          const sideName = `${solid.name}_S`;
-          try { solid.setFaceMetadata(sideName, { hole: { ...descriptor } }); } catch { }
-        }
-      }
-
-      if (threadGeom) {
-        try {
-          const axialBlend = 1e-4;
-          let threadLength = Math.max(
-            0,
-            descriptor?.straightDepth ?? descriptor?.totalDepth ?? straightDepth,
-          );
-          let threadStart = 0;
-          if (descriptor?.type === 'COUNTERSINK') threadStart = descriptor.countersinkHeight || 0;
-          else if (descriptor?.type === 'COUNTERBORE') threadStart = descriptor.counterboreDepth || 0;
-          threadStart = Math.max(0, threadStart - axialBlend);
-          threadLength = Math.max(0, threadLength + axialBlend);
-          if (threadLength > 0) {
-            console.log('[HoleFeature] Generating thread:', {
-              mode: threadMode,
-              length: threadLength,
-              threadStart,
-              majorDiameter: threadGeom.majorDiameter,
-              minorDiameter: threadGeom.minorDiameter,
-              crestRadius: threadGeom.crestRadius,
-              rootRadius: threadGeom.rootRadius,
-              pitch: threadGeom.pitch,
-              isExternal: threadGeom.isExternal,
-              radialOffset: threadRadialOffset,
-              segmentsPerTurn: threadSegmentsPerTurn,
-            });
-            // Scale the thread geometry to millimeters if needed
-            let threadGeomScaled = threadGeom;
-            if (threadUnitScale !== 1) {
-              console.log('[HoleFeature] Creating scaled thread geometry with scale factor', threadUnitScale);
-              // Create a new ThreadGeometry with scaled dimensions
-              threadGeomScaled = new ThreadGeometry({
-                standard: threadGeom.standard,
-                nominalDiameter: threadGeom.nominalDiameter * threadUnitScale,
-                pitch: threadGeom.pitch * threadUnitScale,
-                isExternal: threadGeom.isExternal,
-                starts: threadGeom.starts,
-                taperDirection: threadGeom.taperDirection,
-              });
-            }
-            // Extend one full pitch past both start and end to avoid flats for modeled threads only
-            const extraThreadLength = Math.max(0, threadGeomScaled.pitch || threadGeom.pitch || 0);
-            const threadStartEffective = threadMode === 'MODELED'
-              ? threadStart - extraThreadLength
-              : threadStart;
-            const threadLengthEffective = threadMode === 'MODELED'
-              ? Math.max(0, threadLength + extraThreadLength * 2)
-              : threadLength;
-            const threadCutFaceName = `${holeFacePrefix}_THREAD_FACE`;
-
-            const threadSolid = threadGeomScaled.toSolid({
-              length: threadLengthEffective,
-              mode: threadMode === 'MODELED' ? 'modeled' : 'symbolic',
-              radialOffset: threadRadialOffset,
-              symbolicRadius: 'crest',
-              includeCore: false, // Core disabled - helical surface only for now
-              resolution: res,
-              segmentsPerTurn: threadSegmentsPerTurn,
-              name: `${holeFacePrefix}_THREAD`,
-              faceName: threadCutFaceName,
-              axis: [0, 1, 0],
-              origin: [0, threadStartEffective, 0],
-              xDirection: [1, 0, 0],
-            });
-            const canonicalCoreFaceName = `${holeFacePrefix}_THREAD_CORE`;
-            if (threadMode === 'MODELED') {
-              try {
-                modeledThreadPitch = Number(threadGeomScaled?.pitch || threadGeom?.pitch || 0);
-                modeledThreadFaceNames = [
-                  `${threadCutFaceName}:FLANK_A`,
-                  `${threadCutFaceName}:ROOT`,
-                  `${threadCutFaceName}:FLANK_B`,
-                  canonicalCoreFaceName,
-                ];
-                const mergeIntoCore = [
-                  `${threadCutFaceName}:CREST`,
-                  `${threadCutFaceName}:CAP_START`,
-                  `${threadCutFaceName}:CAP_END`,
-                ];
-                for (const fromName of mergeIntoCore) {
-                  threadSolid.renameFace(fromName, canonicalCoreFaceName);
-                }
-                if (descriptor) {
-                  threadSolid.setFaceMetadata(canonicalCoreFaceName, { hole: { ...descriptor } });
-                }
-              } catch {
-                /* best-effort */
-              }
-            }
-            console.log('[HoleFeature] Thread solid created:', {
-              type: threadSolid?.constructor?.name,
-              hasGeometry: !!threadSolid?.geometry,
-              vertexCount: threadSolid?.geometry?.attributes?.position?.count,
-              triangleCount: threadSolid?.triangles?.length,
-              faceCount: threadSolid?.faces?.size,
-            });
-            
-            // Add a core solid at the minor diameter so the threaded hole removes material fully.
-            const minorRadiusAt = (z) => {
-              try {
-                const d = typeof threadGeomScaled.diametersAtZ === 'function'
-                  ? threadGeomScaled.diametersAtZ(z)
-                  : null;
-                const minorDia = Number(d?.minor ?? threadGeomScaled.minorDiameter ?? threadGeomScaled.crestDiameter);
-                if (Number.isFinite(minorDia) && minorDia > 0) {
-                  return Math.max(1e-4, minorDia * 0.5 + threadRadialOffset);
-                }
-              } catch { /* ignore */ }
-              return Math.max(1e-4, threadGeomScaled.crestRadius + threadRadialOffset);
-            };
-            const coreR0 = minorRadiusAt(0);
-            const coreR1 = minorRadiusAt(threadLengthEffective);
-            const coreName = `${holeFacePrefix}_THREAD_CORE`;
-            const coreResolution = threadMode === 'MODELED'
-              ? Math.max(8, Math.min(res, threadSegmentsPerTurn * 2))
-              : res;
-            const coreHeight = threadLengthEffective;
-            if (coreHeight > 0) {
-              const coreSolid = threadGeomScaled.isTapered && Math.abs(coreR0 - coreR1) > 1e-6
-                ? new BREP.Cone({
-                  r1: coreR0,
-                  r2: coreR1,
-                  h: coreHeight,
-                  resolution: coreResolution,
-                  name: coreName,
-                })
-                : new BREP.Cylinder({
-                  radius: coreR0,
-                  height: coreHeight,
-                  resolution: coreResolution,
-                  name: coreName,
-                });
-              coreSolid.bakeTRS({
-                position: [0, threadStartEffective, 0],
-                rotationEuler: [0, 0, 0],
-                scale: [1, 1, 1],
-              });
-              if (descriptor) {
-                try { coreSolid.setFaceMetadata(`${coreName}_S`, { hole: { ...descriptor } }); } catch { /* best-effort */ }
-              }
-              if (threadMode === 'MODELED') {
-                try {
-                  const coreFaces = typeof coreSolid.getFaceNames === 'function' ? coreSolid.getFaceNames() : [];
-                  for (const coreFaceName of coreFaces) {
-                    if (!coreFaceName || coreFaceName === canonicalCoreFaceName) continue;
-                    coreSolid.renameFace(coreFaceName, canonicalCoreFaceName);
-                  }
-                  if (descriptor) {
-                    coreSolid.setFaceMetadata(canonicalCoreFaceName, { hole: { ...descriptor } });
-                  }
-                } catch {
-                  /* best-effort */
-                }
-              }
-              toolSolids.push(coreSolid);
-            }
-            
-            toolSolids.push(threadSolid);
-            
-            if (debugShowSolid) {
-              try {
-                console.log('[HoleFeature] Creating profile cross-section visualization using primitives...');
-                
-                // Get the profile points from the thread geometry
-                const crestR = threadGeomScaled.crestRadius;
-                const rootR = threadGeomScaled.rootRadius;
-                const pitch = threadGeomScaled.pitch;
-                const halfPitch = pitch / 2;
-                
-                console.log('[HoleFeature] Profile dimensions:', {
-                  crestR,
-                  rootR,
-                  pitch,
-                  halfPitch,
-                  depth: rootR - crestR,
-                });
-                
-                // Create small spheres at each corner of the profile to visualize it
-                const markerSize = Math.max(0.5, pitch * 0.2);
-                const vizCenterZ = threadLengthEffective + 5; // Place it above the thread
-                
-                // Profile corners in [R, Z] cylindrical coords (R=radial, Z=axial position in thread)
-                // We need to display this as a cross-section shape oriented perpendicular to hole axis
-                // Map: axial variation (Z in profile) -> X, radial distance (R) -> Y, depth -> Z
-                const profileCorners = [
-                  [-halfPitch, crestR, vizCenterZ],        // X=axial, Y=radial, Z=depth
-                  [-halfPitch * 0.3, rootR, vizCenterZ],
-                  [halfPitch * 0.3, rootR, vizCenterZ],
-                  [halfPitch, crestR, vizCenterZ],
-                ];
-                
-                // Create a marker at each corner - store separately for debug viz
-                for (let i = 0; i < profileCorners.length; i++) {
-                  const corner = profileCorners[i];
-                  const marker = new BREP.Sphere({
-                    radius: markerSize,
-                    resolution: 16,
-                    name: `PROFILE_MARKER_${featureID}_${idx}_${i}`,
-                  });
-                  marker.bakeTRS({
-                    position: corner,
-                    rotationEuler: [0, 0, 0],
-                    scale: [1, 1, 1],
-                  });
-                  debugVisualizationObjects.push(marker);
-                  console.log(`[HoleFeature] Added profile marker ${i} at`, corner);
-                }
-                
-                // Also create connecting cylinders to show the edges
-                for (let i = 0; i < profileCorners.length; i++) {
-                  const p1 = profileCorners[i];
-                  const p2 = profileCorners[(i + 1) % profileCorners.length];
-                  const dx = p2[0] - p1[0];
-                  const dy = p2[1] - p1[1];
-                  const dz = p2[2] - p1[2];
-                  const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
-                  
-                  if (length > 0.01) {
-                    const edge = new BREP.Cylinder({
-                      radius: markerSize * 0.3,
-                      height: length,
-                      resolution: 12,
-                      name: `PROFILE_EDGE_${featureID}_${idx}_${i}`,
-                    });
-                    
-                    // Position and orient the cylinder to connect the points
-                    const midpoint = [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2, (p1[2] + p2[2]) / 2];
-                    const angleY = Math.atan2(dx, dy);
-                    const angleX = Math.atan2(Math.sqrt(dx * dx + dz * dz), dy);
-                    
-                    edge.bakeTRS({
-                      position: midpoint,
-                      rotationEuler: [angleX * 180 / Math.PI, 0, angleY * 180 / Math.PI],
-                      scale: [1, 1, 1],
-                    });
-                    debugVisualizationObjects.push(edge);
-                  }
-                }
-                
-              } catch (err) {
-                console.warn('[HoleFeature] Profile visualization creation failed:', err);
-              }
-            }
-            if (descriptor) {
-              descriptor.thread = {
-                standard: threadStandard,
-                designation: threadDesignation,
-                series: threadGeom?.series || null,
-                mode: threadMode,
-                radialOffset: threadRadialOffset,
-                length: threadLengthEffective,
-                startOffset: threadStartEffective,
-              };
-            }
-          }
-        } catch (threadErr) {
-          console.warn('[HoleFeature] Thread generation failed:', threadErr);
-        }
-      }
-
-      if (descriptor) {
+        annotateHoleFaces(tool, descriptor);
         holeRecords.push({ ...descriptor });
-      }
-
-      console.log('[HoleFeature] Unioning', toolSolids.length, 'solids for hole tool');
-      console.log('[HoleFeature] Unioning', toolSolids.length, 'solids for hole tool');
-      const tool = unionSolids(toolSolids);
-      if (!tool) return;
-      if (threadMode === 'MODELED' && modeledThreadFaceNames?.length) {
-        try {
-          const cleanupSummary = cleanupModeledThreadFaceIslands(tool, modeledThreadFaceNames, modeledThreadPitch);
-          if (cleanupSummary) {
-            console.log('[HoleFeature] Modeled thread face cleanup summary:', cleanupSummary);
-          }
-        } catch (cleanupErr) {
-          console.warn('[HoleFeature] Modeled thread face island cleanup failed:', cleanupErr);
-        }
       }
       if (debugShowSolid) {
         try {

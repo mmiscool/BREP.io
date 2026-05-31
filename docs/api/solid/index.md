@@ -50,7 +50,7 @@ Related pages:
 - [collapseTinyTriangles(lengthThreshold)](./collapseTinyTriangles.md)
 - [splitSelfIntersectingTriangles(diagnostics)](./splitSelfIntersectingTriangles.md)
 - [removeDegenerateTriangles()](./removeDegenerateTriangles.md)
-- [removeInternalTriangles(options)](./removeInternalTriangles.md)
+- [removeInternalTriangles()](./removeInternalTriangles.md)
 - [removeInternalTrianglesByRaycast()](./removeInternalTrianglesByRaycast.md)
 - [removeInternalTrianglesByWinding(options)](./removeInternalTrianglesByWinding.md)
 - [cleanupTinyFaceIslands(size)](./cleanupTinyFaceIslands.md)

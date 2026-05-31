@@ -97,6 +97,50 @@ export async function afterRun_hole_through(partHistory) {
   if (holeMetaCount === 0) throw new Error("[hole_through] No hole face metadata found");
 }
 
+export async function test_hole_multi_point_cloned_cutter(partHistory) {
+  const cube = await partHistory.newFeature("P.CU");
+  cube.inputParams.sizeX = CUBE_SIZE;
+  cube.inputParams.sizeY = CUBE_SIZE;
+  cube.inputParams.sizeZ = CUBE_SIZE;
+
+  const plane = await partHistory.newFeature("P");
+  plane.inputParams.orientation = "XY";
+
+  const sketch = await partHistory.newFeature("S");
+  sketch.inputParams.sketchPlane = plane.inputParams.featureID;
+  buildSketchWithPoints(sketch, [
+    [CUBE_SIZE * 0.25, CUBE_SIZE * 0.25],
+    [CUBE_SIZE * 0.50, CUBE_SIZE * 0.50],
+    [CUBE_SIZE * 0.75, CUBE_SIZE * 0.75],
+  ]);
+
+  const hole = await partHistory.newFeature("H");
+  hole.inputParams.face = sketch.inputParams.featureID;
+  hole.inputParams.holeType = "SIMPLE";
+  hole.inputParams.diameter = HOLE_DIAMETER;
+  hole.inputParams.throughAll = true;
+  hole.inputParams.boolean = {
+    targets: [cube.inputParams.featureID],
+    operation: "SUBTRACT",
+  };
+
+  return partHistory;
+}
+
+export async function afterRun_hole_multi_point_cloned_cutter(partHistory) {
+  const holeFeature = findHoleFeature(partHistory);
+  if (!holeFeature) throw new Error("[hole_multi_point] Hole feature missing");
+  const holes = holeFeature.persistentData?.holes || [];
+  if (holes.length !== 3) throw new Error(`[hole_multi_point] Expected 3 hole records, got ${holes.length}`);
+  const centers = new Set(holes.map((hole) => Array.isArray(hole?.center) ? hole.center.map((v) => Number(v).toFixed(4)).join(",") : ""));
+  if (centers.size !== 3) throw new Error(`[hole_multi_point] Expected 3 unique hole centers, got ${centers.size}`);
+
+  const solid = getPrimarySolid(partHistory);
+  if (!solid) throw new Error("[hole_multi_point] No solids created");
+  const holeMetaCount = countHoleMetadata([solid]);
+  if (holeMetaCount < 3) throw new Error(`[hole_multi_point] Expected metadata for multiple holes, got ${holeMetaCount}`);
+}
+
 export async function test_hole_thread_symbolic(partHistory) {
   const cube = await partHistory.newFeature("P.CU");
   cube.inputParams.sizeX = CUBE_SIZE;

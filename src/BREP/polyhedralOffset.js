@@ -21,7 +21,6 @@ const DEFAULT_TINY_BOUNDARY_AREA = 1e-7;
 const DEFAULT_ISLAND_TRIANGLE_CAP = 16;
 const DEFAULT_TINY_FACE_ISLAND_AREA = 1e-4;
 const DEFAULT_DISCONNECTED_MIN_VOLUME = 1e-10;
-const DEFAULT_WINDING_CROSSING_TOLERANCE = 0.05;
 const STABLE_PASS_LIMIT = 2;
 
 function _buildPointInsideTester(solid, options = {}) {
@@ -1167,7 +1166,6 @@ function _repairSelfIntersections(solid, options = {}) {
     options.removeDisconnectedMinVolume,
     Math.max(DEFAULT_DISCONNECTED_MIN_VOLUME, Math.pow(modelScale, 3) * 1e-10),
   );
-  const windingCrossingTolerance = Math.min(0.45, Math.max(0, Number(options.windingCrossingTolerance) || DEFAULT_WINDING_CROSSING_TOLERANCE));
   const baseWeldEpsilon = _toNonNegativeNumber(
     options.weldEpsilon,
     Math.max(1e-8, modelScale * 1e-8),
@@ -1288,27 +1286,10 @@ function _repairSelfIntersections(solid, options = {}) {
         || nextCount <= Math.max(4, passTriangleCount * 0.8)
       );
       if (shouldRunInternal) {
-        const windingOffsetScale = Math.max(1e-8, modelScale * Math.pow(1e-6, 1 - (pass / Math.max(1, maxPasses))));
-        const removed = runCount(nextCount, `removeInternalTriangles#${pass}`, () => solid.removeInternalTriangles({
-          fallback: pass >= maxPasses - 1 ? 'raycast' : 'winding',
-          windingOptions: {
-            offsetScale: windingOffsetScale,
-            crossingTolerance: windingCrossingTolerance,
-          },
-        }));
+        const removed = runCount(nextCount, `removeInternalTriangles#${pass}`, () => solid.removeInternalTriangles());
         if (removed.changed) {
           didWorkThisPass = true;
           nextCount = removed.after;
-        }
-
-        if (!removed.changed && pass > 1 && passTopologyBefore.nonManifoldEdgeCount === 0) {
-          const raycastResult = runCount(nextCount, 'removeInternalTriangles(raycast)', () => solid.removeInternalTriangles({
-            fallback: 'raycast',
-          }));
-          if (raycastResult.changed) {
-            didWorkThisPass = true;
-            nextCount = raycastResult.after;
-          }
         }
       }
     }

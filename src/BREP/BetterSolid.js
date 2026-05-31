@@ -333,7 +333,8 @@ export class Solid extends THREE.Group {
      * @returns {Solid}
      */
     _weldVerticesByEpsilon(..._args) {
-        return SolidMethods._weldVerticesByEpsilon.apply(this, arguments);
+        return this;
+        //return SolidMethods._weldVerticesByEpsilon.apply(this, arguments);
     }
 
     /**
@@ -538,7 +539,7 @@ export class Solid extends THREE.Group {
      * Rebuild authoring arrays from the manifold’s exterior surface, dropping internal faces.
      * @returns {number} triangles removed
      */
-    removeInternalTriangles(..._args) {
+    removeInternalTriangles() {
         return SolidMethods.removeInternalTriangles.apply(this, arguments);
     }
 

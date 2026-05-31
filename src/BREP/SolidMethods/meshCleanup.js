@@ -5,18 +5,9 @@ import {
     cppSolidCoreHasNativeTinyFaceIslandCleanup,
     cppSolidCoreHasNativeTinyFaceMerge,
     getSyncedCppSolidCore,
+    requireCppSolidCoreCapability,
     syncSolidAuthoringStateFromCpp,
 } from "../CppSolidCore.js";
-
-const alertSolidCleanupJsFallback = (methodName) => {
-    const message = `Solid.${methodName} is using the JavaScript cleanup fallback.`;
-    try {
-        if (typeof alert === "function") alert(message);
-        else if (typeof console !== "undefined" && typeof console.warn === "function") console.warn(message);
-    } catch {
-        // Keep cleanup behavior unchanged if alerting is blocked.
-    }
-};
 
 /**
  * Mesh cleanup and refinement utilities.
@@ -29,211 +20,19 @@ const alertSolidCleanupJsFallback = (methodName) => {
  * @param {boolean} [options.removeExternal=true] drop islands outside the main shell
  */
 export function removeSmallIslands({ maxTriangles = 30, removeInternal = true, removeExternal = true } = {}) {
-    if (cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeSmallIslandCleanup) {
-        const core = getSyncedCppSolidCore(this);
-        const removed = core.removeSmallIslands(maxTriangles, removeInternal, removeExternal);
-        if (removed > 0) {
-            syncSolidAuthoringStateFromCpp(this, core);
-            this._dirty = true;
-            this._faceIndex = null;
-            try { if (this._manifold && typeof this._manifold.delete === "function") this._manifold.delete(); } catch { }
-            this._manifold = null;
-        }
-        return removed;
+    requireCppSolidCoreCapability(
+        cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeSmallIslandCleanup,
+        "Solid.removeSmallIslands()"
+    );
+    const core = getSyncedCppSolidCore(this);
+    const removed = core.removeSmallIslands(maxTriangles, removeInternal, removeExternal);
+    if (removed > 0) {
+        syncSolidAuthoringStateFromCpp(this, core);
+        this._dirty = true;
+        this._faceIndex = null;
+        try { if (this._manifold && typeof this._manifold.delete === "function") this._manifold.delete(); } catch { }
+        this._manifold = null;
     }
-
-    alertSolidCleanupJsFallback("removeSmallIslands()");
-
-    const tv = this._triVerts;
-    const vp = this._vertProperties;
-    const triCount = (tv.length / 3) | 0;
-    if (triCount === 0) return 0;
-
-    const nv = (vp.length / 3) | 0;
-    const NV = BigInt(Math.max(1, nv));
-    const eKey = (a, b) => {
-        const A = BigInt(a), B = BigInt(b);
-        return (A < B) ? (A * NV + B) : (B * NV + A);
-    };
-
-    const edgeToTris = new Map(); // key -> [tri indices]
-    for (let t = 0; t < triCount; t++) {
-        const b = t * 3;
-        const i0 = tv[b + 0] >>> 0;
-        const i1 = tv[b + 1] >>> 0;
-        const i2 = tv[b + 2] >>> 0;
-        const edges = [[i0, i1], [i1, i2], [i2, i0]];
-        for (let k = 0; k < 3; k++) {
-            const a = edges[k][0], c = edges[k][1];
-            const key = eKey(a, c);
-            let arr = edgeToTris.get(key);
-            if (!arr) { arr = []; edgeToTris.set(key, arr); }
-            arr.push(t);
-        }
-    }
-
-    const adj = new Array(triCount);
-    for (let t = 0; t < triCount; t++) adj[t] = [];
-    for (const [, arr] of edgeToTris.entries()) {
-        if (arr.length === 2) {
-            const a = arr[0], b = arr[1];
-            adj[a].push(b);
-            adj[b].push(a);
-        }
-    }
-
-    const compId = new Int32Array(triCount);
-    for (let i = 0; i < triCount; i++) compId[i] = -1;
-    const comps = [];
-    let compIdx = 0;
-    const stack = [];
-    for (let seed = 0; seed < triCount; seed++) {
-        if (compId[seed] !== -1) continue;
-        compId[seed] = compIdx;
-        stack.length = 0;
-        stack.push(seed);
-        const tris = [];
-        while (stack.length) {
-            const t = stack.pop();
-            tris.push(t);
-            const nbrs = adj[t];
-            for (let j = 0; j < nbrs.length; j++) {
-                const u = nbrs[j];
-                if (compId[u] !== -1) continue;
-                compId[u] = compIdx;
-                stack.push(u);
-            }
-        }
-        comps.push(tris);
-        compIdx++;
-    }
-
-    if (comps.length <= 1) return 0;
-
-    let mainIdx = 0;
-    for (let i = 1; i < comps.length; i++) {
-        if (comps[i].length > comps[mainIdx].length) mainIdx = i;
-    }
-    const mainTris = comps[mainIdx];
-
-    const mainFaces = new Array(mainTris.length);
-    for (let k = 0; k < mainTris.length; k++) {
-        const t = mainTris[k];
-        const b = t * 3;
-        const i0 = tv[b + 0] * 3, i1 = tv[b + 1] * 3, i2 = tv[b + 2] * 3;
-        mainFaces[k] = [
-            [vp[i0 + 0], vp[i0 + 1], vp[i0 + 2]],
-            [vp[i1 + 0], vp[i1 + 1], vp[i1 + 2]],
-            [vp[i2 + 0], vp[i2 + 1], vp[i2 + 2]],
-        ];
-    }
-
-    const rayTri = (orig, dir, tri) => {
-        const EPS = 1e-12;
-        const ax = tri[0][0], ay = tri[0][1], az = tri[0][2];
-        const bx = tri[1][0], by = tri[1][1], bz = tri[1][2];
-        const cx = tri[2][0], cy = tri[2][1], cz = tri[2][2];
-        const e1x = bx - ax, e1y = by - ay, e1z = bz - az;
-        const e2x = cx - ax, e2y = cy - ay, e2z = cz - az;
-        const px = dir[1] * e2z - dir[2] * e2y;
-        const py = dir[2] * e2x - dir[0] * e2z;
-        const pz = dir[0] * e2y - dir[1] * e2x;
-        const det = e1x * px + e1y * py + e1z * pz;
-        if (Math.abs(det) < EPS) return null;
-        const invDet = 1.0 / det;
-        const tvecx = orig[0] - ax, tvecy = orig[1] - ay, tvecz = orig[2] - az;
-        const u = (tvecx * px + tvecy * py + tvecz * pz) * invDet;
-        if (u < 0 || u > 1) return null;
-        const qx = tvecy * e1z - tvecz * e1y;
-        const qy = tvecz * e1x - tvecx * e1z;
-        const qz = tvecx * e1y - tvecy * e1x;
-        const v = (dir[0] * qx + dir[1] * qy + dir[2] * qz) * invDet;
-        if (v < 0 || u + v > 1) return null;
-        const tHit = (e2x * qx + e2y * qy + e2z * qz) * invDet;
-        return tHit > EPS ? tHit : null;
-    };
-
-    const pointInsideMain = (p) => {
-        const dir = [1, 0, 0];
-        let hits = 0;
-        for (let i = 0; i < mainFaces.length; i++) {
-            const th = rayTri(p, dir, mainFaces[i]);
-            if (th !== null) hits++;
-        }
-        return (hits % 2) === 1;
-    };
-
-    const triCentroid = (t) => {
-        const b = t * 3;
-        const i0 = tv[b + 0] * 3, i1 = tv[b + 1] * 3, i2 = tv[b + 2] * 3;
-        const x = (vp[i0 + 0] + vp[i1 + 0] + vp[i2 + 0]) / 3;
-        const y = (vp[i0 + 1] + vp[i1 + 1] + vp[i2 + 1]) / 3;
-        const z = (vp[i0 + 2] + vp[i1 + 2] + vp[i2 + 2]) / 3;
-        return [x + 1e-8, y + 1e-8, z + 1e-8];
-    };
-
-    const removeComp = new Array(comps.length).fill(false);
-    for (let i = 0; i < comps.length; i++) {
-        if (i === mainIdx) continue;
-        const tris = comps[i];
-        if (tris.length === 0 || tris.length > maxTriangles) continue;
-        const probe = triCentroid(tris[0]);
-        const inside = pointInsideMain(probe);
-        if ((inside && removeInternal) || (!inside && removeExternal)) {
-            removeComp[i] = true;
-        }
-    }
-
-    const keepTri = new Uint8Array(triCount);
-    for (let t = 0; t < triCount; t++) keepTri[t] = 1;
-    let removed = 0;
-    for (let i = 0; i < comps.length; i++) {
-        if (!removeComp[i]) continue;
-        const tris = comps[i];
-        for (let k = 0; k < tris.length; k++) {
-            const t = tris[k];
-            if (keepTri[t]) { keepTri[t] = 0; removed++; }
-        }
-    }
-    if (removed === 0) return 0;
-
-    const usedVert = new Uint8Array(nv);
-    const newTriVerts = [];
-    const newTriIDs = [];
-    for (let t = 0; t < triCount; t++) {
-        if (!keepTri[t]) continue;
-        const b = t * 3;
-        const a = tv[b + 0] >>> 0;
-        const b1 = tv[b + 1] >>> 0;
-        const c = tv[b + 2] >>> 0;
-        newTriVerts.push(a, b1, c);
-        newTriIDs.push(this._triIDs[t]);
-        usedVert[a] = 1; usedVert[b1] = 1; usedVert[c] = 1;
-    }
-
-    const oldToNew = new Int32Array(nv);
-    for (let i = 0; i < nv; i++) oldToNew[i] = -1;
-    const newVP = [];
-    let write = 0;
-    for (let i = 0; i < nv; i++) {
-        if (!usedVert[i]) continue;
-        oldToNew[i] = write++;
-        newVP.push(vp[i * 3 + 0], vp[i * 3 + 1], vp[i * 3 + 2]);
-    }
-    for (let i = 0; i < newTriVerts.length; i++) {
-        newTriVerts[i] = oldToNew[newTriVerts[i]];
-    }
-
-    this._vertProperties = newVP;
-    this._triVerts = newTriVerts;
-    this._triIDs = newTriIDs;
-    this._vertKeyToIndex = new Map();
-    for (let i = 0; i < this._vertProperties.length; i += 3) {
-        const x = this._vertProperties[i], y = this._vertProperties[i + 1], z = this._vertProperties[i + 2];
-        this._vertKeyToIndex.set(`${x},${y},${z}`, (i / 3) | 0);
-    }
-    this._dirty = true;
-    this._faceIndex = null;
     return removed;
 }
 
@@ -1955,89 +1754,25 @@ export function removeDegenerateTriangles() {
 }
 
 /**
- * Remove internal triangles by rebuilding from the Manifold surface.
- * - Primary path: `_manifoldize().getMesh()` yields only the exterior faces.
- * - Fallback: if manifoldization fails (e.g., self‑intersections), falls back
- *   to a winding-based classifier (or raycast if requested) to cull interior tris.
+ * Remove internal triangles by rebuilding from the native runtime Manifold surface.
  * - Returns the number of triangles removed.
- * @param {object|string} [options] optional fallback settings; string -> fallback mode
- * @param {'winding'|'raycast'|'ray'} [options.fallback='winding'] fallback classifier
- * @param {object} [options.windingOptions] forwarded to removeInternalTrianglesByWinding
  */
-export function removeInternalTriangles(options = {}) {
+export function removeInternalTriangles() {
     const triCountBefore = (this._triVerts.length / 3) | 0;
     if (triCountBefore === 0) return 0;
 
-    const opts = (options && typeof options === 'object')
-        ? options
-        : { fallback: options };
-    const fallback = (opts.fallback || 'winding').toString().toLowerCase();
-    let alertedJsFallback = false;
-    const alertFallback = () => {
-        if (alertedJsFallback) return;
-        alertedJsFallback = true;
-        alertSolidCleanupJsFallback("removeInternalTriangles()");
-    };
-
-    try {
-        if (cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeInternalTriangleCleanup) {
-            const core = getSyncedCppSolidCore(this);
-            const removed = core.removeInternalTriangles();
-            syncSolidAuthoringStateFromCpp(this, core);
-            this._dirty = false;
-            this._faceIndex = null;
-            try { if (this._manifold && typeof this._manifold.delete === 'function') this._manifold.delete(); } catch { }
-            this._manifold = null;
-            return removed > 0 ? removed : 0;
-        }
-
-        alertFallback();
-
-        let mesh = null;
-        try {
-            const manifoldObj = this._manifoldize();
-            mesh = manifoldObj.getMesh();
-            const triVerts = Array.from(mesh.triVerts || []);
-            const vertProps = Array.from(mesh.vertProperties || []);
-            const triCountAfter = (triVerts.length / 3) | 0;
-            const ids = (mesh.faceID && mesh.faceID.length === triCountAfter)
-                ? Array.from(mesh.faceID)
-                : new Array(triCountAfter).fill(0);
-
-            // Overwrite our authoring arrays with the exterior-only mesh
-            this._numProp = mesh.numProp || 3;
-            this._vertProperties = vertProps;
-            this._triVerts = triVerts;
-            this._triIDs = ids;
-
-            // Rebuild quick index map
-            this._vertKeyToIndex = new Map();
-            for (let i = 0; i < this._vertProperties.length; i += 3) {
-                const x = this._vertProperties[i], y = this._vertProperties[i + 1], z = this._vertProperties[i + 2];
-                this._vertKeyToIndex.set(`${x},${y},${z}`, (i / 3) | 0);
-            }
-
-            // These arrays now match the current manifold, so mark clean
-            this._dirty = false;
-            this._faceIndex = null;
-
-            // Keep existing id/name maps; Manifold preserves triangle faceIDs.
-            const removed = triCountBefore - triCountAfter;
-            return removed > 0 ? removed : 0;
-        } finally {
-            try { if (mesh && typeof mesh.delete === 'function') mesh.delete(); } catch { }
-        }
-    } catch (err) {
-        const mode = (fallback === 'ray' || fallback === 'raycast') ? 'raycast' : 'winding';
-        try { console.warn(`[removeInternalTriangles] Manifold rebuild failed (${err?.message || err}); falling back to ${mode} classifier.`); } catch { }
-    }
-
-    // Fallback path for non-manifold/self-intersecting meshes
-    alertFallback();
-    if (fallback === 'ray' || fallback === 'raycast') {
-        return this.removeInternalTrianglesByRaycast();
-    }
-    return this.removeInternalTrianglesByWinding(opts.windingOptions || {});
+    requireCppSolidCoreCapability(
+        cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeInternalTriangleCleanup,
+        "Solid.removeInternalTriangles()"
+    );
+    const core = getSyncedCppSolidCore(this);
+    const removed = core.removeInternalTriangles();
+    syncSolidAuthoringStateFromCpp(this, core);
+    this._dirty = false;
+    this._faceIndex = null;
+    try { if (this._manifold && typeof this._manifold.delete === 'function') this._manifold.delete(); } catch { }
+    this._manifold = null;
+    return removed > 0 ? removed : 0;
 }
 
 /**
@@ -2350,247 +2085,19 @@ export function cleanupTinyFaceIslands(size) {
     const maxArea = Number(size);
     if (!Number.isFinite(maxArea) || maxArea <= 0) return 0;
 
-    if (cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeTinyFaceIslandCleanup) {
-        const core = getSyncedCppSolidCore(this);
-        const reassigned = core.cleanupTinyFaceIslands(maxArea);
-        if (reassigned > 0) {
-            syncSolidAuthoringStateFromCpp(this, core);
-            this._dirty = true;
-            this._faceIndex = null;
-            try { if (this._manifold && typeof this._manifold.delete === "function") this._manifold.delete(); } catch { }
-            this._manifold = null;
-        }
-        return reassigned;
-    }
-
-    alertSolidCleanupJsFallback("cleanupTinyFaceIslands()");
-
-    const tv = this._triVerts;
-    const vp = this._vertProperties;
-    const ids = this._triIDs;
-    const triCount = (tv?.length || 0) / 3 | 0;
-    if (!triCount || !vp || vp.length < 9 || !ids || ids.length < triCount) return 0;
-
-    const triArea = (i0, i1, i2) => {
-        const x0 = vp[i0 * 3 + 0], y0 = vp[i0 * 3 + 1], z0 = vp[i0 * 3 + 2];
-        const x1 = vp[i1 * 3 + 0], y1 = vp[i1 * 3 + 1], z1 = vp[i1 * 3 + 2];
-        const x2 = vp[i2 * 3 + 0], y2 = vp[i2 * 3 + 1], z2 = vp[i2 * 3 + 2];
-        const ux = x1 - x0, uy = y1 - y0, uz = z1 - z0;
-        const vx = x2 - x0, vy = y2 - y0, vz = z2 - z0;
-        const cx = uy * vz - uz * vy;
-        const cy = uz * vx - ux * vz;
-        const cz = ux * vy - uy * vx;
-        return 0.5 * Math.hypot(cx, cy, cz);
-    };
-
-    // Per-triangle areas and face groupings.
-    const areas = new Float64Array(triCount);
-    const faceToTris = new Map(); // faceId -> tri indices[]
-    const faceArea = new Map();   // faceId -> total area
-    for (let t = 0; t < triCount; t++) {
-        const base = t * 3;
-        const i0 = tv[base + 0] >>> 0;
-        const i1 = tv[base + 1] >>> 0;
-        const i2 = tv[base + 2] >>> 0;
-        const a = triArea(i0, i1, i2);
-        areas[t] = a;
-        const id = ids[t] >>> 0;
-        let tris = faceToTris.get(id);
-        if (!tris) { tris = []; faceToTris.set(id, tris); }
-        tris.push(t);
-        faceArea.set(id, (faceArea.get(id) || 0) + a);
-    }
-
-    // Build edge -> triangles map, then triangle adjacency.
-    const nv = (vp.length / 3) | 0;
-    const NV = BigInt(Math.max(1, nv));
-    const eKey = (a, b) => {
-        const A = BigInt(a), B = BigInt(b);
-        return A < B ? (A * NV + B) : (B * NV + A);
-    };
-
-    const edgeToTris = new Map(); // key -> tri indices[]
-    for (let t = 0; t < triCount; t++) {
-        const base = t * 3;
-        const i0 = tv[base + 0] >>> 0;
-        const i1 = tv[base + 1] >>> 0;
-        const i2 = tv[base + 2] >>> 0;
-        const edges = [[i0, i1], [i1, i2], [i2, i0]];
-        for (let k = 0; k < 3; k++) {
-            const a = edges[k][0], b = edges[k][1];
-            const key = eKey(a, b);
-            let arr = edgeToTris.get(key);
-            if (!arr) { arr = []; edgeToTris.set(key, arr); }
-            arr.push(t);
-        }
-    }
-
-    const triAdj = new Array(triCount);
-    for (let t = 0; t < triCount; t++) {
-        triAdj[t] = [];
-    }
-
-    for (const [, tris] of edgeToTris.entries()) {
-        if (tris.length !== 2) continue;
-        const a = tris[0] | 0;
-        const b = tris[1] | 0;
-        triAdj[a].push(b);
-        triAdj[b].push(a);
-    }
-
-    let reassigned = 0;
-
-    // Detect tiny faces by total face area (face-level trigger).
-    const tinyFaceIds = [];
-    for (const [faceId, tris] of faceToTris.entries()) {
-        if (!tris || tris.length === 0) continue;
-        if ((faceArea.get(faceId) || 0) <= maxArea) tinyFaceIds.push(faceId >>> 0);
-    }
-
-    // For each tiny face, reassign triangles one-by-one.
-    // Target face is chosen per triangle from that triangle's directly-adjacent faces.
-    // Prefer candidates that share more edges with the triangle, then larger face area.
-    for (let f = 0; f < tinyFaceIds.length; f++) {
-        const tinyFaceId = tinyFaceIds[f] >>> 0;
-        const tinyFaceTris = faceToTris.get(tinyFaceId);
-        if (!tinyFaceTris || tinyFaceTris.length === 0) continue;
-
-        // Iterate until no triangle from this tiny face can be moved.
-        let movedInPass = true;
-        while (movedInPass) {
-            movedInPass = false;
-            for (let i = 0; i < tinyFaceTris.length; i++) {
-                const t = tinyFaceTris[i] | 0;
-                if ((ids[t] >>> 0) !== tinyFaceId) continue;
-
-                const contactCount = new Map(); // neighbor face id -> shared-edge count
-                let bestId = null;
-                let bestContact = -Infinity;
-                let bestArea = -Infinity;
-                const nbrs = triAdj[t];
-                for (let j = 0; j < nbrs.length; j++) {
-                    const u = nbrs[j] | 0;
-                    const nid = ids[u] >>> 0;
-                    if (nid === tinyFaceId) continue;
-                    contactCount.set(nid, (contactCount.get(nid) || 0) + 1);
-                }
-
-                for (const [nid, count] of contactCount.entries()) {
-                    const a = faceArea.get(nid) || 0;
-                    if (count > bestContact || (count === bestContact && a > bestArea)) {
-                        bestContact = count;
-                        bestArea = a;
-                        bestId = nid;
-                    }
-                }
-                if (bestId === null) continue;
-
-                ids[t] = bestId;
-                const triA = areas[t] || 0;
-                faceArea.set(tinyFaceId, (faceArea.get(tinyFaceId) || 0) - triA);
-                faceArea.set(bestId, (faceArea.get(bestId) || 0) + triA);
-                reassigned++;
-                movedInPass = true;
-            }
-        }
-    }
-
-    // Stabilization: collapse any tiny disconnected label-islands that may remain
-    // after per-triangle moves, to prevent visual seam noise.
-    const collapseTinyLabelIslands = () => {
-        const currFaceToTris = new Map();
-        for (let t = 0; t < triCount; t++) {
-            const id = ids[t] >>> 0;
-            let arr = currFaceToTris.get(id);
-            if (!arr) { arr = []; currFaceToTris.set(id, arr); }
-            arr.push(t);
-        }
-
-        const seenToken = new Int32Array(triCount);
-        let token = 1;
-        const stack = [];
-        let changed = false;
-
-        for (const [faceIdRaw, tris] of currFaceToTris.entries()) {
-            const faceId = faceIdRaw >>> 0;
-            if (!tris || tris.length === 0) continue;
-
-            token++;
-            if (token <= 0) {
-                seenToken.fill(0);
-                token = 1;
-            }
-
-            for (let i = 0; i < tris.length; i++) {
-                const seed = tris[i] | 0;
-                if ((ids[seed] >>> 0) !== faceId) continue;
-                if (seenToken[seed] === token) continue;
-                seenToken[seed] = token;
-
-                stack.length = 0;
-                stack.push(seed);
-                const compTris = [];
-                let compArea = 0;
-                const neighborIds = new Set();
-
-                while (stack.length) {
-                    const t = stack.pop() | 0;
-                    compTris.push(t);
-                    compArea += areas[t] || 0;
-                    const nbrs = triAdj[t];
-                    for (let j = 0; j < nbrs.length; j++) {
-                        const u = nbrs[j] | 0;
-                        const nid = ids[u] >>> 0;
-                        if (nid === faceId) {
-                            if (seenToken[u] === token) continue;
-                            seenToken[u] = token;
-                            stack.push(u);
-                        } else {
-                            neighborIds.add(nid);
-                        }
-                    }
-                }
-
-                if (!(compArea <= maxArea)) continue;
-                if (neighborIds.size === 0) continue;
-
-                let bestId = null;
-                let bestArea = -Infinity;
-                for (const nid of neighborIds) {
-                    const a = faceArea.get(nid) || 0;
-                    if (a > bestArea) {
-                        bestArea = a;
-                        bestId = nid;
-                    }
-                }
-                if (bestId === null) continue;
-
-                for (let k = 0; k < compTris.length; k++) {
-                    const t = compTris[k] | 0;
-                    if ((ids[t] >>> 0) === faceId) {
-                        ids[t] = bestId;
-                        reassigned++;
-                        changed = true;
-                    }
-                }
-                faceArea.set(faceId, Math.max(0, (faceArea.get(faceId) || 0) - compArea));
-                faceArea.set(bestId, (faceArea.get(bestId) || 0) + compArea);
-            }
-        }
-        return changed;
-    };
-
-    let islandPasses = 0;
-    while (collapseTinyLabelIslands()) {
-        islandPasses++;
-        if (islandPasses >= 8) break;
-    }
-
+    requireCppSolidCoreCapability(
+        cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeTinyFaceIslandCleanup,
+        "Solid.cleanupTinyFaceIslands()"
+    );
+    const core = getSyncedCppSolidCore(this);
+    const reassigned = core.cleanupTinyFaceIslands(maxArea);
     if (reassigned > 0) {
+        syncSolidAuthoringStateFromCpp(this, core);
         this._dirty = true;
         this._faceIndex = null;
+        try { if (this._manifold && typeof this._manifold.delete === "function") this._manifold.delete(); } catch { }
+        this._manifold = null;
     }
-
     return reassigned;
 }
 
@@ -2598,88 +2105,19 @@ export function cleanupTinyFaceIslands(size) {
 export function mergeTinyFaces(maxArea = 0.001) {
     if (!Number.isFinite(maxArea) || maxArea <= 0) return this;
 
-    if (cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeTinyFaceMerge) {
-        const core = getSyncedCppSolidCore(this);
-        const merged = core.mergeTinyFaces(maxArea);
-        if (merged > 0) {
-            syncSolidAuthoringStateFromCpp(this, core);
-            this._faceIndex = null;
-            this._dirty = true;
-            try { if (this._manifold && typeof this._manifold.delete === 'function') this._manifold.delete(); } catch { }
-            this._manifold = null;
-            try {
-                if (typeof this._manifoldize === 'function') {
-                    this._manifoldize();
-                    if (typeof this._ensureFaceIndex === 'function') this._ensureFaceIndex();
-                }
-            } catch { }
-        }
-        return this;
-    }
-
-    alertSolidCleanupJsFallback("mergeTinyFaces()");
-
-    if (typeof this.getFaceNames !== 'function' || typeof this.getBoundaryEdgePolylines !== 'function') return this;
-    const faceNames = this.getFaceNames() || [];
-    if (!Array.isArray(faceNames) || faceNames.length === 0) return this;
-
-    const areaCache = new Map();
-    const areaOf = (name) => {
-        if (areaCache.has(name)) return areaCache.get(name);
-        let area = 0;
-        try {
-            const tris = this.getFace(name);
-            if (Array.isArray(tris)) {
-                for (const tri of tris) {
-                    const p1 = tri?.p1, p2 = tri?.p2, p3 = tri?.p3;
-                    if (!p1 || !p2 || !p3) continue;
-                    const ax = p2[0] - p1[0], ay = p2[1] - p1[1], az = p2[2] - p1[2];
-                    const bx = p3[0] - p1[0], by = p3[1] - p1[1], bz = p3[2] - p1[2];
-                    const cx = ay * bz - az * by;
-                    const cy = az * bx - ax * bz;
-                    const cz = ax * by - ay * bx;
-                    area += 0.5 * Math.hypot(cx, cy, cz);
-                }
-            }
-        } catch { area = 0; }
-        areaCache.set(name, area);
-        return area;
-    };
-
-    const boundaries = this.getBoundaryEdgePolylines() || [];
-    const neighbors = new Map();
-    for (const poly of boundaries) {
-        const a = poly?.faceA;
-        const b = poly?.faceB;
-        if (!a || !b) continue;
-        if (!neighbors.has(a)) neighbors.set(a, new Set());
-        if (!neighbors.has(b)) neighbors.set(b, new Set());
-        neighbors.get(a).add(b);
-        neighbors.get(b).add(a);
-    }
-
-    let merged = 0;
-    for (const name of faceNames) {
-        const area = areaOf(name);
-        if (!(area < maxArea)) continue;
-        const adj = neighbors.get(name);
-        if (!adj || adj.size === 0) continue;
-        let best = null;
-        let bestArea = -Infinity;
-        for (const n of adj) {
-            const a = areaOf(n);
-            if (a > bestArea) { bestArea = a; best = n; }
-        }
-        if (best) {
-            this.renameFace(name, best);
-            merged++;
-        }
-    }
+    requireCppSolidCoreCapability(
+        cppSolidCoreHasAuthoringBridge && cppSolidCoreHasNativeTinyFaceMerge,
+        "Solid.mergeTinyFaces()"
+    );
+    const core = getSyncedCppSolidCore(this);
+    const merged = core.mergeTinyFaces(maxArea);
     if (merged > 0) {
+        syncSolidAuthoringStateFromCpp(this, core);
+        this._faceIndex = null;
+        this._dirty = true;
+        try { if (this._manifold && typeof this._manifold.delete === 'function') this._manifold.delete(); } catch { }
+        this._manifold = null;
         try {
-            this._faceIndex = null;
-            this._dirty = true;
-            // Rebuild now so the caller gets a clean, chainable solid.
             if (typeof this._manifoldize === 'function') {
                 this._manifoldize();
                 if (typeof this._ensureFaceIndex === 'function') this._ensureFaceIndex();

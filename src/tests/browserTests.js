@@ -65,6 +65,7 @@ export class BrowserTesting {
 
   // ====== Small helpers ======
   sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
+  nextFrame() { return new Promise(res => requestAnimationFrame(() => res())); }
 
   // ====== Screenshot dump (unchanged behavior) ======
   async dumpScreenshot() {
@@ -91,8 +92,9 @@ export class BrowserTesting {
     this.env.scene = featureHistory.scene;
 
     try {
-      if (this.autoProgress) await this.sleep(1000);
-      await this.sleep(1000);
+      if (this.autoProgress) await this.sleep(250);
+      await this.nextFrame();
+      await this.nextFrame();
       await this.env.renderer.render(this.env.scene, this.env.camera);
 
       // capture screenshot to the popupDiv
@@ -438,6 +440,7 @@ export class BrowserTesting {
         } catch (_) { /* best-effort snapshot */ }
 
         this._setError(name, await this.endLogging());
+        this._setStatus(name, "pass");
       }
     } catch (err) {
       console.error(`Error in test ${name}:`, err);

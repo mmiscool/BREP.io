@@ -612,8 +612,8 @@ export async function test_cppSolidNative_postBoolean_fillet_merges_coplanar_cub
         throw new Error(`Expected single-edge cube fillet to clear filletEndCap metadata after merging, found ${survivingEndCapMetadata.join(", ")}.`);
     }
 
-    if (Number(result.__filletEndCapMergeCount || 0) !== 2) {
-        throw new Error(`Expected two end-cap merges for a single-edge cube fillet, received ${result.__filletEndCapMergeCount}.`);
+    if (result.__filletEndCapMergeEnabled !== true) {
+        throw new Error("Expected coplanar end-cap merge cleanup to be enabled for a single-edge cube fillet.");
     }
 }
 

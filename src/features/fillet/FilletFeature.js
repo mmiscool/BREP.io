@@ -11,6 +11,7 @@ import {
 import { cleanupFilletSingleNeighborIslands } from "../../BREP/SolidMethods/fillet.js";
 
 const DEBUG_MODE_NONE = "NONE";
+const DEBUG_MODE_CONSOLE_LOG_PROCESS = "CONSOLE.LOG PROCESS";
 const DEBUG_MODE_WEDGE_AND_TUBE = "WEDGE AND TUBE";
 const DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEAN = "WEDGE AND TUBE AFTER BOOLEAN";
 const DEBUG_MODE_COMBINED_BEFORE_TARGET = "COMBINED FILLET BEFORE TARGET BOOLEAN";
@@ -77,6 +78,7 @@ const inputParamsSchema = {
         type: "options",
         options: [
             DEBUG_MODE_NONE,
+            DEBUG_MODE_CONSOLE_LOG_PROCESS,
             DEBUG_MODE_WEDGE_AND_TUBE,
             DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEAN,
             DEBUG_MODE_COMBINED_BEFORE_TARGET,
@@ -89,6 +91,7 @@ const inputParamsSchema = {
 function resolveDebugMode(rawValue) {
     const normalized = String(rawValue).trim().toUpperCase();
     if (normalized === DEBUG_MODE_NONE) return DEBUG_MODE_NONE;
+    if (normalized === DEBUG_MODE_CONSOLE_LOG_PROCESS.toUpperCase()) return DEBUG_MODE_CONSOLE_LOG_PROCESS;
     if (normalized === DEBUG_MODE_WEDGE_AND_TUBE) return DEBUG_MODE_WEDGE_AND_TUBE;
     if (normalized === DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEAN) {
         return DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEAN;
@@ -100,6 +103,9 @@ function resolveDebugMode(rawValue) {
 }
 
 function getDebugConfig(debugMode) {
+    if (debugMode === DEBUG_MODE_CONSOLE_LOG_PROCESS) {
+        return { enabled: false, solidsLevel: -1, showCombinedBeforeTarget: false };
+    }
     if (debugMode === DEBUG_MODE_WEDGE_AND_TUBE) {
         return { enabled: true, solidsLevel: 0, showCombinedBeforeTarget: false };
     }
@@ -704,20 +710,23 @@ export class FilletFeature {
         const debugMode = resolveDebugMode(this.inputParams?.debug);
         const debugConfig = getDebugConfig(debugMode);
         const debugEnabled = !!debugConfig.enabled;
+        const debugLogsEnabled = debugMode !== DEBUG_MODE_NONE;
         const configuredDebugLevel = Number(debugConfig.solidsLevel);
         const debugShowCombinedBeforeTarget = !!debugConfig.showCombinedBeforeTarget;
-        console.log('[FilletFeature] Starting fillet run...', {
-            featureID: this.inputParams?.featureID,
-            direction: this.inputParams?.direction,
-            radius: this.inputParams?.radius,
-            resolution: this.inputParams?.resolution,
-            inflate: this.inputParams?.inflate,
-            nudgeFaceDistance: this.inputParams?.nudgeFaceDistance,
-            debug: debugEnabled,
-            debugMode,
-            debugSolidsLevel: configuredDebugLevel,
-            debugShowCombinedBeforeTarget,
-        });
+        if (debugLogsEnabled) {
+            console.log('[FilletFeature] Starting fillet run...', {
+                featureID: this.inputParams?.featureID,
+                direction: this.inputParams?.direction,
+                radius: this.inputParams?.radius,
+                resolution: this.inputParams?.resolution,
+                inflate: this.inputParams?.inflate,
+                nudgeFaceDistance: this.inputParams?.nudgeFaceDistance,
+                debug: debugEnabled,
+                debugMode,
+                debugSolidsLevel: configuredDebugLevel,
+                debugShowCombinedBeforeTarget,
+            });
+        }
         const added = [];
         const removed = [];
 
@@ -757,15 +766,17 @@ export class FilletFeature {
                 ...(this.persistentData || {}),
                 filletProfiler: profile,
             };
-            console.log('[FilletFeature] Profile', profile);
+            if (debugLogsEnabled) console.log('[FilletFeature] Profile', profile);
             return { added: [], removed: [] };
         }
         profiler.end('resolve target solid', { target: targetSolid?.name || null });
-        console.log('[FilletFeature] Target solid resolved', {
-            name: targetSolid?.name,
-            edgeCount: edgeObjs.length,
-            edgeNames: edgeObjs.map(e => e?.name).filter(Boolean),
-        });
+        if (debugLogsEnabled) {
+            console.log('[FilletFeature] Target solid resolved', {
+                name: targetSolid?.name,
+                edgeCount: edgeObjs.length,
+                edgeNames: edgeObjs.map(e => e?.name).filter(Boolean),
+            });
+        }
 
         const dir = String(this.inputParams.direction || 'AUTO').toUpperCase();
         const r = Number(this.inputParams.radius);
@@ -776,7 +787,7 @@ export class FilletFeature {
                 ...(this.persistentData || {}),
                 filletProfiler: profile,
             };
-            console.log('[FilletFeature] Profile', profile);
+            if (debugLogsEnabled) console.log('[FilletFeature] Profile', profile);
             return { added: [], removed: [] };
         }
 
@@ -798,11 +809,13 @@ export class FilletFeature {
                 usedSheetMetalPath: true,
             };
             if (sheetResult?.root) {
-                console.log('[FilletFeature] Sheet-metal corner fillet applied; replacing target solid.', {
-                    featureID: fid,
-                    appliedTargets: sheetResult?.summary?.applied || 0,
-                    appliedCorners: sheetResult?.summary?.appliedCorners || 0,
-                });
+                if (debugLogsEnabled) {
+                    console.log('[FilletFeature] Sheet-metal corner fillet applied; replacing target solid.', {
+                        featureID: fid,
+                        appliedTargets: sheetResult?.summary?.applied || 0,
+                        appliedCorners: sheetResult?.summary?.appliedCorners || 0,
+                    });
+                }
                 added.push(sheetResult.root);
                 removed.push(targetSolid);
             } else {
@@ -817,7 +830,7 @@ export class FilletFeature {
                 ...(this.persistentData || {}),
                 filletProfiler: profile,
             };
-            console.log('[FilletFeature] Profile', profile);
+            if (debugLogsEnabled) console.log('[FilletFeature] Profile', profile);
             return { added, removed };
         }
 
@@ -865,13 +878,15 @@ export class FilletFeature {
             profiler.end('restore cached solid', {
                 debugSnapshots: Array.isArray(cacheEntry?.debugSnapshots) ? cacheEntry.debugSnapshots.length : 0,
             });
-            console.log('[FilletFeature] Reused cached fillet solid.', {
-                featureID: fid,
-                edges: edgeObjs.length,
-                debugMode,
-                renameFacesRequested: renameFaces,
-                cachedRenameFaces: cacheEntry?.renameFaces,
-            });
+            if (debugLogsEnabled) {
+                console.log('[FilletFeature] Reused cached fillet solid.', {
+                    featureID: fid,
+                    edges: edgeObjs.length,
+                    debugMode,
+                    renameFacesRequested: renameFaces,
+                    cachedRenameFaces: cacheEntry?.renameFaces,
+                });
+            }
         }
         if (!result) {
             profiler.start('native fillet build');
@@ -889,6 +904,8 @@ export class FilletFeature {
                 reassignSliverTriangles: true,
                 collapseFilletSideWalls,
                 debug: debugEnabled,
+                consoleLogProcess: debugLogsEnabled,
+                profile: debugLogsEnabled,
                 debugSolidsLevel: configuredDebugLevel,
                 debugShowCombinedBeforeTarget,
             });
@@ -910,7 +927,7 @@ export class FilletFeature {
                     const rawName = String(dbg.name || 'DEBUG');
                     dbg.name = rawName.startsWith(`${fid}_`) ? rawName : `${fid}_${rawName}`;
                 } catch { }
-                console.log('[FilletFeature] Adding fillet debug solid', { featureID: fid, name: dbg.name });
+                if (debugLogsEnabled) console.log('[FilletFeature] Adding fillet debug solid', { featureID: fid, name: dbg.name });
                 out.push(dbg);
             }
             return out;
@@ -952,12 +969,14 @@ export class FilletFeature {
                 + `(triangles=${triCount}, vertices=${vertCount}, direction=${dir}, radius=${r}, `
                 + `inflate=${this.inputParams.inflate})`);
         }
-        console.log('[FilletFeature] Fillet succeeded; replacing target solid.', {
-            featureID: fid,
-            triangles: triCount,
-            vertices: vertCount,
-            edgeDirectionDecision: edgeDirectionDecision || null,
-        });
+        if (debugLogsEnabled) {
+            console.log('[FilletFeature] Fillet succeeded; replacing target solid.', {
+                featureID: fid,
+                triangles: triCount,
+                vertices: vertCount,
+                edgeDirectionDecision: edgeDirectionDecision || null,
+            });
+        }
         added.push(result);
         added.push(...debugSolids);
         // Replace the original geometry in the scene
@@ -993,7 +1012,7 @@ export class FilletFeature {
                         obj.__filletPostCollapseTinyFaceIslandCleanupEnabled = runPostTinyFaceIslandCleanup;
                         const singleNeighborIslandSummary = cleanupFilletSingleNeighborIslands(obj, {
                             featureID: fid,
-                            debug: debugEnabled,
+                            debug: debugLogsEnabled,
                         });
                         obj.__filletPostSingleNeighborIslandCleanupCount = Math.max(
                             0,
@@ -1053,7 +1072,7 @@ export class FilletFeature {
             ...(this.persistentData || {}),
             filletProfiler: profile,
         };
-        console.log('[FilletFeature] Profile', profile);
+        if (debugLogsEnabled) console.log('[FilletFeature] Profile', profile);
 
         return { added, removed };
     }
