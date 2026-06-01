@@ -333,8 +333,7 @@ export class Solid extends THREE.Group {
      * @returns {Solid}
      */
     _weldVerticesByEpsilon(..._args) {
-        return this;
-        //return SolidMethods._weldVerticesByEpsilon.apply(this, arguments);
+        return SolidMethods._weldVerticesByEpsilon.apply(this, arguments);
     }
 
     /**

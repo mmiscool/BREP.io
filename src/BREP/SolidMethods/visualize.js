@@ -64,7 +64,10 @@ export function visualize(options = {}) {
     } else {
         usedFallback = true;
     }
-    if (usedFallback || !faces) {
+    if (!usedFallback && (!faces || faces.length === 0)) {
+        usedFallback = true;
+    }
+    if (usedFallback) {
         // Fallback: group authored triangles by face name directly from arrays.
         // This enables visualization even if manifoldization failed, which helps debugging.
         const vp = this._vertProperties || [];

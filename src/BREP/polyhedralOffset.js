@@ -1291,6 +1291,15 @@ function _repairSelfIntersections(solid, options = {}) {
           didWorkThisPass = true;
           nextCount = removed.after;
         }
+        // Raycast fallback: if winding-based removal stalled, try ray-based classification
+        if (!removed.changed && pass > 1 && passTopologyBefore.nonManifoldEdgeCount === 0
+            && typeof solid.removeInternalTrianglesByRaycast === 'function') {
+          const raycastResult = runCount(nextCount, 'removeInternalTriangles(raycast)', () => solid.removeInternalTrianglesByRaycast());
+          if (raycastResult.changed) {
+            didWorkThisPass = true;
+            nextCount = raycastResult.after;
+          }
+        }
       }
     }
 

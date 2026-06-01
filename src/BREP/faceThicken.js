@@ -420,75 +420,50 @@ function orientSolidTrianglesByAdjacency(solid) {
     tv[base + 2] = tmp;
   };
 
-  // Build a persistent edge-direction map so stats can be updated incrementally
-  // instead of rebuilding the full map from scratch on every orientationStats() call.
-  const liveEdgeUses = new Map();
-  const triEntryRefs = new Array(triCount);
-  for (let ti = 0; ti < triCount; ti++) {
-    const a = tv[(ti * 3) + 0] >>> 0;
-    const b = tv[(ti * 3) + 1] >>> 0;
-    const c = tv[(ti * 3) + 2] >>> 0;
-    const refs = [];
-    for (const [u, v] of [[a, b], [b, c], [c, a]]) {
-      const key = edgeKey(u, v);
-      let list = liveEdgeUses.get(key);
-      if (!list) { list = []; liveEdgeUses.set(key, list); }
-      const entry = { triIndex: ti, a: u, b: v };
-      list.push(entry);
-      refs.push({ entry, list });
+  const orientationStats = () => {
+    const localEdgeUses = new Map();
+    const addLocalUse = (a, b, triIndex) => {
+      const key = edgeKey(a, b);
+      let list = localEdgeUses.get(key);
+      if (!list) {
+        list = [];
+        localEdgeUses.set(key, list);
+      }
+      list.push({ triIndex, a, b });
+    };
+    for (let triIndex = 0; triIndex < triCount; triIndex++) {
+      const a = tv[(triIndex * 3) + 0] >>> 0;
+      const b = tv[(triIndex * 3) + 1] >>> 0;
+      const c = tv[(triIndex * 3) + 2] >>> 0;
+      addLocalUse(a, b, triIndex);
+      addLocalUse(b, c, triIndex);
+      addLocalUse(c, a, triIndex);
     }
-    triEntryRefs[ti] = refs;
-  }
-
-  const sameByTri = new Uint8Array(triCount);
-  const oppositeByTri = new Uint8Array(triCount);
-  let sameCount = 0;
-  for (const list of liveEdgeUses.values()) {
-    if (list.length !== 2) continue;
-    if (list[0].a === list[1].a && list[0].b === list[1].b) {
-      sameCount++;
-      sameByTri[list[0].triIndex]++;
-      sameByTri[list[1].triIndex]++;
-    } else {
-      oppositeByTri[list[0].triIndex]++;
-      oppositeByTri[list[1].triIndex]++;
-    }
-  }
-
-  const flipAndUpdateStats = (triIndex) => {
-    for (const { entry, list } of triEntryRefs[triIndex]) {
-      if (list.length === 2) {
-        const other = list[0].triIndex === triIndex ? list[1] : list[0];
-        if (entry.a === other.a && entry.b === other.b) {
-          sameCount--;
-          sameByTri[triIndex]--;
-          sameByTri[other.triIndex]--;
-        } else {
-          oppositeByTri[triIndex]--;
-          oppositeByTri[other.triIndex]--;
-        }
-        const tmp = entry.a; entry.a = entry.b; entry.b = tmp;
-        if (entry.a === other.a && entry.b === other.b) {
-          sameCount++;
-          sameByTri[triIndex]++;
-          sameByTri[other.triIndex]++;
-        } else {
-          oppositeByTri[triIndex]++;
-          oppositeByTri[other.triIndex]++;
-        }
+    const sameByTri = new Uint8Array(triCount);
+    const oppositeByTri = new Uint8Array(triCount);
+    let sameCount = 0;
+    for (const uses of localEdgeUses.values()) {
+      if (uses.length !== 2) continue;
+      const sameDirection = uses[0].a === uses[1].a && uses[0].b === uses[1].b;
+      if (sameDirection) {
+        sameCount += 1;
+        sameByTri[uses[0].triIndex] += 1;
+        sameByTri[uses[1].triIndex] += 1;
       } else {
-        const tmp = entry.a; entry.a = entry.b; entry.b = tmp;
+        oppositeByTri[uses[0].triIndex] += 1;
+        oppositeByTri[uses[1].triIndex] += 1;
       }
     }
-    flipTriangle(triIndex);
+    return { sameCount, sameByTri, oppositeByTri };
   };
 
   for (let pass = 0; pass < 16; pass++) {
-    if (sameCount === 0) break;
+    const stats = orientationStats();
+    if (stats.sameCount === 0) break;
     let flippedThisPass = 0;
     for (let triIndex = 0; triIndex < triCount; triIndex++) {
-      if (sameByTri[triIndex] <= oppositeByTri[triIndex]) continue;
-      flipAndUpdateStats(triIndex);
+      if (stats.sameByTri[triIndex] <= stats.oppositeByTri[triIndex]) continue;
+      flipTriangle(triIndex);
       changed += 1;
       flippedThisPass += 1;
     }
@@ -496,27 +471,30 @@ function orientSolidTrianglesByAdjacency(solid) {
   }
 
   for (let pass = 0; pass < 64; pass++) {
-    if (sameCount === 0) break;
+    let stats = orientationStats();
+    if (stats.sameCount === 0) break;
     const candidates = [];
     for (let triIndex = 0; triIndex < triCount; triIndex++) {
-      if (!sameByTri[triIndex]) continue;
+      if (!stats.sameByTri[triIndex]) continue;
       candidates.push({
         triIndex,
-        score: (sameByTri[triIndex] * 2) - oppositeByTri[triIndex],
+        score: (stats.sameByTri[triIndex] * 2) - stats.oppositeByTri[triIndex],
       });
     }
     candidates.sort((a, b) => b.score - a.score || a.triIndex - b.triIndex);
 
     let improvedThisPass = false;
     for (const candidate of candidates) {
-      if (sameCount === 0 || !sameByTri[candidate.triIndex]) break;
-      const before = sameCount;
-      flipAndUpdateStats(candidate.triIndex);
-      if (sameCount < before) {
+      stats = orientationStats();
+      if (stats.sameCount === 0 || !stats.sameByTri[candidate.triIndex]) break;
+      const before = stats.sameCount;
+      flipTriangle(candidate.triIndex);
+      const after = orientationStats().sameCount;
+      if (after < before) {
         changed += 1;
         improvedThisPass = true;
       } else {
-        flipAndUpdateStats(candidate.triIndex);
+        flipTriangle(candidate.triIndex);
       }
     }
     if (!improvedThisPass) break;
@@ -782,14 +760,15 @@ function extractFaceSurface(face, options = {}) {
         uses = [];
         edgeToUses.set(key, uses);
       }
-      uses.push({ triIndex, u: u < v ? u : v, v: u < v ? v : u });
+      uses.push({ triIndex, u, v });
     }
   }
 
-  for (const [, uses] of edgeToUses.entries()) {
+  for (const [key, uses] of edgeToUses.entries()) {
     if (!Array.isArray(uses) || uses.length < 2) continue;
-    const u = uses[0].u;
-    const v = uses[0].v;
+    const [uRaw, vRaw] = key.split('|');
+    const u = Number(uRaw) >>> 0;
+    const v = Number(vRaw) >>> 0;
     for (let i = 0; i < uses.length; i++) {
       for (let j = i + 1; j < uses.length; j++) {
         triAdjacency[uses[i].triIndex].push({ neighbor: uses[j].triIndex, u, v });
@@ -870,7 +849,8 @@ function extractFaceSurface(face, options = {}) {
   };
 
   while (remainingEdges.size) {
-    const seedEdgeKey = remainingEdges.values().next().value;
+    const seedEdgeKey = Array.from(remainingEdges.values())
+      .sort((a, b) => a.localeCompare(b))[0];
     const [seedStartRaw, seedEndRaw] = seedEdgeKey.split('>');
     const seedStart = Number(seedStartRaw) >>> 0;
     const seedEnd = Number(seedEndRaw) >>> 0;
@@ -899,14 +879,16 @@ function extractFaceSurface(face, options = {}) {
   const normalizeLoopSignature = (loop) => {
     const verts = Array.isArray(loop?.vertices) ? loop.vertices.slice(0, -1) : [];
     if (!verts.length) return '';
-    const keys = verts.map((v) => vertexKeys[v] || `${v}`);
-    let minIdx = 0;
-    for (let i = 1; i < keys.length; i++) {
-      if (keys[i] < keys[minIdx]) minIdx = i;
+    let best = null;
+    for (let offset = 0; offset < verts.length; offset++) {
+      const rotated = [];
+      for (let i = 0; i < verts.length; i++) {
+        rotated.push(vertexKeys[verts[(offset + i) % verts.length]] || `${verts[(offset + i) % verts.length]}`);
+      }
+      const signature = rotated.join('>');
+      if (best == null || signature < best) best = signature;
     }
-    const rotated = new Array(keys.length);
-    for (let i = 0; i < keys.length; i++) rotated[i] = keys[(minIdx + i) % keys.length];
-    return rotated.join('>');
+    return best || '';
   };
 
   const loops = rawLoops
@@ -1159,13 +1141,22 @@ function buildStitchedThickenMesh(surface, distance, classificationState) {
   const triIDs = [];
   const addTriangle = (i0, i1, i2, faceID) => {
     if (i0 === i1 || i1 === i2 || i2 === i0) return;
-    const ax = vertProperties[(i0 * 3) + 0], ay = vertProperties[(i0 * 3) + 1], az = vertProperties[(i0 * 3) + 2];
-    const bx = vertProperties[(i1 * 3) + 0], by = vertProperties[(i1 * 3) + 1], bz = vertProperties[(i1 * 3) + 2];
-    const cx = vertProperties[(i2 * 3) + 0], cy = vertProperties[(i2 * 3) + 1], cz = vertProperties[(i2 * 3) + 2];
-    const ux = bx - ax, uy = by - ay, uz = bz - az;
-    const vx = cx - ax, vy = cy - ay, vz = cz - az;
-    const crossX = (uy * vz) - (uz * vy), crossY = (uz * vx) - (ux * vz), crossZ = (ux * vy) - (uy * vx);
-    if (!((crossX * crossX + crossY * crossY + crossZ * crossZ) > 4 * TRI_EPS * TRI_EPS)) return;
+    const a = new THREE.Vector3(
+      vertProperties[(i0 * 3) + 0],
+      vertProperties[(i0 * 3) + 1],
+      vertProperties[(i0 * 3) + 2],
+    );
+    const b = new THREE.Vector3(
+      vertProperties[(i1 * 3) + 0],
+      vertProperties[(i1 * 3) + 1],
+      vertProperties[(i1 * 3) + 2],
+    );
+    const c = new THREE.Vector3(
+      vertProperties[(i2 * 3) + 0],
+      vertProperties[(i2 * 3) + 1],
+      vertProperties[(i2 * 3) + 2],
+    );
+    if (!(triangleArea(a, b, c) > TRI_EPS)) return;
     triVerts.push(i0 >>> 0, i1 >>> 0, i2 >>> 0);
     triIDs.push(Number(faceID) >>> 0);
   };
@@ -1655,19 +1646,19 @@ function fillBoundaryLoopsWithTriangles(solid, faceID) {
 
   const loopSignature = (loop) => {
     if (!Array.isArray(loop) || !loop.length) return '';
-    const findMinRotation = (source) => {
-      let minIdx = 0;
-      for (let i = 1; i < source.length; i++) {
-        if (source[i] < source[minIdx]) minIdx = i;
+    const variants = [];
+    const addVariants = (source) => {
+      for (let offset = 0; offset < source.length; offset++) {
+        const rotated = [];
+        for (let i = 0; i < source.length; i++) rotated.push(source[(offset + i) % source.length]);
+        variants.push(rotated.join('|'));
       }
-      const out = new Array(source.length);
-      for (let i = 0; i < source.length; i++) out[i] = source[(minIdx + i) % source.length];
-      return out.join('|');
     };
-    const fwd = findMinRotation(loop);
-    if (loop.length <= 1) return fwd;
-    const rev = findMinRotation(loop.slice().reverse());
-    return fwd < rev ? fwd : rev;
+    addVariants(loop);
+    if (loop.length > 1) {
+      addVariants(loop.slice().reverse());
+    }
+    return variants.sort()[0] || '';
   };
 
   const traceBoundaryGraphLoops = (componentEdges, componentAdjacency) => {
@@ -2624,13 +2615,7 @@ function triangleSplitCullSolid(solid, options = {}) {
   );
   for (let pass = 0; pass < maxPasses; pass++) {
     passCount = pass + 1;
-    const splitThisPass = options.skipTriangleSplit === true
-      ? (pass === 0 ? Number(solid.splitSelfIntersectingTriangles?.({
-        ...splitOptions,
-        probeOnly: true,
-        maxIntersections: 1,
-      }) || 0) : 0)
-      : Number(solid.splitSelfIntersectingTriangles?.(splitOptions) || 0);
+    const splitThisPass = Number(solid.splitSelfIntersectingTriangles?.(splitOptions) || 0);
     splitCount += splitThisPass;
     degenerateTriangleCount += Number(solid.removeDegenerateTriangles?.() || 0);
     const weldAfterSplit = weldSolidVerticesByPosition(solid, weldTolerance);
@@ -2695,47 +2680,6 @@ function applySourceFaceMetadataToThickenResult(result, face, labels, sourceFace
   } catch {
     /* ignore metadata propagation errors */
   }
-}
-
-function shouldSkipArrangementSplitForSelfOverlappingSurface(surface, distance) {
-  const dist = Number(distance);
-  if (!(dist < 0)) return false;
-  const vertices = Array.isArray(surface?.vertices) ? surface.vertices : [];
-  const normals = Array.isArray(surface?.vertexNormals) ? surface.vertexNormals : [];
-  if (vertices.length < 3 || normals.length < vertices.length) return false;
-
-  const normalSum = new THREE.Vector3();
-  const centroid = new THREE.Vector3();
-  let normalCount = 0;
-  for (let i = 0; i < vertices.length; i++) {
-    const vertex = vertices[i];
-    const normal = normals[i];
-    if (!vertex || !normal || !(normal.lengthSq?.() > TRI_EPS)) continue;
-    centroid.add(vertex);
-    normalSum.add(normal);
-    normalCount += 1;
-  }
-  if (normalCount < 3) return false;
-  centroid.multiplyScalar(1 / normalCount);
-
-  // A low resultant normal indicates a closed-around curved patch, such as a
-  // full cylinder side. Planar and open curved patches should continue using
-  // the full arrangement split path.
-  const resultantNormalLength = normalSum.length() / normalCount;
-  if (resultantNormalLength > 0.35) return false;
-
-  let minPositiveSupport = Infinity;
-  for (let i = 0; i < vertices.length; i++) {
-    const vertex = vertices[i];
-    const normal = normals[i];
-    if (!vertex || !normal || !(normal.lengthSq?.() > TRI_EPS)) continue;
-    const support = vertex.clone().sub(centroid).dot(normal);
-    if (support > TRI_EPS && support < minPositiveSupport) {
-      minPositiveSupport = support;
-    }
-  }
-  if (!Number.isFinite(minPositiveSupport)) return false;
-  return Math.abs(dist) >= minPositiveSupport * 0.95;
 }
 
 function thickenSurfaceToSolid(surface, face, distance, options = {}) {
@@ -2862,14 +2806,8 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
       throw new Error('Face.thicken() failed to build the stitched triangle shell.');
     }
 
-    const skipArrangementSplit = options.skipTriangleSplit === true
-      || (
-        options.skipTriangleSplit !== false
-        && shouldSkipArrangementSplitForSelfOverlappingSurface(surface, dist)
-      );
     const cleanup = triangleSplitCullSolid(staged, {
       ...options,
-      skipTriangleSplit: skipArrangementSplit,
       weldTolerance: manifoldWeldEpsilon,
     });
     let topology = cleanup?.topology || analyzeMeshTopology(staged);

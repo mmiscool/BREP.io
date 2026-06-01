@@ -85,6 +85,7 @@ import {
     test_generated_history_20260427005357_three_face_thicken,
 } from './test_generated_history_20260427005357.js';
 import { test_generated_history_20260523000414 } from './test_generated_history_20260523000414.js';
+import { test_generated_history_20260531201126 } from './test_generated_history_20260531201126.js';
 import {
     afterRun_fillet_preserves_original_face_names,
     test_fillet_preserves_original_face_names,
@@ -675,6 +676,13 @@ export const testFunctions = [
     },
     {
         test: test_generated_history_20260523000414,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_generated_history_20260531201126,
         printArtifacts: false,
         exportFaces: false,
         exportSolids: false,

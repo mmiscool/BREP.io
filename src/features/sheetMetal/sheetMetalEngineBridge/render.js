@@ -47,7 +47,9 @@ function quantizeCoord(value, quantum = COORD_QUANT) {
   if (!Number.isFinite(value)) return 0;
   if (!(quantum > 0)) return value;
   const snapped = Math.round(value / quantum) * quantum;
-  return Math.abs(snapped) <= quantum ? 0 : snapped;
+  if (Math.abs(snapped) <= quantum) return 0;
+  const decimals = Math.max(0, Math.min(12, Math.ceil(-Math.log10(quantum)) + 1));
+  return Number(snapped.toFixed(decimals));
 }
 
 function quantizePoint3(point, quantum = COORD_QUANT) {
@@ -77,6 +79,59 @@ function addTriangleIfValid(solid, faceName, a, b, c) {
   if (triangleAreaSq3(a, b, c) <= TRIANGLE_AREA_EPS) return false;
   solid.addTriangle(faceName, a, b, c);
   return true;
+}
+
+function weldSolidVerticesByQuantizedPosition(solid, quantum = COORD_QUANT) {
+  if (!solid || !Array.isArray(solid._vertProperties) || !Array.isArray(solid._triVerts)) return solid;
+  const oldVerts = solid._vertProperties;
+  const oldTris = solid._triVerts;
+  const oldIds = solid._triIDs || [];
+  if (oldVerts.length < 3 || oldTris.length < 3) return solid;
+
+  const newVerts = [];
+  const newTris = [];
+  const newIds = [];
+  const keyToIndex = new Map();
+  const oldToNew = new Map();
+  const indexForOldVertex = (oldIndex) => {
+    if (oldToNew.has(oldIndex)) return oldToNew.get(oldIndex);
+    const x = quantizeCoord(oldVerts[oldIndex * 3], quantum);
+    const y = quantizeCoord(oldVerts[oldIndex * 3 + 1], quantum);
+    const z = quantizeCoord(oldVerts[oldIndex * 3 + 2], quantum);
+    const key = `${x},${y},${z}`;
+    let nextIndex = keyToIndex.get(key);
+    if (nextIndex === undefined) {
+      nextIndex = (newVerts.length / 3) | 0;
+      keyToIndex.set(key, nextIndex);
+      newVerts.push(x, y, z);
+    }
+    oldToNew.set(oldIndex, nextIndex);
+    return nextIndex;
+  };
+
+  for (let i = 0; i < oldTris.length; i += 3) {
+    const a = indexForOldVertex(oldTris[i]);
+    const b = indexForOldVertex(oldTris[i + 1]);
+    const c = indexForOldVertex(oldTris[i + 2]);
+    if (a === b || b === c || c === a) continue;
+    const pa = [newVerts[a * 3], newVerts[a * 3 + 1], newVerts[a * 3 + 2]];
+    const pb = [newVerts[b * 3], newVerts[b * 3 + 1], newVerts[b * 3 + 2]];
+    const pc = [newVerts[c * 3], newVerts[c * 3 + 1], newVerts[c * 3 + 2]];
+    if (triangleAreaSq3(pa, pb, pc) <= TRIANGLE_AREA_EPS) continue;
+    newTris.push(a, b, c);
+    newIds.push(oldIds[(i / 3) | 0]);
+  }
+
+  if (newVerts.length === oldVerts.length && newTris.length === oldTris.length) return solid;
+  solid._vertProperties = newVerts;
+  solid._triVerts = newTris;
+  solid._triIDs = newIds;
+  solid._vertKeyToIndex = keyToIndex;
+  solid._dirty = true;
+  solid._faceIndex = null;
+  try { if (solid._manifold && typeof solid._manifold.delete === "function") solid._manifold.delete(); } catch {}
+  solid._manifold = null;
+  return solid;
 }
 
 function makeMidplaneWorldPoint(matrix, point2) {
@@ -447,8 +502,15 @@ function addFlatPlacementToSolid({ solid, placement, featureID, thickness, edgeC
 
   const contour = outerLoop.map((point) => new THREE.Vector2(point[0], point[1]));
   const holeLoops = holeEntries.map((entry) => entry.loop.map((point) => new THREE.Vector2(point[0], point[1])));
-  const triangles = THREE.ShapeUtils.triangulateShape(contour, holeLoops);
-  if (!triangles.length) return;
+  const rawTriangles = THREE.ShapeUtils.triangulateShape(contour, holeLoops);
+  if (!rawTriangles.length) return;
+  // If the contour is CW (negative signed area), the triangulation produces reversed normals.
+  // Flip each triangle's winding to restore outward-facing normals without changing the loop
+  // order (which is relied upon for bend-attachment edge detection).
+  const needsFlip = signedArea2D(outerLoop) < 0;
+  const triangles = needsFlip
+    ? rawTriangles.map(([a, b, c]) => [a, c, b])
+    : rawTriangles;
 
   const loops = [outerLoop, ...holeEntries.map((entry) => entry.loop)];
   const loopOffsets = [];
@@ -524,8 +586,13 @@ function addFlatPlacementToSolid({ solid, placement, featureID, thickness, edgeC
     const sideFace = makeFlatFaceName(featureID, flat.id, `SIDE:${edgeId}`);
     const topA = outerOffset + i;
     const topB = outerOffset + next;
-    addTriangleIfValid(solid, sideFace, topPoints[topA], bottomPoints[topA], topPoints[topB]);
-    addTriangleIfValid(solid, sideFace, topPoints[topB], bottomPoints[topA], bottomPoints[topB]);
+    if (needsFlip) {
+      addTriangleIfValid(solid, sideFace, topPoints[topA], topPoints[topB], bottomPoints[topA]);
+      addTriangleIfValid(solid, sideFace, topPoints[topB], bottomPoints[topB], bottomPoints[topA]);
+    } else {
+      addTriangleIfValid(solid, sideFace, topPoints[topA], bottomPoints[topA], topPoints[topB]);
+      addTriangleIfValid(solid, sideFace, topPoints[topB], bottomPoints[topA], bottomPoints[topB]);
+    }
     const cylindricalMeta = buildFlatWallCylindricalMetadata({
       edge: mappedEdge,
       placementMatrix: placement.matrix,
@@ -586,8 +653,13 @@ function addFlatPlacementToSolid({ solid, placement, featureID, thickness, edgeC
       const sideFace = faceGroup.faceName;
       const topA = offset + i;
       const topB = offset + next;
-      addTriangleIfValid(solid, sideFace, topPoints[topA], bottomPoints[topA], topPoints[topB]);
-      addTriangleIfValid(solid, sideFace, topPoints[topB], bottomPoints[topA], bottomPoints[topB]);
+      if (needsFlip) {
+        addTriangleIfValid(solid, sideFace, topPoints[topA], topPoints[topB], bottomPoints[topA]);
+        addTriangleIfValid(solid, sideFace, topPoints[topB], bottomPoints[topB], bottomPoints[topA]);
+      } else {
+        addTriangleIfValid(solid, sideFace, topPoints[topA], bottomPoints[topA], topPoints[topB]);
+        addTriangleIfValid(solid, sideFace, topPoints[topB], bottomPoints[topA], bottomPoints[topB]);
+      }
       solid.setFaceMetadata(sideFace, {
         flatId: flat.id,
         edgeId: faceGroup.edgeId,
@@ -1187,12 +1259,14 @@ function buildRenderableSheetModel({ featureID, tree, rootMatrix = null, showFla
       candidate.polyline = transformPolyline3ByMatrix(candidate.polyline, rootTransform);
     }
   }
+  weldSolidVerticesByQuantizedPosition(root);
 
   const cutoutApplication = applyRecordedCutoutsToSolid(root, tree);
   let outputSolid = isSolidLikeObject(cutoutApplication?.solid) ? cutoutApplication.solid : root;
   if (outputSolid !== root) {
     preserveSheetMetalFaceNames(outputSolid, root);
   }
+  weldSolidVerticesByQuantizedPosition(outputSolid);
   outputSolid.name = featureID;
   assignSheetMetalEdgeMetadata(outputSolid, edgeCandidates);
 
