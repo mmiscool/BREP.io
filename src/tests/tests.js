@@ -235,6 +235,11 @@ import { test_sheetMetal_corner_fillet_compound_reference } from './test_sheetMe
 import { test_sheetMetal_corner_fillet_selection_resolution } from './test_sheetMetal_corner_fillet_selection_resolution.js';
 import { test_sheetMetal_cutout_context_button } from './test_sheetMetal_cutout_context_button.js';
 import { test_sheetMetal_cutoutEdge_flange_controls } from './test_sheetMetal_cutoutEdge_flange_controls.js';
+import {
+    afterRun_sheetMetal_contour_flange_whole_sketch_selection,
+    test_sheetMetal_contour_flange_context_button_prefers_sketch,
+    test_sheetMetal_contour_flange_whole_sketch_selection,
+} from './test_sheetMetal_contour_flange_sketch_selection.js';
 import { test_sheetMetal_nonManifold_sm_f18 } from './test_sheetMetal_nonManifold_sm_f18.js';
 import { test_sheetMetal_tab_circular_hole_wall } from './test_sheetMetal_tab_circular_hole_wall.js';
 import { afterRun_sketch_openLoop, test_sketch_openLoop } from './test_sketch_openLoop.js';
@@ -753,6 +758,8 @@ export const testFunctions = [
     { test: test_sheetMetal_tab_circular_hole_wall, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_bend_face_cylindrical_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_cutout_context_button, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sheetMetal_contour_flange_context_button_prefers_sketch, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sheetMetal_contour_flange_whole_sketch_selection, afterRun: afterRun_sheetMetal_contour_flange_whole_sketch_selection, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_cutoutEdge_flange_controls, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_corner_fillet, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_corner_fillet_face_cylindrical_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

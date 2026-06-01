@@ -7,7 +7,7 @@ Status: Implemented (engine-backed)
 Contour Flange builds a base sheet-metal tree from an open path (sketch/edge chain) and evaluates it using the shared deterministic sheet-metal core.
 
 ## Inputs
-- `path` – Connected edge chain (from sketch, edges, or face boundaries).
+- `path` – Connected path from a whole sketch, individual edges, or face boundaries. Selecting a sketch uses all non-construction sketch curves as the contour path.
 - `distance` – Strip width offset from the path.
 - `thickness` – Global model thickness.
 - `reverseSheetSide` – Flips offset side and placement direction.

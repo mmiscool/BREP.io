@@ -561,6 +561,12 @@ export class SelectionFilter {
 
             const allowed = SelectionFilter.allowedSelectionTypes;
             const allowAll = allowed === SelectionFilter.ALL;
+            const activeRefDef = activeRefInput?.__refSelectionDef || null;
+            const preferredAncestorTypes = Array.isArray(activeRefDef?.preferAncestorSelectionTypes)
+                ? activeRefDef.preferAncestorSelectionTypes
+                    .map((type) => String(type || '').toUpperCase())
+                    .filter(Boolean)
+                : [];
             const priorityOrder = [
                 SelectionFilter.VERTEX,
                 SelectionFilter.EDGE,
@@ -607,8 +613,18 @@ export class SelectionFilter {
             };
 
             let targetObj = null;
+            if (preferredAncestorTypes.length) {
+                for (const desired of preferredAncestorTypes) {
+                    if (!allowAll && !allowedHas(desired)) continue;
+                    const picked = findAncestorOfType(objectToToggleSelectionOn, desired);
+                    if (picked) {
+                        targetObj = picked;
+                        break;
+                    }
+                }
+            }
             if (allowAll || allowedHas(objectToToggleSelectionOn?.type)) {
-                targetObj = objectToToggleSelectionOn;
+                if (!targetObj) targetObj = objectToToggleSelectionOn;
             }
             if (!targetObj) {
                 targetObj = pickByTypeList(allowedPriority);

@@ -9,6 +9,7 @@ const inputParamsSchema = {
   path: {
     type: "reference_selection",
     selectionFilter: ["SKETCH", "EDGE", "FACE"],
+    preferAncestorSelectionTypes: ["SKETCH"],
     multiple: true,
     default_value: null,
     hint: "Open sketch (or connected edges) defining the flange centerline.",
@@ -55,6 +56,27 @@ export class SheetMetalContourFlangeFeature {
   static shortName = "SM.CF";
   static longName = "Sheet Metal Contour Flange";
   static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems) {
+    const items = Array.isArray(selectedItems) ? selectedItems : [];
+    if (items.length !== 1) return false;
+
+    const pick = items[0] || null;
+    const type = String(pick?.type || "").toUpperCase();
+    const parentType = String(pick?.parent?.type || "").toUpperCase();
+    const isSketch = type === "SKETCH";
+    const isSketchChild = (type === "EDGE" || type === "FACE") && parentType === "SKETCH";
+    const isStandalonePath = type === "EDGE" || type === "FACE";
+    if (!isSketch && !isSketchChild && !isStandalonePath) return false;
+
+    const source = isSketchChild ? pick.parent : pick;
+    const name = source?.name
+      || source?.userData?.faceName
+      || source?.userData?.edgeName
+      || null;
+    if (!name) return false;
+
+    return { field: "path", value: [name] };
+  }
 
   constructor() {
     this.inputParams = {};
@@ -66,7 +88,6 @@ export class SheetMetalContourFlangeFeature {
   }
 
   async run(partHistory) {
-    void partHistory;
-    return runSheetMetalContourFlange(this);
+    return runSheetMetalContourFlange(this, partHistory);
   }
 }

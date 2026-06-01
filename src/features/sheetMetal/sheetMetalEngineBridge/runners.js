@@ -145,9 +145,24 @@ export function runSheetMetalTab(instance) {
   return { added: [root], removed: dedupeObjects(removed) };
 }
 
-export function runSheetMetalContourFlange(instance) {
+function resolveSelectionReferences(selections, partHistory) {
+  const scene = partHistory?.scene || null;
+  const resolver = typeof partHistory?.getObjectByName === "function"
+    ? (name) => partHistory.getObjectByName(name)
+    : (name) => scene?.getObjectByName?.(name);
+  if (typeof resolver !== "function") return selections;
+
+  return normalizeSelectionArray(selections).map((selection) => {
+    if (selection && typeof selection === "object") return selection;
+    if (selection == null) return selection;
+    const name = String(selection);
+    return resolver(name) || selection;
+  });
+}
+
+export function runSheetMetalContourFlange(instance, partHistory = null) {
   const featureID = featureIdFromInstance(instance, "SM_CF");
-  const pathSelections = normalizeSelectionArray(instance?.inputParams?.path);
+  const pathSelections = resolveSelectionReferences(instance?.inputParams?.path, partHistory);
   const thickness = Math.max(MIN_THICKNESS, Math.abs(toFiniteNumber(instance?.inputParams?.thickness, 1)));
   const distance = toFiniteNumber(instance?.inputParams?.distance, 20);
   const reverseSheetSide = !!instance?.inputParams?.reverseSheetSide;
