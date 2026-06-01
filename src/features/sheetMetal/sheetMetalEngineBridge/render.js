@@ -407,8 +407,46 @@ function fitCircularEdgePolyline2(polyline) {
   return { center, radius };
 }
 
+function fitClosedCircularLoop2(loop) {
+  const points = normalizeLoop2(loop);
+  if (points.length < 6) return null;
+
+  const first = points[0];
+  const oneThird = points[Math.floor(points.length / 3)];
+  const twoThirds = points[Math.floor((points.length * 2) / 3)];
+  const center = circumcenter2(first, oneThird, twoThirds);
+  if (!center) return null;
+
+  const radii = points.map((point) => Math.hypot(point[0] - center[0], point[1] - center[1]));
+  const radius = radii.reduce((sum, value) => sum + value, 0) / radii.length;
+  if (!(Number.isFinite(radius) && radius > EPS)) return null;
+
+  const tolerance = Math.max(1e-4, radius * 1e-3);
+  for (const sampleRadius of radii) {
+    if (Math.abs(sampleRadius - radius) > tolerance) return null;
+  }
+
+  return { center, radius };
+}
+
 function buildFlatWallCylindricalMetadata({ edge, placementMatrix, thickness }) {
   const fit = fitCircularEdgePolyline2(edge?.polyline);
+  if (!fit) return null;
+  const axisDir = new THREE.Vector3(0, 0, 1).transformDirection(placementMatrix).normalize();
+  const axisCenter = makeMidplaneWorldPoint(placementMatrix, fit.center);
+  const height = Math.abs(toFiniteNumber(thickness, 0));
+  if (!(height > EPS)) return null;
+  return {
+    type: "cylindrical",
+    radius: fit.radius,
+    height,
+    axis: [axisDir.x, axisDir.y, axisDir.z],
+    center: [axisCenter.x, axisCenter.y, axisCenter.z],
+  };
+}
+
+function buildFlatHoleCylindricalMetadata({ loop, placementMatrix, thickness }) {
+  const fit = fitClosedCircularLoop2(loop);
   if (!fit) return null;
   const axisDir = new THREE.Vector3(0, 0, 1).transformDirection(placementMatrix).normalize();
   const axisCenter = makeMidplaneWorldPoint(placementMatrix, fit.center);
@@ -618,6 +656,15 @@ function addFlatPlacementToSolid({ solid, placement, featureID, thickness, edgeC
     const hole = holeEntries[holeIndex];
     const loop = hole.loop;
     const offset = loopOffsets[holeIndex + 1];
+    const holeCylindricalMeta = buildFlatHoleCylindricalMetadata({
+      loop,
+      placementMatrix: placement.matrix,
+      thickness,
+    });
+    const groupedCircularHoleEdgeId = holeCylindricalMeta ? `${hole.id}:wall` : null;
+    const groupedCircularHoleFace = holeCylindricalMeta
+      ? makeFlatFaceName(featureID, flat.id, `CUTOUT:${hole.id}:WALL`)
+      : null;
     const holeSourceEdges = cloneHoleSourceChains2(
       hole?.raw?.sourceChains,
       `${flat.id}:hole:${hole.id}:source`,
@@ -635,14 +682,14 @@ function addFlatPlacementToSolid({ solid, placement, featureID, thickness, edgeC
       const mappedEdge = edgeIndex.get(edgeSignature)
         || findSourceEdgeForSegment(loop[i], loop[next], edgeSourceIndex)
         || null;
-      const edgeId = mappedEdge?.id || makeHoleSegmentEdgeId(flat.id, hole.id, holeEdgeIndex);
+      const edgeId = groupedCircularHoleEdgeId || mappedEdge?.id || makeHoleSegmentEdgeId(flat.id, hole.id, holeEdgeIndex);
       if (mappedEdge?.bend || mappedEdge?.isAttachEdge) continue;
 
-      const faceGroupKey = mappedSourceEdge?.id || edgeId;
+      const faceGroupKey = groupedCircularHoleEdgeId || mappedSourceEdge?.id || edgeId;
       let faceGroup = holeFaceGroups.get(faceGroupKey);
       if (!faceGroup) {
         faceGroup = {
-          faceName: makeFlatFaceName(featureID, flat.id, `CUTOUT:${hole.id}:EDGE:${holeEdgeIndex}`),
+          faceName: groupedCircularHoleFace || makeFlatFaceName(featureID, flat.id, `CUTOUT:${hole.id}:EDGE:${holeEdgeIndex}`),
           edgeId,
           edgeIndex: holeEdgeIndex,
           edgeSignature: edgeSignature || null,
@@ -661,6 +708,7 @@ function addFlatPlacementToSolid({ solid, placement, featureID, thickness, edgeC
         addTriangleIfValid(solid, sideFace, topPoints[topB], bottomPoints[topA], bottomPoints[topB]);
       }
       solid.setFaceMetadata(sideFace, {
+        ...(holeCylindricalMeta || {}),
         flatId: flat.id,
         edgeId: faceGroup.edgeId,
         holeId: hole.id,
@@ -678,6 +726,9 @@ function addFlatPlacementToSolid({ solid, placement, featureID, thickness, edgeC
           edgeSignature: faceGroup.edgeSignature,
         },
       });
+    }
+    if (holeCylindricalMeta && groupedCircularHoleFace && holeFaceGroups.size > 0) {
+      addCylindricalFaceCenterline({ solid, faceName: groupedCircularHoleFace, metadata: holeCylindricalMeta });
     }
   }
 
