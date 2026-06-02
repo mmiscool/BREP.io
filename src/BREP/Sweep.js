@@ -148,26 +148,33 @@ export function computeBoundaryLoopsFromFaceNative(faceObj) {
       }
       return 0.5 * a;
     };
-    const loopAreas = loops.map((loop) => {
-      const v2 = loop.pts.map((P) => {
+    const pointInPolygon = (point, polygon) => {
+      let inside = false;
+      const px = point.x;
+      const py = point.y;
+      for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        const a = polygon[i];
+        const b = polygon[j];
+        const crosses = ((a.y > py) !== (b.y > py))
+          && (px < ((b.x - a.x) * (py - a.y)) / ((b.y - a.y) || 1e-30) + a.x);
+        if (crosses) inside = !inside;
+      }
+      return inside;
+    };
+    const projectedLoops = loops.map((loop) => loop.pts.map((P) => {
         const vp = new THREE.Vector3(P[0], P[1], P[2]);
         return new THREE.Vector2(vp.dot(U), vp.dot(V));
-      });
-      return area2(v2);
-    });
-    let outerIdx = 0;
-    let outerAbs = 0;
-    for (let i = 0; i < loopAreas.length; i++) {
-      const abs = Math.abs(loopAreas[i]);
-      if (abs > outerAbs) {
-        outerAbs = abs;
-        outerIdx = i;
-      }
-    }
-    const outerSign = Math.sign(loopAreas[outerIdx] || 1);
+    }));
+    const loopAreas = projectedLoops.map(area2);
     for (let i = 0; i < loops.length; i++) {
-      const sign = Math.sign(loopAreas[i] || 0);
-      loops[i].isHole = sign !== outerSign;
+      let containingLoopCount = 0;
+      const areaAbs = Math.abs(loopAreas[i]);
+      for (let j = 0; j < loops.length; j++) {
+        if (i === j) continue;
+        if (Math.abs(loopAreas[j]) <= areaAbs) continue;
+        if (projectedLoops[i].some((point) => pointInPolygon(point, projectedLoops[j]))) containingLoopCount++;
+      }
+      loops[i].isHole = (containingLoopCount % 2) === 1;
     }
   }
 

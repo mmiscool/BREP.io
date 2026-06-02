@@ -1,4 +1,5 @@
 import { BREP } from "../BREP/BREP.js";
+import { computeBoundaryLoopsFromFaceNative } from "../BREP/Sweep.js";
 import { RevolveFeature } from "../features/revolve/RevolveFeature.js";
 
 export async function test_revolve_feature_resolves_face_and_edge_string_references() {
@@ -78,5 +79,42 @@ export async function test_revolve_generates_manifold_native_faces_for_axis_edge
     const volume = revolve.volume();
     if (!(volume > 0)) {
         throw new Error(`Expected axis-edge revolve to have positive manifold volume. Volume=${volume}.`);
+    }
+}
+
+export async function test_revolve_face_profile_boundary_recovery_marks_inner_loop_as_hole() {
+    const THREE = BREP.THREE;
+    const points = [
+        [-2, -2, 0],
+        [2, -2, 0],
+        [2, 2, 0],
+        [-2, 2, 0],
+        [-1, -1, 0],
+        [1, -1, 0],
+        [1, 1, 0],
+        [-1, 1, 0],
+    ];
+    const triangles = [
+        [0, 1, 5], [0, 5, 4],
+        [1, 2, 6], [1, 6, 5],
+        [2, 3, 7], [2, 7, 6],
+        [3, 0, 4], [3, 4, 7],
+    ];
+    const positions = [];
+    for (const tri of triangles) {
+        for (const index of tri) positions.push(...points[index]);
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.computeVertexNormals();
+    const face = new BREP.Face(geometry);
+    face.updateMatrixWorld?.(true);
+
+    const loops = computeBoundaryLoopsFromFaceNative(face);
+    const outerCount = loops.filter((loop) => !loop.isHole).length;
+    const holeCount = loops.filter((loop) => loop.isHole).length;
+    if (outerCount !== 1 || holeCount !== 1) {
+        throw new Error(`Expected recovered annular profile to have one outer loop and one hole. Outer=${outerCount}, Holes=${holeCount}.`);
     }
 }

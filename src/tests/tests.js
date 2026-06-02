@@ -334,6 +334,7 @@ import {
 import { test_thicken_feature_is_available_in_modeling_and_surfacing_workbenches } from './test_workbenchFeatureVisibility.js';
 import { test_sketch_feature_scene_visibility } from './test_sketchFeatureVisibility.js';
 import {
+    test_revolve_face_profile_boundary_recovery_marks_inner_loop_as_hole,
     test_revolve_feature_resolves_face_and_edge_string_references,
     test_revolve_generates_manifold_native_faces_for_axis_edge_profile,
 } from './test_revolveFeature.js';
@@ -400,6 +401,7 @@ export const testFunctions = [
     { test: test_cppSolidCore_removeDisconnectedIslandsByVolume_drops_small_shells, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidBakeTransform_updates_solid_authoring_state, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidMirror_preserves_face_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_revolve_face_profile_boundary_recovery_marks_inner_loop_as_hole, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_revolve_feature_resolves_face_and_edge_string_references, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_revolve_generates_manifold_native_faces_for_axis_edge_profile, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_remesh_simplify_welds_by_tolerance_before_simplify, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
