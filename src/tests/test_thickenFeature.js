@@ -195,8 +195,8 @@ export async function test_face_thicken_planar_profile(partHistory) {
   const actualFaceNames = getFaceNamesSet(solid);
   assert(actualFaceNames.has('THICK_PLANAR_SRC:PROFILE_START'), '[thicken-planar] Missing start face.');
   assert(actualFaceNames.has('THICK_PLANAR_SRC:PROFILE_END'), '[thicken-planar] Missing end face.');
-  const sidewalls = listFaceNamesByRegex(solid, /^THICK_PLANAR_SRC:PROFILE_E\d+_SW$/);
-  assert(sidewalls.length === 4, `[thicken-planar] Expected 4 per-edge sidewalls, received ${sidewalls.length}.`);
+  const sidewalls = listFaceNamesByRegex(solid, /^THICK_PLANAR_SRC_G10\d_SW$/);
+  assert(sidewalls.length === 4, `[thicken-planar] Expected 4 logical source-edge sidewalls, received ${sidewalls.length}.`);
   assertSidewallsConnectToCaps(
     solid,
     'thicken-planar',
@@ -222,8 +222,8 @@ export async function test_face_thicken_hole_profile(partHistory) {
   const faceNames = getFaceNamesSet(solid);
   assert(faceNames.has('THICK_RING_SRC:PROFILE_START'), '[thicken-hole] Missing start face.');
   assert(faceNames.has('THICK_RING_SRC:PROFILE_END'), '[thicken-hole] Missing end face.');
-  const outerSidewalls = listFaceNamesByRegex(solid, /^THICK_RING_SRC:PROFILE_E\d+_SW$/);
-  const innerSidewalls = listFaceNamesByRegex(solid, /^THICK_RING_SRC:PROFILE_L1_E\d+_SW$/);
+  const outerSidewalls = listFaceNamesByRegex(solid, /^THICK_RING_SRC_G20\d_SW$/);
+  const innerSidewalls = listFaceNamesByRegex(solid, /^THICK_RING_SRC_G21\d_SW$/);
   assert(outerSidewalls.length === 4, `[thicken-hole] Expected 4 outer sidewalls, received ${outerSidewalls.length}.`);
   assert(innerSidewalls.length === 4, `[thicken-hole] Expected 4 inner sidewalls, received ${innerSidewalls.length}.`);
   assertSidewallsConnectToCaps(
@@ -258,10 +258,10 @@ export async function test_face_thicken_curved_cylinder_side(partHistory) {
   const faceNames = getFaceNamesSet(solid);
   assert(faceNames.has('THICK_CURVED_SRC_S_START'), '[thicken-curved] Missing start face.');
   assert(faceNames.has('THICK_CURVED_SRC_S_END'), '[thicken-curved] Missing end face.');
-  const outerSidewalls = listFaceNamesByRegex(solid, /^THICK_CURVED_SRC_S_E\d+_SW$/);
-  const innerSidewalls = listFaceNamesByRegex(solid, /^THICK_CURVED_SRC_S_L1_E\d+_SW$/);
-  assert(outerSidewalls.length > 0, '[thicken-curved] Expected per-edge sidewalls on the first boundary loop.');
-  assert(innerSidewalls.length > 0, '[thicken-curved] Expected per-edge sidewalls on the second boundary loop.');
+  const outerSidewalls = listFaceNamesByRegex(solid, /^THICK_CURVED_SRC_B_THICK_CURVED_SRC_S_0_SW$/);
+  const innerSidewalls = listFaceNamesByRegex(solid, /^THICK_CURVED_SRC_S_THICK_CURVED_SRC_T_0_SW$/);
+  assert(outerSidewalls.length === 1, `[thicken-curved] Expected one logical source-edge sidewall on the first boundary loop, received ${outerSidewalls.length}.`);
+  assert(innerSidewalls.length === 1, `[thicken-curved] Expected one logical source-edge sidewall on the second boundary loop, received ${innerSidewalls.length}.`);
 
   const sourceRadius = averageFaceTriangleRadiusXZ(solid, 'THICK_CURVED_SRC_S_START');
   const offsetRadius = averageFaceTriangleRadiusXZ(solid, 'THICK_CURVED_SRC_S_END');
@@ -284,8 +284,8 @@ export async function test_face_thicken_filleted_planar_face_keeps_clean_boundar
   const faceNames = getFaceNamesSet(solid);
   assert(faceNames.has('THICK_FILLETED_SRC_PZ_START'), '[thicken-filleted-planar] Missing start face.');
   assert(faceNames.has('THICK_FILLETED_SRC_PZ_END'), '[thicken-filleted-planar] Missing end face.');
-  const sidewalls = listFaceNamesByRegex(solid, /^THICK_FILLETED_SRC_PZ_(?:L\d+_)?E\d+_SW$/);
-  assert(sidewalls.length > 0, '[thicken-filleted-planar] Expected per-edge sidewalls.');
+  const sidewalls = listFaceNamesByRegex(solid, /^THICK_FILLETED_SRC_FILLET_FILLET_.*_THICK_FILLETED_SRC_PZ_0_SW$/);
+  assert(sidewalls.length === 4, `[thicken-filleted-planar] Expected 4 logical source-edge sidewalls, received ${sidewalls.length}.`);
   assertSidewallsConnectToCaps(
     solid,
     'thicken-filleted-planar',
@@ -335,10 +335,10 @@ export async function test_face_thicken_partial_torus_side_avoids_internal_voids
   const faceNames = getFaceNamesSet(solid);
   assert(faceNames.has('THICK_TORUS_SRC_Side_START'), '[thicken-partial-torus] Missing start face.');
   assert(faceNames.has('THICK_TORUS_SRC_Side_END'), '[thicken-partial-torus] Missing end face.');
-  const outerSidewalls = listFaceNamesByRegex(solid, /^THICK_TORUS_SRC_Side_E\d+_SW$/);
-  const innerSidewalls = listFaceNamesByRegex(solid, /^THICK_TORUS_SRC_Side_L1_E\d+_SW$/);
-  assert(outerSidewalls.length > 0, '[thicken-partial-torus] Expected per-edge sidewalls on the first boundary loop.');
-  assert(innerSidewalls.length > 0, '[thicken-partial-torus] Expected per-edge sidewalls on the second boundary loop.');
+  const outerSidewalls = listFaceNamesByRegex(solid, /^THICK_TORUS_SRC_Cap0_THICK_TORUS_SRC_Side_0_SW$/);
+  const innerSidewalls = listFaceNamesByRegex(solid, /^THICK_TORUS_SRC_Cap1_THICK_TORUS_SRC_Side_0_SW$/);
+  assert(outerSidewalls.length === 1, `[thicken-partial-torus] Expected one logical source-edge sidewall on the first boundary loop, received ${outerSidewalls.length}.`);
+  assert(innerSidewalls.length === 1, `[thicken-partial-torus] Expected one logical source-edge sidewall on the second boundary loop, received ${innerSidewalls.length}.`);
 
   const diagnostics = solid?.__thickenDiagnostics || {};
   assert(

@@ -4,14 +4,14 @@ Status: Implemented
 
 ![Offset Shell dialog](Offset_Shell_dialog.png)
 
-Offset Shell offsets every face of a solid outward or inward by a uniform distance, producing a new shelled solid. It requires selecting a face on the target solid only to identify which solid to process.
+Offset Shell thickens every face of the selected faces' parent solid except the selected faces, then unions the thickened solids into one shelled result.
 
 ## Inputs
-- `faces` – One or more faces on the solid to shell (used to pick the parent solid). All faces must belong to the same solid.
-- `distance` – Signed offset distance. Positive grows the solid; negative shrinks it. Must be non-zero.
+- `faces` – One or more faces to exclude while shelling the parent solid. All faces must belong to the same solid.
+- `distance` – Signed shell distance. Per-face thickening uses the opposite sign, so `2` thickens by `-2` and `-3` thickens by `3`. Must be non-zero.
 - `id` – Optional identifier applied to the generated shell and its faces.
 
 ## Behaviour
 - Collects the solid from the selected faces; aborts if selections span multiple solids or no solid is found.
-- Uses `OffsetShellSolid.generate` to build a new shell solid at the requested offset; leaves the original solid untouched.
+- Uses `OffsetShellSolid.generate` to thicken every non-selected face of the parent solid and boolean-union the results; leaves the original solid untouched.
 - Names the result `<parentName>_<featureID>` and visualizes it for downstream selection.

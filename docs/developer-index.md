@@ -5,6 +5,7 @@ Top-level hub for developer-facing documentation.
 ## Start Here
 
 - [Getting Started](./getting-started.md) - local setup, dev server, and tests
+- [Testing](./testing.md) - Node test runner usage and single-test selection
 - [API Examples](./api-examples.md) - runnable examples and demo entry points
 - [Bug Reporting and Repro Test Cases](./bug-reporting.md) - how to capture actionable reports
 - [Developer Discord](https://discord.gg/R5KNAKrQ)

@@ -204,6 +204,10 @@ import {
     test_offsetFace_preserves_individual_edges,
 } from './test_offsetFace_preserves_individual_edges.js';
 import {
+    afterRun_offsetShell_thickens_all_faces_except_selected,
+    test_offsetShell_thickens_all_faces_except_selected,
+} from './test_offsetShellExcludedFaces.js';
+import {
     afterRun_thicken_feature_connected_faces_remain_individual_solids,
     afterRun_thicken_feature_multiple_faces_produce_multiple_solids,
     afterRun_thicken_feature_serializes_and_replays_planar_profile,
@@ -218,6 +222,10 @@ import {
     test_thicken_feature_multiple_faces_produce_multiple_solids,
     test_thicken_feature_serializes_and_replays_planar_profile,
 } from './test_thickenFeature.js';
+import {
+    afterRun_thicken_sphere_torus_union,
+    test_thicken_sphere_torus_union,
+} from './test_thicken_sphere_torus_union.js';
 import { test_plane } from './test_plane.js';
 import { test_primitiveCone } from './test_primitiveCone.js';
 import { test_primitiveCube } from './test_primitiveCube.js';
@@ -342,6 +350,42 @@ import {
 const IS_NODE_RUNTIME = typeof process !== 'undefined' && process.versions && process.versions.node && typeof window === 'undefined';
 const TEST_LOG_PATH = path.join('tests', 'test-run.log');
 
+function getTestName(testFunction) {
+    return (testFunction?.test?.name && String(testFunction.test.name)) || 'unnamed_test';
+}
+
+function getCliRequestedTestName(argv = []) {
+    const args = argv.slice(2);
+    for (let i = 0; i < args.length; i += 1) {
+        const arg = args[i];
+        if (arg === '--test' || arg === '-t') {
+            return args[i + 1] ? String(args[i + 1]) : '';
+        }
+        if (arg.startsWith('--test=')) {
+            return arg.slice('--test='.length);
+        }
+        if (!arg.startsWith('-')) {
+            return arg;
+        }
+    }
+    return null;
+}
+
+function getRequestedTestFunctions(testFunctionsToSearch, requestedTestName) {
+    if (requestedTestName == null) return testFunctionsToSearch;
+    if (!requestedTestName) throw new Error('Missing test name. Use `pnpm test -- <test_name>` or `pnpm test -- --test <test_name>`.');
+
+    const matchingTests = testFunctionsToSearch.filter(testFunction => getTestName(testFunction) === requestedTestName);
+    if (matchingTests.length > 0) return matchingTests;
+
+    const availableNames = testFunctionsToSearch.map(getTestName).sort();
+    const suggestions = availableNames.filter(name => name.includes(requestedTestName)).slice(0, 10);
+    const suggestionText = suggestions.length
+        ? `\nMatching test names:\n${suggestions.map(name => `  - ${name}`).join('\n')}`
+        : `\nNo matching test names found.`;
+    throw new Error(`Unknown test "${requestedTestName}".${suggestionText}`);
+}
+
 
 export const testFunctions = [
     { test: test_cppNative_prepareManifoldMesh_matches_legacy_js_reference, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -419,6 +463,22 @@ export const testFunctions = [
     { test: test_face_thicken_boundary_uses_smooth_adjacent_face_normals, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_face_thicken_filleted_planar_face_keeps_clean_boundaries, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_face_thicken_self_overlap_cylinder_side, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    {
+        test: test_thicken_sphere_torus_union,
+        afterRun: afterRun_thicken_sphere_torus_union,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_offsetShell_thickens_all_faces_except_selected,
+        afterRun: afterRun_offsetShell_thickens_all_faces_except_selected,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
     { test: test_thicken_feature_is_available_in_modeling_and_surfacing_workbenches, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     {
         test: test_thicken_feature_serializes_and_replays_planar_profile,
@@ -830,7 +890,7 @@ async function registerPartFileTests() {
 
 // call runTests automatically when executed under Node.js
 if (IS_NODE_RUNTIME) {
-    runTests()
+    runTests(new PartHistory(), null, { testName: getCliRequestedTestName(process.argv) })
         .then(() => {
             // ensure CLI exits promptly once the suite finishes
             process.exit(0);
@@ -844,7 +904,7 @@ if (IS_NODE_RUNTIME) {
 
 
 
-export async function runTests(partHistory = new PartHistory(), callbackToRunBetweenTests = null) {
+export async function runTests(partHistory = new PartHistory(), callbackToRunBetweenTests = null, options = {}) {
     if (typeof process !== "undefined" && process.versions && process.versions.node) {
         //await console.clear();
     }
@@ -852,6 +912,7 @@ export async function runTests(partHistory = new PartHistory(), callbackToRunBet
     if (IS_NODE_RUNTIME) {
         resetTestLog();
         logTestEvent('Test run started');
+        if (options.testName) logTestEvent(`Filtering to ${options.testName}`);
     }
 
     // delete the ./tests/results directory in an asynchronous way
@@ -862,13 +923,15 @@ export async function runTests(partHistory = new PartHistory(), callbackToRunBet
     // Discover and register sketch solver topology fixtures (Node only)
     await registerSketchSolverTopologyFixtureTests(testFunctions);
 
-    for (const testFunction of testFunctions) {
-        const isLastTest = testFunction === testFunctions[testFunctions.length - 1];
+    const testFunctionsToRun = getRequestedTestFunctions(testFunctions, options.testName);
+
+    for (const testFunction of testFunctionsToRun) {
+        const isLastTest = testFunction === testFunctionsToRun[testFunctionsToRun.length - 1];
         await partHistory.reset();
 
         if (testFunction.resetHistory) partHistory.features = [];
 
-        const testName = (testFunction?.test?.name && String(testFunction.test.name)) || 'unnamed_test';
+        const testName = getTestName(testFunction);
         if (IS_NODE_RUNTIME) logTestEvent(`Starting ${testName}`);
 
         let handledError = null;

@@ -9,14 +9,14 @@ const inputParamsSchema = {
   distance: {
     type: 'number',
     default_value: 1,
-    hint: 'Positive grows the shell, negative shrinks it',
+    hint: 'Signed shell distance; thickening is applied in the opposite direction.',
   },
   faces: {
     type: 'reference_selection',
     selectionFilter: ['FACE'],
     multiple: true,
     default_value: [],
-    hint: 'Pick one or more faces to remove and open while shelling the solid',
+    hint: 'Pick one or more faces to exclude while shelling the solid.',
   },
   replaceOriginalSolid: {
     type: 'boolean',
@@ -129,7 +129,7 @@ export class OffsetShellFeature {
 
     this.persistentData = {
       sourceSolidName: String(targetSolid?.name || ''),
-      removedFaceNames: faceEntries.map((entry) => getFaceName(entry)).filter(Boolean),
+      selectedFaceNames: faceEntries.map((entry) => getFaceName(entry)).filter(Boolean),
       distance: dist,
       diagnostics: resultSolid?.__offsetDiagnostics || null,
     };

@@ -51,6 +51,140 @@ function unorderedPointPairKey(a, b) {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
+function pointToSegmentDistanceSq(point, a, b) {
+  const ab = new THREE.Vector3().subVectors(b, a);
+  const lengthSq = ab.lengthSq();
+  if (!(lengthSq > TRI_EPS)) return point.distanceToSquared(a);
+  const t = Math.max(0, Math.min(1, new THREE.Vector3().subVectors(point, a).dot(ab) / lengthSq));
+  const closest = a.clone().add(ab.multiplyScalar(t));
+  return point.distanceToSquared(closest);
+}
+
+function pointToPolylineDistanceSq(point, polyline) {
+  if (!Array.isArray(polyline) || polyline.length < 2) return Infinity;
+  let best = Infinity;
+  for (let i = 0; i + 1 < polyline.length; i++) {
+    const distSq = pointToSegmentDistanceSq(point, polyline[i], polyline[i + 1]);
+    if (distSq < best) best = distSq;
+  }
+  return best;
+}
+
+function pointToTriangleDistanceSq(point, a, b, c) {
+  const ab = new THREE.Vector3().subVectors(b, a);
+  const ac = new THREE.Vector3().subVectors(c, a);
+  const ap = new THREE.Vector3().subVectors(point, a);
+  const d1 = ab.dot(ap);
+  const d2 = ac.dot(ap);
+  if (d1 <= 0 && d2 <= 0) return point.distanceToSquared(a);
+
+  const bp = new THREE.Vector3().subVectors(point, b);
+  const d3 = ab.dot(bp);
+  const d4 = ac.dot(bp);
+  if (d3 >= 0 && d4 <= d3) return point.distanceToSquared(b);
+
+  const vc = (d1 * d4) - (d3 * d2);
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+    const v = d1 / (d1 - d3);
+    return point.distanceToSquared(a.clone().add(ab.multiplyScalar(v)));
+  }
+
+  const cp = new THREE.Vector3().subVectors(point, c);
+  const d5 = ab.dot(cp);
+  const d6 = ac.dot(cp);
+  if (d6 >= 0 && d5 <= d6) return point.distanceToSquared(c);
+
+  const vb = (d5 * d2) - (d1 * d6);
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) {
+    const w = d2 / (d2 - d6);
+    return point.distanceToSquared(a.clone().add(ac.multiplyScalar(w)));
+  }
+
+  const va = (d3 * d6) - (d5 * d4);
+  if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
+    const bc = new THREE.Vector3().subVectors(c, b);
+    const w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+    return point.distanceToSquared(b.clone().add(bc.multiplyScalar(w)));
+  }
+
+  const denom = 1 / (va + vb + vc);
+  const v = vb * denom;
+  const w = vc * denom;
+  return point.distanceToSquared(a.clone().add(ab.multiplyScalar(v)).add(ac.multiplyScalar(w)));
+}
+
+function getSourceEdgePolylines(face) {
+  const edges = Array.isArray(face?.edges) ? face.edges : [];
+  if (!edges.length) return [];
+  const solid = face?.parentSolid || (String(face?.parent?.type || '').toUpperCase() === 'SOLID' ? face.parent : null);
+  try { solid?.updateMatrixWorld?.(true); } catch { /* ignore */ }
+  const matrix = solid?.matrixWorld || new THREE.Matrix4();
+  const result = [];
+
+  for (let index = 0; index < edges.length; index++) {
+    const sourceEdge = edges[index];
+    const rawPolyline = Array.isArray(sourceEdge?.userData?.polylineLocal)
+      ? sourceEdge.userData.polylineLocal
+      : [];
+    const polyline = rawPolyline
+      .map((point) => {
+        if (Array.isArray(point)) {
+          return new THREE.Vector3(
+            Number(point[0]) || 0,
+            Number(point[1]) || 0,
+            Number(point[2]) || 0,
+          ).applyMatrix4(matrix);
+        }
+        if (point && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y)) && Number.isFinite(Number(point.z))) {
+          return new THREE.Vector3(Number(point.x), Number(point.y), Number(point.z)).applyMatrix4(matrix);
+        }
+        return null;
+      })
+      .filter(Boolean);
+    if (polyline.length < 2) continue;
+    result.push({
+      name: String(sourceEdge?.name || sourceEdge?.userData?.edgeName || `EDGE_${index}`).trim() || `EDGE_${index}`,
+      key: String(sourceEdge?.uuid || sourceEdge?.name || `EDGE_${index}`),
+      polyline,
+    });
+  }
+
+  return result;
+}
+
+function assignSourceEdgesToBoundaryLoops(face, loops, vertices, scale, weldTolerance) {
+  const sourceEdges = getSourceEdgePolylines(face);
+  if (!sourceEdges.length || !Array.isArray(loops) || !Array.isArray(vertices)) return;
+  const tolerance = Math.max(Number(weldTolerance) * 32, Number(scale) * 1e-5, 1e-5);
+  const toleranceSq = tolerance * tolerance;
+
+  for (const loop of loops) {
+    for (const edge of loop?.edges || []) {
+      const start = vertices[edge.start];
+      const end = vertices[edge.end];
+      if (!start || !end) continue;
+      const midpoint = start.clone().add(end).multiplyScalar(0.5);
+      let best = null;
+      let bestScore = Infinity;
+      for (const sourceEdge of sourceEdges) {
+        const score = Math.max(
+          pointToPolylineDistanceSq(start, sourceEdge.polyline),
+          pointToPolylineDistanceSq(midpoint, sourceEdge.polyline),
+          pointToPolylineDistanceSq(end, sourceEdge.polyline),
+        );
+        if (score < bestScore) {
+          bestScore = score;
+          best = sourceEdge;
+        }
+      }
+      if (best && bestScore <= toleranceSq) {
+        edge.sourceEdgeName = best.name;
+        edge.sourceEdgeKey = best.key;
+      }
+    }
+  }
+}
+
 function addSmoothAdjacentBoundaryNormals(face, surface, options = {}) {
   const solid = face?.parentSolid || (String(face?.parent?.type || '').toUpperCase() === 'SOLID' ? face.parent : null);
   const selectedFaceName = getFaceLabel(face);
@@ -895,6 +1029,8 @@ function extractFaceSurface(face, options = {}) {
     .map((loop) => ({ ...loop, signature: normalizeLoopSignature(loop) }))
     .sort((a, b) => a.signature.localeCompare(b.signature));
 
+  assignSourceEdgesToBoundaryLoops(face, loops, vertices, scale, weldTolerance);
+
   const boundaryEdgeToLoop = new Map();
   for (let loopIndex = 0; loopIndex < loops.length; loopIndex++) {
     const loop = loops[loopIndex];
@@ -996,6 +1132,36 @@ function extractFacesSurface(faces, options = {}) {
 }
 
 function buildThickenClassificationState(labels, distance) {
+  const sidewallGroups = [];
+  const sidewallGroupByLabel = new Map();
+  for (const entry of labels.sidewalls || []) {
+    const label = String(entry?.label || '').trim();
+    if (!label) continue;
+    let group = sidewallGroupByLabel.get(label);
+    if (!group) {
+      group = {
+        label,
+        kind: 'sidewall',
+        metadata: {
+          type: 'sidewall',
+          sourceFaceName: labels.sourceFaceName,
+          loopIndex: entry.loopIndex,
+          edgeIndex: entry.edgeIndex,
+          edgeKey: entry.key,
+          sourceEdgeName: entry.sourceEdgeName || null,
+          sourceEdgeKey: entry.sourceEdgeKey || null,
+          distance,
+          segmentCount: 0,
+          edgeKeys: [],
+        },
+      };
+      sidewallGroupByLabel.set(label, group);
+      sidewallGroups.push(group);
+    }
+    group.metadata.segmentCount += 1;
+    if (entry.key != null) group.metadata.edgeKeys.push(entry.key);
+  }
+
   const groups = [
     {
       label: labels.start,
@@ -1015,18 +1181,7 @@ function buildThickenClassificationState(labels, distance) {
         distance,
       },
     },
-    ...labels.sidewalls.map((entry) => ({
-      label: entry.label,
-      kind: 'sidewall',
-      metadata: {
-        type: 'sidewall',
-        sourceFaceName: labels.sourceFaceName,
-        loopIndex: entry.loopIndex,
-        edgeIndex: entry.edgeIndex,
-        edgeKey: entry.key,
-        distance,
-      },
-    })),
+    ...sidewallGroups,
   ];
 
   const faceNameToID = new Map();
@@ -2175,6 +2330,94 @@ function getOrCreateIntersectionCapFaceID(solid, sourceFaceName, distance) {
   return capFaceID || null;
 }
 
+function reclassifyThickenCapTrianglesByGeometry(solid, surface, distance, classificationState, tolerance) {
+  const tv = Array.isArray(solid?._triVerts) ? solid._triVerts : [];
+  const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : [];
+  const ids = Array.isArray(solid?._triIDs) ? solid._triIDs : [];
+  const sourceVertices = Array.isArray(surface?.vertices) ? surface.vertices : [];
+  const sourceNormals = Array.isArray(surface?.vertexNormals) ? surface.vertexNormals : [];
+  const sourceTriangles = Array.isArray(surface?.triangles) ? surface.triangles : [];
+  const triCount = (tv.length / 3) | 0;
+  if (!triCount || ids.length < triCount || !sourceVertices.length || !sourceTriangles.length) return 0;
+
+  const startFaceID = Number(classificationState?.faceNameToID?.get?.(classificationState?.labels?.start)) >>> 0;
+  const endFaceID = Number(classificationState?.faceNameToID?.get?.(classificationState?.labels?.end)) >>> 0;
+  if (!startFaceID || !endFaceID) return 0;
+
+  const offsetVertices = sourceVertices.map((point, index) => {
+    const normal = sourceNormals[index];
+    return point && normal
+      ? point.clone().add(normal.clone().multiplyScalar(distance))
+      : null;
+  });
+  const sourceTriRefs = [];
+  const offsetTriRefs = [];
+  for (const tri of sourceTriangles) {
+    const a = tri?.[0] >>> 0;
+    const b = tri?.[1] >>> 0;
+    const c = tri?.[2] >>> 0;
+    if (!sourceVertices[a] || !sourceVertices[b] || !sourceVertices[c]) continue;
+    sourceTriRefs.push([sourceVertices[a], sourceVertices[b], sourceVertices[c]]);
+    if (offsetVertices[a] && offsetVertices[b] && offsetVertices[c]) {
+      offsetTriRefs.push([offsetVertices[a], offsetVertices[b], offsetVertices[c]]);
+    }
+  }
+  if (!sourceTriRefs.length || !offsetTriRefs.length) return 0;
+
+  const tol = Math.max(Number(tolerance) || 0, 1e-7);
+  const toleranceSq = tol * tol;
+  const point = new THREE.Vector3();
+  const pointDistanceToSurfaceSq = (p, refs) => {
+    let best = Infinity;
+    for (const [a, b, c] of refs) {
+      const distSq = pointToTriangleDistanceSq(p, a, b, c);
+      if (distSq < best) {
+        best = distSq;
+        if (best <= toleranceSq) break;
+      }
+    }
+    return best;
+  };
+  const triangleMaxDistanceSq = (triIndex, refs) => {
+    let maxDistanceSq = 0;
+    for (let corner = 0; corner < 3; corner++) {
+      const vertex = tv[(triIndex * 3) + corner] >>> 0;
+      const base = vertex * 3;
+      point.set(
+        Number(vp[base + 0]) || 0,
+        Number(vp[base + 1]) || 0,
+        Number(vp[base + 2]) || 0,
+      );
+      const distSq = pointDistanceToSurfaceSq(point, refs);
+      if (distSq > maxDistanceSq) maxDistanceSq = distSq;
+      if (maxDistanceSq > toleranceSq) break;
+    }
+    return maxDistanceSq;
+  };
+
+  let changed = 0;
+  for (let triIndex = 0; triIndex < triCount; triIndex++) {
+    const startDistanceSq = triangleMaxDistanceSq(triIndex, sourceTriRefs);
+    const endDistanceSq = startDistanceSq <= toleranceSq
+      ? Infinity
+      : triangleMaxDistanceSq(triIndex, offsetTriRefs);
+    const nextID = startDistanceSq <= toleranceSq
+      ? startFaceID
+      : (endDistanceSq <= toleranceSq ? endFaceID : 0);
+    if (nextID && ids[triIndex] !== nextID) {
+      ids[triIndex] = nextID;
+      changed += 1;
+    }
+  }
+
+  if (changed > 0) {
+    solid._dirty = true;
+    solid._faceIndex = null;
+    solid._manifold = null;
+  }
+  return changed;
+}
+
 function fillIntersectionCapBoundaryLoops(solid, sourceFaceName, distance) {
   const capFaceID = getOrCreateIntersectionCapFaceID(solid, sourceFaceName, distance);
   if (!capFaceID) return 0;
@@ -2615,7 +2858,18 @@ function triangleSplitCullSolid(solid, options = {}) {
   );
   for (let pass = 0; pass < maxPasses; pass++) {
     passCount = pass + 1;
-    const splitThisPass = Number(solid.splitSelfIntersectingTriangles?.(splitOptions) || 0);
+    const precomputedSplitProbeCount = Number(options.precomputedTriangleSplitProbeCount);
+    const splitThisPass = options.skipTriangleSplit === true
+      ? (pass === 0
+        ? (Number.isFinite(precomputedSplitProbeCount) && precomputedSplitProbeCount >= 0
+          ? precomputedSplitProbeCount
+          : Number(solid.splitSelfIntersectingTriangles?.({
+            ...splitOptions,
+            probeOnly: true,
+            maxIntersections: 1,
+          }) || 0))
+        : 0)
+      : Number(solid.splitSelfIntersectingTriangles?.(splitOptions) || 0);
     splitCount += splitThisPass;
     degenerateTriangleCount += Number(solid.removeDegenerateTriangles?.() || 0);
     const weldAfterSplit = weldSolidVerticesByPosition(solid, weldTolerance);
@@ -2682,6 +2936,108 @@ function applySourceFaceMetadataToThickenResult(result, face, labels, sourceFace
   }
 }
 
+function shouldSkipArrangementSplitForSelfOverlappingSurface(surface, distance) {
+  const dist = Number(distance);
+  if (!(dist < 0)) return false;
+  const vertices = Array.isArray(surface?.vertices) ? surface.vertices : [];
+  const normals = Array.isArray(surface?.vertexNormals) ? surface.vertexNormals : [];
+  if (vertices.length < 3 || normals.length < vertices.length) return false;
+
+  const normalSum = new THREE.Vector3();
+  const centroid = new THREE.Vector3();
+  let normalCount = 0;
+  for (let i = 0; i < vertices.length; i++) {
+    const vertex = vertices[i];
+    const normal = normals[i];
+    if (!vertex || !normal || !(normal.lengthSq?.() > TRI_EPS)) continue;
+    centroid.add(vertex);
+    normalSum.add(normal);
+    normalCount += 1;
+  }
+  if (normalCount < 3) return false;
+  centroid.multiplyScalar(1 / normalCount);
+
+  const resultantNormalLength = normalSum.length() / normalCount;
+  if (resultantNormalLength > 0.35) return false;
+
+  let minPositiveSupport = Infinity;
+  for (let i = 0; i < vertices.length; i++) {
+    const vertex = vertices[i];
+    const normal = normals[i];
+    if (!vertex || !normal || !(normal.lengthSq?.() > TRI_EPS)) continue;
+    const support = vertex.clone().sub(centroid).dot(normal);
+    if (support > TRI_EPS && support < minPositiveSupport) {
+      minPositiveSupport = support;
+    }
+  }
+  if (!Number.isFinite(minPositiveSupport)) return false;
+  return Math.abs(dist) >= minPositiveSupport * 0.95;
+}
+
+function shouldPreserveExactClosedOffsetShell(staged, surface, distance, options = {}, topology = null) {
+  const dist = Number(distance);
+  if (!(dist > 0)) return { skip: false, reason: '', splitProbeCount: 0 };
+  if (!staged || typeof staged.splitSelfIntersectingTriangles !== 'function') {
+    return { skip: false, reason: '', splitProbeCount: 0 };
+  }
+
+  const loops = Array.isArray(surface?.loops) ? surface.loops : [];
+  if (!loops.length) return { skip: false, reason: '', splitProbeCount: 0 };
+
+  const initialTopology = topology || analyzeMeshTopology(staged);
+  if (initialTopology.boundaryEdgeCount || initialTopology.nonManifoldEdgeCount) {
+    return { skip: false, reason: '', splitProbeCount: 0 };
+  }
+
+  try {
+    if (
+      typeof staged._isCoherentlyOrientedManifold === 'function'
+      && staged._isCoherentlyOrientedManifold() !== true
+    ) {
+      return { skip: false, reason: '', splitProbeCount: 0 };
+    }
+  } catch {
+    return { skip: false, reason: '', splitProbeCount: 0 };
+  }
+
+  const boundarySegmentCount = Math.max(
+    Array.isArray(surface?.boundaryDirectedEdges) ? surface.boundaryDirectedEdges.length : 0,
+    loops.reduce((sum, loop) => sum + (Array.isArray(loop?.edges) ? loop.edges.length : 0), 0),
+  );
+  const benignIntersectionLimit = Math.max(16, Math.min(512, boundarySegmentCount * 2 || 64));
+  const splitOptions = {
+    probeOnly: true,
+    maxIntersections: benignIntersectionLimit + 1,
+  };
+  const snapTolerance = options.splitSnapTolerance ?? options.snapTolerance;
+  if (Number.isFinite(Number(snapTolerance)) && Number(snapTolerance) > 0) {
+    splitOptions.snapTolerance = Number(snapTolerance);
+  }
+
+  let probeSolid = null;
+  let splitProbeCount = 0;
+  try {
+    probeSolid = typeof staged.clone === 'function' ? staged.clone() : null;
+    splitProbeCount = probeSolid
+      ? Number(probeSolid.splitSelfIntersectingTriangles(splitOptions) || 0)
+      : Number(staged.splitSelfIntersectingTriangles({
+        ...splitOptions,
+        maxIntersections: 1,
+      }) || 0);
+  } finally {
+    try { probeSolid?.free?.(); } catch { /* ignore */ }
+  }
+  if (splitProbeCount > benignIntersectionLimit) {
+    return { skip: false, reason: '', splitProbeCount };
+  }
+
+  return {
+    skip: true,
+    reason: splitProbeCount > 0 ? 'preserve_exact_closed_shell' : 'closed_shell_without_intersections',
+    splitProbeCount,
+  };
+}
+
 function thickenSurfaceToSolid(surface, face, distance, options = {}) {
   const dist = Number(distance);
   if (!Number.isFinite(dist) || Math.abs(dist) <= EPS) {
@@ -2701,14 +3057,24 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
     sourceFaceName,
     start: `${sourceFaceName}_START`,
     end: `${sourceFaceName}_END`,
-    sidewalls: loops.flatMap((loop, loopIndex) => (Array.isArray(loop?.edges) ? loop.edges : []).map((edge, edgeIndex) => ({
-      key: edge.key,
-      loopIndex,
-      edgeIndex,
-      label: loopIndex === 0
-        ? `${sourceFaceName}_E${edgeIndex}_SW`
-        : `${sourceFaceName}_L${loopIndex}_E${edgeIndex}_SW`,
-    }))),
+    sidewalls: loops.flatMap((loop, loopIndex) => (Array.isArray(loop?.edges) ? loop.edges : []).map((edge, edgeIndex) => {
+      const sourceEdgeName = String(edge?.sourceEdgeName || '').trim();
+      const sourceEdgeToken = sourceEdgeName
+        ? sanitizeToken(sourceEdgeName, `EDGE_${loopIndex}_${edgeIndex}`).replace(/_+$/g, '')
+        : null;
+      return {
+        key: edge.key,
+        loopIndex,
+        edgeIndex,
+        sourceEdgeName: sourceEdgeName || null,
+        sourceEdgeKey: edge?.sourceEdgeKey || null,
+        label: sourceEdgeToken
+          ? `${sourceEdgeToken}_SW`
+          : (loopIndex === 0
+            ? `${sourceFaceName}_E${edgeIndex}_SW`
+            : `${sourceFaceName}_L${loopIndex}_E${edgeIndex}_SW`),
+      };
+    })),
   };
   const classificationState = buildThickenClassificationState(labels, dist);
   const solidName = String(options.name || featureId).trim() || featureId;
@@ -2781,6 +3147,20 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
         __raycastMajorityRetry: true,
       });
     };
+    const retryWithoutTriangleSplit = () => {
+      if (options.__skipTriangleSplitRetry === true || options.skipTriangleSplit === true) return null;
+      try { staged?.free?.(); } catch { /* ignore */ }
+      staged = null;
+      try {
+        return thickenSurfaceToSolid(surface, face, dist, {
+          ...options,
+          skipTriangleSplit: true,
+          __skipTriangleSplitRetry: true,
+        });
+      } catch {
+        return null;
+      }
+    };
     const retryWithTrianglePrismUnion = (reason = 'destructive_repair') => {
       if (options.__trianglePrismUnionRetry === true || useTrianglePrismUnion) return null;
       try { staged?.free?.(); } catch { /* ignore */ }
@@ -2798,6 +3178,7 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
         return null;
       }
     };
+    const getBoundaryRepairFaceID = () => getOrCreateIntersectionCapFaceID(staged, sourceFaceName, dist);
 
     staged = useTrianglePrismUnion
       ? buildTrianglePrismUnionShellSolid(surface, dist, classificationState, solidName)
@@ -2806,11 +3187,33 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
       throw new Error('Face.thicken() failed to build the stitched triangle shell.');
     }
 
+    let topology = analyzeMeshTopology(staged);
+    const exactShellPreservation = (
+      options.skipTriangleSplit !== true
+      && options.skipTriangleSplit !== false
+      && !useTrianglePrismUnion
+    )
+      ? shouldPreserveExactClosedOffsetShell(staged, surface, dist, options, topology)
+      : { skip: false, reason: '', splitProbeCount: 0 };
+    const skipSelfOverlapArrangement = (
+      options.skipTriangleSplit !== false
+      && shouldSkipArrangementSplitForSelfOverlappingSurface(surface, dist)
+    );
+    const skipArrangementSplit = options.skipTriangleSplit === true
+      || exactShellPreservation.skip === true
+      || skipSelfOverlapArrangement;
+    const triangleSplitSkipReason = options.skipTriangleSplit === true
+      ? 'option'
+      : (exactShellPreservation.reason || (skipSelfOverlapArrangement ? 'self_overlap_surface' : ''));
     const cleanup = triangleSplitCullSolid(staged, {
       ...options,
+      skipTriangleSplit: skipArrangementSplit,
+      precomputedTriangleSplitProbeCount: exactShellPreservation.skip === true
+        ? exactShellPreservation.splitProbeCount
+        : undefined,
       weldTolerance: manifoldWeldEpsilon,
     });
-    let topology = cleanup?.topology || analyzeMeshTopology(staged);
+    topology = cleanup?.topology || analyzeMeshTopology(staged);
     let boundaryCapTriangleCount = 0;
     let nonManifoldCulledTriangleCount = 0;
     const nonManifoldCullMaxTriangles = Math.max(
@@ -2836,19 +3239,8 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
       } catch { /* ignore */ }
     }
     if (allowBoundaryRepairCaps && topology.boundaryEdgeCount > 0) {
-      const capLabel = `${sourceFaceName}_INTERSECTION_CAP`;
-      let capFaceID = staged._faceNameToID instanceof Map ? staged._faceNameToID.get(capLabel) : null;
-      if (!capFaceID && typeof staged._getOrCreateID === 'function') {
-        capFaceID = staged._getOrCreateID(capLabel);
-      }
+      const capFaceID = getBoundaryRepairFaceID();
       if (capFaceID) {
-        if (staged._faceMetadata instanceof Map) {
-          staged._faceMetadata.set(capLabel, {
-            type: 'intersection_cap',
-            sourceFaceName,
-            distance: dist,
-          });
-        }
         boundaryCapTriangleCount = fillBoundaryLoopsWithTriangles(staged, capFaceID);
         if (boundaryCapTriangleCount > 0) {
           try { staged.fixTriangleWindingsByAdjacency?.(); } catch { /* ignore */ }
@@ -2873,19 +3265,8 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
         }
       }
       if (allowBoundaryRepairCaps && topology.boundaryEdgeCount > 0) {
-        const capLabel = `${sourceFaceName}_INTERSECTION_CAP`;
-        let capFaceID = staged._faceNameToID instanceof Map ? staged._faceNameToID.get(capLabel) : null;
-        if (!capFaceID && typeof staged._getOrCreateID === 'function') {
-          capFaceID = staged._getOrCreateID(capLabel);
-        }
+        const capFaceID = getBoundaryRepairFaceID();
         if (capFaceID) {
-          if (staged._faceMetadata instanceof Map) {
-            staged._faceMetadata.set(capLabel, {
-              type: 'intersection_cap',
-              sourceFaceName,
-              distance: dist,
-            });
-          }
           const addedThisPass = fillBoundaryLoopsWithTriangles(staged, capFaceID);
           if (addedThisPass > 0) {
             boundaryCapTriangleCount += addedThisPass;
@@ -2925,19 +3306,8 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
         orientationCulledTriangleCount += removedThisPass;
         topology = analyzeMeshTopology(staged);
         if (allowBoundaryRepairCaps && topology.boundaryEdgeCount > 0) {
-          const capLabel = `${sourceFaceName}_INTERSECTION_CAP`;
-          let capFaceID = staged._faceNameToID instanceof Map ? staged._faceNameToID.get(capLabel) : null;
-          if (!capFaceID && typeof staged._getOrCreateID === 'function') {
-            capFaceID = staged._getOrCreateID(capLabel);
-          }
+          const capFaceID = getBoundaryRepairFaceID();
           if (capFaceID) {
-            if (staged._faceMetadata instanceof Map) {
-              staged._faceMetadata.set(capLabel, {
-                type: 'intersection_cap',
-                sourceFaceName,
-                distance: dist,
-              });
-            }
             const addedThisPass = fillBoundaryLoopsWithTriangles(staged, capFaceID);
             if (addedThisPass > 0) {
               orientationCapTriangleCount += addedThisPass;
@@ -2967,19 +3337,8 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
       }
       topology = analyzeMeshTopology(staged);
       if (allowBoundaryRepairCaps && topology.boundaryEdgeCount > 0) {
-        const capLabel = `${sourceFaceName}_INTERSECTION_CAP`;
-        let capFaceID = staged._faceNameToID instanceof Map ? staged._faceNameToID.get(capLabel) : null;
-        if (!capFaceID && typeof staged._getOrCreateID === 'function') {
-          capFaceID = staged._getOrCreateID(capLabel);
-        }
+        const capFaceID = getBoundaryRepairFaceID();
         if (capFaceID) {
-          if (staged._faceMetadata instanceof Map) {
-            staged._faceMetadata.set(capLabel, {
-              type: 'intersection_cap',
-              sourceFaceName,
-              distance: dist,
-            });
-          }
           const addedThisPass = fillBoundaryLoopsWithTriangles(staged, capFaceID);
           if (addedThisPass > 0) {
             boundaryCapTriangleCount += addedThisPass;
@@ -3006,19 +3365,8 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
         nonManifoldCulledTriangleCount += prunedThisPass;
         topology = analyzeMeshTopology(staged);
         if (allowBoundaryRepairCaps && topology.boundaryEdgeCount > 0) {
-          const capLabel = `${sourceFaceName}_INTERSECTION_CAP`;
-          let capFaceID = staged._faceNameToID instanceof Map ? staged._faceNameToID.get(capLabel) : null;
-          if (!capFaceID && typeof staged._getOrCreateID === 'function') {
-            capFaceID = staged._getOrCreateID(capLabel);
-          }
+          const capFaceID = getBoundaryRepairFaceID();
           if (capFaceID) {
-            if (staged._faceMetadata instanceof Map) {
-              staged._faceMetadata.set(capLabel, {
-                type: 'intersection_cap',
-                sourceFaceName,
-                distance: dist,
-              });
-            }
             const addedThisPass = fillBoundaryLoopsWithTriangles(staged, capFaceID);
             if (addedThisPass > 0) {
               boundaryCapTriangleCount += addedThisPass;
@@ -3046,19 +3394,8 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
         }
       }
       if (allowBoundaryRepairCaps && topology.boundaryEdgeCount > 0) {
-        const capLabel = `${sourceFaceName}_INTERSECTION_CAP`;
-        let capFaceID = staged._faceNameToID instanceof Map ? staged._faceNameToID.get(capLabel) : null;
-        if (!capFaceID && typeof staged._getOrCreateID === 'function') {
-          capFaceID = staged._getOrCreateID(capLabel);
-        }
+        const capFaceID = getBoundaryRepairFaceID();
         if (capFaceID) {
-          if (staged._faceMetadata instanceof Map) {
-            staged._faceMetadata.set(capLabel, {
-              type: 'intersection_cap',
-              sourceFaceName,
-              distance: dist,
-            });
-          }
           const addedThisPass = fillBoundaryLoopsWithTriangles(staged, capFaceID);
           if (addedThisPass > 0) {
             boundaryCapTriangleCount += addedThisPass;
@@ -3130,6 +3467,8 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
     if (topology.boundaryEdgeCount || topology.nonManifoldEdgeCount) {
       const prismRetry = retryWithTrianglePrismUnion('invalid_stitched_topology');
       if (prismRetry) return prismRetry;
+      const noTriangleSplitRetry = retryWithoutTriangleSplit();
+      if (noTriangleSplitRetry) return noTriangleSplitRetry;
       const noInternalCullRetry = retryWithoutInternalCull();
       if (noInternalCullRetry) return noInternalCullRetry;
       const relaxedWeldRetry = retryWithRelaxedWeld();
@@ -3176,19 +3515,8 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
         orientationCulledTriangleCount += removedThisPass;
         topology = analyzeMeshTopology(staged);
         if (allowBoundaryRepairCaps && topology.boundaryEdgeCount > 0) {
-          const capLabel = `${sourceFaceName}_INTERSECTION_CAP`;
-          let capFaceID = staged._faceNameToID instanceof Map ? staged._faceNameToID.get(capLabel) : null;
-          if (!capFaceID && typeof staged._getOrCreateID === 'function') {
-            capFaceID = staged._getOrCreateID(capLabel);
-          }
+          const capFaceID = getBoundaryRepairFaceID();
           if (capFaceID) {
-            if (staged._faceMetadata instanceof Map) {
-              staged._faceMetadata.set(capLabel, {
-                type: 'intersection_cap',
-                sourceFaceName,
-                distance: dist,
-              });
-            }
             const addedThisPass = fillBoundaryLoopsWithTriangles(staged, capFaceID);
             if (addedThisPass > 0) {
               orientationCapTriangleCount += addedThisPass;
@@ -3222,6 +3550,20 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
       );
     }
 
+    const capReclassificationTolerance = Math.max(
+      manifoldWeldEpsilon * 64,
+      Math.abs(dist) * 1e-5,
+      surface.scale * 1e-5,
+      1e-6,
+    );
+    const capReclassifiedTriangleCount = reclassifyThickenCapTrianglesByGeometry(
+      staged,
+      surface,
+      dist,
+      classificationState,
+      capReclassificationTolerance,
+    );
+
     applySourceFaceMetadataToThickenResult(staged, face, labels, sourceFaceName);
     staged.__thickenMethod = 'triangle_split_cull';
     staged.__thickenClassificationMethod = 'raw_face_ids';
@@ -3241,6 +3583,9 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
       repairBoundaryCapsEnabled: allowBoundaryRepairCaps,
       weldEpsilon: manifoldWeldEpsilon,
       triangleSplitCount: cleanup?.splitCount || 0,
+      triangleSplitSkipped: skipArrangementSplit,
+      triangleSplitSkipReason,
+      triangleSplitProbeCount: exactShellPreservation.splitProbeCount || 0,
       culledTriangleCount: cleanup?.culledTriangleCount || 0,
       internalTriangleCullSkipped: options.skipInternalCull === true,
       internalTriangleCullRetry: options.__skipInternalCullRetry === true,
@@ -3255,6 +3600,7 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
       orientationWarning,
       orientationSameDirectionEdgeCount: finalOrientation?.sameDirectionEdgeCount || 0,
       orientationAmbiguousEdgeCount: finalOrientation?.ambiguousEdgeCount || 0,
+      capReclassifiedTriangleCount,
       nonManifoldCulledTriangleCount,
       boundaryCapTriangleCount,
       splitCullPasses: cleanup?.passCount || 0,
@@ -3277,6 +3623,9 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
         buildMethod: staged.__thickenMethod,
         weldEpsilon: manifoldWeldEpsilon,
         triangleSplitCount: cleanup?.splitCount || 0,
+        triangleSplitSkipped: skipArrangementSplit,
+        triangleSplitSkipReason,
+        triangleSplitProbeCount: exactShellPreservation.splitProbeCount || 0,
         culledTriangleCount: cleanup?.culledTriangleCount || 0,
         internalTriangleCullSkipped: options.skipInternalCull === true,
         internalTriangleCullRetry: options.__skipInternalCullRetry === true,
@@ -3291,6 +3640,7 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
         orientationWarning,
         orientationSameDirectionEdgeCount: finalOrientation?.sameDirectionEdgeCount || 0,
         orientationAmbiguousEdgeCount: finalOrientation?.ambiguousEdgeCount || 0,
+        capReclassifiedTriangleCount,
         nonManifoldCulledTriangleCount,
         boundaryCapTriangleCount,
         splitCullPasses: cleanup?.passCount || 0,

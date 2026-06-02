@@ -1780,7 +1780,8 @@ export class Viewer {
                 if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
             } catch { /* ignore */ }
 
-            banner = document.createElement('button');
+            banner = document.createElement('A');
+            banner.href = this._homeBannerUrl || '#';
             banner.type = 'button';
             banner.className = 'cad-sidebar-home-banner';
             banner.title = opensExternalHome ? 'Open BREP.io' : 'Back to workspace';

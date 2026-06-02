@@ -619,10 +619,10 @@ export class Solid extends THREE.Group {
     }
 
     /**
-     * Build an open shell by thickening every face except the supplied exclusions
+     * Build an offset shell by thickening every face except the supplied selections
      * and boolean-unioning the results into a single solid.
-     * @param {Array<string|any>|string|any} faces face names or face objects to exclude/open
-     * @param {number} distance shell thickness magnitude; per-face thickening uses `-abs(distance)`
+     * @param {Array<string|any>|string|any} faces face names or face objects to exclude
+     * @param {number} distance signed shell distance; per-face thickening uses `-distance`
      * @param {object} [options]
      * @param {string} [options.featureId='OffsetShell'] name prefix for generated intermediates
      * @param {string} [options.newSolidName] final result name override

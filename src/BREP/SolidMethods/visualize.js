@@ -9,6 +9,187 @@ import {
     Vertex
 } from "../SolidShared.js";
 
+function reassignTemporaryIntersectionCapTriangles(solid) {
+    const tv = Array.isArray(solid?._triVerts) ? solid._triVerts : [];
+    const ids = Array.isArray(solid?._triIDs) ? solid._triIDs : [];
+    const idToName = solid?._idToFaceName instanceof Map ? solid._idToFaceName : null;
+    const triCount = (tv.length / 3) | 0;
+    if (!triCount || ids.length < triCount || !idToName) return 0;
+
+    const capIds = new Set();
+    for (const [id, name] of idToName.entries()) {
+        if (String(name || '').endsWith('_INTERSECTION_CAP')) capIds.add(Number(id) >>> 0);
+    }
+    if (!capIds.size) return 0;
+
+    const edgeKey = (a, b) => {
+        const u = a < b ? a : b;
+        const v = a < b ? b : a;
+        return `${u}|${v}`;
+    };
+    const edgeUses = new Map();
+    for (let triIndex = 0; triIndex < triCount; triIndex++) {
+        const a = tv[(triIndex * 3) + 0] >>> 0;
+        const b = tv[(triIndex * 3) + 1] >>> 0;
+        const c = tv[(triIndex * 3) + 2] >>> 0;
+        for (const [u, v] of [[a, b], [b, c], [c, a]]) {
+            const key = edgeKey(u, v);
+            let list = edgeUses.get(key);
+            if (!list) {
+                list = [];
+                edgeUses.set(key, list);
+            }
+            list.push(triIndex);
+        }
+    }
+
+    let changedTotal = 0;
+    for (let pass = 0; pass < 4; pass++) {
+        let changed = 0;
+        for (let triIndex = 0; triIndex < triCount; triIndex++) {
+            const currentID = ids[triIndex] >>> 0;
+            if (!capIds.has(currentID)) continue;
+            const neighborScore = new Map();
+            const neighborNames = new Map();
+            const a = tv[(triIndex * 3) + 0] >>> 0;
+            const b = tv[(triIndex * 3) + 1] >>> 0;
+            const c = tv[(triIndex * 3) + 2] >>> 0;
+            for (const [u, v] of [[a, b], [b, c], [c, a]]) {
+                for (const neighborTri of edgeUses.get(edgeKey(u, v)) || []) {
+                    if (neighborTri === triIndex) continue;
+                    const neighborID = ids[neighborTri] >>> 0;
+                    if (!neighborID || capIds.has(neighborID)) continue;
+                    const name = String(idToName.get(neighborID) || '');
+                    neighborNames.set(neighborID, name);
+                    const capBonus = /_(?:START|END)$/u.test(name) ? 10 : 0;
+                    const sidewallPenalty = name.endsWith('_SW') ? -1 : 0;
+                    neighborScore.set(neighborID, (neighborScore.get(neighborID) || 0) + 1 + capBonus + sidewallPenalty);
+                }
+            }
+            const touchesStart = Array.from(neighborNames.values()).some((name) => name.endsWith('_START'));
+            const touchesEnd = Array.from(neighborNames.values()).some((name) => name.endsWith('_END'));
+            if (touchesStart && touchesEnd) {
+                for (const [candidateID, name] of neighborNames.entries()) {
+                    if (!String(name || '').endsWith('_SW')) continue;
+                    neighborScore.set(candidateID, (neighborScore.get(candidateID) || 0) + 100);
+                }
+            }
+            let bestID = 0;
+            let bestScore = -Infinity;
+            for (const [candidateID, score] of neighborScore.entries()) {
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestID = candidateID;
+                }
+            }
+            if (bestID) {
+                ids[triIndex] = bestID;
+                changed += 1;
+            }
+        }
+        changedTotal += changed;
+        if (!changed) break;
+    }
+
+    if (changedTotal > 0) {
+        solid._dirty = true;
+        solid._faceIndex = null;
+        solid._manifold = null;
+    }
+    return changedTotal;
+}
+
+function repairDirectStartEndCapBoundaries(solid) {
+    const tv = Array.isArray(solid?._triVerts) ? solid._triVerts : [];
+    const ids = Array.isArray(solid?._triIDs) ? solid._triIDs : [];
+    const idToName = solid?._idToFaceName instanceof Map ? solid._idToFaceName : null;
+    const triCount = (tv.length / 3) | 0;
+    if (!triCount || ids.length < triCount || !idToName) return 0;
+
+    const edgeKey = (a, b) => {
+        const u = a < b ? a : b;
+        const v = a < b ? b : a;
+        return `${u}|${v}`;
+    };
+    const edgeUses = new Map();
+    for (let triIndex = 0; triIndex < triCount; triIndex++) {
+        const a = tv[(triIndex * 3) + 0] >>> 0;
+        const b = tv[(triIndex * 3) + 1] >>> 0;
+        const c = tv[(triIndex * 3) + 2] >>> 0;
+        for (const [u, v] of [[a, b], [b, c], [c, a]]) {
+            const key = edgeKey(u, v);
+            let list = edgeUses.get(key);
+            if (!list) {
+                list = [];
+                edgeUses.set(key, list);
+            }
+            list.push(triIndex);
+        }
+    }
+
+    const bestSidewallNeighbor = (triIndex) => {
+        const score = new Map();
+        const a = tv[(triIndex * 3) + 0] >>> 0;
+        const b = tv[(triIndex * 3) + 1] >>> 0;
+        const c = tv[(triIndex * 3) + 2] >>> 0;
+        for (const [u, v] of [[a, b], [b, c], [c, a]]) {
+            for (const neighborTri of edgeUses.get(edgeKey(u, v)) || []) {
+                if (neighborTri === triIndex) continue;
+                const neighborID = ids[neighborTri] >>> 0;
+                const name = String(idToName.get(neighborID) || '');
+                if (!name.endsWith('_SW')) continue;
+                score.set(neighborID, (score.get(neighborID) || 0) + 1);
+            }
+        }
+        let bestID = 0;
+        let bestScore = 0;
+        for (const [candidateID, candidateScore] of score.entries()) {
+            if (candidateScore > bestScore) {
+                bestID = candidateID;
+                bestScore = candidateScore;
+            }
+        }
+        return bestID;
+    };
+
+    let changedTotal = 0;
+    for (let pass = 0; pass < 8; pass++) {
+        let changed = 0;
+        for (const uses of edgeUses.values()) {
+            if (!Array.isArray(uses) || uses.length !== 2) continue;
+            const aTri = uses[0];
+            const bTri = uses[1];
+            const aName = String(idToName.get(ids[aTri] >>> 0) || '');
+            const bName = String(idToName.get(ids[bTri] >>> 0) || '');
+            const directCaps = (aName.endsWith('_START') && bName.endsWith('_END'))
+                || (aName.endsWith('_END') && bName.endsWith('_START'));
+            if (!directCaps) continue;
+            const aSidewall = bestSidewallNeighbor(aTri);
+            const bSidewall = bestSidewallNeighbor(bTri);
+            if (aSidewall && !bSidewall) {
+                ids[aTri] = aSidewall;
+                changed += 1;
+            } else if (bSidewall && !aSidewall) {
+                ids[bTri] = bSidewall;
+                changed += 1;
+            } else if (aSidewall || bSidewall) {
+                const targetTri = aName.endsWith('_END') ? aTri : bTri;
+                ids[targetTri] = aSidewall || bSidewall;
+                changed += 1;
+            }
+        }
+        changedTotal += changed;
+        if (!changed) break;
+    }
+
+    if (changedTotal > 0) {
+        solid._dirty = true;
+        solid._faceIndex = null;
+        solid._manifold = null;
+    }
+    return changedTotal;
+}
+
 
 
 
@@ -32,6 +213,9 @@ import {
 export function visualize(options = {}) {
     // stack trace here
     //console.trace();
+
+    reassignTemporaryIntersectionCapTriangles(this);
+    repairDirectStartEndCapBoundaries(this);
 
 
 
