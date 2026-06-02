@@ -925,6 +925,71 @@ export async function test_cppSolidNative_collapseFilletSideWallFaces_collapses_
     }
 }
 
+export async function test_cppSolidNative_collapseFilletSideWallFaces_preserves_shared_endpoint_junctions() {
+    const solid = new Solid();
+    const sideWallAName = "F_TEST_FILLET_SIDEWALL_EDGE_A_aaaa1111";
+    const sideWallBName = "F_TEST_FILLET_SIDEWALL_EDGE_B_bbbb2222";
+    const shared = [1, 1, 0];
+    solid
+        .addTriangle("HOST_A", [0, 0, 0], [2, 0, 0], shared)
+        .addTriangle(sideWallAName, [2, 0, 0], [2, 0.1, 0], shared)
+        .addTriangle("ROUND_A", [2, 0.1, 0], [1.9, 0.2, 0], shared)
+        .addTriangle("HOST_B", [0, 2, 0], shared, [2, 2, 0])
+        .addTriangle(sideWallBName, [2, 2, 0], shared, [2, 1.9, 0])
+        .addTriangle("ROUND_B", [2, 1.9, 0], shared, [1.9, 1.8, 0]);
+
+    solid.setFaceMetadata("HOST_A", { marker: "host-a" });
+    solid.setFaceMetadata("HOST_B", { marker: "host-b" });
+    solid.setFaceMetadata("ROUND_A", { filletRoundFace: true });
+    solid.setFaceMetadata("ROUND_B", { filletRoundFace: true });
+    solid.setFaceMetadata(sideWallAName, {
+        filletSideWall: true,
+        filletMergedSideWall: true,
+        filletSideWallEdge: "EDGE_A",
+        sourceFeatureId: "F_TEST",
+    });
+    solid.setFaceMetadata(sideWallBName, {
+        filletSideWall: true,
+        filletMergedSideWall: true,
+        filletSideWallEdge: "EDGE_B",
+        sourceFeatureId: "F_TEST",
+    });
+
+    const sharedIndex = solid._vertKeyToIndex.get(shared.join(","));
+    if (sharedIndex == null) {
+        throw new Error("Expected synthetic shared endpoint vertex to be present before collapse.");
+    }
+
+    const summary = __testOnlyCollapseFilletSideWallFaces(solid, { featureID: "F_TEST" });
+    if (Number(summary?.collapsedTriangles || 0) !== 2) {
+        throw new Error(`Expected two side-wall triangles to be considered for collapse, received ${summary?.collapsedTriangles}.`);
+    }
+
+    const sharedAfter = [
+        solid._vertProperties[(sharedIndex * 3) + 0],
+        solid._vertProperties[(sharedIndex * 3) + 1],
+        solid._vertProperties[(sharedIndex * 3) + 2],
+    ];
+    if (!approx(sharedAfter[0], shared[0], 1e-9) || !approx(sharedAfter[1], shared[1], 1e-9) || !approx(sharedAfter[2], shared[2], 1e-9)) {
+        throw new Error(`Expected shared fillet endpoint to remain fixed, received [${sharedAfter.join(", ")}].`);
+    }
+
+    const sideWallAID = solid._faceNameToID.get(sideWallAName);
+    let collapsedNonJunction = false;
+    for (let triIndex = 0; triIndex < solid._triIDs.length; triIndex += 1) {
+        if ((solid._triIDs[triIndex] >>> 0) !== (sideWallAID >>> 0)) continue;
+        const base = triIndex * 3;
+        for (const vertexIndex of [solid._triVerts[base], solid._triVerts[base + 1], solid._triVerts[base + 2]]) {
+            const x = solid._vertProperties[(vertexIndex * 3) + 0];
+            const y = solid._vertProperties[(vertexIndex * 3) + 1];
+            if (approx(x, 2, 1e-9) && approx(y, 0, 1e-9)) collapsedNonJunction = true;
+        }
+    }
+    if (!collapsedNonJunction) {
+        throw new Error("Expected non-junction side-wall vertices to keep collapsing onto the adjacent host edge.");
+    }
+}
+
 export async function test_cppSolidNative_booleanCombinedAuthoringState_preserves_face_names_and_metadata() {
     if (manifoldBuildSource !== "local" || typeof manifold?.buildBooleanCombinedAuthoringState !== "function") {
         return;

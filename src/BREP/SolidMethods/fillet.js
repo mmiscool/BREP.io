@@ -1263,10 +1263,21 @@ function collapseFilletSideWallFaces(solid, opts = {}) {
   const debug = !!opts?.debug;
   const forcedCollapseFaceIDs = new Set();
   const opportunisticCollapseFaceIDs = new Set();
+  const collapseFaceGroupByID = new Map();
   const collapseFaceNames = [];
   const sideWallNameNeedle = featureID ? `${featureID}_FILLET_SIDEWALL_` : '_FILLET_SIDEWALL_';
   const hostSideWallPattern = /_(?:FACE_A|FACE_B|SIDE_A|SIDE_B)(?:$|_)/u;
   const wedgeSurfaceSideWallPattern = /_(?:SURFACE_CA|SURFACE_CB|WEDGE_A|WEDGE_B)(?:$|_)/u;
+  const sideWallGroupFromFaceName = (faceName) => {
+    const name = String(faceName || '').trim();
+    if (!name) return '';
+    const deterministicIndex = name.indexOf('_FILLET_SIDEWALL_');
+    if (deterministicIndex >= 0) return name.slice(0, deterministicIndex + '_FILLET_SIDEWALL_'.length) + name.slice(deterministicIndex + '_FILLET_SIDEWALL_'.length);
+    for (const suffix of ['_SURFACE_CA', '_SURFACE_CB', '_WEDGE_A', '_WEDGE_B', '_FACE_A', '_FACE_B', '_SIDE_A', '_SIDE_B', '_END_CAP_1', '_END_CAP_2']) {
+      if (name.endsWith(suffix)) return name.slice(0, -suffix.length);
+    }
+    return name;
+  };
   for (const [faceNameRaw, faceIDRaw] of faceToId.entries()) {
     const faceName = String(faceNameRaw || '').trim();
     const faceID = faceIDRaw >>> 0;
@@ -1291,6 +1302,7 @@ function collapseFilletSideWallFaces(solid, opts = {}) {
     ) continue;
     if (isPreservedWedgeSurfaceSideWall) opportunisticCollapseFaceIDs.add(faceID);
     else forcedCollapseFaceIDs.add(faceID);
+    collapseFaceGroupByID.set(faceID, String(metadata?.filletSideWallEdge || '').trim() || sideWallGroupFromFaceName(faceName));
     collapseFaceNames.push(faceName);
   }
   if (forcedCollapseFaceIDs.size === 0 && opportunisticCollapseFaceIDs.size === 0) {
@@ -1361,6 +1373,52 @@ function collapseFilletSideWallFaces(solid, opts = {}) {
     return false;
   };
   const protectedVertices = new Set();
+  const sideWallGroupsByVertex = new Map();
+  const sideWallVerticesByCoordKey = new Map();
+  const tolerance = deriveSolidToleranceFromVerts(solid, 1e-7);
+  const coordKeyForVertex = (vertexIndex) => {
+    const scale = tolerance > 0 ? tolerance : 1e-7;
+    return [
+      Math.round((Number(vp[(vertexIndex * 3) + 0]) || 0) / scale),
+      Math.round((Number(vp[(vertexIndex * 3) + 1]) || 0) / scale),
+      Math.round((Number(vp[(vertexIndex * 3) + 2]) || 0) / scale),
+    ].join('|');
+  };
+  const addSideWallVertexGroup = (vertexIndex, group) => {
+    const key = String(group || '').trim();
+    if (!key) return;
+    let groups = sideWallGroupsByVertex.get(vertexIndex);
+    if (!groups) {
+      groups = new Set();
+      sideWallGroupsByVertex.set(vertexIndex, groups);
+    }
+    groups.add(key);
+
+    const coordKey = coordKeyForVertex(vertexIndex);
+    let coordEntry = sideWallVerticesByCoordKey.get(coordKey);
+    if (!coordEntry) {
+      coordEntry = { groups: new Set(), vertices: new Set() };
+      sideWallVerticesByCoordKey.set(coordKey, coordEntry);
+    }
+    coordEntry.groups.add(key);
+    coordEntry.vertices.add(vertexIndex);
+  };
+  for (let triIndex = 0; triIndex < triCount; triIndex += 1) {
+    const faceID = ids[triIndex] >>> 0;
+    if (!collapseFaceIDs.has(faceID)) continue;
+    const group = collapseFaceGroupByID.get(faceID) || '';
+    const base = triIndex * 3;
+    addSideWallVertexGroup(tv[base + 0] >>> 0, group);
+    addSideWallVertexGroup(tv[base + 1] >>> 0, group);
+    addSideWallVertexGroup(tv[base + 2] >>> 0, group);
+  }
+  for (const [vertexIndex, groups] of sideWallGroupsByVertex.entries()) {
+    if (groups.size > 1) protectedVertices.add(vertexIndex);
+  }
+  for (const entry of sideWallVerticesByCoordKey.values()) {
+    if (entry.groups.size <= 1) continue;
+    for (const vertexIndex of entry.vertices) protectedVertices.add(vertexIndex);
+  }
   for (let triIndex = 0; triIndex < triCount; triIndex += 1) {
     const faceID = ids[triIndex] >>> 0;
     if (!collapseFaceIDs.has(faceID)) continue;
