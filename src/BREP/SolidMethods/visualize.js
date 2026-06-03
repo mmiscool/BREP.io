@@ -190,6 +190,96 @@ function repairDirectStartEndCapBoundaries(solid) {
     return changedTotal;
 }
 
+function hasFaceNameMatching(solid, predicate) {
+    const idToName = solid?._idToFaceName instanceof Map ? solid._idToFaceName : null;
+    if (!idToName || !idToName.size) return false;
+    for (const name of idToName.values()) {
+        if (predicate(String(name || ''))) return true;
+    }
+    return false;
+}
+
+function hasDirectStartEndCapRepairLabels(solid) {
+    let hasStart = false;
+    let hasEnd = false;
+    const idToName = solid?._idToFaceName instanceof Map ? solid._idToFaceName : null;
+    if (!idToName || !idToName.size) return false;
+    for (const nameRaw of idToName.values()) {
+        const name = String(nameRaw || '');
+        if (name.endsWith('_START')) hasStart = true;
+        else if (name.endsWith('_END')) hasEnd = true;
+        if (hasStart && hasEnd) return true;
+    }
+    return false;
+}
+
+function arraySampleSignature(arrayLike) {
+    const length = Array.isArray(arrayLike) || ArrayBuffer.isView(arrayLike) ? arrayLike.length : 0;
+    if (!length) return '0';
+    const mid = length >> 1;
+    return `${length}:${arrayLike[0]}:${arrayLike[mid]}:${arrayLike[length - 1]}`;
+}
+
+function visualizeCacheSignature(solid, options) {
+    const aux = Array.isArray(solid?._auxEdges) ? solid._auxEdges : [];
+    return {
+        showEdges: options.showEdges !== false,
+        forceAuthoring: !!options.forceAuthoring,
+        authoringOnly: !!options.authoringOnly,
+        vertPropertiesRef: solid?._vertProperties || null,
+        vertPropertiesSig: arraySampleSignature(solid?._vertProperties),
+        triVertsRef: solid?._triVerts || null,
+        triVertsSig: arraySampleSignature(solid?._triVerts),
+        triIDsRef: solid?._triIDs || null,
+        triIDsSig: arraySampleSignature(solid?._triIDs),
+        faceNameToIDRef: solid?._faceNameToID || null,
+        faceNameToIDSize: solid?._faceNameToID instanceof Map ? solid._faceNameToID.size : 0,
+        idToFaceNameRef: solid?._idToFaceName || null,
+        idToFaceNameSize: solid?._idToFaceName instanceof Map ? solid._idToFaceName.size : 0,
+        faceMetadataRef: solid?._faceMetadata || null,
+        faceMetadataSize: solid?._faceMetadata instanceof Map ? solid._faceMetadata.size : 0,
+        faceMetadataVersion: Number(solid?._faceMetadataVersion || 0),
+        edgeMetadataRef: solid?._edgeMetadata || null,
+        edgeMetadataSize: solid?._edgeMetadata instanceof Map ? solid._edgeMetadata.size : 0,
+        edgeMetadataVersion: Number(solid?._edgeMetadataVersion || 0),
+        auxEdgesRef: solid?._auxEdges || null,
+        auxEdgesLength: aux.length,
+    };
+}
+
+function visualizeCacheMatches(a, b) {
+    return !!a && !!b
+        && a.showEdges === b.showEdges
+        && a.forceAuthoring === b.forceAuthoring
+        && a.authoringOnly === b.authoringOnly
+        && a.vertPropertiesRef === b.vertPropertiesRef
+        && a.vertPropertiesSig === b.vertPropertiesSig
+        && a.triVertsRef === b.triVertsRef
+        && a.triVertsSig === b.triVertsSig
+        && a.triIDsRef === b.triIDsRef
+        && a.triIDsSig === b.triIDsSig
+        && a.faceNameToIDRef === b.faceNameToIDRef
+        && a.faceNameToIDSize === b.faceNameToIDSize
+        && a.idToFaceNameRef === b.idToFaceNameRef
+        && a.idToFaceNameSize === b.idToFaceNameSize
+        && a.faceMetadataRef === b.faceMetadataRef
+        && a.faceMetadataSize === b.faceMetadataSize
+        && a.faceMetadataVersion === b.faceMetadataVersion
+        && a.edgeMetadataRef === b.edgeMetadataRef
+        && a.edgeMetadataSize === b.edgeMetadataSize
+        && a.edgeMetadataVersion === b.edgeMetadataVersion
+        && a.auxEdgesRef === b.auxEdgesRef
+        && a.auxEdgesLength === b.auxEdgesLength;
+}
+
+function hasVisualizedChildren(solid) {
+    const children = Array.isArray(solid?.children) ? solid.children : [];
+    for (const child of children) {
+        if (child?.type === 'FACE') return true;
+    }
+    return false;
+}
+
 
 
 
@@ -208,14 +298,29 @@ function repairDirectStartEndCapBoundaries(solid) {
  * @param {boolean} [options.showEdges=true] Include boundary polylines between faces
  * @param {boolean} [options.forceAuthoring=false] Force authoring-based grouping instead of manifold mesh
  * @param {boolean} [options.authoringOnly=false] Skip manifold path entirely (always use authoring arrays)
+ * @param {boolean} [options.forceRebuild=false] Ignore cached rendered children and rebuild
  * @returns {any} THREE.Group containing one child Mesh per face
  */
 export function visualize(options = {}) {
     // stack trace here
     //console.trace();
 
-    reassignTemporaryIntersectionCapTriangles(this);
-    repairDirectStartEndCapBoundaries(this);
+    const { showEdges = true, forceAuthoring = false, authoringOnly = false, forceRebuild = false } = options;
+    const cacheSignature = visualizeCacheSignature(this, { showEdges, forceAuthoring, authoringOnly });
+    if (
+        !forceRebuild
+        && visualizeCacheMatches(this._visualizeCache, cacheSignature)
+        && hasVisualizedChildren(this)
+    ) {
+        return this;
+    }
+
+    if (hasFaceNameMatching(this, (name) => name.endsWith('_INTERSECTION_CAP'))) {
+        reassignTemporaryIntersectionCapTriangles(this);
+    }
+    if (hasDirectStartEndCapRepairLabels(this)) {
+        repairDirectStartEndCapBoundaries(this);
+    }
 
 
 
@@ -236,7 +341,6 @@ export function visualize(options = {}) {
         }
     }
 
-    const { showEdges = true, forceAuthoring = false, authoringOnly = false } = options;
     let faces; let usedFallback = false;
     if (!forceAuthoring && !authoringOnly) {
         try {
@@ -676,6 +780,7 @@ export function visualize(options = {}) {
         }
     }
 
+    this._visualizeCache = visualizeCacheSignature(this, { showEdges, forceAuthoring, authoringOnly });
     return this;
 
 }

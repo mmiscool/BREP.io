@@ -30,6 +30,8 @@ export function constructorImpl() {
     this._dirty = true;               // arrays changed and manifold needs rebuild
     this._manifold = null;            // cached Manifold object built from arrays
     this._faceIndex = null;           // lazy cache: id -> [triIndices]
+    this._visualizeCache = null;      // last rendered topology/options signature
+    this._minGapIndex = null;         // cached triangle spatial index for point-gap queries
     this._epsilon = 0;                // optional vertex weld tolerance (off by default)
     this._freeTimer = null;           // handle for scheduled wasm cleanup
     this._cppSolidCore = null;        // optional reusable native authoring bridge
@@ -53,6 +55,8 @@ export function clone() {
     s._dirty = true;
     s._manifold = null;
     s._faceIndex = null;
+    s._visualizeCache = null;
+    s._minGapIndex = null;
     s._cppSolidCore = null;
     s._cppSolidCoreSyncStamp = null;
     s.type = 'SOLID';

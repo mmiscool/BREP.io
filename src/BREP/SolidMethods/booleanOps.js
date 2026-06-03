@@ -100,7 +100,7 @@ function faceBoundaryPoints(solid, faceName) {
 function hasNearTargetEdgePoint(targetSolid, points, tolerance) {
     if (!targetSolid || typeof targetSolid.minGapToPoint !== "function") return false;
     for (const point of points) {
-        const records = targetSolid.minGapToPoint(point, tolerance);
+        const records = targetSolid.minGapToPoint(point, tolerance, { nearestOnly: true });
         if (Array.isArray(records) && records.some((record) => Number(record?.distance) <= tolerance)) return true;
     }
     return false;
@@ -115,7 +115,7 @@ function scoreFaceSide(targetSolid, solid, faceName, desiredInside, sampleLimit 
     let samples = 0;
     for (let i = 0; i < points.length; i += stride) {
         samples += 1;
-        const records = targetSolid.minGapToPoint(points[i], searchLength);
+        const records = targetSolid.minGapToPoint(points[i], searchLength, { nearestOnly: true });
         const inside = Array.isArray(records) && records.length > 0 ? records[0].inside === true : false;
         if (inside === desiredInside) score += 1;
     }
