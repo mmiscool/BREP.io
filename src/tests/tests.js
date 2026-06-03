@@ -209,6 +209,7 @@ import {
     afterRun_offsetFace_preserves_individual_edges,
     test_offsetFace_preserves_individual_edges,
 } from './test_offsetFace_preserves_individual_edges.js';
+import { test_offsetShell_preserves_source_centerlines } from './test_offsetShellGrouping.js';
 import {
     afterRun_offsetShell_thickens_all_faces_except_selected,
     test_offsetShell_thickens_all_faces_except_selected,
@@ -238,7 +239,7 @@ import { test_primitiveCube } from './test_primitiveCube.js';
 import { test_primitiveCylinder } from './test_primitiveCylinder.js';
 import { test_primitivePyramid } from './test_primitivePyramid.js';
 import { test_primitiveSphere } from './test_primitiveSphere.js';
-import { test_primitiveTorus } from './test_primitiveTorus.js';
+import { afterRun_primitiveTorus, test_primitiveTorus } from './test_primitiveTorus.js';
 import { afterRun_pushFace_feature, test_pushFace_feature } from './test_pushFace_feature.js';
 import { afterRun_pushFace, test_pushFace } from './test_pushFace.js';
 import { test_sheetMetal_corner_fillet } from './test_sheetMetal_corner_fillet.js';
@@ -498,6 +499,7 @@ export const testFunctions = [
         exportSolids: false,
         resetHistory: true,
     },
+    { test: test_offsetShell_preserves_source_centerlines, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_thicken_feature_is_available_in_modeling_and_surfacing_workbenches, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     {
         test: test_thicken_feature_serializes_and_replays_planar_profile,
@@ -524,7 +526,7 @@ export const testFunctions = [
         resetHistory: true,
     },
     { test: test_primitiveCone, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
-    { test: test_primitiveTorus, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_primitiveTorus, afterRun: afterRun_primitiveTorus, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_primitiveSphere, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_feature_dimension_overlay_supports_port, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_port_extension_annotation_geometry_preserves_extension_value, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

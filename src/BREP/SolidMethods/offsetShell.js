@@ -26,6 +26,76 @@ function getSelectedFaceNames(faces, sourceFaces) {
     return selected;
 }
 
+function cloneCenterlineAuxEdges(sourceSolid) {
+    const source = Array.isArray(sourceSolid?._auxEdges) ? sourceSolid._auxEdges : [];
+    const out = [];
+    for (const aux of source) {
+        const name = String(aux?.name || "EDGE");
+        const isCenterline = !!aux?.centerline || /centerline/i.test(name);
+        if (!isCenterline) continue;
+
+        const points = Array.isArray(aux?.points)
+            ? aux.points.map((point) => {
+                if (Array.isArray(point) && point.length >= 3) {
+                    const x = Number(point[0]);
+                    const y = Number(point[1]);
+                    const z = Number(point[2]);
+                    if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) return [x, y, z];
+                    return null;
+                }
+                if (point && typeof point === "object") {
+                    const x = Number(point.x);
+                    const y = Number(point.y);
+                    const z = Number(point.z);
+                    if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) return [x, y, z];
+                }
+                return null;
+            }).filter(Boolean)
+            : [];
+        if (points.length < 2) continue;
+
+        const entry = {
+            name,
+            points,
+            closedLoop: !!aux?.closedLoop,
+            polylineWorld: !!aux?.polylineWorld,
+            centerline: true,
+        };
+        const materialKey = String(aux?.materialKey || "").trim();
+        if (materialKey) entry.materialKey = materialKey;
+        const faceA = String(aux?.faceA || "").trim();
+        const faceB = String(aux?.faceB || "").trim();
+        if (faceA) entry.faceA = faceA;
+        if (faceB) entry.faceB = faceB;
+        out.push(entry);
+    }
+    return out;
+}
+
+function appendSourceCenterlines(targetSolid, sourceSolid) {
+    if (!targetSolid) return targetSolid;
+    const centerlines = cloneCenterlineAuxEdges(sourceSolid);
+    if (!centerlines.length) return targetSolid;
+    const existing = Array.isArray(targetSolid._auxEdges) ? targetSolid._auxEdges : [];
+    const keyFor = (aux) => JSON.stringify({
+        name: String(aux?.name || "EDGE"),
+        points: Array.isArray(aux?.points) ? aux.points : [],
+        closedLoop: !!aux?.closedLoop,
+    });
+    const seen = new Set(existing.map(keyFor));
+    const additions = centerlines.filter((aux) => {
+        const key = keyFor(aux);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+    if (!additions.length) return targetSolid;
+    targetSolid._auxEdges = [...existing, ...additions];
+    targetSolid._visualizeCache = null;
+    targetSolid._cppSolidCoreSyncStamp = null;
+    return targetSolid;
+}
+
 export function offsetShell(faces, distance, options = {}) {
     const featureId = String(options?.featureId || options?.name || this?.name || "OffsetShell").trim() || "OffsetShell";
     const newSolidName = String(options?.newSolidName || `${this?.name || "Solid"}_${featureId}`).trim() || `${this?.name || "Solid"}_${featureId}`;
@@ -111,5 +181,6 @@ export function offsetShell(faces, distance, options = {}) {
             },
         };
     } catch { /* ignore */ }
+    appendSourceCenterlines(combined, this);
     return combined;
 }
