@@ -70,6 +70,17 @@ export class PatternFeature {
     this.persistentData = {};
   }
 
+  uiFieldsTest(context) {
+    const params = this.inputParams && Object.keys(this.inputParams).length > 0
+      ? this.inputParams
+      : context?.params || {};
+    const mode = String(params?.mode || "LINEAR").toUpperCase();
+    if (mode === "CIRCULAR") {
+      return ["offset"];
+    }
+    return ["axisRef", "centerOffset", "totalAngleDeg"];
+  }
+
   async run(partHistory) {
     // Tolerant: accept SOLID directly, or objects with parentSolid
     const raw = Array.isArray(this.inputParams.solids) ? this.inputParams.solids.filter(Boolean) : [];

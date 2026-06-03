@@ -1,4 +1,8 @@
+import { BREP } from '../BREP/BREP.js';
+import { fs } from '../fs.proxy.js';
+
 const IMPORT_PLANAR_SLIVER_ID = 'IMPORT3D_PLANAR_SLIVER_BRIDGE';
+const IMPORT_FIXTURE_STL_PATH = 'src/tests/importTestingData/import_test.stl';
 
 function formatNumber(value) {
   const num = Number(value);
@@ -91,6 +95,165 @@ export async function afterRun_import3d_planar_extraction_merges_sliver_bridge(p
   if (uniqueFaceNames.size !== 1) {
     throw new Error(
       `[import3d planar sliver] Expected one merged planar face, got ${uniqueFaceNames.size} (${Array.from(uniqueFaceNames).join(', ')})`,
+    );
+  }
+}
+
+export async function test_import3d_planar_extraction_keeps_small_flat_patch_edges() {
+  const geometry = new BREP.THREE.BufferGeometry();
+  const positions = new Float32Array([
+    // Center flat patch, intentionally below the global planar area threshold.
+    0, 0, 0,
+    1, 0, 0,
+    1, 1, 0,
+    0, 1, 0,
+
+    // Neighboring shallow planes that would merge by deflection angle.
+    -1, 0, 0.05,
+    0, 0, 0,
+    0, 1, 0,
+    -1, 1, 0.05,
+
+    1, 0, 0,
+    2, 0, 0.05,
+    2, 1, 0.05,
+    1, 1, 0,
+
+    // Large disconnected planar area to make the center patch fail the
+    // configured global percent threshold.
+    -25, -25, 10,
+    25, -25, 10,
+    25, 25, 10,
+    -25, 25, 10,
+  ]);
+  const indices = new Uint32Array([
+    0, 1, 2,
+    0, 2, 3,
+    4, 5, 6,
+    4, 6, 7,
+    8, 9, 10,
+    8, 10, 11,
+    12, 13, 14,
+    12, 14, 15,
+  ]);
+  geometry.setAttribute('position', new BREP.THREE.BufferAttribute(positions, 3));
+  geometry.setIndex(new BREP.THREE.BufferAttribute(indices, 1));
+
+  const solid = new BREP.MeshToBrep(geometry, 5, 1e-5, {
+    extractPlanarFaces: true,
+    planarMinAreaPercent: 1,
+  });
+
+  const triIDs = Array.isArray(solid._triIDs) ? solid._triIDs : [];
+  const idToFaceName = solid._idToFaceName instanceof Map ? solid._idToFaceName : new Map();
+  const names = triIDs.map((id) => String(idToFaceName.get(id) || ''));
+
+  if (names.length !== 8) {
+    throw new Error(`[import3d planar small patch] Expected 8 triangles, got ${names.length}`);
+  }
+  if (!names[0] || names[0] !== names[1]) {
+    throw new Error('[import3d planar small patch] Center patch triangles were not kept in one planar face.');
+  }
+  if (names[0] === names[2] || names[0] === names[4]) {
+    throw new Error('[import3d planar small patch] Center planar patch was merged into adjacent shallow faces.');
+  }
+}
+
+export async function test_import3d_planar_extraction_merges_near_coplanar_patch_back_into_neighbor() {
+  const geometry = new BREP.THREE.BufferGeometry();
+  const positions = new Float32Array([
+    // Small local planar patch.
+    0, 0, 0,
+    1, 0, 0,
+    1, 1, 0,
+    0, 1, 0,
+
+    // Neighboring patch is visually coplanar but has tiny STL tolerance drift.
+    1, 0, 0,
+    2, 0, 0.0002,
+    2, 1, 0.0002,
+    1, 1, 0,
+
+    // Large disconnected planar area makes the local patch fail the global
+    // area threshold, forcing the local-patch path before coalescing.
+    -25, -25, 10,
+    25, -25, 10,
+    25, 25, 10,
+    -25, 25, 10,
+  ]);
+  const indices = new Uint32Array([
+    0, 1, 2,
+    0, 2, 3,
+    4, 5, 6,
+    4, 6, 7,
+    8, 9, 10,
+    8, 10, 11,
+  ]);
+  geometry.setAttribute('position', new BREP.THREE.BufferAttribute(positions, 3));
+  geometry.setIndex(new BREP.THREE.BufferAttribute(indices, 1));
+
+  const solid = new BREP.MeshToBrep(geometry, 5, 1e-5, {
+    extractPlanarFaces: true,
+    planarMinAreaPercent: 1,
+  });
+
+  const triIDs = Array.isArray(solid._triIDs) ? solid._triIDs : [];
+  const idToFaceName = solid._idToFaceName instanceof Map ? solid._idToFaceName : new Map();
+  const names = triIDs.map((id) => String(idToFaceName.get(id) || ''));
+
+  if (names.length !== 6) {
+    throw new Error(`[import3d planar near-coplanar merge] Expected 6 triangles, got ${names.length}`);
+  }
+  if (!names[0] || names[0] !== names[1]) {
+    throw new Error('[import3d planar near-coplanar merge] Local patch triangles were not grouped together.');
+  }
+  if (names[0] !== names[2] || names[0] !== names[3]) {
+    throw new Error('[import3d planar near-coplanar merge] Local patch was not merged back into its coplanar neighbor.');
+  }
+}
+
+export async function test_import3d_fixture_merges_faces_4_and_34(partHistory) {
+  const stl = await fs.promises.readFile(IMPORT_FIXTURE_STL_PATH, 'utf8');
+  const import3d = await partHistory.newFeature('IMPORT3D');
+  Object.assign(import3d.inputParams, {
+    id: 'IMPORT3D5',
+    featureID: 'IMPORT3D5',
+    fileToImport: stl,
+    deflectionAngle: 8,
+    decimationLevel: 100,
+    meshRepairLevel: 'NONE',
+    centerMesh: true,
+    extractMultipleSolids: false,
+    extractPlanarFaces: true,
+    planarFaceMinAreaPercent: 1,
+    segmentAnalyticPrimitives: false,
+  });
+
+  await partHistory.runHistory();
+
+  const solids = (partHistory.scene?.children || []).filter((obj) => obj?.type === 'SOLID');
+  const solid = solids.find((obj) => String(obj?.name || '') === 'IMPORT3D5') || solids[0];
+  if (!solid) {
+    throw new Error('[import3d fixture planar merge] No imported solid was generated.');
+  }
+
+  const triIDs = Array.isArray(solid._triIDs) ? solid._triIDs : [];
+  const idToFaceName = solid._idToFaceName instanceof Map ? solid._idToFaceName : new Map();
+  const faceCounts = new Map();
+  for (const faceID of triIDs) {
+    const faceName = String(idToFaceName.get(faceID) || '');
+    if (!faceName) continue;
+    faceCounts.set(faceName, (faceCounts.get(faceName) || 0) + 1);
+  }
+
+  const face4Count = faceCounts.get('STL_FACE_4') || 0;
+  const face34Count = faceCounts.get('STL_FACE_34') || 0;
+  if (face4Count <= 0) {
+    throw new Error('[import3d fixture planar merge] Expected STL_FACE_4 to exist after import.');
+  }
+  if (face34Count !== 0) {
+    throw new Error(
+      `[import3d fixture planar merge] Expected STL_FACE_34 to merge into STL_FACE_4, but it still has ${face34Count} triangles.`,
     );
   }
 }

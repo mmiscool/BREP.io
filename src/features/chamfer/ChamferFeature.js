@@ -6,6 +6,12 @@ import {
 import { BREP } from "../../BREP/BREP.js";
 import { SelectionState } from "../../UI/SelectionState.js";
 
+const CHAMFER_DEBUG_NONE = "NONE";
+const CHAMFER_DEBUG_ADVANCED_OPTIONS = "ADVANCED OPTIONS";
+const CHAMFER_DEBUG_TRIANGLE_CROSS_SECTIONS = "TRIANGLE CROSS SECTIONS ONLY";
+const CHAMFER_DEBUG_SOLID_ONLY = "CHAMFER SOLID ONLY";
+const CHAMFER_DEBUG_SOLID_AND_CROSS_SECTIONS = "CHAMFER SOLID AND CROSS SECTIONS";
+
 const inputParamsSchema = {
     id: {
         type: "string",
@@ -40,25 +46,27 @@ const inputParamsSchema = {
     debug: {
         type: "options",
         options: [
-            "NONE",
-            "TRIANGLE CROSS SECTIONS ONLY",
-            "CHAMFER SOLID ONLY",
-            "CHAMFER SOLID AND CROSS SECTIONS",
+            CHAMFER_DEBUG_NONE,
+            CHAMFER_DEBUG_ADVANCED_OPTIONS,
+            CHAMFER_DEBUG_TRIANGLE_CROSS_SECTIONS,
+            CHAMFER_DEBUG_SOLID_ONLY,
+            CHAMFER_DEBUG_SOLID_AND_CROSS_SECTIONS,
         ],
-        default_value: "NONE",
+        default_value: CHAMFER_DEBUG_NONE,
         hint: "Choose which chamfer debug geometry to draw",
     }
 };
 
 function normalizeChamferDebugMode(rawValue) {
-    if (rawValue === true) return "CHAMFER SOLID AND CROSS SECTIONS";
-    if (rawValue === false || rawValue == null) return "NONE";
+    if (rawValue === true) return CHAMFER_DEBUG_SOLID_AND_CROSS_SECTIONS;
+    if (rawValue === false || rawValue == null) return CHAMFER_DEBUG_NONE;
     const value = String(rawValue).trim().toLowerCase();
-    if (value === "triangle cross sections only") return "TRIANGLE CROSS SECTIONS ONLY";
-    if (value === "chamfer solid only") return "CHAMFER SOLID ONLY";
-    if (value === "chamfer solid and cross sections") return "CHAMFER SOLID AND CROSS SECTIONS";
-    if (value === "none") return "NONE";
-    return "NONE";
+    if (value === CHAMFER_DEBUG_ADVANCED_OPTIONS.toLowerCase()) return CHAMFER_DEBUG_ADVANCED_OPTIONS;
+    if (value === CHAMFER_DEBUG_TRIANGLE_CROSS_SECTIONS.toLowerCase()) return CHAMFER_DEBUG_TRIANGLE_CROSS_SECTIONS;
+    if (value === CHAMFER_DEBUG_SOLID_ONLY.toLowerCase()) return CHAMFER_DEBUG_SOLID_ONLY;
+    if (value === CHAMFER_DEBUG_SOLID_AND_CROSS_SECTIONS.toLowerCase()) return CHAMFER_DEBUG_SOLID_AND_CROSS_SECTIONS;
+    if (value === CHAMFER_DEBUG_NONE.toLowerCase()) return CHAMFER_DEBUG_NONE;
+    return CHAMFER_DEBUG_NONE;
 }
 
 function isSectionDebugSolid(debugSolid) {
@@ -69,13 +77,13 @@ function isSectionDebugSolid(debugSolid) {
 function shouldIncludeChamferDebugSolid(debugMode, debugSolid) {
     const isSection = isSectionDebugSolid(debugSolid);
     switch (debugMode) {
-        case "TRIANGLE CROSS SECTIONS ONLY":
+        case CHAMFER_DEBUG_TRIANGLE_CROSS_SECTIONS:
             return isSection;
-        case "CHAMFER SOLID ONLY":
+        case CHAMFER_DEBUG_SOLID_ONLY:
             return !isSection;
-        case "CHAMFER SOLID AND CROSS SECTIONS":
+        case CHAMFER_DEBUG_SOLID_AND_CROSS_SECTIONS:
             return true;
-        case "NONE":
+        case CHAMFER_DEBUG_NONE:
         default:
             return false;
     }
@@ -215,6 +223,19 @@ export class ChamferFeature {
         this.inputParams = {};
         this.persistentData = {};
     }
+
+    uiFieldsTest(context) {
+        const params = this.inputParams && Object.keys(this.inputParams).length > 0
+            ? this.inputParams
+            : context?.params || {};
+        const debugMode = normalizeChamferDebugMode(params?.debug);
+        const inflate = Number(params?.inflate) || 0;
+        if (debugMode === CHAMFER_DEBUG_NONE && inflate === 0) {
+            return ["inflate"];
+        }
+        return [];
+    }
+
     async run(_partHistory) {
         const inputObjects = Array.isArray(this.inputParams.edges) ? this.inputParams.edges.filter(Boolean) : [];
         const edgeObjs = collectEdgesFromSelection(inputObjects);
@@ -242,12 +263,13 @@ export class ChamferFeature {
 
         const fid = this.inputParams.featureID;
         const debugMode = normalizeChamferDebugMode(this.inputParams.debug);
+        const debugEnabled = debugMode !== CHAMFER_DEBUG_NONE && debugMode !== CHAMFER_DEBUG_ADVANCED_OPTIONS;
         const result = await targetSolid.chamfer({
             distance,
             edges: edgeObjs,
             direction,
             inflate: Number(this.inputParams.inflate),
-            debug: debugMode !== "NONE",
+            debug: debugEnabled,
             featureID: fid,
         });
 
@@ -269,7 +291,7 @@ export class ChamferFeature {
         result.visualize();
 
         const added = [result];
-        if (debugMode !== "NONE" && Array.isArray(result.__debugChamferSolids)) {
+        if (debugEnabled && Array.isArray(result.__debugChamferSolids)) {
             for (const dbg of result.__debugChamferSolids) {
                 if (!dbg) continue;
                 if (!shouldIncludeChamferDebugSolid(debugMode, dbg)) continue;

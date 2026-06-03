@@ -49,6 +49,17 @@ export class RemeshFeature {
     this.persistentData = {};
   }
 
+  uiFieldsTest(context) {
+    const params = this.inputParams && Object.keys(this.inputParams).length > 0
+      ? this.inputParams
+      : context?.params || {};
+    const mode = String(params?.mode || "Increase resolution").toLowerCase();
+    if (mode === "simplify") {
+      return ["maxEdgeLength", "maxIterations"];
+    }
+    return ["tolerance"];
+  }
+
   async run(partHistory) {
     const scene = partHistory.scene;
 

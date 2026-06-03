@@ -5,7 +5,7 @@ import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUti
 import { BREP } from '../../BREP/BREP.js';
 import { segmentMeshPrimitives } from '../../BREP/Segmentation/primitiveSegmentation.js';
 
-const IMPORT3D_CACHE_VERSION = 2;
+const IMPORT3D_CACHE_VERSION = 5;
 const DEFAULT_DEFLECTION_ANGLE = 8;
 const DEFAULT_DECIMATION_LEVEL_PERCENT = 100;
 const DEFAULT_EXTRACT_PLANAR_FACES = true;
@@ -1410,6 +1410,14 @@ export class Import3dModelFeature {
     constructor() {
         this.inputParams = {};
         this.persistentData = {};
+    }
+
+    uiFieldsTest(context) {
+        const params = this.inputParams && Object.keys(this.inputParams).length > 0
+            ? this.inputParams
+            : context?.params || {};
+        const extractPlanarFaces = normalizeBoolean(params.extractPlanarFaces, DEFAULT_EXTRACT_PLANAR_FACES);
+        return extractPlanarFaces ? [] : ['planarFaceMinAreaPercent'];
     }
 
     async run(partHistory) {

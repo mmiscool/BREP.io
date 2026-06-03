@@ -130,6 +130,9 @@ import {
 } from './test_import3dMultipleSolids.js';
 import {
     afterRun_import3d_planar_extraction_merges_sliver_bridge,
+    test_import3d_fixture_merges_faces_4_and_34,
+    test_import3d_planar_extraction_keeps_small_flat_patch_edges,
+    test_import3d_planar_extraction_merges_near_coplanar_patch_back_into_neighbor,
     test_import3d_planar_extraction_merges_sliver_bridge,
 } from './test_import3dPlanarExtraction.js';
 import { test_mirror } from './test_mirror.js';
@@ -583,6 +586,27 @@ export const testFunctions = [
         printArtifacts: false,
         exportFaces: true,
         exportSolids: true,
+        resetHistory: true,
+    },
+    {
+        test: test_import3d_planar_extraction_keeps_small_flat_patch_edges,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_import3d_planar_extraction_merges_near_coplanar_patch_back_into_neighbor,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_import3d_fixture_merges_faces_4_and_34,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
         resetHistory: true,
     },
     {

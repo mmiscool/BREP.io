@@ -11,6 +11,7 @@ import {
 import { cleanupFilletSingleNeighborIslands } from "../../BREP/SolidMethods/fillet.js";
 
 const DEBUG_MODE_NONE = "NONE";
+const DEBUG_MODE_ADVANCED_OPTIONS = "ADVANCED OPTIONS";
 const DEBUG_MODE_CONSOLE_LOG_PROCESS = "CONSOLE.LOG PROCESS";
 const DEBUG_MODE_WEDGE_AND_TUBE = "WEDGE AND TUBE";
 const DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEAN = "WEDGE AND TUBE AFTER BOOLEAN";
@@ -46,10 +47,29 @@ const inputParamsSchema = {
         default_value: "resolution",
         hint: "Segments around the fillet tube circumference",
     },
+    direction: {
+        type: "options",
+        options: ["AUTO", "INSET", "OUTSET"],
+        default_value: "AUTO",
+        hint: "AUTO classifies each selected edge as inside/outside and applies subtract/union automatically.",
+    },
+    debug: {
+        type: "options",
+        options: [
+            DEBUG_MODE_NONE,
+            DEBUG_MODE_ADVANCED_OPTIONS,
+            DEBUG_MODE_CONSOLE_LOG_PROCESS,
+            DEBUG_MODE_WEDGE_AND_TUBE,
+            DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEAN,
+            DEBUG_MODE_COMBINED_BEFORE_TARGET,
+        ],
+        default_value: DEBUG_MODE_NONE,
+        hint: "Controls which fillet debug solids are emitted.",
+    },
     inflate: {
         type: "number",
         step: 0.1,
-        default_value: 0.1,
+        default_value: 0,
         hint: "Grow the cutting solid by this amount (units). Keep tiny (e.g. 0.0005). Closed loops ignore inflation to avoid self‑intersection.",
     },
     nudgeFaceDistance: {
@@ -68,29 +88,12 @@ const inputParamsSchema = {
         default_value: true,
         hint: "Allow fillet cleanup to rename/relabel generated faces.",
     },
-    direction: {
-        type: "options",
-        options: ["AUTO", "INSET", "OUTSET"],
-        default_value: "AUTO",
-        hint: "AUTO classifies each selected edge as inside/outside and applies subtract/union automatically.",
-    },
-    debug: {
-        type: "options",
-        options: [
-            DEBUG_MODE_NONE,
-            DEBUG_MODE_CONSOLE_LOG_PROCESS,
-            DEBUG_MODE_WEDGE_AND_TUBE,
-            DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEAN,
-            DEBUG_MODE_COMBINED_BEFORE_TARGET,
-        ],
-        default_value: DEBUG_MODE_NONE,
-        hint: "Controls which fillet debug solids are emitted.",
-    },
 };
 
 function resolveDebugMode(rawValue) {
     const normalized = String(rawValue).trim().toUpperCase();
     if (normalized === DEBUG_MODE_NONE) return DEBUG_MODE_NONE;
+    if (normalized === DEBUG_MODE_ADVANCED_OPTIONS) return DEBUG_MODE_ADVANCED_OPTIONS;
     if (normalized === DEBUG_MODE_CONSOLE_LOG_PROCESS.toUpperCase()) return DEBUG_MODE_CONSOLE_LOG_PROCESS;
     if (normalized === DEBUG_MODE_WEDGE_AND_TUBE) return DEBUG_MODE_WEDGE_AND_TUBE;
     if (normalized === DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEAN) {
@@ -103,6 +106,9 @@ function resolveDebugMode(rawValue) {
 }
 
 function getDebugConfig(debugMode) {
+    if (debugMode === DEBUG_MODE_ADVANCED_OPTIONS) {
+        return { enabled: false, solidsLevel: -1, showCombinedBeforeTarget: false };
+    }
     if (debugMode === DEBUG_MODE_CONSOLE_LOG_PROCESS) {
         return { enabled: false, solidsLevel: -1, showCombinedBeforeTarget: false };
     }
@@ -700,8 +706,17 @@ export class FilletFeature {
         this.persistentData = {};
     }
 
-    uiFieldsTest() {
-        return [];
+    uiFieldsTest(context) {
+        const ownParams = this.inputParams && Object.keys(this.inputParams).length > 0 ? this.inputParams : null;
+        const params = ownParams || context?.params || {};
+        const debugMode = resolveDebugMode(params?.debug);
+        const inflate = Number(params?.inflate) || 0;
+        const exclude = [];
+        if (debugMode === DEBUG_MODE_NONE) {
+            exclude.push('collapseFilletSideWalls', 'renameFaces', 'nudgeFaceDistance');
+            if (inflate === 0) exclude.push('inflate');
+        }
+        return exclude;
     }
 
     async run(partHistory) {
@@ -710,7 +725,7 @@ export class FilletFeature {
         const debugMode = resolveDebugMode(this.inputParams?.debug);
         const debugConfig = getDebugConfig(debugMode);
         const debugEnabled = !!debugConfig.enabled;
-        const debugLogsEnabled = debugMode !== DEBUG_MODE_NONE;
+        const debugLogsEnabled = debugMode !== DEBUG_MODE_NONE && debugMode !== DEBUG_MODE_ADVANCED_OPTIONS;
         const configuredDebugLevel = Number(debugConfig.solidsLevel);
         const debugShowCombinedBeforeTarget = !!debugConfig.showCombinedBeforeTarget;
         if (debugLogsEnabled) {
@@ -837,7 +852,8 @@ export class FilletFeature {
         let result = null;
         const collapseFilletSideWalls = this.inputParams?.collapseFilletSideWalls !== false;
         const renameFaces = this.inputParams?.renameFaces !== false;
-        const inflate = Number(this.inputParams.inflate) || 0;
+        const inflateInput = Number(this.inputParams.inflate) || 0;
+        const inflate = inflateInput === 0 ? r * 0.1 : inflateInput;
         const nudgeFaceDistance = this.inputParams?.nudgeFaceDistance;
         profiler.start('build dependency signature');
         const cacheKey = buildFilletCacheKey({
