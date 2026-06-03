@@ -27,7 +27,6 @@ build.ninja
 
 # Test artifacts
 /tests/results/
-/tests/test-run.log
 /test-results/
 /coverage/
 /playwright-report/

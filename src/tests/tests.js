@@ -358,7 +358,8 @@ import {
 } from './test_primitive_boolean_face_grouping.js';
 
 const IS_NODE_RUNTIME = typeof process !== 'undefined' && process.versions && process.versions.node && typeof window === 'undefined';
-const TEST_LOG_PATH = path.join('tests', 'test-run.log');
+const TEST_LOG_PATH = path.join('tests', 'test-run.log.md');
+const TEST_LOG_VERSION = 1;
 
 function getTestName(testFunction) {
     return (testFunction?.test?.name && String(testFunction.test.name)) || 'unnamed_test';
@@ -959,12 +960,6 @@ export async function runTests(partHistory = new PartHistory(), callbackToRunBet
         //await console.clear();
     }
 
-    if (IS_NODE_RUNTIME) {
-        resetTestLog();
-        logTestEvent('Test run started');
-        if (options.testName) logTestEvent(`Filtering to ${options.testName}`);
-    }
-
     // delete the ./tests/results directory in an asynchronous way
     await fs.promises.rm('./tests/results', { recursive: true, force: true });
 
@@ -974,96 +969,82 @@ export async function runTests(partHistory = new PartHistory(), callbackToRunBet
     await registerSketchSolverTopologyFixtureTests(testFunctions);
 
     const testFunctionsToRun = getRequestedTestFunctions(testFunctions, options.testName);
+    const testRunLog = IS_NODE_RUNTIME
+        ? createTestRunLog({ filter: options.testName, plannedTests: testFunctionsToRun.map(getTestName) })
+        : null;
 
-    for (const testFunction of testFunctionsToRun) {
-        const isLastTest = testFunction === testFunctionsToRun[testFunctionsToRun.length - 1];
-        await partHistory.reset();
+    try {
+        for (const testFunction of testFunctionsToRun) {
+            const isLastTest = testFunction === testFunctionsToRun[testFunctionsToRun.length - 1];
+            await partHistory.reset();
 
-        if (testFunction.resetHistory) partHistory.features = [];
+            if (testFunction.resetHistory) partHistory.features = [];
 
-        const testName = getTestName(testFunction);
-        if (IS_NODE_RUNTIME) logTestEvent(`Starting ${testName}`);
+            const testName = getTestName(testFunction);
+            const testStartMs = getMonotonicTimeMs();
+            let testDurationMs = 0;
+            let artifactDurationMs = 0;
+            let handledError = null;
 
-        let handledError = null;
-        try {
-            handledError = await runSingleTest(testFunction, partHistory);
-        } catch (err) {
-            if (IS_NODE_RUNTIME) logTestEvent(`Test ${testName} failed: ${stringifyError(err)}`);
-            throw err;
-        }
-
-        if (IS_NODE_RUNTIME) {
-            if (handledError) logTestEvent(`Test ${testName} completed with handled error: ${stringifyError(handledError)}`);
-            else logTestEvent(`Test ${testName} completed successfully`);
-        }
-
-        if (typeof window !== "undefined") {
-            if (typeof callbackToRunBetweenTests === 'function') {
-                await callbackToRunBetweenTests(partHistory, isLastTest);
-            }
-        } else {
-            // run each test and export the results to a folder ./tests/results/<testFunction name>/
-            const exportName = testFunction.test.name;
-            const exportPath = `./tests/results/${exportName}/`;
-            // create the directory if it does not exist
-            if (!fs.existsSync(exportPath)) {
-                fs.mkdirSync(exportPath, { recursive: true });
-            }
-
-            // Collect SOLID nodes from the scene
-            const solids = (partHistory.scene?.children || []).filter(o => o && o.type === 'SOLID' && typeof o.toSTL === 'function');
-
-            // Export solids (triggered by either flag for convenience)
-            if (testFunction.exportSolids || testFunction.printArtifacts) {
-                solids.forEach((solid, idx) => {
-                    const rawName = solid.name && String(solid.name).trim().length ? String(solid.name) : `solid_${idx}`;
-                    const safeName = sanitizeFileName(rawName);
-                    let stl = "";
-                    try {
-                        stl = solid.toSTL(safeName, 6);
-                    } catch (e) {
-                        console.warn(`[runTests] toSTL failed for solid ${rawName}:`, e?.message || e);
-                        return;
-                    }
-                    const outPath = path.join(exportPath, `${safeName}.stl`);
-                    writeFile(outPath, stl);
-                });
-            }
-
-            // Export faces per solid
-            if (testFunction.exportFaces) {
-                solids.forEach((solid, sidx) => {
-                    const rawName = solid.name && String(solid.name).trim().length ? String(solid.name) : `solid_${sidx}`;
-                    const safeSolid = sanitizeFileName(rawName);
-                    let faces = [];
-                    try {
-                        faces = typeof solid.getFaces === 'function' ? solid.getFaces(false) : [];
-                    } catch {
-                        faces = [];
-                    }
-                    faces.forEach(({ faceName, triangles }, fIdx) => {
-                        if (!triangles || triangles.length === 0) return;
-                        const rawFace = faceName || `face_${fIdx}`;
-                        const safeFace = sanitizeFileName(rawFace);
-                        const stl = trianglesToAsciiSTL(`${safeSolid}_${safeFace}`, triangles);
-                        const outPath = path.join(exportPath, `${safeSolid}_${safeFace}.stl`);
-                        writeFile(outPath, stl);
+            try {
+                handledError = await runSingleTest(testFunction, partHistory);
+            } catch (err) {
+                testDurationMs = getMonotonicTimeMs() - testStartMs;
+                if (testRunLog) {
+                    testRunLog.recordTest({
+                        name: testName,
+                        status: 'failed',
+                        testDurationMs,
+                        artifactDurationMs,
+                        error: err,
                     });
-                });
+                    testRunLog.finish('failed');
+                }
+                throw err;
             }
 
-            // Export 3MF with embedded feature history
-            await export3mfArtifact({
-                partHistory,
-                exportName,
-                exportPath,
-                solids,
-            });
+            testDurationMs = getMonotonicTimeMs() - testStartMs;
 
+            const artifactStartMs = getMonotonicTimeMs();
+            try {
+                if (typeof window !== "undefined") {
+                    if (typeof callbackToRunBetweenTests === 'function') {
+                        await callbackToRunBetweenTests(partHistory, isLastTest);
+                    }
+                } else {
+                    await exportTestArtifacts({ testFunction, partHistory });
+                }
+            } catch (err) {
+                artifactDurationMs = getMonotonicTimeMs() - artifactStartMs;
+                if (testRunLog) {
+                    testRunLog.recordTest({
+                        name: testName,
+                        status: 'failed',
+                        testDurationMs,
+                        artifactDurationMs,
+                        error: err,
+                    });
+                    testRunLog.finish('failed');
+                }
+                throw err;
+            }
+            artifactDurationMs = getMonotonicTimeMs() - artifactStartMs;
+
+            if (testRunLog) {
+                testRunLog.recordTest({
+                    name: testName,
+                    status: handledError ? 'handled_error' : 'passed',
+                    testDurationMs,
+                    artifactDurationMs,
+                    error: handledError,
+                });
+            }
         }
+    } catch (err) {
+        throw err;
     }
 
-    if (IS_NODE_RUNTIME) logTestEvent('Test run finished');
+    if (testRunLog) testRunLog.finish('passed');
 }
 
 
@@ -1141,35 +1122,166 @@ function writeBinaryFile(filePath, content) {
     }
 }
 
-function appendToFile(filePath, content) {
-    if (!IS_NODE_RUNTIME) return;
-    try {
-        const dir = path.dirname(filePath);
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-        }
-        fs.appendFileSync(filePath, content, 'utf8');
-    } catch (error) {
-        console.log(`Error appending file ${filePath}:`, error);
-    }
-}
-
-function resetTestLog() {
-    if (!IS_NODE_RUNTIME) return;
-    writeFile(TEST_LOG_PATH, '');
-}
-
-function logTestEvent(message) {
-    if (!IS_NODE_RUNTIME) return;
-    const timestamp = new Date().toISOString();
-    appendToFile(TEST_LOG_PATH, `[${timestamp}] ${message}\n`);
-}
-
 function stringifyError(err) {
     if (!err) return 'Unknown error';
     if (typeof err === 'string') return err;
     const message = err?.message || err?.toString?.() || 'Unknown error';
     return err?.stack ? `${message}\n${err.stack}` : message;
+}
+
+function getMonotonicTimeMs() {
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+        return performance.now();
+    }
+    return Date.now();
+}
+
+function formatDurationMs(ms) {
+    return (Math.max(0, Number(ms) || 0)).toFixed(3);
+}
+
+function createTestRunLog({ filter, plannedTests }) {
+    const startedAt = new Date();
+    const startedMs = getMonotonicTimeMs();
+    const records = [];
+    let finished = false;
+
+    const write = (status = 'running') => {
+        const finishedAt = finished ? new Date() : null;
+        const elapsedMs = getMonotonicTimeMs() - startedMs;
+        const passed = records.filter(record => record.status === 'passed').length;
+        const handledErrors = records.filter(record => record.status === 'handled_error').length;
+        const failed = records.filter(record => record.status === 'failed').length;
+        const lines = [
+            '# BREP Test Run Log',
+            '',
+            `log_version: ${TEST_LOG_VERSION}`,
+            `status: ${status}`,
+            `started_at: ${startedAt.toISOString()}`,
+            `finished_at: ${finishedAt ? finishedAt.toISOString() : ''}`,
+            `filter: ${filter || 'all'}`,
+            `planned_tests: ${plannedTests.length}`,
+            `tests_run: ${records.length}`,
+            `passed: ${passed}`,
+            `handled_errors: ${handledErrors}`,
+            `failed: ${failed}`,
+            `total_elapsed_ms: ${formatDurationMs(elapsedMs)}`,
+            '',
+            '| # | test | status | test_ms | artifact_ms | total_ms | notes |',
+            '|---:|---|---|---:|---:|---:|---|',
+        ];
+
+        records.forEach((record, index) => {
+            const cells = [
+                index + 1,
+                escapeMarkdownTableCell(record.name),
+                record.status,
+                formatDurationMs(record.testDurationMs),
+                formatDurationMs(record.artifactDurationMs),
+                formatDurationMs(record.testDurationMs + record.artifactDurationMs),
+                escapeMarkdownTableCell(record.note || ''),
+            ];
+            lines.push(`| ${cells.join(' | ')} |`);
+        });
+
+        if (records.length < plannedTests.length) {
+            lines.push('');
+            lines.push('Pending tests:');
+            plannedTests.slice(records.length).forEach((name, index) => {
+                lines.push(`${records.length + index + 1}. ${name}`);
+            });
+        }
+
+        writeFile(TEST_LOG_PATH, `${lines.join('\n')}\n`);
+    };
+
+    write();
+
+    return {
+        records,
+        recordTest({ name, status, testDurationMs, artifactDurationMs, error }) {
+            records.push({
+                name,
+                status,
+                testDurationMs,
+                artifactDurationMs,
+                note: error ? firstLine(stringifyError(error)) : '',
+            });
+            write();
+        },
+        finish(status) {
+            finished = true;
+            write(status);
+        },
+    };
+}
+
+function firstLine(value) {
+    return String(value || '').split(/\r?\n/)[0];
+}
+
+function escapeMarkdownTableCell(value) {
+    return String(value || '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+}
+
+async function exportTestArtifacts({ testFunction, partHistory }) {
+    // run each test and export the results to a folder ./tests/results/<testFunction name>/
+    const exportName = testFunction.test.name;
+    const exportPath = `./tests/results/${exportName}/`;
+    // create the directory if it does not exist
+    if (!fs.existsSync(exportPath)) {
+        fs.mkdirSync(exportPath, { recursive: true });
+    }
+
+    // Collect SOLID nodes from the scene
+    const solids = (partHistory.scene?.children || []).filter(o => o && o.type === 'SOLID' && typeof o.toSTL === 'function');
+
+    // Export solids (triggered by either flag for convenience)
+    if (testFunction.exportSolids || testFunction.printArtifacts) {
+        solids.forEach((solid, idx) => {
+            const rawName = solid.name && String(solid.name).trim().length ? String(solid.name) : `solid_${idx}`;
+            const safeName = sanitizeFileName(rawName);
+            let stl = "";
+            try {
+                stl = solid.toSTL(safeName, 6);
+            } catch (e) {
+                console.warn(`[runTests] toSTL failed for solid ${rawName}:`, e?.message || e);
+                return;
+            }
+            const outPath = path.join(exportPath, `${safeName}.stl`);
+            writeFile(outPath, stl);
+        });
+    }
+
+    // Export faces per solid
+    if (testFunction.exportFaces) {
+        solids.forEach((solid, sidx) => {
+            const rawName = solid.name && String(solid.name).trim().length ? String(solid.name) : `solid_${sidx}`;
+            const safeSolid = sanitizeFileName(rawName);
+            let faces = [];
+            try {
+                faces = typeof solid.getFaces === 'function' ? solid.getFaces(false) : [];
+            } catch {
+                faces = [];
+            }
+            faces.forEach(({ faceName, triangles }, fIdx) => {
+                if (!triangles || triangles.length === 0) return;
+                const rawFace = faceName || `face_${fIdx}`;
+                const safeFace = sanitizeFileName(rawFace);
+                const stl = trianglesToAsciiSTL(`${safeSolid}_${safeFace}`, triangles);
+                const outPath = path.join(exportPath, `${safeSolid}_${safeFace}.stl`);
+                writeFile(outPath, stl);
+            });
+        });
+    }
+
+    // Export 3MF with embedded feature history
+    await export3mfArtifact({
+        partHistory,
+        exportName,
+        exportPath,
+        solids,
+    });
 }
 
 // ---------------- Local helpers for artifact export (Node only) ----------------

@@ -24,3 +24,5 @@ pnpm test -- -t test_primitiveCube
 Test names are the exported test function names registered in `testFunctions`, plus generated names for dynamic part-file import tests such as `import_part_fillet_test`.
 
 Each run clears `tests/results/` first. A full run writes artifacts for every test that enables them; a single-test run writes only that test's artifacts.
+
+Each Node test run also writes `tests/test-run.log`. This log is intentionally stored in the repository so Git history preserves the run summary. It includes the selected filter, total elapsed time, and one row per executed test with test runtime, artifact export runtime, total runtime, status, and any failure note.

@@ -11,7 +11,7 @@
     "build:kernel": "node ./scripts/prepareManifoldRuntime.js && pnpm generateLicenses && vite build --config vite.config.kernel.js && node ./scripts/syncKernelAssets.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "liveTesting": "nodemon --watch src --watch tests --ext js --exec \"pnpm test\"",
+    "liveTesting": "nodemon --watch src --ignore \"src/generated/**\" --ext js --exec \"pnpm test\"",
     "test": "node ./scripts/prepareManifoldRuntime.js && node ./src/tests/tests.js",
     "generateLicenses": "node ./generateLicenses.js && node ./scripts/generateLicenseBundle.js",
     "prepareFonts": "node ./scripts/prepareFontAssets.js",
