@@ -973,75 +973,82 @@ export async function runTests(partHistory = new PartHistory(), callbackToRunBet
         ? createTestRunLog({ filter: options.testName, plannedTests: testFunctionsToRun.map(getTestName) })
         : null;
 
-    try {
-        for (const testFunction of testFunctionsToRun) {
-            const isLastTest = testFunction === testFunctionsToRun[testFunctionsToRun.length - 1];
-            await partHistory.reset();
+    const failedTests = [];
 
-            if (testFunction.resetHistory) partHistory.features = [];
+    for (const testFunction of testFunctionsToRun) {
+        const isLastTest = testFunction === testFunctionsToRun[testFunctionsToRun.length - 1];
+        await partHistory.reset();
 
-            const testName = getTestName(testFunction);
-            const testStartMs = getMonotonicTimeMs();
-            let testDurationMs = 0;
-            let artifactDurationMs = 0;
-            let handledError = null;
+        if (testFunction.resetHistory) partHistory.features = [];
 
-            try {
-                handledError = await runSingleTest(testFunction, partHistory);
-            } catch (err) {
-                testDurationMs = getMonotonicTimeMs() - testStartMs;
-                if (testRunLog) {
-                    testRunLog.recordTest({
-                        name: testName,
-                        status: 'failed',
-                        testDurationMs,
-                        artifactDurationMs,
-                        error: err,
-                    });
-                    testRunLog.finish('failed');
-                }
-                throw err;
-            }
+        const testName = getTestName(testFunction);
+        const testStartMs = getMonotonicTimeMs();
+        let testDurationMs = 0;
+        let artifactDurationMs = 0;
+        let handledError = null;
 
+        try {
+            handledError = await runSingleTest(testFunction, partHistory);
             testDurationMs = getMonotonicTimeMs() - testStartMs;
-
-            const artifactStartMs = getMonotonicTimeMs();
-            try {
-                if (typeof window !== "undefined") {
-                    if (typeof callbackToRunBetweenTests === 'function') {
-                        await callbackToRunBetweenTests(partHistory, isLastTest);
-                    }
-                } else {
-                    await exportTestArtifacts({ testFunction, partHistory });
-                }
-            } catch (err) {
-                artifactDurationMs = getMonotonicTimeMs() - artifactStartMs;
-                if (testRunLog) {
-                    testRunLog.recordTest({
-                        name: testName,
-                        status: 'failed',
-                        testDurationMs,
-                        artifactDurationMs,
-                        error: err,
-                    });
-                    testRunLog.finish('failed');
-                }
-                throw err;
-            }
-            artifactDurationMs = getMonotonicTimeMs() - artifactStartMs;
-
+        } catch (err) {
+            testDurationMs = getMonotonicTimeMs() - testStartMs;
+            failedTests.push({ name: testName, error: err });
             if (testRunLog) {
                 testRunLog.recordTest({
                     name: testName,
-                    status: handledError ? 'handled_error' : 'passed',
+                    status: 'failed',
                     testDurationMs,
                     artifactDurationMs,
-                    error: handledError,
+                    error: err,
                 });
             }
+            console.error(`[runTests] Test failed: ${testName}`, err);
+            continue;
         }
-    } catch (err) {
-        throw err;
+
+        const artifactStartMs = getMonotonicTimeMs();
+        try {
+            if (typeof window !== "undefined") {
+                if (typeof callbackToRunBetweenTests === 'function') {
+                    await callbackToRunBetweenTests(partHistory, isLastTest);
+                }
+            } else {
+                await exportTestArtifacts({ testFunction, partHistory });
+            }
+        } catch (err) {
+            artifactDurationMs = getMonotonicTimeMs() - artifactStartMs;
+            failedTests.push({ name: testName, error: err });
+            if (testRunLog) {
+                testRunLog.recordTest({
+                    name: testName,
+                    status: 'failed',
+                    testDurationMs,
+                    artifactDurationMs,
+                    error: err,
+                });
+            }
+            console.error(`[runTests] Artifact export failed: ${testName}`, err);
+            continue;
+        }
+        artifactDurationMs = getMonotonicTimeMs() - artifactStartMs;
+
+        if (testRunLog) {
+            testRunLog.recordTest({
+                name: testName,
+                status: handledError ? 'handled_error' : 'passed',
+                testDurationMs,
+                artifactDurationMs,
+                error: handledError,
+            });
+        }
+    }
+
+    if (failedTests.length > 0) {
+        if (testRunLog) testRunLog.finish('failed');
+        const failures = failedTests
+            .map(({ name, error }) => `${name}: ${firstLine(stringifyError(error))}`)
+            .join('; ');
+        throw new Error(`${failedTests.length} test(s) failed. ${failures}`);
     }
 
     if (testRunLog) testRunLog.finish('passed');
@@ -1141,13 +1148,11 @@ function formatDurationMs(ms) {
 }
 
 function createTestRunLog({ filter, plannedTests }) {
-    const startedAt = new Date();
     const startedMs = getMonotonicTimeMs();
     const records = [];
     let finished = false;
 
     const write = (status = 'running') => {
-        const finishedAt = finished ? new Date() : null;
         const elapsedMs = getMonotonicTimeMs() - startedMs;
         const passed = records.filter(record => record.status === 'passed').length;
         const handledErrors = records.filter(record => record.status === 'handled_error').length;
@@ -1157,8 +1162,6 @@ function createTestRunLog({ filter, plannedTests }) {
             '',
             `log_version: ${TEST_LOG_VERSION}`,
             `status: ${status}`,
-            `started_at: ${startedAt.toISOString()}`,
-            `finished_at: ${finishedAt ? finishedAt.toISOString() : ''}`,
             `filter: ${filter || 'all'}`,
             `planned_tests: ${plannedTests.length}`,
             `tests_run: ${records.length}`,
