@@ -114,11 +114,13 @@ import {
 } from './test_hole.js';
 import {
     afterRun_import3d_decimation_100_restores_original_geometry,
+    afterRun_import3d_decimation_99_is_near_full_detail,
     afterRun_import3d_decimation_preserves_source_snapshot_without_json_clone,
     afterRun_import3d_decimation_reapplies_from_cached_source_mesh,
     afterRun_import3d_decimation_reduces_triangle_count,
     afterRun_import3d_decimation_seeds_source_snapshot_for_legacy_cache,
     test_import3d_decimation_100_restores_original_geometry,
+    test_import3d_decimation_99_is_near_full_detail,
     test_import3d_decimation_preserves_source_snapshot_without_json_clone,
     test_import3d_decimation_reapplies_from_cached_source_mesh,
     test_import3d_decimation_reduces_triangle_count,
@@ -343,7 +345,9 @@ import {
     test_revolve_generates_manifold_native_faces_for_axis_edge_profile,
 } from './test_revolveFeature.js';
 import {
-    test_remesh_simplify_welds_by_tolerance_before_simplify,
+    afterRun_remesh_simplify_imported_fixture_stl,
+    test_remesh_simplify_imported_fixture_stl,
+    test_remesh_simplify_uses_kernel_simplify_without_full_tolerance_weld,
     test_solid_simplify_preserves_face_tags_and_metadata,
 } from './test_remeshFeature.js';
 import { test_revolve_after_union_preserves_face_reference_resolution } from './test_revolve_after_union_face_reference.js';
@@ -408,7 +412,15 @@ export const testFunctions = [
     { test: test_revolve_face_profile_boundary_recovery_marks_inner_loop_as_hole, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_revolve_feature_resolves_face_and_edge_string_references, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_revolve_generates_manifold_native_faces_for_axis_edge_profile, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
-    { test: test_remesh_simplify_welds_by_tolerance_before_simplify, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_remesh_simplify_uses_kernel_simplify_without_full_tolerance_weld, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    {
+        test: test_remesh_simplify_imported_fixture_stl,
+        afterRun: afterRun_remesh_simplify_imported_fixture_stl,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
     { test: test_solid_simplify_preserves_face_tags_and_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_revolve_after_union_preserves_face_reference_resolution, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_setEpsilon_welds_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -551,6 +563,14 @@ export const testFunctions = [
     {
         test: test_import3d_decimation_reapplies_from_cached_source_mesh,
         afterRun: afterRun_import3d_decimation_reapplies_from_cached_source_mesh,
+        printArtifacts: false,
+        exportFaces: true,
+        exportSolids: true,
+        resetHistory: true,
+    },
+    {
+        test: test_import3d_decimation_99_is_near_full_detail,
+        afterRun: afterRun_import3d_decimation_99_is_near_full_detail,
         printArtifacts: false,
         exportFaces: true,
         exportSolids: true,

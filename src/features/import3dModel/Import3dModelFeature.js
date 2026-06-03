@@ -1,6 +1,5 @@
 import { ThreeMFLoader } from 'three/examples/jsm/loaders/3MFLoader.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
-import { SimplifyModifier } from 'three/examples/jsm/modifiers/SimplifyModifier.js';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { BREP } from '../../BREP/BREP.js';
 import { segmentMeshPrimitives } from '../../BREP/Segmentation/primitiveSegmentation.js';
@@ -69,42 +68,55 @@ function countGeometryTriangles(geometry) {
     return Math.max(0, Math.floor(position.count / 3));
 }
 
-function decimateImportedGeometry(geometry, decimationLevelPercent) {
-    if (!geometry || !geometry.isBufferGeometry) return geometry;
-    const level = normalizeDecimationLevel(decimationLevelPercent, DEFAULT_DECIMATION_LEVEL_PERCENT);
-    if (level >= 100) return geometry;
+function computeSolidBoundsDiagonal(solid) {
+    const vertices = Array.isArray(solid?._vertProperties) ? solid._vertProperties : [];
+    if (vertices.length < 3) return 0;
+    let minX = Infinity;
+    let minY = Infinity;
+    let minZ = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let maxZ = -Infinity;
+    for (let i = 0; i + 2 < vertices.length; i += 3) {
+        const x = Number(vertices[i + 0]);
+        const y = Number(vertices[i + 1]);
+        const z = Number(vertices[i + 2]);
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (z < minZ) minZ = z;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+        if (z > maxZ) maxZ = z;
+    }
+    if (!Number.isFinite(minX)) return 0;
+    const diagonal = Math.hypot(maxX - minX, maxY - minY, maxZ - minZ);
+    return Number.isFinite(diagonal) && diagonal > 0 ? diagonal : 0;
+}
 
-    let source = geometry.clone();
+function simplifyImportedSolid(solid, decimationLevelPercent) {
+    if (!solid || typeof solid.simplify !== 'function') return solid;
+    const level = normalizeDecimationLevel(decimationLevelPercent, DEFAULT_DECIMATION_LEVEL_PERCENT);
+    if (level >= 100) return solid;
+
+    const diagonal = computeSolidBoundsDiagonal(solid);
+    if (!(diagonal > 0)) return solid;
+
+    const reductionRatio = Math.max(0, Math.min(0.99, (100 - level) / 100));
+    const tolerance = diagonal * (0.0035 * Math.pow(reductionRatio / 0.1, 1.3));
+    if (!(tolerance > 0)) return solid;
+
     try {
-        if (!source.getIndex()) {
-            source = BufferGeometryUtils.mergeVertices(source);
+        const beforeTriangles = Math.floor((solid._triVerts?.length || 0) / 3);
+        solid.simplify(tolerance, true);
+        const afterTriangles = Math.floor((solid._triVerts?.length || 0) / 3);
+        if (afterTriangles < 1 || afterTriangles > beforeTriangles) {
+            console.warn('[Import3D] Decimation produced invalid triangle counts; keeping simplified manifold output.');
         }
     } catch (error) {
-        console.warn('[Import3D] Failed to index geometry before decimation; keeping original mesh detail.', error);
-        return geometry;
-    }
-
-    const position = source.getAttribute('position');
-    const vertexCount = Number(position?.count) || 0;
-    if (vertexCount < 8) return geometry;
-
-    const keepRatio = Math.max(0.01, Math.min(1, level / 100));
-    const targetVertexCount = Math.max(4, Math.floor(vertexCount * keepRatio));
-    const removeVertexCount = Math.max(0, vertexCount - targetVertexCount);
-    if (removeVertexCount <= 0) return geometry;
-
-    try {
-        const modifier = new SimplifyModifier();
-        const decimated = modifier.modify(source, removeVertexCount);
-        if (!decimated || !decimated.isBufferGeometry) return geometry;
-        if (countGeometryTriangles(decimated) < 1) return geometry;
-        // Ensure downstream face grouping uses geometric triangle normals.
-        decimated.deleteAttribute('normal');
-        return decimated;
-    } catch (error) {
         console.warn('[Import3D] Decimation failed; keeping original mesh detail.', error);
-        return geometry;
     }
+    return solid;
 }
 
 function centerGeometryByBoundingBox(geometry) {
@@ -650,6 +662,7 @@ function splitGeometryIntoDisconnectedIslands(geometry) {
 function buildImportSolidsFromGeometry(geometry, options = {}) {
     if (!geometry || !geometry.isBufferGeometry) return [];
     const extractMultipleSolids = normalizeBoolean(options.extractMultipleSolids, DEFAULT_EXTRACT_MULTIPLE_SOLIDS);
+    const decimationLevel = normalizeDecimationLevel(options.decimationLevel, DEFAULT_DECIMATION_LEVEL_PERCENT);
     const sourceGeometries = extractMultipleSolids
         ? splitGeometryIntoDisconnectedIslands(geometry)
         : [geometry];
@@ -667,6 +680,7 @@ function buildImportSolidsFromGeometry(geometry, options = {}) {
                 planarMinAreaPercent: options.planarFaceMinAreaPercent,
             },
         );
+        simplifyImportedSolid(solid, decimationLevel);
         if (options.segmentAnalyticPrimitives) {
             applyPrimitiveSegmentationToSolid(solid, options.featureName, options.primitiveSettings);
         }
@@ -1487,13 +1501,13 @@ export class Import3dModelFeature {
                     if (centerMesh) {
                         regroupedGeometry = centerGeometryByBoundingBox(regroupedGeometry);
                     }
-                    regroupedGeometry = decimateImportedGeometry(regroupedGeometry, decimationLevel);
                     regroupedGeometry = runImportMeshRepairPipeline(regroupedGeometry, meshRepairLevel);
                     const regroupedSolids = buildImportSolidsFromGeometry(
                         regroupedGeometry,
                         {
                             featureName,
                             deflectionAngle,
+                            decimationLevel,
                             extractMultipleSolids,
                             extractPlanarFaces,
                             planarFaceMinAreaPercent,
@@ -1600,11 +1614,8 @@ export class Import3dModelFeature {
         // Optionally center the geometry by its bounding box center
         if (centerMesh) geometry = centerGeometryByBoundingBox(geometry);
 
-        // Optional decimation pass before repair and face grouping.
-        const decimatedGeometry = decimateImportedGeometry(geometry, decimationLevel);
-
         // Run mesh repair pipeline per selected level to produce a BufferGeometry
-        const repairedGeometry = runImportMeshRepairPipeline(decimatedGeometry, meshRepairLevel);
+        const repairedGeometry = runImportMeshRepairPipeline(geometry, meshRepairLevel);
 
         // Build one or more BREP solids by grouping triangles into faces via deflection angle.
         const solids = buildImportSolidsFromGeometry(
@@ -1612,6 +1623,7 @@ export class Import3dModelFeature {
             {
                 featureName,
                 deflectionAngle,
+                decimationLevel,
                 extractMultipleSolids,
                 extractPlanarFaces,
                 planarFaceMinAreaPercent,

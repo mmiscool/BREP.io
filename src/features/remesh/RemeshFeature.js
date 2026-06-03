@@ -1,4 +1,8 @@
- 
+import { BREP } from "../../BREP/BREP.js";
+import {
+  applySolidAuthoringStateSnapshot,
+  getSolidAuthoringStateSnapshot,
+} from "../../BREP/CppSolidCore.js";
 
 const inputParamsSchema = {
   id: {
@@ -39,6 +43,24 @@ const inputParamsSchema = {
   },
 };
 
+function cloneSolidForRemesh(target) {
+  if (target && typeof target.clone === "function") {
+    try {
+      const cloned = target.clone();
+      if (cloned?.type === "SOLID") return cloned;
+    } catch {
+      // Imported MeshToBrep solids have constructor arguments, so cloning by
+      // authoring snapshot is the expected path for those targets.
+    }
+  }
+
+  const fallback = new BREP.Solid();
+  applySolidAuthoringStateSnapshot(fallback, getSolidAuthoringStateSnapshot(target));
+  fallback.type = "SOLID";
+  fallback.renderOrder = target?.renderOrder ?? fallback.renderOrder;
+  return fallback;
+}
+
 export class RemeshFeature {
   static shortName = "RM";
   static longName = "Remesh";
@@ -76,25 +98,17 @@ export class RemeshFeature {
     const modeRaw = this.inputParams.mode || 'Increase resolution';
     const mode = String(modeRaw).toLowerCase();
 
-    // Clone target to preserve original
-    const outSolid = target.clone();
+    // Clone target to preserve original. Imported MeshToBrep solids need the
+    // snapshot fallback because their constructor requires source geometry.
+    const outSolid = cloneSolidForRemesh(target);
 
     if (mode === 'simplify') {
       const T = Number(this.inputParams.tolerance);
       const tol = Number.isFinite(T) && T >= 0 ? T : undefined;
-      if (Number.isFinite(tol) && tol > 0) {
-        try {
-          if (typeof outSolid._weldVerticesByEpsilon === 'function') {
-            outSolid._weldVerticesByEpsilon(tol, { rebuildManifold: false });
-          }
-          if (typeof outSolid.fixTriangleWindingsByAdjacency === 'function') {
-            outSolid.fixTriangleWindingsByAdjacency();
-          }
-        } catch (e) {
-          console.warn('[RemeshFeature] Pre-simplify weld failed; continuing with simplify.', e);
-        }
-      }
       try {
+        if (typeof outSolid.fixTriangleWindingsByAdjacency === 'function') {
+          outSolid.fixTriangleWindingsByAdjacency();
+        }
         if (tol === undefined) outSolid.simplify(undefined, true);
         else outSolid.simplify(tol, true);
       } catch (e) {

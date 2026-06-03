@@ -4,6 +4,7 @@ const IMPORT3D_DECIMATION_STABILITY_ID = 'IMPORT3D_DECIMATION_STABILITY';
 const IMPORT3D_DECIMATION_RESTORE_ID = 'IMPORT3D_DECIMATION_RESTORE';
 const IMPORT3D_DECIMATION_LEGACY_CACHE_ID = 'IMPORT3D_DECIMATION_LEGACY_CACHE';
 const IMPORT3D_DECIMATION_SNAPSHOT_CLONE_RESILIENCE_ID = 'IMPORT3D_DECIMATION_SNAPSHOT_CLONE_RESILIENCE';
+const IMPORT3D_DECIMATION_NEAR_FULL_ID = 'IMPORT3D_DECIMATION_NEAR_FULL';
 
 function formatNumber(value) {
   const num = Number(value);
@@ -109,6 +110,42 @@ function getSolidTriangleCount(solid) {
   return Math.floor((Array.isArray(solid?._triVerts) ? solid._triVerts.length : 0) / 3);
 }
 
+function analyzeSolidTopology(solid) {
+  const triVerts = Array.isArray(solid?._triVerts) ? solid._triVerts : [];
+  const triCount = (triVerts.length / 3) | 0;
+  const edgeUses = new Map();
+  const edgeKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  for (let triIndex = 0; triIndex < triCount; triIndex += 1) {
+    const a = triVerts[triIndex * 3 + 0] >>> 0;
+    const b = triVerts[triIndex * 3 + 1] >>> 0;
+    const c = triVerts[triIndex * 3 + 2] >>> 0;
+    for (const [u, v] of [[a, b], [b, c], [c, a]]) {
+      const key = edgeKey(u, v);
+      edgeUses.set(key, (edgeUses.get(key) || 0) + 1);
+    }
+  }
+  let boundaryEdgeCount = 0;
+  let nonManifoldEdgeCount = 0;
+  for (const count of edgeUses.values()) {
+    if (count === 1) boundaryEdgeCount += 1;
+    else if (count !== 2) nonManifoldEdgeCount += 1;
+  }
+  return { boundaryEdgeCount, nonManifoldEdgeCount };
+}
+
+function assertSolidIsClosedManifold(solid, label) {
+  const topology = analyzeSolidTopology(solid);
+  if (topology.boundaryEdgeCount || topology.nonManifoldEdgeCount) {
+    throw new Error(
+      `[${label}] Expected closed manifold import. `
+      + `Boundary edges=${topology.boundaryEdgeCount}, non-manifold edges=${topology.nonManifoldEdgeCount}`,
+    );
+  }
+  if (typeof solid?._isCoherentlyOrientedManifold === 'function' && solid._isCoherentlyOrientedManifold() !== true) {
+    throw new Error(`[${label}] Expected coherently oriented manifold import.`);
+  }
+}
+
 function getImportFeatureById(partHistory, id) {
   return (partHistory.features || []).find((entry) => (
     entry &&
@@ -158,6 +195,50 @@ export async function afterRun_import3d_decimation_reduces_triangle_count(partHi
       `[import3d decimation] Expected reduced triangle count < baseline (${reducedTriangles} >= ${baselineTriangles})`,
     );
   }
+  assertSolidIsClosedManifold(reducedSolid, 'import3d decimation');
+}
+
+export async function test_import3d_decimation_99_is_near_full_detail(partHistory) {
+  const stlText = buildCylinderStl({ radius: 5, height: 10, segments: 96 });
+
+  const baseline = await partHistory.newFeature('IMPORT3D');
+  baseline.inputParams.featureID = `${IMPORT3D_DECIMATION_NEAR_FULL_ID}_100`;
+  createImportFeature(baseline, stlText, 100);
+
+  const nearFull = await partHistory.newFeature('IMPORT3D');
+  nearFull.inputParams.featureID = `${IMPORT3D_DECIMATION_NEAR_FULL_ID}_99`;
+  createImportFeature(nearFull, stlText, 99);
+
+  const reduced = await partHistory.newFeature('IMPORT3D');
+  reduced.inputParams.featureID = `${IMPORT3D_DECIMATION_NEAR_FULL_ID}_90`;
+  createImportFeature(reduced, stlText, 90);
+
+  return partHistory;
+}
+
+export async function afterRun_import3d_decimation_99_is_near_full_detail(partHistory) {
+  const baselineSolid = getSolidByName(partHistory, `${IMPORT3D_DECIMATION_NEAR_FULL_ID}_100`);
+  const nearFullSolid = getSolidByName(partHistory, `${IMPORT3D_DECIMATION_NEAR_FULL_ID}_99`);
+  const reducedSolid = getSolidByName(partHistory, `${IMPORT3D_DECIMATION_NEAR_FULL_ID}_90`);
+  if (!baselineSolid || !nearFullSolid || !reducedSolid) {
+    throw new Error('[import3d decimation 99] Missing baseline, 99%, or 90% solid.');
+  }
+
+  const baselineTriangles = getSolidTriangleCount(baselineSolid);
+  const nearFullTriangles = getSolidTriangleCount(nearFullSolid);
+  const reducedTriangles = getSolidTriangleCount(reducedSolid);
+  if (!(nearFullTriangles >= baselineTriangles * 0.9)) {
+    throw new Error(
+      `[import3d decimation 99] Expected 99% to keep at least 90% of baseline triangles (${nearFullTriangles}/${baselineTriangles}).`,
+    );
+  }
+  if (!(nearFullTriangles > reducedTriangles)) {
+    throw new Error(
+      `[import3d decimation 99] Expected 99% to keep more detail than 90% (${nearFullTriangles} <= ${reducedTriangles}).`,
+    );
+  }
+  assertSolidIsClosedManifold(nearFullSolid, 'import3d decimation 99');
+  assertSolidIsClosedManifold(reducedSolid, 'import3d decimation 90 comparison');
 }
 
 export async function test_import3d_decimation_reapplies_from_cached_source_mesh(partHistory) {
@@ -189,6 +270,7 @@ export async function afterRun_import3d_decimation_reapplies_from_cached_source_
   if (!(first55 > 0)) {
     throw new Error('[import3d decimation stability] First decimated rebuild produced no triangles');
   }
+  assertSolidIsClosedManifold(getSolidByName(partHistory, IMPORT3D_DECIMATION_STABILITY_ID), 'import3d decimation stability first');
 
   feature.inputParams.fileToImport = null;
   feature.inputParams.decimationLevel = 55;
@@ -197,6 +279,7 @@ export async function afterRun_import3d_decimation_reapplies_from_cached_source_
   if (!(second55 > 0)) {
     throw new Error('[import3d decimation stability] Second decimated rebuild produced no triangles');
   }
+  assertSolidIsClosedManifold(getSolidByName(partHistory, IMPORT3D_DECIMATION_STABILITY_ID), 'import3d decimation stability second');
 
   if (first55 !== second55) {
     throw new Error(
@@ -236,6 +319,7 @@ export async function afterRun_import3d_decimation_100_restores_original_geometr
       `[import3d decimation restore] Expected 90% decimation to reduce triangles (${decimatedTriangles} >= ${baselineTriangles})`,
     );
   }
+  assertSolidIsClosedManifold(decimatedSolid, 'import3d decimation restore decimated');
 
   feature.inputParams.fileToImport = null;
   feature.inputParams.decimationLevel = 100;
@@ -281,6 +365,7 @@ export async function afterRun_import3d_decimation_seeds_source_snapshot_for_leg
   if (!(first90 > 0)) {
     throw new Error('[import3d decimation legacy cache] 90% pass produced no triangles');
   }
+  assertSolidIsClosedManifold(getSolidByName(partHistory, IMPORT3D_DECIMATION_LEGACY_CACHE_ID), 'import3d decimation legacy 90');
   if (!feature?.persistentData?.importCache?.sourceMeshSnapshot) {
     throw new Error('[import3d decimation legacy cache] Expected source mesh snapshot to be seeded');
   }
@@ -292,6 +377,7 @@ export async function afterRun_import3d_decimation_seeds_source_snapshot_for_leg
   if (!(at80 > 0 && at80 < first90)) {
     throw new Error(`[import3d decimation legacy cache] Expected 80% to reduce triangles (${at80} !< ${first90})`);
   }
+  assertSolidIsClosedManifold(getSolidByName(partHistory, IMPORT3D_DECIMATION_LEGACY_CACHE_ID), 'import3d decimation legacy 80');
 
   feature.inputParams.fileToImport = null;
   feature.inputParams.decimationLevel = 90;
@@ -350,6 +436,10 @@ export async function afterRun_import3d_decimation_preserves_source_snapshot_wit
   } finally {
     JSON.stringify = originalStringify;
   }
+  assertSolidIsClosedManifold(
+    getSolidByName(partHistory, IMPORT3D_DECIMATION_SNAPSHOT_CLONE_RESILIENCE_ID),
+    'import3d decimation snapshot resilience decimated',
+  );
 
   const snapshotAfter90 = feature?.persistentData?.importCache?.sourceMeshSnapshot;
   if (!snapshotAfter90 || !Array.isArray(snapshotAfter90.position)) {
