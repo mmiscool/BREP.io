@@ -57,10 +57,8 @@
     "jspdf": "^4.2.0",
     "jszip": "^3.10.1",
     "monaco-editor": "^0.55.1",
-    "pngjs": "^7.0.0",
     "tess2": "^1.0.0",
     "three": "^0.183.2",
-    "three-mesh-bvh": "^0.9.9",
     "vhacd-js": "^0.0.1"
   },
   "description": "",
