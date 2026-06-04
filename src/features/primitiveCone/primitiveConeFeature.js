@@ -4,7 +4,6 @@
 
 import { BREP } from '../../BREP/BREP.js'
 import { composeReferencedTransformMatrix } from '../../utils/transformReferenceUtils.js';
-// no extra imports needed for centerline metadata
 
 const inputParamsSchema = {
   id: {
@@ -70,18 +69,6 @@ export class PrimitiveConeFeature {
     try {
       if (this.inputParams.transform) {
         cone.bakeTransform(composeReferencedTransformMatrix(this.inputParams.transform, partHistory || null, {}, BREP.THREE));
-      }
-    } catch (_) { }
-
-    // Add a world-space centerline along Y from base to top and store on the solid
-    const THREE = BREP.THREE;
-    try {
-      const M = composeReferencedTransformMatrix(this.inputParams?.transform, partHistory || null, {}, THREE);
-      const a0 = new THREE.Vector3(0, 0, 0).applyMatrix4(M);
-      const a1 = new THREE.Vector3(0, Number(height) || 0, 0).applyMatrix4(M);
-      if (a0.distanceToSquared(a1) >= 1e-16) {
-        const featureID = this.inputParams.featureID;
-        cone.addCenterline([a0.x, a0.y, a0.z], [a1.x, a1.y, a1.z], (featureID ? `${featureID}_AXIS` : 'AXIS'), { materialKey: 'OVERLAY' });
       }
     } catch (_) { }
 

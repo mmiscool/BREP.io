@@ -35,6 +35,13 @@ export async function test_cppPrimitive_cylinder_preserves_expected_face_labels_
     assert(metadata?.type === "cylindrical", "Expected native cylinder side metadata to remain cylindrical.");
     assert(Math.abs((metadata?.radius || 0) - 2) <= 1e-9, "Expected native cylinder side metadata to preserve radius.");
     assert(Math.abs((metadata?.height || 0) - 7) <= 1e-9, "Expected native cylinder side metadata to preserve height.");
+
+    const aux = Array.isArray(cylinder._auxEdges) ? cylinder._auxEdges : [];
+    const axis = aux.find((entry) => entry?.name === "CPP_CYL_AXIS");
+    assert(axis?.centerline === true, "Expected native cylinder primitive to create its axis centerline.");
+    assert(Array.isArray(axis?.points) && axis.points.length === 2, "Expected native cylinder axis centerline to contain two points.");
+    assert(Math.abs((axis.points[0]?.[1] || 0) - 0) <= 1e-9, "Expected native cylinder axis centerline to start at y=0.");
+    assert(Math.abs((axis.points[1]?.[1] || 0) - 7) <= 1e-9, "Expected native cylinder axis centerline to end at y=height.");
 }
 
 export async function test_cppPrimitive_cone_preserves_expected_face_labels_and_metadata() {
@@ -51,6 +58,13 @@ export async function test_cppPrimitive_cone_preserves_expected_face_labels_and_
     assert(Math.abs((metadata?.radiusBottom || 0) - 3) <= 1e-9, "Expected native cone metadata to preserve bottom radius.");
     assert(Math.abs((metadata?.radiusTop || 0) - 1) <= 1e-9, "Expected native cone metadata to preserve top radius.");
     assert(Math.abs((metadata?.height || 0) - 5) <= 1e-9, "Expected native cone metadata to preserve height.");
+
+    const aux = Array.isArray(cone._auxEdges) ? cone._auxEdges : [];
+    const axis = aux.find((entry) => entry?.name === "CPP_CONE_AXIS");
+    assert(axis?.centerline === true, "Expected native cone primitive to create its axis centerline.");
+    assert(Array.isArray(axis?.points) && axis.points.length === 2, "Expected native cone axis centerline to contain two points.");
+    assert(Math.abs((axis.points[0]?.[1] || 0) - 0) <= 1e-9, "Expected native cone axis centerline to start at y=0.");
+    assert(Math.abs((axis.points[1]?.[1] || 0) - 5) <= 1e-9, "Expected native cone axis centerline to end at y=height.");
 }
 
 export async function test_cppPrimitive_torus_and_pyramid_preserve_face_labels() {
@@ -67,12 +81,25 @@ export async function test_cppPrimitive_torus_and_pyramid_preserve_face_labels()
         assert(Math.abs((torusMeta?.majorRadius || 0) - 10) <= 1e-9, "Expected native torus metadata to preserve major radius.");
         assert(Math.abs((torusMeta?.tubeRadius || 0) - 2) <= 1e-9, "Expected native torus metadata to preserve tube radius.");
     }
+    const torusAux = Array.isArray(torus._auxEdges) ? torus._auxEdges : [];
+    const torusAxis = torusAux.find((entry) => entry?.name === "CPP_TORUS_AXIS");
+    const torusTubeCenterline = torusAux.find((entry) => entry?.name === "CPP_TORUS_TUBE_CENTERLINE");
+    assert(torusAxis?.centerline === true, "Expected native torus primitive to create its axis centerline.");
+    assert(Array.isArray(torusAxis?.points) && torusAxis.points.length === 2, "Expected native torus axis centerline to contain two points.");
+    assert(torusTubeCenterline?.centerline === true, "Expected native torus primitive to create its tube centerline.");
+    assert(torusTubeCenterline?.closedLoop === false, "Expected partial native torus tube centerline to be open.");
+    assert(Array.isArray(torusTubeCenterline?.points) && torusTubeCenterline.points.length === 25, "Expected partial native torus tube centerline to include arc endpoints.");
 
     const fullTorus = new Torus({ mR: 10, tR: 2, resolution: 24, arcDegrees: 360, name: "CPP_TORUS_FULL" });
     const fullTorusFaceNames = new Set(fullTorus.getFaceNames());
     assert(fullTorusFaceNames.has("CPP_TORUS_FULL_Side"), "Expected closed native torus to expose side face.");
     assert(!fullTorusFaceNames.has("CPP_TORUS_FULL_Cap0"), "Did not expect start cap on closed native torus.");
     assert(!fullTorusFaceNames.has("CPP_TORUS_FULL_Cap1"), "Did not expect end cap on closed native torus.");
+    const fullTorusAux = Array.isArray(fullTorus._auxEdges) ? fullTorus._auxEdges : [];
+    const fullTorusTubeCenterline = fullTorusAux.find((entry) => entry?.name === "CPP_TORUS_FULL_TUBE_CENTERLINE");
+    assert(fullTorusTubeCenterline?.centerline === true, "Expected full native torus primitive to create its tube centerline.");
+    assert(fullTorusTubeCenterline?.closedLoop === true, "Expected full native torus tube centerline to be closed.");
+    assert(Array.isArray(fullTorusTubeCenterline?.points) && fullTorusTubeCenterline.points.length === 24, "Expected full native torus tube centerline to match major resolution.");
 
     const pyramid = new Pyramid({ bL: 6, s: 4, h: 8, name: "CPP_PYRAMID" });
     const pyramidFaceNames = new Set(pyramid.getFaceNames());
