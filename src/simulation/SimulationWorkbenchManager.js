@@ -5,13 +5,13 @@ const FIXED_METADATA_KEY = 'fixed';
 const TRANSFORM_METADATA_KEY = 'simulationTransform';
 const SIM_PROXY_PREFIX = '__SIM_PROXY__';
 const VHACD_OPTIONS = Object.freeze({
-  maxHulls: 64,
+  maxHulls: 256,
   voxelResolution: 1000000,
   maxVerticesPerHull: 64,
-  shrinkWrap: true,
+  shrinkWrap: false,
   fillMode: 'flood',
-  findBestPlane: true,
-  minEdgeLength: 1,
+  findBestPlane: false,
+  minEdgeLength: .1,
   messages: 'none',
 });
 const DEFAULT_TRANSFORM = Object.freeze({
