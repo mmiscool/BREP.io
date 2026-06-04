@@ -523,7 +523,8 @@ export class PartHistory {
     this.runningFeatureId = featureId != null ? String(featureId) : null;
   }
 
-  async runHistory() {
+  async runHistory(options = {}) {
+    const throwOnFeatureError = !!options?.throwOnFeatureError;
     const whatStepToStopAt = this.currentHistoryStepId;
     const hiddenVisibilityState = this.#captureHiddenVisibilityState();
     let modelChanged = false;
@@ -570,6 +571,16 @@ export class PartHistory {
           const t1 = nowMs();
           const msg = `Feature type "${feature.type}" is not installed`;
           try { feature.lastRun = { ok: false, startedAt: t1, endedAt: t1, durationMs: 0, error: { name: 'MissingFeature', message: msg, stack: null } }; } catch { }
+          if (throwOnFeatureError) {
+            const error = new Error(`Feature ${featureId} (${feature.type}) failed: ${msg}`);
+            error.name = 'FeatureHistoryError';
+            error.featureId = featureId;
+            error.featureType = feature.type;
+            error.featureIndex = i;
+            error.featureLastRun = feature.lastRun;
+            try { this.#restoreHiddenVisibilityState(hiddenVisibilityState); } catch { }
+            throw error;
+          }
           // Skip visualization/add/remove steps for this feature
           continue;
         }
@@ -716,8 +727,22 @@ export class PartHistory {
 
             previousFeatureTimestamp = feature.timestamp;
             instance.errorString = `Error occurred while running feature ${featureId}: ${e.message}`;
-            console.error(e);
             try { this.#restoreHiddenVisibilityState(hiddenVisibilityState); } catch { }
+            if (throwOnFeatureError) {
+              const message = `Feature ${featureId} (${feature.type}) failed: ${e?.message || String(e)}`;
+              const error = new Error(message);
+              error.name = 'FeatureHistoryError';
+              error.featureId = featureId;
+              error.featureType = feature.type;
+              error.featureIndex = i;
+              error.featureLastRun = feature.lastRun;
+              error.cause = e;
+              if (e?.stack) {
+                error.stack = `${error.stack}\nCaused by: ${e.stack}`;
+              }
+              throw error;
+            }
+            console.error(e);
             return;
           }
         }

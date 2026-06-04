@@ -1069,7 +1069,7 @@ export async function runSingleTest(testFunction, partHistory = new PartHistory(
     let error = null;
     try {
         await testFunction.test(partHistory);
-        await partHistory.runHistory();
+        await partHistory.runHistory({ throwOnFeatureError: true });
         // Optional per-test post-run hook for validations/metrics
         if (typeof testFunction.afterRun === 'function') {
             try { await testFunction.afterRun(partHistory); } catch (e) { console.warn('afterRun failed:', e?.message || e); }
