@@ -1282,6 +1282,10 @@ export class FeatureDimensionOverlay {
     if (!dragState) return;
 
     try {
+      SchemaForm.deactivateActiveReferenceSelection?.(null, this.viewer?.partHistory?.scene || this.viewer?.scene || null);
+    } catch { /* ignore */ }
+
+    try {
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation?.();
