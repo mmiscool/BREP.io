@@ -455,6 +455,85 @@ function isSyntheticSweepSourceEdgeName(name) {
   return /_REPAIR_\d+/.test(raw);
 }
 
+function pointArrayFromWorldPoint(point) {
+  if (!point) return null;
+  const x = Number(point[0]);
+  const y = Number(point[1]);
+  const z = Number(point[2]);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
+  return [x, y, z];
+}
+
+function transformPolylinePoints(points, matrixWorld) {
+  if (!Array.isArray(points) || points.length < 2) return [];
+  const out = [];
+  const v = new THREE.Vector3();
+  for (const point of points) {
+    const p = pointArrayFromWorldPoint(point);
+    if (!p) continue;
+    v.set(p[0], p[1], p[2]);
+    if (matrixWorld && typeof v.applyMatrix4 === 'function') v.applyMatrix4(matrixWorld);
+    out.push([v.x, v.y, v.z]);
+  }
+  return out;
+}
+
+function buildSweepEdgeInput(name, polyline, metadataJson = '') {
+  const edgeName = String(name || '').trim();
+  if (!edgeName || isSyntheticSweepSourceEdgeName(edgeName)) return null;
+  if (!Array.isArray(polyline) || polyline.length < 2) return null;
+  return {
+    name: edgeName,
+    polyline,
+    metadataJson: typeof metadataJson === 'string' ? metadataJson : '',
+  };
+}
+
+function getSolidFaceBoundaryEdgeInputs(face, featureTag) {
+  const faceName = String(face?.name || face?.userData?.faceName || '').trim();
+  if (!faceName) return [];
+
+  const inputs = [];
+  const seen = new Set();
+  const pushInput = (edgeName, polyline, metadataJson = '') => {
+    const rawName = String(edgeName || '').trim();
+    if (!rawName || seen.has(rawName) || isSyntheticSweepSourceEdgeName(rawName)) return;
+    const input = buildSweepEdgeInput(`${featureTag}${rawName}_SW`, polyline, metadataJson);
+    if (!input) return;
+    seen.add(rawName);
+    inputs.push(input);
+  };
+
+  if (Array.isArray(face?.edges) && face.edges.length) {
+    for (const edge of face.edges) {
+      const rawName = String(edge?.name || edge?.userData?.edgeName || '').trim();
+      let metadataJson = '';
+      try {
+        const metadata = (typeof edge?.getMetadata === 'function') ? edge.getMetadata() : null;
+        if (metadata && typeof metadata === 'object') metadataJson = JSON.stringify(metadata);
+      } catch (_) { /* metadata is optional */ }
+      pushInput(rawName, getEdgePolylineWorld(edge, { dedupe: false }), metadataJson);
+    }
+    return inputs.length > 1 ? inputs : [];
+  }
+
+  const solid = face?.parentSolid || face?.parent || null;
+  if (!solid || typeof solid.getBoundaryEdgePolylines !== 'function') return [];
+  let boundaries = [];
+  try { boundaries = solid.getBoundaryEdgePolylines() || []; } catch { boundaries = []; }
+  for (const boundary of boundaries) {
+    if (!boundary || (boundary.faceA !== faceName && boundary.faceB !== faceName)) continue;
+    const rawName = String(boundary.name || '').trim();
+    let metadataJson = '';
+    try {
+      const metadata = (typeof solid.getEdgeMetadata === 'function') ? solid.getEdgeMetadata(rawName) : null;
+      if (metadata && typeof metadata === 'object') metadataJson = JSON.stringify(metadata);
+    } catch (_) { /* metadata is optional */ }
+    pushInput(rawName, transformPolylinePoints(boundary.positions, solid.matrixWorld), metadataJson);
+  }
+  return inputs.length > 1 ? inputs : [];
+}
+
 export function generateNativeSweep(target, params = {}) {
   requireNativeSweepBuilder();
   const {
@@ -486,6 +565,7 @@ export function generateNativeSweep(target, params = {}) {
   faceNormal.normalize();
 
   const sourceIsSketchFace = face?.parent?.type === 'SKETCH';
+  const featureTag = name ? `${name}:` : '';
   const relevantEdges = sourceIsSketchFace && Array.isArray(face?.edges)
     ? face.edges.filter((edge) => {
         const kind = edge?.userData?.sketchGeomType;
@@ -495,12 +575,14 @@ export function generateNativeSweep(target, params = {}) {
         return !isSyntheticSweepSourceEdgeName(sourceEdgeName);
       })
     : [];
-  const featureTag = name ? `${name}:` : '';
-  const edgeInputs = relevantEdges.map((edge) => ({
+  const sketchEdgeInputs = relevantEdges.map((edge) => ({
     name: `${featureTag}${edge?.name || 'EDGE'}_SW`,
     polyline: getEdgePolylineWorld(edge, { dedupe: false }).map((p) => [p[0], p[1], p[2]]),
     metadataJson: buildSweepEdgeMetadataJson(edge, faceNormal, distance, distanceBack),
   })).filter((entry) => Array.isArray(entry.polyline) && entry.polyline.length >= 2);
+  const edgeInputs = sourceIsSketchFace
+    ? sketchEdgeInputs
+    : getSolidFaceBoundaryEdgeInputs(face, featureTag);
 
   let pathPoints = [];
   if (Array.isArray(sweepPathEdges) && sweepPathEdges.length) {

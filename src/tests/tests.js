@@ -45,7 +45,11 @@ import {
     test_extrude_intersect_coplanar_face_merge,
 } from './test_extrude_intersect_coplanar_face_merge.js';
 import { test_face_source_feature_seed } from './test_face_source_feature_seed.js';
-import { test_ExtrudeFace } from './test_extrudeFace.js';
+import {
+    afterRun_extrude_solid_face_uses_boundary_edge_sidewalls,
+    test_ExtrudeFace,
+    test_extrude_solid_face_uses_boundary_edge_sidewalls,
+} from './test_extrudeFace.js';
 import { test_Fillet } from './test_fillet.js';
 import { afterRun_fillet_angle, test_fillet_angle } from './test_fillet_angle.js';
 import {
@@ -344,6 +348,7 @@ import { test_sketch_feature_scene_visibility } from './test_sketchFeatureVisibi
 import {
     test_revolve_face_profile_boundary_recovery_marks_inner_loop_as_hole,
     test_revolve_feature_resolves_face_and_edge_string_references,
+    test_revolve_axis_edge_profile_reuses_axis_vertices_for_partial_sweep,
     test_revolve_generates_manifold_native_faces_for_axis_edge_profile,
 } from './test_revolveFeature.js';
 import {
@@ -414,6 +419,7 @@ export const testFunctions = [
     { test: test_cppSolidMirror_preserves_face_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_revolve_face_profile_boundary_recovery_marks_inner_loop_as_hole, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_revolve_feature_resolves_face_and_edge_string_references, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_revolve_axis_edge_profile_reuses_axis_vertices_for_partial_sweep, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_revolve_generates_manifold_native_faces_for_axis_edge_profile, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_remesh_simplify_uses_kernel_simplify_without_full_tolerance_weld, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     {
@@ -702,6 +708,14 @@ export const testFunctions = [
         resetHistory: true,
     },
     { test: test_ExtrudeFace, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    {
+        test: test_extrude_solid_face_uses_boundary_edge_sidewalls,
+        afterRun: afterRun_extrude_solid_face_uses_boundary_edge_sidewalls,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
     { test: test_Fillet, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_fillet_angle, afterRun: afterRun_fillet_angle, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     {

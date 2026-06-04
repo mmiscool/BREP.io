@@ -2,6 +2,29 @@ import { BREP } from "../BREP/BREP.js";
 import { computeBoundaryLoopsFromFaceNative } from "../BREP/Sweep.js";
 import { RevolveFeature } from "../features/revolve/RevolveFeature.js";
 
+function analyzeMeshTopology(solid) {
+    const triVerts = Array.isArray(solid?._triVerts) ? solid._triVerts : [];
+    const triCount = (triVerts.length / 3) | 0;
+    const counts = new Map();
+    const edgeKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+    for (let triIndex = 0; triIndex < triCount; triIndex++) {
+        const a = triVerts[triIndex * 3] >>> 0;
+        const b = triVerts[triIndex * 3 + 1] >>> 0;
+        const c = triVerts[triIndex * 3 + 2] >>> 0;
+        for (const [u, v] of [[a, b], [b, c], [c, a]]) {
+            const key = edgeKey(u, v);
+            counts.set(key, (counts.get(key) || 0) + 1);
+        }
+    }
+    let boundaryEdgeCount = 0;
+    let nonManifoldEdgeCount = 0;
+    for (const count of counts.values()) {
+        if (count === 1) boundaryEdgeCount += 1;
+        else if (count !== 2) nonManifoldEdgeCount += 1;
+    }
+    return { boundaryEdgeCount, nonManifoldEdgeCount, triangleCount: triCount };
+}
+
 export async function test_revolve_feature_resolves_face_and_edge_string_references() {
     const fakeHistory = {
         scene: new BREP.THREE.Scene(),
@@ -116,5 +139,56 @@ export async function test_revolve_face_profile_boundary_recovery_marks_inner_lo
     const holeCount = loops.filter((loop) => loop.isHole).length;
     if (outerCount !== 1 || holeCount !== 1) {
         throw new Error(`Expected recovered annular profile to have one outer loop and one hole. Outer=${outerCount}, Holes=${holeCount}.`);
+    }
+}
+
+export async function test_revolve_axis_edge_profile_reuses_axis_vertices_for_partial_sweep() {
+    const THREE = BREP.THREE;
+    const loop = [
+        [0, 0, 0],
+        [8.905728, 14.930946, 0],
+        [-10.96543, 26.783322, 0],
+        [-19.87116, 11.852382, 0],
+    ];
+    const positions = [
+        ...loop[0], ...loop[1], ...loop[2],
+        ...loop[0], ...loop[2], ...loop[3],
+    ];
+
+    const faceGeometry = new THREE.BufferGeometry();
+    faceGeometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    faceGeometry.computeVertexNormals();
+    const face = new BREP.Face(faceGeometry);
+    face.name = "REVOLVE_AXIS_EDGE_PROFILE";
+    face.userData.boundaryLoopsWorld = [{ pts: loop, isHole: false }];
+    face.updateMatrixWorld?.(true);
+
+    const axisGeometry = new THREE.BufferGeometry();
+    axisGeometry.setAttribute("position", new THREE.Float32BufferAttribute([
+        ...loop[0],
+        ...loop[3],
+    ], 3));
+    const axis = new THREE.Line(axisGeometry);
+    axis.name = "REVOLVE_AXIS_EDGE";
+    axis.type = "EDGE";
+    axis.updateMatrixWorld?.(true);
+
+    const revolve = new BREP.Revolve({
+        face,
+        axis,
+        angle: 144,
+        resolution: 64,
+        name: "REVOLVE_AXIS_EDGE_PARTIAL_TEST",
+    });
+
+    const topology = analyzeMeshTopology(revolve);
+    if (topology.boundaryEdgeCount || topology.nonManifoldEdgeCount) {
+        throw new Error(
+            "Expected partial revolve around a profile edge to be closed and manifold. "
+            + `Boundaries=${topology.boundaryEdgeCount}, nonManifold=${topology.nonManifoldEdgeCount}, triangles=${topology.triangleCount}.`,
+        );
+    }
+    if (typeof revolve._isCoherentlyOrientedManifold === "function" && revolve._isCoherentlyOrientedManifold() !== true) {
+        throw new Error("Expected partial revolve around a profile edge to be coherently oriented.");
     }
 }

@@ -441,6 +441,12 @@ double DistanceSqToAxis(const Vec3& point, const Vec3& origin,
   return LengthSq(Subtract(v, axial));
 }
 
+Vec3 RotateAroundAxisSnappingAxisPoint(const Vec3& point, const Vec3& origin,
+                                       const Vec3& unit_axis, double angle) {
+  if (DistanceSqToAxis(point, origin, unit_axis) <= 1e-18) return point;
+  return RotateAroundAxis(point, origin, unit_axis, angle);
+}
+
 Vec3 ComputeCentroid(const std::vector<Vec3>& pts) {
   if (pts.empty()) return {};
   Vec3 out{};
@@ -979,7 +985,8 @@ emscripten::val BuildRevolveAuthoringState(const emscripten::val& options) {
     std::vector<LoopData> end_loops = boundary_loops;
     for (LoopData& loop : end_loops) {
       for (Vec3& point : loop.pts) {
-        point = RotateAroundAxis(point, axis_origin, axis_direction, sweep_rad);
+        point = RotateAroundAxisSnappingAxisPoint(point, axis_origin,
+                                                  axis_direction, sweep_rad);
       }
     }
     const Vec3 end_normal = RotateAroundAxis(Add(axis_origin, face_normal),
@@ -1016,16 +1023,26 @@ emscripten::val BuildRevolveAuthoringState(const emscripten::val& options) {
       for (int s = 0; s < steps; ++s, ang0 += d_angle) {
         const double ang1 = (s == steps - 1) ? sweep_rad : (ang0 + d_angle);
         const bool snap_final_ring = is_closed_revolution && s == steps - 1;
-        const Vec3 a0 = RotateAroundAxis(a, axis_origin, axis_direction, ang0);
-        const Vec3 a1 = snap_final_ring
+        const Vec3 a0 = a_on_axis
                             ? a
                             : RotateAroundAxis(a, axis_origin, axis_direction,
-                                               ang1);
-        const Vec3 b0 = RotateAroundAxis(b, axis_origin, axis_direction, ang0);
-        const Vec3 b1 = snap_final_ring
+                                               ang0);
+        const Vec3 a1 = snap_final_ring
+                            ? a
+                            : (a_on_axis
+                                   ? a
+                                   : RotateAroundAxis(a, axis_origin,
+                                                      axis_direction, ang1));
+        const Vec3 b0 = b_on_axis
                             ? b
                             : RotateAroundAxis(b, axis_origin, axis_direction,
-                                               ang1);
+                                               ang0);
+        const Vec3 b1 = snap_final_ring
+                            ? b
+                            : (b_on_axis
+                                   ? b
+                                   : RotateAroundAxis(b, axis_origin,
+                                                      axis_direction, ang1));
         AddQuad(builder, face_name_for_seg, a0, b0, b1, a1, is_hole);
       }
     }

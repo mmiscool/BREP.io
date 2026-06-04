@@ -242,6 +242,38 @@ function computeObjectWorldPoint(object) {
     return null;
 }
 
+function resolveSketchPlaneReference(reference, partHistory) {
+    const scene = partHistory?.scene || null;
+    const lookupByName = (name) => {
+        if (!name || typeof scene?.getObjectByName !== 'function') return null;
+        try { return scene.getObjectByName(String(name)) || null; } catch { return null; }
+    };
+    const resolveOne = (value) => {
+        if (!value) return null;
+        if (typeof value === 'string' || typeof value === 'number') {
+            return lookupByName(value);
+        }
+        if (typeof value === 'object') {
+            if (typeof value.updateWorldMatrix === 'function'
+                || typeof value.getWorldPosition === 'function'
+                || typeof value.getWorldQuaternion === 'function') {
+                return value;
+            }
+            return lookupByName(value.name || value.userData?.faceName || value.id);
+        }
+        return null;
+    };
+
+    if (Array.isArray(reference)) {
+        for (const item of reference) {
+            const resolved = resolveOne(item);
+            if (resolved) return resolved;
+        }
+        return null;
+    }
+    return resolveOne(reference);
+}
+
 export class SketchFeature {
     static shortName = "S";
     static longName = "Sketch";
@@ -273,16 +305,7 @@ export class SketchFeature {
     _getOrCreateBasis(partHistory) {
         const currentRef = this.inputParams?.sketchPlane || null;
         const pdBasis = this.persistentData?.basis || null;
-        const ph = partHistory;
-        // Accept object (preferred, from sanitizeInputParams) or fallback to name
-        let refObj = null;
-        if (Array.isArray(currentRef)) {
-            refObj = currentRef[0] || null;
-        } else if (currentRef && typeof currentRef === 'object') {
-            refObj = currentRef;
-        } else if (currentRef) {
-            refObj = ph?.scene?.getObjectByName(currentRef);
-        }
+        const refObj = resolveSketchPlaneReference(currentRef, partHistory);
 
         const x = new THREE.Vector3(1,0,0);
         const y = new THREE.Vector3(0,1,0);
@@ -290,10 +313,10 @@ export class SketchFeature {
         const origin = new THREE.Vector3();
 
         if (refObj) {
-            refObj.updateWorldMatrix(true, true);
+            try { refObj.updateWorldMatrix?.(true, true); } catch { /* ignore */ }
             const center = computeObjectWorldBoundsCenter(refObj) || computeObjectWorldCentroid(refObj);
             if (center) origin.copy(center);
-            else origin.copy(refObj.getWorldPosition(new THREE.Vector3()));
+            else origin.copy(computeObjectWorldPoint(refObj) || new THREE.Vector3());
             // For Face, use its avg normal; otherwise use object orientation
             if (refObj.type === 'FACE' && typeof refObj.getAverageNormal === 'function') {
                 const n = refObj.getAverageNormal().clone();
@@ -310,7 +333,10 @@ export class SketchFeature {
                 y.copy(tmp.crossVectors(n, x).normalize());
                 z.copy(n);
             } else {
-                const n = new THREE.Vector3(0,0,1).applyQuaternion(refObj.getWorldQuaternion(new THREE.Quaternion())).normalize();
+                const quat = (typeof refObj.getWorldQuaternion === 'function')
+                    ? refObj.getWorldQuaternion(new THREE.Quaternion())
+                    : new THREE.Quaternion();
+                const n = new THREE.Vector3(0,0,1).applyQuaternion(quat).normalize();
                 const worldUp = new THREE.Vector3(0,1,0);
                 const tmp = new THREE.Vector3();
                 const zx = Math.abs(n.dot(worldUp)) > 0.9 ? new THREE.Vector3(1,0,0) : worldUp;
