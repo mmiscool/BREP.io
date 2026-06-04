@@ -97,6 +97,7 @@ import {
 import { afterRun_Fillet_NonClosed, test_Fillet_NonClosed } from './test_fillet_nonClosed.js';
 import { test_fillets_more_dificult } from './test_filletsMoreDifficult.js';
 import { afterRun_history_expand_does_not_dirty, test_history_expand_does_not_dirty } from './test_history_expand_does_not_dirty.js';
+import { test_history_test_snippet_persistent_data_allowlist } from './test_historyTestSnippetPersistentData.js';
 import { afterRun_history_features_basic, test_history_features_basic } from './test_history_features_basic.js';
 import {
     afterRun_hole_counterbore,
@@ -851,6 +852,7 @@ export const testFunctions = [
     { test: test_mirror, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_history_features_basic, afterRun: afterRun_history_features_basic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_history_expand_does_not_dirty, afterRun: afterRun_history_expand_does_not_dirty, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_history_test_snippet_persistent_data_allowlist, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_selection_owning_feature_resolution, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_solid_overlap_diagnostics_detects_coplanar_overlap, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_solid_overlap_diagnostics_ignores_boundary_touching_faces, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -1133,7 +1135,9 @@ function stringifyError(err) {
     if (!err) return 'Unknown error';
     if (typeof err === 'string') return err;
     const message = err?.message || err?.toString?.() || 'Unknown error';
-    return err?.stack ? `${message}\n${err.stack}` : message;
+    if (!err?.stack) return message;
+    const stack = String(err.stack);
+    return stack.includes(message) ? stack : `${message}\n${stack}`;
 }
 
 function getMonotonicTimeMs() {
@@ -1195,6 +1199,20 @@ function createTestRunLog({ filter, plannedTests }) {
             });
         }
 
+        const recordsWithDetails = records.filter(record => record.errorDetails);
+        if (recordsWithDetails.length > 0) {
+            lines.push('');
+            lines.push('Failure details:');
+            recordsWithDetails.forEach((record, index) => {
+                lines.push('');
+                lines.push(`${index + 1}. ${record.name} (${record.status})`);
+                lines.push('');
+                lines.push('```');
+                lines.push(record.errorDetails);
+                lines.push('```');
+            });
+        }
+
         writeFile(TEST_LOG_PATH, `${lines.join('\n')}\n`);
     };
 
@@ -1208,7 +1226,8 @@ function createTestRunLog({ filter, plannedTests }) {
                 status,
                 testDurationMs,
                 artifactDurationMs,
-                note: error ? firstLine(stringifyError(error)) : '',
+                note: error ? stringifyError(error) : '',
+                errorDetails: error ? stringifyError(error) : '',
             });
             write();
         },

@@ -3,6 +3,31 @@ const UI_ONLY_INPUT_PARAM_KEYS = new Set(['__open']);
 const DIALOG_STYLE_ID = 'history-test-snippet-dialog-styles';
 const BUG_REPORT_URL_BASE = 'https://github.com/mmiscool/BREP/issues/new';
 const BUG_REPORT_TEMPLATE = 'bug_report.yml';
+const FEATURE_PERSISTENT_DATA_KEY_ALLOWLIST = new Map([
+  ['S', ['sketch']],
+  ['SKETCH', ['sketch']],
+  ['SKETCHFEATURE', ['sketch']],
+  ['SP', ['spline']],
+  ['SPLINE', ['spline']],
+  ['SPLINEFEATURE', ['spline']],
+  ['NURBS', ['cage', 'editorOptions']],
+  ['NURBS FACE SOLID', ['cage', 'editorOptions']],
+  ['NURBSFACESOLIDFEATURE', ['cage', 'editorOptions']],
+  ['POLY', ['meshData', 'editorOptions']],
+  ['POLYGON SOLID', ['meshData', 'editorOptions']],
+  ['POLYGONSOLIDFEATURE', ['meshData', 'editorOptions']],
+  ['TEXT', ['fontFile', 'fontFileKey', 'embeddedFont']],
+  ['TEXT TO FACE', ['fontFile', 'fontFileKey', 'embeddedFont']],
+  ['TEXTTOFACEFEATURE', ['fontFile', 'fontFileKey', 'embeddedFont']],
+  ['IMPORT3D', ['importCache']],
+  ['IMPORT 3D MODEL', ['importCache']],
+  ['IMPORT3DMODELFEATURE', ['importCache']],
+  ['STL', ['importCache']],
+  ['ACOMP', ['componentData']],
+  ['ASSY COMPONENT', ['componentData']],
+  ['ASSEMBLY COMPONENT', ['componentData']],
+  ['ASSEMBLYCOMPONENTFEATURE', ['componentData']],
+]);
 
 function sanitizeFunctionName(rawName) {
   const trimmed = String(rawName || '').trim();
@@ -33,19 +58,28 @@ function sanitizeInputParamsForSnippet(rawParams) {
   return sanitized;
 }
 
-function hasSerializablePersistentData(raw) {
-  if (!raw || typeof raw !== 'object') return false;
+function hasSerializableSnippetValue(raw) {
+  if (raw === undefined || raw === null) return false;
+  if (typeof raw === 'string') return raw.length > 0;
+  if (typeof raw !== 'object') return true;
   if (Array.isArray(raw)) return raw.length > 0;
   return Object.keys(raw).length > 0;
 }
 
-function extractSketchPersistentData(featureType, persistentData) {
+function extractSnippetPersistentData(featureType, persistentData) {
   const normalizedType = String(featureType || '').trim().toUpperCase();
-  if (normalizedType !== 'S') return null;
+  const keys = FEATURE_PERSISTENT_DATA_KEY_ALLOWLIST.get(normalizedType);
+  if (!Array.isArray(keys) || keys.length === 0) return null;
   const source = (persistentData && typeof persistentData === 'object') ? persistentData : null;
-  const sketch = source?.sketch;
-  if (!hasSerializablePersistentData(sketch)) return null;
-  return { sketch };
+  if (!source) return null;
+  const output = {};
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+    const value = source[key];
+    if (!hasSerializableSnippetValue(value)) continue;
+    output[key] = value;
+  }
+  return Object.keys(output).length ? output : null;
 }
 
 function stringifyAsCodeLiteral(value, indent = 4) {
@@ -103,7 +137,7 @@ function buildTestSnippet({ functionName, features, expressions, configurator })
     const featureType = String(feature?.type || '');
     const inputParams = sanitizeInputParamsForSnippet(feature?.inputParams);
     const persistentData = feature?.persistentData;
-    const sketchPersistentData = extractSketchPersistentData(featureType, persistentData);
+    const snippetPersistentData = extractSnippetPersistentData(featureType, persistentData);
 
     lines.push('');
     lines.push(`  const ${variableName} = await partHistory.newFeature(${JSON.stringify(featureType)});`);
@@ -112,8 +146,8 @@ function buildTestSnippet({ functionName, features, expressions, configurator })
       lines.push(`  Object.assign(${variableName}.inputParams,${stringifyAsCodeLiteral(inputParams, 4)});`);
     }
 
-    if (sketchPersistentData) {
-      lines.push(`  ${variableName}.persistentData =${stringifyAsCodeLiteral(sketchPersistentData, 4)};`);
+    if (snippetPersistentData) {
+      lines.push(`  ${variableName}.persistentData =${stringifyAsCodeLiteral(snippetPersistentData, 4)};`);
     }
   }
 
@@ -288,3 +322,9 @@ export function createHistoryTestSnippetButton(viewer) {
     },
   };
 }
+
+export {
+  buildTestSnippet,
+  extractSnippetPersistentData,
+  sanitizeInputParamsForSnippet,
+};
