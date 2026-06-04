@@ -19,37 +19,61 @@ function evaluateNumber(expressionsEvaluator, value) {
   return Number.isFinite(fallback) ? fallback : 0;
 }
 
+function getReferenceObjectNameCandidates(value) {
+    if (!value || typeof value !== 'object') return [];
+    const out = [];
+    const seen = new Set();
+    const add = (candidate) => {
+        if (typeof candidate !== 'string') return;
+        const name = candidate.trim();
+        if (!name || seen.has(name)) return;
+        seen.add(name);
+        out.push(name);
+    };
+    add(value.name);
+    add(value.id);
+    add(value.selectionName);
+    add(value.userData?.edgeName);
+    add(value.userData?.faceName);
+    add(value.userData?.selectionName);
+    return out;
+}
+
+function attachReferencePickMetadata(resolved, rawValue, refName) {
+    if (!resolved || !rawValue || typeof rawValue !== 'object') return;
+    try {
+        const pick = Array.isArray(rawValue.pickPoint) && rawValue.pickPoint.length >= 3
+            ? [Number(rawValue.pickPoint[0]) || 0, Number(rawValue.pickPoint[1]) || 0, Number(rawValue.pickPoint[2]) || 0]
+            : null;
+        const faceIndex = Number(rawValue.faceIndex);
+        if (pick || (Number.isFinite(faceIndex) && faceIndex >= 0)) {
+            resolved.userData = resolved.userData || {};
+            resolved.userData.__lastReferencePickMeta = {
+                name: String(refName),
+                ...(pick ? { pickPoint: pick } : {}),
+                ...(Number.isFinite(faceIndex) && faceIndex >= 0 ? { faceIndex: Math.floor(faceIndex) } : {}),
+            };
+        }
+    } catch {
+        /* ignore metadata propagation errors */
+    }
+}
+
+function resolveCurrentReferenceObject(rawValue, getObjectByName) {
+    if (!rawValue || typeof rawValue !== 'object' || typeof getObjectByName !== 'function') return null;
+    for (const refName of getReferenceObjectNameCandidates(rawValue)) {
+        const resolved = getObjectByName(refName);
+        if (!resolved) continue;
+        attachReferencePickMetadata(resolved, rawValue, refName);
+        return resolved;
+    }
+    return null;
+}
+
 function resolveReferenceSelectionValue(rawValue, getObjectByName) {
     if (!rawValue) return null;
     if (typeof rawValue === 'object') {
-        if (rawValue.isObject3D) return rawValue;
-        const refName = (typeof rawValue.name === 'string' && rawValue.name.trim())
-            ? rawValue.name.trim()
-            : (typeof rawValue.id === 'string' && rawValue.id.trim())
-                ? rawValue.id.trim()
-                : (typeof rawValue.selectionName === 'string' && rawValue.selectionName.trim())
-                    ? rawValue.selectionName.trim()
-                    : null;
-        if (!refName) return null;
-        const resolved = getObjectByName(refName);
-        if (!resolved) return null;
-        try {
-            const pick = Array.isArray(rawValue.pickPoint) && rawValue.pickPoint.length >= 3
-                ? [Number(rawValue.pickPoint[0]) || 0, Number(rawValue.pickPoint[1]) || 0, Number(rawValue.pickPoint[2]) || 0]
-                : null;
-            const faceIndex = Number(rawValue.faceIndex);
-            if (pick || (Number.isFinite(faceIndex) && faceIndex >= 0)) {
-                resolved.userData = resolved.userData || {};
-                resolved.userData.__lastReferencePickMeta = {
-                    name: String(refName),
-                    ...(pick ? { pickPoint: pick } : {}),
-                    ...(Number.isFinite(faceIndex) && faceIndex >= 0 ? { faceIndex: Math.floor(faceIndex) } : {}),
-                };
-            }
-        } catch {
-            /* ignore metadata propagation errors */
-        }
-        return resolved;
+        return resolveCurrentReferenceObject(rawValue, getObjectByName) || (rawValue.isObject3D ? rawValue : null);
     }
     const obj = getObjectByName(String(rawValue));
     return obj || null;
@@ -66,7 +90,7 @@ export async function sanitizeInputParams(schema, inputParams, expressionsEvalua
             if (schema[key].type === "number") {
                 sanitized[key] = evaluateNumber(expressionsEvaluator, inputParams[key]);
             } else if (schema[key].type === "reference_selection") {
-                // Resolve references: accept objects directly or look up by name
+                // Resolve references by current scene name first, with object refs as fallback.
                 const val = inputParams[key];
                 if (Array.isArray(val)) {
                     const arr = [];
@@ -92,7 +116,10 @@ export async function sanitizeInputParams(schema, inputParams, expressionsEvalua
                 const targets = [];
                 for (const it of items) {
                     if (!it) continue;
-                    if (typeof it === 'object') { targets.push(it); continue; }
+                    if (typeof it === 'object') {
+                        targets.push(resolveCurrentReferenceObject(it, getObjectByName) || it);
+                        continue;
+                    }
                     const obj = getObjectByName(String(it));
                     if (obj) targets.push(obj);
                 }

@@ -98,6 +98,10 @@ import {
     afterRun_fillet_corner_bridge,
     test_fillet_corner_bridge,
 } from './test_fillet_corner_bridge.js';
+import {
+    test_fillet_cache_invalidates_when_target_solid_changes_away_from_selected_edges,
+    test_fillet_rebuild_re_resolves_stale_edge_object,
+} from './test_fillet_stale_reference_rebuild.js';
 import { afterRun_Fillet_NonClosed, test_Fillet_NonClosed } from './test_fillet_nonClosed.js';
 import { test_fillets_more_dificult } from './test_filletsMoreDifficult.js';
 import { afterRun_history_expand_does_not_dirty, test_history_expand_does_not_dirty } from './test_history_expand_does_not_dirty.js';
@@ -724,6 +728,20 @@ export const testFunctions = [
         printArtifacts: false,
         exportFaces: true,
         exportSolids: true,
+        resetHistory: true,
+    },
+    {
+        test: test_fillet_rebuild_re_resolves_stale_edge_object,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_fillet_cache_invalidates_when_target_solid_changes_away_from_selected_edges,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
         resetHistory: true,
     },
     {

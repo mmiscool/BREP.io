@@ -32,6 +32,37 @@ const UI_ONLY_INPUT_PARAM_KEYS = new Set(['__open']);
 const DEFAULT_EXPRESSION_PRELUDE = 'resolution = 32;\n';
 const DEFAULT_EXPRESSIONS = "//Examples:\nx = 10 + 6; \ny = x * 2;" + "\n\n" + DEFAULT_EXPRESSION_PRELUDE;
 
+function getReferenceObjectNameCandidates(value) {
+  if (!value || typeof value !== 'object') return [];
+  const out = [];
+  const seen = new Set();
+  const add = (candidate) => {
+    if (typeof candidate !== 'string') return;
+    const name = candidate.trim();
+    if (!name || seen.has(name)) return;
+    seen.add(name);
+    out.push(name);
+  };
+  add(value.name);
+  add(value.id);
+  add(value.selectionName);
+  add(value.userData?.edgeName);
+  add(value.userData?.faceName);
+  add(value.userData?.selectionName);
+  return out;
+}
+
+function resolveCurrentReferenceObject(value, getObjectByName) {
+  if (!value || typeof value !== 'object' || typeof getObjectByName !== 'function') return null;
+  for (const name of getReferenceObjectNameCandidates(value)) {
+    try {
+      const resolved = getObjectByName(name);
+      if (resolved && typeof resolved === 'object') return resolved;
+    } catch { /* ignore resolver failures */ }
+  }
+  return null;
+}
+
 function resolveFeatureEntryId(entry, fallback = null) {
   if (!entry) return fallback;
   const params = entry.inputParams || {};
@@ -43,8 +74,17 @@ function resolveFeatureEntryId(entry, fallback = null) {
 function stringifyInputParamsForDirtyCheck(inputParams) {
   const source = (inputParams && typeof inputParams === 'object') ? inputParams : {};
   try {
+    const seenObjects = new WeakSet();
     const serialized = JSON.stringify(source, (key, value) => {
       if (key && UI_ONLY_INPUT_PARAM_KEYS.has(key)) return undefined;
+      if (value && typeof value === 'object') {
+        if (seenObjects.has(value)) return undefined;
+        seenObjects.add(value);
+        const refNames = getReferenceObjectNameCandidates(value);
+        if (value.isObject3D || (typeof value.type === 'string' && refNames.length > 0)) {
+          return { __reference: refNames[0] || null, type: value.type || null };
+        }
+      }
       return value;
     });
     return serialized == null ? '' : serialized;
@@ -1751,14 +1791,18 @@ export class PartHistory {
             sanitized[key] = rawStr;
           }
         } else if (schema[key].type === "reference_selection") {
-          // Resolve references: accept objects directly, look up by name,
+          // Resolve references by current scene name first; fall back to object refs
           // and preserve unresolved string refs for features that do their own mapping.
           const val = rawValue;
           if (Array.isArray(val)) {
             const arr = [];
             for (const it of val) {
               if (!it) continue;
-              if (typeof it === 'object') { arr.push(it); continue; }
+              if (typeof it === 'object') {
+                const resolved = resolveCurrentReferenceObject(it, (name) => this.getObjectByName(name));
+                arr.push(resolved || it);
+                continue;
+              }
               const refName = String(it);
               const obj = this.getObjectByName(refName);
               if (obj) arr.push(obj);
@@ -1767,7 +1811,10 @@ export class PartHistory {
             sanitized[key] = arr;
           } else {
             if (!val) { sanitized[key] = []; }
-            else if (typeof val === 'object') { sanitized[key] = [val]; }
+            else if (typeof val === 'object') {
+              const resolved = resolveCurrentReferenceObject(val, (name) => this.getObjectByName(name));
+              sanitized[key] = [resolved || val];
+            }
             else {
               const refName = String(val);
               const obj = this.getObjectByName(refName);
@@ -1784,7 +1831,11 @@ export class PartHistory {
           const targets = [];
           for (const it of items) {
             if (!it) continue;
-            if (typeof it === 'object') { targets.push(it); continue; }
+            if (typeof it === 'object') {
+              const resolved = resolveCurrentReferenceObject(it, (name) => this.getObjectByName(name));
+              targets.push(resolved || it);
+              continue;
+            }
             const obj = this.getObjectByName(String(it));
             if (obj) targets.push(obj);
           }

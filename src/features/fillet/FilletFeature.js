@@ -20,7 +20,7 @@ const FINAL_FILLET_SIMPLIFY_TOLERANCE = 0.0009;
 const FILLET_NATIVE_TINY_FACE_ISLAND_CLEANUP_AREA = 0.01;
 const FILLET_POST_COLLAPSE_TINY_TRIANGLE_THRESHOLD = 0.001;
 const FILLET_POST_COLLAPSE_TINY_FACE_ISLAND_CLEANUP_AREA = 0.01;
-const FILLET_CACHE_VERSION = 2;
+const FILLET_CACHE_VERSION = 4;
 
 const inputParamsSchema = {
     id: {
@@ -176,6 +176,20 @@ function stableStringHash32(value = '') {
     return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
+function updateHashText32(hash, value = '') {
+    const text = String(value == null ? '' : value);
+    let next = hash >>> 0;
+    for (let i = 0; i < text.length; i += 1) {
+        next ^= text.charCodeAt(i);
+        next = Math.imul(next, 16777619);
+    }
+    return next >>> 0;
+}
+
+function finishHash32(hash) {
+    return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
 function appendHashToken(parts, value) {
     if (typeof value === 'number') {
         if (Number.isFinite(value)) parts.push(Number(value).toPrecision(12));
@@ -204,6 +218,54 @@ function stableValueHash(value) {
     const parts = [];
     appendHashToken(parts, value);
     return stableStringHash32(parts.join('|'));
+}
+
+function isHashableArrayLike(value) {
+    return Array.isArray(value) || ArrayBuffer.isView(value);
+}
+
+function updateHashNumber32(hash, value) {
+    const num = Number(value);
+    return updateHashText32(hash, Number.isFinite(num) ? num.toPrecision(12) : 'NaN');
+}
+
+function updateHashArrayLike32(hash, label, values, numeric = false) {
+    const arr = isHashableArrayLike(values) ? values : [];
+    let next = updateHashText32(hash, label);
+    next = updateHashText32(next, arr.length);
+    for (let i = 0; i < arr.length; i += 1) {
+        next = numeric ? updateHashNumber32(next, arr[i]) : updateHashText32(next, arr[i]);
+    }
+    return next;
+}
+
+function updateHashMap32(hash, label, map, valueHash = (value) => String(value)) {
+    const entries = map instanceof Map ? Array.from(map.entries()) : [];
+    entries.sort((a, b) => String(a?.[0] ?? '').localeCompare(String(b?.[0] ?? '')));
+    let next = updateHashText32(hash, label);
+    next = updateHashText32(next, entries.length);
+    for (const [key, value] of entries) {
+        next = updateHashText32(next, key);
+        next = updateHashText32(next, valueHash(value));
+    }
+    return next;
+}
+
+function hashTargetSolidState(solid) {
+    if (!solid || typeof solid !== 'object') return null;
+    let hash = 2166136261;
+    hash = updateHashText32(hash, 'target-solid-v1');
+    hash = updateHashText32(hash, Number(solid?._numProp ?? 3));
+    hash = updateHashArrayLike32(hash, 'verts', solid?._vertProperties, true);
+    hash = updateHashArrayLike32(hash, 'triVerts', solid?._triVerts, false);
+    hash = updateHashArrayLike32(hash, 'triIDs', solid?._triIDs, false);
+    hash = updateHashMap32(hash, 'faceNameToID', solid?._faceNameToID);
+    hash = updateHashMap32(hash, 'idToFaceName', solid?._idToFaceName);
+    hash = updateHashMap32(hash, 'faceMetadata', solid?._faceMetadata, stableValueHash);
+    hash = updateHashMap32(hash, 'edgeMetadata', solid?._edgeMetadata, stableValueHash);
+    hash = updateHashText32(hash, stableValueHash(solid?._auxEdges || []));
+    hash = updateHashArrayLike32(hash, 'matrix', solid?.matrix?.elements, true);
+    return finishHash32(hash);
 }
 
 function cloneAuthoringSnapshot(snapshot) {
@@ -244,28 +306,76 @@ function getEdgeFaceNamesForCache(edgeObj) {
     return { faceAName, faceBName };
 }
 
-function hashFaceState(solid, faceName) {
-    if (!solid || !faceName) return null;
-    let triangles = null;
-    try {
-        triangles = typeof solid.getFace === 'function' ? solid.getFace(faceName) : null;
-    } catch {
-        triangles = null;
+function appendNumberHashToken(parts, value) {
+    const num = Number(value);
+    parts.push(Number.isFinite(num) ? num.toPrecision(12) : 'NaN');
+}
+
+function hashFaceAuthoringState(solid, faceName, metadata) {
+    const faceToId = solid?._faceNameToID instanceof Map ? solid._faceNameToID : null;
+    const triIDs = Array.isArray(solid?._triIDs) ? solid._triIDs : null;
+    const triVerts = Array.isArray(solid?._triVerts) ? solid._triVerts : null;
+    const vertProperties = Array.isArray(solid?._vertProperties) ? solid._vertProperties : null;
+    if (!faceToId || !triIDs || !triVerts || !vertProperties) return null;
+
+    const faceID = faceToId.get(faceName);
+    if (!Number.isFinite(faceID)) return null;
+
+    const parts = ['faceName', String(faceName || ''), 'metadata'];
+    appendHashToken(parts, metadata && typeof metadata === 'object' ? metadata : {});
+    parts.push('triangles');
+
+    const targetID = faceID >>> 0;
+    const triCount = Math.min(triIDs.length, (triVerts.length / 3) | 0);
+    for (let triIndex = 0; triIndex < triCount; triIndex += 1) {
+        if ((triIDs[triIndex] >>> 0) !== targetID) continue;
+        parts.push('tri');
+        const triBase = triIndex * 3;
+        for (let corner = 0; corner < 3; corner += 1) {
+            const vertexIndex = triVerts[triBase + corner] >>> 0;
+            const vertexBase = vertexIndex * 3;
+            appendNumberHashToken(parts, vertProperties[vertexBase + 0]);
+            appendNumberHashToken(parts, vertProperties[vertexBase + 1]);
+            appendNumberHashToken(parts, vertProperties[vertexBase + 2]);
+        }
     }
+
+    return stableStringHash32(parts.join('|'));
+}
+
+function hashFaceState(solid, faceName, cache = null) {
+    if (!solid || !faceName) return null;
+    const cacheKey = String(faceName || '').trim();
+    if (cache && cache.has(cacheKey)) return cache.get(cacheKey);
     let metadata = null;
     try {
         metadata = typeof solid.getFaceMetadata === 'function' ? solid.getFaceMetadata(faceName) : null;
     } catch {
         metadata = null;
     }
-    return stableValueHash({
+
+    const authoringHash = hashFaceAuthoringState(solid, faceName, metadata);
+    if (authoringHash) {
+        if (cache) cache.set(cacheKey, authoringHash);
+        return authoringHash;
+    }
+
+    let triangles = null;
+    try {
+        triangles = typeof solid.getFace === 'function' ? solid.getFace(faceName) : null;
+    } catch {
+        triangles = null;
+    }
+    const hash = stableValueHash({
         faceName,
         triangles: Array.isArray(triangles) ? triangles : [],
         metadata: metadata && typeof metadata === 'object' ? metadata : {},
     });
+    if (cache) cache.set(cacheKey, hash);
+    return hash;
 }
 
-function buildFilletEdgeDependencySignature(edge, targetSolid) {
+function buildFilletEdgeDependencySignature(edge, targetSolid, faceStateCache = null) {
     const edgeName = typeof edge?.name === 'string' ? edge.name : '';
     const edgePolyline = Array.isArray(edge?.userData?.polylineLocal) ? edge.userData.polylineLocal : [];
     const { faceAName, faceBName } = getEdgeFaceNamesForCache(edge);
@@ -277,9 +387,9 @@ function buildFilletEdgeDependencySignature(edge, targetSolid) {
             closedLoop: !!(edge?.closedLoop || edge?.userData?.closedLoop),
         }),
         faceAName,
-        faceAHash: hashFaceState(targetSolid, faceAName),
+        faceAHash: hashFaceState(targetSolid, faceAName, faceStateCache),
         faceBName,
-        faceBHash: hashFaceState(targetSolid, faceBName),
+        faceBHash: hashFaceState(targetSolid, faceBName, faceStateCache),
     };
 }
 
@@ -293,11 +403,14 @@ function buildFilletCacheKey({
     nudgeFaceDistance,
     collapseFilletSideWalls,
 }) {
+    const faceStateCache = new Map();
     const edgeSignatures = (Array.isArray(edgeObjs) ? edgeObjs : [])
-        .map((edge) => buildFilletEdgeDependencySignature(edge, targetSolid));
+        .map((edge) => buildFilletEdgeDependencySignature(edge, targetSolid, faceStateCache));
+    const targetStateHash = hashTargetSolidState(targetSolid);
     return {
         version: FILLET_CACHE_VERSION,
         targetName: targetSolid?.name || null,
+        targetStateHash,
         optionsHash: stableValueHash({
             radius,
             resolution,
@@ -307,13 +420,17 @@ function buildFilletCacheKey({
             collapseFilletSideWalls,
         }),
         edgeSignatures,
-        dependencyHash: stableValueHash(edgeSignatures),
+        dependencyHash: stableValueHash({
+            targetStateHash,
+            edgeSignatures,
+        }),
     };
 }
 
 function filletCacheMatches(cacheEntry, cacheKey) {
     return !!cacheEntry
         && cacheEntry.version === FILLET_CACHE_VERSION
+        && cacheEntry.targetStateHash === cacheKey.targetStateHash
         && cacheEntry.optionsHash === cacheKey.optionsHash
         && cacheEntry.dependencyHash === cacheKey.dependencyHash
         && Array.isArray(cacheEntry.edgeSignatures)
@@ -359,6 +476,40 @@ function uniqueObjects(items) {
         out.push(item);
     }
     return out;
+}
+
+function getReferenceObjectNameCandidates(value) {
+    if (!value || typeof value !== 'object') return [];
+    const out = [];
+    const seen = new Set();
+    const add = (candidate) => {
+        if (typeof candidate !== 'string') return;
+        const name = candidate.trim();
+        if (!name || seen.has(name)) return;
+        seen.add(name);
+        out.push(name);
+    };
+    add(value.name);
+    add(value.id);
+    add(value.selectionName);
+    add(value.userData?.edgeName);
+    add(value.userData?.faceName);
+    add(value.userData?.selectionName);
+    return out;
+}
+
+function resolveCurrentReferenceObject(value, resolveByName) {
+    if (!value || typeof value !== 'object' || typeof resolveByName !== 'function') return null;
+    for (const name of getReferenceObjectNameCandidates(value)) {
+        const direct = resolveByName(name);
+        if (direct) return direct;
+        const normalized = normalizeSelectionToken(name);
+        if (normalized && normalized !== name) {
+            const normalizedObject = resolveByName(normalized);
+            if (normalizedObject) return normalizedObject;
+        }
+    }
+    return null;
 }
 
 function collectEdgesForReferenceObject(obj) {
@@ -567,7 +718,7 @@ function expandReferenceSelections(rawSelections, partHistory, snapshotStore = n
     for (const item of (Array.isArray(rawSelections) ? rawSelections : [])) {
         if (!item) continue;
         if (typeof item === 'object') {
-            pushObject(item);
+            pushObject(resolveCurrentReferenceObject(item, resolveByName) || item);
             continue;
         }
         const text = String(item || '').trim();
@@ -1064,6 +1215,7 @@ export class FilletFeature {
                 ...(this.persistentData || {}),
                 filletSolidCache: {
                     version: FILLET_CACHE_VERSION,
+                    targetStateHash: cacheKey.targetStateHash,
                     optionsHash: cacheKey.optionsHash,
                     dependencyHash: cacheKey.dependencyHash,
                     edgeSignatures: cacheKey.edgeSignatures,
