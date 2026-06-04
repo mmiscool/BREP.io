@@ -4582,6 +4582,7 @@ void SnapChamferOpenEndCapsToEndpointPlanes(const std::vector<Vec3>& source_edge
                                             std::vector<Vec3>& rail_b,
                                             bool closed_loop,
                                             double max_tangent_offset) {
+  (void)max_tangent_offset;
   if (closed_loop || source_edge_points.size() < 2) return;
   const size_t count = std::min({rail_p.size(), rail_a.size(), rail_b.size(),
                                  tangents.size(), source_edge_points.size()});
@@ -4589,56 +4590,24 @@ void SnapChamferOpenEndCapsToEndpointPlanes(const std::vector<Vec3>& source_edge
 
   const Vec3 tangent_start = Normalize(tangents.front());
   if (LengthSq(tangent_start) > 1e-18) {
-    const Vec3 current_plane_normal =
-        Normalize(Cross(Subtract(rail_a.front(), rail_p.front()),
-                        Subtract(rail_b.front(), rail_p.front())));
-    const double a_offset = std::abs(
-        SignedDistanceToPlane(rail_a.front(), source_edge_points.front(),
-                              tangent_start));
-    const double b_offset = std::abs(
-        SignedDistanceToPlane(rail_b.front(), source_edge_points.front(),
-                              tangent_start));
-    const bool source_edge_inside =
-        ChamferCapPlaneContainsSourceEdge(source_edge_points, rail_p.front(),
-                                         current_plane_normal, 0,
-                                         max_tangent_offset);
-    if (!source_edge_inside ||
-        std::max(a_offset, b_offset) > max_tangent_offset) {
-      const Vec3 ideal_plane_point = source_edge_points.front();
-      rail_p.front() =
-          ProjectPointOntoPlane(rail_p.front(), ideal_plane_point, tangent_start);
-      rail_a.front() =
-          ProjectPointOntoPlane(rail_a.front(), ideal_plane_point, tangent_start);
-      rail_b.front() =
-          ProjectPointOntoPlane(rail_b.front(), ideal_plane_point, tangent_start);
-    }
+    const Vec3 ideal_plane_point = source_edge_points.front();
+    rail_p.front() =
+        ProjectPointOntoPlane(rail_p.front(), ideal_plane_point, tangent_start);
+    rail_a.front() =
+        ProjectPointOntoPlane(rail_a.front(), ideal_plane_point, tangent_start);
+    rail_b.front() =
+        ProjectPointOntoPlane(rail_b.front(), ideal_plane_point, tangent_start);
   }
 
   const Vec3 tangent_end = Normalize(tangents.back());
   if (LengthSq(tangent_end) > 1e-18) {
-    const Vec3 current_plane_normal =
-        Normalize(Cross(Subtract(rail_b.back(), rail_p.back()),
-                        Subtract(rail_a.back(), rail_p.back())));
-    const double a_offset =
-        std::abs(SignedDistanceToPlane(rail_a.back(), source_edge_points.back(),
-                                       tangent_end));
-    const double b_offset =
-        std::abs(SignedDistanceToPlane(rail_b.back(), source_edge_points.back(),
-                                       tangent_end));
-    const bool source_edge_inside =
-        ChamferCapPlaneContainsSourceEdge(source_edge_points, rail_p.back(),
-                                         current_plane_normal, 1,
-                                         max_tangent_offset);
-    if (!source_edge_inside ||
-        std::max(a_offset, b_offset) > max_tangent_offset) {
-      const Vec3 ideal_plane_point = source_edge_points.back();
-      rail_p.back() =
-          ProjectPointOntoPlane(rail_p.back(), ideal_plane_point, tangent_end);
-      rail_a.back() =
-          ProjectPointOntoPlane(rail_a.back(), ideal_plane_point, tangent_end);
-      rail_b.back() =
-          ProjectPointOntoPlane(rail_b.back(), ideal_plane_point, tangent_end);
-    }
+    const Vec3 ideal_plane_point = source_edge_points.back();
+    rail_p.back() =
+        ProjectPointOntoPlane(rail_p.back(), ideal_plane_point, tangent_end);
+    rail_a.back() =
+        ProjectPointOntoPlane(rail_a.back(), ideal_plane_point, tangent_end);
+    rail_b.back() =
+        ProjectPointOntoPlane(rail_b.back(), ideal_plane_point, tangent_end);
   }
 }
 
@@ -5303,8 +5272,14 @@ emscripten::val BuildChamferAuthoringState(const emscripten::val& options) {
   }
 
   std::vector<std::vector<Vec3>*> rails = {&rail_p_used, &rail_a_used, &rail_b_used};
-  ResolveChamferSelfIntersections(rails, closed_loop);
   const double max_cap_tangent_offset = std::max(1e-4, distance * 0.2);
+  SnapChamferOpenEndCapsToEndpointPlanes(rail_p, tangents, rail_p_used, rail_a_used,
+                                         rail_b_used, closed_loop,
+                                         max_cap_tangent_offset);
+  std::vector<Vec3> debug_rail_p = rail_p_used;
+  std::vector<Vec3> debug_rail_a = rail_a_used;
+  std::vector<Vec3> debug_rail_b = rail_b_used;
+  ResolveChamferSelfIntersections(rails, closed_loop);
   SnapChamferOpenEndCapsToEndpointPlanes(rail_p, tangents, rail_p_used, rail_a_used,
                                          rail_b_used, closed_loop,
                                          max_cap_tangent_offset);
@@ -5314,8 +5289,8 @@ emscripten::val BuildChamferAuthoringState(const emscripten::val& options) {
       name, base_name, rail_p_used, rail_a_used, rail_b_used, closed_loop);
   if (debug_cross_sections) {
     out.set("debugCrossSectionSnapshots",
-            BuildChamferCrossSectionSnapshots(base_name, rail_p_used, rail_a_used,
-                                              rail_b_used));
+            BuildChamferCrossSectionSnapshots(base_name, debug_rail_p, debug_rail_a,
+                                              debug_rail_b));
   }
 
   return out;
@@ -5521,11 +5496,10 @@ emscripten::val BuildChamferWorkflowAuthoringState(const emscripten::val& option
   direction_decision.set("ambiguousEdges", ambiguous_edges);
 
   const double distance_abs = std::abs(distance);
-  const double endpoint_tol = std::max(1e-6, distance_abs * 1e-4);
+  const double endpoint_tol = std::max(1e-6, distance_abs * 2e-2);
   const double cap_point_tol = std::max(1e-7, endpoint_tol * 0.5);
   const double tangent_dot_threshold = std::cos(45.0 * kPi / 180.0);
-  const double min_bridge_gap = std::max(cap_point_tol * 0.5, 1e-8);
-  const double max_bridge_gap = std::max(endpoint_tol * 8.0, distance_abs * 0.1);
+  const double max_bridge_gap = std::max(endpoint_tol * 8.0, distance_abs * 0.5);
   uint32_t tangent_cap_bridge_count = 0;
   std::unordered_set<std::string> emitted_bridge_keys;
 
@@ -5565,8 +5539,7 @@ emscripten::val BuildChamferWorkflowAuthoringState(const emscripten::val& option
       if (cap_a.points.size() < 3 || cap_b.points.size() < 3) continue;
 
       const double cap_gap = MinimumPointSetDistance(cap_a.points, cap_b.points);
-      if (!(std::isfinite(cap_gap)) || !(cap_gap > min_bridge_gap) ||
-          !(cap_gap <= max_bridge_gap)) {
+      if (!(std::isfinite(cap_gap)) || !(cap_gap <= max_bridge_gap)) {
         continue;
       }
 

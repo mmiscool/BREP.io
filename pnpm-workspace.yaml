@@ -1,6 +1,10 @@
 packages:
   - .
 
+allowBuilds:
+  core-js: false
+  esbuild: false
+
 ignoredBuiltDependencies:
   - core-js
   - esbuild
