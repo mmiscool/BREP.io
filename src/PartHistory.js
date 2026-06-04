@@ -526,6 +526,9 @@ export class PartHistory {
   async runHistory(options = {}) {
     const throwOnFeatureError = !!options?.throwOnFeatureError;
     const whatStepToStopAt = this.currentHistoryStepId;
+    const stopBeforeFeatureId = options?.stopBeforeFeatureId != null
+      ? String(options.stopBeforeFeatureId)
+      : null;
     const hiddenVisibilityState = this.#captureHiddenVisibilityState();
     let modelChanged = false;
 
@@ -548,6 +551,11 @@ export class PartHistory {
         }
 
         const nextFeature = features[i + 1];
+
+        if (stopBeforeFeatureId && featureId === stopBeforeFeatureId) {
+          skipAllFeatures = true;
+          continue;
+        }
 
         if (whatStepToStopAt && featureId === whatStepToStopAt) {
           skipAllFeatures = true; // stop after this feature

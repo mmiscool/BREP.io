@@ -525,6 +525,16 @@ export class SelectionFilter {
             if (!usable) {
                 try { activeRefInput.removeAttribute('active-reference-selection'); } catch (_) { }
                 try { activeRefInput.style.filter = 'none'; } catch (_) { }
+                try {
+                    if (typeof activeRefInput.__refPreviewCleanup === 'function') {
+                        activeRefInput.__refPreviewCleanup();
+                    }
+                } catch (_) { }
+                try {
+                    if (typeof activeRefInput.__refSelectionDeactivate === 'function') {
+                        activeRefInput.__refSelectionDeactivate();
+                    }
+                } catch (_) { }
                 try { if (window.__BREP_activeRefInput === activeRefInput) window.__BREP_activeRefInput = null; } catch (_) { }
                 SelectionFilter.restoreAllowedSelectionTypes();
                 return false;
@@ -735,6 +745,16 @@ export class SelectionFilter {
                 try {
                     const wrap = activeRefInput.closest('.ref-single-wrap, .ref-multi-wrap');
                     if (wrap) wrap.classList.remove('ref-active');
+                } catch (_) { }
+                try {
+                    if (typeof activeRefInput.__refPreviewCleanup === 'function') {
+                        activeRefInput.__refPreviewCleanup();
+                    }
+                } catch (_) { }
+                try {
+                    if (typeof activeRefInput.__refSelectionDeactivate === 'function') {
+                        activeRefInput.__refSelectionDeactivate();
+                    }
                 } catch (_) { }
                 SelectionFilter.restoreAllowedSelectionTypes();
                 try { if (window.__BREP_activeRefInput === activeRefInput) window.__BREP_activeRefInput = null; } catch (_) { }

@@ -505,6 +505,8 @@ export class HistoryWidget extends HistoryCollectionWidget {
     const featureId = this.#entryId(entry);
     return {
       onChange: () => {
+        const activeRef = SchemaForm.getActiveReferenceInput?.() || null;
+        if (activeRef?.__refSelectionSceneMode?.featureId === featureId) return;
         if (featureId) this.#setCurrentHistoryStep(featureId);
       },
       onAction: (_id, actionKey) => this.#handleFormAction(featureId, actionKey),

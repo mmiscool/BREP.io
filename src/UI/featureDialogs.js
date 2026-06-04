@@ -47,6 +47,7 @@ export class SchemaForm {
                 try { prev.style.filter = 'none'; } catch (_) { }
                 try { prev.removeAttribute('active-reference-selection'); } catch (_) { }
                 try { if (typeof prev.__refPreviewCleanup === 'function') prev.__refPreviewCleanup(); } catch (_) { }
+                try { if (typeof prev.__refSelectionDeactivate === 'function') prev.__refSelectionDeactivate(); } catch (_) { }
             }
         } catch (_) { }
         SchemaForm.__activeRefInput = el || null;
@@ -174,6 +175,11 @@ export class SchemaForm {
         try {
             if (typeof activeInput.__refPreviewCleanup === 'function') {
                 activeInput.__refPreviewCleanup();
+            }
+        } catch (_) { }
+        try {
+            if (typeof activeInput.__refSelectionDeactivate === 'function') {
+                activeInput.__refSelectionDeactivate();
             }
         } catch (_) { }
         SchemaForm.__activeRefInput = null;
@@ -1487,7 +1493,6 @@ export class SchemaForm {
         try {
             const scene = this._getReferenceSelectionScene();
             if (scene) {
-                SchemaForm.__setGlobalActiveRefInput(null);
                 SelectionFilter.unselectAll(scene);
             }
         } catch (_) { }
@@ -1556,7 +1561,301 @@ export class SchemaForm {
                 inputEl.__captureReferencePreview = (obj) => this._storeReferencePreviewSnapshot(inputEl, def, obj);
             }
         } catch (_) { }
+        try { this._enterReferenceSelectionSceneMode(inputEl, def); } catch (_) { }
         try { this._startReferencePreviewWatcher(inputEl, def); } catch (_) { }
+    }
+
+    _getFeatureIdForReferenceSceneMode() {
+        const raw = this.params?.id ?? this.params?.featureID ?? this.params?.featureId ?? this.options?.featureRef?.id ?? null;
+        if (raw == null || String(raw).trim() === '') return null;
+        return String(raw);
+    }
+
+    _getFeatureEntryForReferenceSceneMode(featureId = null) {
+        const id = featureId != null ? String(featureId) : this._getFeatureIdForReferenceSceneMode();
+        const explicit = this.options?.featureRef || null;
+        const explicitId = explicit?.inputParams?.id ?? explicit?.inputParams?.featureID ?? explicit?.id ?? null;
+        if (explicit && (id == null || explicitId == null || String(explicitId) === id)) return explicit;
+        const features = this.options?.partHistory?.features || this.options?.viewer?.partHistory?.features || null;
+        if (!Array.isArray(features) || id == null) return explicit;
+        return features.find((entry) => {
+            const entryId = entry?.inputParams?.id ?? entry?.inputParams?.featureID ?? entry?.id ?? null;
+            return entryId != null && String(entryId) === id;
+        }) || explicit;
+    }
+
+    _findReferenceSceneObject(scene, source) {
+        if (!scene || !source) return null;
+        try {
+            if (source.uuid && typeof scene.getObjectByProperty === 'function') {
+                const byUuid = scene.getObjectByProperty('uuid', source.uuid);
+                if (byUuid && !byUuid?.userData?.referenceSelectionGhost) return byUuid;
+            }
+        } catch (_) { }
+        try {
+            const name = source.name != null ? String(source.name) : '';
+            if (name) {
+                const byName = scene.getObjectByName(name);
+                if (byName && !byName?.userData?.referenceSelectionGhost) return byName;
+            }
+        } catch (_) { }
+        return null;
+    }
+
+    _makeReferenceSelectionMaterialTransparent(material, opacity = 0.32) {
+        if (!material) return material;
+        if (Array.isArray(material)) {
+            return material.map((m) => this._makeReferenceSelectionMaterialTransparent(m, opacity));
+        }
+        let clone = material;
+        try {
+            if (material && typeof material.clone === 'function') clone = material.clone();
+        } catch (_) {
+            clone = material;
+        }
+        try { clone.transparent = true; } catch (_) { }
+        try { clone.opacity = Math.max(0, Math.min(1, Number(opacity) || 0.32)); } catch (_) { }
+        try { clone.depthWrite = false; } catch (_) { }
+        try { clone.needsUpdate = true; } catch (_) { }
+        return clone;
+    }
+
+    _setReferenceSelectionObjectOpacity(root, opacity = 0.32, records = null) {
+        if (!root || typeof root.traverse !== 'function') return;
+        root.traverse((obj) => {
+            if (!obj || !obj.material) return;
+            try {
+                if (records && !records.has(obj)) records.set(obj, obj.material);
+                obj.material = this._makeReferenceSelectionMaterialTransparent(obj.material, opacity);
+                obj.renderOrder = Math.max(Number(obj.renderOrder) || 0, 20);
+            } catch (_) { }
+        });
+    }
+
+    _disableReferenceSelectionPicking(root) {
+        if (!root || typeof root.traverse !== 'function') return;
+        root.traverse((obj) => {
+            if (!obj) return;
+            try { obj.onClick = undefined; } catch (_) { }
+            try { obj.raycast = () => { }; } catch (_) { }
+            try {
+                obj.userData = obj.userData || {};
+                obj.userData.referenceSelectionGhost = true;
+                obj.userData.excludeFromFit = true;
+            } catch (_) { }
+        });
+    }
+
+    _buildReferenceSelectionAddedGhost(source) {
+        if (!source || !source.isObject3D || typeof source.clone !== 'function') return null;
+        let ghost = null;
+        try { ghost = source.clone(true); } catch (_) { ghost = null; }
+        if (!ghost) return null;
+        try {
+            if ((!Array.isArray(ghost.children) || ghost.children.length === 0) && typeof ghost.visualize === 'function') {
+                ghost.visualize({ forceRebuild: true });
+            }
+        } catch (_) { }
+        try {
+            ghost.traverse?.((obj) => {
+                if (!obj) return;
+                if (obj.geometry && typeof obj.geometry.clone === 'function') {
+                    try { obj.geometry = obj.geometry.clone(); } catch (_) { }
+                }
+                if (obj.material) {
+                    try {
+                        if (Array.isArray(obj.material)) {
+                            obj.material = obj.material.map((mat) => (mat && typeof mat.clone === 'function') ? mat.clone() : mat);
+                        } else if (typeof obj.material.clone === 'function') {
+                            obj.material = obj.material.clone();
+                        }
+                    } catch (_) { }
+                }
+            });
+        } catch (_) { }
+        try {
+            ghost.name = source.name ? `__refSelectionAdded__${source.name}` : '__refSelectionAdded__';
+            ghost.userData = { ...(ghost.userData || {}), preventRemove: true, excludeFromFit: true, referenceSelectionGhost: true };
+            ghost.renderOrder = Math.max(Number(ghost.renderOrder) || 0, 10);
+        } catch (_) { }
+        this._disableReferenceSelectionPicking(ghost);
+        this._setReferenceSelectionObjectOpacity(ghost, 0.34);
+        return ghost;
+    }
+
+    _buildReferenceSelectionAddedGhostGroup(feature, featureId, scene) {
+        const added = Array.isArray(feature?.effects?.added) ? feature.effects.added : [];
+        if (!added.length) return null;
+        const group = new THREE.Group();
+        group.name = `__REF_SELECTION_ADDED_GHOSTS__${featureId}`;
+        group.userData = {
+            preventRemove: true,
+            excludeFromFit: true,
+            referenceSelectionGhost: true,
+        };
+        group.raycast = () => { };
+        for (const source of added) {
+            let addedSource = source;
+            try {
+                if (source?.uuid && scene && typeof scene.getObjectByProperty === 'function') {
+                    addedSource = scene.getObjectByProperty('uuid', source.uuid) || source;
+                }
+            } catch (_) { }
+            const ghost = this._buildReferenceSelectionAddedGhost(addedSource);
+            if (ghost) group.add(ghost);
+        }
+        return group.children.length ? group : null;
+    }
+
+    _disposeReferenceSelectionGhost(root) {
+        if (!root || typeof root.traverse !== 'function') return;
+        try {
+            root.traverse((obj) => {
+                if (!obj) return;
+                try { obj.geometry?.dispose?.(); } catch (_) { }
+                const material = obj.material;
+                try {
+                    if (Array.isArray(material)) {
+                        for (const mat of material) {
+                            try { mat?.dispose?.(); } catch (_) { }
+                        }
+                    } else {
+                        material?.dispose?.();
+                    }
+                } catch (_) { }
+            });
+        } catch (_) { }
+    }
+
+    _removeReferenceSelectionGhosts(scene, keep = null) {
+        if (!scene || typeof scene.traverse !== 'function') return;
+        const keepSet = new Set();
+        if (keep) {
+            keepSet.add(keep);
+            try { keep.traverse?.((obj) => keepSet.add(obj)); } catch (_) { }
+        }
+        const ghosts = [];
+        try {
+            scene.traverse((obj) => {
+                if (!obj || obj === scene || keepSet.has(obj)) return;
+                const isGhost = obj.userData?.referenceSelectionGhost === true
+                    || String(obj.name || '').startsWith('__REF_SELECTION_ADDED_GHOSTS__')
+                    || String(obj.name || '').startsWith('__refSelectionAdded__');
+                if (!isGhost) return;
+                let ancestor = obj.parent || null;
+                while (ancestor && ancestor !== scene) {
+                    if (keepSet.has(ancestor)) return;
+                    if (ancestor.userData?.referenceSelectionGhost === true
+                        || String(ancestor.name || '').startsWith('__REF_SELECTION_ADDED_GHOSTS__')
+                        || String(ancestor.name || '').startsWith('__refSelectionAdded__')) {
+                        return;
+                    }
+                    ancestor = ancestor.parent || null;
+                }
+                ghosts.push(obj);
+            });
+        } catch (_) { }
+        for (const ghost of ghosts) {
+            try { if (ghost.userData) ghost.userData.preventRemove = false; } catch (_) { }
+            try { if (ghost.parent) ghost.parent.remove(ghost); } catch (_) { }
+            try { this._disposeReferenceSelectionGhost(ghost); } catch (_) { }
+        }
+    }
+
+    _removeReferenceSelectionSceneMode(inputEl, { restoreHistory = false } = {}) {
+        const state = inputEl?.__refSelectionSceneMode;
+        if (!state) return Promise.resolve(false);
+        try { inputEl.__refSelectionSceneMode = null; } catch (_) { }
+        try { inputEl.__refSelectionDeactivate = null; } catch (_) { }
+        try {
+            for (const [obj, material] of state.fadedMaterials || []) {
+                try { obj.material = material; } catch (_) { }
+            }
+        } catch (_) { }
+        try {
+            const group = state.ghostGroup;
+            if (group) {
+                try { if (group.userData) group.userData.preventRemove = false; } catch (_) { }
+                try { if (group.parent) group.parent.remove(group); } catch (_) { }
+                try { this._disposeReferenceSelectionGhost(group); } catch (_) { }
+            }
+        } catch (_) { }
+        try { this._removeReferenceSelectionGhosts(state.scene || this._getReferenceSelectionScene()); } catch (_) { }
+        if (!restoreHistory) return Promise.resolve(true);
+        const partHistory = state.partHistory;
+        if (!partHistory || typeof partHistory.runHistory !== 'function') return Promise.resolve(true);
+        try { partHistory.currentHistoryStepId = state.previousStepId ?? null; } catch (_) { }
+        return this._queueReferenceSelectionHistoryRun(partHistory, () => partHistory.runHistory())
+            .catch((error) => {
+                console.warn('[ReferenceSelection] Failed to restore model after reference selection:', error);
+            })
+            .then(() => true);
+    }
+
+    _queueReferenceSelectionHistoryRun(partHistory, runFn) {
+        if (!partHistory || typeof runFn !== 'function') return Promise.resolve(null);
+        const previous = partHistory.__refSelectionHistoryPromise || Promise.resolve();
+        const next = previous.catch(() => { }).then(() => runFn());
+        try {
+            const stored = next.finally(() => {
+                try {
+                    if (partHistory.__refSelectionHistoryPromise === stored) {
+                        partHistory.__refSelectionHistoryPromise = null;
+                    }
+                } catch (_) { }
+            });
+            partHistory.__refSelectionHistoryPromise = stored;
+        } catch (_) { }
+        return next;
+    }
+
+    _enterReferenceSelectionSceneMode(inputEl, def = null) {
+        const partHistory = this.options?.partHistory || this.options?.viewer?.partHistory || null;
+        const scene = this._getReferenceSelectionScene();
+        const featureId = this._getFeatureIdForReferenceSceneMode();
+        if (!inputEl || !partHistory || !scene || !featureId || typeof partHistory.runHistory !== 'function') return;
+        try {
+            if (inputEl.__refSelectionSceneMode) {
+                this._removeReferenceSelectionSceneMode(inputEl, { restoreHistory: false });
+            } else {
+                this._removeReferenceSelectionGhosts(scene);
+            }
+        } catch (_) { }
+        const feature = this._getFeatureEntryForReferenceSceneMode(featureId);
+        const addedGhostGroup = this._buildReferenceSelectionAddedGhostGroup(feature, featureId, scene);
+        const token = {};
+        const previousStepId = partHistory.currentHistoryStepId != null ? String(partHistory.currentHistoryStepId) : null;
+        const state = {
+            token,
+            partHistory,
+            scene,
+            featureId,
+            feature,
+            previousStepId,
+            ghostGroup: addedGhostGroup,
+            fadedMaterials: new Map(),
+        };
+        try { inputEl.__refSelectionSceneMode = state; } catch (_) { }
+        try {
+            inputEl.__refSelectionDeactivate = () => this._removeReferenceSelectionSceneMode(inputEl, { restoreHistory: true });
+        } catch (_) { }
+
+        this._queueReferenceSelectionHistoryRun(partHistory, () => partHistory.runHistory({ stopBeforeFeatureId: featureId }))
+            .then(() => {
+                if (inputEl.__refSelectionSceneMode !== state || state.token !== token) return;
+                const latestScene = this._getReferenceSelectionScene();
+                if (!latestScene) return;
+                try { this._removeReferenceSelectionGhosts(latestScene, state.ghostGroup); } catch (_) { }
+                if (state.ghostGroup && state.ghostGroup.children?.length) {
+                    try { latestScene.add(state.ghostGroup); } catch (_) { }
+                }
+                try { this._syncActiveReferenceSelectionHighlight(inputEl, def); } catch (_) { }
+                try { this._syncActiveReferenceSelectionPreview(inputEl, def); } catch (_) { }
+                try { this.options?.viewer?.render?.(); } catch (_) { }
+            })
+            .catch((error) => {
+                console.warn('[ReferenceSelection] Failed to enter pre-feature selection scene:', error);
+            });
     }
 
     // Activate a TransformControls session for a transform widget
@@ -2087,6 +2386,11 @@ export class SchemaForm {
                 activeInput.__refPreviewCleanup();
             } else if (activeInput) {
                 this._removeReferencePreviewGroup(activeInput);
+            }
+        } catch (_) { }
+        try {
+            if (activeInput && typeof activeInput.__refSelectionDeactivate === 'function') {
+                activeInput.__refSelectionDeactivate();
             }
         } catch (_) { }
         SchemaForm.__activeRefInput = null;
