@@ -1,0 +1,3 @@
+{
+  "ignorePatterns": ["vendor/**", "**/samples/**", "**/docs/**", "**/tests/**", "src/tools/featureDialogCapturePage.js"]
+}
