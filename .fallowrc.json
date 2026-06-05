@@ -1,3 +1,23 @@
 {
-  "ignorePatterns": ["vendor/**", "**/samples/**", "**/docs/**", "**/tests/**", "src/tools/featureDialogCapturePage.js"]
+  "ignorePatterns": [
+    "vendor/**",
+    "**/samples/**",
+    "apiExamples/**",
+    "**/docs/**",
+
+  ],
+  "ignoreExports": [
+    {
+      "file": "src/UI/assembly/constraintSelectionUtils.js",
+      "exports": ["*"]
+    },
+    {
+      "file": "src/features/selectionUtils.js",
+      "exports": ["*"]
+    },
+    {
+      "file": "src/utils/selectionResolver.js",
+      "exports": ["*"]
+    }
+  ]
 }
