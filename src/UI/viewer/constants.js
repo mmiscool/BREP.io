@@ -1,0 +1,3 @@
+export const ASSEMBLY_CONSTRAINTS_TITLE = 'Assembly Constraints';
+export const SIDEBAR_HOME_BANNER_HEIGHT_PX = 41;
+export const CAD_MATERIAL_SETTINGS_KEY = '__CAD_MATERIAL_SETTINGS__';
