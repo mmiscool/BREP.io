@@ -11,6 +11,7 @@ import {
 const FALLBACK_INTERVAL_MS = 200;
 const FEATURE_DRAG_RUN_THROTTLE_MS = 120;
 const HEADER_SYNC_MIN_INTERVAL_MS = 120;
+const HISTORY_RUN_UI_YIELD_MS = 16;
 
 export class HistoryWidget extends HistoryCollectionWidget {
   constructor(viewer) {
@@ -42,6 +43,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
     this._featureDragRunTimer = null;
     this._featureDragRunPending = false;
     this._lastHeaderSyncTs = -Infinity;
+    this._lastHistoryRunUiYieldTs = -Infinity;
     this._featureDimensionOverlay = null;
     this._workbenchHeader = null;
     this._workbenchSelect = null;
@@ -62,7 +64,9 @@ export class HistoryWidget extends HistoryCollectionWidget {
     this.render();
     try { window.addEventListener('brep-active-transform-state', this._onActiveTransformStateChange); } catch { /* ignore */ }
     this.#startAutoSyncLoop();
+    this.#patchFromJSON();
     this.#patchRunHistory();
+    this.#patchRunCallback();
     this.partHistory?.queueHistorySnapshot?.({ debounceMs: 0, reason: 'init' });
   }
 
@@ -317,22 +321,88 @@ export class HistoryWidget extends HistoryCollectionWidget {
     if (!ph || typeof ph.runHistory !== 'function' || ph.__historyWidgetPatched) return;
     const original = ph.runHistory.bind(ph);
     ph.runHistory = async (...args) => {
-      const res = await original(...args);
-      this.#afterPartHistoryMutated();
-      return res;
+      this.#beforePartHistoryRun();
+      await this.#yieldForHistoryRunUi({ force: true });
+      try {
+        return await original(...args);
+      } finally {
+        this.#afterPartHistoryMutated();
+      }
     };
     ph.__historyWidgetPatched = true;
   }
 
-  #afterPartHistoryMutated() {
+  #patchFromJSON() {
+    const ph = this.partHistory;
+    if (!ph || typeof ph.fromJSON !== 'function' || ph.__historyWidgetFromJsonPatched) return;
+    const original = ph.fromJSON.bind(ph);
+    ph.fromJSON = async (...args) => {
+      const res = await original(...args);
+      this.#afterPartHistoryLoaded();
+      return res;
+    };
+    ph.__historyWidgetFromJsonPatched = true;
+  }
+
+  #patchRunCallback() {
+    const ph = this.partHistory;
+    if (!ph || ph.__historyWidgetRunCallbackPatched) return;
+    ph.callbacks = ph.callbacks || {};
+    const originalRunCallback = ph.callbacks.run;
+    ph.callbacks.run = async (...args) => {
+      this.#syncRunningFeatureRow(args[0]);
+      await this.#yieldForHistoryRunUi();
+      if (typeof originalRunCallback === 'function') {
+        return originalRunCallback(...args);
+      }
+      return undefined;
+    };
+    ph.__historyWidgetRunCallbackPatched = true;
+  }
+
+  #beforePartHistoryRun() {
+    this.#afterPartHistoryMutated({ syncOpenForms: false });
+  }
+
+  #afterPartHistoryLoaded() {
+    this.#afterPartHistoryMutated({ forceRender: true, syncOpenForms: false });
+  }
+
+  #afterPartHistoryMutated({ forceRender = false, syncOpenForms = true } = {}) {
     const nextIdsSignature = this.#computeIdsSignature();
     const idsChanged = nextIdsSignature !== this._idsSignature;
     this._idsSignature = nextIdsSignature;
-    if (idsChanged) this.render();
+    if (forceRender || idsChanged) this.render();
     this._syncHeaderState(true);
-    this.#refreshOpenForms();
+    if (syncOpenForms) this.#refreshOpenForms();
     this._syncFeatureDimensionOverlay();
     try { this.viewer?.refreshWorkbenchUi?.(); } catch { /* ignore */ }
+  }
+
+  #syncRunningFeatureRow(featureId = null) {
+    this._syncHeaderState(true);
+    if (featureId == null) return;
+    const item = this._itemEls?.get?.(String(featureId)) || null;
+    try {
+      item?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    } catch { /* ignore */ }
+  }
+
+  async #yieldForHistoryRunUi({ force = false } = {}) {
+    if (typeof window === 'undefined') return;
+    const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+      ? performance.now()
+      : Date.now();
+    if (!force && (now - this._lastHistoryRunUiYieldTs) < HISTORY_RUN_UI_YIELD_MS) return;
+    this._lastHistoryRunUiYieldTs = now;
+    await new Promise((resolve) => {
+      const finish = () => setTimeout(resolve, 0);
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(finish);
+      } else {
+        finish();
+      }
+    });
   }
 
   async #createFeatureEntry(typeStr) {
