@@ -39,6 +39,9 @@ importers:
       '@eslint/js':
         specifier: ^9.39.3
         version: 9.39.3
+      '@fallow-cli/fallow-node':
+        specifier: ^2.88.2
+        version: 2.88.2
       eslint:
         specifier: ^9.39.3
         version: 9.39.3
@@ -260,6 +263,62 @@ packages:
   '@eslint/plugin-kit@0.4.1':
     resolution: {integrity: sha512-43/qtrDUokr7LJqoF2c3+RInu/t4zfrpYdoSDfYyhg52rwLV6TnOvdG4fXm7IkSB3wErkcmJS9iEhjVtOSEjjA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+
+  '@fallow-cli/fallow-node-darwin-arm64@2.88.2':
+    resolution: {integrity: sha512-tA2S/NQoUb3o1ONjR3A/Zjd+ZQfAQSLxHhekCmpg4zszVD9/QlJHBh9AnLeODcY6hUMwtZHeGuR4mxweqGR44w==}
+    engines: {node: '>=18'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@fallow-cli/fallow-node-darwin-x64@2.88.2':
+    resolution: {integrity: sha512-hRbmo7vnhDKKqsxnWjTC5y7JyrJUWgO+X+pgStu3T++wp9MPbNXyTSrcZlCzNH5CA+rN/NExE8y5x8TpS5hthw==}
+    engines: {node: '>=18'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@fallow-cli/fallow-node-linux-arm64-gnu@2.88.2':
+    resolution: {integrity: sha512-AlZNlrOGkWOlq3kU40xKCAABRMcMhiaKyh0MNGeSSPZfGX79LuvMvuI2Hi8q6vAlFyiaY9rcsszNGD0p+g5J1Q==}
+    engines: {node: '>=18'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@fallow-cli/fallow-node-linux-arm64-musl@2.88.2':
+    resolution: {integrity: sha512-NqakTCnQp0mCBtaA3gH9hmrYVaEwhP/AWPglpM4KnSp8HNm9azVNH/vny23jz+WcPLoq51doScBn9veRUbuRxA==}
+    engines: {node: '>=18'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [musl]
+
+  '@fallow-cli/fallow-node-linux-x64-gnu@2.88.2':
+    resolution: {integrity: sha512-rLcX24IA9b3SeCfgmtBMvPuizLSVbusFfGdMxthFfvsIjP/hrt/8Ea9e3ZODRiw8gYu8+sRI1EJSuzffjal18A==}
+    engines: {node: '>=18'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@fallow-cli/fallow-node-linux-x64-musl@2.88.2':
+    resolution: {integrity: sha512-JkOPq0b/LfyXsnDWo0QOcRuOC7SEU/H7NEHvqJmMT3RQTMTMLRpAXrv8twsC9SMQ19pxMtvmyYxha6nfDDNuNw==}
+    engines: {node: '>=18'}
+    cpu: [x64]
+    os: [linux]
+    libc: [musl]
+
+  '@fallow-cli/fallow-node-win32-arm64-msvc@2.88.2':
+    resolution: {integrity: sha512-ZRz2V4e2P+cyhVgKWWl20HuAA8dpJbKlgN4z1tkQDvdEAAtOhAaAdg1WgzmHFEYq2yJ5A6SXWtV2dsDhg94ODQ==}
+    engines: {node: '>=18'}
+    cpu: [arm64]
+    os: [win32]
+
+  '@fallow-cli/fallow-node-win32-x64-msvc@2.88.2':
+    resolution: {integrity: sha512-wmhNPqitW9GaYfY4cSUf9SFl2T/6cUIvJBRn6qESN4fVQ1leRyflobEWDpI92V+Qq0ohQ7o8pYhB1mnjhyomsA==}
+    engines: {node: '>=18'}
+    cpu: [x64]
+    os: [win32]
+
+  '@fallow-cli/fallow-node@2.88.2':
+    resolution: {integrity: sha512-Oo/j4jJp1s++MbHkcc15nXrGYjboeQ7BnqcFo70BlkpFGzebIFcK7aiMHkeLKY4Sxjrd7paqufCNhWixN8QAtw==}
+    engines: {node: '>=18'}
 
   '@humanfs/core@0.19.1':
     resolution: {integrity: sha512-5DyQ4+1JEUzejeK1JGICcideyfUbGixgS9jNgex5nqkW+cY7WZhxBigmieN5Qnw9ZosSNVC9KQKyb+GUaGyKUA==}
@@ -1166,6 +1225,41 @@ snapshots:
     dependencies:
       '@eslint/core': 0.17.0
       levn: 0.4.1
+
+  '@fallow-cli/fallow-node-darwin-arm64@2.88.2':
+    optional: true
+
+  '@fallow-cli/fallow-node-darwin-x64@2.88.2':
+    optional: true
+
+  '@fallow-cli/fallow-node-linux-arm64-gnu@2.88.2':
+    optional: true
+
+  '@fallow-cli/fallow-node-linux-arm64-musl@2.88.2':
+    optional: true
+
+  '@fallow-cli/fallow-node-linux-x64-gnu@2.88.2':
+    optional: true
+
+  '@fallow-cli/fallow-node-linux-x64-musl@2.88.2':
+    optional: true
+
+  '@fallow-cli/fallow-node-win32-arm64-msvc@2.88.2':
+    optional: true
+
+  '@fallow-cli/fallow-node-win32-x64-msvc@2.88.2':
+    optional: true
+
+  '@fallow-cli/fallow-node@2.88.2':
+    optionalDependencies:
+      '@fallow-cli/fallow-node-darwin-arm64': 2.88.2
+      '@fallow-cli/fallow-node-darwin-x64': 2.88.2
+      '@fallow-cli/fallow-node-linux-arm64-gnu': 2.88.2
+      '@fallow-cli/fallow-node-linux-arm64-musl': 2.88.2
+      '@fallow-cli/fallow-node-linux-x64-gnu': 2.88.2
+      '@fallow-cli/fallow-node-linux-x64-musl': 2.88.2
+      '@fallow-cli/fallow-node-win32-arm64-msvc': 2.88.2
+      '@fallow-cli/fallow-node-win32-x64-msvc': 2.88.2
 
   '@humanfs/core@0.19.1': {}
 
