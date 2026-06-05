@@ -134,9 +134,15 @@ export class Sheet2DManager {
 
   createSheet(options = {}) {
     const list = this.getSheets();
+    const now = Date.now();
     const normalized = this._normalizeSheet({
       ...options,
       id: options?.id || this._generateSheetId(),
+      metadata: {
+        ...(options?.metadata && typeof options.metadata === "object" ? options.metadata : {}),
+        createdAt: Number.isFinite(Number(options?.metadata?.createdAt)) ? Number(options.metadata.createdAt) : now,
+        updatedAt: Number.isFinite(Number(options?.metadata?.updatedAt)) ? Number(options.metadata.updatedAt) : now,
+      },
     }, list.length);
     list.push(normalized);
     this._emit();
@@ -179,7 +185,15 @@ export class Sheet2DManager {
       next = { ...current, ...updater };
     }
 
-    this.sheets[index] = this._normalizeSheet(next, index, current?.id);
+    const normalized = this._normalizeSheet(next, index, current?.id);
+    normalized.metadata = {
+      ...(normalized.metadata || {}),
+      createdAt: Number.isFinite(Number(current?.metadata?.createdAt))
+        ? Number(current.metadata.createdAt)
+        : normalized.metadata?.createdAt,
+      updatedAt: Date.now(),
+    };
+    this.sheets[index] = normalized;
     this._emit();
     return this.sheets[index];
   }
@@ -314,7 +328,9 @@ export class Sheet2DManager {
         createdAt: Number.isFinite(Number(source?.metadata?.createdAt))
           ? Number(source.metadata.createdAt)
           : Date.now(),
-        updatedAt: Date.now(),
+        updatedAt: Number.isFinite(Number(source?.metadata?.updatedAt))
+          ? Number(source.metadata.updatedAt)
+          : (Number.isFinite(Number(source?.metadata?.createdAt)) ? Number(source.metadata.createdAt) : Date.now()),
       },
     };
   }

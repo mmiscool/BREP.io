@@ -1069,7 +1069,9 @@ export class PMIViewsWidget {
           if (camera.parent === scene) scene.remove(camera);
         } catch { /* ignore */ }
         try { this._disposeExportScene(scene); } catch { /* ignore */ }
+        try { renderer.renderLists?.dispose?.(); } catch { /* ignore */ }
         try { renderer.dispose(); } catch { /* ignore */ }
+        try { renderer.forceContextLoss?.(); } catch { /* ignore */ }
       },
     };
   }

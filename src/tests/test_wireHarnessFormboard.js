@@ -119,6 +119,40 @@ export function test_sheet_custom_size_persists() {
   assert(updated.heightIn === 72, 'Expected portrait custom sheet height to persist.');
 }
 
+export function test_sheet_metadata_updated_at_is_stable_on_read() {
+  const originalNow = Date.now;
+  let now = 1000;
+  Date.now = () => now;
+  try {
+    const manager = new Sheet2DManager(null);
+    const sheet = manager.createSheet({
+      name: 'Timestamp Sheet',
+      sizeKey: 'A',
+      orientation: 'landscape',
+      elements: [],
+    });
+
+    const createdAt = sheet.metadata?.createdAt;
+    const firstUpdatedAt = sheet.metadata?.updatedAt;
+    assert(createdAt === 1000, 'Expected sheet createdAt to use creation time.');
+    assert(firstUpdatedAt === 1000, 'Expected sheet updatedAt to use creation time.');
+
+    now = 2000;
+    manager.getSheets();
+    manager.toSerializable();
+    const afterRead = manager.getSheetById(sheet.id);
+    assert(afterRead.metadata?.updatedAt === firstUpdatedAt, 'Expected reading sheets not to update metadata.updatedAt.');
+
+    now = 3000;
+    manager.updateSheet(sheet.id, { name: 'Timestamp Sheet Updated' });
+    const afterUpdate = manager.getSheetById(sheet.id);
+    assert(afterUpdate.metadata?.createdAt === createdAt, 'Expected sheet updates to preserve createdAt.');
+    assert(afterUpdate.metadata?.updatedAt === 3000, 'Expected sheet updates to advance updatedAt.');
+  } finally {
+    Date.now = originalNow;
+  }
+}
+
 export function test_wire_harness_formboard_insert() {
   const partHistory = createSimpleHarnessPartHistory();
   const definition = buildWireHarnessFormboardDefinition(partHistory, {

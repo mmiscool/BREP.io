@@ -312,6 +312,7 @@ import { test_wire_harness_formboard_reuses_only_formboard_sheet } from './test_
 import { test_wire_harness_connection_endpoint_resolution } from './test_wireHarnessConnectionEndpoints.js';
 import {
     test_sheet_custom_size_persists,
+    test_sheet_metadata_updated_at_is_stable_on_read,
     test_wire_harness_formboard_insert,
 } from './test_wireHarnessFormboard.js';
 import {
@@ -669,6 +670,7 @@ export const testFunctions = [
     { test: test_wire_harness_formboard_reuses_only_formboard_sheet, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_wire_harness_connection_endpoint_resolution, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheet_custom_size_persists, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sheet_metadata_updated_at_is_stable_on_read, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_pmi_view_text_size_setting_normalizes, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_pmi_view_visibility_state_normalizes, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_pmi_view_visibility_state_round_trip, afterRun: afterRun_pmi_view_visibility_state_round_trip, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

@@ -367,19 +367,43 @@ export class FileManagerWidget {
     return snapshot;
   }
 
-  async hasUnsavedChanges() {
+  async _captureUnsavedChangeDetails() {
     const currentSnapshot = await this._captureCurrentHistorySnapshot();
-    if (currentSnapshot === null) return false;
+    if (currentSnapshot === null) {
+      return {
+        hasChanges: false,
+        currentSnapshot: null,
+        savedSnapshot: this._savedHistorySnapshot,
+        reason: 'snapshot_unavailable',
+      };
+    }
     if (typeof this._savedHistorySnapshot !== 'string') {
       this._markSavedHistorySnapshot(currentSnapshot);
-      return false;
+      return {
+        hasChanges: false,
+        currentSnapshot,
+        savedSnapshot: currentSnapshot,
+        reason: 'initialized_saved_snapshot',
+      };
     }
-    return currentSnapshot !== this._savedHistorySnapshot;
+    return {
+      hasChanges: currentSnapshot !== this._savedHistorySnapshot,
+      currentSnapshot,
+      savedSnapshot: this._savedHistorySnapshot,
+      reason: currentSnapshot !== this._savedHistorySnapshot ? 'snapshot_diff' : 'clean',
+    };
+  }
+
+  async hasUnsavedChanges() {
+    const details = await this._captureUnsavedChangeDetails();
+    return !!details?.hasChanges;
   }
 
   async confirmNavigateHome() {
-    const hasChanges = await this.hasUnsavedChanges();
-    if (!hasChanges) return true;
+    const changeDetails = await this._captureUnsavedChangeDetails();
+    if (!changeDetails?.hasChanges) return true;
+
+    this._logUnsavedHistoryDiff(changeDetails);
 
     const action = await this._openNavigateHomeDialog();
     if (action === 'save') {
@@ -398,6 +422,117 @@ export class FileManagerWidget {
 
     if (action === 'discard') return true;
     return false;
+  }
+
+  _logUnsavedHistoryDiff({ savedSnapshot, currentSnapshot, reason } = {}) {
+    try {
+      const savedText = typeof savedSnapshot === 'string' ? savedSnapshot : '';
+      const currentText = typeof currentSnapshot === 'string' ? currentSnapshot : '';
+      const savedParsed = savedText ? JSON.parse(savedText) : null;
+      const currentParsed = currentText ? JSON.parse(currentText) : null;
+      const limit = 200;
+      const diffs = this._collectHistorySnapshotDiffs(savedParsed, currentParsed, { limit });
+      const payload = {
+        reason: reason || 'snapshot_diff',
+        savedBytes: savedText.length,
+        currentBytes: currentText.length,
+        diffCountShown: diffs.length,
+        truncated: diffs.length >= limit,
+        diffs,
+      };
+      if (typeof console.groupCollapsed === 'function') {
+        console.groupCollapsed('[FileManagerWidget] Unsaved changes detected before Home navigation');
+        console.log(payload);
+        console.groupEnd();
+      } else {
+        console.log('[FileManagerWidget] Unsaved changes detected before Home navigation', payload);
+      }
+    } catch (error) {
+      console.log('[FileManagerWidget] Unsaved changes detected before Home navigation; failed to parse diff', {
+        reason: reason || 'snapshot_diff',
+        savedBytes: typeof savedSnapshot === 'string' ? savedSnapshot.length : 0,
+        currentBytes: typeof currentSnapshot === 'string' ? currentSnapshot.length : 0,
+        error: error?.message || String(error || ''),
+      });
+    }
+  }
+
+  _collectHistorySnapshotDiffs(savedValue, currentValue, { limit = 200 } = {}) {
+    const diffs = [];
+    const addDiff = (path, type, saved, current) => {
+      if (diffs.length >= limit) return;
+      diffs.push({
+        path,
+        type,
+        saved: this._summarizeHistoryDiffValue(saved),
+        current: this._summarizeHistoryDiffValue(current),
+      });
+    };
+    const formatPathPart = (key) => {
+      if (typeof key === 'number') return `[${key}]`;
+      const text = String(key);
+      return /^[A-Za-z_$][\w$]*$/.test(text) ? `.${text}` : `[${JSON.stringify(text)}]`;
+    };
+    const walk = (saved, current, path) => {
+      if (diffs.length >= limit) return;
+      if (Object.is(saved, current)) return;
+      if (saved === undefined) {
+        addDiff(path, 'added', saved, current);
+        return;
+      }
+      if (current === undefined) {
+        addDiff(path, 'removed', saved, current);
+        return;
+      }
+      const savedIsArray = Array.isArray(saved);
+      const currentIsArray = Array.isArray(current);
+      if (savedIsArray || currentIsArray) {
+        if (!savedIsArray || !currentIsArray) {
+          addDiff(path, 'type_changed', saved, current);
+          return;
+        }
+        if (saved.length !== current.length) {
+          addDiff(`${path}.length`, 'changed', saved.length, current.length);
+        }
+        const max = Math.max(saved.length, current.length);
+        for (let i = 0; i < max && diffs.length < limit; i += 1) {
+          walk(saved[i], current[i], `${path}${formatPathPart(i)}`);
+        }
+        return;
+      }
+      const savedIsObject = saved && typeof saved === 'object';
+      const currentIsObject = current && typeof current === 'object';
+      if (savedIsObject || currentIsObject) {
+        if (!savedIsObject || !currentIsObject) {
+          addDiff(path, 'type_changed', saved, current);
+          return;
+        }
+        const keys = new Set([...Object.keys(saved), ...Object.keys(current)]);
+        for (const key of Array.from(keys).sort()) {
+          if (diffs.length >= limit) break;
+          walk(saved[key], current[key], `${path}${formatPathPart(key)}`);
+        }
+        return;
+      }
+      addDiff(path, 'changed', saved, current);
+    };
+    walk(savedValue, currentValue, '$');
+    return diffs;
+  }
+
+  _summarizeHistoryDiffValue(value) {
+    if (value === undefined) return '[undefined]';
+    if (value === null) return null;
+    if (typeof value === 'string') {
+      return value.length > 500 ? `${value.slice(0, 500)}... [${value.length} chars]` : value;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') return value;
+    if (Array.isArray(value)) return `[Array(${value.length})]`;
+    if (value && typeof value === 'object') {
+      const keys = Object.keys(value);
+      return `{Object keys: ${keys.slice(0, 12).join(', ')}${keys.length > 12 ? ', ...' : ''}}`;
+    }
+    return String(value);
   }
 
 
@@ -1070,7 +1205,7 @@ export class FileManagerWidget {
     try {
       this._logSaveProgress('Preparing feature history...');
       // Get feature history JSON (now includes PMI views) and embed into a 3MF archive as Metadata/featureHistory.json
-      const jsonString = await this.viewer.partHistory.toJSON();
+      let jsonString = await this.viewer.partHistory.toJSON();
       try { console.log('[FileManagerWidget] saveCurrent: feature history', { bytes: jsonString ? jsonString.length : 0 }); } catch { }
       let additionalFiles = {};
       let modelMetadata = undefined;
@@ -1118,6 +1253,14 @@ export class FileManagerWidget {
       } catch (err) {
         console.warn('[FileManagerWidget] Failed to embed sheet metal flat patterns:', err);
       }
+      try {
+        const finalJsonString = await this.viewer.partHistory.toJSON();
+        if (finalJsonString) {
+          jsonString = finalJsonString;
+          additionalFiles['Metadata/featureHistory.json'] = finalJsonString;
+          modelMetadata = { ...(modelMetadata || {}), featureHistoryPath: '/Metadata/featureHistory.json' };
+        }
+      } catch { /* keep the initial history snapshot */ }
       // Capture a higher-resolution thumbnail of the current view
       let thumbnail = null;
       try {
@@ -1853,6 +1996,7 @@ export class FileManagerWidget {
   }
 
   async _captureThumbnail(size = THUMBNAIL_CAPTURE_SIZE) {
+    const restoreState = this._captureViewerCameraState();
     try {
       const renderer = this.viewer?.renderer;
       const canvas = renderer?.domElement;
@@ -1910,6 +2054,67 @@ export class FileManagerWidget {
       return dataUrl;
     } catch {
       return null;
+    } finally {
+      this._restoreViewerCameraState(restoreState);
     }
+  }
+
+  _captureViewerCameraState() {
+    const camera = this.viewer?.camera || null;
+    if (!camera) return null;
+    const controls = this.viewer?.controls || null;
+    const state = {
+      position: camera.position?.clone?.() || null,
+      quaternion: camera.quaternion?.clone?.() || null,
+      up: camera.up?.clone?.() || null,
+      zoom: camera.zoom,
+      near: camera.near,
+      far: camera.far,
+      left: camera.left,
+      right: camera.right,
+      top: camera.top,
+      bottom: camera.bottom,
+      aspect: camera.aspect,
+      fov: camera.fov,
+      controlsTarget: controls?.target?.clone?.() || null,
+      controlsEnabled: typeof controls?.enabled === 'boolean' ? controls.enabled : null,
+    };
+    return state;
+  }
+
+  _restoreViewerCameraState(state) {
+    const camera = this.viewer?.camera || null;
+    if (!camera || !state) return;
+    try {
+      if (state.position) camera.position.copy(state.position);
+      if (state.quaternion) camera.quaternion.copy(state.quaternion);
+      if (state.up) camera.up.copy(state.up);
+      if (Number.isFinite(state.zoom)) camera.zoom = state.zoom;
+      if (Number.isFinite(state.near)) camera.near = state.near;
+      if (Number.isFinite(state.far)) camera.far = state.far;
+      if (camera.isOrthographicCamera) {
+        if (Number.isFinite(state.left)) camera.left = state.left;
+        if (Number.isFinite(state.right)) camera.right = state.right;
+        if (Number.isFinite(state.top)) camera.top = state.top;
+        if (Number.isFinite(state.bottom)) camera.bottom = state.bottom;
+      } else if (camera.isPerspectiveCamera) {
+        if (Number.isFinite(state.aspect)) camera.aspect = state.aspect;
+        if (Number.isFinite(state.fov)) camera.fov = state.fov;
+      }
+      camera.updateProjectionMatrix?.();
+      camera.updateMatrixWorld?.(true);
+
+      const controls = this.viewer?.controls || null;
+      if (state.controlsTarget && controls?.target) {
+        controls.target.copy(state.controlsTarget);
+      }
+      if (typeof state.controlsEnabled === 'boolean' && controls) {
+        controls.enabled = state.controlsEnabled;
+      }
+      try { controls?.update?.(); } catch { }
+      try { controls?.updateMatrixState?.(); } catch { }
+      try { this.viewer?.viewCube?.render?.(); } catch { }
+      try { this.viewer?.render?.(); } catch { }
+    } catch { /* ignore restore failures */ }
   }
 }

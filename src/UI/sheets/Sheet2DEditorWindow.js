@@ -758,6 +758,7 @@ export class Sheet2DEditorWindow {
     try {
       document.body.style.overflow = this._previousBodyOverflow || "";
     } catch { }
+    this._restoreViewerSurface();
   }
 
   dispose() {
@@ -783,6 +784,24 @@ export class Sheet2DEditorWindow {
     try {
       document.body.style.overflow = this._previousBodyOverflow || "";
     } catch { }
+    this._restoreViewerSurface();
+  }
+
+  _restoreViewerSurface() {
+    const viewer = this.viewer || null;
+    if (!viewer || viewer._disposed) return;
+
+    const renderViewer = () => {
+      if (viewer._disposed) return;
+      try { viewer._resizeRendererToDisplaySize?.(); } catch { }
+      try { viewer.controls?.update?.(); } catch { }
+      try { viewer.render?.(); } catch { }
+    };
+
+    renderViewer();
+    if (typeof requestAnimationFrame === "function") {
+      try { requestAnimationFrame(renderViewer); } catch { }
+    }
   }
 
   refreshFromHistory() {
