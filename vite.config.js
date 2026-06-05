@@ -63,6 +63,7 @@ export default defineConfig(() => {
       rollupOptions: {
         input,
       },
+      chunkSizeWarningLimit: 20000, // increase chunk size warning limit to 2MB
     },
   };
 });
