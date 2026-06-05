@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 import { generate3MF } from '../../exporters/threeMF.js';
+import {
+  buildSheetMetalFlatPatternPackageFiles,
+  collectSheetMetalSolidsFromViewer,
+  resolveViewerFlatPatternBaseName,
+} from '../../features/sheetMetal/flatPatternFiles.js';
 import { localStorage as LS } from '../../idbStorage.js';
 import { generateSheetsPdfBytes } from '../sheets/Sheet2DEditorWindow.js';
 
@@ -87,6 +92,24 @@ export function createSaveButton(viewer) {
       if (sheetsPdf instanceof Uint8Array && sheetsPdf.length) {
         additionalFiles = { ...(additionalFiles || {}), 'sheets.pdf': sheetsPdf };
         modelMetadata = { ...(modelMetadata || {}), sheetsPdfPath: '/sheets.pdf' };
+      }
+      try {
+        const flatPatterns = buildSheetMetalFlatPatternPackageFiles(
+          collectSheetMetalSolidsFromViewer(viewer),
+          { baseName: resolveViewerFlatPatternBaseName(viewer, 'autosave') },
+        );
+        if (flatPatterns.files.length) {
+          additionalFiles = { ...(additionalFiles || {}), ...flatPatterns.additionalFiles };
+          modelMetadata = {
+            ...(modelMetadata || {}),
+            sheetMetalFlatPatternPaths: flatPatterns.paths.map((p) => `/${p}`).join(';'),
+          };
+        }
+        if (flatPatterns.skipped.length) {
+          console.warn('[SaveButton] Skipped sheet metal flat pattern(s):', flatPatterns.skipped);
+        }
+      } catch (err) {
+        console.warn('[SaveButton] Failed to embed sheet metal flat patterns:', err);
       }
 
       const thumbnail = await _captureThumbnail(THUMBNAIL_CAPTURE_SIZE);

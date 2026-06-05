@@ -21,6 +21,10 @@ import {
 import { readDroppedWorkspaceFileRecord } from '../services/droppedWorkspaceFiles.js';
 import { listMountedDirectories } from '../services/mountedStorage.js';
 import {
+  buildSheetMetalFlatPatternPackageFiles,
+  collectSheetMetalSolidsFromViewer,
+} from '../features/sheetMetal/flatPatternFiles.js';
+import {
   readBrowserStorageValue,
   writeBrowserStorageValue,
 } from '../utils/browserStorage.js';
@@ -1094,6 +1098,25 @@ export class FileManagerWidget {
       } catch (err) {
         console.error('Failed to embed 2D sheets PDF:', err);
         throw err;
+      }
+      try {
+        this._logSaveProgress('Generating sheet metal flat patterns...');
+        const sheetMetalSolids = collectSheetMetalSolidsFromViewer(this.viewer);
+        const flatPatterns = buildSheetMetalFlatPatternPackageFiles(sheetMetalSolids, {
+          baseName: modelPath,
+        });
+        if (flatPatterns.files.length) {
+          additionalFiles = { ...(additionalFiles || {}), ...flatPatterns.additionalFiles };
+          modelMetadata = {
+            ...(modelMetadata || {}),
+            sheetMetalFlatPatternPaths: flatPatterns.paths.map((p) => `/${p}`).join(';'),
+          };
+        }
+        if (flatPatterns.skipped.length) {
+          console.warn('[FileManagerWidget] Skipped sheet metal flat pattern(s):', flatPatterns.skipped);
+        }
+      } catch (err) {
+        console.warn('[FileManagerWidget] Failed to embed sheet metal flat patterns:', err);
       }
       // Capture a higher-resolution thumbnail of the current view
       let thumbnail = null;

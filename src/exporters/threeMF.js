@@ -640,6 +640,7 @@ function contentTypesXML() {
     '  <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>',
     '  <Default Extension="xml" ContentType="application/xml"/>',
     '  <Default Extension="pdf" ContentType="application/pdf"/>',
+    '  <Default Extension="dxf" ContentType="application/dxf"/>',
     '  <Default Extension="png" ContentType="image/png"/>',
     '  <Default Extension="jpg" ContentType="image/jpeg"/>',
     '  <Default Extension="jpeg" ContentType="image/jpeg"/>',
@@ -720,7 +721,7 @@ export async function generate3MF(solids, opts = {}) {
         const clean = path.startsWith('/') ? path : `/${path}`;
         viewRelPaths.push(clean);
       }
-      if (lower.endsWith('.pdf')) {
+      if (lower.endsWith('.pdf') || lower.endsWith('.dxf')) {
         const clean = path.startsWith('/') ? path : `/${path}`;
         attachmentRelPaths.push(clean);
       }

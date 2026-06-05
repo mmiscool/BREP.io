@@ -1,6 +1,11 @@
 import JSZip from 'jszip';
 import { generateSTEP } from '../../exporters/step.js';
 import { generate3MF } from '../../exporters/threeMF.js';
+import {
+  buildSheetMetalFlatPatternPackageFiles,
+  collectSheetMetalSolidsFromViewer,
+  resolveViewerFlatPatternBaseName,
+} from '../../features/sheetMetal/flatPatternFiles.js';
 import { generateSheetsPdfBytes } from '../sheets/Sheet2DEditorWindow.js';
 
 async function _captureThumbnail(viewer, size = 256) {
@@ -605,6 +610,24 @@ function _openExportDialog(viewer) {
             additionalFiles = { ...(additionalFiles || {}), 'sheets.pdf': sheetsPdf };
             modelMetadata = { ...(modelMetadata || {}), sheetsPdfPath: '/sheets.pdf' };
           }
+        }
+        try {
+          const sheetMetalSolids = collectSheetMetalSolidsFromViewer(viewer);
+          const flatPatterns = buildSheetMetalFlatPatternPackageFiles(sheetMetalSolids, {
+            baseName: base || resolveViewerFlatPatternBaseName(viewer, 'part'),
+          });
+          if (flatPatterns.files.length) {
+            additionalFiles = { ...(additionalFiles || {}), ...flatPatterns.additionalFiles };
+            modelMetadata = {
+              ...(modelMetadata || {}),
+              sheetMetalFlatPatternPaths: flatPatterns.paths.map((p) => `/${p}`).join(';'),
+            };
+          }
+          if (flatPatterns.skipped.length) {
+            console.warn('[Export] Skipped sheet metal flat pattern(s):', flatPatterns.skipped);
+          }
+        } catch (err) {
+          console.warn('[Export] Failed to embed sheet metal flat patterns:', err);
         }
 
         // Gracefully handle non-manifold solids by skipping them

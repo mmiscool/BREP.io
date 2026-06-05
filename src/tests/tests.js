@@ -1,4 +1,5 @@
 import { generate3MF } from '../exporters/threeMF.js';
+import { buildSheetMetalFlatPatternPackageFiles } from '../features/sheetMetal/flatPatternFiles.js';
 import { fs } from '../fs.proxy.js';
 import { PartHistory } from "../PartHistory.js";
 import { posix as path } from '../path.proxy.js';
@@ -267,6 +268,7 @@ import {
 } from './test_sheetMetal_contour_flange_sketch_selection.js';
 import { test_sheetMetal_nonManifold_sm_f18 } from './test_sheetMetal_nonManifold_sm_f18.js';
 import { test_sheetMetal_tab_circular_hole_wall } from './test_sheetMetal_tab_circular_hole_wall.js';
+import { test_sheetMetal_flat_pattern_files_use_model_and_feature_names } from './test_sheetMetal_flatPatternFiles.js';
 import { afterRun_sketch_openLoop, test_sketch_openLoop } from './test_sketch_openLoop.js';
 import {
     afterRun_sketch_face_attachment_alignment,
@@ -903,6 +905,7 @@ export const testFunctions = [
     { test: test_textToFace, afterRun: afterRun_textToFace, printArtifacts: false, exportFaces: true, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_nonManifold_sm_f18, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_tab_circular_hole_wall, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sheetMetal_flat_pattern_files_use_model_and_feature_names, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_bend_face_cylindrical_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_cutout_context_button, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_contour_flange_context_button_prefers_sketch, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -1384,9 +1387,26 @@ async function export3mfArtifact({ partHistory, exportName, exportPath, solids }
         console.warn(`[runTests] Failed to serialize feature history for ${exportName}:`, e?.message || e);
     }
 
-    const additionalFiles = historyJson ? { 'Metadata/featureHistory.json': historyJson } : undefined;
-    const modelMetadata = historyJson ? { featureHistoryPath: '/Metadata/featureHistory.json' } : undefined;
+    let additionalFiles = historyJson ? { 'Metadata/featureHistory.json': historyJson } : undefined;
+    let modelMetadata = historyJson ? { featureHistoryPath: '/Metadata/featureHistory.json' } : undefined;
     const metadataManager = partHistory?.metadataManager || null;
+    try {
+        const flatPatterns = buildSheetMetalFlatPatternPackageFiles(solids || [], {
+            baseName: exportName || 'partHistory',
+        });
+        if (flatPatterns.files.length) {
+            additionalFiles = { ...(additionalFiles || {}), ...flatPatterns.additionalFiles };
+            modelMetadata = {
+                ...(modelMetadata || {}),
+                sheetMetalFlatPatternPaths: flatPatterns.paths.map((p) => `/${p}`).join(';'),
+            };
+        }
+        if (flatPatterns.skipped.length) {
+            console.warn(`[runTests] Skipped ${flatPatterns.skipped.length} sheet metal flat pattern(s) for ${exportName}`);
+        }
+    } catch (e) {
+        console.warn(`[runTests] Failed to package sheet metal flat patterns for ${exportName}:`, e?.message || e);
+    }
 
     const solidsForExport = [];
     (solids || []).forEach((s, idx) => {

@@ -1,14 +1,8 @@
 import {
-  buildFlatPatternExportData,
-  buildFlatPatternDxf,
-  buildFlatPatternSvg,
-} from "../../features/sheetMetal/flatPatternExport.js";
-
-function safeName(raw, fallback = "flat_pattern") {
-  const text = String(raw || "").trim();
-  const base = text.length ? text : fallback;
-  return base.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120);
-}
+  buildSheetMetalFlatPatternFiles,
+  collectSheetMetalSolidsFromViewer,
+  resolveViewerFlatPatternBaseName,
+} from "../../features/sheetMetal/flatPatternFiles.js";
 
 function downloadFile(filename, content, mime = "application/octet-stream") {
   const blob = new Blob([content], { type: mime });
@@ -22,48 +16,6 @@ function downloadFile(filename, content, mime = "application/octet-stream") {
     try { document.body.removeChild(anchor); } catch {}
     URL.revokeObjectURL(url);
   }, 0);
-}
-
-function ascendSheetMetalSolid(object) {
-  let current = object || null;
-  while (current) {
-    if (current.type === "SOLID" && current.userData?.sheetMetalModel?.tree) return current;
-    if (current.parentSolid && current.parentSolid !== current) current = current.parentSolid;
-    else current = current.parent || null;
-  }
-  return null;
-}
-
-function collectSheetMetalSolids(viewer) {
-  const scene = viewer?.partHistory?.scene || viewer?.scene;
-  if (!scene) return [];
-  const solids = [];
-  scene.traverse((object) => {
-    if (!object || object.type !== "SOLID") return;
-    if (!object.visible) return;
-    if (!object.userData?.sheetMetalModel?.tree) return;
-    solids.push(object);
-  });
-  return solids;
-}
-
-function resolveTargetSheetMetalSolid(viewer) {
-  const scene = viewer?.partHistory?.scene || viewer?.scene;
-  if (!scene) return { solid: null, reason: "no_scene" };
-  const all = collectSheetMetalSolids(viewer);
-  if (!all.length) return { solid: null, reason: "no_sheet_metal" };
-
-  const selectedSolids = new Set();
-  scene.traverse((object) => {
-    if (!object?.selected) return;
-    const carrier = ascendSheetMetalSolid(object);
-    if (carrier) selectedSolids.add(carrier);
-  });
-
-  if (selectedSolids.size === 1) return { solid: Array.from(selectedSolids)[0], reason: "selected" };
-  if (selectedSolids.size > 1) return { solid: Array.from(selectedSolids)[0], reason: "selected_multiple" };
-  if (all.length === 1) return { solid: all[0], reason: "single" };
-  return { solid: null, reason: "ambiguous" };
 }
 
 function ensureFlatExportDialogStyles() {
@@ -87,16 +39,11 @@ function ensureFlatExportDialogStyles() {
 }
 
 function openFlatExportDialog(viewer) {
-  const resolved = resolveTargetSheetMetalSolid(viewer);
-  if (!resolved.solid) {
-    if (resolved.reason === "ambiguous") {
-      alert("Select a sheet metal model first, then run flat pattern export.");
-      return;
-    }
+  const solids = collectSheetMetalSolidsFromViewer(viewer);
+  if (!solids.length) {
     alert("No sheet metal model found to export.");
     return;
   }
-  const solid = resolved.solid;
 
   ensureFlatExportDialogStyles();
 
@@ -116,7 +63,7 @@ function openFlatExportDialog(viewer) {
   labName.textContent = "Filename";
   const inpName = document.createElement("input");
   inpName.className = "flat-exp-input";
-  inpName.value = safeName(`${solid.name || "part"}_flat`);
+  inpName.value = resolveViewerFlatPatternBaseName(viewer, solids[0]?.name || "part");
   rowName.appendChild(labName);
   rowName.appendChild(inpName);
 
@@ -140,7 +87,9 @@ function openFlatExportDialog(viewer) {
 
   const hint = document.createElement("div");
   hint.className = "flat-exp-hint";
-  hint.textContent = "Cut lines export as black solid lines. Bend UP lines export as blue dashed lines, bend DOWN lines as magenta dashed lines, with UP/DOWN angle labels.";
+  hint.textContent = solids.length > 1
+    ? `Exports ${solids.length} visible sheet metal flat patterns. File names use the current model name plus the sheet metal feature name.`
+    : "Cut lines export as black solid lines. Bend UP lines export as blue dashed lines, bend DOWN lines as magenta dashed lines, with UP/DOWN angle labels.";
 
   const buttons = document.createElement("div");
   buttons.className = "flat-exp-buttons";
@@ -156,28 +105,22 @@ function openFlatExportDialog(viewer) {
 
   btnExport.addEventListener("click", () => {
     try {
-      const tree = solid?.userData?.sheetMetalModel?.tree;
-      if (!tree) {
-        alert("Selected object has no sheet metal tree data.");
-        return;
-      }
-
-      const data = buildFlatPatternExportData(tree);
-      if (!Array.isArray(data.cutSegments) || data.cutSegments.length === 0) {
+      const format = selFmt.value;
+      const result = buildSheetMetalFlatPatternFiles(solids, {
+        baseName: inpName.value || resolveViewerFlatPatternBaseName(viewer, solids[0]?.name || "part"),
+        format,
+      });
+      if (!result.files.length) {
         alert("Flat pattern export failed: no cut boundaries were generated.");
         return;
       }
-
-      const base = safeName(inpName.value || `${solid.name || "part"}_flat`);
-      const format = selFmt.value;
-      if (format === "svg") {
-        const svg = buildFlatPatternSvg(data);
-        downloadFile(`${base}.svg`, svg, "image/svg+xml;charset=utf-8");
-      } else {
-        const dxf = buildFlatPatternDxf(data);
-        downloadFile(`${base}.dxf`, dxf, "application/dxf");
+      for (const file of result.files) {
+        downloadFile(file.filename, file.content, file.mime);
       }
       close();
+      if (result.skipped.length) {
+        alert(`Exported ${result.files.length} flat pattern file(s). Skipped ${result.skipped.length}.`);
+      }
     } catch (error) {
       console.error(error);
       alert("Flat pattern export failed. See console for details.");
