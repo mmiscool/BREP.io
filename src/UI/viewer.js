@@ -1861,6 +1861,9 @@ export class Viewer {
             void this._syncWireHarnessRoutesFromHistoryState({ reason: 'after-run-history' });
         };
         this.partHistory.callbacks.afterReset = () => {
+            try {
+                SchemaForm.clearReferenceSelectionGhosts?.(this.partHistory?.scene || this.scene || null);
+            } catch { /* ignore */ }
             this._refreshAssemblyConstraintsPanelVisibility();
             this.refreshWorkbenchUi();
             this.applyMetadataColors();

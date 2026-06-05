@@ -81,19 +81,60 @@ function normalizeFilletDirectionMode(rawDirection) {
   return 'AUTO';
 }
 
-function pushUniquePoint3(list, point, eps2) {
-  if (!Array.isArray(list) || !point) return;
-  const px = Number(point.x);
-  const py = Number(point.y);
-  const pz = Number(point.z);
-  if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) return;
-  for (const q of list) {
-    const dx = px - q.x;
-    const dy = py - q.y;
-    const dz = pz - q.z;
-    if (((dx * dx) + (dy * dy) + (dz * dz)) <= eps2) return;
+function createUniquePoint3Accumulator(list, tolerance = 1e-6) {
+  const out = Array.isArray(list) ? list : [];
+  const tol = Math.max(1e-9, Math.abs(Number(tolerance) || 0));
+  const tol2 = tol * tol;
+  const buckets = new Map();
+  const cellKey = (ix, iy, iz) => `${ix}|${iy}|${iz}`;
+  const cellIndex = (value) => Math.floor(value / tol);
+
+  for (const existing of out) {
+    const p = toPoint3Object(existing);
+    if (!p) continue;
+    const ix = cellIndex(p.x);
+    const iy = cellIndex(p.y);
+    const iz = cellIndex(p.z);
+    const key = cellKey(ix, iy, iz);
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = [];
+      buckets.set(key, bucket);
+    }
+    bucket.push(p);
   }
-  list.push({ x: px, y: py, z: pz });
+
+  return (point) => {
+    const p = toPoint3Object(point);
+    if (!p) return;
+    const ix = cellIndex(p.x);
+    const iy = cellIndex(p.y);
+    const iz = cellIndex(p.z);
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dz = -1; dz <= 1; dz += 1) {
+          const bucket = buckets.get(cellKey(ix + dx, iy + dy, iz + dz));
+          if (!bucket) continue;
+          for (const q of bucket) {
+            const qx = p.x - q.x;
+            const qy = p.y - q.y;
+            const qz = p.z - q.z;
+            if (((qx * qx) + (qy * qy) + (qz * qz)) <= tol2) return;
+          }
+        }
+      }
+    }
+
+    const stored = { x: p.x, y: p.y, z: p.z };
+    out.push(stored);
+    const key = cellKey(ix, iy, iz);
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = [];
+      buckets.set(key, bucket);
+    }
+    bucket.push(stored);
+  };
 }
 
 function getEdgeFaceNames(edgeObj) {
@@ -483,7 +524,8 @@ function analyzePlanarFaceTriangles(triangles, {
   let sz = 0;
   let totalArea = 0;
   const vertices = [];
-  const pointTol2 = Math.max(1e-16, Math.abs(Number(pointTolerance) || 0) ** 2);
+  const pointTol = Math.max(1e-8, Math.abs(Number(pointTolerance) || 0));
+  const addUniqueVertex = createUniquePoint3Accumulator(vertices, pointTol);
 
   for (const tri of tris) {
     const p1 = toPoint3Object(tri?.p1);
@@ -491,9 +533,9 @@ function analyzePlanarFaceTriangles(triangles, {
     const p3 = toPoint3Object(tri?.p3);
     if (!p1 || !p2 || !p3) continue;
 
-    pushUniquePoint3(vertices, p1, pointTol2);
-    pushUniquePoint3(vertices, p2, pointTol2);
-    pushUniquePoint3(vertices, p3, pointTol2);
+    addUniqueVertex(p1);
+    addUniqueVertex(p2);
+    addUniqueVertex(p3);
 
     const ux = p2.x - p1.x;
     const uy = p2.y - p1.y;
@@ -589,13 +631,11 @@ function arePlanarFaceAnalysesCoplanar(faceA, faceB, {
   return true;
 }
 
-function findCoplanarAdjacentFaceForFilletEndCap(solid, endCapFaceName, {
-  featureID = '',
+function createCoplanarEndCapMergeContext(solid, {
   planarityTolerance = 1e-5,
   distanceTolerance = 1e-5,
-  normalTolerance = 2e-4,
 } = {}) {
-  if (!solid || !endCapFaceName) return null;
+  if (!solid) return null;
   const faceEntries = (typeof solid.getFaces === 'function') ? (solid.getFaces(false) || []) : [];
   if (!Array.isArray(faceEntries) || faceEntries.length === 0) return null;
 
@@ -605,6 +645,7 @@ function findCoplanarAdjacentFaceForFilletEndCap(solid, endCapFaceName, {
     if (!name) continue;
     faceTriangles.set(name, Array.isArray(entry?.triangles) ? entry.triangles : []);
   }
+
   const analysisCache = new Map();
   const boundarySegmentsCache = new Map();
   const analysisPointTolerance = Math.max(distanceTolerance * 0.5, 1e-6);
@@ -630,26 +671,67 @@ function findCoplanarAdjacentFaceForFilletEndCap(solid, endCapFaceName, {
     return segments;
   };
 
-  const endCapAnalysis = getFaceAnalysis(endCapFaceName);
-  if (!endCapAnalysis) return null;
-  const endCapBoundarySegments = getBoundarySegments(endCapFaceName);
-
   const boundaries = (typeof solid.getBoundaryEdgePolylines === 'function')
     ? (solid.getBoundaryEdgePolylines() || [])
     : [];
-  const nativeNeighborSharedLengths = new Map();
+  const nativeNeighborSharedLengthsByFace = new Map();
+  const addNativeSharedLength = (faceName, neighborName, sharedLength) => {
+    let byNeighbor = nativeNeighborSharedLengthsByFace.get(faceName);
+    if (!byNeighbor) {
+      byNeighbor = new Map();
+      nativeNeighborSharedLengthsByFace.set(faceName, byNeighbor);
+    }
+    byNeighbor.set(neighborName, (byNeighbor.get(neighborName) || 0) + sharedLength);
+  };
   for (const boundary of boundaries) {
     const faceA = String(boundary?.faceA || '').trim();
     const faceB = String(boundary?.faceB || '').trim();
     if (!faceA || !faceB || faceA === faceB) continue;
     const sharedLength = boundaryPolylineLength(boundary?.positions || boundary?.pts);
     if (!(sharedLength > 0)) continue;
-    if (faceA === endCapFaceName && faceB) {
-      nativeNeighborSharedLengths.set(faceB, (nativeNeighborSharedLengths.get(faceB) || 0) + sharedLength);
-    } else if (faceB === endCapFaceName && faceA) {
-      nativeNeighborSharedLengths.set(faceA, (nativeNeighborSharedLengths.get(faceA) || 0) + sharedLength);
-    }
+    addNativeSharedLength(faceA, faceB, sharedLength);
+    addNativeSharedLength(faceB, faceA, sharedLength);
   }
+
+  return {
+    faceTriangles,
+    getFaceAnalysis,
+    getBoundarySegments,
+    getNativeSharedLength: (faceName, neighborName) => (
+      nativeNeighborSharedLengthsByFace.get(faceName)?.get(neighborName) || 0
+    ),
+    minSharedBoundaryLength,
+    boundaryMatchTolerance,
+    boundaryDirectionTolerance,
+  };
+}
+
+function findCoplanarAdjacentFaceForFilletEndCap(solid, endCapFaceName, {
+  featureID = '',
+  planarityTolerance = 1e-5,
+  distanceTolerance = 1e-5,
+  normalTolerance = 2e-4,
+  context = null,
+} = {}) {
+  if (!solid || !endCapFaceName) return null;
+  const mergeContext = context || createCoplanarEndCapMergeContext(solid, {
+    planarityTolerance,
+    distanceTolerance,
+  });
+  if (!mergeContext) return null;
+  const {
+    faceTriangles,
+    getFaceAnalysis,
+    getBoundarySegments,
+    getNativeSharedLength,
+    minSharedBoundaryLength,
+    boundaryMatchTolerance,
+    boundaryDirectionTolerance,
+  } = mergeContext;
+
+  const endCapAnalysis = getFaceAnalysis(endCapFaceName);
+  if (!endCapAnalysis) return null;
+  const endCapBoundarySegments = getBoundarySegments(endCapFaceName);
 
   const featureToken = String(featureID || '').trim();
   let best = null;
@@ -669,7 +751,7 @@ function findCoplanarAdjacentFaceForFilletEndCap(solid, endCapFaceName, {
       continue;
     }
 
-    const nativeSharedLength = nativeNeighborSharedLengths.get(neighborName) || 0;
+    const nativeSharedLength = getNativeSharedLength(endCapFaceName, neighborName);
     let sharedLength = nativeSharedLength;
     if (endCapBoundarySegments.length > 0) {
       const neighborBoundarySegments = getBoundarySegments(neighborName);
@@ -751,12 +833,17 @@ function mergeCoplanarAdjacentFilletEndCaps(solid, opts = {}) {
     if (endCapFaceNames.length === 0) break;
 
     let mergedThisPass = false;
+    const mergeContext = createCoplanarEndCapMergeContext(solid, {
+      planarityTolerance,
+      distanceTolerance,
+    });
     for (const endCapFaceName of endCapFaceNames) {
       const target = findCoplanarAdjacentFaceForFilletEndCap(solid, endCapFaceName, {
         featureID,
         planarityTolerance,
         distanceTolerance,
         normalTolerance,
+        context: mergeContext,
       });
       if (!target?.faceName) continue;
 

@@ -390,6 +390,14 @@ export async function test_cppSolidNative_buildFilletEdgeAuthoringState_returns_
     if (!Array.isArray(result?.finalSnapshot?.triVerts)) {
         throw new Error("Expected native fillet edge builder to return a final snapshot payload.");
     }
+
+    const finalAuxEdges = Array.isArray(result?.finalSnapshot?.auxEdges)
+        ? result.finalSnapshot.auxEdges
+        : [];
+    const tubePath = finalAuxEdges.find((entry) => entry?.name === "CPP_FILLET_EDGE_TUBE_PATH");
+    if (!tubePath || tubePath.centerline !== true || !Array.isArray(tubePath.points) || tubePath.points.length < 2) {
+        throw new Error("Expected native fillet edge final snapshot to preserve the tube centerline aux edge.");
+    }
 }
 
 export async function test_cppSolidNative_filletEdge_finalSnapshot_preserves_face_names_and_metadata() {
@@ -614,6 +622,71 @@ export async function test_cppSolidNative_postBoolean_fillet_merges_coplanar_cub
 
     if (result.__filletEndCapMergeEnabled !== true) {
         throw new Error("Expected coplanar end-cap merge cleanup to be enabled for a single-edge cube fillet.");
+    }
+}
+
+export async function test_cppSolidNative_solidFillet_preserves_tube_centerline_aux_edge() {
+    if (manifoldBuildSource !== "local" || typeof manifold?.buildFilletAuthoringState !== "function") {
+        return;
+    }
+
+    const cube = new Cube({ x: 2, y: 2, z: 2, name: "CPP_FILLET_CENTERLINE" });
+    const boundary = (cube.getBoundaryEdgePolylines() || []).find((candidate) => {
+        const faceA = String(candidate?.faceA || "");
+        const faceB = String(candidate?.faceB || "");
+        return (faceA === "CPP_FILLET_CENTERLINE_NX" && faceB === "CPP_FILLET_CENTERLINE_NY")
+            || (faceA === "CPP_FILLET_CENTERLINE_NY" && faceB === "CPP_FILLET_CENTERLINE_NX");
+    });
+    if (!boundary || !Array.isArray(boundary.positions) || boundary.positions.length < 2) {
+        throw new Error("Expected cube boundary polyline between CPP_FILLET_CENTERLINE_NX and CPP_FILLET_CENTERLINE_NY.");
+    }
+
+    const edge = {
+        name: String(boundary.name || "CPP_FILLET_CENTERLINE_NX|CPP_FILLET_CENTERLINE_NY[0]"),
+        parentSolid: cube,
+        faces: [{ name: boundary.faceA }, { name: boundary.faceB }],
+        userData: {
+            faceA: boundary.faceA,
+            faceB: boundary.faceB,
+            polylineLocal: boundary.positions.map((point) => Array.from(point || [])),
+            closedLoop: !!boundary.closedLoop,
+        },
+        closedLoop: !!boundary.closedLoop,
+    };
+
+    const result = await cube.fillet({
+        radius: 0.25,
+        edges: [edge],
+        direction: "INSET",
+        resolution: 24,
+        featureID: "CPP_FILLET_CENTERLINE",
+    });
+    if (!result || typeof result.getFaceNames !== "function") {
+        throw new Error("Expected Solid.fillet() to return a result solid.");
+    }
+
+    const roundFaceName = Array.from(result.getFaceNames() || [])
+        .find((faceName) => String(faceName || "").endsWith("_TUBE_Outer"));
+    if (!roundFaceName) {
+        throw new Error("Expected Solid.fillet() result to retain the round tube face.");
+    }
+
+    const expectedAuxName = `${String(roundFaceName).replace(/_Outer$/, "")}_PATH`;
+    const auxEdges = Array.isArray(result._auxEdges) ? result._auxEdges : [];
+    const centerline = auxEdges.find((entry) => entry?.name === expectedAuxName);
+    if (!centerline || centerline.centerline !== true) {
+        throw new Error(`Expected final fillet solid to expose centerline aux edge ${expectedAuxName}.`);
+    }
+    if (!Array.isArray(centerline.points) || centerline.points.length < 2) {
+        throw new Error("Expected final fillet centerline aux edge to contain at least two points.");
+    }
+
+    const snapshot = buildSolidAuthoringStateSnapshot(result);
+    const restored = new Solid();
+    applySolidAuthoringStateSnapshot(restored, snapshot);
+    const restoredAux = Array.isArray(restored._auxEdges) ? restored._auxEdges : [];
+    if (!restoredAux.some((entry) => entry?.name === expectedAuxName && entry?.centerline === true)) {
+        throw new Error("Expected fillet centerline aux edge to survive authoring snapshot round-trip.");
     }
 }
 

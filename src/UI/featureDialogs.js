@@ -159,9 +159,78 @@ export class SchemaForm {
         return SchemaForm.__activeRefInput;
     }
 
+    static isReferenceSelectionGhostObject(obj) {
+        if (!obj) return false;
+        const name = String(obj.name || '');
+        return obj.userData?.referenceSelectionGhost === true
+            || name.startsWith('__REF_SELECTION_ADDED_GHOSTS__')
+            || name.startsWith('__refSelectionAdded__');
+    }
+
+    static disposeReferenceSelectionGhost(root) {
+        if (!root || typeof root.traverse !== 'function') return;
+        try {
+            root.traverse((obj) => {
+                if (!obj) return;
+                try { obj.geometry?.dispose?.(); } catch (_) { }
+                const material = obj.material;
+                try {
+                    if (Array.isArray(material)) {
+                        for (const mat of material) {
+                            try { mat?.dispose?.(); } catch (_) { }
+                        }
+                    } else {
+                        material?.dispose?.();
+                    }
+                } catch (_) { }
+            });
+        } catch (_) { }
+    }
+
+    static clearReferenceSelectionGhosts(scene, { keep = null } = {}) {
+        if (!scene || typeof scene.traverse !== 'function') return 0;
+        const keepSet = new Set();
+        if (keep) {
+            keepSet.add(keep);
+            try { keep.traverse?.((obj) => keepSet.add(obj)); } catch (_) { }
+        }
+        const ghosts = [];
+        try {
+            scene.traverse((obj) => {
+                if (!obj || obj === scene || keepSet.has(obj)) return;
+                if (!SchemaForm.isReferenceSelectionGhostObject(obj)) return;
+                let ancestor = obj.parent || null;
+                while (ancestor && ancestor !== scene) {
+                    if (keepSet.has(ancestor)) return;
+                    if (SchemaForm.isReferenceSelectionGhostObject(ancestor)) return;
+                    ancestor = ancestor.parent || null;
+                }
+                ghosts.push(obj);
+            });
+        } catch (_) { }
+        for (const ghost of ghosts) {
+            try {
+                ghost.traverse?.((obj) => {
+                    try { if (obj.userData) obj.userData.preventRemove = false; } catch (_) { }
+                });
+            } catch (_) { }
+            try { if (ghost.userData) ghost.userData.preventRemove = false; } catch (_) { }
+            try {
+                if (ghost.parent && typeof ghost.parent.remove === 'function') ghost.parent.remove(ghost);
+                else if (typeof scene.remove === 'function') scene.remove(ghost);
+            } catch (_) { }
+            try { SchemaForm.disposeReferenceSelectionGhost(ghost); } catch (_) { }
+        }
+        return ghosts.length;
+    }
+
     static deactivateActiveReferenceSelection(key = null, sceneOverride = null) {
         const activeInput = SchemaForm.__activeRefInput || window.__BREP_activeRefInput || null;
-        if (!activeInput) return false;
+        const scene = sceneOverride || SelectionFilter.viewer?.partHistory?.scene || SelectionFilter.viewer?.scene || null;
+        if (!activeInput) {
+            const removedGhosts = SchemaForm.clearReferenceSelectionGhosts(scene);
+            return removedGhosts > 0;
+        }
         if (key != null) {
             const activeKey = activeInput?.dataset?.key || activeInput?.dataset?.refKey || null;
             if (activeKey != null && String(activeKey) !== String(key)) return false;
@@ -186,7 +255,7 @@ export class SchemaForm {
         try { window.__BREP_activeRefInput = null; } catch (_) { }
         try { SelectionFilter.clearHover(); } catch (_) { }
         try {
-            const scene = sceneOverride || SelectionFilter.viewer?.partHistory?.scene || SelectionFilter.viewer?.scene || null;
+            SchemaForm.clearReferenceSelectionGhosts(scene);
             if (scene) SelectionFilter.unselectAll(scene);
         } catch (_) { }
         try { SelectionFilter.restoreAllowedSelectionTypes(); } catch (_) { }
@@ -324,6 +393,10 @@ export class SchemaForm {
                     || (typeof activeRef.getRootNode === 'function' && activeRef.getRootNode && activeRef.getRootNode() === this._shadow)
                 );
             if (ownsActiveRef) this._stopActiveReferenceSelection();
+            else {
+                const keep = activeRef?.__refSelectionSceneMode?.ghostGroup || null;
+                SchemaForm.clearReferenceSelectionGhosts(this._getReferenceSelectionScene(), { keep });
+            }
         } catch (_) { /* ignore */ }
 
         // Clean up any active transform session owned by this instance
@@ -1708,63 +1781,24 @@ export class SchemaForm {
     }
 
     _disposeReferenceSelectionGhost(root) {
-        if (!root || typeof root.traverse !== 'function') return;
-        try {
-            root.traverse((obj) => {
-                if (!obj) return;
-                try { obj.geometry?.dispose?.(); } catch (_) { }
-                const material = obj.material;
-                try {
-                    if (Array.isArray(material)) {
-                        for (const mat of material) {
-                            try { mat?.dispose?.(); } catch (_) { }
-                        }
-                    } else {
-                        material?.dispose?.();
-                    }
-                } catch (_) { }
-            });
-        } catch (_) { }
+        SchemaForm.disposeReferenceSelectionGhost(root);
     }
 
     _removeReferenceSelectionGhosts(scene, keep = null) {
-        if (!scene || typeof scene.traverse !== 'function') return;
-        const keepSet = new Set();
-        if (keep) {
-            keepSet.add(keep);
-            try { keep.traverse?.((obj) => keepSet.add(obj)); } catch (_) { }
-        }
-        const ghosts = [];
-        try {
-            scene.traverse((obj) => {
-                if (!obj || obj === scene || keepSet.has(obj)) return;
-                const isGhost = obj.userData?.referenceSelectionGhost === true
-                    || String(obj.name || '').startsWith('__REF_SELECTION_ADDED_GHOSTS__')
-                    || String(obj.name || '').startsWith('__refSelectionAdded__');
-                if (!isGhost) return;
-                let ancestor = obj.parent || null;
-                while (ancestor && ancestor !== scene) {
-                    if (keepSet.has(ancestor)) return;
-                    if (ancestor.userData?.referenceSelectionGhost === true
-                        || String(ancestor.name || '').startsWith('__REF_SELECTION_ADDED_GHOSTS__')
-                        || String(ancestor.name || '').startsWith('__refSelectionAdded__')) {
-                        return;
-                    }
-                    ancestor = ancestor.parent || null;
-                }
-                ghosts.push(obj);
-            });
-        } catch (_) { }
-        for (const ghost of ghosts) {
-            try { if (ghost.userData) ghost.userData.preventRemove = false; } catch (_) { }
-            try { if (ghost.parent) ghost.parent.remove(ghost); } catch (_) { }
-            try { this._disposeReferenceSelectionGhost(ghost); } catch (_) { }
-        }
+        return SchemaForm.clearReferenceSelectionGhosts(scene, { keep });
     }
 
     _removeReferenceSelectionSceneMode(inputEl, { restoreHistory = false } = {}) {
         const state = inputEl?.__refSelectionSceneMode;
-        if (!state) return Promise.resolve(false);
+        if (!state) {
+            try {
+                const scene = this._getReferenceSelectionScene();
+                const active = SchemaForm.__activeRefInput || window.__BREP_activeRefInput || null;
+                const keep = active && active !== inputEl ? active.__refSelectionSceneMode?.ghostGroup || null : null;
+                this._removeReferenceSelectionGhosts(scene, keep);
+            } catch (_) { }
+            return Promise.resolve(false);
+        }
         try { inputEl.__refSelectionSceneMode = null; } catch (_) { }
         try { inputEl.__refSelectionDeactivate = null; } catch (_) { }
         try {
@@ -2402,7 +2436,15 @@ export class SchemaForm {
         if (hadActive) {
             try {
                 const scene = this._getReferenceSelectionScene();
+                SchemaForm.clearReferenceSelectionGhosts(scene);
                 if (scene) SelectionFilter.unselectAll(scene);
+            } catch (_) { }
+        } else {
+            try {
+                const scene = this._getReferenceSelectionScene();
+                const active = SchemaForm.__activeRefInput || window.__BREP_activeRefInput || null;
+                const keep = active?.__refSelectionSceneMode?.ghostGroup || null;
+                SchemaForm.clearReferenceSelectionGhosts(scene, { keep });
             } catch (_) { }
         }
         SelectionFilter.restoreAllowedSelectionTypes();

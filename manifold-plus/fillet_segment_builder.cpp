@@ -1217,6 +1217,8 @@ emscripten::val BuildBooleanResultSnapshot(
   auto wedge_meta = wedge_info.face_metadata_json;
   const auto& tube_meta = tube_info.face_metadata_json;
   wedge_meta.insert(tube_meta.begin(), tube_meta.end());
+  std::vector<AuxEdgeRecord> merged_aux_edges = wedge_info.aux_edges;
+  MergeAuxEdges(merged_aux_edges, tube_info.aux_edges);
 
   std::unordered_set<uint32_t> seen_ids(final_mesh.faceID.begin(), final_mesh.faceID.end());
   std::unordered_map<uint32_t, std::string> id_to_face_name;
@@ -1246,6 +1248,7 @@ emscripten::val BuildBooleanResultSnapshot(
   snapshot.set("idToFaceName", ToFaceIdEntries(id_to_face_name));
   snapshot.set("faceMetadataJson", ToStringMapEntries(filtered_meta));
   snapshot.set("edgeMetadataJson", emscripten::val::array());
+  snapshot.set("auxEdges", ToAuxEdges(merged_aux_edges));
   snapshot.set("vertexCount", static_cast<uint32_t>(final_mesh.NumVert()));
   snapshot.set("triangleCount", static_cast<uint32_t>(final_mesh.NumTri()));
   snapshot.set("name", name + "_FINAL_FILLET");

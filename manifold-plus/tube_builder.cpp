@@ -1314,6 +1314,24 @@ emscripten::val ToPointArray(const std::vector<Vec3>& points,
   return out;
 }
 
+emscripten::val BuildTubeAuxEdges(const std::string& name,
+                                  const emscripten::val& path_points,
+                                  bool closed,
+                                  size_t source_point_count) {
+  emscripten::val aux_edges = emscripten::val::array();
+  if (source_point_count < 2) return aux_edges;
+
+  emscripten::val entry = emscripten::val::object();
+  entry.set("name", (name.empty() ? std::string("Tube") : name) + "_PATH");
+  entry.set("points", path_points);
+  entry.set("closedLoop", closed);
+  entry.set("polylineWorld", true);
+  entry.set("materialKey", std::string("OVERLAY"));
+  entry.set("centerline", true);
+  aux_edges.set(0, entry);
+  return aux_edges;
+}
+
 emscripten::val BuildSnapshotFromAuthoring(const AuthoringBuffers& buffers,
                                            const TubeFaceLabels& labels,
                                            const std::vector<Vec3>& path_points,
@@ -1324,7 +1342,8 @@ emscripten::val BuildSnapshotFromAuthoring(const AuthoringBuffers& buffers,
                                            bool self_union_skipped,
                                            bool self_intersection_likely,
                                            bool path_foldback_likely,
-                                           double min_non_adjacent_segment_distance) {
+                                           double min_non_adjacent_segment_distance,
+                                           const std::string& name) {
   emscripten::val snapshot = emscripten::val::object();
   snapshot.set("numProp", kNumProp);
   snapshot.set("vertProperties", ToJsArray(buffers.vert_properties));
@@ -1337,7 +1356,11 @@ emscripten::val BuildSnapshotFromAuthoring(const AuthoringBuffers& buffers,
   snapshot.set("vertexCount",
                static_cast<uint32_t>(buffers.vert_properties.size() / 3));
   snapshot.set("triangleCount", static_cast<uint32_t>(buffers.tri_ids.size()));
-  snapshot.set("pathPoints", ToPointArray(path_points, closed));
+  emscripten::val path_points_array = ToPointArray(path_points, closed);
+  snapshot.set("pathPoints", path_points_array);
+  snapshot.set("auxEdges",
+               BuildTubeAuxEdges(name, path_points_array, closed,
+                                 path_points.size()));
   snapshot.set("closed", closed);
 
   emscripten::val stats = emscripten::val::object();
@@ -1358,7 +1381,8 @@ emscripten::val BuildSnapshotFromAuthoring(const AuthoringBuffers& buffers,
 emscripten::val BuildSnapshotFromMesh(const manifold::MeshGL& mesh,
                                       const TubeFaceLabels& labels,
                                       const std::vector<Vec3>& path_points,
-                                      bool closed) {
+                                      bool closed,
+                                      const std::string& name) {
   emscripten::val snapshot = emscripten::val::object();
   snapshot.set("numProp", mesh.numProp);
   snapshot.set("vertProperties", ToJsArray(mesh.vertProperties));
@@ -1370,7 +1394,11 @@ emscripten::val BuildSnapshotFromMesh(const manifold::MeshGL& mesh,
   snapshot.set("edgeMetadataJson", emscripten::val::array());
   snapshot.set("vertexCount", static_cast<uint32_t>(mesh.NumVert()));
   snapshot.set("triangleCount", static_cast<uint32_t>(mesh.NumTri()));
-  snapshot.set("pathPoints", ToPointArray(path_points, false));
+  emscripten::val path_points_array = ToPointArray(path_points, false);
+  snapshot.set("pathPoints", path_points_array);
+  snapshot.set("auxEdges",
+               BuildTubeAuxEdges(name, path_points_array, closed,
+                                 path_points.size()));
   snapshot.set("closed", closed);
   return snapshot;
 }
@@ -1458,7 +1486,8 @@ emscripten::val BuildTubeAuthoringState(const emscripten::val& options) {
                                        fast.path_foldback_likely ||
                                            fast.post_triangles > fast.pre_triangles,
                                        fast.path_foldback_likely,
-                                       fast.min_non_adjacent_segment_distance);
+                                       fast.min_non_adjacent_segment_distance,
+                                       build_options.name);
         AnnotateTubeSnapshotBuildDecision(snapshot, "fast",
                                           build_options.prefer_fast, false, "",
                                           "");
@@ -1495,7 +1524,8 @@ emscripten::val BuildTubeAuthoringState(const emscripten::val& options) {
   const TubeFaceLabels labels = MakeTubeFaceLabels(
       build_options.name, closed, build_options.inner_radius > 0.0);
   emscripten::val snapshot =
-      BuildSnapshotFromMesh(mesh, labels, path_points, closed);
+      BuildSnapshotFromMesh(mesh, labels, path_points, closed,
+                            build_options.name);
   AnnotateTubeSnapshotBuildDecision(snapshot, "slow",
                                     build_options.prefer_fast,
                                     fallback_from_fast, fallback_reason,
