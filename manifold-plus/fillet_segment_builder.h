@@ -16,6 +16,7 @@ emscripten::val BuildFilletBatchAuthoringState(const emscripten::val& options);
 emscripten::val BuildFilletAuthoringState(const emscripten::val& options);
 emscripten::val BuildFilletCombinedAuthoringState(const emscripten::val& options);
 emscripten::val BuildBooleanCombinedAuthoringState(const emscripten::val& options);
+emscripten::val BuildBooleanUnionManyAuthoringState(const emscripten::val& options);
 emscripten::val BuildSolidAuthoringStateFromMesh(const emscripten::val& options);
 
 }  // namespace manifoldplus

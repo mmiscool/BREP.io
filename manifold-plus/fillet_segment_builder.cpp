@@ -7138,6 +7138,103 @@ emscripten::val BuildBooleanCombinedAuthoringState(const emscripten::val& option
   return core.GetAuthoringState();
 }
 
+emscripten::val BuildBooleanUnionManyAuthoringState(const emscripten::val& options) {
+  const emscripten::val snapshots = options["snapshots"];
+  if (snapshots.isUndefined() || snapshots.isNull()) {
+    throw std::runtime_error("buildBooleanUnionManyAuthoringState requires snapshots.");
+  }
+  const uint32_t snapshot_count = snapshots["length"].as<uint32_t>();
+  if (snapshot_count == 0) {
+    throw std::runtime_error("buildBooleanUnionManyAuthoringState requires at least one snapshot.");
+  }
+
+  const std::string feature_id = ReadString(options["featureID"], "UNION");
+  const std::string name = ReadString(options["name"], "");
+  const double cleanup_tiny_face_islands_area =
+      options["cleanupTinyFaceIslandsArea"].isUndefined() ||
+              options["cleanupTinyFaceIslandsArea"].isNull()
+          ? 0.01
+          : ReadFiniteNumber(options["cleanupTinyFaceIslandsArea"],
+                             "cleanupTinyFaceIslandsArea");
+  const double disconnected_island_min_volume =
+      options["disconnectedIslandMinVolume"].isUndefined() ||
+              options["disconnectedIslandMinVolume"].isNull()
+          ? 0.01
+          : ReadFiniteNumber(options["disconnectedIslandMinVolume"],
+                             "disconnectedIslandMinVolume");
+
+  std::vector<SnapshotInfo> infos;
+  infos.reserve(snapshot_count);
+  std::vector<manifold::Manifold> manifolds;
+  manifolds.reserve(snapshot_count);
+  std::unordered_map<uint32_t, std::string> merged_id_to_face_name;
+  std::unordered_map<std::string, uint32_t> merged_face_name_to_id;
+  std::unordered_map<std::string, std::string> merged_face_metadata;
+  std::unordered_map<std::string, std::string> merged_edge_metadata;
+  std::vector<AuxEdgeRecord> merged_aux_edges;
+  bool has_metadata_seed = false;
+
+  for (uint32_t i = 0; i < snapshot_count; ++i) {
+    const emscripten::val snapshot = snapshots[i];
+    if (snapshot.isUndefined() || snapshot.isNull()) continue;
+    const std::string fallback_name =
+        name.empty() ? ("BOOLEAN_UNION_" + std::to_string(i + 1)) : name;
+    infos.push_back(ReadBooleanReadySnapshotInfo(snapshot, fallback_name));
+    const SnapshotInfo& info = infos.back();
+    if (info.mesh.NumTri() == 0 || info.mesh.NumVert() == 0) continue;
+    manifolds.emplace_back(info.mesh);
+
+    if (!has_metadata_seed) {
+      merged_id_to_face_name = info.id_to_face_name;
+      merged_face_name_to_id = info.face_name_to_id;
+      merged_face_metadata = info.face_metadata_json;
+      merged_edge_metadata = info.edge_metadata_json;
+      merged_aux_edges = info.aux_edges;
+      has_metadata_seed = true;
+      continue;
+    }
+
+    merged_id_to_face_name =
+        CombineIdMaps(merged_id_to_face_name, info.id_to_face_name);
+    for (const auto& entry : info.face_name_to_id) {
+      merged_face_name_to_id[entry.first] = entry.second;
+    }
+    MergeMetadataMaps(merged_face_metadata, info.face_metadata_json);
+    MergeMetadataMaps(merged_edge_metadata, info.edge_metadata_json);
+    MergeAuxEdges(merged_aux_edges, info.aux_edges);
+  }
+
+  if (manifolds.empty()) {
+    throw std::runtime_error(
+        "buildBooleanUnionManyAuthoringState could not build any input manifolds.");
+  }
+
+  manifold::Manifold result_manifold =
+      manifolds.size() == 1
+          ? manifolds.front()
+          : manifold::Manifold::BatchBoolean(manifolds, manifold::OpType::Add);
+  manifold::MeshGL final_mesh = result_manifold.GetMeshGL();
+
+  RelabelFallbackFacesByAdjacency(final_mesh, merged_id_to_face_name,
+                                  merged_face_name_to_id, merged_face_metadata,
+                                  feature_id);
+  CleanupTinyFaceIslands(final_mesh, merged_id_to_face_name,
+                         merged_face_name_to_id, merged_face_metadata,
+                         cleanup_tiny_face_islands_area);
+
+  const std::string final_name = name.empty() ? feature_id : name;
+  emscripten::val snapshot = BuildSnapshotFromMesh(
+      final_mesh, merged_id_to_face_name, merged_face_name_to_id,
+      merged_face_metadata, merged_edge_metadata, merged_aux_edges, final_name);
+
+  BrepSolidCore core;
+  core.SetAuthoringState(snapshot);
+  if (disconnected_island_min_volume > 0.0) {
+    core.RemoveDisconnectedIslandsByVolume(disconnected_island_min_volume);
+  }
+  return core.GetAuthoringState();
+}
+
 emscripten::val BuildSolidAuthoringStateFromMesh(const emscripten::val& options) {
   emscripten::val canonical = emscripten::val::object();
   canonical.set("numProp", options["numProp"]);

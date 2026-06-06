@@ -20,9 +20,18 @@ function hasNativeBooleanCombinedBuilder() {
     return typeof manifold?.buildBooleanCombinedAuthoringState === "function";
 }
 
+export function hasNativeBooleanUnionManyBuilder() {
+    return typeof manifold?.buildBooleanUnionManyAuthoringState === "function";
+}
+
 function requireNativeBooleanCombinedBuilder(methodName) {
     if (hasNativeBooleanCombinedBuilder()) return;
     throw new Error(`${methodName} requires the custom local manifold build with native boolean result reconstruction support.`);
+}
+
+function requireNativeBooleanUnionManyBuilder(methodName) {
+    if (hasNativeBooleanUnionManyBuilder()) return;
+    throw new Error(`${methodName} requires the custom local manifold build with native batch union result reconstruction support.`);
 }
 
 function baseSolidCtor(obj) {
@@ -453,6 +462,31 @@ function buildNativeBooleanResult(left, right, operation, SolidCtor) {
         disconnectedIslandMinVolume: BOOLEAN_DISCONNECTED_ISLAND_MIN_VOLUME,
     });
     return solidFromNativeBooleanSnapshot(SolidCtor, snapshot, left?.name || `${operation}_RESULT`);
+}
+
+export function buildNativeUnionManyResult(solids, SolidCtor = null, options = {}) {
+    const inputs = Array.isArray(solids) ? solids.filter(Boolean) : [];
+    if (!inputs.length) return null;
+    requireNativeBooleanUnionManyBuilder("Solid.unionMany");
+    const ResultSolid = SolidCtor || baseSolidCtor(inputs[0]);
+    const snapshots = inputs.map((solid) => toNativeBooleanSnapshot(getSolidAuthoringStateSnapshot(solid)));
+    const featureID = String(options?.featureID || inputs[0]?.owningFeatureID || inputs[0]?.name || "UNION");
+    const name = String(options?.name || inputs[0]?.name || `${featureID}_UNION`);
+    const snapshot = manifold.buildBooleanUnionManyAuthoringState({
+        snapshots,
+        featureID,
+        name,
+        cleanupTinyFaceIslandsArea: Number(options?.cleanupTinyFaceIslandsArea ?? BOOLEAN_DISCONNECTED_ISLAND_MIN_VOLUME),
+        disconnectedIslandMinVolume: Number(options?.disconnectedIslandMinVolume ?? BOOLEAN_DISCONNECTED_ISLAND_MIN_VOLUME),
+    });
+    const out = solidFromNativeBooleanSnapshot(ResultSolid, snapshot, name);
+    try {
+        out.owningFeatureID = options?.owningFeatureID
+            || inputs.find((solid) => solid?.owningFeatureID)?.owningFeatureID
+            || out?.owningFeatureID
+            || null;
+    } catch { /* ignore */ }
+    return _cleanupBooleanResult(out);
 }
 
 function _dropDisconnectedIslandsByVolume(solid, minVolume = BOOLEAN_DISCONNECTED_ISLAND_MIN_VOLUME) {

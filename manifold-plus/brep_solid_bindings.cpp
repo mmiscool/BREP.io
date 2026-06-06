@@ -16,6 +16,18 @@ EMSCRIPTEN_BINDINGS(manifold_plus_solid_bindings) {
                 &manifoldplus::BrepSolidCore::TransformMetadata)
       .function("weldVerticesByEpsilon",
                 &manifoldplus::BrepSolidCore::WeldVerticesByEpsilon)
+      .function("buildThickenedFaceShellMesh",
+                &manifoldplus::BrepSolidCore::BuildThickenedFaceShellMesh)
+      .function("analyzeMeshTopology",
+                &manifoldplus::BrepSolidCore::AnalyzeMeshTopology)
+      .function("analyzeTriangleOrientation",
+                &manifoldplus::BrepSolidCore::AnalyzeTriangleOrientation)
+      .function("weldVerticesByPositionKey",
+                &manifoldplus::BrepSolidCore::WeldVerticesByPositionKey)
+      .function("cullTrianglesTouchingNonManifoldEdges",
+                &manifoldplus::BrepSolidCore::CullTrianglesTouchingNonManifoldEdges)
+      .function("cullTriangleTouchingSameDirectionEdge",
+                &manifoldplus::BrepSolidCore::CullTriangleTouchingSameDirectionEdge)
       .function("pushFace", &manifoldplus::BrepSolidCore::PushFace)
       .function("normalizeFaceTracking",
                 &manifoldplus::BrepSolidCore::NormalizeFaceTracking)

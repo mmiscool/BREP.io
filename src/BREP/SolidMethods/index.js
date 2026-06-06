@@ -52,6 +52,8 @@ export {
 } from "./meshQueries.js";
 export {
     union,
+    buildNativeUnionManyResult,
+    hasNativeBooleanUnionManyBuilder,
     subtract,
     intersect,
     _expandTriIDsFromMesh as _expandTriIDsFromMeshStatic,

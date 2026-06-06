@@ -43,6 +43,8 @@ EMSCRIPTEN_BINDINGS(manifold_plus_bindings) {
                        &manifoldplus::BuildFilletCombinedAuthoringState);
   emscripten::function("buildBooleanCombinedAuthoringState",
                        &manifoldplus::BuildBooleanCombinedAuthoringState);
+  emscripten::function("buildBooleanUnionManyAuthoringState",
+                       &manifoldplus::BuildBooleanUnionManyAuthoringState);
   emscripten::function("buildSolidAuthoringStateFromMesh",
                        &manifoldplus::BuildSolidAuthoringStateFromMesh);
 }

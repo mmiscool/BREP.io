@@ -110,6 +110,38 @@ export const cppSolidCoreHasNativeWeldVerticesByEpsilon = (() => {
     }
 })();
 
+export const cppSolidCoreHasNativeFaceThickenShell = (() => {
+    try {
+        if (typeof manifold?.BrepSolidCore !== "function") return false;
+        const probe = new manifold.BrepSolidCore();
+        try {
+            return typeof probe.buildThickenedFaceShellMesh === "function";
+        } finally {
+            if (typeof probe.delete === "function") probe.delete();
+        }
+    } catch {
+        return false;
+    }
+})();
+
+export const cppSolidCoreHasNativeThickenMeshOps = (() => {
+    try {
+        if (typeof manifold?.BrepSolidCore !== "function") return false;
+        const probe = new manifold.BrepSolidCore();
+        try {
+            return typeof probe.analyzeMeshTopology === "function"
+                && typeof probe.analyzeTriangleOrientation === "function"
+                && typeof probe.weldVerticesByPositionKey === "function"
+                && typeof probe.cullTrianglesTouchingNonManifoldEdges === "function"
+                && typeof probe.cullTriangleTouchingSameDirectionEdge === "function";
+        } finally {
+            if (typeof probe.delete === "function") probe.delete();
+        }
+    } catch {
+        return false;
+    }
+})();
+
 export const cppSolidCoreHasNativePushFace = (() => {
     try {
         if (typeof manifold?.BrepSolidCore !== "function") return false;
@@ -843,6 +875,53 @@ export class CppSolidCore {
     weldVerticesByEpsilon(epsilon) {
         this._native.weldVerticesByEpsilon(epsilon);
         return this;
+    }
+
+    buildThickenedFaceShellMesh(options) {
+        const snapshot = this._native.buildThickenedFaceShellMesh(options);
+        return {
+            numProp: Number(snapshot?.numProp ?? 3),
+            vertProperties: Array.from(snapshot?.vertProperties ?? []),
+            triVerts: Array.from(snapshot?.triVerts ?? []),
+            faceID: Array.from(snapshot?.faceID ?? []),
+            nativeKernel: snapshot?.nativeKernel === true,
+            vertexCount: Number(snapshot?.vertexCount ?? 0),
+            triangleCount: Number(snapshot?.triangleCount ?? 0),
+        };
+    }
+
+    analyzeMeshTopology() {
+        const result = this._native.analyzeMeshTopology() || {};
+        return {
+            boundaryEdgeCount: Number(result?.boundaryEdgeCount ?? 0),
+            nonManifoldEdgeCount: Number(result?.nonManifoldEdgeCount ?? 0),
+            triangleCount: Number(result?.triangleCount ?? 0),
+        };
+    }
+
+    analyzeTriangleOrientation() {
+        const result = this._native.analyzeTriangleOrientation() || {};
+        return {
+            sameDirectionEdgeCount: Number(result?.sameDirectionEdgeCount ?? 0),
+            oppositeDirectionEdgeCount: Number(result?.oppositeDirectionEdgeCount ?? 0),
+            ambiguousEdgeCount: Number(result?.ambiguousEdgeCount ?? 0),
+        };
+    }
+
+    weldVerticesByPositionKey(epsilon) {
+        const result = this._native.weldVerticesByPositionKey(epsilon) || {};
+        return {
+            weldedVertexCount: Number(result?.weldedVertexCount ?? 0),
+            removedTriangleCount: Number(result?.removedTriangleCount ?? 0),
+        };
+    }
+
+    cullTrianglesTouchingNonManifoldEdges() {
+        return Number(this._native.cullTrianglesTouchingNonManifoldEdges());
+    }
+
+    cullTriangleTouchingSameDirectionEdge() {
+        return Number(this._native.cullTriangleTouchingSameDirectionEdge());
     }
 
     pushFace(faceName, distance) {

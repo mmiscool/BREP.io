@@ -76,6 +76,72 @@ double SignedVolume6FromVerts(const std::vector<float>& vert_properties,
          z0 * (x1 * y2 - y1 * x2);
 }
 
+uint32_t CompactMeshRemovingTriangles(std::vector<float>& vert_properties,
+                                      uint32_t num_prop,
+                                      std::vector<uint32_t>& tri_verts,
+                                      std::vector<uint32_t>& tri_ids,
+                                      const std::vector<uint8_t>& remove_tri) {
+  const uint32_t tri_count = static_cast<uint32_t>(tri_verts.size() / 3);
+  const uint32_t vertex_count =
+      num_prop == 0 ? 0 : static_cast<uint32_t>(vert_properties.size() / num_prop);
+  if (tri_count == 0 || vertex_count == 0 || remove_tri.size() < tri_count) {
+    return 0;
+  }
+
+  uint32_t removed = 0;
+  std::vector<uint8_t> used_vert(vertex_count, 0);
+  std::vector<uint32_t> next_tri_verts;
+  std::vector<uint32_t> next_tri_ids;
+  next_tri_verts.reserve(tri_verts.size());
+  next_tri_ids.reserve(tri_ids.size());
+
+  for (uint32_t tri_index = 0; tri_index < tri_count; ++tri_index) {
+    if (remove_tri[tri_index]) {
+      removed += 1;
+      continue;
+    }
+    const uint32_t base = tri_index * 3;
+    const uint32_t a = tri_verts[base + 0];
+    const uint32_t b = tri_verts[base + 1];
+    const uint32_t c = tri_verts[base + 2];
+    if (a >= vertex_count || b >= vertex_count || c >= vertex_count) {
+      removed += 1;
+      continue;
+    }
+    next_tri_verts.push_back(a);
+    next_tri_verts.push_back(b);
+    next_tri_verts.push_back(c);
+    next_tri_ids.push_back(tri_ids[tri_index]);
+    used_vert[a] = 1;
+    used_vert[b] = 1;
+    used_vert[c] = 1;
+  }
+
+  if (removed == 0) return 0;
+
+  std::vector<uint32_t> old_to_new(vertex_count, UINT32_MAX);
+  std::vector<float> next_vert_properties;
+  next_vert_properties.reserve(vert_properties.size());
+  uint32_t next_vertex = 0;
+  for (uint32_t i = 0; i < vertex_count; ++i) {
+    if (!used_vert[i]) continue;
+    old_to_new[i] = next_vertex++;
+    const uint32_t base = i * num_prop;
+    for (uint32_t p = 0; p < num_prop; ++p) {
+      next_vert_properties.push_back(vert_properties[base + p]);
+    }
+  }
+
+  for (uint32_t& index : next_tri_verts) {
+    index = old_to_new[index];
+  }
+
+  vert_properties.swap(next_vert_properties);
+  tri_verts.swap(next_tri_verts);
+  tri_ids.swap(next_tri_ids);
+  return removed;
+}
+
 double RayTriangleHit(const std::array<double, 3>& origin,
                       const std::array<double, 3>& dir,
                       const std::array<std::array<double, 3>, 3>& tri) {
@@ -699,6 +765,383 @@ void BrepSolidCore::WeldVerticesByEpsilon(double eps) {
   }
 
   RebuildVertexKeyIndex();
+}
+
+emscripten::val BrepSolidCore::BuildThickenedFaceShellMesh(
+    const emscripten::val& options) {
+  const double distance = options["distance"].as<double>();
+  if (!std::isfinite(distance) || distance == 0.0) {
+    throw std::runtime_error(
+        "BuildThickenedFaceShellMesh requires a non-zero finite distance.");
+  }
+
+  const std::vector<float> source_vertices =
+      ReadFloatArray(options["vertices"], "vertices");
+  const std::vector<float> source_normals =
+      ReadFloatArray(options["vertexNormals"], "vertexNormals");
+  const std::vector<uint32_t> source_triangles =
+      ReadUint32Array(options["triangles"], "triangles");
+  const std::vector<uint32_t> sidewall_edges =
+      ReadUint32Array(options["sidewallEdges"], "sidewallEdges");
+  const uint32_t start_face_id = options["startFaceID"].as<uint32_t>();
+  const uint32_t end_face_id = options["endFaceID"].as<uint32_t>();
+
+  if ((source_vertices.size() % 3) != 0 || source_vertices.empty()) {
+    throw std::runtime_error("vertices length must be a non-empty multiple of 3.");
+  }
+  if (source_normals.size() != source_vertices.size()) {
+    throw std::runtime_error("vertexNormals length must match vertices length.");
+  }
+  if ((source_triangles.size() % 3) != 0) {
+    throw std::runtime_error("triangles length must be a multiple of 3.");
+  }
+  if ((sidewall_edges.size() % 3) != 0) {
+    throw std::runtime_error("sidewallEdges length must be a multiple of 3.");
+  }
+
+  const uint32_t vertex_count =
+      static_cast<uint32_t>(source_vertices.size() / 3);
+  std::vector<float> out_vertices;
+  out_vertices.resize(static_cast<size_t>(vertex_count) * 2 * 3);
+
+  for (uint32_t i = 0; i < vertex_count; ++i) {
+    const size_t src = static_cast<size_t>(i) * 3;
+    out_vertices[src + 0] = source_vertices[src + 0];
+    out_vertices[src + 1] = source_vertices[src + 1];
+    out_vertices[src + 2] = source_vertices[src + 2];
+
+    const size_t dst = static_cast<size_t>(vertex_count + i) * 3;
+    out_vertices[dst + 0] =
+        source_vertices[src + 0] + source_normals[src + 0] * distance;
+    out_vertices[dst + 1] =
+        source_vertices[src + 1] + source_normals[src + 1] * distance;
+    out_vertices[dst + 2] =
+        source_vertices[src + 2] + source_normals[src + 2] * distance;
+  }
+
+  std::vector<uint32_t> out_triangles;
+  std::vector<uint32_t> out_face_ids;
+  out_triangles.reserve(source_triangles.size() * 2 + sidewall_edges.size() * 2);
+  out_face_ids.reserve((source_triangles.size() / 3) * 2 +
+                       (sidewall_edges.size() / 3) * 2);
+
+  auto add_triangle = [&](uint32_t i0, uint32_t i1, uint32_t i2,
+                          uint32_t face_id) {
+    if (i0 == i1 || i1 == i2 || i2 == i0) return;
+    if (i0 >= vertex_count * 2 || i1 >= vertex_count * 2 ||
+        i2 >= vertex_count * 2) {
+      return;
+    }
+    if (!(TriangleAreaFromVerts(out_vertices, 3, i0, i1, i2) > 1e-12)) return;
+    out_triangles.push_back(i0);
+    out_triangles.push_back(i1);
+    out_triangles.push_back(i2);
+    out_face_ids.push_back(face_id);
+  };
+
+  for (size_t i = 0; i + 2 < source_triangles.size(); i += 3) {
+    const uint32_t a = source_triangles[i + 0];
+    const uint32_t b = source_triangles[i + 1];
+    const uint32_t c = source_triangles[i + 2];
+    if (a >= vertex_count || b >= vertex_count || c >= vertex_count) continue;
+
+    if (distance >= 0.0) {
+      add_triangle(a, c, b, start_face_id);
+      add_triangle(vertex_count + a, vertex_count + b, vertex_count + c,
+                   end_face_id);
+    } else {
+      add_triangle(a, b, c, start_face_id);
+      add_triangle(vertex_count + a, vertex_count + c, vertex_count + b,
+                   end_face_id);
+    }
+  }
+
+  for (size_t i = 0; i + 2 < sidewall_edges.size(); i += 3) {
+    const uint32_t u = sidewall_edges[i + 0];
+    const uint32_t v = sidewall_edges[i + 1];
+    const uint32_t side_face_id = sidewall_edges[i + 2];
+    if (u >= vertex_count || v >= vertex_count) continue;
+    const uint32_t qu = vertex_count + u;
+    const uint32_t qv = vertex_count + v;
+
+    if (distance >= 0.0) {
+      add_triangle(u, v, qv, side_face_id);
+      add_triangle(u, qv, qu, side_face_id);
+    } else {
+      add_triangle(qu, qv, v, side_face_id);
+      add_triangle(qu, v, u, side_face_id);
+    }
+  }
+
+  emscripten::val result = emscripten::val::object();
+  result.set("numProp", 3);
+  result.set("vertProperties", ToJsArray(out_vertices));
+  result.set("triVerts", ToJsArray(out_triangles));
+  result.set("faceID", ToJsArray(out_face_ids));
+  result.set("nativeKernel", true);
+  result.set("vertexCount", static_cast<uint32_t>(out_vertices.size() / 3));
+  result.set("triangleCount", static_cast<uint32_t>(out_face_ids.size()));
+  return result;
+}
+
+emscripten::val BrepSolidCore::AnalyzeMeshTopology() const {
+  const uint32_t tri_count = static_cast<uint32_t>(tri_verts_.size() / 3);
+  std::unordered_map<std::string, uint32_t> edge_counts;
+  edge_counts.reserve(static_cast<size_t>(tri_count) * 3);
+
+  for (uint32_t tri_index = 0; tri_index < tri_count; ++tri_index) {
+    const uint32_t base = tri_index * 3;
+    const uint32_t a = tri_verts_[base + 0];
+    const uint32_t b = tri_verts_[base + 1];
+    const uint32_t c = tri_verts_[base + 2];
+    edge_counts[MakeUndirectedEdgeKey(a, b)] += 1;
+    edge_counts[MakeUndirectedEdgeKey(b, c)] += 1;
+    edge_counts[MakeUndirectedEdgeKey(c, a)] += 1;
+  }
+
+  uint32_t boundary_edge_count = 0;
+  uint32_t non_manifold_edge_count = 0;
+  for (const auto& entry : edge_counts) {
+    if (entry.second == 1) {
+      boundary_edge_count += 1;
+    } else if (entry.second != 2) {
+      non_manifold_edge_count += 1;
+    }
+  }
+
+  emscripten::val result = emscripten::val::object();
+  result.set("boundaryEdgeCount", boundary_edge_count);
+  result.set("nonManifoldEdgeCount", non_manifold_edge_count);
+  result.set("triangleCount", tri_count);
+  return result;
+}
+
+emscripten::val BrepSolidCore::AnalyzeTriangleOrientation() const {
+  struct EdgeUse {
+    uint32_t a = 0;
+    uint32_t b = 0;
+  };
+
+  const uint32_t tri_count = static_cast<uint32_t>(tri_verts_.size() / 3);
+  std::unordered_map<std::string, std::vector<EdgeUse>> edge_uses;
+  edge_uses.reserve(static_cast<size_t>(tri_count) * 3);
+  auto add_use = [&](uint32_t a, uint32_t b) {
+    edge_uses[MakeUndirectedEdgeKey(a, b)].push_back({a, b});
+  };
+
+  for (uint32_t tri_index = 0; tri_index < tri_count; ++tri_index) {
+    const uint32_t base = tri_index * 3;
+    const uint32_t a = tri_verts_[base + 0];
+    const uint32_t b = tri_verts_[base + 1];
+    const uint32_t c = tri_verts_[base + 2];
+    add_use(a, b);
+    add_use(b, c);
+    add_use(c, a);
+  }
+
+  uint32_t same_direction_edge_count = 0;
+  uint32_t opposite_direction_edge_count = 0;
+  uint32_t ambiguous_edge_count = 0;
+  for (const auto& entry : edge_uses) {
+    const auto& uses = entry.second;
+    if (uses.size() != 2) {
+      ambiguous_edge_count += 1;
+      continue;
+    }
+    if (uses[0].a == uses[1].a && uses[0].b == uses[1].b) {
+      same_direction_edge_count += 1;
+    } else {
+      opposite_direction_edge_count += 1;
+    }
+  }
+
+  emscripten::val result = emscripten::val::object();
+  result.set("sameDirectionEdgeCount", same_direction_edge_count);
+  result.set("oppositeDirectionEdgeCount", opposite_direction_edge_count);
+  result.set("ambiguousEdgeCount", ambiguous_edge_count);
+  return result;
+}
+
+emscripten::val BrepSolidCore::WeldVerticesByPositionKey(double eps) {
+  uint32_t welded_vertex_count = 0;
+  uint32_t removed_triangle_count = 0;
+  if (!std::isfinite(eps) || eps <= 0.0 || num_prop_ < 3) {
+    emscripten::val result = emscripten::val::object();
+    result.set("weldedVertexCount", welded_vertex_count);
+    result.set("removedTriangleCount", removed_triangle_count);
+    return result;
+  }
+
+  const uint32_t vertex_count = VertexCount();
+  const uint32_t tri_count = static_cast<uint32_t>(tri_verts_.size() / 3);
+  if (vertex_count == 0 || tri_count == 0 || tri_ids_.size() < tri_count) {
+    emscripten::val result = emscripten::val::object();
+    result.set("weldedVertexCount", welded_vertex_count);
+    result.set("removedTriangleCount", removed_triangle_count);
+    return result;
+  }
+
+  const double inv = 1.0 / eps;
+  auto key_for_index = [&](uint32_t index) {
+    const uint32_t base = index * num_prop_;
+    std::ostringstream stream;
+    stream << std::llround(static_cast<double>(vert_properties_[base + 0]) * inv)
+           << ','
+           << std::llround(static_cast<double>(vert_properties_[base + 1]) * inv)
+           << ','
+           << std::llround(static_cast<double>(vert_properties_[base + 2]) * inv);
+    return stream.str();
+  };
+
+  std::unordered_map<std::string, uint32_t> key_to_new;
+  key_to_new.reserve(vertex_count * 2);
+  std::vector<uint32_t> old_to_new(vertex_count, UINT32_MAX);
+  std::vector<float> next_vert_properties;
+  next_vert_properties.reserve(vert_properties_.size());
+
+  for (uint32_t i = 0; i < vertex_count; ++i) {
+    const std::string key = key_for_index(i);
+    const auto found = key_to_new.find(key);
+    if (found == key_to_new.end()) {
+      const uint32_t mapped =
+          static_cast<uint32_t>(next_vert_properties.size() / num_prop_);
+      key_to_new[key] = mapped;
+      old_to_new[i] = mapped;
+      const uint32_t base = i * num_prop_;
+      for (uint32_t p = 0; p < num_prop_; ++p) {
+        next_vert_properties.push_back(vert_properties_[base + p]);
+      }
+    } else {
+      old_to_new[i] = found->second;
+      welded_vertex_count += 1;
+    }
+  }
+
+  if (welded_vertex_count == 0) {
+    emscripten::val result = emscripten::val::object();
+    result.set("weldedVertexCount", welded_vertex_count);
+    result.set("removedTriangleCount", removed_triangle_count);
+    return result;
+  }
+
+  std::vector<uint32_t> next_tri_verts;
+  std::vector<uint32_t> next_tri_ids;
+  next_tri_verts.reserve(tri_verts_.size());
+  next_tri_ids.reserve(tri_ids_.size());
+  for (uint32_t tri_index = 0; tri_index < tri_count; ++tri_index) {
+    const uint32_t base = tri_index * 3;
+    const uint32_t a = old_to_new[tri_verts_[base + 0]];
+    const uint32_t b = old_to_new[tri_verts_[base + 1]];
+    const uint32_t c = old_to_new[tri_verts_[base + 2]];
+    if (a == UINT32_MAX || b == UINT32_MAX || c == UINT32_MAX || a == b ||
+        b == c || c == a ||
+        !(TriangleAreaFromVerts(next_vert_properties, num_prop_, a, b, c) >
+          1e-12)) {
+      removed_triangle_count += 1;
+      continue;
+    }
+    next_tri_verts.push_back(a);
+    next_tri_verts.push_back(b);
+    next_tri_verts.push_back(c);
+    next_tri_ids.push_back(tri_ids_[tri_index]);
+  }
+
+  vert_properties_.swap(next_vert_properties);
+  tri_verts_.swap(next_tri_verts);
+  tri_ids_.swap(next_tri_ids);
+  RebuildVertexKeyIndex();
+
+  emscripten::val result = emscripten::val::object();
+  result.set("weldedVertexCount", welded_vertex_count);
+  result.set("removedTriangleCount", removed_triangle_count);
+  return result;
+}
+
+uint32_t BrepSolidCore::CullTrianglesTouchingNonManifoldEdges() {
+  const uint32_t tri_count = static_cast<uint32_t>(tri_verts_.size() / 3);
+  if (tri_count == 0 || tri_ids_.size() < tri_count) return 0;
+
+  std::unordered_map<std::string, std::vector<uint32_t>> edge_to_tris;
+  edge_to_tris.reserve(static_cast<size_t>(tri_count) * 3);
+  for (uint32_t tri_index = 0; tri_index < tri_count; ++tri_index) {
+    const uint32_t base = tri_index * 3;
+    const uint32_t a = tri_verts_[base + 0];
+    const uint32_t b = tri_verts_[base + 1];
+    const uint32_t c = tri_verts_[base + 2];
+    edge_to_tris[MakeUndirectedEdgeKey(a, b)].push_back(tri_index);
+    edge_to_tris[MakeUndirectedEdgeKey(b, c)].push_back(tri_index);
+    edge_to_tris[MakeUndirectedEdgeKey(c, a)].push_back(tri_index);
+  }
+
+  std::vector<uint8_t> remove_tri(tri_count, 0);
+  for (const auto& entry : edge_to_tris) {
+    if (entry.second.size() <= 2) continue;
+    for (const uint32_t tri_index : entry.second) remove_tri[tri_index] = 1;
+  }
+
+  const uint32_t removed = CompactMeshRemovingTriangles(
+      vert_properties_, num_prop_, tri_verts_, tri_ids_, remove_tri);
+  if (removed > 0) RebuildVertexKeyIndex();
+  return removed;
+}
+
+uint32_t BrepSolidCore::CullTriangleTouchingSameDirectionEdge() {
+  struct EdgeUse {
+    uint32_t tri_index = 0;
+    uint32_t a = 0;
+    uint32_t b = 0;
+  };
+
+  const uint32_t tri_count = static_cast<uint32_t>(tri_verts_.size() / 3);
+  if (tri_count == 0 || tri_ids_.size() < tri_count) return 0;
+
+  std::unordered_map<std::string, std::vector<EdgeUse>> edge_uses;
+  edge_uses.reserve(static_cast<size_t>(tri_count) * 3);
+  auto add_use = [&](uint32_t a, uint32_t b, uint32_t tri_index) {
+    edge_uses[MakeUndirectedEdgeKey(a, b)].push_back({tri_index, a, b});
+  };
+
+  for (uint32_t tri_index = 0; tri_index < tri_count; ++tri_index) {
+    const uint32_t base = tri_index * 3;
+    const uint32_t a = tri_verts_[base + 0];
+    const uint32_t b = tri_verts_[base + 1];
+    const uint32_t c = tri_verts_[base + 2];
+    add_use(a, b, tri_index);
+    add_use(b, c, tri_index);
+    add_use(c, a, tri_index);
+  }
+
+  std::vector<uint16_t> same_by_tri(tri_count, 0);
+  for (const auto& entry : edge_uses) {
+    const auto& uses = entry.second;
+    if (uses.size() != 2) continue;
+    if (!(uses[0].a == uses[1].a && uses[0].b == uses[1].b)) continue;
+    same_by_tri[uses[0].tri_index] += 1;
+    same_by_tri[uses[1].tri_index] += 1;
+  }
+
+  int32_t best_tri_index = -1;
+  uint32_t best_score = 0;
+  for (uint32_t tri_index = 0; tri_index < tri_count; ++tri_index) {
+    const uint32_t same_count = same_by_tri[tri_index];
+    if (same_count == 0) continue;
+    const std::string face_name = ResolveFaceName(tri_ids_[tri_index]);
+    const uint32_t cap_bonus =
+        face_name.find("INTERSECTION_CAP") != std::string::npos ? 100 : 0;
+    const uint32_t score = same_count + cap_bonus;
+    if (score > best_score) {
+      best_score = score;
+      best_tri_index = static_cast<int32_t>(tri_index);
+    }
+  }
+  if (best_tri_index < 0) return 0;
+
+  std::vector<uint8_t> remove_tri(tri_count, 0);
+  remove_tri[static_cast<uint32_t>(best_tri_index)] = 1;
+  const uint32_t removed = CompactMeshRemovingTriangles(
+      vert_properties_, num_prop_, tri_verts_, tri_ids_, remove_tri);
+  if (removed > 0) RebuildVertexKeyIndex();
+  return removed;
 }
 
 bool BrepSolidCore::IsCoherentlyOrientedManifold() const {
