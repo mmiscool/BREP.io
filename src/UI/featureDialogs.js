@@ -187,6 +187,42 @@ export class SchemaForm {
         } catch (_) { }
     }
 
+    static removeSheetMetalFlatPatternChildren(root) {
+        if (!root || !root.isObject3D) return 0;
+        let removed = 0;
+        const dispose = (obj) => {
+            if (!obj) return;
+            try { obj.geometry?.dispose?.(); } catch (_) { }
+            const material = obj.material;
+            try {
+                if (Array.isArray(material)) {
+                    for (const mat of material) {
+                        try { mat?.dispose?.(); } catch (_) { }
+                    }
+                } else {
+                    material?.dispose?.();
+                }
+            } catch (_) { }
+        };
+        const visit = (parent) => {
+            if (!parent || !Array.isArray(parent.children)) return;
+            for (const child of parent.children.slice()) {
+                if (!child) continue;
+                const isFlatPattern = child?.userData?.sheetMetalFlatPattern === true
+                    || String(child?.name || '').endsWith(':2D');
+                if (isFlatPattern) {
+                    try { parent.remove(child); } catch (_) { }
+                    try { child.traverse?.(dispose); } catch (_) { dispose(child); }
+                    removed += 1;
+                    continue;
+                }
+                visit(child);
+            }
+        };
+        visit(root);
+        return removed;
+    }
+
     static clearReferenceSelectionGhosts(scene, { keep = null } = {}) {
         if (!scene || typeof scene.traverse !== 'function') return 0;
         const keepSet = new Set();
@@ -1751,6 +1787,7 @@ export class SchemaForm {
             ghost.userData = { ...(ghost.userData || {}), preventRemove: true, excludeFromFit: true, referenceSelectionGhost: true };
             ghost.renderOrder = Math.max(Number(ghost.renderOrder) || 0, 10);
         } catch (_) { }
+        try { SchemaForm.removeSheetMetalFlatPatternChildren(ghost); } catch (_) { }
         this._disableReferenceSelectionPicking(ghost);
         this._setReferenceSelectionObjectOpacity(ghost, 0.34);
         return ghost;

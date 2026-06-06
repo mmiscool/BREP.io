@@ -269,6 +269,7 @@ import {
 import { test_sheetMetal_nonManifold_sm_f18 } from './test_sheetMetal_nonManifold_sm_f18.js';
 import { test_sheetMetal_tab_circular_hole_wall } from './test_sheetMetal_tab_circular_hole_wall.js';
 import { test_sheetMetal_flat_pattern_files_use_model_and_feature_names } from './test_sheetMetal_flatPatternFiles.js';
+import { test_sheetMetal_flat_pattern_preview_visualize_is_idempotent } from './test_sheetMetal_flatPatternPreview.js';
 import { afterRun_sketch_openLoop, test_sketch_openLoop } from './test_sketch_openLoop.js';
 import {
     afterRun_sketch_face_attachment_alignment,
@@ -908,6 +909,7 @@ export const testFunctions = [
     { test: test_sheetMetal_nonManifold_sm_f18, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_tab_circular_hole_wall, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_flat_pattern_files_use_model_and_feature_names, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sheetMetal_flat_pattern_preview_visualize_is_idempotent, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_bend_face_cylindrical_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_cutout_context_button, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_contour_flange_context_button_prefers_sketch, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

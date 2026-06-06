@@ -1240,6 +1240,41 @@ function makeSheetMetal2DGroup({ solid, model, tree, featureID, thickness, rootM
   return group2D;
 }
 
+function disposeObject3DResources(object) {
+  if (!object || typeof object !== "object") return;
+  const children = Array.isArray(object.children) ? object.children.slice() : [];
+  for (const child of children) disposeObject3DResources(child);
+
+  try { object.geometry?.dispose?.(); } catch { /* ignore disposal errors */ }
+  const material = object.material;
+  if (Array.isArray(material)) {
+    for (const mat of material) {
+      try { mat?.dispose?.(); } catch { /* ignore disposal errors */ }
+    }
+  } else {
+    try { material?.dispose?.(); } catch { /* ignore disposal errors */ }
+  }
+}
+
+function removeExistingSheetMetal2DGroups(root, featureID) {
+  if (!root || !Array.isArray(root.children)) return;
+  const groupName = `${featureID}:2D`;
+  const existing = root.children.filter((child) => (
+    child?.userData?.sheetMetalFlatPattern === true
+    || child?.name === groupName
+  ));
+  for (const child of existing) {
+    try { root.remove(child); } catch { /* ignore removal errors */ }
+    disposeObject3DResources(child);
+  }
+}
+
+function addSheetMetal2DGroupToParent(parent, group2D, featureID) {
+  if (!parent || !group2D) return;
+  removeExistingSheetMetal2DGroups(parent, featureID);
+  parent.add(group2D);
+}
+
 function installSheetMetalVisualizeHook(root, config) {
   if (!root || typeof root.visualize !== "function") return;
   if (root.__sheetMetalVisualizeHookInstalled) return;
@@ -1247,6 +1282,7 @@ function installSheetMetalVisualizeHook(root, config) {
   const baseVisualize = root.visualize.bind(root);
   root.__sheetMetalVisualizeHookInstalled = true;
   root.visualize = function visualizeWithSheetMetalOverlay(options = {}) {
+    removeExistingSheetMetal2DGroups(this, config?.featureID);
     const result = baseVisualize(options);
     const pattern = makeSheetMetal2DGroup({
       solid: this,
@@ -1257,7 +1293,7 @@ function installSheetMetalVisualizeHook(root, config) {
       rootMatrix: config?.rootMatrix,
       showFlatPattern: config?.showFlatPattern,
     });
-    if (pattern) this.add(pattern);
+    addSheetMetal2DGroupToParent(this, pattern, config?.featureID);
     SelectionState.attach(this, { deep: true });
     this.onClick = this.onClick || (() => {});
     return result;
