@@ -136,7 +136,7 @@ export const workbenchMethods = {
 
         this._simulationWorkbenchManagerPromise = (async () => {
             try {
-                const moduleUrl = new URL('../simulation/SimulationWorkbenchManager.js', import.meta.url).href;
+                const moduleUrl = new URL('../../simulation/SimulationWorkbenchManager.js', import.meta.url).href;
                 const { SimulationWorkbenchManager } = await import(/* @vite-ignore */ moduleUrl);
                 if (this._disposed) return null;
                 if (!this.simulationWorkbenchManager) {
