@@ -444,6 +444,17 @@ export class Solid extends THREE.Group {
     }
 
     /**
+     * Batch union a list of solids, preferring the native batch boolean path.
+     * Falls back to a balanced pairwise union tree when native batching is unavailable.
+     * @param {Solid[]} solids
+     * @param {{name?: string, featureID?: string, featureId?: string, owningFeatureID?: string, nativeBatchUnion?: boolean, unionStrategy?: string, skipFailed?: boolean, overlapConditioningEnabled?: boolean}} [options]
+     * @returns {Solid|null}
+     */
+    static unionMany(..._args) {
+        return SolidMethods.unionMany.apply(this, arguments);
+    }
+
+    /**
      * Boolean union with another solid; merges face labels, metadata, and aux edges.
      * @param {Solid} other
      * @param {{overlapConditioningEnabled?: boolean}} [options]
@@ -451,6 +462,16 @@ export class Solid extends THREE.Group {
      */
     union(..._args) {
         return SolidMethods.union.apply(this, arguments);
+    }
+
+    /**
+     * Batch union this solid with additional solids.
+     * @param {Solid[]|Solid} others
+     * @param {{name?: string, featureID?: string, featureId?: string, owningFeatureID?: string, nativeBatchUnion?: boolean, unionStrategy?: string, skipFailed?: boolean, overlapConditioningEnabled?: boolean}} [options]
+     * @returns {Solid|null}
+     */
+    unionMany(..._args) {
+        return SolidMethods.unionMany.apply(this, arguments);
     }
 
     /**

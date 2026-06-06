@@ -209,24 +209,19 @@ function unionSolids(solids) {
     console.warn('[HoleFeature] unionSolids: no solids provided');
     return null;
   }
-  console.log('[HoleFeature] unionSolids: combining', solids.length, 'solids');
-  let current = solids[0];
-  if (!current) {
+  const inputs = solids.filter(Boolean);
+  if (!inputs.length) {
     console.warn('[HoleFeature] unionSolids: first solid is null/undefined');
     return null;
   }
-  console.log('[HoleFeature] unionSolids: first solid type:', current?.constructor?.name);
-  for (let i = 1; i < solids.length; i++) {
-    const next = solids[i];
-    if (!next) continue;
-    try { 
-      console.log('[HoleFeature] unionSolids: unioning with solid', i, 'type:', next?.constructor?.name);
-      current = current.union(next); 
-    }
-    catch (error) { console.warn('[HoleFeature] Union failed:', error); }
+  try {
+    const result = BREP.Solid.unionMany(inputs, { skipFailed: true });
+    console.log('[HoleFeature] unionSolids: final result type:', result?.constructor?.name);
+    return result;
+  } catch (error) {
+    console.warn('[HoleFeature] Union failed:', error);
+    return inputs[0] || null;
   }
-  console.log('[HoleFeature] unionSolids: final result type:', current?.constructor?.name);
-  return current;
 }
 
 function renameSolidFacePrefix(solid, oldPrefix, newPrefix) {

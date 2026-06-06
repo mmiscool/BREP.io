@@ -52,6 +52,7 @@ export {
 } from "./meshQueries.js";
 export {
     union,
+    unionMany,
     buildNativeUnionManyResult,
     hasNativeBooleanUnionManyBuilder,
     subtract,

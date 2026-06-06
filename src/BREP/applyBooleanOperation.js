@@ -1555,6 +1555,42 @@ export async function applyBooleanOperation(partHistory, baseSolid, booleanParam
       overlapConditioningEnabled,
     });
 
+    if (
+      op === 'UNION'
+      && baseSolid
+      && tools.length > 1
+      && !overlapConditioningEnabled
+      && booleanParam?.nativeBatchUnion !== false
+    ) {
+      try {
+        const nameSource = __booleanResolveFoldNameSource(baseSolid, tools, featureID);
+        const inheritedName = nameSource?.name || nameSource?.uuid || nameSource?.id || null;
+        const fallbackName = featureID || baseSolid.name || 'RESULT';
+        let result = Solid.unionMany([baseSolid, ...tools], {
+          featureID,
+          owningFeatureID: featureID,
+          name: inheritedName || fallbackName,
+          nativeBatchUnion: booleanParam?.nativeBatchUnion,
+          unionStrategy: booleanParam?.unionStrategy,
+          overlapConditioningEnabled: false,
+        });
+        if (!result) throw new Error('batch union returned null');
+        result = await __booleanPostTinyFaceCleanup(result, debugLog, { op, featureID });
+        try { result.name = inheritedName || fallbackName; } catch (_) { }
+        debugLog('Batch union successful', {
+          result: __booleanDebugSummarizeSolid(result),
+          diagnostics: result?.__unionManyDiagnostics || null,
+          removedCount: tools.length + 1,
+        });
+        return { added: [result], removed: [...tools, baseSolid] };
+      } catch (batchErr) {
+        debugLog('Batch union failed; falling back to pairwise union', {
+          message: batchErr?.message || batchErr,
+          diagnostics: batchErr?.unionManyDiagnostics || null,
+        });
+      }
+    }
+
     // Apply selected boolean
     if (op === 'SUBTRACT') {
       // Inverted semantics for subtract: subtract the new baseSolid (tool)

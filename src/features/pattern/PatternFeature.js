@@ -125,9 +125,9 @@ export class PatternFeature {
           ? this.#linearPattern(src, count, (this.inputParams.offset && this.inputParams.offset.position) || [10, 0, 0], /*doVisualize*/ false)
           : this.#circularPattern(src, count, this.inputParams.axisRef, Number(this.inputParams.totalAngleDeg) || 360, Number(this.inputParams.centerOffset) || 0, /*doVisualize*/ false);
 
-        let acc = src;
-        for (const c of clones) acc = acc.union(c);
-        acc.name = `${src.name || 'Pattern'}::UNION`;
+        const unionName = `${src.name || 'Pattern'}::UNION`;
+        const acc = BREP.Solid.unionMany([src, ...clones], { name: unionName }) || src;
+        try { acc.name = unionName; } catch {}
         acc.visualize();
         try { src.__removeFlag = true; } catch {}
         out.push(acc);

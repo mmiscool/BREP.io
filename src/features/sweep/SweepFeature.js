@@ -245,10 +245,11 @@ export class SweepFeature {
       throw new Error('Sweep failed to build profile islands for sweeping.');
     }
 
-    let sweep = sweeps[0];
-    for (let i = 1; i < sweeps.length; i++) {
-      sweep = sweep.union(sweeps[i]);
-    }
+    let sweep = BREP.Solid.unionMany(sweeps, {
+      featureID: this.inputParams.featureID,
+      owningFeatureID: this.inputParams.featureID,
+      name: this.inputParams.featureID || sweeps[0]?.name,
+    }) || sweeps[0];
     sweep.name = this.inputParams.featureID || sweep.name;
     if (this.inputParams.featureID) {
       sweep.owningFeatureID = this.inputParams.featureID;

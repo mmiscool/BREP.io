@@ -464,6 +464,104 @@ function buildNativeBooleanResult(left, right, operation, SolidCtor) {
     return solidFromNativeBooleanSnapshot(SolidCtor, snapshot, left?.name || `${operation}_RESULT`);
 }
 
+function describeBooleanError(error) {
+    const message = error?.message || error?.toString?.() || String(error || "");
+    return String(message || "unknown error").slice(0, 240);
+}
+
+function attachUnionManyDiagnostics(solid, diagnostics) {
+    if (!solid || typeof solid !== "object") return solid;
+    try {
+        solid.__unionManyDiagnostics = { ...diagnostics };
+    } catch { /* ignore */ }
+    try {
+        solid.userData = {
+            ...(solid.userData || {}),
+            unionMany: { ...diagnostics },
+        };
+    } catch { /* ignore */ }
+    return solid;
+}
+
+function applyUnionManyNameAndOwner(solid, options = {}, inputs = []) {
+    if (!solid || typeof solid !== "object") return solid;
+    const name = String(options?.name || "").trim();
+    if (name) {
+        try { solid.name = name; } catch { /* ignore */ }
+    }
+    try {
+        solid.owningFeatureID = options?.owningFeatureID
+            || options?.featureID
+            || options?.featureId
+            || inputs.find((entry) => entry?.owningFeatureID)?.owningFeatureID
+            || solid?.owningFeatureID
+            || null;
+    } catch { /* ignore */ }
+    return solid;
+}
+
+function unionManyPair(left, right, options = {}) {
+    return left.union(right, {
+        overlapConditioningEnabled: options?.overlapConditioningEnabled,
+    });
+}
+
+function throwUnionManyError(error, diagnostics) {
+    try { error.unionManyDiagnostics = { ...diagnostics }; } catch { /* ignore */ }
+    throw error;
+}
+
+function unionManyNodesSequential(nodes, options, diagnostics) {
+    if (!nodes.length) return null;
+    let current = nodes[0];
+    for (let i = 1; i < nodes.length; i += 1) {
+        const next = nodes[i];
+        diagnostics.unionAttemptCount += 1;
+        try {
+            current = {
+                solid: unionManyPair(current.solid, next.solid, options),
+                count: current.count + next.count,
+            };
+        } catch (error) {
+            diagnostics.unionFailureCount += 1;
+            diagnostics.skippedSolidCount += next.count;
+            if (!diagnostics.firstUnionError) diagnostics.firstUnionError = describeBooleanError(error);
+            if (!options?.skipFailed) throwUnionManyError(error, diagnostics);
+        }
+    }
+    return current;
+}
+
+function unionManyNodesBalanced(nodes, options, diagnostics) {
+    let round = nodes.slice();
+    while (round.length > 1) {
+        const nextRound = [];
+        for (let i = 0; i < round.length; i += 2) {
+            const left = round[i];
+            const right = round[i + 1];
+            if (!right) {
+                nextRound.push(left);
+                continue;
+            }
+            diagnostics.unionAttemptCount += 1;
+            try {
+                nextRound.push({
+                    solid: unionManyPair(left.solid, right.solid, options),
+                    count: left.count + right.count,
+                });
+            } catch (error) {
+                diagnostics.unionFailureCount += 1;
+                diagnostics.skippedSolidCount += right.count;
+                if (!diagnostics.firstUnionError) diagnostics.firstUnionError = describeBooleanError(error);
+                if (!options?.skipFailed) throwUnionManyError(error, diagnostics);
+                nextRound.push(left);
+            }
+        }
+        round = nextRound;
+    }
+    return round[0] || null;
+}
+
 export function buildNativeUnionManyResult(solids, SolidCtor = null, options = {}) {
     const inputs = Array.isArray(solids) ? solids.filter(Boolean) : [];
     if (!inputs.length) return null;
@@ -487,6 +585,75 @@ export function buildNativeUnionManyResult(solids, SolidCtor = null, options = {
             || null;
     } catch { /* ignore */ }
     return _cleanupBooleanResult(out);
+}
+
+export function unionMany(solidsOrOther, options = {}) {
+    const rawInputs = Array.isArray(solidsOrOther)
+        ? solidsOrOther
+        : [solidsOrOther];
+    const includeThis = this
+        && typeof this === "object"
+        && typeof this.union === "function";
+    const inputs = (includeThis ? [this, ...rawInputs] : rawInputs).filter(Boolean);
+    const diagnostics = {
+        unionStrategy: "none",
+        nativeBatchUnionAvailable: hasNativeBooleanUnionManyBuilder(),
+        nativeBatchUnionStatus: inputs.length > 1 ? "not_run" : "not_applicable",
+        nativeBatchUnionError: null,
+        unionAttemptCount: 0,
+        unionFailureCount: 0,
+        skippedSolidCount: 0,
+        contributedSolidCount: inputs.length,
+        firstUnionError: null,
+    };
+    if (!inputs.length) return null;
+
+    if (inputs.length === 1) {
+        diagnostics.unionStrategy = "single";
+        const single = applyUnionManyNameAndOwner(inputs[0], options, inputs);
+        return attachUnionManyDiagnostics(single, diagnostics);
+    }
+
+    const requestedStrategy = String(options?.unionStrategy || "native_batch").trim().toLowerCase();
+    const allowNativeBatch = options?.nativeBatchUnion !== false
+        && requestedStrategy !== "balanced"
+        && requestedStrategy !== "sequential";
+    const SolidCtor = typeof this === "function"
+        ? (this.BaseSolid || this)
+        : baseSolidCtor(inputs[0]);
+
+    if (allowNativeBatch && diagnostics.nativeBatchUnionAvailable) {
+        try {
+            const solid = buildNativeUnionManyResult(inputs, SolidCtor, {
+                ...options,
+                featureID: options?.featureID || options?.featureId,
+                owningFeatureID: options?.owningFeatureID || options?.featureID || options?.featureId,
+            });
+            diagnostics.unionStrategy = "native_batch";
+            diagnostics.nativeBatchUnionStatus = "passed";
+            diagnostics.contributedSolidCount = inputs.length;
+            applyUnionManyNameAndOwner(solid, options, inputs);
+            return attachUnionManyDiagnostics(solid, diagnostics);
+        } catch (error) {
+            diagnostics.nativeBatchUnionStatus = "failed";
+            diagnostics.nativeBatchUnionError = describeBooleanError(error);
+        }
+    } else if (!diagnostics.nativeBatchUnionAvailable) {
+        diagnostics.nativeBatchUnionStatus = "unavailable";
+    } else {
+        diagnostics.nativeBatchUnionStatus = "disabled";
+    }
+
+    const nodes = inputs.map((solid) => ({ solid, count: 1 }));
+    const fallbackNode = requestedStrategy === "sequential"
+        ? unionManyNodesSequential(nodes, options, diagnostics)
+        : unionManyNodesBalanced(nodes, options, diagnostics);
+    diagnostics.unionStrategy = requestedStrategy === "sequential"
+        ? (diagnostics.nativeBatchUnionStatus === "failed" ? "sequential_fallback" : "sequential")
+        : (diagnostics.nativeBatchUnionStatus === "failed" ? "balanced_fallback" : "balanced");
+    diagnostics.contributedSolidCount = Number(fallbackNode?.count || 0);
+    const solid = applyUnionManyNameAndOwner(fallbackNode?.solid || null, options, inputs);
+    return attachUnionManyDiagnostics(solid, diagnostics);
 }
 
 function _dropDisconnectedIslandsByVolume(solid, minVolume = BOOLEAN_DISCONNECTED_ISLAND_MIN_VOLUME) {

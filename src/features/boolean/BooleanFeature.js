@@ -86,8 +86,12 @@ export class BooleanFeature {
         //   helper will remove target and the base union; also mark the original tool solids as removed here.
         let effects = { added: [], removed: [] };
         if (op === 'SUBTRACT') {
-            let toolUnion = tools[0];
-            for (let i = 1; i < tools.length; i++) toolUnion = toolUnion.union(tools[i]);
+            const toolUnion = tools.length > 1
+                ? BREP.Solid.unionMany(tools, {
+                    featureID: this.inputParams.featureID,
+                    owningFeatureID: this.inputParams.featureID,
+                })
+                : tools[0];
             const param = {
                 operation: 'SUBTRACT',
                 targets: [target],

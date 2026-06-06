@@ -584,21 +584,8 @@ export class TubeFeature {
         }
         return solids[0];
       }
-      console.log('Attempting union of solids:', solids);
-
-
-
       try {
-        let result = solids[0];
-
-        for (let idx = 1; idx < solids.length; idx++) {
-          try {
-            result = result.union(solids[idx]);
-          } catch (err) {
-            console.warn(`[TubeFeature] Union step failed at index ${idx}:`, err?.message || err);
-            return null;
-          }
-        }
+        const result = BREP.Solid.unionMany(solids, { name: label || undefined });
         if (label) {
           try { result.name = label; } catch (_) { }
         }

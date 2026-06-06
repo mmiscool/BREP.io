@@ -1,7 +1,4 @@
-import {
-    buildNativeUnionManyResult,
-    hasNativeBooleanUnionManyBuilder,
-} from "./booleanOps.js";
+import { unionMany } from "./booleanOps.js";
 
 function getFaceName(entry) {
     if (!entry) return null;
@@ -116,123 +113,6 @@ function roundMs(value) {
     return Number.isFinite(Number(value)) ? Number(Number(value).toFixed(3)) : 0;
 }
 
-function describeError(error) {
-    const message = error?.message || error?.toString?.() || String(error || "");
-    return String(message || "unknown error").slice(0, 240);
-}
-
-function baseSolidCtorFor(solid) {
-    const ctor = solid && solid.constructor;
-    return (ctor && ctor.BaseSolid) ? ctor.BaseSolid : ctor;
-}
-
-function unionNodesSequential(nodes, diagnostics) {
-    if (!nodes.length) return null;
-    let current = nodes[0];
-    for (let i = 1; i < nodes.length; i += 1) {
-        const next = nodes[i];
-        diagnostics.unionAttemptCount += 1;
-        try {
-            current = {
-                solid: current.solid.union(next.solid),
-                count: current.count + next.count,
-            };
-        } catch (error) {
-            diagnostics.unionFailureCount += 1;
-            diagnostics.skippedSolidCount += next.count;
-            if (!diagnostics.firstUnionError) diagnostics.firstUnionError = describeError(error);
-        }
-    }
-    return current;
-}
-
-function unionNodesBalanced(nodes, diagnostics) {
-    let round = nodes.slice();
-    while (round.length > 1) {
-        const nextRound = [];
-        for (let i = 0; i < round.length; i += 2) {
-            const left = round[i];
-            const right = round[i + 1];
-            if (!right) {
-                nextRound.push(left);
-                continue;
-            }
-            diagnostics.unionAttemptCount += 1;
-            try {
-                nextRound.push({
-                    solid: left.solid.union(right.solid),
-                    count: left.count + right.count,
-                });
-            } catch (error) {
-                diagnostics.unionFailureCount += 1;
-                diagnostics.skippedSolidCount += right.count;
-                if (!diagnostics.firstUnionError) diagnostics.firstUnionError = describeError(error);
-                nextRound.push(left);
-            }
-        }
-        round = nextRound;
-    }
-    return round[0] || null;
-}
-
-function unionThickenedSolids(thickenedSolids, options = {}) {
-    const solids = Array.isArray(thickenedSolids) ? thickenedSolids.filter(Boolean) : [];
-    const diagnostics = {
-        unionStrategy: "none",
-        nativeBatchUnionAvailable: hasNativeBooleanUnionManyBuilder(),
-        nativeBatchUnionStatus: solids.length > 1 ? "not_run" : "not_applicable",
-        nativeBatchUnionError: null,
-        unionAttemptCount: 0,
-        unionFailureCount: 0,
-        skippedSolidCount: 0,
-        contributedSolidCount: solids.length,
-        firstUnionError: null,
-    };
-    if (!solids.length) {
-        diagnostics.contributedSolidCount = 0;
-        return { solid: null, diagnostics };
-    }
-    if (solids.length === 1) {
-        diagnostics.unionStrategy = "single";
-        return { solid: solids[0], diagnostics };
-    }
-
-    const requestedStrategy = String(options?.unionStrategy || "native_batch").trim().toLowerCase();
-    const allowNativeBatch = options?.nativeBatchUnion !== false
-        && requestedStrategy !== "balanced"
-        && requestedStrategy !== "sequential";
-    if (allowNativeBatch && diagnostics.nativeBatchUnionAvailable) {
-        try {
-            const solid = buildNativeUnionManyResult(solids, baseSolidCtorFor(solids[0]), {
-                featureID: options?.featureId,
-                name: options?.name,
-                owningFeatureID: options?.featureId,
-            });
-            if (!solid) throw new Error("native batch union returned null");
-            diagnostics.unionStrategy = "native_batch";
-            diagnostics.nativeBatchUnionStatus = "passed";
-            return { solid, diagnostics };
-        } catch (error) {
-            diagnostics.nativeBatchUnionStatus = "failed";
-            diagnostics.nativeBatchUnionError = describeError(error);
-        }
-    } else if (!diagnostics.nativeBatchUnionAvailable) {
-        diagnostics.nativeBatchUnionStatus = "unavailable";
-    } else if (!allowNativeBatch) {
-        diagnostics.nativeBatchUnionStatus = "disabled";
-    }
-
-    const nodes = solids.map((solid) => ({ solid, count: 1 }));
-    const node = requestedStrategy === "sequential"
-        ? unionNodesSequential(nodes, diagnostics)
-        : unionNodesBalanced(nodes, diagnostics);
-    diagnostics.unionStrategy = requestedStrategy === "sequential"
-        ? (diagnostics.nativeBatchUnionStatus === "failed" ? "sequential_fallback" : "sequential")
-        : (diagnostics.nativeBatchUnionStatus === "failed" ? "balanced_fallback" : "balanced");
-    diagnostics.contributedSolidCount = Number(node?.count || 0);
-    return { solid: node?.solid || null, diagnostics };
-}
-
 export function offsetShell(faces, distance, options = {}) {
     const featureId = String(options?.featureId || options?.name || this?.name || "OffsetShell").trim() || "OffsetShell";
     const newSolidName = String(options?.newSolidName || `${this?.name || "Solid"}_${featureId}`).trim() || `${this?.name || "Solid"}_${featureId}`;
@@ -285,18 +165,26 @@ export function offsetShell(faces, distance, options = {}) {
     }
 
     const unionStart = nowMs();
-    const unionResult = unionThickenedSolids(thickenedSolids, {
-        featureId,
-        name: newSolidName,
-        nativeBatchUnion: options?.nativeBatchUnion,
-        unionStrategy: options?.offsetShellUnionStrategy,
-    });
+    let unionDiagnostics = {};
+    let combined = null;
+    try {
+        combined = unionMany(thickenedSolids, {
+            featureID: featureId,
+            owningFeatureID: featureId,
+            name: newSolidName,
+            nativeBatchUnion: options?.nativeBatchUnion,
+            unionStrategy: options?.offsetShellUnionStrategy,
+            skipFailed: true,
+        });
+        unionDiagnostics = combined?.__unionManyDiagnostics || {};
+    } catch (error) {
+        unionDiagnostics = error?.unionManyDiagnostics || {};
+    }
     unionWallMs += nowMs() - unionStart;
 
-    let combined = unionResult.solid;
     if (!combined) return null;
-    skippedCount += Number(unionResult.diagnostics?.skippedSolidCount || 0);
-    generatedCount = Number(unionResult.diagnostics?.contributedSolidCount || thickenedSolids.length);
+    skippedCount += Number(unionDiagnostics?.skippedSolidCount || 0);
+    generatedCount = Number(unionDiagnostics?.contributedSolidCount || thickenedSolids.length);
 
     try { combined.name = newSolidName; } catch { /* ignore */ }
     combined.__offsetMethod = 'face_thicken_union_shell';
@@ -310,13 +198,13 @@ export function offsetShell(faces, distance, options = {}) {
         thickenDistance,
         thickenWallMs: roundMs(thickenWallMs),
         unionWallMs: roundMs(unionWallMs),
-        unionStrategy: unionResult.diagnostics?.unionStrategy || "unknown",
-        nativeBatchUnionAvailable: !!unionResult.diagnostics?.nativeBatchUnionAvailable,
-        nativeBatchUnionStatus: unionResult.diagnostics?.nativeBatchUnionStatus || "unknown",
-        nativeBatchUnionError: unionResult.diagnostics?.nativeBatchUnionError || null,
-        unionAttemptCount: Number(unionResult.diagnostics?.unionAttemptCount || 0),
-        unionFailureCount: Number(unionResult.diagnostics?.unionFailureCount || 0),
-        firstUnionError: unionResult.diagnostics?.firstUnionError || null,
+        unionStrategy: unionDiagnostics?.unionStrategy || "unknown",
+        nativeBatchUnionAvailable: !!unionDiagnostics?.nativeBatchUnionAvailable,
+        nativeBatchUnionStatus: unionDiagnostics?.nativeBatchUnionStatus || "unknown",
+        nativeBatchUnionError: unionDiagnostics?.nativeBatchUnionError || null,
+        unionAttemptCount: Number(unionDiagnostics?.unionAttemptCount || 0),
+        unionFailureCount: Number(unionDiagnostics?.unionFailureCount || 0),
+        firstUnionError: unionDiagnostics?.firstUnionError || null,
     };
     try {
         combined.userData = {
@@ -328,7 +216,7 @@ export function offsetShell(faces, distance, options = {}) {
                 generatedFaceCount: generatedCount,
                 skippedFaceCount: skippedCount,
                 thickenDistance,
-                unionStrategy: unionResult.diagnostics?.unionStrategy || "unknown",
+                unionStrategy: unionDiagnostics?.unionStrategy || "unknown",
             },
         };
     } catch { /* ignore */ }
