@@ -244,26 +244,7 @@ export function registerSelectionToolbarButtons(viewer) {
     }
   } catch { }
 
-  try {
-    SelectionFilter.registerSelectionAction({
-      id: 'selection-action-edit-sketch-like-feature',
-      label: 'Edit feature',
-      title: 'Open the selected sketch-like feature in history for editing',
-      onClick: async () => {
-        const selection = SelectionFilter.getSelectedObjects();
-        const entry = getSketchLikeFeatureEntry(selection, viewer);
-        if (!entry) {
-          viewer?._toast?.('Select a single sketch-like object.');
-          return;
-        }
-        const revealed = await revealHistoryEntry(viewer, entry.featureId);
-        if (!revealed) {
-          viewer?._toast?.(`Feature "${entry.featureId}" is not available in history.`);
-        }
-      },
-      shouldShow: (selection) => isNonSimulationWorkbench(viewer) && !!getSketchLikeFeatureEntry(selection, viewer),
-    });
-  } catch { }
+
 
   try {
     SelectionFilter.registerSelectionAction({
