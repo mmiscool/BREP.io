@@ -35,12 +35,6 @@ class BrepSolidCore {
   void BakeTransform(const emscripten::val& matrix_values);
   void TransformMetadata(const emscripten::val& matrix_values);
   void WeldVerticesByEpsilon(double eps);
-  emscripten::val BuildThickenedFaceShellMesh(const emscripten::val& options);
-  emscripten::val AnalyzeMeshTopology() const;
-  emscripten::val AnalyzeTriangleOrientation() const;
-  emscripten::val WeldVerticesByPositionKey(double eps);
-  uint32_t CullTrianglesTouchingNonManifoldEdges();
-  uint32_t CullTriangleTouchingSameDirectionEdge();
   emscripten::val PushFace(const std::string& face_name, double distance);
   void NormalizeFaceTracking();
   bool IsCoherentlyOrientedManifold() const;

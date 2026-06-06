@@ -234,7 +234,6 @@ function unionThickenedSolids(thickenedSolids, options = {}) {
 }
 
 export function offsetShell(faces, distance, options = {}) {
-    const offsetStart = nowMs();
     const featureId = String(options?.featureId || options?.name || this?.name || "OffsetShell").trim() || "OffsetShell";
     const newSolidName = String(options?.newSolidName || `${this?.name || "Solid"}_${featureId}`).trim() || `${this?.name || "Solid"}_${featureId}`;
 
@@ -259,7 +258,6 @@ export function offsetShell(faces, distance, options = {}) {
     let skippedCount = 0;
     let thickenWallMs = 0;
     let unionWallMs = 0;
-    const thickenBenchmarks = [];
     const thickenedSolids = [];
 
     for (let index = 0; index < faceObjects.length; index += 1) {
@@ -282,9 +280,6 @@ export function offsetShell(faces, distance, options = {}) {
         if (!thickened) {
             skippedCount += 1;
             continue;
-        }
-        if (thickened.__thickenBenchmark) {
-            thickenBenchmarks.push(thickened.__thickenBenchmark);
         }
         thickenedSolids.push(thickened);
     }
@@ -338,38 +333,5 @@ export function offsetShell(faces, distance, options = {}) {
         };
     } catch { /* ignore */ }
     appendSourceCenterlines(combined, this);
-    if (thickenBenchmarks.length) {
-        const sum = (field) => thickenBenchmarks.reduce((total, entry) => total + (Number(entry?.[field]) || 0), 0);
-        const jsMs = sum("jsMs");
-        const cppMs = sum("cppMs");
-        const surfaceExtractionMs = sum("surfaceExtractionMs");
-        const totalMs = nowMs() - offsetStart;
-        try {
-            console.log("[Solid.offsetShell] Face.thicken JS vs C++ aggregate", {
-                sourceSolidName: this?.name || "",
-                featureId,
-                thickenedFaceCount: faceObjects.length,
-                generatedFaceCount: generatedCount,
-                skippedFaceCount: skippedCount,
-                jsMs: roundMs(jsMs),
-                cppMs: roundMs(cppMs),
-                cppVsJsRatio: jsMs > 0 ? Number((cppMs / jsMs).toFixed(3)) : null,
-                surfaceExtractionMs: roundMs(surfaceExtractionMs),
-                thickenWallMs: roundMs(thickenWallMs),
-                unionWallMs: roundMs(unionWallMs),
-                unionStrategy: unionResult.diagnostics?.unionStrategy || "unknown",
-                nativeBatchUnionAvailable: !!unionResult.diagnostics?.nativeBatchUnionAvailable,
-                nativeBatchUnionStatus: unionResult.diagnostics?.nativeBatchUnionStatus || "unknown",
-                nativeBatchUnionError: unionResult.diagnostics?.nativeBatchUnionError || null,
-                unionAttemptCount: Number(unionResult.diagnostics?.unionAttemptCount || 0),
-                unionFailureCount: Number(unionResult.diagnostics?.unionFailureCount || 0),
-                firstUnionError: unionResult.diagnostics?.firstUnionError || null,
-                totalWallMs: roundMs(totalMs),
-                unaccountedWallMs: roundMs(totalMs - thickenWallMs - unionWallMs),
-            });
-        } catch {
-            /* ignore console failures */
-        }
-    }
     return combined;
 }

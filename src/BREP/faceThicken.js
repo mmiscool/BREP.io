@@ -1,32 +1,8 @@
 import { Solid } from './BetterSolid.js';
-import {
-  CppSolidCore,
-  cppSolidCoreHasNativeFaceThickenShell,
-  cppSolidCoreHasNativeThickenMeshOps,
-  getSyncedCppSolidCore,
-  syncSolidAuthoringStateFromCpp,
-} from './CppSolidCore.js';
 import { Manifold, THREE } from './SolidShared.js';
 
 const EPS = 1e-9;
 const TRI_EPS = 1e-12;
-const NATIVE_THICKEN_SHELL_MIN_TRIANGLES = 8192;
-const NATIVE_THICKEN_MESH_OP_MIN_TRIANGLES = 8192;
-
-function nowMs() {
-  try {
-    if (globalThis.performance && typeof globalThis.performance.now === 'function') {
-      return globalThis.performance.now();
-    }
-  } catch {
-    /* fall through */
-  }
-  return Date.now();
-}
-
-function formatMs(value) {
-  return Number.isFinite(Number(value)) ? Number(value).toFixed(3) : 'n/a';
-}
 
 function sanitizeToken(value, fallback = 'FACE') {
   const raw = value == null ? '' : String(value);
@@ -45,35 +21,10 @@ function edgeKey(a, b) {
   return `${i}|${j}`;
 }
 
-function invalidateNativeThickenCore(solid) {
+function invalidateCppSolidCoreCache(solid) {
   if (solid && typeof solid === 'object') {
     solid._cppSolidCoreSyncStamp = null;
   }
-}
-
-function thickenSolidTriangleCount(solid) {
-  return ((solid?._triVerts?.length || 0) / 3) | 0;
-}
-
-function shouldUseNativeThickenMeshOps(solid) {
-  if (solid?.__nativeThickenMeshOps === false) return false;
-  if (solid?.__nativeThickenMeshOps === true) return cppSolidCoreHasNativeThickenMeshOps;
-  const minTriangles = Math.max(
-    0,
-    Number.isFinite(Number(solid?.__nativeThickenMeshOpsMinTriangles))
-      ? Number(solid.__nativeThickenMeshOpsMinTriangles)
-      : NATIVE_THICKEN_MESH_OP_MIN_TRIANGLES,
-  );
-  return cppSolidCoreHasNativeThickenMeshOps
-    && thickenSolidTriangleCount(solid) >= minTriangles;
-}
-
-function syncNativeThickenMutationFromCpp(solid, core) {
-  syncSolidAuthoringStateFromCpp(solid, core);
-  solid._dirty = true;
-  solid._faceIndex = null;
-  try { if (solid._manifold && typeof solid._manifold.delete === 'function') solid._manifold.delete(); } catch { /* ignore */ }
-  solid._manifold = null;
 }
 
 function pointKey(point, epsilon) {
@@ -480,13 +431,6 @@ function addSmoothAdjacentBoundaryNormals(face, surface, options = {}) {
 }
 
 function analyzeMeshTopology(solid) {
-  if (shouldUseNativeThickenMeshOps(solid)) {
-    try {
-      return getSyncedCppSolidCore(solid).analyzeMeshTopology();
-    } catch {
-      /* fall through to JS topology analysis */
-    }
-  }
   const triVerts = Array.isArray(solid?._triVerts) ? solid._triVerts : [];
   const triCount = (triVerts.length / 3) | 0;
   if (!triCount) return { boundaryEdgeCount: 0, nonManifoldEdgeCount: 0, triangleCount: 0 };
@@ -510,13 +454,6 @@ function analyzeMeshTopology(solid) {
 }
 
 function analyzeTriangleOrientation(solid) {
-  if (shouldUseNativeThickenMeshOps(solid)) {
-    try {
-      return getSyncedCppSolidCore(solid).analyzeTriangleOrientation();
-    } catch {
-      /* fall through to JS orientation analysis */
-    }
-  }
   const triVerts = Array.isArray(solid?._triVerts) ? solid._triVerts : [];
   const triCount = (triVerts.length / 3) | 0;
   if (!triCount) return { sameDirectionEdgeCount: 0, oppositeDirectionEdgeCount: 0, ambiguousEdgeCount: 0 };
@@ -707,7 +644,7 @@ function orientSolidTrianglesByAdjacency(solid) {
     solid._dirty = true;
     solid._faceIndex = null;
     solid._manifold = null;
-    invalidateNativeThickenCore(solid);
+    invalidateCppSolidCoreCache(solid);
   }
   return changed;
 }
@@ -790,25 +727,13 @@ function orientSolidComponentsBySignedVolume(solid) {
     solid._dirty = true;
     solid._faceIndex = null;
     solid._manifold = null;
-    invalidateNativeThickenCore(solid);
+    invalidateCppSolidCoreCache(solid);
   }
   return changed;
 }
 
 function weldSolidVerticesByPosition(solid, epsilon) {
   const eps = Math.max(Number(epsilon) || 0, 0);
-  if (eps > 0 && shouldUseNativeThickenMeshOps(solid)) {
-    try {
-      const core = getSyncedCppSolidCore(solid);
-      const result = core.weldVerticesByPositionKey(eps);
-      if ((result.weldedVertexCount || 0) > 0 || (result.removedTriangleCount || 0) > 0) {
-        syncNativeThickenMutationFromCpp(solid, core);
-      }
-      return result;
-    } catch {
-      /* fall through to JS weld */
-    }
-  }
   const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : [];
   const tv = Array.isArray(solid?._triVerts) ? solid._triVerts : [];
   const ids = Array.isArray(solid?._triIDs) ? solid._triIDs : [];
@@ -880,7 +805,7 @@ function weldSolidVerticesByPosition(solid, epsilon) {
   solid._dirty = true;
   solid._faceIndex = null;
   solid._manifold = null;
-  invalidateNativeThickenCore(solid);
+  invalidateCppSolidCoreCache(solid);
   return { weldedVertexCount, removedTriangleCount };
 }
 
@@ -1357,88 +1282,7 @@ function buildRawClassification(classificationState, triIDs, method = 'raw_face_
   };
 }
 
-function shouldUseNativeThickenShell(surface, options = {}) {
-  if (options.nativeThickenShell === false) return false;
-  if (options.nativeThickenShell === true) return cppSolidCoreHasNativeFaceThickenShell;
-  if (!cppSolidCoreHasNativeFaceThickenShell) return false;
-  const sourceTriangleCount = Array.isArray(surface?.triangles) ? surface.triangles.length : 0;
-  const sourceVertexCount = Array.isArray(surface?.vertices) ? surface.vertices.length : 0;
-  const minTriangles = Math.max(
-    0,
-    Number.isFinite(Number(options.nativeThickenShellMinTriangles))
-      ? Number(options.nativeThickenShellMinTriangles)
-      : NATIVE_THICKEN_SHELL_MIN_TRIANGLES,
-  );
-  return sourceTriangleCount >= minTriangles || sourceVertexCount >= (minTriangles * 2);
-}
-
-function buildNativeStitchedThickenMesh(surface, distance, classificationState, options = {}) {
-  if (!shouldUseNativeThickenShell(surface, options)) return null;
-  if (!cppSolidCoreHasNativeFaceThickenShell) return null;
-  const vertexCount = Array.isArray(surface?.vertices) ? surface.vertices.length : 0;
-  if (!vertexCount) return null;
-
-  const vertices = [];
-  const vertexNormals = [];
-  for (let i = 0; i < vertexCount; i++) {
-    const p = surface.vertices[i];
-    const n = surface.vertexNormals?.[i];
-    if (!p || !n) return null;
-    vertices.push(Number(p.x) || 0, Number(p.y) || 0, Number(p.z) || 0);
-    vertexNormals.push(Number(n.x) || 0, Number(n.y) || 0, Number(n.z) || 0);
-  }
-
-  const triangles = [];
-  for (const tri of surface.triangles || []) {
-    if (!Array.isArray(tri) || tri.length < 3) continue;
-    triangles.push(tri[0] >>> 0, tri[1] >>> 0, tri[2] >>> 0);
-  }
-
-  const sidewallEdges = [];
-  for (const loop of surface.loops || []) {
-    for (const edge of loop?.edges || []) {
-      const sideLabel = classificationState?.edgeKeyToLabel?.get?.(edge.key);
-      const sideFaceID = Number(classificationState?.faceNameToID?.get?.(sideLabel)) >>> 0;
-      if (!sideFaceID) continue;
-      sidewallEdges.push(edge.start >>> 0, edge.end >>> 0, sideFaceID);
-    }
-  }
-
-  const startFaceID = Number(classificationState?.faceNameToID?.get?.(classificationState?.labels?.start)) >>> 0;
-  const endFaceID = Number(classificationState?.faceNameToID?.get?.(classificationState?.labels?.end)) >>> 0;
-  if (!startFaceID || !endFaceID) return null;
-
-  let core = null;
-  try {
-    core = new CppSolidCore();
-    const mesh = core.buildThickenedFaceShellMesh({
-      distance,
-      vertices,
-      vertexNormals,
-      triangles,
-      sidewallEdges,
-      startFaceID,
-      endFaceID,
-    });
-    if (!mesh || !Array.isArray(mesh.triVerts) || !mesh.triVerts.length) return null;
-    return {
-      numProp: Number(mesh.numProp ?? 3) || 3,
-      vertProperties: Float32Array.from(mesh.vertProperties || []),
-      triVerts: Uint32Array.from(mesh.triVerts || []),
-      faceID: Uint32Array.from(mesh.faceID || []),
-      nativeKernel: mesh.nativeKernel === true,
-    };
-  } catch {
-    return null;
-  } finally {
-    try { core?.dispose?.(); } catch { /* ignore */ }
-  }
-}
-
 function buildStitchedThickenMesh(surface, distance, classificationState, options = {}) {
-  const nativeMesh = buildNativeStitchedThickenMesh(surface, distance, classificationState, options);
-  if (nativeMesh) return nativeMesh;
-
   const vertexCount = Array.isArray(surface?.vertices) ? surface.vertices.length : 0;
   if (!vertexCount) return null;
 
@@ -1882,7 +1726,7 @@ function cullInternalTrianglesByIndexedRaycast(solid, options = {}) {
   solid._dirty = true;
   solid._faceIndex = null;
   solid._manifold = null;
-  invalidateNativeThickenCore(solid);
+  invalidateCppSolidCoreCache(solid);
   try { solid.fixTriangleWindingsByAdjacency?.(); } catch { /* ignore */ }
   return removed;
 }
@@ -2476,7 +2320,7 @@ function fillBoundaryLoopsWithTriangles(solid, faceID) {
     solid._dirty = true;
     solid._faceIndex = null;
     solid._manifold = null;
-    invalidateNativeThickenCore(solid);
+    invalidateCppSolidCoreCache(solid);
   }
   return added;
 }
@@ -2592,16 +2436,6 @@ function fillIntersectionCapBoundaryLoops(solid, sourceFaceName, distance) {
 }
 
 function cullTrianglesTouchingNonManifoldEdges(solid) {
-  if (shouldUseNativeThickenMeshOps(solid)) {
-    try {
-      const core = getSyncedCppSolidCore(solid);
-      const removed = core.cullTrianglesTouchingNonManifoldEdges();
-      if (removed > 0) syncNativeThickenMutationFromCpp(solid, core);
-      return removed;
-    } catch {
-      /* fall through to JS cull */
-    }
-  }
   const tv = Array.isArray(solid?._triVerts) ? solid._triVerts : [];
   const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : [];
   const ids = Array.isArray(solid?._triIDs) ? solid._triIDs : [];
@@ -2681,21 +2515,11 @@ function cullTrianglesTouchingNonManifoldEdges(solid) {
   solid._dirty = true;
   solid._faceIndex = null;
   solid._manifold = null;
-  invalidateNativeThickenCore(solid);
+  invalidateCppSolidCoreCache(solid);
   return removed;
 }
 
 function cullTrianglesTouchingSameDirectionEdges(solid) {
-  if (shouldUseNativeThickenMeshOps(solid)) {
-    try {
-      const core = getSyncedCppSolidCore(solid);
-      const removed = core.cullTriangleTouchingSameDirectionEdge();
-      if (removed > 0) syncNativeThickenMutationFromCpp(solid, core);
-      return removed;
-    } catch {
-      /* fall through to JS cull */
-    }
-  }
   const tv = Array.isArray(solid?._triVerts) ? solid._triVerts : [];
   const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : [];
   const ids = Array.isArray(solid?._triIDs) ? solid._triIDs : [];
@@ -2786,7 +2610,7 @@ function cullTrianglesTouchingSameDirectionEdges(solid) {
   solid._dirty = true;
   solid._faceIndex = null;
   solid._manifold = null;
-  invalidateNativeThickenCore(solid);
+  invalidateCppSolidCoreCache(solid);
   return 1;
 }
 
@@ -2975,7 +2799,7 @@ function pruneOverusedTriangles(solid) {
     solid._dirty = true;
     solid._faceIndex = null;
     solid._manifold = null;
-    invalidateNativeThickenCore(solid);
+    invalidateCppSolidCoreCache(solid);
   };
 
   for (let pass = 0; pass < 256; pass++) {
@@ -3060,10 +2884,10 @@ function triangleSplitCullSolid(solid, options = {}) {
           }) || 0))
         : 0)
       : Number(solid.splitSelfIntersectingTriangles?.(splitOptions) || 0);
-    if (splitThisPass > 0 && options.skipTriangleSplit !== true) invalidateNativeThickenCore(solid);
+    if (splitThisPass > 0 && options.skipTriangleSplit !== true) invalidateCppSolidCoreCache(solid);
     splitCount += splitThisPass;
     const degenerateAfterSplit = Number(solid.removeDegenerateTriangles?.() || 0);
-    if (degenerateAfterSplit > 0) invalidateNativeThickenCore(solid);
+    if (degenerateAfterSplit > 0) invalidateCppSolidCoreCache(solid);
     degenerateTriangleCount += degenerateAfterSplit;
     const weldAfterSplit = weldSolidVerticesByPosition(solid, weldTolerance);
     weldedVertexCount += weldAfterSplit.weldedVertexCount || 0;
@@ -3084,10 +2908,10 @@ function triangleSplitCullSolid(solid, options = {}) {
       : cullMethod === 'winding'
       ? Number(solid.removeInternalTrianglesByWinding?.(options.windingOptions || {}) || 0)
       : Number(cullInternalTrianglesByIndexedRaycast(solid, options.raycastCullOptions || {}) || 0);
-    if (culledThisPass > 0) invalidateNativeThickenCore(solid);
+    if (culledThisPass > 0) invalidateCppSolidCoreCache(solid);
     culledTriangleCount += culledThisPass;
     const degenerateAfterCull = Number(solid.removeDegenerateTriangles?.() || 0);
-    if (degenerateAfterCull > 0) invalidateNativeThickenCore(solid);
+    if (degenerateAfterCull > 0) invalidateCppSolidCoreCache(solid);
     degenerateTriangleCount += degenerateAfterCull;
     const weldAfterCull = weldSolidVerticesByPosition(solid, weldTolerance);
     weldedVertexCount += weldAfterCull.weldedVertexCount || 0;
@@ -3381,11 +3205,6 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
       : buildStitchedShellSolid(surface, dist, classificationState, solidName, options);
     if (!staged) {
       throw new Error('Face.thicken() failed to build the stitched triangle shell.');
-    }
-    if (options.nativeThickenMeshOps === false) staged.__nativeThickenMeshOps = false;
-    else if (options.nativeThickenMeshOps === true) staged.__nativeThickenMeshOps = true;
-    if (Number.isFinite(Number(options.nativeThickenMeshOpsMinTriangles))) {
-      staged.__nativeThickenMeshOpsMinTriangles = Math.max(0, Number(options.nativeThickenMeshOpsMinTriangles));
     }
 
     let topology = analyzeMeshTopology(staged);
@@ -3857,117 +3676,15 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
   }
 }
 
-function benchmarkThickenSurfaceToSolid(surface, face, distance, options = {}, benchmarkContext = {}) {
-  const shouldCompare = options.compareNativeThicken !== false;
-  if (!shouldCompare) {
-    return thickenSurfaceToSolid(surface, face, distance, options);
-  }
-
-  const sourceFaceName = String(
-    options.sourceFaceName
-    || benchmarkContext.sourceFaceName
-    || face?.userData?.faceName
-    || face?.name
-    || '',
-  ).trim();
-  const sourceTriangleCount = Array.isArray(surface?.triangles) ? surface.triangles.length : 0;
-  const sourceVertexCount = Array.isArray(surface?.vertices) ? surface.vertices.length : 0;
-  const extractionMs = Number(benchmarkContext.surfaceExtractionMs);
-
-  let jsResult = null;
-  let nativeResult = null;
-  let jsError = null;
-  let nativeError = null;
-  let jsMs = 0;
-  let nativeMs = 0;
-
-  const jsOptions = {
-    ...options,
-    compareNativeThicken: false,
-    nativeThickenShell: false,
-    nativeThickenMeshOps: false,
-  };
-  const nativeOptions = {
-    ...options,
-    compareNativeThicken: false,
-    nativeThickenShell: true,
-    nativeThickenShellMinTriangles: 0,
-    nativeThickenMeshOps: true,
-    nativeThickenMeshOpsMinTriangles: 0,
-  };
-
-  const jsStart = nowMs();
-  try {
-    jsResult = thickenSurfaceToSolid(surface, face, distance, jsOptions);
-  } catch (error) {
-    jsError = error;
-  } finally {
-    jsMs = nowMs() - jsStart;
-  }
-
-  const nativeStart = nowMs();
-  try {
-    nativeResult = thickenSurfaceToSolid(surface, face, distance, nativeOptions);
-  } catch (error) {
-    nativeError = error;
-  } finally {
-    nativeMs = nowMs() - nativeStart;
-  }
-
-  const jsTriCount = ((jsResult?._triVerts?.length || 0) / 3) | 0;
-  const nativeTriCount = ((nativeResult?._triVerts?.length || 0) / 3) | 0;
-  const ratio = jsMs > 0 && Number.isFinite(nativeMs) ? nativeMs / jsMs : null;
-  const payload = {
-    sourceFaceName,
-    sourceTriangleCount,
-    sourceVertexCount,
-    ...(Number.isFinite(extractionMs) ? { surfaceExtractionMs: Number(formatMs(extractionMs)) } : {}),
-    jsMs: Number(formatMs(jsMs)),
-    cppMs: Number(formatMs(nativeMs)),
-    cppVsJsRatio: ratio == null ? null : Number(ratio.toFixed(3)),
-    jsStatus: jsError ? 'failed' : 'passed',
-    cppStatus: nativeError ? 'failed' : 'passed',
-    jsResultTriangleCount: jsTriCount,
-    cppResultTriangleCount: nativeTriCount,
-    cppNativeShellAvailable: cppSolidCoreHasNativeFaceThickenShell,
-    cppNativeMeshOpsAvailable: cppSolidCoreHasNativeThickenMeshOps,
-  };
-  if (jsError) payload.jsError = jsError?.message || String(jsError);
-  if (nativeError) payload.cppError = nativeError?.message || String(nativeError);
-
-  try {
-    console.log('[Face.thicken] JS vs C++ timing', payload);
-  } catch {
-    /* ignore console failures */
-  }
-
-  if (jsResult && typeof jsResult === 'object') {
-    jsResult.__thickenBenchmark = payload;
-    jsResult.userData = {
-      ...(jsResult.userData || {}),
-      thickenBenchmark: payload,
-    };
-  }
-
-  try { nativeResult?.free?.(); } catch { /* sidecar result only */ }
-
-  if (jsError) throw jsError;
-  return jsResult;
-}
-
 export function thickenFaceToSolid(face, distance, options = {}) {
-  const extractionStart = nowMs();
   const surface = extractFaceSurface(face, options);
-  const surfaceExtractionMs = nowMs() - extractionStart;
   const sourceFaceName = String(options.sourceFaceName || face?.userData?.faceName || face?.name || '').trim();
-  return benchmarkThickenSurfaceToSolid(surface, face, distance, {
+  return thickenSurfaceToSolid(surface, face, distance, {
     ...options,
     sourceFaceNames: Array.isArray(options.sourceFaceNames)
       ? options.sourceFaceNames
       : (sourceFaceName ? [sourceFaceName] : undefined),
-  }, {
     sourceFaceName,
-    surfaceExtractionMs,
   });
 }
 
@@ -3983,15 +3700,10 @@ export function thickenFacesToSolid(faces, distance, options = {}) {
   ));
   const featureId = sanitizeToken(options.featureId || options.name || sourceFaceNames[0] || 'THICKEN', 'THICKEN');
   const sourceFaceName = String(options.sourceFaceName || `${featureId}_PATCH`).trim() || `${featureId}_PATCH`;
-  const extractionStart = nowMs();
   const surface = extractFacesSurface(faceList, options);
-  const surfaceExtractionMs = nowMs() - extractionStart;
-  return benchmarkThickenSurfaceToSolid(surface, faceList[0], distance, {
+  return thickenSurfaceToSolid(surface, faceList[0], distance, {
     ...options,
     sourceFaceName,
     sourceFaceNames,
-  }, {
-    sourceFaceName,
-    surfaceExtractionMs,
   });
 }
