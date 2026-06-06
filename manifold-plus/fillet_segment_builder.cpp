@@ -4272,6 +4272,50 @@ std::vector<Vec3> ResamplePolyline3(const std::vector<Vec3>& src, uint32_t n,
   return out;
 }
 
+Vec3 PointAtReferenceArcLength(const std::vector<Vec3>& reference,
+                               const std::vector<Vec3>& values,
+                               double distance) {
+  if (values.empty()) return {};
+  if (reference.size() < 2 || values.size() != reference.size()) {
+    return values.back();
+  }
+  double acc = 0.0;
+  for (size_t i = 1; i < reference.size(); ++i) {
+    const double seg = std::sqrt(DistanceSq(reference[i - 1], reference[i]));
+    if (acc + seg >= distance && seg > kEps) {
+      const double t = Clamp((distance - acc) / seg, 0.0, 1.0);
+      return Lerp(values[i - 1], values[i], t);
+    }
+    acc += seg;
+  }
+  return values.back();
+}
+
+std::vector<Vec3> ResamplePolylineLikeReference(
+    const std::vector<Vec3>& reference, const std::vector<Vec3>& values,
+    uint32_t n, bool closed) {
+  if (reference.size() < 2 || values.size() != reference.size() || n < 2) {
+    return values;
+  }
+  std::vector<Vec3> reference_list = reference;
+  std::vector<Vec3> value_list = values;
+  if (closed) {
+    reference_list.push_back(reference_list.front());
+    value_list.push_back(value_list.front());
+  }
+  const double total_length = PolylineLength(reference_list);
+  if (!(total_length > kEps)) return values;
+
+  std::vector<Vec3> out;
+  out.reserve(n);
+  for (uint32_t i = 0; i < n; ++i) {
+    const double t = (n <= 1) ? 0.0 : (static_cast<double>(i) / (n - 1));
+    out.push_back(PointAtReferenceArcLength(reference_list, value_list,
+                                            t * total_length));
+  }
+  return out;
+}
+
 double SignNonZero(double value) { return value >= 0.0 ? 1.0 : -1.0; }
 
 struct ProjectedPoint2D {
@@ -5710,6 +5754,37 @@ emscripten::val BuildFilletEdgeAuthoringState(const emscripten::val& options) {
   }
   if (!has_variation) {
     throw std::runtime_error("Degenerate centerline: all points are identical.");
+  }
+
+  constexpr uint32_t kMaxFilletBuildCenterlineSamples = 33;
+  const uint32_t original_centerline_count =
+      static_cast<uint32_t>(centerline.size());
+  if (original_centerline_count > kMaxFilletBuildCenterlineSamples &&
+      tangent_a.size() == centerline.size() &&
+      tangent_b.size() == centerline.size() &&
+      edge_points.size() == centerline.size()) {
+    const double resample_start_ms = NativeNowMs();
+    const std::vector<Vec3> reference_centerline = centerline;
+    centerline = ResamplePolyline3(reference_centerline,
+                                   kMaxFilletBuildCenterlineSamples,
+                                   result_closed);
+    tangent_a = ResamplePolylineLikeReference(reference_centerline, tangent_a,
+                                              kMaxFilletBuildCenterlineSamples,
+                                              result_closed);
+    tangent_b = ResamplePolylineLikeReference(reference_centerline, tangent_b,
+                                              kMaxFilletBuildCenterlineSamples,
+                                              result_closed);
+    edge_points = ResamplePolylineLikeReference(reference_centerline, edge_points,
+                                                kMaxFilletBuildCenterlineSamples,
+                                                result_closed);
+    if (profile) {
+      emscripten::val extra = emscripten::val::object();
+      extra.set("from", original_centerline_count);
+      extra.set("to", static_cast<uint32_t>(centerline.size()));
+      extra.set("closedLoop", result_closed);
+      LogNativeFilletProfile(feature_id, "edge centerline resample",
+                             NativeNowMs() - resample_start_ms, extra);
+    }
   }
 
   const double sanitize_start_ms = NativeNowMs();

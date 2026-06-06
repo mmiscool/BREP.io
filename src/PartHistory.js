@@ -32,6 +32,10 @@ const UI_ONLY_INPUT_PARAM_KEYS = new Set(['__open']);
 const DEFAULT_EXPRESSION_PRELUDE = 'resolution = 32;\n';
 const DEFAULT_EXPRESSIONS = "//Examples:\nx = 10 + 6; \ny = x * 2;" + "\n\n" + DEFAULT_EXPRESSION_PRELUDE;
 
+function getMonotonicTimeMs() {
+  return (typeof performance !== 'undefined' && performance?.now) ? performance.now() : Date.now();
+}
+
 function getReferenceObjectNameCandidates(value) {
   if (!value || typeof value !== 'object') return [];
   const out = [];
@@ -116,6 +120,7 @@ export class PartHistory {
     this._modelChangeListeners = new Set();
     this.currentHistoryStepId = null;
     this.runningFeatureId = null;
+    this._runningFeatureTiming = null;
     this.expressions = DEFAULT_EXPRESSIONS;
     this.configurator = createEmptyConfiguratorState();
     this.activeWorkbench = getDefaultWorkbenchForNewPart();
@@ -532,6 +537,8 @@ export class PartHistory {
     // Reset MetadataManager
     this.metadataManager = new MetadataManager();
     this.currentHistoryStepId = null;
+    this.runningFeatureId = null;
+    this._runningFeatureTiming = null;
 
     this.#disposeSceneObjects();
     // empty the scene without destroying it
@@ -559,8 +566,44 @@ export class PartHistory {
     // console.log("PartHistory reset complete.");
   }
 
-  #setFeatureRunningState(featureId = null) {
-    this.runningFeatureId = featureId != null ? String(featureId) : null;
+  #setFeatureRunningState(featureId = null, feature = null) {
+    const nextFeatureId = featureId != null ? String(featureId) : null;
+    const currentTiming = this._runningFeatureTiming || null;
+    if (currentTiming && currentTiming.featureId !== nextFeatureId) {
+      this.#finishRunningFeatureTiming(getMonotonicTimeMs());
+    }
+
+    this.runningFeatureId = nextFeatureId;
+    if (nextFeatureId && (!this._runningFeatureTiming || this._runningFeatureTiming.featureId !== nextFeatureId)) {
+      this._runningFeatureTiming = {
+        featureId: nextFeatureId,
+        feature: feature || null,
+        startedAt: getMonotonicTimeMs(),
+      };
+    } else if (nextFeatureId && feature && this._runningFeatureTiming) {
+      this._runningFeatureTiming.feature = feature;
+    }
+  }
+
+  #finishRunningFeatureTiming(endedAt = getMonotonicTimeMs()) {
+    const timing = this._runningFeatureTiming || null;
+    if (!timing) return null;
+    this._runningFeatureTiming = null;
+
+    const startedAt = Number.isFinite(timing.startedAt) ? timing.startedAt : endedAt;
+    const durationMs = Math.max(0, Math.round(endedAt - startedAt));
+    const feature = timing.feature || this.features.find((candidate) => resolveFeatureEntryId(candidate) === timing.featureId) || null;
+    if (feature && timing.recordLastRunTiming) {
+      const prev = feature.lastRun && typeof feature.lastRun === 'object' ? feature.lastRun : {};
+      feature.lastRun = {
+        ok: prev.ok !== undefined ? prev.ok : true,
+        startedAt,
+        endedAt,
+        durationMs,
+        error: prev.error || null,
+      };
+    }
+    return { feature, startedAt, endedAt, durationMs };
   }
 
   async runHistory(options = {}) {
@@ -581,7 +624,7 @@ export class PartHistory {
       let skipAllFeatures = false;
       const features = Array.isArray(this.features) ? this.features : [];
       let previousFeatureTimestamp = features.length ? (features[0]?.timestamp ?? null) : null;
-      const nowMs = () => (typeof performance !== 'undefined' && performance?.now ? performance.now() : Date.now());
+      const nowMs = getMonotonicTimeMs;
       for (let i = 0; i < features.length; i++) {
         const feature = features[i];
         this.#linkFeatureParams(feature);
@@ -601,7 +644,7 @@ export class PartHistory {
           skipAllFeatures = true; // stop after this feature
         }
 
-        this.#setFeatureRunningState(featureId);
+        this.#setFeatureRunningState(featureId, feature);
 
         // Do NOT mutate currentHistoryStepId while running.
         // It is used by the UI to indicate which panel the user wants open
@@ -618,7 +661,21 @@ export class PartHistory {
           // Record an error on the feature but do not abort the whole run.
           const t1 = nowMs();
           const msg = `Feature type "${feature.type}" is not installed`;
-          try { feature.lastRun = { ok: false, startedAt: t1, endedAt: t1, durationMs: 0, error: { name: 'MissingFeature', message: msg, stack: null } }; } catch { }
+          try {
+            const startedAt = this._runningFeatureTiming?.featureId === featureId
+              ? this._runningFeatureTiming.startedAt
+              : t1;
+            feature.lastRun = {
+              ok: false,
+              startedAt,
+              endedAt: t1,
+              durationMs: Math.max(0, Math.round(t1 - startedAt)),
+              error: { name: 'MissingFeature', message: msg, stack: null },
+            };
+            if (this._runningFeatureTiming?.featureId === featureId) {
+              this._runningFeatureTiming.recordLastRunTiming = true;
+            }
+          } catch { }
           if (throwOnFeatureError) {
             const error = new Error(`Feature ${featureId} (${feature.type}) failed: ${msg}`);
             error.name = 'FeatureHistoryError';
@@ -762,15 +819,25 @@ export class PartHistory {
             previousFeatureTimestamp = feature.timestamp;
 
             const t1 = sketchPreviewRun ? sketchPreviewRun.endedAt : nowMs();
-            const dur = sketchPreviewRun ? sketchPreviewRun.durationMs : Math.max(0, Math.round(t1 - t0));
+            const startedAt = this._runningFeatureTiming?.featureId === featureId
+              ? this._runningFeatureTiming.startedAt
+              : t0;
 
-            feature.lastRun = { ok: true, startedAt: t0, endedAt: t1, durationMs: dur, error: null };
+            feature.lastRun = { ok: true, startedAt, endedAt: t1, durationMs: Math.max(0, Math.round(t1 - startedAt)), error: null };
+            if (this._runningFeatureTiming?.featureId === featureId) {
+              this._runningFeatureTiming.recordLastRunTiming = true;
+            }
             feature.dirty = false;
             modelChanged = true;
           } catch (e) {
             const t1 = nowMs();
-            const dur = Math.max(0, Math.round(t1 - t0));
-            feature.lastRun = { ok: false, startedAt: t0, endedAt: t1, durationMs: dur, error: { message: e?.message || String(e), name: e?.name || 'Error', stack: e?.stack || null } };
+            const startedAt = this._runningFeatureTiming?.featureId === featureId
+              ? this._runningFeatureTiming.startedAt
+              : t0;
+            feature.lastRun = { ok: false, startedAt, endedAt: t1, durationMs: Math.max(0, Math.round(t1 - startedAt)), error: { message: e?.message || String(e), name: e?.name || 'Error', stack: e?.stack || null } };
+            if (this._runningFeatureTiming?.featureId === featureId) {
+              this._runningFeatureTiming.recordLastRunTiming = true;
+            }
             feature.timestamp = Date.now();
 
             previousFeatureTimestamp = feature.timestamp;
@@ -1305,6 +1372,8 @@ export class PartHistory {
 
   async fromJSON(jsonString, options = {}) {
     const importData = JSON.parse(jsonString);
+    this.runningFeatureId = null;
+    this._runningFeatureTiming = null;
     const rawFeatures = Array.isArray(importData.features) ? importData.features : [];
     this.features = this.#prepareFeatureList(rawFeatures);
     this.idCounter = importData.idCounter;
