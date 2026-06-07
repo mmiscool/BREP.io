@@ -223,7 +223,12 @@ import {
 } from './test_offsetFace_preserves_individual_edges.js';
 import { test_offsetShell_preserves_source_centerlines } from './test_offsetShellGrouping.js';
 import {
+    afterRun_offsetShell_debug_separates_rounded_tube_remainder,
+    afterRun_offsetShell_negative_distance_rounds_unselected_solid_edges,
     afterRun_offsetShell_thickens_all_faces_except_selected,
+    test_offsetShell_debug_separates_rounded_tube_remainder,
+    test_offsetShell_negative_distance_rounds_unselected_solid_edges,
+    test_offsetShell_negative_distance_skips_edges_without_union_sidewall,
     test_offsetShell_thickens_all_faces_except_selected,
 } from './test_offsetShellExcludedFaces.js';
 import {
@@ -513,6 +518,23 @@ export const testFunctions = [
     {
         test: test_offsetShell_thickens_all_faces_except_selected,
         afterRun: afterRun_offsetShell_thickens_all_faces_except_selected,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_offsetShell_negative_distance_rounds_unselected_solid_edges,
+        afterRun: afterRun_offsetShell_negative_distance_rounds_unselected_solid_edges,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    { test: test_offsetShell_negative_distance_skips_edges_without_union_sidewall, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    {
+        test: test_offsetShell_debug_separates_rounded_tube_remainder,
+        afterRun: afterRun_offsetShell_debug_separates_rounded_tube_remainder,
         printArtifacts: false,
         exportFaces: false,
         exportSolids: false,

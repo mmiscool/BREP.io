@@ -24,6 +24,12 @@ const inputParamsSchema = {
     default_value: true,
     hint: 'When enabled, remove the source solid and leave only the shell result in the scene.',
   },
+  debugSeparateRoundedCornerPipe: {
+    type: 'boolean',
+    label: 'DEBUG: DISABLE TUBE/SHELL UNION',
+    default_value: false,
+    hint: 'For negative offsets, skip the final union between the thickened shell and rounded tube remainder and keep both solids.',
+  },
 };
 
 function getFaceName(entry) {
@@ -113,6 +119,7 @@ export class OffsetShellFeature {
       resultSolid = targetSolid.offsetShell(faceEntries, dist, {
         featureId,
         newSolidName,
+        debugSeparateRoundedCornerPipe: this.inputParams.debugSeparateRoundedCornerPipe === true,
       });
     } catch (err) {
       console.error('[OffsetShellFeature] Solid.offsetShell failed:', err);
@@ -126,17 +133,24 @@ export class OffsetShellFeature {
 
     try { resultSolid.name = newSolidName; } catch {}
     try { resultSolid.visualize(); } catch {}
+    const debugAddedSolids = (this.inputParams.debugSeparateRoundedCornerPipe === true && Array.isArray(resultSolid?.__offsetDebugAddedSolids))
+      ? resultSolid.__offsetDebugAddedSolids.filter(Boolean)
+      : [];
+    for (const debugSolid of debugAddedSolids) {
+      try { debugSolid.visualize(); } catch {}
+    }
 
     this.persistentData = {
       sourceSolidName: String(targetSolid?.name || ''),
       selectedFaceNames: faceEntries.map((entry) => getFaceName(entry)).filter(Boolean),
       distance: dist,
       diagnostics: resultSolid?.__offsetDiagnostics || null,
+      debugAddedSolidNames: debugAddedSolids.map((solid) => String(solid?.name || '')).filter(Boolean),
     };
 
     const replaceOriginalSolid = this.inputParams.replaceOriginalSolid !== false;
     return {
-      added: [resultSolid],
+      added: [resultSolid, ...debugAddedSolids],
       removed: replaceOriginalSolid ? [targetSolid] : [],
     };
   }
