@@ -273,12 +273,185 @@ function triangleAreaFromArrays(p1, p2, p3) {
     return Math.hypot(nx, ny, nz) * 0.5;
 }
 
+function solidModelScale(solid) {
+    const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : null;
+    if (!vp || vp.length < 6) return 1;
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (let i = 0; i < vp.length; i += 3) {
+        const x = Number(vp[i + 0]);
+        const y = Number(vp[i + 1]);
+        const z = Number(vp[i + 2]);
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+    if (![minX, minY, minZ, maxX, maxY, maxZ].every(Number.isFinite)) return 1;
+    return Math.max(Math.hypot(maxX - minX, maxY - minY, maxZ - minZ), 1);
+}
+
 function faceTriangleArea(face) {
     let area = 0;
     for (const tri of face?.triangles || []) {
         area += triangleAreaFromArrays(tri?.p1, tri?.p2, tri?.p3);
     }
     return area;
+}
+
+function isOffsetShellSidewallFaceName(faceName, metadata = {}) {
+    return (
+        metadata?.type === "sidewall"
+        || metadata?.faceType === "sidewall"
+        || /_SW(?:$|[_|])/u.test(String(faceName || ""))
+    );
+}
+
+function collectSidewallFaceAreas(solid) {
+    const out = new Map();
+    let faces = null;
+    try {
+        const queried = typeof solid?.getFaces === "function" ? solid.getFaces(false) : null;
+        if (Array.isArray(queried) && queried.length > 0) faces = queried;
+    } catch {
+        faces = null;
+    }
+    if (Array.isArray(faces)) {
+        for (const face of faces) {
+            const faceName = String(face?.faceName || "").trim();
+            if (!faceName) continue;
+            let metadata = {};
+            try { metadata = solid?.getFaceMetadata?.(faceName) || {}; } catch { metadata = {}; }
+            if (!isOffsetShellSidewallFaceName(faceName, metadata)) continue;
+            const area = faceTriangleArea(face);
+            if (area > 0) out.set(faceName, (out.get(faceName) || 0) + area);
+        }
+        return out;
+    }
+
+    const tv = Array.isArray(solid?._triVerts) ? solid._triVerts : null;
+    const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : null;
+    const ids = Array.isArray(solid?._triIDs) ? solid._triIDs : null;
+    const idToFace = solid?._idToFaceName instanceof Map ? solid._idToFaceName : null;
+    if (!tv || !vp || !ids || !idToFace) return out;
+
+    const sidewallIDs = new Map();
+    for (const [faceIDRaw, faceNameRaw] of idToFace.entries()) {
+        const faceID = faceIDRaw >>> 0;
+        const faceName = String(faceNameRaw || "").trim();
+        if (!faceName) continue;
+        let metadata = {};
+        try { metadata = solid?.getFaceMetadata?.(faceName) || {}; } catch { metadata = {}; }
+        if (isOffsetShellSidewallFaceName(faceName, metadata)) sidewallIDs.set(faceID, faceName);
+    }
+
+    const triCount = Math.min(ids.length, (tv.length / 3) | 0);
+    for (let triIndex = 0; triIndex < triCount; triIndex += 1) {
+        const faceName = sidewallIDs.get(ids[triIndex] >>> 0);
+        if (!faceName) continue;
+        const base = triIndex * 3;
+        const point = (offset) => {
+            const vertexBase = (tv[base + offset] >>> 0) * 3;
+            return [
+                Number(vp[vertexBase + 0]) || 0,
+                Number(vp[vertexBase + 1]) || 0,
+                Number(vp[vertexBase + 2]) || 0,
+            ];
+        };
+        const area = triangleAreaFromArrays(point(0), point(1), point(2));
+        if (area > 0) out.set(faceName, (out.get(faceName) || 0) + area);
+    }
+    return out;
+}
+
+function mergeSidewallFaceAreas(target, source) {
+    if (!(target instanceof Map) || !(source instanceof Map)) return target;
+    for (const [faceName, area] of source.entries()) {
+        if (!(area > 0)) continue;
+        target.set(faceName, (target.get(faceName) || 0) + area);
+    }
+    return target;
+}
+
+function buildSidewallAreaLossCollapseTargets(solid, originalAreas, opts = {}) {
+    const original = originalAreas instanceof Map ? originalAreas : new Map();
+    const finalAreas = collectSidewallFaceAreas(solid);
+    const areaLossThreshold = Math.max(0, Math.min(1, Number(opts?.areaLossThreshold) || 0.98));
+    const minOriginalArea = Math.max(0, Number(opts?.minOriginalArea) || 1e-9);
+    const targets = [];
+    let maxAreaLossRatio = 0;
+    let matchedSidewallAreaCount = 0;
+
+    for (const [faceName, originalAreaRaw] of original.entries()) {
+        const originalArea = Number(originalAreaRaw) || 0;
+        if (!(originalArea > minOriginalArea)) continue;
+        const finalArea = Number(finalAreas.get(faceName) || 0);
+        if (finalArea > 0) matchedSidewallAreaCount += 1;
+        const areaLossRatio = Math.max(0, (originalArea - finalArea) / originalArea);
+        if (areaLossRatio > maxAreaLossRatio) maxAreaLossRatio = areaLossRatio;
+        if (areaLossRatio >= areaLossThreshold && finalArea > 0) {
+            targets.push({
+                faceName,
+                originalArea,
+                finalArea,
+                areaLossRatio,
+            });
+        }
+    }
+
+    targets.sort((left, right) => right.areaLossRatio - left.areaLossRatio || left.faceName.localeCompare(right.faceName));
+    return {
+        areaLossThreshold,
+        originalSidewallAreaCount: original.size,
+        finalSidewallAreaCount: finalAreas.size,
+        matchedSidewallAreaCount,
+        collapseTargetCount: targets.length,
+        maxAreaLossRatio,
+        collapseFaceNames: targets.map((entry) => entry.faceName),
+        targets,
+    };
+}
+
+function pruneUnusedFaceLabelsFromTriangles(solid) {
+    const ids = Array.isArray(solid?._triIDs) ? solid._triIDs : null;
+    const faceToId = solid?._faceNameToID instanceof Map ? solid._faceNameToID : null;
+    const idToFace = solid?._idToFaceName instanceof Map ? solid._idToFaceName : null;
+    if (!ids || !faceToId || !idToFace) return 0;
+
+    const usedIDs = new Set();
+    for (let i = 0; i < ids.length; i += 1) usedIDs.add(ids[i] >>> 0);
+
+    let removed = 0;
+    const removedNames = new Set();
+    for (const [faceIDRaw, faceName] of Array.from(idToFace.entries())) {
+        const faceID = faceIDRaw >>> 0;
+        if (usedIDs.has(faceID)) continue;
+        idToFace.delete(faceIDRaw);
+        if (faceToId.has(faceName) && (faceToId.get(faceName) >>> 0) === faceID) faceToId.delete(faceName);
+        removedNames.add(faceName);
+        removed += 1;
+    }
+    for (const [faceName, faceIDRaw] of Array.from(faceToId.entries())) {
+        const faceID = faceIDRaw >>> 0;
+        if (usedIDs.has(faceID)) continue;
+        faceToId.delete(faceName);
+        idToFace.delete(faceIDRaw);
+        removedNames.add(faceName);
+        removed += 1;
+    }
+    if (solid._faceMetadata instanceof Map) {
+        for (const faceName of removedNames) {
+            let stillUsed = false;
+            for (const [usedFaceIDRaw, usedFaceName] of idToFace.entries()) {
+                if (usedFaceName === faceName && usedIDs.has(usedFaceIDRaw >>> 0)) {
+                    stillUsed = true;
+                    break;
+                }
+            }
+            if (!stillUsed && !faceToId.has(faceName)) solid._faceMetadata.delete(faceName);
+        }
+    }
+    return removed;
 }
 
 function createSurvivingSidewallFaceIndex(shellSolid) {
@@ -508,6 +681,541 @@ function pathScale(records) {
     }
     if (![minX, minY, minZ, maxX, maxY, maxZ].every(Number.isFinite)) return 1;
     return Math.max(Math.hypot(maxX - minX, maxY - minY, maxZ - minZ), 1);
+}
+
+function collapseOffsetShellRoundedPipeSlivers(solid, opts = {}) {
+    const tv = Array.isArray(solid?._triVerts) ? solid._triVerts : null;
+    const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : null;
+    const ids = Array.isArray(solid?._triIDs) ? solid._triIDs : null;
+    const idToFace = solid?._idToFaceName instanceof Map ? solid._idToFaceName : null;
+    if (!solid || !tv || !vp || !ids || !idToFace) {
+        return {
+            enabled: true,
+            collapsedPipeVertices: 0,
+            collapsedPipeTriangles: 0,
+            removedDegenerateTriangles: 0,
+        };
+    }
+
+    const triCount = Math.min(ids.length, (tv.length / 3) | 0);
+    const vertexCount = (vp.length / 3) | 0;
+    if (triCount <= 0 || vertexCount <= 0) {
+        return {
+            enabled: true,
+            collapsedPipeVertices: 0,
+            collapsedPipeTriangles: 0,
+            removedDegenerateTriangles: 0,
+        };
+    }
+
+    const featureId = String(opts?.featureId || opts?.featureID || "").trim();
+    const modelScale = solidModelScale(solid);
+    const radius = Math.abs(Number(opts?.radius ?? opts?.offsetDistance ?? opts?.distance ?? 0)) || 0;
+    const pipeSliverHeightTolerance = Math.max(
+        Number.isFinite(Number(opts?.pipeSliverHeightTolerance)) ? Number(opts.pipeSliverHeightTolerance) : 0,
+        modelScale * 5e-5,
+        radius > 0 ? radius * 0.25 : 0,
+        1e-5,
+    );
+    const pipeSliverHeightToleranceSq = pipeSliverHeightTolerance * pipeSliverHeightTolerance;
+    const debug = opts?.debug === true;
+    const getFaceMetadata = (faceName) => {
+        try {
+            return (typeof solid.getFaceMetadata === "function") ? (solid.getFaceMetadata(faceName) || {}) : {};
+        } catch {
+            return {};
+        }
+    };
+    const collapseSidewallFaceNames = new Set(
+        Array.from(opts?.collapseSidewallFaceNames || [], (faceName) => String(faceName || "").trim()).filter(Boolean),
+    );
+    const hasCollapseSidewallFilter = Object.prototype.hasOwnProperty.call(opts || {}, "collapseSidewallFaceNames");
+    const isRoundedPipeFace = (faceName, metadata = {}) => {
+        if (metadata?.offsetShellRoundedPipe === true) return true;
+        const name = String(faceName || "");
+        if (!name.includes("ROUND_PIPE")) return false;
+        if (featureId && !name.includes(`${featureId}_ROUND_PIPE`)) return false;
+        return /ROUND_PIPE.*_Outer(?:$|[_|])/u.test(name);
+    };
+
+    const sidewallFaceIDs = new Set();
+    const pipeFaceIDs = new Set();
+    const faceNamesByID = new Map();
+    for (const [faceIDRaw, faceNameRaw] of idToFace.entries()) {
+        const faceID = faceIDRaw >>> 0;
+        const faceName = String(faceNameRaw || "").trim();
+        if (!faceName) continue;
+        faceNamesByID.set(faceID, faceName);
+        const metadata = getFaceMetadata(faceName);
+        if (isOffsetShellSidewallFaceName(faceName, metadata) && (!hasCollapseSidewallFilter || collapseSidewallFaceNames.has(faceName))) {
+            sidewallFaceIDs.add(faceID);
+        }
+        if (isRoundedPipeFace(faceName, metadata)) pipeFaceIDs.add(faceID);
+    }
+    if (sidewallFaceIDs.size === 0 || pipeFaceIDs.size === 0) {
+        return {
+            enabled: true,
+            collapsedPipeVertices: 0,
+            collapsedPipeTriangles: 0,
+            removedDegenerateTriangles: 0,
+            sidewallFaceCount: sidewallFaceIDs.size,
+            pipeFaceCount: pipeFaceIDs.size,
+            areaLossTargetFaceCount: collapseSidewallFaceNames.size,
+        };
+    }
+
+    const pointForVertex = (vertexIndex) => [
+        Number(vp[(vertexIndex * 3) + 0]) || 0,
+        Number(vp[(vertexIndex * 3) + 1]) || 0,
+        Number(vp[(vertexIndex * 3) + 2]) || 0,
+    ];
+    const vertexDistanceSq = (a, b) => pointDistanceSq(pointForVertex(a), pointForVertex(b));
+    const pointSegmentDistanceSq = (pointIndex, aIndex, bIndex) => {
+        const p = pointForVertex(pointIndex);
+        const a = pointForVertex(aIndex);
+        const b = pointForVertex(bIndex);
+        const abx = b[0] - a[0];
+        const aby = b[1] - a[1];
+        const abz = b[2] - a[2];
+        const apx = p[0] - a[0];
+        const apy = p[1] - a[1];
+        const apz = p[2] - a[2];
+        const denom = (abx * abx) + (aby * aby) + (abz * abz);
+        const t = denom > 0
+            ? Math.max(0, Math.min(1, ((apx * abx) + (apy * aby) + (apz * abz)) / denom))
+            : 0;
+        const dx = apx - (abx * t);
+        const dy = apy - (aby * t);
+        const dz = apz - (abz * t);
+        return (dx * dx) + (dy * dy) + (dz * dz);
+    };
+    const edgeKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+    const edgeToTriangles = new Map();
+    const vertexFaceIDs = new Map();
+    const addVertexFace = (vertexIndex, faceID) => {
+        let faceIDs = vertexFaceIDs.get(vertexIndex);
+        if (!faceIDs) {
+            faceIDs = new Set();
+            vertexFaceIDs.set(vertexIndex, faceIDs);
+        }
+        faceIDs.add(faceID);
+    };
+
+    for (let triIndex = 0; triIndex < triCount; triIndex += 1) {
+        const faceID = ids[triIndex] >>> 0;
+        const base = triIndex * 3;
+        const i0 = tv[base + 0] >>> 0;
+        const i1 = tv[base + 1] >>> 0;
+        const i2 = tv[base + 2] >>> 0;
+        const record = { triIndex, faceID, vertices: [i0, i1, i2] };
+        addVertexFace(i0, faceID);
+        addVertexFace(i1, faceID);
+        addVertexFace(i2, faceID);
+        for (const [a, b] of [[i0, i1], [i1, i2], [i2, i0]]) {
+            const key = edgeKey(a, b);
+            let list = edgeToTriangles.get(key);
+            if (!list) {
+                list = [];
+                edgeToTriangles.set(key, list);
+            }
+            list.push(record);
+        }
+    }
+
+    const vertexIsPipeOnly = (vertexIndex) => {
+        const faceIDs = vertexFaceIDs.get(vertexIndex);
+        if (!faceIDs || faceIDs.size === 0) return false;
+        for (const faceID of faceIDs) {
+            if (!pipeFaceIDs.has(faceID >>> 0)) return false;
+        }
+        return true;
+    };
+    const chooseShortestEdgeCollapseCandidate = (tri, preferredSource = null) => {
+        const [i0, i1, i2] = tri.vertices;
+        const edges = [
+            { a: i0, b: i1, lengthSq: vertexDistanceSq(i0, i1) },
+            { a: i1, b: i2, lengthSq: vertexDistanceSq(i1, i2) },
+            { a: i2, b: i0, lengthSq: vertexDistanceSq(i2, i0) },
+        ].sort((left, right) => left.lengthSq - right.lengthSq || left.a - right.a || left.b - right.b);
+        const edge = edges[0];
+        if (!edge) return null;
+        let source = null;
+        let target = null;
+        const aPipeOnly = vertexIsPipeOnly(edge.a);
+        const bPipeOnly = vertexIsPipeOnly(edge.b);
+        if (aPipeOnly && !bPipeOnly) {
+            source = edge.a;
+            target = edge.b;
+        } else if (bPipeOnly && !aPipeOnly) {
+            source = edge.b;
+            target = edge.a;
+        } else if (preferredSource === edge.a || preferredSource === edge.b) {
+            source = preferredSource;
+            target = preferredSource === edge.a ? edge.b : edge.a;
+        } else {
+            source = edge.a > edge.b ? edge.a : edge.b;
+            target = edge.a > edge.b ? edge.b : edge.a;
+        }
+        if (source == null || target == null || source === target) return null;
+        return {
+            source: source >>> 0,
+            target: target >>> 0,
+            triIndex: tri.triIndex,
+            faceID: tri.faceID,
+            heightSq: 0,
+            edgeLengthSq: edge.lengthSq,
+            mode: "shortest-edge-fallback",
+            priority: aPipeOnly || bPipeOnly ? 1 : 2,
+        };
+    };
+
+    const candidateBySource = new Map();
+    let skippedLargePipeTriangles = 0;
+    let skippedProtectedPipeVertices = 0;
+    let shortestEdgeFallbackCandidates = 0;
+    const pushCandidate = (candidate) => {
+        if (!candidate || candidate.source == null || candidate.target == null || candidate.source === candidate.target) return;
+        const existing = candidateBySource.get(candidate.source);
+        if (
+            !existing
+            || (candidate.priority || 0) < (existing.priority || 0)
+            || (
+                (candidate.priority || 0) === (existing.priority || 0)
+                && (
+                    candidate.heightSq < existing.heightSq
+                    || (candidate.heightSq === existing.heightSq && (candidate.edgeLengthSq || 0) < (existing.edgeLengthSq || 0))
+                )
+            )
+        ) {
+            candidateBySource.set(candidate.source, candidate);
+        }
+    };
+    for (const [key, incidentTriangles] of edgeToTriangles.entries()) {
+        if (!Array.isArray(incidentTriangles) || incidentTriangles.length < 2) continue;
+        const hasSidewall = incidentTriangles.some((tri) => sidewallFaceIDs.has(tri.faceID));
+        if (!hasSidewall) continue;
+        const [aRaw, bRaw] = key.split("|");
+        const edgeA = Number(aRaw) >>> 0;
+        const edgeB = Number(bRaw) >>> 0;
+        for (const tri of incidentTriangles) {
+            if (!pipeFaceIDs.has(tri.faceID)) continue;
+            const source = tri.vertices.find((vertexIndex) => vertexIndex !== edgeA && vertexIndex !== edgeB);
+            if (source == null) continue;
+            const heightSq = pointSegmentDistanceSq(source, edgeA, edgeB);
+            if (heightSq > pipeSliverHeightToleranceSq) {
+                skippedLargePipeTriangles += 1;
+                continue;
+            }
+            if (!vertexIsPipeOnly(source)) {
+                const fallback = chooseShortestEdgeCollapseCandidate(tri, source);
+                if (fallback) {
+                    fallback.heightSq = heightSq;
+                    shortestEdgeFallbackCandidates += 1;
+                    pushCandidate(fallback);
+                } else {
+                    skippedProtectedPipeVertices += 1;
+                }
+                continue;
+            }
+            const target = vertexDistanceSq(source, edgeA) <= vertexDistanceSq(source, edgeB)
+                ? edgeA
+                : edgeB;
+            pushCandidate({
+                source,
+                target,
+                triIndex: tri.triIndex,
+                faceID: tri.faceID,
+                heightSq,
+                edgeLengthSq: vertexDistanceSq(source, target),
+                mode: "pipe-only-opposite-vertex",
+                priority: 0,
+            });
+        }
+    }
+
+    const candidates = Array.from(candidateBySource.values())
+        .sort((left, right) => (
+            (left.priority || 0) - (right.priority || 0)
+            || left.heightSq - right.heightSq
+            || (left.edgeLengthSq || 0) - (right.edgeLengthSq || 0)
+            || left.source - right.source
+        ));
+    if (candidates.length === 0) {
+        return {
+            enabled: true,
+            collapsedPipeVertices: 0,
+            collapsedPipeTriangles: 0,
+            removedDegenerateTriangles: 0,
+            sidewallFaceCount: sidewallFaceIDs.size,
+            pipeFaceCount: pipeFaceIDs.size,
+            areaLossTargetFaceCount: collapseSidewallFaceNames.size,
+            pipeSliverHeightTolerance,
+            skippedLargePipeTriangles,
+            skippedProtectedPipeVertices,
+            shortestEdgeFallbackCandidates,
+            shortestEdgeFallbackCollapses: 0,
+        };
+    }
+
+    const parent = new Int32Array(vertexCount);
+    for (let i = 0; i < vertexCount; i += 1) parent[i] = i;
+    const find = (index) => {
+        let i = index;
+        while (parent[i] !== i) {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        return i;
+    };
+    const uniteDirected = (source, target) => {
+        const rs = find(source);
+        const rt = find(target);
+        if (rs === rt) return false;
+        parent[rs] = rt;
+        return true;
+    };
+
+    let collapsedPipeVertices = 0;
+    let shortestEdgeFallbackCollapses = 0;
+    const collapsedPipeFaceNames = new Set();
+    for (const candidate of candidates) {
+        if (uniteDirected(candidate.source, candidate.target)) {
+            collapsedPipeVertices += 1;
+            if (candidate.mode === "shortest-edge-fallback") shortestEdgeFallbackCollapses += 1;
+            const faceName = faceNamesByID.get(candidate.faceID);
+            if (faceName) collapsedPipeFaceNames.add(faceName);
+        }
+    }
+    if (collapsedPipeVertices === 0) {
+        return {
+            enabled: true,
+            collapsedPipeVertices: 0,
+            collapsedPipeTriangles: candidates.length,
+            removedDegenerateTriangles: 0,
+            sidewallFaceCount: sidewallFaceIDs.size,
+            pipeFaceCount: pipeFaceIDs.size,
+            areaLossTargetFaceCount: collapseSidewallFaceNames.size,
+            pipeSliverHeightTolerance,
+            skippedLargePipeTriangles,
+            skippedProtectedPipeVertices,
+            shortestEdgeFallbackCandidates,
+            shortestEdgeFallbackCollapses,
+        };
+    }
+
+    const rootCoords = new Map();
+    for (let i = 0; i < vertexCount; i += 1) {
+        const root = find(i);
+        if (rootCoords.has(root)) continue;
+        rootCoords.set(root, pointForVertex(root));
+    }
+    for (let i = 0; i < vertexCount; i += 1) {
+        const coords = rootCoords.get(find(i));
+        vp[(i * 3) + 0] = coords[0];
+        vp[(i * 3) + 1] = coords[1];
+        vp[(i * 3) + 2] = coords[2];
+    }
+
+    solid._vertKeyToIndex = new Map();
+    for (let i = 0; i < vp.length; i += 3) {
+        solid._vertKeyToIndex.set(`${vp[i]},${vp[i + 1]},${vp[i + 2]}`, (i / 3) | 0);
+    }
+    solid._faceIndex = null;
+    solid._dirty = true;
+    try { if (solid._manifold && typeof solid._manifold.delete === "function") solid._manifold.delete(); } catch { /* ignore */ }
+    solid._manifold = null;
+    solid._cppSolidCoreSyncStamp = null;
+
+    let removedDegenerateTriangles = 0;
+    if (typeof solid.removeDegenerateTriangles === "function") {
+        try {
+            removedDegenerateTriangles = Math.max(0, Number(solid.removeDegenerateTriangles() || 0));
+        } catch {
+            removedDegenerateTriangles = 0;
+        }
+    }
+
+    const summary = {
+        enabled: true,
+        collapsedPipeVertices,
+        collapsedPipeTriangles: candidates.length,
+        removedDegenerateTriangles,
+        sidewallFaceCount: sidewallFaceIDs.size,
+        pipeFaceCount: pipeFaceIDs.size,
+        areaLossTargetFaceCount: collapseSidewallFaceNames.size,
+        pipeSliverHeightTolerance,
+        skippedLargePipeTriangles,
+        skippedProtectedPipeVertices,
+        shortestEdgeFallbackCandidates,
+        shortestEdgeFallbackCollapses,
+        pipeFaceNames: Array.from(collapsedPipeFaceNames),
+    };
+    if (debug) {
+        console.log("[OffsetShell] Collapsed rounded-pipe sliver vertices onto sidewall edges.", summary);
+    }
+    return summary;
+}
+
+function reassignAreaLossSidewallFacesToDominantNeighbor(solid, opts = {}) {
+    const tv = Array.isArray(solid?._triVerts) ? solid._triVerts : null;
+    const ids = Array.isArray(solid?._triIDs) ? solid._triIDs : null;
+    const idToFace = solid?._idToFaceName instanceof Map ? solid._idToFaceName : null;
+    const faceToId = solid?._faceNameToID instanceof Map ? solid._faceNameToID : null;
+    if (!solid || !tv || !ids || !idToFace || !faceToId) {
+        return { reassignedTriangles: 0, reassignedFaces: 0, removedFaceLabels: 0 };
+    }
+
+    const collapseSidewallFaceNames = new Set(
+        Array.from(opts?.collapseSidewallFaceNames || [], (faceName) => String(faceName || "").trim()).filter(Boolean),
+    );
+    if (collapseSidewallFaceNames.size === 0) {
+        return { reassignedTriangles: 0, reassignedFaces: 0, removedFaceLabels: 0 };
+    }
+
+    const featureId = String(opts?.featureId || opts?.featureID || "").trim();
+    const debug = opts?.debug === true;
+    const getFaceMetadata = (faceName) => {
+        try {
+            return (typeof solid.getFaceMetadata === "function") ? (solid.getFaceMetadata(faceName) || {}) : {};
+        } catch {
+            return {};
+        }
+    };
+    const isRoundedPipeFace = (faceName, metadata = {}) => {
+        if (metadata?.offsetShellRoundedPipe === true) return true;
+        const name = String(faceName || "");
+        if (!name.includes("ROUND_PIPE")) return false;
+        if (featureId && !name.includes(`${featureId}_ROUND_PIPE`)) return false;
+        return /ROUND_PIPE.*_Outer(?:$|[_|])/u.test(name);
+    };
+
+    const targetFaceIDs = new Set();
+    const targetFaceNamesByID = new Map();
+    const pipeFaceIDs = new Set();
+    for (const [faceIDRaw, faceNameRaw] of idToFace.entries()) {
+        const faceID = faceIDRaw >>> 0;
+        const faceName = String(faceNameRaw || "").trim();
+        if (!faceName) continue;
+        const metadata = getFaceMetadata(faceName);
+        if (collapseSidewallFaceNames.has(faceName) && isOffsetShellSidewallFaceName(faceName, metadata)) {
+            targetFaceIDs.add(faceID);
+            targetFaceNamesByID.set(faceID, faceName);
+        }
+        if (isRoundedPipeFace(faceName, metadata)) pipeFaceIDs.add(faceID);
+    }
+    if (targetFaceIDs.size === 0) {
+        return { reassignedTriangles: 0, reassignedFaces: 0, removedFaceLabels: 0 };
+    }
+
+    const triCount = Math.min(ids.length, (tv.length / 3) | 0);
+    const edgeKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+    const edgeToFaceIDs = new Map();
+    const trianglesByTargetFaceID = new Map();
+    for (let triIndex = 0; triIndex < triCount; triIndex += 1) {
+        const faceID = ids[triIndex] >>> 0;
+        if (targetFaceIDs.has(faceID)) {
+            let tris = trianglesByTargetFaceID.get(faceID);
+            if (!tris) {
+                tris = [];
+                trianglesByTargetFaceID.set(faceID, tris);
+            }
+            tris.push(triIndex);
+        }
+        const base = triIndex * 3;
+        const i0 = tv[base + 0] >>> 0;
+        const i1 = tv[base + 1] >>> 0;
+        const i2 = tv[base + 2] >>> 0;
+        for (const [a, b] of [[i0, i1], [i1, i2], [i2, i0]]) {
+            const key = edgeKey(a, b);
+            let faceIDs = edgeToFaceIDs.get(key);
+            if (!faceIDs) {
+                faceIDs = new Set();
+                edgeToFaceIDs.set(key, faceIDs);
+            }
+            faceIDs.add(faceID);
+        }
+    }
+
+    let reassignedTriangles = 0;
+    const targets = [];
+    for (const [targetFaceID, triIndices] of trianglesByTargetFaceID.entries()) {
+        if (!Array.isArray(triIndices) || triIndices.length === 0) continue;
+        const neighborCounts = new Map();
+        for (const triIndex of triIndices) {
+            const base = triIndex * 3;
+            const i0 = tv[base + 0] >>> 0;
+            const i1 = tv[base + 1] >>> 0;
+            const i2 = tv[base + 2] >>> 0;
+            for (const [a, b] of [[i0, i1], [i1, i2], [i2, i0]]) {
+                const faceIDs = edgeToFaceIDs.get(edgeKey(a, b));
+                if (!faceIDs) continue;
+                for (const neighborIDRaw of faceIDs) {
+                    const neighborID = neighborIDRaw >>> 0;
+                    if (neighborID === targetFaceID) continue;
+                    if (targetFaceIDs.has(neighborID)) continue;
+                    if (pipeFaceIDs.has(neighborID)) continue;
+                    const neighborName = String(idToFace.get(neighborID) || "").trim();
+                    if (!neighborName) continue;
+                    neighborCounts.set(neighborID, (neighborCounts.get(neighborID) || 0) + 1);
+                }
+            }
+        }
+        let bestNeighborID = null;
+        let bestSharedEdgeCount = 0;
+        for (const [neighborID, sharedEdgeCount] of neighborCounts.entries()) {
+            if (
+                bestNeighborID == null
+                || sharedEdgeCount > bestSharedEdgeCount
+                || (
+                    sharedEdgeCount === bestSharedEdgeCount
+                    && String(idToFace.get(neighborID) || "").localeCompare(String(idToFace.get(bestNeighborID) || "")) < 0
+                )
+            ) {
+                bestNeighborID = neighborID >>> 0;
+                bestSharedEdgeCount = sharedEdgeCount;
+            }
+        }
+        if (bestNeighborID == null) continue;
+        for (const triIndex of triIndices) {
+            ids[triIndex] = bestNeighborID >>> 0;
+            reassignedTriangles += 1;
+        }
+        targets.push({
+            faceName: targetFaceNamesByID.get(targetFaceID) || String(idToFace.get(targetFaceID) || ""),
+            toFaceName: String(idToFace.get(bestNeighborID) || ""),
+            triangleCount: triIndices.length,
+            sharedEdgeCount: bestSharedEdgeCount,
+        });
+    }
+
+    if (reassignedTriangles <= 0) {
+        return {
+            reassignedTriangles: 0,
+            reassignedFaces: 0,
+            removedFaceLabels: 0,
+            targetFaceCount: targetFaceIDs.size,
+        };
+    }
+
+    solid._triIDs = ids;
+    const removedFaceLabels = pruneUnusedFaceLabelsFromTriangles(solid);
+    solid._faceIndex = null;
+    solid._dirty = true;
+    try { if (solid._manifold && typeof solid._manifold.delete === "function") solid._manifold.delete(); } catch { /* ignore */ }
+    solid._manifold = null;
+    solid._cppSolidCoreSyncStamp = null;
+
+    const summary = {
+        reassignedTriangles,
+        reassignedFaces: targets.length,
+        removedFaceLabels,
+        targetFaceCount: targetFaceIDs.size,
+        targets,
+    };
+    if (debug) {
+        console.log("[OffsetShell] Reassigned area-loss sidewall remnants to dominant neighbors.", summary);
+    }
+    return summary;
 }
 
 function buildRoundedTubePathTasks(edgeRecords) {
@@ -781,6 +1489,7 @@ export function offsetShell(faces, distance, options = {}) {
     let thickenWallMs = 0;
     let unionWallMs = 0;
     const thickenedSolids = [];
+    const originalSidewallAreas = new Map();
     const thickenedFaceNames = faceObjects.map((face) => getFaceName(face)).filter(Boolean);
     const smoothAdjacentNormalDotThreshold = Number.isFinite(Number(options?.adjacentNormalDotThreshold))
         ? Number(options.adjacentNormalDotThreshold)
@@ -824,6 +1533,7 @@ export function offsetShell(faces, distance, options = {}) {
             skippedPatchCount += 1;
             continue;
         }
+        mergeSidewallFaceAreas(originalSidewallAreas, collectSidewallFaceAreas(thickened));
         thickenedSolids.push(thickened);
         generatedCount += Math.max(1, groupFaces.length);
         generatedPatchCount += 1;
@@ -869,6 +1579,11 @@ export function offsetShell(faces, distance, options = {}) {
         tubeUnionWallMs: 0,
         pipeSubtractWallMs: 0,
         shellUnionWallMs: 0,
+        pipeSliverCollapseCount: 0,
+        pipeSliverCollapseRemovedDegenerateTriangles: 0,
+        sidewallAreaLoss: null,
+        pipeSliverCollapse: null,
+        areaLossSidewallReassign: null,
         unionStrategy: "none",
         shellUnionStrategy: "none",
         firstError: null,
@@ -927,6 +1642,27 @@ export function offsetShell(faces, distance, options = {}) {
                         });
                         if (roundedShell) {
                             combined = roundedShell;
+                            const sidewallAreaLoss = buildSidewallAreaLossCollapseTargets(combined, originalSidewallAreas, {
+                                areaLossThreshold: options?.roundedCornerSidewallAreaLossThreshold ?? 0.98,
+                                minOriginalArea: options?.roundedCornerSidewallAreaLossMinOriginalArea,
+                            });
+                            const pipeSliverCollapse = collapseOffsetShellRoundedPipeSlivers(combined, {
+                                featureId,
+                                radius: Math.abs(offsetDistance),
+                                debug: options?.debugOffsetShellPipeSliverCollapse === true,
+                                pipeSliverHeightTolerance: options?.roundedCornerPipeSliverHeightTolerance,
+                                collapseSidewallFaceNames: sidewallAreaLoss.collapseFaceNames,
+                            });
+                            const areaLossSidewallReassign = reassignAreaLossSidewallFacesToDominantNeighbor(combined, {
+                                featureId,
+                                debug: options?.debugOffsetShellPipeSliverCollapse === true,
+                                collapseSidewallFaceNames: sidewallAreaLoss.collapseFaceNames,
+                            });
+                            roundedCorners.sidewallAreaLoss = sidewallAreaLoss;
+                            roundedCorners.pipeSliverCollapse = pipeSliverCollapse;
+                            roundedCorners.areaLossSidewallReassign = areaLossSidewallReassign;
+                            roundedCorners.pipeSliverCollapseCount = Number(pipeSliverCollapse?.collapsedPipeVertices || 0);
+                            roundedCorners.pipeSliverCollapseRemovedDegenerateTriangles = Number(pipeSliverCollapse?.removedDegenerateTriangles || 0);
                             roundedCorners.status = "applied";
                             roundedCorners.shellUnionStrategy = roundedShell?.__unionManyDiagnostics?.unionStrategy || "unknown";
                         } else {
@@ -994,3 +1730,9 @@ export function offsetShell(faces, distance, options = {}) {
     appendSourceCenterlines(combined, this);
     return combined;
 }
+
+export {
+    buildSidewallAreaLossCollapseTargets as __testOnlyBuildSidewallAreaLossCollapseTargets,
+    collapseOffsetShellRoundedPipeSlivers as __testOnlyCollapseOffsetShellRoundedPipeSlivers,
+    reassignAreaLossSidewallFacesToDominantNeighbor as __testOnlyReassignAreaLossSidewallFacesToDominantNeighbor,
+};

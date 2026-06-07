@@ -1,4 +1,9 @@
 import { Solid } from '../BREP/BetterSolid.js';
+import {
+  __testOnlyBuildSidewallAreaLossCollapseTargets,
+  __testOnlyCollapseOffsetShellRoundedPipeSlivers,
+  __testOnlyReassignAreaLossSidewallFacesToDominantNeighbor,
+} from '../BREP/SolidMethods/offsetShell.js';
 
 export async function test_offsetShell_thickens_all_faces_except_selected(partHistory) {
   await partHistory.reset();
@@ -99,10 +104,135 @@ export async function afterRun_offsetShell_negative_distance_rounds_unselected_s
   if (!(Number(rounded.pathCount) > 0) || !(Number(rounded.tubeSolidCount) > 0)) {
     throw new Error(`Expected rounded-corner pipe paths and tube solids, got ${JSON.stringify(rounded)}.`);
   }
+  if (!rounded.pipeSliverCollapse || !Number.isFinite(Number(rounded.pipeSliverCollapseCount))) {
+    throw new Error(`Expected rounded-corner pipe sliver collapse diagnostics, got ${JSON.stringify(rounded)}.`);
+  }
 
   const shell = partHistory.scene.getObjectByName("P.CU_NEG_OS_NEG");
   if (!shell) {
     throw new Error("Expected negative offset shell result P.CU_NEG_OS_NEG in the scene.");
+  }
+}
+
+export async function test_offsetShell_repro_20260607082324_removes_area_loss_sidewall(partHistory) {
+  await partHistory.reset();
+  partHistory.features = [];
+  partHistory.expressions = "resolution = 16;\n";
+  partHistory.configurator = { fields: [], values: {} };
+
+  const points = [
+    [0, 0, 0, true, true],
+    [-7.158141, -7.907776],
+    [8.426984, 5.71041],
+    [-7.158141, -7.907776],
+    [7.560362, -8.787576],
+    [7.560362, -8.787576],
+    [8.426984, 5.71041],
+    [-6.291516, 6.590214],
+    [-6.291516, 6.590214],
+    [-1.237185, 0.019114],
+    [-2.794092, -2.205038],
+    [7.560362, -8.787576],
+    [7.484115, -11.495576],
+    [-7.437728, -13.144076],
+    [-2.88781, -12.825321],
+    [-4.301049, -12.388265],
+    [-5.585603, -11.991006],
+    [2.463262, -12.023261],
+    [0.123113, -13.639996],
+    [-1.794938, -14.965129],
+    [5.529604, -10.376861],
+    [3.628537, -11.397603],
+    [2.463262, -12.023261],
+  ].map((point, id) => ({
+    id,
+    x: point[0],
+    y: point[1],
+    fixed: !!point[3],
+    construction: !!point[4],
+    externalReference: false,
+  }));
+  const geometries = [
+    [1, "line", [1, 4], true],
+    [2, "line", [5, 2], false],
+    [3, "line", [6, 7], false],
+    [4, "line", [8, 3], false],
+    [5, "circle", [9, 10], false],
+    [6, "bezier", [11, 12, 20, 21, 22, 17, 18, 19, 14, 15, 16, 13, 1], false],
+    [7, "line", [11, 12], true],
+    [8, "line", [1, 13], true],
+    [9, "line", [15, 14], true],
+    [10, "line", [15, 16], true],
+    [11, "line", [18, 17], true],
+    [12, "line", [18, 19], true],
+    [13, "line", [21, 20], true],
+    [14, "line", [21, 22], true],
+  ].map(([id, type, geometryPoints, construction]) => ({
+    id,
+    type,
+    points: geometryPoints,
+    construction,
+  }));
+
+  const sketch = await partHistory.newFeature("S");
+  Object.assign(sketch.inputParams, {
+    id: "S1",
+    sketchPlane: null,
+    editSketch: null,
+    dumpSketchDiagnostics: null,
+    curveResolution: "resolution",
+  });
+  sketch.persistentData = { sketch: { points, geometries, constraints: [] } };
+
+  const extrude = await partHistory.newFeature("E");
+  Object.assign(extrude.inputParams, {
+    id: "E2",
+    profile: "S1:PROFILE",
+    consumeProfileSketch: true,
+    distance: 10,
+    distanceBack: 10,
+    boolean: { targets: [], operation: "NONE", overlapConditioningEnabled: true },
+  });
+
+  const revolve = await partHistory.newFeature("R");
+  Object.assign(revolve.inputParams, {
+    id: "R3",
+    profile: "E2:S1:PROFILE_START",
+    consumeProfileSketch: true,
+    axis: "E2:S1:G3_SW|E2:S1:PROFILE_START[0]",
+    angle: 53,
+    resolution: "resolution",
+    boolean: { targets: ["E2"], operation: "UNION", overlapConditioningEnabled: false },
+  });
+
+  const offsetShell = await partHistory.newFeature("O.S");
+  Object.assign(offsetShell.inputParams, {
+    id: "O.S17",
+    distance: "-1",
+    faces: ["E2:S1:PROFILE_START_END"],
+    replaceOriginalSolid: true,
+    debugSeparateRoundedCornerPipe: false,
+  });
+}
+
+export async function afterRun_offsetShell_repro_20260607082324_removes_area_loss_sidewall(partHistory) {
+  const targetFaceName = "E2_S1_G6_SW_E2_S1_PROFILE_END_0_SW";
+  const feature = (partHistory.features || []).find((entry) => entry?.inputParams?.id === "O.S17");
+  const rounded = feature?.persistentData?.diagnostics?.roundedCorners || {};
+  const areaLossTarget = (rounded.sidewallAreaLoss?.targets || []).find((target) => target?.faceName === targetFaceName);
+  if (!areaLossTarget || !(Number(areaLossTarget.areaLossRatio) >= 0.98)) {
+    throw new Error(`Expected ${targetFaceName} to be selected by area loss, got ${JSON.stringify(rounded.sidewallAreaLoss)}.`);
+  }
+  const reassignTarget = (rounded.areaLossSidewallReassign?.targets || []).find((target) => target?.faceName === targetFaceName);
+  if (!reassignTarget || reassignTarget.toFaceName !== "E2:S1:G6_SW_END") {
+    throw new Error(`Expected ${targetFaceName} to reassign into E2:S1:G6_SW_END, got ${JSON.stringify(rounded.areaLossSidewallReassign)}.`);
+  }
+  const shell = partHistory.scene.getObjectByName("E2_O.S17");
+  if (!shell) {
+    throw new Error("Expected offset shell result E2_O.S17.");
+  }
+  if (shell.getFaceNames().includes(targetFaceName)) {
+    throw new Error(`Expected ${targetFaceName} to be removed from final solid.`);
   }
 }
 
@@ -221,5 +351,138 @@ export async function test_offsetShell_negative_distance_skips_edges_without_uni
   }
   if (shell.name !== "SPLIT_CUBE_OS_SPLIT") {
     throw new Error(`Expected named split shell result, got ${shell.name || "unnamed"}.`);
+  }
+}
+
+export async function test_offsetShell_pipe_sliver_collapse_moves_only_pipe_vertices() {
+  const solid = new Solid();
+  solid.name = "PIPE_SLIVER_COLLAPSE";
+  solid
+    .addTriangle("BASE_SW", [0, 0, 0], [1, 0, 0], [0, 1, 0])
+    .addTriangle("OS_TEST_ROUND_PIPE_Outer", [0, 0, 0], [1, 0, 0], [0.02, 0.01, 0]);
+
+  const sidewallFaceID = solid._faceNameToID.get("BASE_SW");
+  const pipeVertexIndex = solid._vertKeyToIndex.get("0.02,0.01,0");
+  const sidewallVertexIndices = [];
+  for (let i = 0; i < solid._triIDs.length; i += 1) {
+    if (solid._triIDs[i] !== sidewallFaceID) continue;
+    const base = i * 3;
+    sidewallVertexIndices.push(
+      solid._triVerts[base + 0],
+      solid._triVerts[base + 1],
+      solid._triVerts[base + 2],
+    );
+  }
+  const beforeSidewallCoords = sidewallVertexIndices.map((vertexIndex) => [
+    solid._vertProperties[(vertexIndex * 3) + 0],
+    solid._vertProperties[(vertexIndex * 3) + 1],
+    solid._vertProperties[(vertexIndex * 3) + 2],
+  ]);
+
+  const areaLoss = __testOnlyBuildSidewallAreaLossCollapseTargets(solid, new Map([
+    ["BASE_SW", 50],
+  ]), {
+    areaLossThreshold: 0.98,
+  });
+  if (!areaLoss.collapseFaceNames.includes("BASE_SW")) {
+    throw new Error(`Expected BASE_SW to be selected by >98% area loss, got ${JSON.stringify(areaLoss)}.`);
+  }
+
+  const summary = __testOnlyCollapseOffsetShellRoundedPipeSlivers(solid, {
+    featureId: "OS_TEST",
+    radius: 1,
+    pipeSliverHeightTolerance: 0.05,
+    collapseSidewallFaceNames: areaLoss.collapseFaceNames,
+  });
+
+  if (summary.collapsedPipeVertices !== 1) {
+    throw new Error(`Expected one pipe vertex collapse, got ${JSON.stringify(summary)}.`);
+  }
+  if (summary.removedDegenerateTriangles !== 1) {
+    throw new Error(`Expected the collapsed pipe triangle to be removed, got ${JSON.stringify(summary)}.`);
+  }
+  const pipeAfter = [
+    solid._vertProperties[(pipeVertexIndex * 3) + 0],
+    solid._vertProperties[(pipeVertexIndex * 3) + 1],
+    solid._vertProperties[(pipeVertexIndex * 3) + 2],
+  ];
+  if (pipeAfter[0] !== 0 || pipeAfter[1] !== 0 || pipeAfter[2] !== 0) {
+    throw new Error(`Expected pipe-only vertex to move onto sidewall edge endpoint, got ${pipeAfter.join(",")}.`);
+  }
+
+  for (let i = 0; i < sidewallVertexIndices.length; i += 1) {
+    const vertexIndex = sidewallVertexIndices[i];
+    const before = beforeSidewallCoords[i];
+    const after = [
+      solid._vertProperties[(vertexIndex * 3) + 0],
+      solid._vertProperties[(vertexIndex * 3) + 1],
+      solid._vertProperties[(vertexIndex * 3) + 2],
+    ];
+    if (after[0] !== before[0] || after[1] !== before[1] || after[2] !== before[2]) {
+      throw new Error(`Sidewall vertex ${vertexIndex} moved from ${before.join(",")} to ${after.join(",")}.`);
+    }
+  }
+}
+
+export async function test_offsetShell_pipe_sliver_collapse_falls_back_to_shortest_edge() {
+  const solid = new Solid();
+  solid.name = "PIPE_SLIVER_COLLAPSE_SHORTEST_EDGE";
+  solid
+    .addTriangle("BASE_SW", [0, 0, 0], [1, 0, 0], [0, 1, 0])
+    .addTriangle("OS_TEST_ROUND_PIPE_Outer", [0, 0, 0], [1, 0, 0], [0.02, 0.01, 0])
+    .addTriangle("ADJACENT_KEEPER", [0.02, 0.01, 0], [0.02, 0.02, 0], [0.03, 0.01, 0]);
+
+  const pipeVertexIndex = solid._vertKeyToIndex.get("0.02,0.01,0");
+  const areaLoss = __testOnlyBuildSidewallAreaLossCollapseTargets(solid, new Map([
+    ["BASE_SW", 50],
+  ]), {
+    areaLossThreshold: 0.98,
+  });
+  if (!areaLoss.collapseFaceNames.includes("BASE_SW")) {
+    throw new Error(`Expected BASE_SW to be selected by >98% area loss, got ${JSON.stringify(areaLoss)}.`);
+  }
+
+  const summary = __testOnlyCollapseOffsetShellRoundedPipeSlivers(solid, {
+    featureId: "OS_TEST",
+    radius: 1,
+    pipeSliverHeightTolerance: 0.05,
+    collapseSidewallFaceNames: areaLoss.collapseFaceNames,
+  });
+
+  if (summary.collapsedPipeVertices !== 1 || summary.shortestEdgeFallbackCollapses !== 1) {
+    throw new Error(`Expected one shortest-edge fallback collapse, got ${JSON.stringify(summary)}.`);
+  }
+  const pipeAfter = [
+    solid._vertProperties[(pipeVertexIndex * 3) + 0],
+    solid._vertProperties[(pipeVertexIndex * 3) + 1],
+    solid._vertProperties[(pipeVertexIndex * 3) + 2],
+  ];
+  if (pipeAfter[0] !== 0 || pipeAfter[1] !== 0 || pipeAfter[2] !== 0) {
+    throw new Error(`Expected shared pipe vertex to collapse along the shortest edge, got ${pipeAfter.join(",")}.`);
+  }
+}
+
+export async function test_offsetShell_area_loss_sidewall_reassigns_to_dominant_neighbor() {
+  const solid = new Solid();
+  solid.name = "AREA_LOSS_SIDEWALL_REASSIGN";
+  solid
+    .addTriangle("HOST_FACE", [0, 0, 0], [1, 0, 0], [0, -1, 0])
+    .addTriangle("TARGET_SW", [0, 0, 0], [1, 0, 0], [0.05, 0.001, 0])
+    .addTriangle("TARGET_SW", [0.05, 0.001, 0], [1, 0, 0], [1, 0.001, 0]);
+
+  solid.setFaceMetadata("TARGET_SW", { type: "sidewall" });
+  const summary = __testOnlyReassignAreaLossSidewallFacesToDominantNeighbor(solid, {
+    collapseSidewallFaceNames: ["TARGET_SW"],
+  });
+
+  if (summary.reassignedFaces !== 1 || summary.reassignedTriangles !== 2) {
+    throw new Error(`Expected TARGET_SW to reassign all triangles to HOST_FACE, got ${JSON.stringify(summary)}.`);
+  }
+  if (solid.getFaceNames().includes("TARGET_SW")) {
+    throw new Error(`Expected TARGET_SW face label to be pruned, got ${solid.getFaceNames().join(", ")}`);
+  }
+  const hostFaceID = solid._faceNameToID.get("HOST_FACE");
+  if (!solid._triIDs.every((faceID) => faceID === hostFaceID)) {
+    throw new Error("Expected every triangle to be assigned to HOST_FACE after sidewall reassign.");
   }
 }

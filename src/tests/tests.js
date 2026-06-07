@@ -226,10 +226,15 @@ import { test_offsetShell_preserves_source_centerlines } from './test_offsetShel
 import {
     afterRun_offsetShell_debug_separates_rounded_tube_remainder,
     afterRun_offsetShell_negative_distance_rounds_unselected_solid_edges,
+    afterRun_offsetShell_repro_20260607082324_removes_area_loss_sidewall,
     afterRun_offsetShell_thickens_all_faces_except_selected,
+    test_offsetShell_area_loss_sidewall_reassigns_to_dominant_neighbor,
     test_offsetShell_debug_separates_rounded_tube_remainder,
     test_offsetShell_negative_distance_rounds_unselected_solid_edges,
     test_offsetShell_negative_distance_skips_edges_without_union_sidewall,
+    test_offsetShell_pipe_sliver_collapse_falls_back_to_shortest_edge,
+    test_offsetShell_pipe_sliver_collapse_moves_only_pipe_vertices,
+    test_offsetShell_repro_20260607082324_removes_area_loss_sidewall,
     test_offsetShell_thickens_all_faces_except_selected,
 } from './test_offsetShellExcludedFaces.js';
 import {
@@ -542,6 +547,17 @@ export const testFunctions = [
         resetHistory: true,
     },
     { test: test_offsetShell_negative_distance_skips_edges_without_union_sidewall, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_offsetShell_area_loss_sidewall_reassigns_to_dominant_neighbor, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_offsetShell_pipe_sliver_collapse_falls_back_to_shortest_edge, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_offsetShell_pipe_sliver_collapse_moves_only_pipe_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    {
+        test: test_offsetShell_repro_20260607082324_removes_area_loss_sidewall,
+        afterRun: afterRun_offsetShell_repro_20260607082324_removes_area_loss_sidewall,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
     {
         test: test_offsetShell_debug_separates_rounded_tube_remainder,
         afterRun: afterRun_offsetShell_debug_separates_rounded_tube_remainder,
