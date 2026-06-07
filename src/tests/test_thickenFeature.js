@@ -1,6 +1,6 @@
 import { PartHistory } from '../PartHistory.js';
 import { Solid } from '../BREP/BetterSolid.js';
-import { thickenFacesToSolid } from '../BREP/faceThicken.js';
+import { groupConnectedFacesBySharedEdges, thickenFacesToSolid } from '../BREP/faceThicken.js';
 
 function assert(condition, message) {
   if (!condition) throw new Error(message || 'Assertion failed.');
@@ -539,6 +539,39 @@ export async function test_face_thicken_connected_patch_preserves_source_cap_fac
   }
   const sharedSidewalls = Array.from(faceNames).filter((faceName) => /PATCH_A.*PATCH_B|PATCH_B.*PATCH_A/.test(faceName));
   assert(sharedSidewalls.length === 0, `[thicken-connected-patch] Expected shared edge to be internal, found ${JSON.stringify(sharedSidewalls)}.`);
+}
+
+export async function test_face_thicken_groups_curved_patch_by_shared_edge_normals() {
+  const parent = new Solid();
+  parent.addTriangle('LOCAL_SMOOTH_A', [0, 0, 0], [1, 0, 0], [1, 1, 0]);
+  parent.addTriangle('LOCAL_SMOOTH_A', [0, 0, 0], [1, 1, 0], [0, 1, 0.8]);
+  parent.addTriangle('LOCAL_SMOOTH_B', [1, 0, 0], [2, 0, 0], [2, 1, 0]);
+  parent.addTriangle('LOCAL_SMOOTH_B', [1, 0, 0], [2, 1, 0], [1, 1, 0]);
+  parent.visualize({ authoringOnly: true, showEdges: false });
+
+  const faceA = parent.getObjectByName('LOCAL_SMOOTH_A');
+  const faceB = parent.getObjectByName('LOCAL_SMOOTH_B');
+  assert(faceA?.type === 'FACE' && faceB?.type === 'FACE', '[thicken-local-edge-group] Expected authored source faces.');
+
+  const groups = groupConnectedFacesBySharedEdges([faceA, faceB], {
+    minSharedEdgeNormalDot: 0.95,
+  });
+  assert(groups.length === 1, `[thicken-local-edge-group] Expected shared-edge normal grouping to produce one patch, got ${groups.length}.`);
+
+  const legacyGroups = groupConnectedFacesBySharedEdges([faceA, faceB], {
+    minSharedNormalDot: 0.95,
+    minPlanarRatio: 0.98,
+  });
+  assert(legacyGroups.length === 2, `[thicken-local-edge-group] Expected whole-face planar grouping to keep the low-planarity face split, got ${legacyGroups.length}.`);
+
+  const solid = thickenFacesToSolid(groups[0], 1, {
+    featureId: 'THICK_LOCAL_EDGE_GROUP',
+    name: 'THICK_LOCAL_EDGE_GROUP',
+  });
+  assertClosedManifold(solid, 'thicken-local-edge-group');
+
+  const sidewalls = listFaceNamesByRegex(solid, /_SW$/);
+  assert(sidewalls.length === 6, `[thicken-local-edge-group] Expected only the six outer patch sidewalls, got ${sidewalls.length}: ${sidewalls.join(', ')}`);
 }
 
 export async function test_thicken_feature_serializes_and_replays_planar_profile(partHistory) {

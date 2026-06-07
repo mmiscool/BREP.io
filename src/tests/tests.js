@@ -207,6 +207,7 @@ import {
     test_cppTube_native_auto_falls_back_to_slow_on_foldback_path,
     test_cppTube_native_builder_reports_selected_build_mode,
     test_cppTube_open_tube_preserves_expected_face_labels,
+    test_cppTube_slow_fallback_union_preserves_external_cap_label,
     test_cppTube_union_preserves_distinct_face_labels_across_native_snapshots,
 } from './test_cppTube.js';
 import {
@@ -239,6 +240,7 @@ import {
     test_face_thicken_boundary_uses_smooth_adjacent_face_normals,
     test_face_thicken_connected_patch_preserves_source_cap_faces,
     test_face_thicken_filleted_planar_face_keeps_clean_boundaries,
+    test_face_thicken_groups_curved_patch_by_shared_edge_normals,
     test_face_thicken_hole_profile,
     test_face_thicken_partial_torus_side_avoids_internal_voids,
     test_face_thicken_planar_profile,
@@ -477,6 +479,7 @@ export const testFunctions = [
     { test: test_cppTube_open_tube_preserves_expected_face_labels, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_closed_hollow_tube_preserves_expected_face_labels, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_union_preserves_distinct_face_labels_across_native_snapshots, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppTube_slow_fallback_union_preserves_external_cap_label, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_native_builder_reports_selected_build_mode, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_native_auto_falls_back_to_slow_on_foldback_path, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_feature_inner_cutter_nudges_open_end_caps, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -509,6 +512,7 @@ export const testFunctions = [
     { test: test_face_thicken_partial_torus_side_avoids_internal_voids, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_face_thicken_boundary_uses_smooth_adjacent_face_normals, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_face_thicken_connected_patch_preserves_source_cap_faces, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_face_thicken_groups_curved_patch_by_shared_edge_normals, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_face_thicken_selected_adjacent_normals_accept_relaxed_angle_threshold, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_face_thicken_selected_adjacent_normals_match_shared_offset_edge, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_face_thicken_filleted_planar_face_keeps_clean_boundaries, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

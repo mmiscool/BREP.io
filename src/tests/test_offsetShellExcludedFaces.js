@@ -210,6 +210,9 @@ export async function test_offsetShell_negative_distance_skips_edges_without_uni
   if (rounded.sidewallFilterAvailable !== true) {
     throw new Error(`Expected rounded corner sidewall filtering to be available, got ${JSON.stringify(rounded)}.`);
   }
+  if (rounded.sidewallFilterUsesActualGeometry !== true) {
+    throw new Error(`Expected rounded corner filtering to use actual sidewall geometry, got ${JSON.stringify(rounded)}.`);
+  }
   if (rounded.skippedMissingSidewallFaceCount !== 1) {
     throw new Error(`Expected one edge without a surviving sidewall face to be skipped, got ${rounded.skippedMissingSidewallFaceCount}.`);
   }

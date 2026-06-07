@@ -132,6 +132,9 @@ export function groupConnectedFacesBySharedEdges(faces, options = {}) {
   const minSharedNormalDot = Number.isFinite(Number(options.minSharedNormalDot))
     ? Math.max(-1, Math.min(1, Number(options.minSharedNormalDot)))
     : -1;
+  const minSharedEdgeNormalDot = Number.isFinite(Number(options.minSharedEdgeNormalDot))
+    ? Math.max(-1, Math.min(1, Number(options.minSharedEdgeNormalDot)))
+    : null;
   const minPlanarRatio = Number.isFinite(Number(options.minPlanarRatio))
     ? Math.max(0, Math.min(1, Number(options.minPlanarRatio)))
     : 0;
@@ -193,17 +196,25 @@ export function groupConnectedFacesBySharedEdges(faces, options = {}) {
     }
 
     const edgeCounts = new Map();
+    const edgeNormalSums = new Map();
     const triCount = index ? ((index.count / 3) | 0) : ((position.count / 3) | 0);
     for (let triIndex = 0; triIndex < triCount; triIndex++) {
       const i0 = index ? (index.getX((triIndex * 3) + 0) >>> 0) : ((triIndex * 3) + 0);
       const i1 = index ? (index.getX((triIndex * 3) + 1) >>> 0) : ((triIndex * 3) + 1);
       const i2 = index ? (index.getX((triIndex * 3) + 2) >>> 0) : ((triIndex * 3) + 2);
+      const normal = triangleNormal(rawPoints[i0], rawPoints[i1], rawPoints[i2]);
       for (const [a, b] of [[i0, i1], [i1, i2], [i2, i0]]) {
         const aKey = rawToCanonicalKey[a];
         const bKey = rawToCanonicalKey[b];
         if (!aKey || !bKey || aKey === bKey) continue;
         const key = unorderedPointPairKey(aKey, bKey);
         edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
+        let normalSum = edgeNormalSums.get(key);
+        if (!normalSum) {
+          normalSum = new THREE.Vector3();
+          edgeNormalSums.set(key, normalSum);
+        }
+        normalSum.add(normal);
       }
     }
 
@@ -216,7 +227,11 @@ export function groupConnectedFacesBySharedEdges(faces, options = {}) {
         list = [];
         edgeToFaces.set(key, list);
       }
-      list.push(faceIndex);
+      const normal = edgeNormalSums.get(edge) || null;
+      list.push({
+        faceIndex,
+        normal: normal && normal.lengthSq() > TRI_EPS ? normal.clone().normalize() : null,
+      });
     }
   }
 
@@ -231,9 +246,23 @@ export function groupConnectedFacesBySharedEdges(faces, options = {}) {
     }
     return root;
   };
-  const union = (a, b) => {
-    if (minPlanarRatio > 0 && (facePlanarRatios[a] < minPlanarRatio || facePlanarRatios[b] < minPlanarRatio)) return;
-    if (minSharedNormalDot > -1) {
+  const union = (aEntry, bEntry) => {
+    const a = typeof aEntry === 'number' ? aEntry : (aEntry?.faceIndex >>> 0);
+    const b = typeof bEntry === 'number' ? bEntry : (bEntry?.faceIndex >>> 0);
+    if (a === b || a >= faceList.length || b >= faceList.length) return;
+    if (minSharedEdgeNormalDot != null) {
+      const na = aEntry?.normal || faceNormals[a];
+      const nb = bEntry?.normal || faceNormals[b];
+      if (!na || !nb || Math.abs(na.dot(nb)) < minSharedEdgeNormalDot) return;
+    } else {
+      if (minPlanarRatio > 0 && (facePlanarRatios[a] < minPlanarRatio || facePlanarRatios[b] < minPlanarRatio)) return;
+      if (minSharedNormalDot > -1) {
+        const na = faceNormals[a];
+        const nb = faceNormals[b];
+        if (!na || !nb || Math.abs(na.dot(nb)) < minSharedNormalDot) return;
+      }
+    }
+    if (minSharedNormalDot > -1 && minSharedEdgeNormalDot != null) {
       const na = faceNormals[a];
       const nb = faceNormals[b];
       if (!na || !nb || Math.abs(na.dot(nb)) < minSharedNormalDot) return;

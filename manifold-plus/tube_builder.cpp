@@ -1216,7 +1216,8 @@ manifold::MeshGL RelabelSlowMesh(manifold::MeshGL mesh,
 
 manifold::MeshGL BuildSlowTubeMesh(const TubeBuildOptions& options,
                                    std::vector<Vec3>& out_path_points,
-                                   bool& out_closed) {
+                                   bool& out_closed,
+                                   TubeFaceLabels& out_labels) {
   const double tolerance = std::max(1e-7, options.radius * 1e-5);
   PathData path = NormalizePath(options.raw_points, options.closed, tolerance);
   path.points = SimplifyCollinearPath(path.points, path.closed, tolerance);
@@ -1249,12 +1250,12 @@ manifold::MeshGL BuildSlowTubeMesh(const TubeBuildOptions& options,
     final_manifold = outer - inner;
   }
 
-  const TubeFaceLabels labels = MakeTubeFaceLabels(
+  out_labels = MakeTubeFaceLabels(
       options.name, path.closed, options.inner_radius > 0.0);
   out_path_points = path.points;
   out_closed = path.closed;
   return RelabelSlowMesh(final_manifold.GetMeshGL(), path.points, path.closed,
-                         options.radius, options.inner_radius, labels);
+                         options.radius, options.inner_radius, out_labels);
 }
 
 emscripten::val ToJsArray(const std::vector<float>& values) {
@@ -1516,13 +1517,13 @@ emscripten::val BuildTubeAuthoringState(const emscripten::val& options) {
 
   std::vector<Vec3> path_points;
   bool closed = false;
+  TubeFaceLabels labels;
   const double slow_start_ms = NativeNowMs();
-  manifold::MeshGL mesh = BuildSlowTubeMesh(build_options, path_points, closed);
+  manifold::MeshGL mesh =
+      BuildSlowTubeMesh(build_options, path_points, closed, labels);
   LogNativeTubeProfile(build_options, "build slow mesh",
                        NativeNowMs() - slow_start_ms);
   const double slow_snapshot_start_ms = NativeNowMs();
-  const TubeFaceLabels labels = MakeTubeFaceLabels(
-      build_options.name, closed, build_options.inner_radius > 0.0);
   emscripten::val snapshot =
       BuildSnapshotFromMesh(mesh, labels, path_points, closed,
                             build_options.name);

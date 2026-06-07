@@ -1,9 +1,20 @@
 import { Tube, tubeHasNativeBuilder } from "../BREP/Tube.js";
+import { Solid } from "../BREP/BetterSolid.js";
 import { manifoldBuildSource } from "../BREP/setupManifold.js";
 import { __testOnlyTubeFeatureInternals } from "../features/tube/TubeFeature.js";
 
 function assert(condition, message) {
     if (!condition) throw new Error(message || "Assertion failed.");
+}
+
+function faceTriangleCount(solid, faceName) {
+    const faceID = solid?._faceNameToID instanceof Map ? solid._faceNameToID.get(faceName) : undefined;
+    if (!Number.isFinite(faceID)) return 0;
+    let count = 0;
+    for (const id of solid?._triIDs || []) {
+        if (id === faceID) count += 1;
+    }
+    return count;
 }
 
 export async function test_cppTube_open_tube_preserves_expected_face_labels() {
@@ -77,6 +88,50 @@ export async function test_cppTube_union_preserves_distinct_face_labels_across_n
     assert(faceNames.has("CPP_TUBE_UNION_A_CapStart"), "Expected unioned native tubes to preserve tube A CapStart face.");
     assert(faceNames.has("CPP_TUBE_UNION_B_Outer"), "Expected unioned native tubes to preserve tube B Outer face.");
     assert(faceNames.has("CPP_TUBE_UNION_B_CapEnd"), "Expected unioned native tubes to preserve tube B CapEnd face.");
+}
+
+export async function test_cppTube_slow_fallback_union_preserves_external_cap_label() {
+    if (manifoldBuildSource !== "local" || !tubeHasNativeBuilder()) {
+        return;
+    }
+
+    const slowTubeName = "CPP_TUBE_SLOW_CAP_A";
+    const slowTube = new Tube({
+        points: [
+            [0, 0, 10],
+            [0, 0, -10],
+            [10, 0, -10],
+            [10, 10, -10],
+            [0, 10, -10],
+            [0, 0, -10],
+        ],
+        radius: 1,
+        resolution: 16,
+        closed: false,
+        name: slowTubeName,
+        preferFast: true,
+    });
+    const straightTubeName = "CPP_TUBE_SLOW_CAP_B";
+    const straightTube = new Tube({
+        points: [
+            [10, 0, 10],
+            [10, 0, -10],
+        ],
+        radius: 1,
+        resolution: 16,
+        closed: false,
+        name: straightTubeName,
+        preferFast: true,
+    });
+
+    assert(slowTube._tubeBuildMode === "slow", `Expected self-touching tube to use slow fallback, got ${slowTube._tubeBuildMode}.`);
+    assert(faceTriangleCount(slowTube, `${slowTubeName}_Outer`) > 0, "Expected slow fallback tube to preserve its Outer label.");
+    assert(faceTriangleCount(slowTube, `${slowTubeName}_CapStart`) > 0, "Expected slow fallback tube to preserve its external CapStart label.");
+
+    const unioned = Solid.unionMany([slowTube, straightTube], { name: "CPP_TUBE_SLOW_CAP_UNION" });
+    assert(faceTriangleCount(unioned, `${slowTubeName}_CapStart`) > 0, "Expected union to keep the slow fallback tube external cap as its own face.");
+    assert(faceTriangleCount(unioned, `${straightTubeName}_CapStart`) > 0, "Expected union to keep the adjacent straight tube external cap as its own face.");
+    assert(faceTriangleCount(unioned, `${slowTubeName}_Outer`) > 0, "Expected union to keep the slow fallback tube outer wall label.");
 }
 
 export async function test_cppTube_native_builder_reports_selected_build_mode() {

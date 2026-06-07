@@ -249,29 +249,104 @@ function getSolidFaceNames(solid) {
     return [];
 }
 
+function triangleAreaFromArrays(p1, p2, p3) {
+    if (!Array.isArray(p1) || !Array.isArray(p2) || !Array.isArray(p3)) return 0;
+    const ax = Number(p1[0]);
+    const ay = Number(p1[1]);
+    const az = Number(p1[2]);
+    const bx = Number(p2[0]);
+    const by = Number(p2[1]);
+    const bz = Number(p2[2]);
+    const cx = Number(p3[0]);
+    const cy = Number(p3[1]);
+    const cz = Number(p3[2]);
+    if (![ax, ay, az, bx, by, bz, cx, cy, cz].every(Number.isFinite)) return 0;
+    const ux = bx - ax;
+    const uy = by - ay;
+    const uz = bz - az;
+    const vx = cx - ax;
+    const vy = cy - ay;
+    const vz = cz - az;
+    const nx = (uy * vz) - (uz * vy);
+    const ny = (uz * vx) - (ux * vz);
+    const nz = (ux * vy) - (uy * vx);
+    return Math.hypot(nx, ny, nz) * 0.5;
+}
+
+function faceTriangleArea(face) {
+    let area = 0;
+    for (const tri of face?.triangles || []) {
+        area += triangleAreaFromArrays(tri?.p1, tri?.p2, tri?.p3);
+    }
+    return area;
+}
+
 function createSurvivingSidewallFaceIndex(shellSolid) {
-    const faceNames = getSolidFaceNames(shellSolid);
+    let actualFaces = null;
+    try {
+        const queried = typeof shellSolid?.getFaces === "function" ? shellSolid.getFaces(false) : null;
+        if (Array.isArray(queried)) actualFaces = queried;
+    } catch {
+        actualFaces = null;
+    }
+
+    const useActualFaces = Array.isArray(actualFaces);
+    const faceNames = useActualFaces
+        ? actualFaces.map((face) => String(face?.faceName || "").trim()).filter(Boolean)
+        : getSolidFaceNames(shellSolid);
     const index = {
         available: faceNames.length > 0,
         faceNames: new Set(faceNames),
         sourceEdgeNames: new Set(),
         sourceEdgeKeys: new Set(),
+        actualGeometryAvailable: useActualFaces,
+        actualSidewallFaceCount: 0,
+        skippedEmptySidewallFaceCount: 0,
     };
 
-    for (const faceName of faceNames) {
-        if (!/_SW$/.test(faceName)) continue;
-        let metadata = null;
-        try { metadata = shellSolid?.getFaceMetadata?.(faceName) || null; } catch { metadata = null; }
-        if (!metadata || typeof metadata !== "object") continue;
-
-        const sourceEdgeName = String(metadata.sourceEdgeName || "").trim();
+    const indexSidewallFace = (faceName, metadata = null) => {
+        const isSidewall = /_SW$/.test(faceName) || metadata?.type === "sidewall";
+        if (!isSidewall) return;
+        index.actualSidewallFaceCount += 1;
+        index.faceNames.add(faceName);
+        const sourceEdgeName = String(metadata?.sourceEdgeName || "").trim();
         if (sourceEdgeName) {
             index.sourceEdgeNames.add(sourceEdgeName);
             const sidewallName = sidewallLabelForSourceEdgeName(sourceEdgeName);
             if (sidewallName) index.faceNames.add(sidewallName);
         }
-        const sourceEdgeKey = String(metadata.sourceEdgeKey || "").trim();
+        const sourceEdgeKey = String(metadata?.sourceEdgeKey || "").trim();
         if (sourceEdgeKey) index.sourceEdgeKeys.add(sourceEdgeKey);
+    };
+
+    if (useActualFaces) {
+        index.faceNames.clear();
+        const maxArea = actualFaces.reduce((best, face) => Math.max(best, faceTriangleArea(face)), 0);
+        const areaTolerance = Math.max(maxArea * 1e-12, 1e-12);
+        for (const face of actualFaces) {
+            const faceName = String(face?.faceName || "").trim();
+            if (!faceName) continue;
+            const metadata = typeof shellSolid?.getFaceMetadata === "function"
+                ? (shellSolid.getFaceMetadata(faceName) || null)
+                : null;
+            const isSidewall = /_SW$/.test(faceName) || metadata?.type === "sidewall";
+            const area = faceTriangleArea(face);
+            if (area <= areaTolerance) {
+                if (isSidewall) index.skippedEmptySidewallFaceCount += 1;
+                continue;
+            }
+            index.faceNames.add(faceName);
+            if (isSidewall) indexSidewallFace(faceName, metadata);
+        }
+        index.available = actualFaces.length > 0;
+        return index;
+    }
+
+    for (const faceName of faceNames) {
+        let metadata = null;
+        try { metadata = shellSolid?.getFaceMetadata?.(faceName) || null; } catch { metadata = null; }
+        if (!/_SW$/.test(faceName) && metadata?.type !== "sidewall") continue;
+        indexSidewallFace(faceName, metadata);
     }
     return index;
 }
@@ -399,6 +474,18 @@ function collectRoundedCornerEdges(sourceSolid, sourceFaces, selectedFaceNames, 
         });
         Object.defineProperty(records, "__sidewallFilterAvailable", {
             value: !!sidewallFaceIndex?.available,
+            enumerable: false,
+        });
+        Object.defineProperty(records, "__sidewallFilterUsesActualGeometry", {
+            value: !!sidewallFaceIndex?.actualGeometryAvailable,
+            enumerable: false,
+        });
+        Object.defineProperty(records, "__actualSidewallFaceCount", {
+            value: Number(sidewallFaceIndex?.actualSidewallFaceCount || 0),
+            enumerable: false,
+        });
+        Object.defineProperty(records, "__skippedEmptySidewallFaceCount", {
+            value: Number(sidewallFaceIndex?.skippedEmptySidewallFaceCount || 0),
             enumerable: false,
         });
     } catch { /* ignore */ }
@@ -563,8 +650,11 @@ function buildRoundedCornerPipeSolid(sourceSolid, edgeRecords, radius, options =
         radius,
         edgeCount: Array.isArray(edgeRecords) ? edgeRecords.length : 0,
         sidewallFilterAvailable: !!edgeRecords?.__sidewallFilterAvailable,
+        sidewallFilterUsesActualGeometry: !!edgeRecords?.__sidewallFilterUsesActualGeometry,
+        actualSidewallFaceCount: Number(edgeRecords?.__actualSidewallFaceCount || 0),
         matchedSidewallFaceCount: Number(edgeRecords?.__matchedSidewallFaceCount || 0),
         skippedMissingSidewallFaceCount: Number(edgeRecords?.__skippedMissingSidewallFaceCount || 0),
+        skippedEmptySidewallFaceCount: Number(edgeRecords?.__skippedEmptySidewallFaceCount || 0),
         pathCount: 0,
         tubeSolidCount: 0,
         tubeBuildWallMs: 0,
@@ -698,8 +788,7 @@ export function offsetShell(faces, distance, options = {}) {
             ? Number(options.smoothAdjacentNormalDotThreshold)
             : SELECTED_PATCH_ADJACENT_NORMAL_DOT_THRESHOLD);
     const faceGroups = groupConnectedFacesBySharedEdges(faceObjects, {
-        minSharedNormalDot: smoothAdjacentNormalDotThreshold,
-        minPlanarRatio: 0.98,
+        minSharedEdgeNormalDot: smoothAdjacentNormalDotThreshold,
     });
     const smoothSelectedAdjacentNormals = thickenedFaceNames.length > 1;
 
@@ -769,8 +858,11 @@ export function offsetShell(faces, distance, options = {}) {
         separateTubeShellUnion: !!options?.debugSeparateRoundedCornerPipe,
         edgeCount: 0,
         sidewallFilterAvailable: false,
+        sidewallFilterUsesActualGeometry: false,
+        actualSidewallFaceCount: 0,
         matchedSidewallFaceCount: 0,
         skippedMissingSidewallFaceCount: 0,
+        skippedEmptySidewallFaceCount: 0,
         pathCount: 0,
         tubeSolidCount: 0,
         tubeBuildWallMs: 0,
