@@ -93,6 +93,10 @@ import { test_generated_history_20260523000414 } from './test_generated_history_
 import { test_generated_history_20260531201126 } from './test_generated_history_20260531201126.js';
 import { test_generated_history_20260606004152 } from './test_generated_history_20260606004152.js';
 import {
+    test_generated_history_20260607180752_offset_shell_negative_half_is_manifold,
+    test_generated_history_20260607180752_offset_shell_negative_one_keeps_cleanup,
+} from './test_generated_history_20260607180752.js';
+import {
     afterRun_fillet_preserves_original_face_names,
     test_fillet_preserves_original_face_names,
 } from './test_fillet_preserves_original_face_names.js';
@@ -902,6 +906,20 @@ export const testFunctions = [
         resetHistory: true,
     },
     {
+        test: test_generated_history_20260607180752_offset_shell_negative_half_is_manifold,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_generated_history_20260607180752_offset_shell_negative_one_keeps_cleanup,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
         test: test_fillet_preserves_original_face_names,
         afterRun: afterRun_fillet_preserves_original_face_names,
         printArtifacts: false,
@@ -1251,7 +1269,6 @@ function formatDurationMs(ms) {
 function createTestRunLog({ filter, plannedTests }) {
     const startedMs = getMonotonicTimeMs();
     const records = [];
-    let finished = false;
 
     const write = (status = 'running') => {
         const elapsedMs = getMonotonicTimeMs() - startedMs;
@@ -1329,7 +1346,6 @@ function createTestRunLog({ filter, plannedTests }) {
             write();
         },
         finish(status) {
-            finished = true;
             write(status);
         },
     };

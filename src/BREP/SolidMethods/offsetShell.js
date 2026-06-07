@@ -1,4 +1,7 @@
-import { applySolidAuthoringStateSnapshot } from "../CppSolidCore.js";
+import {
+    applySolidAuthoringStateSnapshot,
+    buildSolidAuthoringStateSnapshot,
+} from "../CppSolidCore.js";
 import {
     groupConnectedFacesBySharedEdges,
     thickenFacesToSolid,
@@ -289,6 +292,70 @@ function solidModelScale(solid) {
     }
     if (![minX, minY, minZ, maxX, maxY, maxZ].every(Number.isFinite)) return 1;
     return Math.max(Math.hypot(maxX - minX, maxY - minY, maxZ - minZ), 1);
+}
+
+function analyzeSolidMeshTopology(solid) {
+    const triVerts = Array.isArray(solid?._triVerts) ? solid._triVerts : [];
+    const triCount = (triVerts.length / 3) | 0;
+    if (!triCount) {
+        return {
+            boundaryEdgeCount: 0,
+            nonManifoldEdgeCount: 0,
+            triangleCount: 0,
+            coherentlyOriented: false,
+        };
+    }
+
+    const counts = new Map();
+    const edgeKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+    for (let triIndex = 0; triIndex < triCount; triIndex += 1) {
+        const a = triVerts[(triIndex * 3) + 0] >>> 0;
+        const b = triVerts[(triIndex * 3) + 1] >>> 0;
+        const c = triVerts[(triIndex * 3) + 2] >>> 0;
+        for (const [u, v] of [[a, b], [b, c], [c, a]]) {
+            const key = edgeKey(u, v);
+            counts.set(key, (counts.get(key) || 0) + 1);
+        }
+    }
+
+    let boundaryEdgeCount = 0;
+    let nonManifoldEdgeCount = 0;
+    for (const value of counts.values()) {
+        if (value === 1) boundaryEdgeCount += 1;
+        else if (value !== 2) nonManifoldEdgeCount += 1;
+    }
+
+    let coherentlyOriented = null;
+    if (typeof solid?._isCoherentlyOrientedManifold === "function") {
+        try {
+            coherentlyOriented = solid._isCoherentlyOrientedManifold() === true;
+        } catch {
+            coherentlyOriented = false;
+        }
+    }
+    return {
+        boundaryEdgeCount,
+        nonManifoldEdgeCount,
+        triangleCount: triCount,
+        coherentlyOriented,
+    };
+}
+
+function checkSolidManifoldBuild(solid) {
+    if (!solid || typeof solid._manifoldize !== "function") return { ok: true, error: null };
+    try {
+        solid._manifoldize();
+        return { ok: true, error: null };
+    } catch (error) {
+        return {
+            ok: false,
+            error: String(error?.message || error || "unknown error").slice(0, 240),
+        };
+    }
+}
+
+function shouldRollbackOffsetShellCleanup(manifoldCheck) {
+    return manifoldCheck?.ok === false;
 }
 
 function faceTriangleArea(face) {
@@ -1642,27 +1709,72 @@ export function offsetShell(faces, distance, options = {}) {
                         });
                         if (roundedShell) {
                             combined = roundedShell;
+                            const cleanupBaselineSnapshot = buildSolidAuthoringStateSnapshot(combined);
+                            const cleanupBaselineTopology = analyzeSolidMeshTopology(combined);
                             const sidewallAreaLoss = buildSidewallAreaLossCollapseTargets(combined, originalSidewallAreas, {
                                 areaLossThreshold: options?.roundedCornerSidewallAreaLossThreshold ?? 0.98,
                                 minOriginalArea: options?.roundedCornerSidewallAreaLossMinOriginalArea,
                             });
-                            const pipeSliverCollapse = collapseOffsetShellRoundedPipeSlivers(combined, {
+                            let pipeSliverCollapse = collapseOffsetShellRoundedPipeSlivers(combined, {
                                 featureId,
                                 radius: Math.abs(offsetDistance),
                                 debug: options?.debugOffsetShellPipeSliverCollapse === true,
                                 pipeSliverHeightTolerance: options?.roundedCornerPipeSliverHeightTolerance,
                                 collapseSidewallFaceNames: sidewallAreaLoss.collapseFaceNames,
                             });
-                            const areaLossSidewallReassign = reassignAreaLossSidewallFacesToDominantNeighbor(combined, {
+                            let areaLossSidewallReassign = reassignAreaLossSidewallFacesToDominantNeighbor(combined, {
                                 featureId,
                                 debug: options?.debugOffsetShellPipeSliverCollapse === true,
                                 collapseSidewallFaceNames: sidewallAreaLoss.collapseFaceNames,
                             });
+                            const cleanupAfterTopology = analyzeSolidMeshTopology(combined);
+                            const cleanupManifoldCheck = checkSolidManifoldBuild(combined);
+                            const rollbackCleanup = options?.roundedCornerCleanupRollbackEnabled === false
+                                ? false
+                                : shouldRollbackOffsetShellCleanup(cleanupManifoldCheck);
+                            if (rollbackCleanup) {
+                                applySolidAuthoringStateSnapshot(combined, cleanupBaselineSnapshot);
+                                combined._dirty = true;
+                                combined._manifold = null;
+                                combined._faceIndex = null;
+                                combined._visualizeCache = null;
+                                combined._cppSolidCoreSyncStamp = null;
+                                const cleanupRollback = {
+                                    rolledBack: true,
+                                    reason: "cleanup_failed_manifold_build",
+                                    beforeTopology: cleanupBaselineTopology,
+                                    afterTopology: cleanupAfterTopology,
+                                    manifoldCheck: cleanupManifoldCheck,
+                                };
+                                pipeSliverCollapse = {
+                                    ...(pipeSliverCollapse || {}),
+                                    applied: false,
+                                    ...cleanupRollback,
+                                };
+                                areaLossSidewallReassign = {
+                                    ...(areaLossSidewallReassign || {}),
+                                    applied: false,
+                                    ...cleanupRollback,
+                                };
+                                roundedCorners.cleanupRollback = cleanupRollback;
+                            } else {
+                                pipeSliverCollapse = {
+                                    ...(pipeSliverCollapse || {}),
+                                    applied: true,
+                                    manifoldCheck: cleanupManifoldCheck,
+                                };
+                                areaLossSidewallReassign = {
+                                    ...(areaLossSidewallReassign || {}),
+                                    applied: true,
+                                    manifoldCheck: cleanupManifoldCheck,
+                                };
+                                roundedCorners.cleanupRollback = null;
+                            }
                             roundedCorners.sidewallAreaLoss = sidewallAreaLoss;
                             roundedCorners.pipeSliverCollapse = pipeSliverCollapse;
                             roundedCorners.areaLossSidewallReassign = areaLossSidewallReassign;
-                            roundedCorners.pipeSliverCollapseCount = Number(pipeSliverCollapse?.collapsedPipeVertices || 0);
-                            roundedCorners.pipeSliverCollapseRemovedDegenerateTriangles = Number(pipeSliverCollapse?.removedDegenerateTriangles || 0);
+                            roundedCorners.pipeSliverCollapseCount = rollbackCleanup ? 0 : Number(pipeSliverCollapse?.collapsedPipeVertices || 0);
+                            roundedCorners.pipeSliverCollapseRemovedDegenerateTriangles = rollbackCleanup ? 0 : Number(pipeSliverCollapse?.removedDegenerateTriangles || 0);
                             roundedCorners.status = "applied";
                             roundedCorners.shellUnionStrategy = roundedShell?.__unionManyDiagnostics?.unionStrategy || "unknown";
                         } else {
