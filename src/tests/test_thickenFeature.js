@@ -1,5 +1,6 @@
 import { PartHistory } from '../PartHistory.js';
 import { Solid } from '../BREP/BetterSolid.js';
+import { thickenFacesToSolid } from '../BREP/faceThicken.js';
 
 function assert(condition, message) {
   if (!condition) throw new Error(message || 'Assertion failed.');
@@ -49,6 +50,36 @@ function getFaceNamesSet(solid) {
 
 function listFaceNamesByRegex(solid, regex) {
   return Array.from(getFaceNamesSet(solid)).filter((name) => regex.test(String(name || ''))).sort((a, b) => a.localeCompare(b));
+}
+
+function uniqueFacePoints(solid, faceName, tolerance = 1e-7) {
+  const face = typeof solid?.getFace === 'function' ? solid.getFace(faceName) : null;
+  assert(Array.isArray(face) && face.length > 0, `Expected face "${faceName}" to exist on solid "${solid?.name || ''}".`);
+  const inv = 1 / tolerance;
+  const points = [];
+  const seen = new Set();
+  for (const tri of face) {
+    for (const point of [tri?.p1, tri?.p2, tri?.p3]) {
+      if (!Array.isArray(point) || point.length < 3) continue;
+      const key = [
+        Math.round(Number(point[0]) * inv),
+        Math.round(Number(point[1]) * inv),
+        Math.round(Number(point[2]) * inv),
+      ].join(',');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      points.push(point);
+    }
+  }
+  return points;
+}
+
+function pointDistance(a, b) {
+  return Math.hypot(
+    Number(a?.[0]) - Number(b?.[0]),
+    Number(a?.[1]) - Number(b?.[1]),
+    Number(a?.[2]) - Number(b?.[2]),
+  );
 }
 
 function assertSidewallsConnectToCaps(solid, label, startFaceName, endFaceName, sidewallNames) {
@@ -389,6 +420,127 @@ export async function test_face_thicken_boundary_uses_smooth_adjacent_face_norma
   );
 }
 
+export async function test_face_thicken_selected_adjacent_normals_accept_relaxed_angle_threshold() {
+  const parent = new Solid();
+  const targetDot = 0.75;
+  const tilt = Math.sqrt((1 / (targetDot * targetDot)) - 1);
+  const selectedFaceNames = ['SELECTED_SMOOTH_A', 'SELECTED_SMOOTH_B'];
+  parent.addTriangle('SELECTED_SMOOTH_A', [0, 0, 0], [1, 0, 0], [1, 1, 0]);
+  parent.addTriangle('SELECTED_SMOOTH_A', [0, 0, 0], [1, 1, 0], [0, 1, 0]);
+  parent.addTriangle('SELECTED_SMOOTH_B', [1, 0, 0], [2, 0, tilt], [2, 1, tilt]);
+  parent.addTriangle('SELECTED_SMOOTH_B', [1, 0, 0], [2, 1, tilt], [1, 1, 0]);
+  parent.visualize({ authoringOnly: true, showEdges: false });
+
+  const face = parent.getObjectByName('SELECTED_SMOOTH_A');
+  assert(face?.type === 'FACE', '[thicken-selected-smooth-boundary] Expected authored source face.');
+
+  const strict = face.thicken(1, {
+    featureId: 'THICK_SELECTED_SMOOTH_STRICT',
+    adjacentNormalFaceNames: selectedFaceNames,
+    smoothAdjacentNormalDotThreshold: 0.85,
+  });
+  assertClosedManifold(strict, 'thicken-selected-smooth-boundary-strict');
+  const strictDiagnostics = strict?.__thickenDiagnostics || {};
+  assert(
+    (strictDiagnostics.adjacentBoundaryNormalContributionCount || 0) === 0,
+    '[thicken-selected-smooth-boundary] Expected the old strict threshold to reject the shallow selected neighbor.',
+  );
+  try { strict?.free?.(); } catch { /* ignore */ }
+
+  const relaxed = face.thicken(1, {
+    featureId: 'THICK_SELECTED_SMOOTH_RELAXED',
+    adjacentNormalFaceNames: selectedFaceNames,
+    smoothAdjacentNormalDotThreshold: 0.7,
+  });
+  assertClosedManifold(relaxed, 'thicken-selected-smooth-boundary-relaxed');
+
+  const diagnostics = relaxed?.__thickenDiagnostics || {};
+  assert(
+    (diagnostics.adjacentBoundaryNormalContributionCount || 0) >= 2,
+    '[thicken-selected-smooth-boundary] Expected relaxed selected-neighbor normals to contribute at the boundary.',
+  );
+  assert(
+    Math.abs(Number(diagnostics.adjacentBoundaryNormalDotThreshold) - 0.7) <= 1e-12,
+    `[thicken-selected-smooth-boundary] Expected dot threshold 0.7, received ${diagnostics.adjacentBoundaryNormalDotThreshold}.`,
+  );
+  assert(
+    diagnostics.adjacentBoundaryNormalFaceFilterCount === 1,
+    `[thicken-selected-smooth-boundary] Expected one adjacent face filter entry, received ${diagnostics.adjacentBoundaryNormalFaceFilterCount}.`,
+  );
+  assert(
+    (diagnostics.adjacentBoundaryNormalFaceFilterNames || []).includes('SELECTED_SMOOTH_B'),
+    '[thicken-selected-smooth-boundary] Expected SELECTED_SMOOTH_B in adjacent face filter diagnostics.',
+  );
+}
+
+export async function test_face_thicken_selected_adjacent_normals_match_shared_offset_edge() {
+  const parent = new Solid();
+  const targetDot = 0.75;
+  const tilt = Math.sqrt((1 / (targetDot * targetDot)) - 1);
+  const selectedFaceNames = ['MATCH_SHARED_A', 'MATCH_SHARED_B'];
+  parent.addTriangle('MATCH_SHARED_A', [0, 0, 0], [1, 0, 0], [1, 1, 0]);
+  parent.addTriangle('MATCH_SHARED_A', [0, 0, 0], [1, 1, 0], [0, 1, 0]);
+  parent.addTriangle('MATCH_SHARED_B', [1, 0, 0], [2, 0, tilt], [2, 1, tilt]);
+  parent.addTriangle('MATCH_SHARED_B', [1, 0, 0], [2, 1, tilt], [1, 1, 0]);
+  parent.visualize({ authoringOnly: true, showEdges: false });
+
+  const faceA = parent.getObjectByName('MATCH_SHARED_A');
+  const faceB = parent.getObjectByName('MATCH_SHARED_B');
+  assert(faceA?.type === 'FACE' && faceB?.type === 'FACE', '[thicken-shared-edge-match] Expected authored source faces.');
+
+  const thickenOptions = {
+    featureId: 'THICK_MATCH_SHARED',
+    adjacentNormalFaceNames: selectedFaceNames,
+    smoothAdjacentNormalDotThreshold: 0.7,
+    sharedBoundaryNormalMode: 'equal',
+  };
+  const solidA = faceA.thicken(1, thickenOptions);
+  const solidB = faceB.thicken(1, thickenOptions);
+  assertClosedManifold(solidA, 'thicken-shared-edge-match-a');
+  assertClosedManifold(solidB, 'thicken-shared-edge-match-b');
+
+  const pointsA = uniqueFacePoints(solidA, 'MATCH_SHARED_A_END');
+  const pointsB = uniqueFacePoints(solidB, 'MATCH_SHARED_B_END');
+  let matchingPointCount = 0;
+  for (const pointA of pointsA) {
+    const best = Math.min(...pointsB.map((pointB) => pointDistance(pointA, pointB)));
+    if (best <= 1e-6) matchingPointCount += 1;
+  }
+  assert(
+    matchingPointCount >= 2,
+    `[thicken-shared-edge-match] Expected both shared offset-edge endpoints to match exactly, matched ${matchingPointCount}.`,
+  );
+}
+
+export async function test_face_thicken_connected_patch_preserves_source_cap_faces() {
+  const parent = new Solid();
+  const tilt = 0.25;
+  parent.addTriangle('PATCH_A', [0, 0, 0], [1, 0, 0], [1, 1, 0]);
+  parent.addTriangle('PATCH_A', [0, 0, 0], [1, 1, 0], [0, 1, 0]);
+  parent.addTriangle('PATCH_B', [1, 0, 0], [2, 0, tilt], [2, 1, tilt]);
+  parent.addTriangle('PATCH_B', [1, 0, 0], [2, 1, tilt], [1, 1, 0]);
+  parent.visualize({ authoringOnly: true, showEdges: false });
+
+  const faceA = parent.getObjectByName('PATCH_A');
+  const faceB = parent.getObjectByName('PATCH_B');
+  assert(faceA?.type === 'FACE' && faceB?.type === 'FACE', '[thicken-connected-patch] Expected authored source faces.');
+
+  const solid = thickenFacesToSolid([faceA, faceB], 1, {
+    featureId: 'THICK_CONNECTED_PATCH',
+    name: 'THICK_CONNECTED_PATCH',
+  });
+  assertClosedManifold(solid, 'thicken-connected-patch');
+
+  const diagnostics = solid?.__thickenDiagnostics || {};
+  assert(diagnostics.sourceFaceCount === 2, `[thicken-connected-patch] Expected two source faces, got ${diagnostics.sourceFaceCount}.`);
+  const faceNames = getFaceNamesSet(solid);
+  for (const faceName of ['PATCH_A_START', 'PATCH_A_END', 'PATCH_B_START', 'PATCH_B_END']) {
+    assert(faceNames.has(faceName), `[thicken-connected-patch] Missing preserved cap face ${faceName}.`);
+  }
+  const sharedSidewalls = Array.from(faceNames).filter((faceName) => /PATCH_A.*PATCH_B|PATCH_B.*PATCH_A/.test(faceName));
+  assert(sharedSidewalls.length === 0, `[thicken-connected-patch] Expected shared edge to be internal, found ${JSON.stringify(sharedSidewalls)}.`);
+}
+
 export async function test_thicken_feature_serializes_and_replays_planar_profile(partHistory) {
   const sketch = await partHistory.newFeature('S');
   sketch.inputParams.id = 'THICK_FEATURE_SRC';
@@ -519,7 +671,7 @@ export async function afterRun_thicken_feature_connected_faces_remain_individual
     .filter((obj) => obj?.type === 'SOLID' && obj?.owningFeatureID === featureId)
     .slice()
     .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || '')));
-  assert(solids.length === 2, `[thicken-feature-patch] Expected two individual solids, received ${solids.length}.`);
+  assert(solids.length === 2, `[thicken-feature-patch] Expected two individual solids for a sharp connected edge, received ${solids.length}.`);
 
   const expectedNames = [
     'THICK_PATCH_01_THICK_PATCH_SRC_PZ',

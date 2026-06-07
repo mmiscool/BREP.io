@@ -1,4 +1,10 @@
+import {
+  groupConnectedFacesBySharedEdges,
+  thickenFacesToSolid,
+} from '../../BREP/faceThicken.js';
 import { resolveSelectionObject } from '../selectionUtils.js';
+
+const SELECTED_PATCH_ADJACENT_NORMAL_DOT_THRESHOLD = 0.7;
 
 const inputParamsSchema = {
   id: {
@@ -116,30 +122,46 @@ export class ThickenFeature {
     const added = [];
     const results = [];
     const failures = [];
-    const width = Math.max(2, String(faceSelections.length).length);
+    const faceGroups = groupConnectedFacesBySharedEdges(faceSelections, {
+      minSharedNormalDot: SELECTED_PATCH_ADJACENT_NORMAL_DOT_THRESHOLD,
+      minPlanarRatio: 0.98,
+    });
+    const selectedFaceNames = faceSelections.map((face, faceIndex) => getFaceName(face) || `FACE_${faceIndex + 1}`);
+    const width = Math.max(2, String(faceGroups.length).length);
 
-    for (let index = 0; index < faceSelections.length; index += 1) {
-      const faceObj = faceSelections[index];
-      const sourceFaceName = getFaceName(faceObj) || `FACE_${index + 1}`;
-      const sourceObjectName = String(faceObj?.name || sourceFaceName);
-      const resultName = faceSelections.length === 1
+    for (let index = 0; index < faceGroups.length; index += 1) {
+      const groupFaces = faceGroups[index];
+      const primaryFace = groupFaces[0] || null;
+      const groupFaceNames = groupFaces.map((face, faceIndex) => getFaceName(face) || `FACE_${faceIndex + 1}`);
+      const sourceFaceName = groupFaceNames[0] || `FACE_${index + 1}`;
+      const sourceObjectName = groupFaceNames.join(', ');
+      const resultName = faceGroups.length === 1
         ? featureId
         : `${featureId}_${String(index + 1).padStart(width, '0')}_${sanitizeToken(sourceFaceName, `FACE_${index + 1}`)}`;
 
       let result = null;
       try {
-        result = faceObj.thicken(distance, {
+        const thickenOptions = {
           featureId,
           name: resultName,
-        });
+        };
+        if (selectedFaceNames.length > 1) {
+          thickenOptions.adjacentNormalFaceNames = selectedFaceNames;
+          thickenOptions.smoothAdjacentNormalDotThreshold = SELECTED_PATCH_ADJACENT_NORMAL_DOT_THRESHOLD;
+          thickenOptions.sharedBoundaryNormalMode = 'equal';
+        }
+        result = groupFaces.length > 1
+          ? thickenFacesToSolid(groupFaces, distance, thickenOptions)
+          : primaryFace.thicken(distance, thickenOptions);
       } catch (error) {
         failures.push({
           selectionIndex: index,
           sourceFaceName,
           sourceObjectName,
+          sourceFaceNames: groupFaceNames,
           error: error?.message || String(error),
         });
-        console.error(`[ThickenFeature] Failed to thicken face "${sourceFaceName}".`, error);
+        console.error(`[ThickenFeature] Failed to thicken face group "${sourceObjectName}".`, error);
         continue;
       }
 
@@ -148,6 +170,7 @@ export class ThickenFeature {
         selectionIndex: index,
         resultName,
         sourceFaceName,
+        sourceFaceNames: groupFaceNames,
         sourceObjectName,
         diagnostics,
       });
@@ -160,6 +183,7 @@ export class ThickenFeature {
             featureId,
             resultName,
             sourceFaceName,
+            sourceFaceNames: groupFaceNames,
             distance,
             selectionIndex: index,
           },
@@ -177,7 +201,7 @@ export class ThickenFeature {
     this.persistentData = {
       sourceFaceName: primary?.sourceFaceName || '',
       sourceObjectName: primary?.sourceObjectName || '',
-      sourceFaceNames: results.map((entry) => entry.sourceFaceName),
+      sourceFaceNames: results.flatMap((entry) => entry.sourceFaceNames || [entry.sourceFaceName]),
       sourceObjectNames: results.map((entry) => entry.sourceObjectName),
       distance,
       diagnostics: results.length === 1
@@ -186,6 +210,7 @@ export class ThickenFeature {
           selectionIndex: entry.selectionIndex,
           resultName: entry.resultName,
           sourceFaceName: entry.sourceFaceName,
+          sourceFaceNames: entry.sourceFaceNames || [entry.sourceFaceName],
           diagnostics: entry.diagnostics || null,
         })),
       results,

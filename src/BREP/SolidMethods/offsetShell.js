@@ -1,9 +1,14 @@
 import { applySolidAuthoringStateSnapshot } from "../CppSolidCore.js";
+import {
+    groupConnectedFacesBySharedEdges,
+    thickenFacesToSolid,
+} from "../faceThicken.js";
 import { THREE } from "../SolidShared.js";
 import { manifold } from "../setupManifold.js";
 import { unionMany } from "./booleanOps.js";
 
 const DEFAULT_ROUNDED_CORNER_RESOLUTION = 32;
+const SELECTED_PATCH_ADJACENT_NORMAL_DOT_THRESHOLD = 0.7;
 
 function hasNativeTubeBuilder() {
     return typeof manifold?.buildTubeAuthoringState === "function";
@@ -681,32 +686,58 @@ export function offsetShell(faces, distance, options = {}) {
 
     let generatedCount = 0;
     let skippedCount = 0;
+    let generatedPatchCount = 0;
+    let skippedPatchCount = 0;
     let thickenWallMs = 0;
     let unionWallMs = 0;
     const thickenedSolids = [];
+    const thickenedFaceNames = faceObjects.map((face) => getFaceName(face)).filter(Boolean);
+    const smoothAdjacentNormalDotThreshold = Number.isFinite(Number(options?.adjacentNormalDotThreshold))
+        ? Number(options.adjacentNormalDotThreshold)
+        : (Number.isFinite(Number(options?.smoothAdjacentNormalDotThreshold))
+            ? Number(options.smoothAdjacentNormalDotThreshold)
+            : SELECTED_PATCH_ADJACENT_NORMAL_DOT_THRESHOLD);
+    const faceGroups = groupConnectedFacesBySharedEdges(faceObjects, {
+        minSharedNormalDot: smoothAdjacentNormalDotThreshold,
+        minPlanarRatio: 0.98,
+    });
+    const smoothSelectedAdjacentNormals = thickenedFaceNames.length > 1;
 
-    for (let index = 0; index < faceObjects.length; index += 1) {
-        const faceObj = faceObjects[index];
+    for (let index = 0; index < faceGroups.length; index += 1) {
+        const groupFaces = faceGroups[index];
+        const faceObj = groupFaces[0] || null;
 
         let thickened = null;
         const thickenStart = nowMs();
         try {
-            thickened = faceObj.thicken(thickenDistance, {
+            const thickenOptions = {
                 featureId,
                 name: featureId,
                 skipTriangleSplit: true,
-            });
+            };
+            if (smoothSelectedAdjacentNormals) {
+                thickenOptions.adjacentNormalFaceNames = thickenedFaceNames;
+                thickenOptions.smoothAdjacentNormalDotThreshold = smoothAdjacentNormalDotThreshold;
+                thickenOptions.sharedBoundaryNormalMode = "equal";
+            }
+            thickened = groupFaces.length > 1
+                ? thickenFacesToSolid(groupFaces, thickenDistance, thickenOptions)
+                : faceObj.thicken(thickenDistance, thickenOptions);
         } catch {
             thickenWallMs += nowMs() - thickenStart;
-            skippedCount += 1;
+            skippedCount += Math.max(1, groupFaces.length);
+            skippedPatchCount += 1;
             continue;
         }
         thickenWallMs += nowMs() - thickenStart;
         if (!thickened) {
-            skippedCount += 1;
+            skippedCount += Math.max(1, groupFaces.length);
+            skippedPatchCount += 1;
             continue;
         }
         thickenedSolids.push(thickened);
+        generatedCount += Math.max(1, groupFaces.length);
+        generatedPatchCount += 1;
     }
 
     const unionStart = nowMs();
@@ -728,8 +759,8 @@ export function offsetShell(faces, distance, options = {}) {
     unionWallMs += nowMs() - unionStart;
 
     if (!combined) return null;
-    skippedCount += Number(unionDiagnostics?.skippedSolidCount || 0);
-    generatedCount = Number(unionDiagnostics?.contributedSolidCount || thickenedSolids.length);
+    skippedPatchCount += Number(unionDiagnostics?.skippedSolidCount || 0);
+    generatedPatchCount = Number(unionDiagnostics?.contributedSolidCount || generatedPatchCount);
 
     const roundedCorners = {
         requested: offsetDistance < 0,
@@ -831,9 +862,14 @@ export function offsetShell(faces, distance, options = {}) {
         faceCount: sourceFaces.length,
         selectedFaceCount: selectedFaceNames.size,
         thickenedFaceCount: faceObjects.length,
+        thickenedPatchCount: faceGroups.length,
         generatedFaceCount: generatedCount,
         skippedFaceCount: skippedCount,
+        generatedPatchCount,
+        skippedPatchCount,
         thickenDistance,
+        adjacentBoundaryNormalDotThreshold: smoothSelectedAdjacentNormals ? smoothAdjacentNormalDotThreshold : null,
+        adjacentBoundaryNormalFaceFilterCount: smoothSelectedAdjacentNormals ? Math.max(0, thickenedFaceNames.length - 1) : 0,
         thickenWallMs: roundMs(thickenWallMs),
         unionWallMs: roundMs(unionWallMs),
         unionStrategy: unionDiagnostics?.unionStrategy || "unknown",
@@ -854,7 +890,10 @@ export function offsetShell(faces, distance, options = {}) {
                 thickenedFaceNames: faceObjects.map((face) => getFaceName(face)).filter(Boolean),
                 generatedFaceCount: generatedCount,
                 skippedFaceCount: skippedCount,
+                generatedPatchCount,
+                skippedPatchCount,
                 thickenDistance,
+                adjacentBoundaryNormalDotThreshold: smoothSelectedAdjacentNormals ? smoothAdjacentNormalDotThreshold : null,
                 unionStrategy: unionDiagnostics?.unionStrategy || "unknown",
                 roundedCorners,
             },

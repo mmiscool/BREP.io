@@ -53,8 +53,211 @@ function getFaceLabel(face) {
   return label || null;
 }
 
+function getFaceLabelList(value) {
+  const rawList = Array.isArray(value) ? value : (value == null ? [] : [value]);
+  const labels = [];
+  const seen = new Set();
+  for (const entry of rawList) {
+    const raw = typeof entry === 'string'
+      ? entry
+      : (entry?.userData?.faceName ?? entry?.faceName ?? entry?.name ?? null);
+    const label = String(raw || '').trim();
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    labels.push(label);
+  }
+  return labels;
+}
+
+function getAdjacentNormalFaceFilter(options, selectedFaceName) {
+  const labels = getFaceLabelList(
+    options.adjacentNormalFaceNames
+      ?? options.smoothAdjacentNormalFaceNames
+      ?? options.selectedFaceNames,
+  );
+  const selected = String(selectedFaceName || '').trim();
+  const neighbors = labels.filter((label) => label && label !== selected);
+  return neighbors.length ? new Set(neighbors) : null;
+}
+
+function getFaceOwnerKey(face) {
+  const owner = face?.parentSolid || (String(face?.parent?.type || '').toUpperCase() === 'SOLID' ? face.parent : null);
+  return String(owner?.uuid || owner?.id || owner?.name || 'NO_OWNER');
+}
+
 function unorderedPointPairKey(a, b) {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
+function copyTriangleMetadata(source, target) {
+  if (!source || !target) return target;
+  if (source.sourceFaceName != null) target.sourceFaceName = source.sourceFaceName;
+  return target;
+}
+
+export function groupConnectedFacesBySharedEdges(faces, options = {}) {
+  const faceList = Array.isArray(faces)
+    ? faces.filter((face) => face?.geometry)
+    : [];
+  if (faceList.length <= 1) return faceList.length ? [faceList] : [];
+
+  const tmp = new THREE.Vector3();
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+  for (const face of faceList) {
+    try { face.updateMatrixWorld?.(true); } catch { /* ignore */ }
+    const position = face.geometry?.getAttribute?.('position');
+    if (!position || position.itemSize !== 3) continue;
+    for (let i = 0; i < position.count; i++) {
+      tmp.set(position.getX(i), position.getY(i), position.getZ(i)).applyMatrix4(face.matrixWorld);
+      if (tmp.x < minX) minX = tmp.x;
+      if (tmp.y < minY) minY = tmp.y;
+      if (tmp.z < minZ) minZ = tmp.z;
+      if (tmp.x > maxX) maxX = tmp.x;
+      if (tmp.y > maxY) maxY = tmp.y;
+      if (tmp.z > maxZ) maxZ = tmp.z;
+    }
+  }
+  const scale = Number.isFinite(minX)
+    ? Math.max(1, Math.hypot(maxX - minX, maxY - minY, maxZ - minZ))
+    : 1;
+  const weldTolerance = Math.max(
+    Number(options.weldTolerance) || 0,
+    Math.max(1e-6, scale * 1e-7),
+  );
+  const minSharedNormalDot = Number.isFinite(Number(options.minSharedNormalDot))
+    ? Math.max(-1, Math.min(1, Number(options.minSharedNormalDot)))
+    : -1;
+  const minPlanarRatio = Number.isFinite(Number(options.minPlanarRatio))
+    ? Math.max(0, Math.min(1, Number(options.minPlanarRatio)))
+    : 0;
+  const computeFacePlanarRatio = (face, averageNormal) => {
+    if (!(minPlanarRatio > 0)) return 1;
+    const position = face?.geometry?.getAttribute?.('position');
+    const index = face?.geometry?.getIndex?.() || null;
+    if (!position || position.itemSize !== 3 || position.count < 3 || !averageNormal || averageNormal.lengthSq() <= TRI_EPS) return 0;
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const c = new THREE.Vector3();
+    let weightedDot = 0;
+    let totalAreaTwice = 0;
+    const triCount = index ? ((index.count / 3) | 0) : ((position.count / 3) | 0);
+    for (let triIndex = 0; triIndex < triCount; triIndex++) {
+      const i0 = index ? (index.getX((triIndex * 3) + 0) >>> 0) : ((triIndex * 3) + 0);
+      const i1 = index ? (index.getX((triIndex * 3) + 1) >>> 0) : ((triIndex * 3) + 1);
+      const i2 = index ? (index.getX((triIndex * 3) + 2) >>> 0) : ((triIndex * 3) + 2);
+      a.set(position.getX(i0), position.getY(i0), position.getZ(i0)).applyMatrix4(face.matrixWorld);
+      b.set(position.getX(i1), position.getY(i1), position.getZ(i1)).applyMatrix4(face.matrixWorld);
+      c.set(position.getX(i2), position.getY(i2), position.getZ(i2)).applyMatrix4(face.matrixWorld);
+      const normal = triangleNormal(a, b, c);
+      const areaTwice = normal.length();
+      if (!(areaTwice > TRI_EPS)) continue;
+      weightedDot += Math.abs(normal.multiplyScalar(1 / areaTwice).dot(averageNormal)) * areaTwice;
+      totalAreaTwice += areaTwice;
+    }
+    return totalAreaTwice > TRI_EPS ? (weightedDot / totalAreaTwice) : 0;
+  };
+  const faceNormals = faceList.map((face) => {
+    try {
+      const normal = typeof face?.getAverageNormal === 'function'
+        ? face.getAverageNormal()
+        : null;
+      if (normal && normal.lengthSq?.() > TRI_EPS) return normal.clone().normalize();
+    } catch { /* ignore */ }
+    return null;
+  });
+  const facePlanarRatios = faceList.map((face, index) => computeFacePlanarRatio(face, faceNormals[index]));
+  const edgeToFaces = new Map();
+
+  for (let faceIndex = 0; faceIndex < faceList.length; faceIndex++) {
+    const face = faceList[faceIndex];
+    const position = face.geometry?.getAttribute?.('position');
+    const index = face.geometry?.getIndex?.() || null;
+    if (!position || position.itemSize !== 3 || position.count < 3) continue;
+
+    const rawPoints = [];
+    for (let i = 0; i < position.count; i++) {
+      rawPoints.push(
+        new THREE.Vector3(position.getX(i), position.getY(i), position.getZ(i))
+          .applyMatrix4(face.matrixWorld),
+      );
+    }
+    const rawToCanonicalKey = new Array(rawPoints.length);
+    for (let i = 0; i < rawPoints.length; i++) {
+      const key = pointKey(rawPoints[i], weldTolerance);
+      rawToCanonicalKey[i] = key;
+    }
+
+    const edgeCounts = new Map();
+    const triCount = index ? ((index.count / 3) | 0) : ((position.count / 3) | 0);
+    for (let triIndex = 0; triIndex < triCount; triIndex++) {
+      const i0 = index ? (index.getX((triIndex * 3) + 0) >>> 0) : ((triIndex * 3) + 0);
+      const i1 = index ? (index.getX((triIndex * 3) + 1) >>> 0) : ((triIndex * 3) + 1);
+      const i2 = index ? (index.getX((triIndex * 3) + 2) >>> 0) : ((triIndex * 3) + 2);
+      for (const [a, b] of [[i0, i1], [i1, i2], [i2, i0]]) {
+        const aKey = rawToCanonicalKey[a];
+        const bKey = rawToCanonicalKey[b];
+        if (!aKey || !bKey || aKey === bKey) continue;
+        const key = unorderedPointPairKey(aKey, bKey);
+        edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
+      }
+    }
+
+    const ownerKey = getFaceOwnerKey(face);
+    for (const [edge, count] of edgeCounts.entries()) {
+      if (count !== 1) continue;
+      const key = `${ownerKey}::${edge}`;
+      let list = edgeToFaces.get(key);
+      if (!list) {
+        list = [];
+        edgeToFaces.set(key, list);
+      }
+      list.push(faceIndex);
+    }
+  }
+
+  const parent = new Array(faceList.length).fill(null).map((_, index) => index);
+  const find = (index) => {
+    let root = index;
+    while (parent[root] !== root) root = parent[root];
+    while (parent[index] !== index) {
+      const next = parent[index];
+      parent[index] = root;
+      index = next;
+    }
+    return root;
+  };
+  const union = (a, b) => {
+    if (minPlanarRatio > 0 && (facePlanarRatios[a] < minPlanarRatio || facePlanarRatios[b] < minPlanarRatio)) return;
+    if (minSharedNormalDot > -1) {
+      const na = faceNormals[a];
+      const nb = faceNormals[b];
+      if (!na || !nb || Math.abs(na.dot(nb)) < minSharedNormalDot) return;
+    }
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[rb] = ra;
+  };
+  for (const list of edgeToFaces.values()) {
+    if (!Array.isArray(list) || list.length < 2) continue;
+    for (let i = 1; i < list.length; i++) union(list[0], list[i]);
+  }
+
+  const groupByRoot = new Map();
+  for (let index = 0; index < faceList.length; index++) {
+    const root = find(index);
+    let group = groupByRoot.get(root);
+    if (!group) {
+      group = [];
+      groupByRoot.set(root, group);
+    }
+    group.push(faceList[index]);
+  }
+  return Array.from(groupByRoot.values());
 }
 
 function pointToSegmentDistanceSq(point, a, b) {
@@ -192,23 +395,25 @@ function assignSourceEdgesToBoundaryLoops(face, loops, vertices, scale, weldTole
 }
 
 function addSmoothAdjacentBoundaryNormals(face, surface, options = {}) {
+  if (options.disableAdjacentBoundaryNormals === true) {
+    return {
+      candidateEdges: 0,
+      acceptedEdges: 0,
+      contributionCount: 0,
+      contributedVertexCount: 0,
+      dotThreshold: null,
+      weightScale: 0,
+      faceFilterCount: 0,
+      faceFilterNames: [],
+    };
+  }
   const solid = face?.parentSolid || (String(face?.parent?.type || '').toUpperCase() === 'SOLID' ? face.parent : null);
   const selectedFaceName = getFaceLabel(face);
+  const adjacentFaceFilter = getAdjacentNormalFaceFilter(options, selectedFaceName);
   const triVerts = Array.isArray(solid?._triVerts) ? solid._triVerts : [];
   const triIDs = Array.isArray(solid?._triIDs) ? solid._triIDs : [];
   const vertProperties = Array.isArray(solid?._vertProperties) ? solid._vertProperties : [];
   const triCount = (triVerts.length / 3) | 0;
-  if (!solid || !selectedFaceName) {
-    return { candidateEdges: 0, acceptedEdges: 0, contributionCount: 0, contributedVertexCount: 0 };
-  }
-  const boundaryEdges = Array.isArray(surface?.boundaryDirectedEdges) ? surface.boundaryDirectedEdges : [];
-  const vertices = Array.isArray(surface?.vertices) ? surface.vertices : [];
-  const vertexNormals = Array.isArray(surface?.vertexNormals) ? surface.vertexNormals : [];
-  if (!boundaryEdges.length || !vertices.length || !vertexNormals.length) {
-    return { candidateEdges: 0, acceptedEdges: 0, contributionCount: 0, contributedVertexCount: 0 };
-  }
-
-  const weldTolerance = Math.max(Number(surface?.weldTolerance) || 0, 1e-8);
   const smoothDotThreshold = Math.max(
     -1,
     Math.min(
@@ -226,8 +431,29 @@ function addSmoothAdjacentBoundaryNormals(face, surface, options = {}) {
       ? Number(options.adjacentNormalWeightScale)
       : 1,
   );
+  const makeStats = (stats = {}) => ({
+    candidateEdges: Number(stats.candidateEdges || 0),
+    acceptedEdges: Number(stats.acceptedEdges || 0),
+    contributionCount: Number(stats.contributionCount || 0),
+    contributedVertexCount: Number(stats.contributedVertexCount || 0),
+    dotThreshold: smoothDotThreshold,
+    weightScale: adjacentWeightScale,
+    faceFilterCount: adjacentFaceFilter?.size || 0,
+    faceFilterNames: adjacentFaceFilter ? Array.from(adjacentFaceFilter) : [],
+  });
+  if (!solid || !selectedFaceName) {
+    return makeStats();
+  }
+  const boundaryEdges = Array.isArray(surface?.boundaryDirectedEdges) ? surface.boundaryDirectedEdges : [];
+  const vertices = Array.isArray(surface?.vertices) ? surface.vertices : [];
+  const vertexNormals = Array.isArray(surface?.vertexNormals) ? surface.vertexNormals : [];
+  if (!boundaryEdges.length || !vertices.length || !vertexNormals.length) {
+    return makeStats();
+  }
+
+  const weldTolerance = Math.max(Number(surface?.weldTolerance) || 0, 1e-8);
   if (adjacentWeightScale <= 0) {
-    return { candidateEdges: 0, acceptedEdges: 0, contributionCount: 0, contributedVertexCount: 0 };
+    return makeStats();
   }
 
   const boundaryVertexByPointKey = new Map();
@@ -245,7 +471,7 @@ function addSmoothAdjacentBoundaryNormals(face, surface, options = {}) {
     boundaryEdgeByPointPair.set(unorderedPointPairKey(aKey, bKey), true);
   }
   if (!boundaryEdgeByPointPair.size) {
-    return { candidateEdges: 0, acceptedEdges: 0, contributionCount: 0, contributedVertexCount: 0 };
+    return makeStats();
   }
 
   const idToFaceName = solid?._idToFaceName instanceof Map ? solid._idToFaceName : new Map();
@@ -260,15 +486,58 @@ function addSmoothAdjacentBoundaryNormals(face, surface, options = {}) {
   const parentPointCache = new Map();
   const parentKeyCache = new Map();
   const contributedVertices = new Set();
+  const useEqualBoundaryNormals = options.equalAdjacentBoundaryNormals === true
+    || String(options.sharedBoundaryNormalMode || '').toLowerCase() === 'equal';
+  const equalBoundaryNormalBuckets = useEqualBoundaryNormals ? new Map() : null;
   let candidateEdges = 0;
   let acceptedEdges = 0;
   let contributionCount = 0;
+
+  const normalKey = (normal) => [
+    Math.round(normal.x * 1e6),
+    Math.round(normal.y * 1e6),
+    Math.round(normal.z * 1e6),
+  ].join(',');
+  const getEqualBoundaryNormalBucket = (selectedIndex) => {
+    if (!equalBoundaryNormalBuckets) return null;
+    let bucket = equalBoundaryNormalBuckets.get(selectedIndex);
+    if (bucket) return bucket;
+    const base = vertexNormals[selectedIndex]?.clone?.() || null;
+    if (!base || base.lengthSq() <= TRI_EPS) return null;
+    base.normalize();
+    bucket = {
+      sum: base.clone(),
+      keys: new Set([normalKey(base)]),
+    };
+    equalBoundaryNormalBuckets.set(selectedIndex, bucket);
+    return bucket;
+  };
+  const finalizeStats = (stats = {}) => {
+    if (equalBoundaryNormalBuckets?.size) {
+      for (const [selectedIndex, bucket] of equalBoundaryNormalBuckets.entries()) {
+        if (!bucket?.sum || bucket.sum.lengthSq() <= TRI_EPS) continue;
+        vertexNormals[selectedIndex].copy(bucket.sum);
+      }
+    }
+    return makeStats(stats);
+  };
 
   const addContributionForPointKey = (key, adjacentUnit, normalLength) => {
     const selectedIndex = boundaryVertexByPointKey.get(key);
     if (selectedIndex == null) return false;
     const current = vertexNormals[selectedIndex];
     if (!current || current.lengthSq() <= TRI_EPS) return false;
+    if (equalBoundaryNormalBuckets) {
+      const bucket = getEqualBoundaryNormalBucket(selectedIndex);
+      if (!bucket) return false;
+      const keyForNormal = normalKey(adjacentUnit);
+      if (bucket.keys.has(keyForNormal)) return false;
+      bucket.keys.add(keyForNormal);
+      bucket.sum.add(adjacentUnit);
+      contributedVertices.add(selectedIndex);
+      contributionCount += 1;
+      return true;
+    }
     const baseWeight = Math.max(current.length(), EPS);
     const weight = Math.min(normalLength, baseWeight) * adjacentWeightScale;
     if (!(weight > EPS)) return false;
@@ -318,6 +587,7 @@ function addSmoothAdjacentBoundaryNormals(face, surface, options = {}) {
       for (const entry of queriedFaces) {
         const faceName = String(entry?.faceName || '').trim();
         if (!faceName || faceName === selectedFaceName) continue;
+        if (adjacentFaceFilter && !adjacentFaceFilter.has(faceName)) continue;
         for (const tri of entry?.triangles || []) {
           const p1 = Array.isArray(tri?.p1) ? tri.p1 : null;
           const p2 = Array.isArray(tri?.p2) ? tri.p2 : null;
@@ -331,12 +601,12 @@ function addSmoothAdjacentBoundaryNormals(face, surface, options = {}) {
         }
       }
       if (candidateEdges > 0 || triCount === 0 || triIDs.length < triCount || vertProperties.length < 9) {
-        return {
+        return finalizeStats({
           candidateEdges,
           acceptedEdges,
           contributionCount,
           contributedVertexCount: contributedVertices.size,
-        };
+        });
       }
     }
   } catch {
@@ -344,12 +614,12 @@ function addSmoothAdjacentBoundaryNormals(face, surface, options = {}) {
   }
 
   if (triCount === 0 || triIDs.length < triCount || vertProperties.length < 9) {
-    return {
+    return finalizeStats({
       candidateEdges,
       acceptedEdges,
       contributionCount,
       contributedVertexCount: contributedVertices.size,
-    };
+    });
   }
 
   const getParentPoint = (index) => {
@@ -381,6 +651,7 @@ function addSmoothAdjacentBoundaryNormals(face, surface, options = {}) {
   for (let triIndex = 0; triIndex < triCount; triIndex++) {
     const faceName = String(idToFaceName.get(triIDs[triIndex]) || '').trim();
     if (faceName === selectedFaceName) continue;
+    if (adjacentFaceFilter && !adjacentFaceFilter.has(faceName)) continue;
 
     const i0 = triVerts[(triIndex * 3) + 0] >>> 0;
     const i1 = triVerts[(triIndex * 3) + 1] >>> 0;
@@ -422,12 +693,12 @@ function addSmoothAdjacentBoundaryNormals(face, surface, options = {}) {
     if (acceptedThisTriangle) acceptedEdges += 1;
   }
 
-  return {
+  return finalizeStats({
     candidateEdges,
     acceptedEdges,
     contributionCount,
     contributedVertexCount: contributedVertices.size,
-  };
+  });
 }
 
 function analyzeMeshTopology(solid) {
@@ -866,6 +1137,10 @@ function extractFaceSurface(face, options = {}) {
 
   let vertices = canonicalAcc.map((entry) => entry.point.multiplyScalar(1 / entry.count));
   let vertexKeys = canonicalAcc.map((entry) => entry.key);
+  const triangleSourceFaceNames = Array.isArray(options.triangleSourceFaceNames)
+    ? options.triangleSourceFaceNames
+    : null;
+  const defaultTriangleSourceFaceName = String(options.sourceFaceName || getFaceLabel(face) || '').trim();
   let triangles = [];
   const triCount = index ? ((index.count / 3) | 0) : ((position.count / 3) | 0);
   for (let t = 0; t < triCount; t++) {
@@ -878,7 +1153,10 @@ function extractFaceSurface(face, options = {}) {
     if (a === b || b === c || c === a) continue;
     const area = triangleArea(vertices[a], vertices[b], vertices[c]);
     if (!(area > TRI_EPS)) continue;
-    triangles.push([a, b, c]);
+    const tri = [a, b, c];
+    const triSourceFaceName = String(triangleSourceFaceNames?.[t] || defaultTriangleSourceFaceName || '').trim();
+    if (triSourceFaceName) tri.sourceFaceName = triSourceFaceName;
+    triangles.push(tri);
   }
   if (!triangles.length) {
     throw new Error('Face.thicken() could not resolve any non-degenerate source triangles.');
@@ -921,7 +1199,7 @@ function extractFaceSurface(face, options = {}) {
   }
 
   const triVisited = new Array(triangles.length).fill(false);
-  const flipTriangle = (tri) => [tri[0], tri[2], tri[1]];
+  const flipTriangle = (tri) => copyTriangleMetadata(tri, [tri[0], tri[2], tri[1]]);
 
   for (let seed = 0; seed < triangles.length; seed++) {
     if (triVisited[seed]) continue;
@@ -1096,10 +1374,23 @@ function extractFacesSurface(faces, options = {}) {
 
   const rawPositions = [];
   const rawIndices = [];
+  const triangleSourceFaceNames = [];
+  const sourceEdges = [];
   const tmp = new THREE.Vector3();
+  let commonParentSolid = null;
+  let hasMixedParentSolid = false;
 
   for (const face of faceList) {
     try { face.updateMatrixWorld?.(true); } catch { /* ignore */ }
+    const faceName = getFaceLabel(face) || `FACE_${faceList.indexOf(face) + 1}`;
+    const parentSolid = face?.parentSolid || (String(face?.parent?.type || '').toUpperCase() === 'SOLID' ? face.parent : null);
+    if (!commonParentSolid && parentSolid) commonParentSolid = parentSolid;
+    else if (commonParentSolid && parentSolid && parentSolid !== commonParentSolid) hasMixedParentSolid = true;
+    if (Array.isArray(face?.edges)) {
+      for (const edge of face.edges) {
+        if (edge && !sourceEdges.includes(edge)) sourceEdges.push(edge);
+      }
+    }
     const geometry = face.geometry;
     const position = geometry.getAttribute?.('position');
     const index = geometry.getIndex?.() || null;
@@ -1121,6 +1412,7 @@ function extractFacesSurface(faces, options = {}) {
       const i1 = index ? (index.getX((triIndex * 3) + 1) >>> 0) : ((triIndex * 3) + 1);
       const i2 = index ? (index.getX((triIndex * 3) + 2) >>> 0) : ((triIndex * 3) + 2);
       rawIndices.push(baseVertex + i0, baseVertex + i1, baseVertex + i2);
+      triangleSourceFaceNames.push(faceName);
     }
   }
 
@@ -1135,12 +1427,50 @@ function extractFacesSurface(faces, options = {}) {
   const fakeFace = {
     geometry,
     matrixWorld: new THREE.Matrix4(),
+    name: String(options.sourceFaceName || 'THICKEN_PATCH'),
+    edges: sourceEdges,
+    parentSolid: hasMixedParentSolid ? null : commonParentSolid,
+    userData: {
+      faceName: String(options.sourceFaceName || 'THICKEN_PATCH'),
+    },
     updateMatrixWorld() {},
   };
-  return extractFaceSurface(fakeFace, options);
+  return extractFaceSurface(fakeFace, {
+    ...options,
+    triangleSourceFaceNames,
+    disableAdjacentBoundaryNormals: options.disableAdjacentBoundaryNormals
+      ?? !(options.equalAdjacentBoundaryNormals === true
+        || String(options.sharedBoundaryNormalMode || '').toLowerCase() === 'equal'),
+  });
 }
 
 function buildThickenClassificationState(labels, distance) {
+  const capGroups = [];
+  const capLabels = new Set();
+  const addCapGroup = (entry, kind) => {
+    const label = String(entry?.label || '').trim();
+    if (!label || capLabels.has(label)) return;
+    capLabels.add(label);
+    const sourceFaceName = String(entry?.sourceFaceName || labels.sourceFaceName || '').trim() || labels.sourceFaceName;
+    capGroups.push({
+      label,
+      kind,
+      metadata: {
+        type: kind === 'start' ? 'start_cap' : 'end_cap',
+        sourceFaceName,
+        distance,
+      },
+    });
+  };
+  const startCaps = Array.isArray(labels.startCaps) && labels.startCaps.length
+    ? labels.startCaps
+    : [{ label: labels.start, sourceFaceName: labels.sourceFaceName }];
+  const endCaps = Array.isArray(labels.endCaps) && labels.endCaps.length
+    ? labels.endCaps
+    : [{ label: labels.end, sourceFaceName: labels.sourceFaceName }];
+  for (const entry of startCaps) addCapGroup(entry, 'start');
+  for (const entry of endCaps) addCapGroup(entry, 'end');
+
   const sidewallGroups = [];
   const sidewallGroupByLabel = new Map();
   for (const entry of labels.sidewalls || []) {
@@ -1172,24 +1502,7 @@ function buildThickenClassificationState(labels, distance) {
   }
 
   const groups = [
-    {
-      label: labels.start,
-      kind: 'start',
-      metadata: {
-        type: 'start_cap',
-        sourceFaceName: labels.sourceFaceName,
-        distance,
-      },
-    },
-    {
-      label: labels.end,
-      kind: 'end',
-      metadata: {
-        type: 'end_cap',
-        sourceFaceName: labels.sourceFaceName,
-        distance,
-      },
-    },
+    ...capGroups,
     ...sidewallGroups,
   ];
 
@@ -1282,7 +1595,24 @@ function buildRawClassification(classificationState, triIDs, method = 'raw_face_
   };
 }
 
-function buildStitchedThickenMesh(surface, distance, classificationState, options = {}) {
+function resolveCapLabelForTriangle(classificationState, tri, kind) {
+  const labels = classificationState?.labels || {};
+  const sourceFaceName = String(tri?.sourceFaceName || '').trim();
+  const capLabels = sourceFaceName
+    ? labels.capLabelsBySourceFaceName?.get?.(sourceFaceName)
+    : null;
+  const label = kind === 'start'
+    ? (capLabels?.start || labels.start)
+    : (capLabels?.end || labels.end);
+  return String(label || '').trim();
+}
+
+function resolveCapFaceIDForTriangle(classificationState, tri, kind) {
+  const label = resolveCapLabelForTriangle(classificationState, tri, kind);
+  return Number(classificationState?.faceNameToID?.get?.(label)) >>> 0;
+}
+
+function buildStitchedThickenMesh(surface, distance, classificationState) {
   const vertexCount = Array.isArray(surface?.vertices) ? surface.vertices.length : 0;
   if (!vertexCount) return null;
 
@@ -1299,8 +1629,8 @@ function buildStitchedThickenMesh(surface, distance, classificationState, option
     vertProperties[(qi * 3) + 2] = q.z;
   }
 
-  const startFaceID = Number(classificationState?.faceNameToID?.get?.(classificationState?.labels?.start)) >>> 0;
-  const endFaceID = Number(classificationState?.faceNameToID?.get?.(classificationState?.labels?.end)) >>> 0;
+  const fallbackStartFaceID = Number(classificationState?.faceNameToID?.get?.(classificationState?.labels?.start)) >>> 0;
+  const fallbackEndFaceID = Number(classificationState?.faceNameToID?.get?.(classificationState?.labels?.end)) >>> 0;
   const triVerts = [];
   const triIDs = [];
   const addTriangle = (i0, i1, i2, faceID) => {
@@ -1327,6 +1657,8 @@ function buildStitchedThickenMesh(surface, distance, classificationState, option
 
   for (const tri of surface.triangles || []) {
     const [a, b, c] = tri;
+    const startFaceID = resolveCapFaceIDForTriangle(classificationState, tri, 'start') || fallbackStartFaceID;
+    const endFaceID = resolveCapFaceIDForTriangle(classificationState, tri, 'end') || fallbackEndFaceID;
     if (distance >= 0) {
       addTriangle(a, c, b, startFaceID);
       addTriangle(vertexCount + a, vertexCount + b, vertexCount + c, endFaceID);
@@ -1363,8 +1695,8 @@ function buildStitchedThickenMesh(surface, distance, classificationState, option
   };
 }
 
-function buildStitchedShellSolid(surface, distance, classificationState, solidName, options = {}) {
-  const rawMesh = buildStitchedThickenMesh(surface, distance, classificationState, options);
+function buildStitchedShellSolid(surface, distance, classificationState, solidName) {
+  const rawMesh = buildStitchedThickenMesh(surface, distance, classificationState);
   if (!rawMesh) return null;
   const rawClassification = buildRawClassification(classificationState, rawMesh.faceID, 'stitched_shell');
   return buildSolidFromTriangleMesh(rawMesh, rawClassification, solidName);
@@ -1375,8 +1707,8 @@ function buildTrianglePrismUnionThickenMesh(surface, distance, classificationSta
   const triangles = Array.isArray(surface?.triangles) ? surface.triangles : [];
   if (!vertices.length || !triangles.length) return null;
 
-  const startFaceID = Number(classificationState?.faceNameToID?.get?.(classificationState?.labels?.start)) >>> 0;
-  const endFaceID = Number(classificationState?.faceNameToID?.get?.(classificationState?.labels?.end)) >>> 0;
+  const fallbackStartFaceID = Number(classificationState?.faceNameToID?.get?.(classificationState?.labels?.start)) >>> 0;
+  const fallbackEndFaceID = Number(classificationState?.faceNameToID?.get?.(classificationState?.labels?.end)) >>> 0;
   const sidewallFallbackID = Number(
     classificationState?.faceNameToID?.values?.()?.next?.()?.value,
   ) >>> 0;
@@ -1403,8 +1735,8 @@ function buildTrianglePrismUnionThickenMesh(surface, distance, classificationSta
     const sideLabel = classificationState?.edgeKeyToLabel?.get?.(key);
     return Number(classificationState?.faceNameToID?.get?.(sideLabel)) >>> 0
       || sidewallFallbackID
-      || startFaceID
-      || endFaceID
+      || fallbackStartFaceID
+      || fallbackEndFaceID
       || 1;
   };
 
@@ -1416,6 +1748,8 @@ function buildTrianglePrismUnionThickenMesh(surface, distance, classificationSta
     const b = vertices[bIndex];
     const c = vertices[cIndex];
     if (!a || !b || !c) continue;
+    const startFaceID = resolveCapFaceIDForTriangle(classificationState, tri, 'start') || fallbackStartFaceID;
+    const endFaceID = resolveCapFaceIDForTriangle(classificationState, tri, 'end') || fallbackEndFaceID;
     const normal = triangleNormal(a, b, c);
     const normalLength = normal.length();
     if (!(normalLength > TRI_EPS)) continue;
@@ -2351,9 +2685,9 @@ function reclassifyThickenCapTrianglesByGeometry(solid, surface, distance, class
   const triCount = (tv.length / 3) | 0;
   if (!triCount || ids.length < triCount || !sourceVertices.length || !sourceTriangles.length) return 0;
 
-  const startFaceID = Number(classificationState?.faceNameToID?.get?.(classificationState?.labels?.start)) >>> 0;
-  const endFaceID = Number(classificationState?.faceNameToID?.get?.(classificationState?.labels?.end)) >>> 0;
-  if (!startFaceID || !endFaceID) return 0;
+  const fallbackStartFaceID = Number(classificationState?.faceNameToID?.get?.(classificationState?.labels?.start)) >>> 0;
+  const fallbackEndFaceID = Number(classificationState?.faceNameToID?.get?.(classificationState?.labels?.end)) >>> 0;
+  if (!fallbackStartFaceID || !fallbackEndFaceID) return 0;
 
   const offsetVertices = sourceVertices.map((point, index) => {
     const normal = sourceNormals[index];
@@ -2361,19 +2695,31 @@ function reclassifyThickenCapTrianglesByGeometry(solid, surface, distance, class
       ? point.clone().add(normal.clone().multiplyScalar(distance))
       : null;
   });
-  const sourceTriRefs = [];
-  const offsetTriRefs = [];
+  const sourceTriRefsByFaceID = new Map();
+  const offsetTriRefsByFaceID = new Map();
+  const addRef = (map, faceID, refs) => {
+    const id = Number(faceID) >>> 0;
+    if (!id || !Array.isArray(refs)) return;
+    let list = map.get(id);
+    if (!list) {
+      list = [];
+      map.set(id, list);
+    }
+    list.push(refs);
+  };
   for (const tri of sourceTriangles) {
     const a = tri?.[0] >>> 0;
     const b = tri?.[1] >>> 0;
     const c = tri?.[2] >>> 0;
     if (!sourceVertices[a] || !sourceVertices[b] || !sourceVertices[c]) continue;
-    sourceTriRefs.push([sourceVertices[a], sourceVertices[b], sourceVertices[c]]);
+    const startFaceID = resolveCapFaceIDForTriangle(classificationState, tri, 'start') || fallbackStartFaceID;
+    const endFaceID = resolveCapFaceIDForTriangle(classificationState, tri, 'end') || fallbackEndFaceID;
+    addRef(sourceTriRefsByFaceID, startFaceID, [sourceVertices[a], sourceVertices[b], sourceVertices[c]]);
     if (offsetVertices[a] && offsetVertices[b] && offsetVertices[c]) {
-      offsetTriRefs.push([offsetVertices[a], offsetVertices[b], offsetVertices[c]]);
+      addRef(offsetTriRefsByFaceID, endFaceID, [offsetVertices[a], offsetVertices[b], offsetVertices[c]]);
     }
   }
-  if (!sourceTriRefs.length || !offsetTriRefs.length) return 0;
+  if (!sourceTriRefsByFaceID.size || !offsetTriRefsByFaceID.size) return 0;
 
   const tol = Math.max(Number(tolerance) || 0, 1e-7);
   const toleranceSq = tol * tol;
@@ -2405,16 +2751,29 @@ function reclassifyThickenCapTrianglesByGeometry(solid, surface, distance, class
     }
     return maxDistanceSq;
   };
+  const bestFaceIDForTriangle = (triIndex, refsByFaceID) => {
+    let bestFaceID = 0;
+    let bestDistanceSq = Infinity;
+    for (const [faceID, refs] of refsByFaceID.entries()) {
+      const distanceSq = triangleMaxDistanceSq(triIndex, refs);
+      if (distanceSq < bestDistanceSq) {
+        bestDistanceSq = distanceSq;
+        bestFaceID = Number(faceID) >>> 0;
+        if (bestDistanceSq <= toleranceSq) break;
+      }
+    }
+    return { faceID: bestFaceID, distanceSq: bestDistanceSq };
+  };
 
   let changed = 0;
   for (let triIndex = 0; triIndex < triCount; triIndex++) {
-    const startDistanceSq = triangleMaxDistanceSq(triIndex, sourceTriRefs);
-    const endDistanceSq = startDistanceSq <= toleranceSq
-      ? Infinity
-      : triangleMaxDistanceSq(triIndex, offsetTriRefs);
-    const nextID = startDistanceSq <= toleranceSq
-      ? startFaceID
-      : (endDistanceSq <= toleranceSq ? endFaceID : 0);
+    const startMatch = bestFaceIDForTriangle(triIndex, sourceTriRefsByFaceID);
+    const endMatch = startMatch.distanceSq <= toleranceSq
+      ? { faceID: 0, distanceSq: Infinity }
+      : bestFaceIDForTriangle(triIndex, offsetTriRefsByFaceID);
+    const nextID = startMatch.distanceSq <= toleranceSq
+      ? startMatch.faceID
+      : (endMatch.distanceSq <= toleranceSq ? endMatch.faceID : 0);
     if (nextID && ids[triIndex] !== nextID) {
       ids[triIndex] = nextID;
       changed += 1;
@@ -3072,11 +3431,33 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
   const sourceFaceNames = Array.isArray(options.sourceFaceNames)
     ? options.sourceFaceNames.map((name) => String(name || '').trim()).filter(Boolean)
     : [sourceFaceName];
+  const capSourceFaceNames = sourceFaceNames.length ? sourceFaceNames : [sourceFaceName];
+  const capLabelsBySourceFaceName = new Map();
+  for (const name of capSourceFaceNames) {
+    const sourceName = String(name || '').trim();
+    if (!sourceName || capLabelsBySourceFaceName.has(sourceName)) continue;
+    capLabelsBySourceFaceName.set(sourceName, {
+      start: `${sourceName}_START`,
+      end: `${sourceName}_END`,
+    });
+  }
+  const fallbackCapLabels = capLabelsBySourceFaceName.get(sourceFaceName)
+    || capLabelsBySourceFaceName.values().next().value
+    || { start: `${sourceFaceName}_START`, end: `${sourceFaceName}_END` };
   const loops = Array.isArray(surface.loops) ? surface.loops : [];
   const labels = {
     sourceFaceName,
-    start: `${sourceFaceName}_START`,
-    end: `${sourceFaceName}_END`,
+    start: fallbackCapLabels.start,
+    end: fallbackCapLabels.end,
+    startCaps: Array.from(capLabelsBySourceFaceName.entries(), ([name, caps]) => ({
+      label: caps.start,
+      sourceFaceName: name,
+    })),
+    endCaps: Array.from(capLabelsBySourceFaceName.entries(), ([name, caps]) => ({
+      label: caps.end,
+      sourceFaceName: name,
+    })),
+    capLabelsBySourceFaceName,
     sidewalls: loops.flatMap((loop, loopIndex) => (Array.isArray(loop?.edges) ? loop.edges : []).map((edge, edgeIndex) => {
       const sourceEdgeName = String(edge?.sourceEdgeName || '').trim();
       const sourceEdgeToken = sourceEdgeName
@@ -3202,7 +3583,7 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
 
     staged = useTrianglePrismUnion
       ? buildTrianglePrismUnionShellSolid(surface, dist, classificationState, solidName)
-      : buildStitchedShellSolid(surface, dist, classificationState, solidName, options);
+      : buildStitchedShellSolid(surface, dist, classificationState, solidName);
     if (!staged) {
       throw new Error('Face.thicken() failed to build the stitched triangle shell.');
     }
@@ -3628,6 +4009,10 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
       adjacentBoundaryNormalVertexCount: surface.adjacentNormalStats?.contributedVertexCount || 0,
       adjacentBoundaryNormalCandidateEdgeCount: surface.adjacentNormalStats?.candidateEdges || 0,
       adjacentBoundaryNormalAcceptedEdgeCount: surface.adjacentNormalStats?.acceptedEdges || 0,
+      adjacentBoundaryNormalDotThreshold: surface.adjacentNormalStats?.dotThreshold ?? null,
+      adjacentBoundaryNormalWeightScale: surface.adjacentNormalStats?.weightScale ?? null,
+      adjacentBoundaryNormalFaceFilterCount: surface.adjacentNormalStats?.faceFilterCount || 0,
+      adjacentBoundaryNormalFaceFilterNames: surface.adjacentNormalStats?.faceFilterNames || [],
     };
     staged.userData = {
       ...(staged.userData || {}),
@@ -3666,6 +4051,9 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
         splitCullPasses: cleanup?.passCount || 0,
         adjacentBoundaryNormalContributionCount: surface.adjacentNormalStats?.contributionCount || 0,
         adjacentBoundaryNormalVertexCount: surface.adjacentNormalStats?.contributedVertexCount || 0,
+        adjacentBoundaryNormalDotThreshold: surface.adjacentNormalStats?.dotThreshold ?? null,
+        adjacentBoundaryNormalFaceFilterCount: surface.adjacentNormalStats?.faceFilterCount || 0,
+        adjacentBoundaryNormalFaceFilterNames: surface.adjacentNormalStats?.faceFilterNames || [],
       },
     };
     const result = staged;
