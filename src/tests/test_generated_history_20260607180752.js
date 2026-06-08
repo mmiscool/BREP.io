@@ -38,7 +38,7 @@ function assertClosedManifold(solid, label) {
   }
 }
 
-export async function buildGeneratedHistory20260607180752(partHistory, offsetDistance = "-0.5") {
+export async function buildGeneratedHistory20260607180752(partHistory, offsetDistance = "-0.5", offsetShellOverrides = {}) {
   partHistory.expressions = "//Examples:\nx = 10 + 6; \ny = x * 2;\n\nresolution = 16;\n";
   partHistory.configurator = { fields: [], values: {} };
 
@@ -173,6 +173,7 @@ export async function buildGeneratedHistory20260607180752(partHistory, offsetDis
     faces: ["E2:S1:PROFILE_START_END"],
     replaceOriginalSolid: true,
     debugSeparateRoundedCornerPipe: false,
+    ...offsetShellOverrides,
   });
 
   return partHistory;
@@ -191,6 +192,27 @@ export async function test_generated_history_20260607180752_offset_shell_negativ
   if (diagnostics.buildMethod !== "face_thicken_union_shell_with_rounded_corners") {
     throw new Error(
       `[generated_history_20260607180752_offset_shell_negative_half] Expected rounded-corner shell build, got ${diagnostics.buildMethod || "unknown"}.`,
+    );
+  }
+  const rounded = diagnostics.roundedCorners || {};
+  if (rounded.cleanupRollback?.rolledBack === true) {
+    throw new Error(
+      `[generated_history_20260607180752_offset_shell_negative_half] Expected area-loss cleanup to stay applied, got rollback `
+      + `${JSON.stringify(rounded.cleanupRollback)}.`,
+    );
+  }
+  if (rounded.areaLossSidewallReassign?.applied !== true || !(Number(rounded.areaLossSidewallReassign?.reassignedTriangles) > 0)) {
+    throw new Error(
+      `[generated_history_20260607180752_offset_shell_negative_half] Expected area-loss sidewall reassignment, got `
+      + `${JSON.stringify(rounded.areaLossSidewallReassign)}.`,
+    );
+  }
+  const faceNames = typeof shell.getFaceNames === "function" ? shell.getFaceNames() : [];
+  const remainingJunkFaces = (rounded.sidewallAreaLoss?.collapseFaceNames || []).filter((faceName) => faceNames.includes(faceName));
+  if (remainingJunkFaces.length > 0) {
+    throw new Error(
+      `[generated_history_20260607180752_offset_shell_negative_half] Expected junk sidewall faces to be removed, still present: `
+      + `${remainingJunkFaces.join(", ")}.`,
     );
   }
 }
@@ -218,6 +240,40 @@ export async function test_generated_history_20260607180752_offset_shell_negativ
     throw new Error(
       `[generated_history_20260607180752_offset_shell_negative_one] Expected cleaned shell to pass manifold build, got `
       + `${JSON.stringify(rounded.pipeSliverCollapse?.manifoldCheck)}.`,
+    );
+  }
+}
+
+export async function test_generated_history_20260607180752_offset_shell_cleanup_toggles_disable_pipe_collapse() {
+  const partHistory = new PartHistory();
+  await buildGeneratedHistory20260607180752(partHistory, "-0.5", {
+    roundedCornerPipeSliverCollapseEnabled: false,
+  });
+  await partHistory.runHistory({ throwOnFeatureError: true });
+
+  const shell = partHistory.scene.getObjectByName("E2_O.S20");
+  assertClosedManifold(shell, "generated_history_20260607180752_offset_shell_cleanup_toggles_disable_pipe_collapse");
+
+  const feature = (partHistory.features || []).find((entry) => entry?.inputParams?.id === "O.S20");
+  const rounded = feature?.persistentData?.diagnostics?.roundedCorners || {};
+  if (rounded.pipeSliverCollapse?.enabled !== false || rounded.pipeSliverCollapseCount !== 0) {
+    throw new Error(
+      `[generated_history_20260607180752_offset_shell_cleanup_toggles_disable_pipe_collapse] Expected pipe collapse disabled, got `
+      + `${JSON.stringify(rounded.pipeSliverCollapse)}.`,
+    );
+  }
+  if (rounded.areaLossSidewallReassign?.applied !== true || rounded.areaLossSidewallReassign?.allowRoundedPipeNeighbors !== true) {
+    throw new Error(
+      `[generated_history_20260607180752_offset_shell_cleanup_toggles_disable_pipe_collapse] Expected area-loss reassignment with pipe neighbors, got `
+      + `${JSON.stringify(rounded.areaLossSidewallReassign)}.`,
+    );
+  }
+  const faceNames = typeof shell.getFaceNames === "function" ? shell.getFaceNames() : [];
+  const remainingJunkFaces = (rounded.sidewallAreaLoss?.collapseFaceNames || []).filter((faceName) => faceNames.includes(faceName));
+  if (remainingJunkFaces.length > 0) {
+    throw new Error(
+      `[generated_history_20260607180752_offset_shell_cleanup_toggles_disable_pipe_collapse] Expected junk sidewall faces to be removed, still present: `
+      + `${remainingJunkFaces.join(", ")}.`,
     );
   }
 }

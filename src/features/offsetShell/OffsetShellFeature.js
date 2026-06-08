@@ -30,6 +30,30 @@ const inputParamsSchema = {
     default_value: false,
     hint: 'For negative offsets, skip the final union between the thickened shell and rounded tube remainder and keep both solids.',
   },
+  roundedCornerAreaLossDetectionEnabled: {
+    type: 'boolean',
+    label: 'CLEANUP: DETECT AREA-LOSS SIDEWALLS',
+    default_value: true,
+    hint: 'For negative offsets, find tiny sidewall remnants that lost nearly all of their original area.',
+  },
+  roundedCornerPipeSliverCollapseEnabled: {
+    type: 'boolean',
+    label: 'CLEANUP: COLLAPSE PIPE SLIVERS',
+    default_value: true,
+    hint: 'For negative offsets, collapse thin rounded-pipe sliver triangles before relabeling sidewall remnants.',
+  },
+  roundedCornerAreaLossReassignEnabled: {
+    type: 'boolean',
+    label: 'CLEANUP: REASSIGN AREA-LOSS FACES',
+    default_value: true,
+    hint: 'For negative offsets, move detected junk sidewall triangles to adjacent surviving faces.',
+  },
+  roundedCornerCleanupRollbackEnabled: {
+    type: 'boolean',
+    label: 'CLEANUP: ROLLBACK NON-MANIFOLD STAGES',
+    default_value: true,
+    hint: 'For negative offsets, undo cleanup stages that produce non-manifold geometry.',
+  },
 };
 
 function getFaceName(entry) {
@@ -120,6 +144,10 @@ export class OffsetShellFeature {
         featureId,
         newSolidName,
         debugSeparateRoundedCornerPipe: this.inputParams.debugSeparateRoundedCornerPipe === true,
+        roundedCornerAreaLossDetectionEnabled: this.inputParams.roundedCornerAreaLossDetectionEnabled !== false,
+        roundedCornerPipeSliverCollapseEnabled: this.inputParams.roundedCornerPipeSliverCollapseEnabled !== false,
+        roundedCornerAreaLossReassignEnabled: this.inputParams.roundedCornerAreaLossReassignEnabled !== false,
+        roundedCornerCleanupRollbackEnabled: this.inputParams.roundedCornerCleanupRollbackEnabled !== false,
       });
     } catch (err) {
       console.error('[OffsetShellFeature] Solid.offsetShell failed:', err);

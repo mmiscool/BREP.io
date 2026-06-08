@@ -1141,6 +1141,8 @@ function reassignAreaLossSidewallFacesToDominantNeighbor(solid, opts = {}) {
 
     const featureId = String(opts?.featureId || opts?.featureID || "").trim();
     const debug = opts?.debug === true;
+    const allowRoundedPipeNeighbors = opts?.allowRoundedPipeNeighbors === true;
+    const preferRoundedPipeNeighbors = opts?.preferRoundedPipeNeighbors === true;
     const getFaceMetadata = (faceName) => {
         try {
             return (typeof solid.getFaceMetadata === "function") ? (solid.getFaceMetadata(faceName) || {}) : {};
@@ -1220,7 +1222,7 @@ function reassignAreaLossSidewallFacesToDominantNeighbor(solid, opts = {}) {
                     const neighborID = neighborIDRaw >>> 0;
                     if (neighborID === targetFaceID) continue;
                     if (targetFaceIDs.has(neighborID)) continue;
-                    if (pipeFaceIDs.has(neighborID)) continue;
+                    if (!allowRoundedPipeNeighbors && pipeFaceIDs.has(neighborID)) continue;
                     const neighborName = String(idToFace.get(neighborID) || "").trim();
                     if (!neighborName) continue;
                     neighborCounts.set(neighborID, (neighborCounts.get(neighborID) || 0) + 1);
@@ -1230,11 +1232,20 @@ function reassignAreaLossSidewallFacesToDominantNeighbor(solid, opts = {}) {
         let bestNeighborID = null;
         let bestSharedEdgeCount = 0;
         for (const [neighborID, sharedEdgeCount] of neighborCounts.entries()) {
+            const bestNeighborIsPipe = bestNeighborID != null && pipeFaceIDs.has(bestNeighborID);
+            const neighborIsPipe = pipeFaceIDs.has(neighborID);
             if (
                 bestNeighborID == null
                 || sharedEdgeCount > bestSharedEdgeCount
                 || (
                     sharedEdgeCount === bestSharedEdgeCount
+                    && preferRoundedPipeNeighbors
+                    && neighborIsPipe
+                    && !bestNeighborIsPipe
+                )
+                || (
+                    sharedEdgeCount === bestSharedEdgeCount
+                    && (!preferRoundedPipeNeighbors || neighborIsPipe === bestNeighborIsPipe)
                     && String(idToFace.get(neighborID) || "").localeCompare(String(idToFace.get(bestNeighborID) || "")) < 0
                 )
             ) {
@@ -1633,6 +1644,12 @@ export function offsetShell(faces, distance, options = {}) {
         status: offsetDistance < 0 ? "not_run" : "not_requested",
         radius: offsetDistance < 0 ? Math.abs(offsetDistance) : 0,
         separateTubeShellUnion: !!options?.debugSeparateRoundedCornerPipe,
+        cleanupOptions: {
+            areaLossDetectionEnabled: options?.roundedCornerAreaLossDetectionEnabled !== false,
+            pipeSliverCollapseEnabled: options?.roundedCornerPipeSliverCollapseEnabled !== false,
+            areaLossReassignEnabled: options?.roundedCornerAreaLossReassignEnabled !== false,
+            rollbackEnabled: options?.roundedCornerCleanupRollbackEnabled !== false,
+        },
         edgeCount: 0,
         sidewallFilterAvailable: false,
         sidewallFilterUsesActualGeometry: false,
@@ -1711,25 +1728,95 @@ export function offsetShell(faces, distance, options = {}) {
                             combined = roundedShell;
                             const cleanupBaselineSnapshot = buildSolidAuthoringStateSnapshot(combined);
                             const cleanupBaselineTopology = analyzeSolidMeshTopology(combined);
-                            const sidewallAreaLoss = buildSidewallAreaLossCollapseTargets(combined, originalSidewallAreas, {
-                                areaLossThreshold: options?.roundedCornerSidewallAreaLossThreshold ?? 0.98,
-                                minOriginalArea: options?.roundedCornerSidewallAreaLossMinOriginalArea,
-                            });
-                            let pipeSliverCollapse = collapseOffsetShellRoundedPipeSlivers(combined, {
+                            const areaLossDetectionEnabled = options?.roundedCornerAreaLossDetectionEnabled !== false;
+                            const pipeSliverCollapseEnabled = options?.roundedCornerPipeSliverCollapseEnabled !== false;
+                            const areaLossReassignEnabled = options?.roundedCornerAreaLossReassignEnabled !== false;
+                            const cleanupRollbackEnabled = options?.roundedCornerCleanupRollbackEnabled !== false;
+                            const sidewallAreaLoss = areaLossDetectionEnabled
+                                ? buildSidewallAreaLossCollapseTargets(combined, originalSidewallAreas, {
+                                    areaLossThreshold: options?.roundedCornerSidewallAreaLossThreshold ?? 0.98,
+                                    minOriginalArea: options?.roundedCornerSidewallAreaLossMinOriginalArea,
+                                })
+                                : {
+                                    enabled: false,
+                                    areaLossThreshold: options?.roundedCornerSidewallAreaLossThreshold ?? 0.98,
+                                    originalSidewallAreaCount: originalSidewallAreas instanceof Map ? originalSidewallAreas.size : 0,
+                                    finalSidewallAreaCount: 0,
+                                    matchedSidewallAreaCount: 0,
+                                    collapseTargetCount: 0,
+                                    maxAreaLossRatio: 0,
+                                    collapseFaceNames: [],
+                                    targets: [],
+                                };
+                            const pipeSliverCollapseOptions = {
                                 featureId,
                                 radius: Math.abs(offsetDistance),
                                 debug: options?.debugOffsetShellPipeSliverCollapse === true,
                                 pipeSliverHeightTolerance: options?.roundedCornerPipeSliverHeightTolerance,
-                                collapseSidewallFaceNames: sidewallAreaLoss.collapseFaceNames,
-                            });
-                            let areaLossSidewallReassign = reassignAreaLossSidewallFacesToDominantNeighbor(combined, {
-                                featureId,
-                                debug: options?.debugOffsetShellPipeSliverCollapse === true,
-                                collapseSidewallFaceNames: sidewallAreaLoss.collapseFaceNames,
-                            });
+                            };
+                            if (areaLossDetectionEnabled) {
+                                pipeSliverCollapseOptions.collapseSidewallFaceNames = sidewallAreaLoss.collapseFaceNames;
+                            }
+                            let pipeSliverCollapse = pipeSliverCollapseEnabled
+                                ? collapseOffsetShellRoundedPipeSlivers(combined, pipeSliverCollapseOptions)
+                                : {
+                                    enabled: false,
+                                    collapsedPipeVertices: 0,
+                                    collapsedPipeTriangles: 0,
+                                    removedDegenerateTriangles: 0,
+                                    areaLossTargetFaceCount: sidewallAreaLoss.collapseTargetCount || 0,
+                                };
+                            const collapseAfterTopology = analyzeSolidMeshTopology(combined);
+                            const collapseManifoldCheck = checkSolidManifoldBuild(combined);
+                            const rollbackPipeSliverCollapse = !cleanupRollbackEnabled || !pipeSliverCollapseEnabled
+                                ? false
+                                : shouldRollbackOffsetShellCleanup(collapseManifoldCheck);
+                            if (rollbackPipeSliverCollapse) {
+                                applySolidAuthoringStateSnapshot(combined, cleanupBaselineSnapshot);
+                                combined._dirty = true;
+                                combined._manifold = null;
+                                combined._faceIndex = null;
+                                combined._visualizeCache = null;
+                                combined._cppSolidCoreSyncStamp = null;
+                                const pipeSliverCollapseRollback = {
+                                    rolledBack: true,
+                                    reason: "pipe_sliver_collapse_failed_manifold_build",
+                                    beforeTopology: cleanupBaselineTopology,
+                                    afterTopology: collapseAfterTopology,
+                                    manifoldCheck: collapseManifoldCheck,
+                                };
+                                pipeSliverCollapse = {
+                                    ...(pipeSliverCollapse || {}),
+                                    applied: false,
+                                    ...pipeSliverCollapseRollback,
+                                };
+                            } else {
+                                pipeSliverCollapse = {
+                                    ...(pipeSliverCollapse || {}),
+                                    applied: true,
+                                    manifoldCheck: collapseManifoldCheck,
+                                };
+                            }
+                            const allowRoundedPipeReassign = rollbackPipeSliverCollapse || !pipeSliverCollapseEnabled;
+                            let areaLossSidewallReassign = areaLossReassignEnabled && areaLossDetectionEnabled
+                                ? reassignAreaLossSidewallFacesToDominantNeighbor(combined, {
+                                    featureId,
+                                    debug: options?.debugOffsetShellPipeSliverCollapse === true,
+                                    collapseSidewallFaceNames: sidewallAreaLoss.collapseFaceNames,
+                                    allowRoundedPipeNeighbors: allowRoundedPipeReassign,
+                                    preferRoundedPipeNeighbors: allowRoundedPipeReassign,
+                                })
+                                : {
+                                    enabled: false,
+                                    reassignedTriangles: 0,
+                                    reassignedFaces: 0,
+                                    removedFaceLabels: 0,
+                                    targetFaceCount: sidewallAreaLoss.collapseTargetCount || 0,
+                                    reason: areaLossDetectionEnabled ? "disabled" : "area_loss_detection_disabled",
+                                };
                             const cleanupAfterTopology = analyzeSolidMeshTopology(combined);
                             const cleanupManifoldCheck = checkSolidManifoldBuild(combined);
-                            const rollbackCleanup = options?.roundedCornerCleanupRollbackEnabled === false
+                            const rollbackCleanup = !cleanupRollbackEnabled
                                 ? false
                                 : shouldRollbackOffsetShellCleanup(cleanupManifoldCheck);
                             if (rollbackCleanup) {
@@ -1758,23 +1845,24 @@ export function offsetShell(faces, distance, options = {}) {
                                 };
                                 roundedCorners.cleanupRollback = cleanupRollback;
                             } else {
-                                pipeSliverCollapse = {
-                                    ...(pipeSliverCollapse || {}),
-                                    applied: true,
-                                    manifoldCheck: cleanupManifoldCheck,
-                                };
                                 areaLossSidewallReassign = {
                                     ...(areaLossSidewallReassign || {}),
-                                    applied: true,
+                                    applied: areaLossReassignEnabled && areaLossDetectionEnabled,
                                     manifoldCheck: cleanupManifoldCheck,
+                                    allowRoundedPipeNeighbors: allowRoundedPipeReassign,
+                                    preferRoundedPipeNeighbors: allowRoundedPipeReassign,
                                 };
                                 roundedCorners.cleanupRollback = null;
                             }
                             roundedCorners.sidewallAreaLoss = sidewallAreaLoss;
                             roundedCorners.pipeSliverCollapse = pipeSliverCollapse;
                             roundedCorners.areaLossSidewallReassign = areaLossSidewallReassign;
-                            roundedCorners.pipeSliverCollapseCount = rollbackCleanup ? 0 : Number(pipeSliverCollapse?.collapsedPipeVertices || 0);
-                            roundedCorners.pipeSliverCollapseRemovedDegenerateTriangles = rollbackCleanup ? 0 : Number(pipeSliverCollapse?.removedDegenerateTriangles || 0);
+                            roundedCorners.pipeSliverCollapseCount = (rollbackCleanup || rollbackPipeSliverCollapse)
+                                ? 0
+                                : Number(pipeSliverCollapse?.collapsedPipeVertices || 0);
+                            roundedCorners.pipeSliverCollapseRemovedDegenerateTriangles = (rollbackCleanup || rollbackPipeSliverCollapse)
+                                ? 0
+                                : Number(pipeSliverCollapse?.removedDegenerateTriangles || 0);
                             roundedCorners.status = "applied";
                             roundedCorners.shellUnionStrategy = roundedShell?.__unionManyDiagnostics?.unionStrategy || "unknown";
                         } else {

@@ -93,6 +93,7 @@ import { test_generated_history_20260523000414 } from './test_generated_history_
 import { test_generated_history_20260531201126 } from './test_generated_history_20260531201126.js';
 import { test_generated_history_20260606004152 } from './test_generated_history_20260606004152.js';
 import {
+    test_generated_history_20260607180752_offset_shell_cleanup_toggles_disable_pipe_collapse,
     test_generated_history_20260607180752_offset_shell_negative_half_is_manifold,
     test_generated_history_20260607180752_offset_shell_negative_one_keeps_cleanup,
 } from './test_generated_history_20260607180752.js';
@@ -914,6 +915,13 @@ export const testFunctions = [
     },
     {
         test: test_generated_history_20260607180752_offset_shell_negative_one_keeps_cleanup,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_generated_history_20260607180752_offset_shell_cleanup_toggles_disable_pipe_collapse,
         printArtifacts: false,
         exportFaces: false,
         exportSolids: false,
