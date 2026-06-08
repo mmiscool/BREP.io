@@ -1,5 +1,15 @@
 import { resolveSelectionObject } from '../selectionUtils.js';
 
+const OFFSET_SHELL_MODE_NORMAL = 'NORMAL';
+const OFFSET_SHELL_MODE_DEBUG = 'DEBUG';
+const DEBUG_ONLY_FIELDS = [
+  'debugSeparateRoundedCornerPipe',
+  'roundedCornerAreaLossDetectionEnabled',
+  'roundedCornerPipeSliverCollapseEnabled',
+  'roundedCornerAreaLossReassignEnabled',
+  'roundedCornerCleanupRollbackEnabled',
+];
+
 const inputParamsSchema = {
   id: {
     type: 'string',
@@ -23,6 +33,13 @@ const inputParamsSchema = {
     label: 'REPLACE ORIGINAL SOLID',
     default_value: true,
     hint: 'When enabled, remove the source solid and leave only the shell result in the scene.',
+  },
+  debugMode: {
+    type: 'options',
+    label: 'MODE',
+    options: [OFFSET_SHELL_MODE_NORMAL, OFFSET_SHELL_MODE_DEBUG],
+    default_value: OFFSET_SHELL_MODE_NORMAL,
+    hint: 'Show offset shell debug and cleanup controls.',
   },
   debugSeparateRoundedCornerPipe: {
     type: 'boolean',
@@ -89,6 +106,11 @@ function collectFaceSelections(selection, partHistory) {
   return faces;
 }
 
+function resolveFeatureId(inputParams, fallback) {
+  const raw = inputParams?.featureID ?? inputParams?.featureId ?? inputParams?.id ?? fallback;
+  return String(raw || fallback).trim() || fallback;
+}
+
 export class OffsetShellFeature {
   static shortName = 'O.S';
   static longName = 'Offset Shell';
@@ -97,6 +119,14 @@ export class OffsetShellFeature {
   constructor() {
     this.inputParams = {};
     this.persistentData = {};
+  }
+
+  uiFieldsTest(context) {
+    const params = this.inputParams && Object.keys(this.inputParams).length > 0
+      ? this.inputParams
+      : context?.params || {};
+    const debugMode = String(params?.debugMode || OFFSET_SHELL_MODE_NORMAL).trim().toUpperCase();
+    return debugMode === OFFSET_SHELL_MODE_DEBUG ? [] : DEBUG_ONLY_FIELDS;
   }
 
   async run(partHistory) {
@@ -134,8 +164,7 @@ export class OffsetShellFeature {
       return { added: [], removed: [] };
     }
 
-    const fallbackId = OffsetShellFeature.shortName || OffsetShellFeature.longName || 'OffsetShell';
-    const featureId = (this.inputParams.featureID || fallbackId).trim();
+    const featureId = resolveFeatureId(this.inputParams, OffsetShellFeature.shortName);
     const newSolidName = `${targetSolid.name || 'Solid'}_${featureId}`;
 
     let resultSolid = null;

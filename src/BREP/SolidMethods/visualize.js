@@ -111,6 +111,7 @@ function repairDirectStartEndCapBoundaries(solid) {
         const v = a < b ? b : a;
         return `${u}|${v}`;
     };
+    const isOffsetShellSidewallCap = (name) => /_SW_(?:START|END)$/u.test(String(name || ''));
     const edgeUses = new Map();
     for (let triIndex = 0; triIndex < triCount; triIndex++) {
         const a = tv[(triIndex * 3) + 0] >>> 0;
@@ -164,6 +165,7 @@ function repairDirectStartEndCapBoundaries(solid) {
             const directCaps = (aName.endsWith('_START') && bName.endsWith('_END'))
                 || (aName.endsWith('_END') && bName.endsWith('_START'));
             if (!directCaps) continue;
+            if (isOffsetShellSidewallCap(aName) || isOffsetShellSidewallCap(bName)) continue;
             const aSidewall = bestSidewallNeighbor(aTri);
             const bSidewall = bestSidewallNeighbor(bTri);
             if (aSidewall && !bSidewall) {

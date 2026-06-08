@@ -80,6 +80,11 @@ function collectFaceSelections(selection, partHistory) {
   return faces;
 }
 
+function resolveFeatureId(inputParams, fallback) {
+  const raw = inputParams?.featureID ?? inputParams?.featureId ?? inputParams?.id ?? fallback;
+  return String(raw || fallback).trim() || fallback;
+}
+
 export class ThickenFeature {
   static shortName = 'THK';
   static longName = 'Thicken';
@@ -106,7 +111,7 @@ export class ThickenFeature {
   }
 
   async run(partHistory) {
-    const featureId = String(this.inputParams?.featureID || this.inputParams?.id || ThickenFeature.shortName).trim() || ThickenFeature.shortName;
+    const featureId = resolveFeatureId(this.inputParams, ThickenFeature.shortName);
     const faceSelections = collectFaceSelections(this.inputParams.face, partHistory);
     if (!faceSelections.length) {
       console.warn('[ThickenFeature] No valid face selections resolved.');

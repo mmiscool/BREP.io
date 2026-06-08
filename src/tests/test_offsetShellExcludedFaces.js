@@ -239,6 +239,63 @@ export async function afterRun_offsetShell_repro_20260607082324_removes_area_los
   }
 }
 
+function getFaceAreaStats(solid, faceName) {
+  const face = (typeof solid?.getFaces === "function" ? solid.getFaces(false) : [])
+    .find((entry) => entry?.faceName === faceName);
+  let area = 0;
+  for (const tri of face?.triangles || []) {
+    const p1 = tri?.p1;
+    const p2 = tri?.p2;
+    const p3 = tri?.p3;
+    if (!Array.isArray(p1) || !Array.isArray(p2) || !Array.isArray(p3)) continue;
+    const ux = p2[0] - p1[0];
+    const uy = p2[1] - p1[1];
+    const uz = p2[2] - p1[2];
+    const vx = p3[0] - p1[0];
+    const vy = p3[1] - p1[1];
+    const vz = p3[2] - p1[2];
+    area += 0.5 * Math.hypot(
+      (uy * vz) - (uz * vy),
+      (uz * vx) - (ux * vz),
+      (ux * vy) - (uy * vx),
+    );
+  }
+  return { found: !!face, triangleCount: face?.triangles?.length || 0, area };
+}
+
+export async function test_offsetShell_repro_20260608054724_reassign_preserves_g3_end_and_start_end_faces(partHistory) {
+  await test_offsetShell_repro_20260607082324_removes_area_loss_sidewall(partHistory);
+  const offsetShell = (partHistory.features || []).find((entry) => entry?.inputParams?.id === "O.S17");
+  Object.assign(offsetShell.inputParams, {
+    distance: "-.5",
+    roundedCornerAreaLossDetectionEnabled: true,
+    roundedCornerPipeSliverCollapseEnabled: true,
+    roundedCornerAreaLossReassignEnabled: true,
+    roundedCornerCleanupRollbackEnabled: false,
+    debugMode: "DEBUG",
+  });
+}
+
+export async function afterRun_offsetShell_repro_20260608054724_reassign_preserves_g3_end_and_start_end_faces(partHistory) {
+  const shell = partHistory.scene.getObjectByName("E2_O.S17");
+  if (!shell) {
+    throw new Error("Expected offset shell result E2_O.S17.");
+  }
+
+  const endStats = getFaceAreaStats(shell, "E2:S1:G3_SW_END");
+  if (!endStats.found || endStats.triangleCount <= 0 || !(endStats.area > 200)) {
+    throw new Error(`Expected E2:S1:G3_SW_END to keep its output face area, got ${JSON.stringify(endStats)}.`);
+  }
+
+  const startEndStats = getFaceAreaStats(shell, "E2_S1_G3_SW_E2_S1_PROFILE_START_END_0_SW");
+  if (!startEndStats.found || startEndStats.triangleCount <= 0 || !(startEndStats.area > 1)) {
+    throw new Error(
+      "Expected E2_S1_G3_SW_E2_S1_PROFILE_START_END_0_SW to remain a separate output face, got "
+      + `${JSON.stringify(startEndStats)}.`,
+    );
+  }
+}
+
 export async function test_offsetShell_debug_separates_rounded_tube_remainder(partHistory) {
   await partHistory.reset();
   partHistory.features = [];
@@ -520,5 +577,55 @@ export async function test_offsetShell_area_loss_sidewall_reassigns_to_dominant_
   const hostFaceID = solid._faceNameToID.get("HOST_FACE");
   if (!solid._triIDs.every((faceID) => faceID === hostFaceID)) {
     throw new Error("Expected every triangle to be assigned to HOST_FACE after sidewall reassign.");
+  }
+}
+
+export async function test_offsetShell_area_loss_sidewall_reassign_skips_protected_open_face_neighbor() {
+  const solid = new Solid();
+  solid.name = "AREA_LOSS_SIDEWALL_REASSIGN_PROTECTED_NEIGHBOR";
+  solid
+    .addTriangle("PROTECTED_OPEN_FACE", [0, 0, 0], [1, 0, 0], [0, -1, 0])
+    .addTriangle("PROTECTED_OPEN_FACE", [1, 0, 0], [2, 0, 0], [1, -1, 0])
+    .addTriangle("HOST_FACE", [0, 1, 0], [1, 1, 0], [0, 0, 0])
+    .addTriangle("TARGET_SW", [0, 0, 0], [1, 0, 0], [0, 1, 0])
+    .addTriangle("TARGET_SW", [1, 0, 0], [2, 0, 0], [1, 1, 0]);
+
+  solid.setFaceMetadata("TARGET_SW", { type: "sidewall" });
+  const summary = __testOnlyReassignAreaLossSidewallFacesToDominantNeighbor(solid, {
+    collapseSidewallFaceNames: ["TARGET_SW"],
+    protectedNeighborFaceNames: ["PROTECTED_OPEN_FACE"],
+  });
+
+  const target = (summary.targets || []).find((entry) => entry?.faceName === "TARGET_SW");
+  if (!target || target.toFaceName !== "HOST_FACE") {
+    throw new Error(`Expected TARGET_SW to skip protected open face and reassign to HOST_FACE, got ${JSON.stringify(summary)}.`);
+  }
+
+  const protectedFaceID = solid._faceNameToID.get("PROTECTED_OPEN_FACE");
+  const protectedTriangleCount = solid._triIDs.filter((faceID) => faceID === protectedFaceID).length;
+  if (protectedTriangleCount !== 2) {
+    throw new Error(`Expected protected open face to keep only its original triangles, got ${protectedTriangleCount}.`);
+  }
+}
+
+export async function test_offsetShell_area_loss_sidewall_reassign_preserves_source_sidewall_end_cap() {
+  const solid = new Solid();
+  solid.name = "AREA_LOSS_SIDEWALL_REASSIGN_PRESERVE_SOURCE_END";
+  solid
+    .addTriangle("E2_S1_G3_SW_E2_S1_PROFILE_START_END_0_SW", [0, 0, 0], [1, 0, 0], [0, -1, 0])
+    .addTriangle("E2:S1:G3_SW_END", [0, 0, 0], [1, 0, 0], [0.05, 0.001, 0])
+    .addTriangle("E2:S1:G3_SW_END", [0.05, 0.001, 0], [1, 0, 0], [1, 0.001, 0]);
+
+  solid.setFaceMetadata("E2:S1:G3_SW_END", { type: "sidewall" });
+  solid.setFaceMetadata("E2_S1_G3_SW_E2_S1_PROFILE_START_END_0_SW", { type: "sidewall" });
+  const summary = __testOnlyReassignAreaLossSidewallFacesToDominantNeighbor(solid, {
+    collapseSidewallFaceNames: ["E2:S1:G3_SW_END"],
+  });
+
+  if (summary.reassignedTriangles !== 0 || summary.reassignedFaces !== 0) {
+    throw new Error(`Expected source sidewall end cap to be preserved, got ${JSON.stringify(summary)}.`);
+  }
+  if (!solid.getFaceNames().includes("E2:S1:G3_SW_END")) {
+    throw new Error("Expected E2:S1:G3_SW_END face label to remain after sidewall reassign.");
   }
 }

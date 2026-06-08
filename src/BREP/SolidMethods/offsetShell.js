@@ -390,14 +390,29 @@ function analyzeSolidMeshTopology(solid) {
 
 function checkSolidManifoldBuild(solid) {
     if (!solid || typeof solid._manifoldize !== "function") return { ok: true, error: null };
+    let probe = null;
     try {
-        solid._manifoldize();
+        const SolidCtor = baseSolidCtor(solid);
+        if (typeof SolidCtor === "function") {
+            probe = new SolidCtor();
+            applySolidAuthoringStateSnapshot(probe, buildSolidAuthoringStateSnapshot(solid));
+            probe._dirty = true;
+            probe._manifold = null;
+            probe._faceIndex = null;
+            probe._visualizeCache = null;
+            probe._cppSolidCoreSyncStamp = null;
+        }
+        (probe || solid)._manifoldize();
         return { ok: true, error: null };
     } catch (error) {
         return {
             ok: false,
             error: String(error?.message || error || "unknown error").slice(0, 240),
         };
+    } finally {
+        if (probe && typeof probe.free === "function") {
+            try { probe.free(); } catch { /* ignore */ }
+        }
     }
 }
 
@@ -419,6 +434,10 @@ function isOffsetShellSidewallFaceName(faceName, metadata = {}) {
         || metadata?.faceType === "sidewall"
         || /_SW(?:$|[_|])/u.test(String(faceName || ""))
     );
+}
+
+function isOffsetShellSidewallCapFaceName(faceName) {
+    return /_SW_(?:START|END)(?:$|[_|])/u.test(String(faceName || ""));
 }
 
 function collectSidewallFaceAreas(solid) {
@@ -497,6 +516,7 @@ function buildSidewallAreaLossCollapseTargets(solid, originalAreas, opts = {}) {
     let matchedSidewallAreaCount = 0;
 
     for (const [faceName, originalAreaRaw] of original.entries()) {
+        if (isOffsetShellSidewallCapFaceName(faceName)) continue;
         const originalArea = Number(originalAreaRaw) || 0;
         if (!(originalArea > minOriginalArea)) continue;
         const finalArea = Number(finalAreas.get(faceName) || 0);
@@ -1193,6 +1213,9 @@ function reassignAreaLossSidewallFacesToDominantNeighbor(solid, opts = {}) {
     const debug = opts?.debug === true;
     const allowRoundedPipeNeighbors = opts?.allowRoundedPipeNeighbors === true;
     const preferRoundedPipeNeighbors = opts?.preferRoundedPipeNeighbors === true;
+    const protectedNeighborFaceNames = new Set(
+        Array.from(opts?.protectedNeighborFaceNames || [], (faceName) => String(faceName || "").trim()).filter(Boolean),
+    );
     const getFaceMetadata = (faceName) => {
         try {
             return (typeof solid.getFaceMetadata === "function") ? (solid.getFaceMetadata(faceName) || {}) : {};
@@ -1217,6 +1240,7 @@ function reassignAreaLossSidewallFacesToDominantNeighbor(solid, opts = {}) {
         if (!faceName) continue;
         const metadata = getFaceMetadata(faceName);
         if (collapseSidewallFaceNames.has(faceName) && isOffsetShellSidewallFaceName(faceName, metadata)) {
+            if (isOffsetShellSidewallCapFaceName(faceName)) continue;
             targetFaceIDs.add(faceID);
             targetFaceNamesByID.set(faceID, faceName);
         }
@@ -1275,6 +1299,7 @@ function reassignAreaLossSidewallFacesToDominantNeighbor(solid, opts = {}) {
                     if (!allowRoundedPipeNeighbors && pipeFaceIDs.has(neighborID)) continue;
                     const neighborName = String(idToFace.get(neighborID) || "").trim();
                     if (!neighborName) continue;
+                    if (protectedNeighborFaceNames.has(neighborName)) continue;
                     neighborCounts.set(neighborID, (neighborCounts.get(neighborID) || 0) + 1);
                 }
             }
@@ -1859,6 +1884,7 @@ export function offsetShell(faces, distance, options = {}) {
                                     featureId,
                                     debug: options?.debugOffsetShellPipeSliverCollapse === true,
                                     collapseSidewallFaceNames: sidewallAreaLoss.collapseFaceNames,
+                                    protectedNeighborFaceNames: selectedFaceNames,
                                     allowRoundedPipeNeighbors: allowRoundedPipeReassign,
                                     preferRoundedPipeNeighbors: allowRoundedPipeReassign,
                                 })
