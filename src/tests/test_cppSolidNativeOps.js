@@ -436,6 +436,101 @@ export async function test_cppSolidNative_buildFilletEdgeAuthoringState_returns_
     }
 }
 
+export async function test_cppSolidNative_filletEdge_inflate_offsets_edge_wedge_corner_in_both_tangent_directions() {
+    if (manifoldBuildSource !== "local" || typeof manifold?.buildFilletEdgeAuthoringState !== "function") {
+        return;
+    }
+
+    const cube = new Cube({ x: 2, y: 2, z: 2, name: "CPP_FILLET_EDGE_INFLATE_CORNER" });
+    const boundary = (cube.getBoundaryEdgePolylines() || []).find((candidate) => {
+        const a = String(candidate?.faceA || "");
+        const b = String(candidate?.faceB || "");
+        return (a === "CPP_FILLET_EDGE_INFLATE_CORNER_NX" && b === "CPP_FILLET_EDGE_INFLATE_CORNER_NY")
+            || (a === "CPP_FILLET_EDGE_INFLATE_CORNER_NY" && b === "CPP_FILLET_EDGE_INFLATE_CORNER_NX");
+    });
+    if (!boundary || !Array.isArray(boundary.positions) || boundary.positions.length < 2) {
+        throw new Error("Expected cube boundary polyline for native fillet edge inflate-corner test.");
+    }
+
+    const inflate = 0.1;
+    const buildResult = (sideMode, inflateDistance) => manifold.buildFilletEdgeAuthoringState({
+        snapshot: buildSolidAuthoringStateSnapshot(cube),
+        faceAName: boundary.faceA,
+        faceBName: boundary.faceB,
+        polyline: boundary.positions,
+        radius: 0.25,
+        requestedRadius: 0.25,
+        sideMode,
+        inflate: inflateDistance,
+        nudgeFaceDistance: 0.0,
+        resolution: 24,
+        closedLoop: false,
+        name: "CPP_FILLET_EDGE_INFLATE_CORNER",
+        edgeReference: boundary.name,
+    });
+
+    const toPoint = (value) => [Number(value?.[0]), Number(value?.[1]), Number(value?.[2])];
+    const subtract = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    const dot = (a, b) => (a[0] * b[0]) + (a[1] * b[1]) + (a[2] * b[2]);
+    const unit = (value) => {
+        const length = Math.hypot(value[0], value[1], value[2]);
+        return length > 1e-12 ? [value[0] / length, value[1] / length, value[2] / length] : null;
+    };
+
+    for (const sideMode of ["INSET", "OUTSET"]) {
+        const inflated = buildResult(sideMode, inflate);
+        const requiredArrays = [
+            inflated?.centerline,
+            inflated?.tangentA,
+            inflated?.tangentB,
+            inflated?.edge,
+            inflated?.edgeWedge,
+        ];
+        if (requiredArrays.some((value) => !Array.isArray(value) || value.length < 2)) {
+            throw new Error(`Expected ${sideMode} native fillet edge builder to return centerline, tangency rails, and edgeWedge arrays.`);
+        }
+
+        const sampleCount = Math.min(
+            inflated.centerline.length,
+            inflated.tangentA.length,
+            inflated.tangentB.length,
+            inflated.edge.length,
+            inflated.edgeWedge.length,
+        );
+        let checkedSamples = 0;
+        for (let index = 0; index < sampleCount; index += 1) {
+            const center = toPoint(inflated.centerline[index]);
+            const tangentA = toPoint(inflated.tangentA[index]);
+            const tangentB = toPoint(inflated.tangentB[index]);
+            const originalEdge = toPoint(inflated.edge[index]);
+            const inflatedEdge = toPoint(inflated.edgeWedge[index]);
+            if ([center, tangentA, tangentB, originalEdge, inflatedEdge].some((point) => point.some((value) => !Number.isFinite(value)))) {
+                continue;
+            }
+            const directionA = unit(subtract(tangentA, center));
+            const directionB = unit(subtract(tangentB, center));
+            if (!directionA || !directionB) continue;
+
+            const delta = subtract(inflatedEdge, originalEdge);
+            const projectionA = dot(delta, directionA);
+            const projectionB = dot(delta, directionB);
+            if (
+                projectionA < inflate * 0.8
+                || projectionB < inflate * 0.8
+                || projectionA > inflate * 1.3
+                || projectionB > inflate * 1.3
+            ) {
+                throw new Error(`Expected ${sideMode} inflated edgeWedge sample ${index} to move roughly one inflate distance in both tangent directions; projections were ${projectionA} and ${projectionB}.`);
+            }
+            checkedSamples += 1;
+        }
+
+        if (checkedSamples < 2) {
+            throw new Error(`Expected to validate at least two ${sideMode} edgeWedge samples, validated ${checkedSamples}.`);
+        }
+    }
+}
+
 export async function test_cppSolidNative_filletEdge_finalSnapshot_preserves_face_names_and_metadata() {
     if (manifoldBuildSource !== "local" || typeof manifold?.buildFilletEdgeAuthoringState !== "function") {
         return;

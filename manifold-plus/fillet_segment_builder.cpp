@@ -3139,6 +3139,30 @@ void ApplyTangentOffset(std::vector<Vec3>& tangent_points,
   }
 }
 
+void ApplyEdgeRailCornerOffset(std::vector<Vec3>& edge_points,
+                               const std::vector<Vec3>& centerline_points,
+                               const std::vector<Vec3>& tangent_a_points,
+                               const std::vector<Vec3>& tangent_b_points,
+                               double offset_distance) {
+  if (!(std::abs(offset_distance) > 1e-12)) return;
+  const size_t count =
+      std::min(std::min(edge_points.size(), centerline_points.size()),
+               std::min(tangent_a_points.size(), tangent_b_points.size()));
+  for (size_t i = 0; i < count; ++i) {
+    const Vec3& center = centerline_points[i];
+    Vec3& edge = edge_points[i];
+    const Vec3 dir_a = Subtract(tangent_a_points[i], center);
+    const Vec3 dir_b = Subtract(tangent_b_points[i], center);
+    const double len_a = std::sqrt(LengthSq(dir_a));
+    const double len_b = std::sqrt(LengthSq(dir_b));
+    if (!(len_a > 1e-12) || !(len_b > 1e-12)) continue;
+    const Vec3 shifted =
+        Add(edge, Add(Scale(dir_a, offset_distance / len_a),
+                      Scale(dir_b, offset_distance / len_b)));
+    if (IsFinitePoint(shifted)) edge = shifted;
+  }
+}
+
 void ApplyWedgeInset(std::vector<Vec3>& edge_points,
                      const std::vector<Vec3>& centerline_points,
                      const manifold::MeshGL& mesh, double inset_magnitude,
@@ -5800,8 +5824,12 @@ emscripten::val BuildFilletEdgeAuthoringState(const emscripten::val& options) {
   const double offset_distance = inflate;
   const bool has_tangent_offset = std::abs(offset_distance) > 1e-12;
   if (has_tangent_offset) {
+    const std::vector<Vec3> tangent_a_before_offset = tangent_a_copy;
+    const std::vector<Vec3> tangent_b_before_offset = tangent_b_copy;
     ApplyTangentOffset(tangent_a_copy, centerline, offset_distance);
     ApplyTangentOffset(tangent_b_copy, centerline, offset_distance);
+    ApplyEdgeRailCornerOffset(edge_wedge, centerline, tangent_a_before_offset,
+                              tangent_b_before_offset, offset_distance);
     tangent_a_copy =
         SanitizeFilletTangentPolyline(centerline, tangent_a_copy, result_closed, 0.0);
     tangent_b_copy =
@@ -5816,8 +5844,7 @@ emscripten::val BuildFilletEdgeAuthoringState(const emscripten::val& options) {
       std::max(1e-4, std::min(0.05, std::abs(radius) * 0.05));
   const double wedge_inset_magnitude =
       result_closed ? 0.0
-                    : (side_mode == "INSET" ? std::abs(inflate)
-                                            : outset_inset_magnitude);
+                    : (side_mode == "OUTSET" ? outset_inset_magnitude : 0.0);
   if (wedge_inset_magnitude > 0.0) {
     const double wedge_inset_start_ms = NativeNowMs();
     SnapshotInfo info = ReadSnapshotInfo(snapshot);
