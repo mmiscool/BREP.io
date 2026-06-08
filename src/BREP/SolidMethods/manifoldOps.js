@@ -28,6 +28,11 @@ export function _manifoldize() {
             try { this.free(); } catch { }
         }, 60 * 1000);
     } catch { }
+
+    this.deduplicateFaceNames()
+
+
+
     if (!this._dirty && this._manifold) {
         const __t1 = nowMs();
         try { if (debugMode) console.log(`[Solid] _manifoldize cache-hit in ${Math.round(__t1 - __t0)} ms`); } catch { }
