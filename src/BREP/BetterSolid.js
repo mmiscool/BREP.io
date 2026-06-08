@@ -386,6 +386,14 @@ export class Solid extends THREE.Group {
     }
 
     /**
+     * Deduplicate face name tracking, preserving the first numeric ID for each name.
+     * @returns {Solid}
+     */
+    deduplicateFaceNames(..._args) {
+        return SolidMethods.deduplicateFaceNames.apply(this, arguments);
+    }
+
+    /**
      * Generate an ASCII STL string for the current manifold mesh.
      * @param {string} [name='solid']
      * @param {number} [precision=6]

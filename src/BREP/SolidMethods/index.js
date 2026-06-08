@@ -11,6 +11,7 @@ export {
     setFaceMetadata,
     getFaceMetadata,
     getFaceNames,
+    deduplicateFaceNames,
     renameFace,
     setEdgeMetadata,
     getEdgeMetadata,

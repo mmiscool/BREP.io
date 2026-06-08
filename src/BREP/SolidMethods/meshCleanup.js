@@ -1673,6 +1673,10 @@ export function removeDegenerateTriangles() {
     if (!this._triVerts || !this._vertProperties) {
         return 0;
     }
+    try{ this._manifoldize(); } catch { 
+        console.log("[removeDegenerateTriangles] manifoldization failed, proceeding with best effort cleanup");
+        /* best effort */ 
+    }
 
     // Vector utilities
     const vec = {

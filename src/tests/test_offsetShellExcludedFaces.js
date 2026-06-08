@@ -107,6 +107,9 @@ export async function afterRun_offsetShell_negative_distance_rounds_unselected_s
   if (!rounded.pipeSliverCollapse || !Number.isFinite(Number(rounded.pipeSliverCollapseCount))) {
     throw new Error(`Expected rounded-corner pipe sliver collapse diagnostics, got ${JSON.stringify(rounded)}.`);
   }
+  if (rounded.pipeRemainderFaceNamesDeduplicated !== true || rounded.shellFaceNamesDeduplicated !== true) {
+    throw new Error(`Expected rounded-corner pipe remainder and final shell face names to be deduplicated, got ${JSON.stringify(rounded)}.`);
+  }
 
   const shell = partHistory.scene.getObjectByName("P.CU_NEG_OS_NEG");
   if (!shell) {
@@ -284,6 +287,39 @@ export async function afterRun_offsetShell_debug_separates_rounded_tube_remainde
   const debugNames = feature?.persistentData?.debugAddedSolidNames || [];
   if (!debugNames.includes("P.CU_DBG_OS_DBG_ROUND_PIPE_REMAINDER")) {
     throw new Error(`Expected debugAddedSolidNames to include the tube remainder, got ${debugNames.join(", ")}.`);
+  }
+
+  if (!(Number(rounded.pipeRemainderStartFaceRenameCount) > 0)) {
+    throw new Error(`Expected non-pipe tube remainder faces to be renamed with _START, got ${JSON.stringify(rounded)}.`);
+  }
+  if (rounded.pipeRemainderFaceNamesDeduplicated !== true) {
+    throw new Error(`Expected debug tube remainder face names to be deduplicated, got ${JSON.stringify(rounded)}.`);
+  }
+
+  const pipeFaceNames = typeof pipe.getFaceNames === "function" ? pipe.getFaceNames() : [];
+  const nonPipeNames = pipeFaceNames.filter((faceName) => {
+    const name = String(faceName || "");
+    if (!name) return false;
+    const metadata = typeof pipe.getFaceMetadata === "function" ? (pipe.getFaceMetadata(name) || {}) : {};
+    if (metadata.offsetShellRoundedPipe === true) return false;
+    return !/ROUND_PIPE.*_Outer(?:$|[_|])/u.test(name);
+  });
+  if (!nonPipeNames.length) {
+    throw new Error(`Expected debug rounded tube remainder to contain non-pipe faces, got ${pipeFaceNames.join(", ")}.`);
+  }
+  const unsuffixedNonPipeNames = nonPipeNames.filter((faceName) => !String(faceName || "").endsWith("_START"));
+  if (unsuffixedNonPipeNames.length) {
+    throw new Error(`Expected non-pipe tube remainder faces to end with _START, got ${unsuffixedNonPipeNames.join(", ")}.`);
+  }
+
+  const suffixedPipeNames = pipeFaceNames.filter((faceName) => {
+    const name = String(faceName || "");
+    if (!name.endsWith("_START")) return false;
+    const metadata = typeof pipe.getFaceMetadata === "function" ? (pipe.getFaceMetadata(name) || {}) : {};
+    return metadata.offsetShellRoundedPipe === true || /ROUND_PIPE.*_Outer(?:$|[_|])/u.test(name);
+  });
+  if (suffixedPipeNames.length) {
+    throw new Error(`Expected rounded pipe faces to keep their names, got ${suffixedPipeNames.join(", ")}.`);
   }
 }
 

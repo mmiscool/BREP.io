@@ -252,6 +252,53 @@ function getSolidFaceNames(solid) {
     return [];
 }
 
+function appendStartSuffixToNonRoundedPipeFaces(solid, featureId = "") {
+    if (!solid || typeof solid.renameFace !== "function") return 0;
+
+    const normalizedFeatureId = String(featureId || "").trim();
+    const faceNames = getSolidFaceNames(solid);
+    let renamedCount = 0;
+
+    const getFaceMetadata = (faceName) => {
+        try {
+            return typeof solid.getFaceMetadata === "function" ? (solid.getFaceMetadata(faceName) || {}) : {};
+        } catch {
+            return {};
+        }
+    };
+    const isRoundedPipeFace = (faceName, metadata = {}) => {
+        if (metadata?.offsetShellRoundedPipe === true) return true;
+        const name = String(faceName || "");
+        if (!name.includes("ROUND_PIPE")) return false;
+        if (normalizedFeatureId && !name.includes(`${normalizedFeatureId}_ROUND_PIPE`)) return false;
+        return /ROUND_PIPE.*_Outer(?:$|[_|])/u.test(name);
+    };
+
+    for (const faceName of faceNames) {
+        if (!faceName || faceName.endsWith("_START")) continue;
+        const metadata = getFaceMetadata(faceName);
+        if (isRoundedPipeFace(faceName, metadata)) continue;
+        try {
+            solid.renameFace(faceName, `${faceName}_START`);
+            renamedCount += 1;
+        } catch {
+            /* ignore individual relabel failures */
+        }
+    }
+
+    return renamedCount;
+}
+
+function deduplicateSolidFaceNames(solid) {
+    if (!solid || typeof solid.deduplicateFaceNames !== "function") return false;
+    try {
+        solid.deduplicateFaceNames();
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 function triangleAreaFromArrays(p1, p2, p3) {
     if (!Array.isArray(p1) || !Array.isArray(p2) || !Array.isArray(p3)) return 0;
     const ax = Number(p1[0]);
@@ -1094,13 +1141,16 @@ function collapseOffsetShellRoundedPipeSlivers(solid, opts = {}) {
     solid._cppSolidCoreSyncStamp = null;
 
     let removedDegenerateTriangles = 0;
-    if (typeof solid.removeDegenerateTriangles === "function") {
-        try {
-            removedDegenerateTriangles = Math.max(0, Number(solid.removeDegenerateTriangles() || 0));
-        } catch {
-            removedDegenerateTriangles = 0;
-        }
-    }
+    solid._manifoldize();
+
+
+    // if (typeof solid.removeDegenerateTriangles === "function") {
+    //     try {
+    //         removedDegenerateTriangles = Math.max(0, Number(solid.removeDegenerateTriangles() || 0));
+    //     } catch {
+    //         removedDegenerateTriangles = 0;
+    //     }
+    // }
 
     const summary = {
         enabled: true,
@@ -1665,6 +1715,9 @@ export function offsetShell(faces, distance, options = {}) {
         shellUnionWallMs: 0,
         pipeSliverCollapseCount: 0,
         pipeSliverCollapseRemovedDegenerateTriangles: 0,
+        pipeRemainderStartFaceRenameCount: 0,
+        pipeRemainderFaceNamesDeduplicated: false,
+        shellFaceNamesDeduplicated: false,
         sidewallAreaLoss: null,
         pipeSliverCollapse: null,
         areaLossSidewallReassign: null,
@@ -1709,6 +1762,8 @@ export function offsetShell(faces, distance, options = {}) {
                 try { pipeOutsideSource._cppSolidCoreSyncStamp = null; } catch { /* ignore */ }
                 try { pipeOutsideSource.name = `${newSolidName}_ROUND_PIPE_REMAINDER`; } catch { /* ignore */ }
                 try { pipeOutsideSource.owningFeatureID = featureId; } catch { /* ignore */ }
+                roundedCorners.pipeRemainderStartFaceRenameCount = appendStartSuffixToNonRoundedPipeFaces(pipeOutsideSource, featureId);
+                roundedCorners.pipeRemainderFaceNamesDeduplicated = deduplicateSolidFaceNames(pipeOutsideSource);
                 if (options?.debugSeparateRoundedCornerPipe) {
                     roundedCorners.status = "separated";
                     roundedCorners.shellUnionStrategy = "debug_separate";
@@ -1726,6 +1781,7 @@ export function offsetShell(faces, distance, options = {}) {
                         });
                         if (roundedShell) {
                             combined = roundedShell;
+                            roundedCorners.shellFaceNamesDeduplicated = deduplicateSolidFaceNames(combined);
                             const cleanupBaselineSnapshot = buildSolidAuthoringStateSnapshot(combined);
                             const cleanupBaselineTopology = analyzeSolidMeshTopology(combined);
                             const areaLossDetectionEnabled = options?.roundedCornerAreaLossDetectionEnabled !== false;

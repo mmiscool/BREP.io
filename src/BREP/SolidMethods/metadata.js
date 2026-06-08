@@ -42,6 +42,51 @@ export function getFaceNames() {
     try { return this._cppSolidCore?.getFaceNames() || []; } catch { return []; }
 }
 
+/** Deduplicate face name tracking by keeping the first ID for each face name. */
+export function deduplicateFaceNames() {
+    const idToFaceName = this._idToFaceName instanceof Map ? this._idToFaceName : new Map();
+    const faceNameToID = this._faceNameToID instanceof Map ? this._faceNameToID : new Map();
+    if (idToFaceName.size === 0 && faceNameToID.size === 0) return this;
+
+    const firstIDByName = new Map();
+    const duplicateIDToFirstID = new Map();
+    const nextIDToFaceName = new Map();
+
+    for (const [id, faceName] of idToFaceName.entries()) {
+        if (!firstIDByName.has(faceName)) {
+            firstIDByName.set(faceName, id);
+            nextIDToFaceName.set(id, faceName);
+        } else {
+            duplicateIDToFirstID.set(id, firstIDByName.get(faceName));
+        }
+    }
+
+    for (const [faceName, id] of faceNameToID.entries()) {
+        if (!firstIDByName.has(faceName)) {
+            firstIDByName.set(faceName, id);
+            nextIDToFaceName.set(id, faceName);
+        }
+    }
+
+    if (duplicateIDToFirstID.size === 0) {
+        this._idToFaceName = nextIDToFaceName;
+        this._faceNameToID = new Map(Array.from(nextIDToFaceName.entries(), ([id, faceName]) => [faceName, id]));
+        return this;
+    }
+
+    this._triIDs = Array.isArray(this._triIDs)
+        ? this._triIDs.map((id) => duplicateIDToFirstID.get(id) ?? id)
+        : [];
+    this._idToFaceName = nextIDToFaceName;
+    this._faceNameToID = new Map(Array.from(nextIDToFaceName.entries(), ([id, faceName]) => [faceName, id]));
+    this._dirty = true;
+    this._manifold = null;
+    this._faceIndex = null;
+    this._visualizeCache = null;
+    this._cppSolidCoreSyncStamp = null;
+    return this;
+}
+
 /** Rename a face; if newName exists, merge triangles/metadata into it. */
 export function renameFace(oldName, newName) {
     if (!oldName || !newName || oldName === newName) return this;

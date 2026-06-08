@@ -256,6 +256,42 @@ export async function test_cppSolidNative_pushFace_updates_planar_face_vertices(
     }
 }
 
+export async function test_cppSolidNative_deduplicateFaceNames_reassigns_duplicate_triangles_to_first_id() {
+    const solid = new Solid();
+    solid
+        .addTriangle("FACE_A", [0, 0, 0], [1, 0, 0], [0, 1, 0])
+        .addTriangle("FACE_B", [0, 0, 1], [0, 1, 1], [1, 0, 1]);
+
+    const firstID = solid._faceNameToID.get("FACE_A");
+    const duplicateID = solid._faceNameToID.get("FACE_B");
+    if (!Number.isFinite(firstID) || !Number.isFinite(duplicateID) || firstID === duplicateID) {
+        throw new Error("Expected distinct finite face IDs before duplicate face-name setup.");
+    }
+
+    solid._idToFaceName.set(duplicateID, "FACE_A");
+    solid._faceNameToID.delete("FACE_B");
+    solid._faceNameToID.set("FACE_A", duplicateID);
+
+    const returned = solid.deduplicateFaceNames();
+    if (returned !== solid) {
+        throw new Error("Expected deduplicateFaceNames to return the solid for chaining.");
+    }
+    if (solid._faceNameToID.get("FACE_A") !== firstID) {
+        throw new Error("Expected FACE_A to keep the first numeric face ID.");
+    }
+    if (solid._idToFaceName.has(duplicateID)) {
+        throw new Error("Expected duplicate face ID to be removed from id-to-face-name tracking.");
+    }
+    if (solid.getFaceNames().join("|") !== "FACE_A") {
+        throw new Error(`Expected one deduplicated face name, received ${solid.getFaceNames().join(", ")}.`);
+    }
+    for (const triID of solid._triIDs) {
+        if (triID !== firstID) {
+            throw new Error(`Expected every triangle to use first face ID ${firstID}, received ${triID}.`);
+        }
+    }
+}
+
 export async function test_cppSolidNative_getFaceNormal_reports_planar_face_normal() {
     if (manifoldBuildSource !== "local") {
         return;
