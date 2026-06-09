@@ -9,8 +9,6 @@ import {
 } from '../CppSolidCore.js';
 import { manifold } from '../setupManifold.js';
 
-const FILLET_SIDEWALL_COLLAPSE_SIMPLIFY_TOLERANCE = 0.0009;
-
 function hasNativeFilletCombinedBuilder() {
   return typeof manifold?.buildFilletCombinedAuthoringState === 'function';
 }
@@ -1952,7 +1950,6 @@ export { collapseFilletSideWallFaces as __testOnlyCollapseFilletSideWallFaces };
  * @param {boolean} [opts.mergeCoplanarEndCaps=true] merge coplanar fillet end caps into adjacent host faces
  * @param {boolean} [opts.renameFaces=true] allow fillet cleanup to rename/relabel generated faces
  * @param {boolean} [opts.reassignSliverTriangles=true] reassign tiny fillet sidewall sliver triangles into planar neighbors
- * @param {boolean} [opts.collapseFilletSideWalls=true] collapse deterministic fillet side-wall faces so adjacent faces meet directly
  * @param {boolean} [opts.debug=false] Enable debug visuals in fillet builder
  * @param {boolean} [opts.consoleLogProcess=false] Emit fillet process console logs without requiring debug visuals
  * @param {number} [opts.debugSolidsLevel=0] -1=none, 0=tube+wedge, 1=edge fillet boolean result, 2=all intermediate solids
@@ -1990,8 +1987,7 @@ export async function fillet(opts = {}) {
   const renameFaces = opts.renameFaces !== false;
   const mergeCoplanarEndCaps = opts.mergeCoplanarEndCaps !== false && renameFaces;
   const reverseEndCapNudge = mergeCoplanarEndCaps;
-  const collapseFilletSideWalls = opts.collapseFilletSideWalls !== false;
-  const reassignSliverTriangles = opts.reassignSliverTriangles !== false && !collapseFilletSideWalls;
+  const reassignSliverTriangles = opts.reassignSliverTriangles !== false;
   const featureID = opts.featureID || 'FILLET';
 
   // Resolve pre-selected edge objects.
@@ -2060,7 +2056,6 @@ export async function fillet(opts = {}) {
       debug: !!debug,
       debugSolidsLevel,
       debugShowCombinedBeforeTarget,
-      preserveFilletSideWallFaces: collapseFilletSideWalls,
       enableFaceRenaming: renameFaces,
       profile: nativeProfile,
     });
@@ -2158,64 +2153,14 @@ export async function fillet(opts = {}) {
   } else {
     result.__filletSliverTriangleReassignCount = 0;
   }
-  result.__filletSideWallCollapseEnabled = collapseFilletSideWalls;
-  if (collapseFilletSideWalls) {
-    try {
-      const sideWallCollapseSummary = collapseFilletSideWallFaces(result, {
-        featureID,
-        debug: logProcess,
-      });
-      result.__filletSideWallCollapseSummary = sideWallCollapseSummary;
-      result.__filletSideWallCollapseCount = Math.max(0, Number(sideWallCollapseSummary?.collapsedEdges || 0));
-      result.__filletSideWallCollapseRemovedTriangles = Math.max(0, Number(sideWallCollapseSummary?.removedSideWallTriangles || 0));
-      result.__filletSideWallCollapseSimplifySucceeded = false;
-      result.__filletSideWallCollapseSimplifyError = null;
-      if (result.__filletSideWallCollapseCount > 0 && typeof result.simplify === 'function') {
-        try {
-          result.simplify(FILLET_SIDEWALL_COLLAPSE_SIMPLIFY_TOLERANCE, true);
-          result.__filletSideWallCollapseSimplifySucceeded = true;
-        } catch (simplifyError) {
-          result.__filletSideWallCollapseSimplifyError = simplifyError?.message || String(simplifyError);
-          if (logProcess) {
-            console.warn('[Solid.fillet] Failed to simplify after fillet side-wall vertex collapse.', {
-              featureID,
-              error: result.__filletSideWallCollapseSimplifyError,
-            });
-          }
-        }
-      }
-    } catch (error) {
-      console.warn('[Solid.fillet] Failed to collapse fillet side-wall faces.', {
-        featureID,
-        error: error?.message || error,
-      });
-      result.__filletSideWallCollapseCount = 0;
-      result.__filletSideWallCollapseRemovedTriangles = 0;
-      result.__filletSideWallCollapseSimplifySucceeded = false;
-      result.__filletSideWallCollapseSimplifyError = error?.message || String(error);
-    }
-  } else {
-    result.__filletSideWallCollapseCount = 0;
-    result.__filletSideWallCollapseRemovedTriangles = 0;
-    result.__filletSideWallCollapseSimplifySucceeded = false;
-    result.__filletSideWallCollapseSimplifyError = null;
-  }
-  const runPostFilletTinyFaceIslandCleanup = collapseFilletSideWalls && cleanupTinyFaceIslandsArea > 0;
-  result.__filletTinyFaceIslandCleanupEnabled = runPostFilletTinyFaceIslandCleanup;
+  result.__filletSideWallCollapseEnabled = false;
+  result.__filletSideWallCollapseSummary = null;
+  result.__filletSideWallCollapseCount = 0;
+  result.__filletSideWallCollapseRemovedTriangles = 0;
+  result.__filletSideWallCollapseSimplifySucceeded = false;
+  result.__filletSideWallCollapseSimplifyError = null;
+  result.__filletTinyFaceIslandCleanupEnabled = false;
   result.__filletTinyFaceIslandCleanupCount = 0;
-  if (runPostFilletTinyFaceIslandCleanup && typeof result.cleanupTinyFaceIslands === 'function') {
-    try {
-      result.__filletTinyFaceIslandCleanupCount = Math.max(
-        0,
-        Number(result.cleanupTinyFaceIslands(cleanupTinyFaceIslandsArea) || 0),
-      );
-    } catch (error) {
-      console.warn('[Solid.fillet] Failed to clean up tiny face islands after fillet post-processing.', {
-        featureID,
-        error: error?.message || error,
-      });
-    }
-  }
   result.__filletSingleNeighborIslandCleanupCount = 0;
   result.__filletSingleNeighborIslandCleanupComponentCount = 0;
   try {

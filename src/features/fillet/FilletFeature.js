@@ -20,7 +20,7 @@ const FINAL_FILLET_SIMPLIFY_TOLERANCE = 0.0009;
 const FILLET_NATIVE_TINY_FACE_ISLAND_CLEANUP_AREA = 0.01;
 const FILLET_POST_COLLAPSE_TINY_TRIANGLE_THRESHOLD = 0.001;
 const FILLET_POST_COLLAPSE_TINY_FACE_ISLAND_CLEANUP_AREA = 0.01;
-const FILLET_CACHE_VERSION = 4;
+const FILLET_CACHE_VERSION = 5;
 
 const inputParamsSchema = {
     id: {
@@ -77,11 +77,6 @@ const inputParamsSchema = {
         step: 0.0001,
         default_value: 0.0001,
         hint: "Push fillet wedge end caps outward by this amount before booleaning (0 disables).",
-    },
-    collapseFilletSideWalls: {
-        type: "boolean",
-        default_value: true,
-        hint: "Collapse deterministic fillet side-wall faces so adjacent faces meet directly.",
     },
     renameFaces: {
         type: "boolean",
@@ -401,7 +396,6 @@ function buildFilletCacheKey({
     direction,
     inflate,
     nudgeFaceDistance,
-    collapseFilletSideWalls,
 }) {
     const faceStateCache = new Map();
     const edgeSignatures = (Array.isArray(edgeObjs) ? edgeObjs : [])
@@ -417,7 +411,6 @@ function buildFilletCacheKey({
             direction,
             inflate,
             nudgeFaceDistance,
-            collapseFilletSideWalls,
         }),
         edgeSignatures,
         dependencyHash: stableValueHash({
@@ -864,7 +857,7 @@ export class FilletFeature {
         const inflate = Number(params?.inflate) || 0;
         const exclude = [];
         if (debugMode === DEBUG_MODE_NONE) {
-            exclude.push('collapseFilletSideWalls', 'renameFaces', 'nudgeFaceDistance');
+            exclude.push('renameFaces', 'nudgeFaceDistance');
             if (inflate === 0) exclude.push('inflate');
         }
         return exclude;
@@ -1001,7 +994,6 @@ export class FilletFeature {
         }
 
         let result = null;
-        const collapseFilletSideWalls = this.inputParams?.collapseFilletSideWalls !== false;
         const renameFaces = this.inputParams?.renameFaces !== false;
         const inflateInput = Number(this.inputParams.inflate) || 0;
         const inflate = inflateInput === 0 ? r * 0.1 : inflateInput;
@@ -1015,7 +1007,6 @@ export class FilletFeature {
             direction: dir,
             inflate,
             nudgeFaceDistance,
-            collapseFilletSideWalls,
         });
         profiler.end('build dependency signature', { edges: cacheKey.edgeSignatures.length });
         const cacheEntry = this.persistentData?.filletSolidCache || null;
@@ -1069,7 +1060,6 @@ export class FilletFeature {
                 mergeCoplanarEndCaps: true,
                 renameFaces,
                 reassignSliverTriangles: true,
-                collapseFilletSideWalls,
                 debug: debugEnabled,
                 consoleLogProcess: debugLogsEnabled,
                 profile: debugLogsEnabled,
@@ -1081,7 +1071,7 @@ export class FilletFeature {
         try {
             result.__filletFinalSimplifyEnabled = true;
             result.__filletNativeTinyFaceIslandCleanupEnabled = true;
-            result.__filletSideWallCollapseEnabled = collapseFilletSideWalls;
+            result.__filletSideWallCollapseEnabled = false;
             result.__filletPostCollapseTinyTriangleCollapseEnabled = true;
             result.__filletPostCollapseTinyFaceIslandCleanupEnabled = true;
         } catch { }
@@ -1158,15 +1148,8 @@ export class FilletFeature {
             for (const obj of added) {
                 if (obj && typeof obj === 'object' && typeof obj.setEpsilon === 'function') {
                     try {
-                        const sideWallCollapseCount = Math.max(
-                            0,
-                            Number(obj.__filletSideWallCollapseCount || 0),
-                        );
-                        const runPostTinyTriangleCollapse = !(collapseFilletSideWalls && sideWallCollapseCount > 0);
-                        if (runPostTinyTriangleCollapse) {
-                            await obj.collapseTinyTriangles(FILLET_POST_COLLAPSE_TINY_TRIANGLE_THRESHOLD);
-                        }
-                        obj.__filletPostCollapseTinyTriangleCollapseEnabled = runPostTinyTriangleCollapse;
+                        await obj.collapseTinyTriangles(FILLET_POST_COLLAPSE_TINY_TRIANGLE_THRESHOLD);
+                        obj.__filletPostCollapseTinyTriangleCollapseEnabled = true;
                         const runPostTinyFaceIslandCleanup = true;
                         if (typeof obj.cleanupTinyFaceIslands === 'function') {
                             obj.__filletPostCollapseTinyFaceIslandCleanupCount = Math.max(
