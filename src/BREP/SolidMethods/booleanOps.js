@@ -446,6 +446,18 @@ function retagSimplifiedMeshFromSourceSolid(mesh, sourceSolid) {
     return mesh;
 }
 
+function meshHasCompleteKnownFaceIDs(mesh, idToFaceName) {
+    const triCount = (mesh?.triVerts?.length / 3) | 0;
+    const faceID = mesh?.faceID;
+    if (!triCount || !faceID || faceID.length !== triCount) return false;
+    const knownIDs = idToFaceName instanceof Map ? idToFaceName : new Map();
+    if (knownIDs.size === 0) return false;
+    for (let tri = 0; tri < triCount; tri += 1) {
+        if (!knownIDs.has(faceID[tri] >>> 0)) return false;
+    }
+    return true;
+}
+
 function buildNativeBooleanResult(left, right, operation, SolidCtor) {
     requireNativeBooleanCombinedBuilder(`Solid.${String(operation || "boolean").toLowerCase()}`);
     const leftSnapshot = getSolidAuthoringStateSnapshot(left);
@@ -653,6 +665,7 @@ export function unionMany(solidsOrOther, options = {}) {
         : (diagnostics.nativeBatchUnionStatus === "failed" ? "balanced_fallback" : "balanced");
     diagnostics.contributedSolidCount = Number(fallbackNode?.count || 0);
     const solid = applyUnionManyNameAndOwner(fallbackNode?.solid || null, options, inputs);
+    try {solid.deduplicateFaceNames();} catch { console.log("Failed cleanup duplicate face names"); }
     return attachUnionManyDiagnostics(solid, diagnostics);
 }
 
@@ -686,6 +699,7 @@ function _applyFixedBooleanResultWeld(solid) {
 
 function _cleanupBooleanResult(solid) {
     try { _dropDisconnectedIslandsByVolume(solid, BOOLEAN_DISCONNECTED_ISLAND_MIN_VOLUME); } catch { }
+    try { solid.deduplicateFaceNames(); } catch { console.log("Failed cleanup duplicate face names"); }
     return _applyFixedBooleanResultWeld(solid);
 }
 
@@ -728,7 +742,9 @@ export function simplify(tolerance = undefined, updateInPlace = false) {
     let outSnapshot = null;
     const outMesh = outM.getMesh();
     try {
-        retagSimplifiedMeshFromSourceSolid(outMesh, this);
+        if (!meshHasCompleteKnownFaceIDs(outMesh, this._idToFaceName)) {
+            retagSimplifiedMeshFromSourceSolid(outMesh, this);
+        }
         outSnapshot = buildNativeSnapshotFromMesh(outMesh, this._idToFaceName, {
             faceMetadataJson: authoringSnapshot?.faceMetadataJson,
             edgeMetadataJson: authoringSnapshot?.edgeMetadataJson,

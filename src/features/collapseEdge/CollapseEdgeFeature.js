@@ -12,6 +12,7 @@ const inputParamsSchema = {
     edges: {
         type: "reference_selection",
         selectionFilter: ["EDGE"],
+        timestampDependency: "parentSolid",
         multiple: true,
         default_value: null,
         hint: "Select one or more edges to collapse to a point",

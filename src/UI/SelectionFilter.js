@@ -402,9 +402,20 @@ export class SelectionFilter {
         }
     }
 
-    static setHoverByName(scene, name) {
+    static #resolveNamedObject(scene, name, resolver = null) {
+        if (!name) return null;
+        if (typeof resolver === 'function') {
+            try {
+                const resolved = resolver(name);
+                if (resolved) return resolved;
+            } catch { }
+        }
+        try { return scene?.getObjectByName?.(name) || null; } catch { return null; }
+    }
+
+    static setHoverByName(scene, name, options = {}) {
         if (!scene || !name) { SelectionFilter.clearHover(); return; }
-        const obj = scene.getObjectByName(name);
+        const obj = SelectionFilter.#resolveNamedObject(scene, name, options?.resolver);
         if (!obj) { SelectionFilter.clearHover(); return; }
         SelectionFilter.setHoverObject(obj);
     }
@@ -806,7 +817,14 @@ export class SelectionFilter {
         SelectionFilter._emitSelectionChanged();
     }
 
-    static selectItem(scene, itemName) {
+    static selectItem(scene, itemName, options = {}) {
+        const resolved = SelectionFilter.#resolveNamedObject(scene, itemName, options?.resolver);
+        if (resolved) {
+            SelectionState.attach(resolved);
+            resolved.selected = true;
+            SelectionFilter._emitSelectionChanged();
+            return;
+        }
         scene.traverse((child) => {
             if (child && child.name === itemName) {
                 SelectionState.attach(child);
@@ -847,8 +865,8 @@ export class SelectionFilter {
                 || obj?.type
                 || 'Object'
             ));
-            const desc = names.length ? names.join(', ') : '(none)';
-            //console.log(`[SelectionFilter] selection changed -> ${desc}`);
+            const _desc = names.length ? names.join(', ') : '(none)';
+            //console.log(`[SelectionFilter] selection changed -> ${_desc}`);
         } catch { /* noop */ }
         try {
             const ev = new CustomEvent('selection-changed');

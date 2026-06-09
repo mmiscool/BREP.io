@@ -14,6 +14,7 @@ const inputParamsSchema = {
   faces: {
     type: "reference_selection",
     selectionFilter: ["FACE"],
+    timestampDependency: "parentSolid",
     multiple: true,
     default_value: [],
     hint: "Select one or more faces to offset",

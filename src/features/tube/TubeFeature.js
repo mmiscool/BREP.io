@@ -10,6 +10,7 @@ const inputParamsSchema = {
   path: {
     type: 'reference_selection',
     selectionFilter: ['EDGE'],
+    timestampDependency: 'selection',
     multiple: true,
     default_value: null,
     hint: 'Select one or more connected edges defining the tube path'

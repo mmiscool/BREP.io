@@ -123,7 +123,7 @@ function buildTestSnippet({ functionName, features, expressions, configurator })
 
   if (!list.length) {
     lines.push('  // No features were found in the current history.');
-    lines.push('  partHistory.runHistory()');
+    lines.push('  await partHistory.runHistory();');
     lines.push('  return partHistory;');
     lines.push('}');
     lines.push('');
@@ -152,7 +152,7 @@ function buildTestSnippet({ functionName, features, expressions, configurator })
   }
 
   lines.push('');
-  lines.push('  partHistory.runHistory()');
+  lines.push('  await partHistory.runHistory();');
   lines.push('  return partHistory;');
   lines.push('}');
   lines.push('');

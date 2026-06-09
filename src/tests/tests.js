@@ -51,6 +51,15 @@ import {
     test_ExtrudeFace,
     test_extrude_solid_face_uses_boundary_edge_sidewalls,
 } from './test_extrudeFace.js';
+import {
+    test_extrude_rectangle_profile_has_one_sidewall_per_sketch_edge,
+    test_feature_edge_name_resolution_prefers_boolean_result_over_raw_tool,
+    test_generated_history_20260609042734_preserves_s22_subtract_sidewalls,
+    test_generated_history_20260609045351_fillet_expanded_replay_uses_subtract_result,
+    test_run_history_calls_are_serialized,
+    test_subtract_restore_rejects_raw_tool_added_snapshot,
+    test_subtract_extrude_preserves_rectangle_tool_sidewall_faces,
+} from './test_extrude_sidewall_face_tracking.js';
 import { test_Fillet } from './test_fillet.js';
 import { afterRun_fillet_angle, test_fillet_angle } from './test_fillet_angle.js';
 import {
@@ -108,6 +117,8 @@ import {
 import {
     test_fillet_cache_invalidates_when_target_solid_changes_away_from_selected_edges,
     test_fillet_rebuild_re_resolves_stale_edge_object,
+    test_history_delete_restores_removed_upstream_solid_from_source_feature,
+    test_reference_selection_timestamp_scope_preserves_unchanged_edge_cache,
 } from './test_fillet_stale_reference_rebuild.js';
 import { afterRun_Fillet_NonClosed, test_Fillet_NonClosed } from './test_fillet_nonClosed.js';
 import { test_fillets_more_dificult } from './test_filletsMoreDifficult.js';
@@ -817,6 +828,20 @@ export const testFunctions = [
         resetHistory: true,
     },
     {
+        test: test_history_delete_restores_removed_upstream_solid_from_source_feature,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_reference_selection_timestamp_scope_preserves_unchanged_edge_cache,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
         test: test_fillet_cache_invalidates_when_target_solid_changes_away_from_selected_edges,
         printArtifacts: false,
         exportFaces: false,
@@ -986,6 +1011,13 @@ export const testFunctions = [
     { test: test_hole_multi_point_cloned_cutter, afterRun: afterRun_hole_multi_point_cloned_cutter, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_thread_symbolic, afterRun: afterRun_hole_thread_symbolic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_thread_modeled, afterRun: afterRun_hole_thread_modeled, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_extrude_rectangle_profile_has_one_sidewall_per_sketch_edge, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_feature_edge_name_resolution_prefers_boolean_result_over_raw_tool, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_run_history_calls_are_serialized, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_subtract_extrude_preserves_rectangle_tool_sidewall_faces, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_subtract_restore_rejects_raw_tool_added_snapshot, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_generated_history_20260609042734_preserves_s22_subtract_sidewalls, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_generated_history_20260609045351_fillet_expanded_replay_uses_subtract_result, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_pushFace_feature, afterRun: afterRun_pushFace_feature, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_pushFace, afterRun: afterRun_pushFace, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_mirror, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },

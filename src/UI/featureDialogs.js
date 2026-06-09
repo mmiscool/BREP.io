@@ -11,6 +11,8 @@ import {
     resolveTransformReferenceBase,
     sanitizeTransformValue,
 } from '../utils/transformReferenceUtils.js';
+import { Solid } from '../BREP/BetterSolid.js';
+import { applySolidAuthoringStateSnapshot } from '../BREP/CppSolidCore.js';
 const REF_PREVIEW_COLORS = {
     EDGE: '#ff00ff',
     FACE: '#ffc400',
@@ -1222,11 +1224,11 @@ export class SchemaForm {
                 if (sourceUuid && typeof scene.getObjectByProperty === 'function') {
                     try { liveObject = scene.getObjectByProperty('uuid', sourceUuid) || null; } catch (_) { liveObject = null; }
                 } else {
-                    try { liveObject = scene.getObjectByName(name) || null; } catch (_) { liveObject = null; }
+                    liveObject = this._resolveReferenceSceneObjectByName(name, scene);
                 }
                 if (!liveObject) {
                     // Fallback by name when UUID changed due to history rebuild.
-                    try { liveObject = scene.getObjectByName(name) || null; } catch (_) { liveObject = null; }
+                    liveObject = this._resolveReferenceSceneObjectByName(name, scene);
                 }
                 originalPresent = !!liveObject;
                 if (originalPresent) {
@@ -1273,7 +1275,7 @@ export class SchemaForm {
         for (const name of list) {
             if (!name) continue;
             const existing = cache.get(name) || null;
-            const obj = scene.getObjectByName(name);
+            const obj = this._resolveReferenceSceneObjectByName(name, scene);
             if (obj && !obj?.userData?.refPreview) {
                 const objType = String(obj.type || '').toUpperCase();
                 const isEdgeObj = objType === SelectionFilter.EDGE || objType === 'EDGE';
@@ -1435,9 +1437,10 @@ export class SchemaForm {
             const names = this._collectReferenceSelectionNames(inputEl, def);
             try { this._seedReferencePreviewCacheFromScene(inputEl, def, names, scene); } catch (_) { }
             SelectionFilter.unselectAll(scene);
+            const resolver = (refName) => this._resolveReferenceSceneObjectByName(refName, scene);
             for (const name of names) {
                 if (!name) continue;
-                try { SelectionFilter.selectItem(scene, name); } catch (_) { }
+                try { SelectionFilter.selectItem(scene, name, { resolver }); } catch (_) { }
             }
             try { this._syncActiveReferenceSelectionPreview(inputEl, def); } catch (_) { }
         } catch (_) { }
@@ -1541,8 +1544,7 @@ export class SchemaForm {
                 if (!targets.includes(candidate)) targets.push(candidate);
             };
 
-            let sceneObj = null;
-            try { sceneObj = scene.getObjectByName(normalized); } catch (_) { sceneObj = null; }
+            const sceneObj = this._resolveReferenceSceneObjectByName(normalized, scene);
             if (sceneObj && !sceneObj?.userData?.refPreview) pushTarget(sceneObj);
 
             const cache = this._getReferencePreviewCache(inputEl);
@@ -1650,7 +1652,7 @@ export class SchemaForm {
                 const cache = this._getReferencePreviewCache(inputEl);
                 for (const name of names) {
                     if (!name) continue;
-                    const obj = scene ? scene.getObjectByName(name) : null;
+                    const obj = scene ? this._resolveReferenceSceneObjectByName(name, scene) : null;
                     const cached = cache ? cache.get(name) : null;
                     const cachedObj = cached && cached.object ? cached.object : null;
                     console.log(`[ReferenceSelection] Selected${keyLabel}: ${name}`, {
@@ -1693,6 +1695,30 @@ export class SchemaForm {
         }) || explicit;
     }
 
+    _resolveReferenceSceneObjectByName(name, sceneOverride = null) {
+        const normalized = normalizeReferenceName(name);
+        if (!normalized) return null;
+        const partHistory = this.options?.partHistory || this.options?.viewer?.partHistory || null;
+        if (partHistory && typeof partHistory.getObjectByName === 'function') {
+            try {
+                const resolved = partHistory.getObjectByName(normalized);
+                if (resolved && !resolved?.userData?.refPreview && !resolved?.userData?.referenceSelectionGhost) {
+                    return resolved;
+                }
+            } catch (_) { /* ignore deterministic resolver failures */ }
+        }
+        const scene = sceneOverride || this._getReferenceSelectionScene();
+        try {
+            const resolved = scene?.getObjectByName?.(normalized) || null;
+            if (resolved && !resolved?.userData?.refPreview && !resolved?.userData?.referenceSelectionGhost) {
+                return resolved;
+            }
+            return resolved;
+        } catch (_) {
+            return null;
+        }
+    }
+
     _findReferenceSceneObject(scene, source) {
         if (!scene || !source) return null;
         try {
@@ -1704,7 +1730,7 @@ export class SchemaForm {
         try {
             const name = source.name != null ? String(source.name) : '';
             if (name) {
-                const byName = scene.getObjectByName(name);
+                const byName = this._resolveReferenceSceneObjectByName(name, scene);
                 if (byName && !byName?.userData?.referenceSelectionGhost) return byName;
             }
         } catch (_) { }
@@ -1793,8 +1819,38 @@ export class SchemaForm {
         return ghost;
     }
 
+    _restoreReferenceSelectionEffectSnapshot(snapshot) {
+        if (!snapshot || typeof snapshot !== 'object') return null;
+        let obj = null;
+        try {
+            if (snapshot.snapshotType === 'solid' && snapshot.solid) {
+                obj = new Solid();
+                applySolidAuthoringStateSnapshot(obj, snapshot.solid);
+            } else if (snapshot.snapshotType === 'object3d' && snapshot.template?.isObject3D && typeof snapshot.template.clone === 'function') {
+                obj = snapshot.template.clone(true);
+            }
+        } catch (_) {
+            obj = null;
+        }
+        if (!obj) return null;
+        try { obj.name = snapshot.name || obj.name || ''; } catch (_) { }
+        try { obj.type = snapshot.type || obj.type; } catch (_) { }
+        try { obj.owningFeatureID = snapshot.owningFeatureID; } catch (_) { }
+        try { obj.userData = { ...(snapshot.userData || obj.userData || {}) }; } catch (_) { }
+        try { obj.visible = snapshot.visible !== false; } catch (_) { }
+        try { obj.renderOrder = Number(snapshot.renderOrder) || 0; } catch (_) { }
+        return obj;
+    }
+
     _buildReferenceSelectionAddedGhostGroup(feature, featureId, scene) {
-        const added = Array.isArray(feature?.effects?.added) ? feature.effects.added : [];
+        const snapshotSources = Array.isArray(feature?.effectSnapshots?.added)
+            ? feature.effectSnapshots.added
+                .map((snapshot) => this._restoreReferenceSelectionEffectSnapshot(snapshot))
+                .filter(Boolean)
+            : [];
+        const added = snapshotSources.length
+            ? snapshotSources
+            : (Array.isArray(feature?.effects?.added) ? feature.effects.added : []);
         if (!added.length) return null;
         const group = new THREE.Group();
         group.name = `__REF_SELECTION_ADDED_GHOSTS__${featureId}`;
@@ -2561,7 +2617,12 @@ export class SchemaForm {
                     this._hoverReferenceSelectionItem(liveInput, liveDef, name);
                     return;
                 }
-                try { SelectionFilter.setHoverByName(this.options?.scene || null, name); } catch (_) { }
+                try {
+                    const scene = this.options?.scene || null;
+                    SelectionFilter.setHoverByName(scene, name, {
+                        resolver: (refName) => this._resolveReferenceSceneObjectByName(refName, scene),
+                    });
+                } catch (_) { }
             });
             chip.addEventListener('mouseleave', () => {
                 const liveInput = resolveInput();

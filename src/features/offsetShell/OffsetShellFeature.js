@@ -24,6 +24,7 @@ const inputParamsSchema = {
   faces: {
     type: 'reference_selection',
     selectionFilter: ['FACE'],
+    timestampDependency: 'parentSolid',
     multiple: true,
     default_value: [],
     hint: 'Pick one or more faces to exclude while shelling the solid.',

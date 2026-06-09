@@ -31,6 +31,7 @@ const inputParamsSchema = {
     edges: {
         type: "reference_selection",
         selectionFilter: ["FACE", "EDGE"],
+        timestampDependency: "parentSolid",
         multiple: true,
         default_value: null,
         hint: "Select faces (or an edge) to fillet along shared edges",

@@ -15,7 +15,7 @@ export function resolveSelectionObject(selection, partHistory) {
     return null;
   };
 
-  return resolveSelectionObjectBase(partHistory?.scene || null, selection, {
+  return resolveSelectionObjectBase(null, selection, {
     nameResolver,
     allowJson: false,
     allowUuid: false,

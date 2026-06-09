@@ -131,6 +131,7 @@ export function test_history_test_snippet_persistent_data_allowlist() {
   assertIncludes(snippet, '"fontFile"', 'Text persisted font data key');
   assertIncludes(snippet, '"importCache"', 'Import 3D cache data key');
   assertIncludes(snippet, '"componentData"', 'Assembly component payload key');
+  assertIncludes(snippet, 'await partHistory.runHistory();', 'awaited history replay');
 
   assertExcludes(snippet, '__open', 'UI-only input params');
   assertExcludes(snippet, 'lastProfileDiagnostics', 'Sketch transient diagnostics');

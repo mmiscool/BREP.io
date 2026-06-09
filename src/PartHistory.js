@@ -4,6 +4,11 @@ import * as THREE from 'three';
 
 // Feature classes live in their own files; registry wires them up.
 import { FeatureRegistry } from './FeatureRegistry.js';
+import { Solid } from './BREP/BetterSolid.js';
+import {
+  applySolidAuthoringStateSnapshot,
+  buildSolidAuthoringStateSnapshot,
+} from './BREP/CppSolidCore.js';
 import { SelectionFilter } from './UI/SelectionFilter.js';
 import { AssemblyConstraintHistory } from './assemblyConstraints/AssemblyConstraintHistory.js';
 import { AssemblyConstraintRegistry } from './assemblyConstraints/AssemblyConstraintRegistry.js';
@@ -118,6 +123,8 @@ export class PartHistory {
     this.callbacks = {};
     this._modelRevision = 0;
     this._modelChangeListeners = new Set();
+    this._runHistoryQueue = null;
+    this._runHistoryQueueToken = null;
     this.currentHistoryStepId = null;
     this.runningFeatureId = null;
     this._runningFeatureTiming = null;
@@ -517,9 +524,123 @@ export class PartHistory {
 
 
 
+  #isTransientReferenceObject(obj) {
+    let cursor = obj || null;
+    let guard = 0;
+    while (cursor && guard < 64) {
+      const name = String(cursor?.name || '');
+      const userData = cursor?.userData || {};
+      if (
+        userData.referenceSelectionGhost === true
+        || userData.refPreview === true
+        || name.startsWith('__REF_SELECTION_ADDED_GHOSTS__')
+        || name.startsWith('__refSelectionAdded__')
+        || name.startsWith('__REF_PREVIEW_GROUP__')
+        || name.startsWith('__refPreview__')
+      ) {
+        return true;
+      }
+      cursor = cursor.parent || null;
+      guard += 1;
+    }
+    return false;
+  }
+
+  #isAttachedToScene(obj) {
+    let cursor = obj || null;
+    let guard = 0;
+    while (cursor && guard < 64) {
+      if (cursor === this.scene) return true;
+      cursor = cursor.parent || null;
+      guard += 1;
+    }
+    return false;
+  }
+
+  #hasRemovedAncestor(obj) {
+    let cursor = obj || null;
+    let guard = 0;
+    while (cursor && guard < 64) {
+      if (cursor.__removeFlag) return true;
+      cursor = cursor.parent || null;
+      guard += 1;
+    }
+    return false;
+  }
+
+  #featureIndexForObject(obj) {
+    if (!obj || !Array.isArray(this.features)) return -1;
+    let cursor = obj;
+    let guard = 0;
+    while (cursor && guard < 64) {
+      const raw = cursor.owningFeatureID ?? cursor.userData?.owningFeatureID ?? null;
+      if (raw != null) {
+        const featureId = String(raw);
+        const idx = this.features.findIndex((entry) => resolveFeatureEntryId(entry) === featureId);
+        if (idx >= 0) return idx;
+      }
+      cursor = cursor.parent || null;
+      guard += 1;
+    }
+    return -1;
+  }
+
+  #leadingFeatureTokenFromSelectionName(name) {
+    const raw = name == null ? '' : String(name).trim();
+    if (!raw || !/[|:[\]]/.test(raw)) return '';
+    const token = raw.split(/[:|[\]]/, 1)[0];
+    return token ? String(token).trim() : '';
+  }
+
+  #scoreLiveSceneNameCandidate(obj, targetName = '') {
+    if (!obj || this.#isTransientReferenceObject(obj)) return -Infinity;
+    let score = 0;
+    score += this.#isAttachedToScene(obj) ? 1_000_000_000_000_000 : -1_000_000_000_000_000;
+    if (this.#hasRemovedAncestor(obj)) score -= 100_000_000_000_000;
+
+    const timestamp = Number(obj.timestamp ?? obj.userData?.timestamp);
+    if (Number.isFinite(timestamp)) score += Math.min(Math.max(timestamp, 0), 9_000_000_000_000);
+
+    const featureIndex = this.#featureIndexForObject(obj);
+    if (featureIndex >= 0) score += featureIndex * 10_000;
+
+    const type = String(obj.type || obj.userData?.type || obj.userData?.brepType || '').toUpperCase();
+    if (type === 'SOLID' || type === 'COMPONENT' || type === 'SKETCH') score += 100;
+    else if (type === 'FACE' || type === 'EDGE') score += 50;
+    else if (obj.geometry) score += 10;
+
+    const featureToken = this.#leadingFeatureTokenFromSelectionName(targetName);
+    if (featureToken && (type === 'FACE' || type === 'EDGE')) {
+      const parentSolid = this.#findAncestorByType(obj, 'SOLID');
+      const parentSolidName = parentSolid?.name != null ? String(parentSolid.name).trim() : '';
+      if (parentSolidName) {
+        if (parentSolidName === featureToken) score -= 50_000_000_000_000;
+        else score += 50_000_000_000_000;
+      }
+    }
+    return score;
+  }
+
   getObjectByName(name) {
-    // traverse the scene to find an object with the given name
-    return this.scene.getObjectByName(name);
+    const target = name == null ? '' : String(name);
+    if (!target || !this.scene || typeof this.scene.traverse !== 'function') {
+      return this.scene?.getObjectByName?.(target) || null;
+    }
+
+    let best = null;
+    let bestScore = -Infinity;
+    try {
+      this.scene.traverse((obj) => {
+        if (!obj || obj.name !== target) return;
+        const score = this.#scoreLiveSceneNameCandidate(obj, target);
+        if (score <= bestScore) return;
+        best = obj;
+        bestScore = score;
+      });
+    } catch {
+      return this.scene.getObjectByName(target) || null;
+    }
+    return best;
   }
 
   // Removed: getObjectsByName (unused)
@@ -606,7 +727,544 @@ export class PartHistory {
     return { feature, startedAt, endedAt, durationMs };
   }
 
+  #collectTimestampDependencyObjects(paramDef, value) {
+    if (!paramDef || !value) return [];
+    const type = String(paramDef.type || '');
+    if (type === 'reference_selection') {
+      return (Array.isArray(value) ? value : [value]).filter((obj) => obj && typeof obj === 'object');
+    }
+    if (type === 'boolean_operation') {
+      const targets = Array.isArray(value?.targets) ? value.targets : [];
+      return targets.filter((obj) => obj && typeof obj === 'object');
+    }
+    return [];
+  }
+
+  #findAncestorByType(obj, typeName) {
+    const wanted = String(typeName || '').toUpperCase();
+    if (!obj || !wanted) return null;
+    let cursor = obj;
+    let guard = 0;
+    while (cursor && guard < 64) {
+      if (String(cursor.type || '').toUpperCase() === wanted) return cursor;
+      cursor = cursor.parentSolid || cursor.userData?.parentSolid || cursor.parent || null;
+      guard += 1;
+    }
+    return null;
+  }
+
+  #getTimestampDependencyValue(obj, paramDef = null) {
+    if (!obj || typeof obj !== 'object') return NaN;
+    const rawScope = paramDef?.timestampDependency
+      ?? paramDef?.referenceTimestampScope
+      ?? paramDef?.dependencyTimestamp
+      ?? 'selection';
+    const scope = String(rawScope || 'selection').trim().toLowerCase();
+    let target = obj;
+    if (scope === 'parentsolid' || scope === 'parent_solid' || scope === 'solid') {
+      target = this.#findAncestorByType(obj, 'SOLID') || obj;
+    }
+    const timestamp = Number(target.timestamp ?? target.userData?.timestamp);
+    return Number.isFinite(timestamp) ? timestamp : NaN;
+  }
+
+  #resolveLiveSelectionValue(value) {
+    if (!value || typeof value !== 'object') return null;
+    const resolved = resolveCurrentReferenceObject(value, (name) => this.getObjectByName(name));
+    if (resolved && typeof resolved === 'object') return resolved;
+    if (this.#isAttachedToScene(value) && !this.#isTransientReferenceObject(value)) return value;
+    const fallbackName = getReferenceObjectNameCandidates(value)[0] || null;
+    return fallbackName;
+  }
+
+  #cloneSnapshotValue(value, seen = new WeakSet()) {
+    if (value == null) return value;
+    const type = typeof value;
+    if (type === 'string' || type === 'number' || type === 'boolean') return value;
+    if (type === 'bigint') return String(value);
+    if (type === 'function' || type === 'symbol' || type === 'undefined') return undefined;
+    if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
+      try { return Array.from(value); } catch { return undefined; }
+    }
+    if (value instanceof Date) return value.toISOString();
+    if (Array.isArray(value)) {
+      if (seen.has(value)) return undefined;
+      seen.add(value);
+      const out = [];
+      for (const item of value) {
+        const cloned = this.#cloneSnapshotValue(item, seen);
+        out.push(cloned === undefined ? null : cloned);
+      }
+      seen.delete(value);
+      return out;
+    }
+    if (value instanceof Map) {
+      if (seen.has(value)) return undefined;
+      seen.add(value);
+      const out = {};
+      for (const [key, item] of value.entries()) {
+        const cloned = this.#cloneSnapshotValue(item, seen);
+        if (cloned !== undefined) out[String(key)] = cloned;
+      }
+      seen.delete(value);
+      return out;
+    }
+    if (value instanceof Set) {
+      if (seen.has(value)) return undefined;
+      seen.add(value);
+      const out = [];
+      for (const item of value.values()) {
+        const cloned = this.#cloneSnapshotValue(item, seen);
+        if (cloned !== undefined) out.push(cloned);
+      }
+      seen.delete(value);
+      return out;
+    }
+    if (type === 'object') {
+      const proto = Object.getPrototypeOf(value);
+      if (proto !== Object.prototype && proto !== null) return undefined;
+      if (seen.has(value)) return undefined;
+      seen.add(value);
+      const out = {};
+      for (const key of Object.keys(value)) {
+        const cloned = this.#cloneSnapshotValue(value[key], seen);
+        if (cloned !== undefined) out[key] = cloned;
+      }
+      seen.delete(value);
+      return out;
+    }
+    return undefined;
+  }
+
+  #cloneSnapshotUserData(userData) {
+    const cloned = this.#cloneSnapshotValue(userData || {});
+    return cloned && typeof cloned === 'object' && !Array.isArray(cloned) ? cloned : {};
+  }
+
+  #finiteTimestamp(value, fallback = null) {
+    const timestamp = Number(value);
+    return Number.isFinite(timestamp) ? timestamp : fallback;
+  }
+
+  #applyTimestampToObject(obj, timestamp) {
+    if (!obj || typeof obj !== 'object') return;
+    const normalized = this.#finiteTimestamp(timestamp, null);
+    if (!Number.isFinite(normalized)) return;
+    try { obj.timestamp = normalized; } catch { }
+    try {
+      obj.userData = obj.userData || {};
+      obj.userData.timestamp = normalized;
+    } catch { }
+  }
+
+  #applyTimestampToChildrenRecursively(obj, timestamp) {
+    this.#applyTimestampToObject(obj, timestamp);
+    const children = Array.isArray(obj.children) ? obj.children : [];
+    for (const child of children) {
+      this.#applyTimestampToChildrenRecursively(child, timestamp);
+    }
+  }
+
+  #quantizedGeometryNumber(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    const q = Math.round(n * 1e6);
+    return String(Object.is(q, -0) ? 0 : q);
+  }
+
+  #pointSignatureFromValues(x, y, z) {
+    const qx = this.#quantizedGeometryNumber(x);
+    const qy = this.#quantizedGeometryNumber(y);
+    const qz = this.#quantizedGeometryNumber(z);
+    if (qx == null || qy == null || qz == null) return null;
+    return `${qx},${qy},${qz}`;
+  }
+
+  #hashSignatureParts(parts) {
+    let h1 = 0x811c9dc5;
+    let h2 = 0x9e3779b9;
+    let length = 0;
+    for (const part of parts) {
+      const text = String(part);
+      for (let i = 0; i < text.length; i += 1) {
+        const c = text.charCodeAt(i);
+        h1 ^= c;
+        h1 = Math.imul(h1, 0x01000193) >>> 0;
+        h2 = (Math.imul(h2 ^ c, 0x85ebca6b) + 0xc2b2ae35) >>> 0;
+      }
+      length += text.length + 1;
+    }
+    return `${h1.toString(36)}:${h2.toString(36)}:${length}`;
+  }
+
+  #polylineGeometrySignatureFromPoints(points, reversible = true) {
+    if (!Array.isArray(points) || points.length < 2) return null;
+    const signatures = [];
+    for (const point of points) {
+      const sig = Array.isArray(point)
+        ? this.#pointSignatureFromValues(point[0], point[1], point[2])
+        : null;
+      if (!sig) return null;
+      signatures.push(sig);
+    }
+    const forward = signatures.join(';');
+    const reverse = signatures.slice().reverse().join(';');
+    const canonical = reversible && reverse < forward ? reverse : forward;
+    return `poly:${signatures.length}:${this.#hashSignatureParts([canonical])}`;
+  }
+
+  #polylineGeometrySignatureFromFlat(flat, reversible = true) {
+    if (!Array.isArray(flat) && !ArrayBuffer.isView(flat)) return null;
+    if (flat.length < 6) return null;
+    const points = [];
+    for (let i = 0; i + 2 < flat.length; i += 3) {
+      points.push([flat[i], flat[i + 1], flat[i + 2]]);
+    }
+    return this.#polylineGeometrySignatureFromPoints(points, reversible);
+  }
+
+  #edgeGeometrySignature(obj) {
+    const cached = obj?.userData?.polylineLocal;
+    if (Array.isArray(cached) && cached.length >= 2) {
+      return this.#polylineGeometrySignatureFromPoints(cached, true);
+    }
+
+    const geom = obj?.geometry || null;
+    const pos = geom && typeof geom.getAttribute === 'function' ? geom.getAttribute('position') : null;
+    if (pos && pos.itemSize === 3 && pos.count >= 2) {
+      const flat = [];
+      for (let i = 0; i < pos.count; i += 1) {
+        flat.push(pos.getX(i), pos.getY(i), pos.getZ(i));
+      }
+      return this.#polylineGeometrySignatureFromFlat(flat, true);
+    }
+
+    const start = geom?.attributes?.instanceStart;
+    const end = geom?.attributes?.instanceEnd;
+    if (start && end && start.itemSize === 3 && end.itemSize === 3 && start.count === end.count && start.count >= 1) {
+      const points = [[start.getX(0), start.getY(0), start.getZ(0)]];
+      for (let i = 0; i < end.count; i += 1) {
+        points.push([end.getX(i), end.getY(i), end.getZ(i)]);
+      }
+      return this.#polylineGeometrySignatureFromPoints(points, true);
+    }
+    return null;
+  }
+
+  #meshGeometrySignature(obj) {
+    const geom = obj?.geometry || null;
+    const pos = geom && typeof geom.getAttribute === 'function' ? geom.getAttribute('position') : null;
+    if (!pos || pos.itemSize !== 3 || pos.count < 1) return null;
+    const index = geom && typeof geom.getIndex === 'function' ? geom.getIndex() : null;
+    const triangles = [];
+    const pointForIndex = (idx) => this.#pointSignatureFromValues(pos.getX(idx), pos.getY(idx), pos.getZ(idx));
+    if (index && index.count >= 3) {
+      for (let i = 0; i + 2 < index.count; i += 3) {
+        const tri = [
+          pointForIndex(index.getX(i)),
+          pointForIndex(index.getX(i + 1)),
+          pointForIndex(index.getX(i + 2)),
+        ];
+        if (tri.every(Boolean)) triangles.push(tri.sort().join('/'));
+      }
+    } else if (pos.count >= 3) {
+      for (let i = 0; i + 2 < pos.count; i += 3) {
+        const tri = [pointForIndex(i), pointForIndex(i + 1), pointForIndex(i + 2)];
+        if (tri.every(Boolean)) triangles.push(tri.sort().join('/'));
+      }
+    }
+    if (triangles.length) {
+      triangles.sort();
+      return `mesh:${triangles.length}:${this.#hashSignatureParts(triangles)}`;
+    }
+    const points = [];
+    for (let i = 0; i < pos.count; i += 1) {
+      const sig = pointForIndex(i);
+      if (sig) points.push(sig);
+    }
+    points.sort();
+    return points.length ? `points:${points.length}:${this.#hashSignatureParts(points)}` : null;
+  }
+
+  #objectGeometrySignature(obj) {
+    if (!obj || typeof obj !== 'object') return null;
+    const type = String(obj.type || '').toUpperCase();
+    if (type === 'EDGE') return this.#edgeGeometrySignature(obj);
+    if (type === 'FACE') return this.#meshGeometrySignature(obj);
+    if (type === 'VERTEX') {
+      const p = obj.position || null;
+      const point = p ? this.#pointSignatureFromValues(p.x, p.y, p.z) : null;
+      return point ? `vertex:${point}` : null;
+    }
+    return this.#meshGeometrySignature(obj) || this.#edgeGeometrySignature(obj);
+  }
+
+  #objectSnapshotName(obj) {
+    if (!obj || typeof obj !== 'object') return '';
+    return String(obj.name || obj.userData?.edgeName || obj.userData?.faceName || obj.userData?.selectionName || '');
+  }
+
+  #snapshotChildObjects(obj) {
+    const out = [];
+    if (!obj || typeof obj.traverse !== 'function') return out;
+    try { obj.updateMatrixWorld?.(true); } catch { }
+    try {
+      obj.traverse((child) => {
+        if (!child || child === obj) return;
+        const name = this.#objectSnapshotName(child);
+        const type = String(child.type || '');
+        const signature = this.#objectGeometrySignature(child);
+        if (!name && !signature) return;
+        out.push({
+          name,
+          type,
+          signature,
+          timestamp: this.#finiteTimestamp(child.timestamp ?? child.userData?.timestamp, null),
+        });
+      });
+    } catch { /* ignore child snapshot failures */ }
+    return out;
+  }
+
+  #snapshotChildKey(entry, signatureOverride = undefined) {
+    if (!entry) return null;
+    const name = String(entry.name || '');
+    const type = String(entry.type || '').toUpperCase();
+    const signature = signatureOverride === undefined ? entry.signature : signatureOverride;
+    if (!name && !signature) return null;
+    return `${type}\u0000${name}\u0000${signature || ''}`;
+  }
+
+  #buildChildTimestampLookup(snapshot) {
+    const exact = new Map();
+    const loose = new Map();
+    const push = (map, key, timestamp) => {
+      if (!key || !Number.isFinite(timestamp)) return;
+      const queue = map.get(key);
+      if (queue) queue.push(timestamp);
+      else map.set(key, [timestamp]);
+    };
+    const children = Array.isArray(snapshot?.children) ? snapshot.children : [];
+    for (const child of children) {
+      const timestamp = this.#finiteTimestamp(child?.timestamp, null);
+      if (!Number.isFinite(timestamp)) continue;
+      if (child?.signature) push(exact, this.#snapshotChildKey(child), timestamp);
+      else push(loose, this.#snapshotChildKey(child, ''), timestamp);
+    }
+    return { exact, loose };
+  }
+
+  #takeTimestampFromLookup(map, key) {
+    if (!map || !key) return null;
+    const queue = map.get(key);
+    if (!Array.isArray(queue) || queue.length === 0) return null;
+    const timestamp = queue.shift();
+    if (queue.length === 0) map.delete(key);
+    return this.#finiteTimestamp(timestamp, null);
+  }
+
+  #applyEffectTimestamps(obj, rootTimestamp, sourceSnapshot = null) {
+    if (!obj || typeof obj !== 'object') return;
+    const normalizedRootTimestamp = this.#finiteTimestamp(rootTimestamp, Date.now());
+    this.#applyTimestampToObject(obj, normalizedRootTimestamp);
+    const lookup = this.#buildChildTimestampLookup(sourceSnapshot);
+    try {
+      obj.updateMatrixWorld?.(true);
+      obj.traverse?.((child) => {
+        if (!child || child === obj) return;
+        const entry = {
+          name: this.#objectSnapshotName(child),
+          type: String(child.type || ''),
+          signature: this.#objectGeometrySignature(child),
+        };
+        const exactKey = entry.signature ? this.#snapshotChildKey(entry) : null;
+        const looseKey = !entry.signature ? this.#snapshotChildKey(entry, '') : null;
+        const preserved = this.#takeTimestampFromLookup(lookup.exact, exactKey)
+          ?? this.#takeTimestampFromLookup(lookup.loose, looseKey);
+        this.#applyTimestampToObject(child, Number.isFinite(preserved) ? preserved : normalizedRootTimestamp);
+      });
+    } catch { /* ignore timestamp propagation failures */ }
+  }
+
+  #effectSnapshotKeyFromParts(type, name) {
+    return `${String(type || '').toUpperCase()}\u0000${String(name || '')}`;
+  }
+
+  #effectSnapshotKeyForObject(obj) {
+    return this.#effectSnapshotKeyFromParts(obj?.type, this.#objectSnapshotName(obj));
+  }
+
+  #buildEffectSnapshotQueues(snapshots) {
+    const queues = new Map();
+    for (const snapshot of Array.isArray(snapshots) ? snapshots : []) {
+      const key = this.#effectSnapshotKeyFromParts(snapshot?.type, snapshot?.name);
+      const queue = queues.get(key);
+      if (queue) queue.push(snapshot);
+      else queues.set(key, [snapshot]);
+    }
+    return queues;
+  }
+
+  #takeEffectSnapshotForObject(queues, obj) {
+    const key = this.#effectSnapshotKeyForObject(obj);
+    const queue = queues?.get(key);
+    if (!Array.isArray(queue) || queue.length === 0) return null;
+    const snapshot = queue.shift();
+    if (queue.length === 0) queues.delete(key);
+    return snapshot || null;
+  }
+
+  #cloneMaterialForSnapshot(material) {
+    if (!material) return material;
+    if (Array.isArray(material)) return material.map((mat) => this.#cloneMaterialForSnapshot(mat));
+    if (typeof material.clone === 'function') {
+      try { return material.clone(); } catch { return material; }
+    }
+    return material;
+  }
+
+  #cloneObjectForSnapshot(obj) {
+    if (!obj || typeof obj.clone !== 'function') return null;
+    let clone = null;
+    try { clone = obj.clone(true); } catch { clone = null; }
+    if (!clone) return null;
+    try {
+      clone.traverse?.((child) => {
+        if (!child) return;
+        if (child.geometry && typeof child.geometry.clone === 'function') {
+          try { child.geometry = child.geometry.clone(); } catch { /* ignore */ }
+        }
+        if (child.material) child.material = this.#cloneMaterialForSnapshot(child.material);
+        if (child.userData && typeof child.userData === 'object') child.userData = this.#cloneSnapshotUserData(child.userData);
+      });
+    } catch { /* ignore */ }
+    try { if (clone.parent) clone.parent.remove(clone); } catch { /* ignore */ }
+    return clone;
+  }
+
+  #snapshotEffectObject(obj) {
+    if (!obj || typeof obj !== 'object') return null;
+    const base = {
+      name: obj.name != null ? String(obj.name) : '',
+      type: obj.type != null ? String(obj.type) : '',
+      owningFeatureID: obj.owningFeatureID != null ? String(obj.owningFeatureID) : null,
+      timestamp: Number.isFinite(Number(obj.timestamp ?? obj.userData?.timestamp))
+        ? Number(obj.timestamp ?? obj.userData?.timestamp)
+        : null,
+      visible: obj.visible !== false,
+      renderOrder: Number.isFinite(Number(obj.renderOrder)) ? Number(obj.renderOrder) : 0,
+      userData: this.#cloneSnapshotUserData(obj.userData || {}),
+      children: this.#snapshotChildObjects(obj),
+    };
+
+    const isSolid = String(obj.type || '').toUpperCase() === 'SOLID'
+      && Array.isArray(obj._vertProperties)
+      && Array.isArray(obj._triVerts)
+      && Array.isArray(obj._triIDs);
+    if (isSolid) {
+      try {
+        return {
+          ...base,
+          snapshotType: 'solid',
+          solid: buildSolidAuthoringStateSnapshot(obj),
+        };
+      } catch { /* fall through to object snapshot */ }
+    }
+
+    const template = this.#cloneObjectForSnapshot(obj);
+    if (!template) return null;
+    return {
+      ...base,
+      snapshotType: 'object3d',
+      template,
+    };
+  }
+
+  #snapshotEffectObjects(objects) {
+    const out = [];
+    for (const obj of Array.isArray(objects) ? objects : []) {
+      const snapshot = this.#snapshotEffectObject(obj);
+      if (snapshot) out.push(snapshot);
+    }
+    return out;
+  }
+
+  #restoreEffectObjectFromSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return null;
+    let obj = null;
+    if (snapshot.snapshotType === 'solid' && snapshot.solid) {
+      obj = new Solid();
+      try { applySolidAuthoringStateSnapshot(obj, snapshot.solid); } catch { obj = null; }
+    } else if (snapshot.snapshotType === 'object3d' && snapshot.template) {
+      obj = this.#cloneObjectForSnapshot(snapshot.template);
+    }
+    if (!obj) return null;
+    try { obj.name = snapshot.name || obj.name || ''; } catch { /* ignore */ }
+    try { obj.type = snapshot.type || obj.type; } catch { /* ignore */ }
+    try { obj.owningFeatureID = snapshot.owningFeatureID; } catch { /* ignore */ }
+    try { obj.userData = this.#cloneSnapshotUserData(snapshot.userData || {}); } catch { /* ignore */ }
+    try { obj.visible = snapshot.visible !== false; } catch { /* ignore */ }
+    try { obj.renderOrder = Number(snapshot.renderOrder) || 0; } catch { /* ignore */ }
+    if (Number.isFinite(Number(snapshot.timestamp))) {
+      this.#applyTimestampToObject(obj, Number(snapshot.timestamp));
+    }
+    return obj;
+  }
+
+  #resolveRemovedObjectFromSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return null;
+    const name = typeof snapshot.name === 'string' ? snapshot.name.trim() : '';
+    if (!name) return null;
+    return this.getObjectByName(name) || null;
+  }
+
+  #hasUsableEffectSnapshots(feature) {
+    const snapshots = feature?.effectSnapshots;
+    return !!(snapshots
+      && Array.isArray(snapshots.added)
+      && Array.isArray(snapshots.removed));
+  }
+
+  #hasStaleSubtractAddedSnapshot(feature, schema, resolvedParams) {
+    if (!feature || !schema || !resolvedParams || !this.#hasUsableEffectSnapshots(feature)) return false;
+    const featureId = resolveFeatureEntryId(feature);
+    if (!featureId) return false;
+    for (const key in schema) {
+      if (!Object.prototype.hasOwnProperty.call(schema, key)) continue;
+      const def = schema[key];
+      if (!def || def.type !== 'boolean_operation') continue;
+      const booleanValue = resolvedParams[key];
+      const op = String(booleanValue?.operation || '').trim().toUpperCase();
+      const targets = Array.isArray(booleanValue?.targets) ? booleanValue.targets.filter(Boolean) : [];
+      if (op !== 'SUBTRACT' || targets.length === 0) continue;
+      for (const snapshot of feature.effectSnapshots.added) {
+        const snapshotType = String(snapshot?.type || '').trim().toUpperCase();
+        const snapshotName = String(snapshot?.name || '').trim();
+        if (snapshotType === 'SOLID' && snapshotName === featureId) return true;
+      }
+    }
+    return false;
+  }
+
   async runHistory(options = {}) {
+    const previous = this._runHistoryQueue || Promise.resolve();
+    const token = {};
+    this._runHistoryQueueToken = token;
+    const queued = previous
+      .catch(() => { })
+      .then(() => this.#runHistoryImpl(options));
+    this._runHistoryQueue = queued.catch(() => { });
+    try {
+      return await queued;
+    } finally {
+      if (this._runHistoryQueueToken === token) {
+        this._runHistoryQueue = null;
+        this._runHistoryQueueToken = null;
+      }
+    }
+  }
+
+  async #runHistoryImpl(options = {}) {
     const throwOnFeatureError = !!options?.throwOnFeatureError;
     const whatStepToStopAt = this.currentHistoryStepId;
     const stopBeforeFeatureId = options?.stopBeforeFeatureId != null
@@ -623,7 +1281,6 @@ export class PartHistory {
 
       let skipAllFeatures = false;
       const features = Array.isArray(this.features) ? this.features : [];
-      let previousFeatureTimestamp = features.length ? (features[0]?.timestamp ?? null) : null;
       const nowMs = getMonotonicTimeMs;
       for (let i = 0; i < features.length; i++) {
         const feature = features[i];
@@ -632,9 +1289,6 @@ export class PartHistory {
         if (skipAllFeatures) {
           continue;
         }
-
-        const nextFeature = features[i + 1];
-
         if (stopBeforeFeatureId && featureId === stopBeforeFeatureId) {
           skipAllFeatures = true;
           continue;
@@ -700,10 +1354,6 @@ export class PartHistory {
           for (const ch of toRemoveOwned) this.scene.remove(ch);
         }
 
-        // if the previous feature had a timestamp later than this feature, we mark this feature as dirty to ensure it gets re-run
-        if (previousFeatureTimestamp != null && Number.isFinite(feature.timestamp) && previousFeatureTimestamp > feature.timestamp) {
-          feature.dirty = true;
-        }
         // if the inputParams have changed since last run, mark dirty
         // (ignore UI-only keys such as panel expansion state).
         const inputParamsSignature = stringifyInputParamsForDirtyCheck(feature.inputParams);
@@ -711,20 +1361,17 @@ export class PartHistory {
 
         instance.inputParams = await this.sanitizeInputParams(FeatureClass.inputParamsSchema, feature.inputParams);
         try { this._captureReferencePreviewSnapshots(feature, FeatureClass.inputParamsSchema, instance.inputParams, instance.persistentData); } catch { }
-        // check the timestamps of any objects referenced by reference_selection inputs; if any are newer than the feature timestamp, mark dirty
+        // Check timestamps of geometry dependencies. Restored feature outputs keep
+        // their original timestamps, so only a full upstream rebuild propagates.
         for (const key in FeatureClass.inputParamsSchema) {
           if (Object.prototype.hasOwnProperty.call(FeatureClass.inputParamsSchema, key)) {
             const paramDef = FeatureClass.inputParamsSchema[key];
-            if (paramDef.type === 'reference_selection') {
-              const selected = Array.isArray(instance.inputParams[key]) ? instance.inputParams[key] : [];
-              for (const obj of selected) {
-                if (obj && typeof obj === 'object') {
-                  const objTime = Number(obj.timestamp);
-                  if (Number.isFinite(objTime) && (!Number.isFinite(feature.timestamp) || objTime > feature.timestamp)) {
-                    feature.dirty = true;
-                    break;
-                  }
-                }
+            const selected = this.#collectTimestampDependencyObjects(paramDef, instance.inputParams[key]);
+            for (const obj of selected) {
+              const objTime = this.#getTimestampDependencyValue(obj, paramDef);
+              if (Number.isFinite(objTime) && (!Number.isFinite(feature.timestamp) || objTime > feature.timestamp)) {
+                feature.dirty = true;
+                break;
               }
             }
           }
@@ -790,11 +1437,17 @@ export class PartHistory {
           }
         }
 
+        if (!feature.dirty && feature.effects && !this.#hasUsableEffectSnapshots(feature)) {
+          feature.dirty = true;
+        }
+        if (!feature.dirty && this.#hasStaleSubtractAddedSnapshot(feature, FeatureClass.inputParamsSchema, instance.inputParams)) {
+          feature.dirty = true;
+        }
+
+        let featureExecuted = false;
         if (feature.dirty) {
           if (debug) console.log("feature dirty");
           if (debug) console.log(`Running feature ${i + 1}/${features.length} (${featureId}) of type ${feature.type}...`, feature);
-          // if this one is dirty, next one should be too (conservative)
-          if (nextFeature) nextFeature.dirty = true;
 
           // Record the current input params as lastRunInputParams
           feature.lastRunInputParams = inputParamsSignature;
@@ -816,7 +1469,6 @@ export class PartHistory {
 
 
             feature.timestamp = Date.now();
-            previousFeatureTimestamp = feature.timestamp;
 
             const t1 = sketchPreviewRun ? sketchPreviewRun.endedAt : nowMs();
             const startedAt = this._runningFeatureTiming?.featureId === featureId
@@ -828,6 +1480,7 @@ export class PartHistory {
               this._runningFeatureTiming.recordLastRunTiming = true;
             }
             feature.dirty = false;
+            featureExecuted = true;
             modelChanged = true;
           } catch (e) {
             const t1 = nowMs();
@@ -839,8 +1492,6 @@ export class PartHistory {
               this._runningFeatureTiming.recordLastRunTiming = true;
             }
             feature.timestamp = Date.now();
-
-            previousFeatureTimestamp = feature.timestamp;
             instance.errorString = `Error occurred while running feature ${featureId}: ${e.message}`;
             try { this.#restoreHiddenVisibilityState(hiddenVisibilityState); } catch { }
             if (throwOnFeatureError) {
@@ -862,7 +1513,7 @@ export class PartHistory {
           }
         }
 
-        await this.applyFeatureEffects(feature.effects, featureId, feature);
+        await this.applyFeatureEffects(feature.effects, featureId, feature, { restoreFromSnapshot: !featureExecuted });
 
 
         feature.persistentData = instance.persistentData;
@@ -1247,15 +1898,37 @@ export class PartHistory {
   }
 
 
-  async applyFeatureEffects(effects, featureID, feature) {
+  async applyFeatureEffects(effects, featureID, feature, options = {}) {
     if (!effects || typeof effects !== 'object') return;
-    const added = Array.isArray(effects.added) ? effects.added : [];
-    const removed = Array.isArray(effects.removed) ? effects.removed : [];
+    const restoreFromSnapshot = !!options?.restoreFromSnapshot && this.#hasUsableEffectSnapshots(feature);
+    let added = Array.isArray(effects.added) ? effects.added : [];
+    let removed = Array.isArray(effects.removed) ? effects.removed : [];
+    const addedSnapshotSources = [];
+    const previousAddedSnapshotQueues = restoreFromSnapshot
+      ? null
+      : this.#buildEffectSnapshotQueues(feature?.effectSnapshots?.added || []);
+
+    if (restoreFromSnapshot) {
+      added = [];
+      for (const snapshot of feature.effectSnapshots.added) {
+        const restored = this.#restoreEffectObjectFromSnapshot(snapshot);
+        if (restored) {
+          added.push(restored);
+          addedSnapshotSources.push(snapshot);
+        }
+      }
+      removed = [];
+      for (const snapshot of feature.effectSnapshots.removed) {
+        const current = this.#resolveRemovedObjectFromSnapshot(snapshot);
+        if (current) removed.push(current);
+      }
+    }
 
     for (const r of removed) {
       await this._safeRemove(r);
     }
 
+    let addedIndex = 0;
     for (const a of added) {
       if (a && typeof a === 'object') {
         if (a === this.scene) continue;
@@ -1270,29 +1943,45 @@ export class PartHistory {
 
 
 
-        const applyTimeStampToChildrenRecursively = (obj, timestamp) => {
-          if (!obj || typeof obj !== 'object') return;
-          try { obj.timestamp = timestamp || Date.now(); } catch { }
-          const children = Array.isArray(obj.children) ? obj.children : [];
-          for (const child of children) {
-            applyTimeStampToChildrenRecursively(child, timestamp);
-          }
-        };
-
-        // attach the timestamp from the feature to the object for traceability
+        // attach the timestamp from the feature to the object for traceability.
+        // Restored snapshots already carry the previous run timestamp; keeping
+        // it stable prevents false downstream invalidation.
         try {
-          a.timestamp = feature.timestamp;
-          applyTimeStampToChildrenRecursively(a, feature.timestamp);
+          const snapshotSource = restoreFromSnapshot
+            ? (addedSnapshotSources[addedIndex] || null)
+            : this.#takeEffectSnapshotForObject(previousAddedSnapshotQueues, a);
+          const timestamp = restoreFromSnapshot
+            ? this.#finiteTimestamp(snapshotSource?.timestamp ?? a.timestamp, feature.timestamp)
+            : feature.timestamp;
+          this.#applyEffectTimestamps(a, timestamp, snapshotSource);
         } catch { }
 
       }
+      addedIndex += 1;
     }
 
-    // apply the featureID to all added/removed items for traceability
+    // apply the featureID to added items for traceability. Removed objects keep
+    // their original owningFeatureID so cached upstream outputs can be restored
+    // without pretending they were created by the downstream feature.
     try { for (const obj of added) { if (obj) obj.owningFeatureID = featureID; } } catch { }
-    try { for (const obj of removed) { if (obj) obj.owningFeatureID = featureID; } } catch { }
+    try {
+      for (const obj of removed) {
+        if (!obj) continue;
+        obj.userData = obj.userData || {};
+        obj.userData.removedByFeatureID = featureID;
+      }
+    } catch { }
 
 
+    if (feature && typeof feature === 'object') {
+      feature.effects = { added, removed };
+      if (!restoreFromSnapshot) {
+        feature.effectSnapshots = {
+          added: this.#snapshotEffectObjects(added),
+          removed: this.#snapshotEffectObjects(removed),
+        };
+      }
+    }
   }
 
   // Removed unused signature/canonicalization helpers
@@ -1868,8 +2557,8 @@ export class PartHistory {
             for (const it of val) {
               if (!it) continue;
               if (typeof it === 'object') {
-                const resolved = resolveCurrentReferenceObject(it, (name) => this.getObjectByName(name));
-                arr.push(resolved || it);
+                const liveSelection = this.#resolveLiveSelectionValue(it);
+                if (liveSelection) arr.push(liveSelection);
                 continue;
               }
               const refName = String(it);
@@ -1881,8 +2570,8 @@ export class PartHistory {
           } else {
             if (!val) { sanitized[key] = []; }
             else if (typeof val === 'object') {
-              const resolved = resolveCurrentReferenceObject(val, (name) => this.getObjectByName(name));
-              sanitized[key] = [resolved || val];
+              const liveSelection = this.#resolveLiveSelectionValue(val);
+              sanitized[key] = liveSelection ? [liveSelection] : [];
             }
             else {
               const refName = String(val);
@@ -1901,8 +2590,8 @@ export class PartHistory {
           for (const it of items) {
             if (!it) continue;
             if (typeof it === 'object') {
-              const resolved = resolveCurrentReferenceObject(it, (name) => this.getObjectByName(name));
-              targets.push(resolved || it);
+              const liveSelection = this.#resolveLiveSelectionValue(it);
+              if (liveSelection && typeof liveSelection === 'object') targets.push(liveSelection);
               continue;
             }
             const obj = this.getObjectByName(String(it));

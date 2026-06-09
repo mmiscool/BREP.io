@@ -1,3 +1,5 @@
+import * as THREE from 'three';
+
 function findObjectByName(root, name) {
   if (!root || !name) return null;
   if (root.name === name) return root;
@@ -70,6 +72,185 @@ function getSolidFaceNames(solid) {
   }
   if (solid._faceNameToID instanceof Map) return new Set(solid._faceNameToID.keys());
   return new Set();
+}
+
+function findEdgeBetweenFaces(root, faceA, faceB) {
+  const wanted = new Set([faceA, faceB]);
+  let found = null;
+  root?.traverse?.((child) => {
+    if (found || String(child?.type || '').toUpperCase() !== 'EDGE') return;
+    const a = child?.userData?.faceA || null;
+    const b = child?.userData?.faceB || null;
+    if (wanted.has(a) && wanted.has(b) && a !== b) found = child;
+  });
+  return found;
+}
+
+function getObjectTimestamp(obj, label) {
+  const timestamp = Number(obj?.timestamp ?? obj?.userData?.timestamp);
+  if (!Number.isFinite(timestamp)) {
+    throw new Error(`[history timestamp scope] Missing timestamp for ${label}.`);
+  }
+  return timestamp;
+}
+
+function waitForTimestampTick() {
+  return new Promise((resolve) => setTimeout(resolve, 5));
+}
+
+export async function test_history_delete_restores_removed_upstream_solid_from_source_feature(partHistory) {
+  const cube = await partHistory.newFeature('P.CU');
+  Object.assign(cube.inputParams, {
+    id: 'C1',
+    sizeX: 4,
+    sizeY: 4,
+    sizeZ: 4,
+  });
+
+  const shell = await partHistory.newFeature('O.S');
+  Object.assign(shell.inputParams, {
+    id: 'OS2',
+    faces: ['C1_PZ'],
+    distance: 1,
+    replaceOriginalSolid: true,
+  });
+
+  await partHistory.runHistory({ throwOnFeatureError: true });
+
+  const liveShell = partHistory.getObjectByName('C1_OS2');
+  if (!liveShell) {
+    throw new Error('[history delete restore] Expected offset shell result C1_OS2.');
+  }
+
+  const removedCube = Array.isArray(shell.effects?.removed) ? shell.effects.removed[0] : null;
+  if (!removedCube || removedCube.name !== 'C1') {
+    throw new Error('[history delete restore] Expected shell feature to remove upstream cube C1.');
+  }
+  if (removedCube.owningFeatureID !== 'C1') {
+    throw new Error(`[history delete restore] Removed upstream cube ownership was overwritten as ${removedCube.owningFeatureID}.`);
+  }
+
+  const ghostGroup = new THREE.Group();
+  ghostGroup.name = '__REF_SELECTION_ADDED_GHOSTS__OS2';
+  ghostGroup.userData = {
+    preventRemove: true,
+    excludeFromFit: true,
+    referenceSelectionGhost: true,
+  };
+  const ghostSolid = new THREE.Group();
+  ghostSolid.name = 'C1_OS2';
+  ghostSolid.type = 'SOLID';
+  ghostGroup.add(ghostSolid);
+
+  partHistory.scene.remove(liveShell);
+  partHistory.scene.add(ghostGroup);
+  partHistory.scene.add(liveShell);
+  const resolvedShell = partHistory.getObjectByName('C1_OS2');
+  if (resolvedShell !== liveShell) {
+    throw new Error('[history delete restore] Live object lookup resolved a reference-selection ghost before the real shell.');
+  }
+
+  const initialCubeOutput = Array.isArray(cube.effects?.added) ? cube.effects.added[0] : null;
+  await partHistory.removeFeature('OS2');
+  await partHistory.runHistory({ throwOnFeatureError: true });
+
+  const restoredCube = partHistory.getObjectByName('C1');
+  if (!restoredCube) {
+    throw new Error('[history delete restore] Expected C1 to be restored after deleting OS2.');
+  }
+  if (partHistory.getObjectByName('C1_OS2')) {
+    throw new Error('[history delete restore] Deleted shell output C1_OS2 still resolves as a live history object.');
+  }
+  if (restoredCube === initialCubeOutput) {
+    throw new Error('[history delete restore] Restored cube reused the pre-delete live object cache.');
+  }
+  if (restoredCube.owningFeatureID !== 'C1') {
+    throw new Error(`[history delete restore] Restored cube has wrong owner ${restoredCube.owningFeatureID}.`);
+  }
+
+  const restoredFaces = getSolidFaceNames(restoredCube);
+  if (!restoredFaces.has('C1_PZ')) {
+    throw new Error('[history delete restore] Restored cube is missing its original C1_PZ face.');
+  }
+
+  console.log('✓ Deleting a downstream feature rebuilds and restores removed upstream solids');
+  return partHistory;
+}
+
+export async function test_reference_selection_timestamp_scope_preserves_unchanged_edge_cache(partHistory) {
+  const cube = await partHistory.newFeature('P.CU');
+  Object.assign(cube.inputParams, {
+    id: 'C1',
+    sizeX: 4,
+    sizeY: 4,
+    sizeZ: 4,
+  });
+
+  const push = await partHistory.newFeature('PF');
+  Object.assign(push.inputParams, {
+    id: 'PF1',
+    faces: ['C1_PZ'],
+    distance: 1,
+  });
+
+  await partHistory.runHistory({ throwOnFeatureError: true });
+
+  let pushedSolid = partHistory.getObjectByName('C1');
+  let stableEdge = findEdgeBetweenFaces(pushedSolid, 'C1_NX', 'C1_NZ');
+  if (!stableEdge) {
+    throw new Error('[history timestamp scope] Could not find stable bottom edge after push-face.');
+  }
+
+  const tube = await partHistory.newFeature('TU');
+  Object.assign(tube.inputParams, {
+    id: 'TU1',
+    path: [stableEdge.name],
+    radius: 0.15,
+    innerRadius: 0,
+    resolution: 8,
+    mode: 'Light (fast)',
+    boolean: { targets: [], operation: 'NONE' },
+  });
+
+  await partHistory.runHistory({ throwOnFeatureError: true });
+
+  pushedSolid = partHistory.getObjectByName('C1');
+  stableEdge = findEdgeBetweenFaces(pushedSolid, 'C1_NX', 'C1_NZ');
+  let movedEdge = findEdgeBetweenFaces(pushedSolid, 'C1_NX', 'C1_PZ');
+  if (!stableEdge || !movedEdge) {
+    throw new Error('[history timestamp scope] Missing expected pushed-solid edges before rerun.');
+  }
+  const firstStableEdgeTimestamp = getObjectTimestamp(stableEdge, stableEdge.name);
+  const firstMovedEdgeTimestamp = getObjectTimestamp(movedEdge, movedEdge.name);
+  const firstTubeTimestamp = getObjectTimestamp(tube, 'tube feature');
+
+  await waitForTimestampTick();
+  push.inputParams.distance = 2;
+  await partHistory.runHistory({ throwOnFeatureError: true });
+
+  pushedSolid = partHistory.getObjectByName('C1');
+  stableEdge = findEdgeBetweenFaces(pushedSolid, 'C1_NX', 'C1_NZ');
+  movedEdge = findEdgeBetweenFaces(pushedSolid, 'C1_NX', 'C1_PZ');
+  if (!stableEdge || !movedEdge) {
+    throw new Error('[history timestamp scope] Missing expected pushed-solid edges after rerun.');
+  }
+
+  const secondStableEdgeTimestamp = getObjectTimestamp(stableEdge, stableEdge.name);
+  const secondMovedEdgeTimestamp = getObjectTimestamp(movedEdge, movedEdge.name);
+  const secondTubeTimestamp = getObjectTimestamp(tube, 'tube feature');
+
+  if (secondStableEdgeTimestamp !== firstStableEdgeTimestamp) {
+    throw new Error('[history timestamp scope] Unchanged selected edge timestamp changed after parent solid rerun.');
+  }
+  if (secondMovedEdgeTimestamp <= firstMovedEdgeTimestamp) {
+    throw new Error('[history timestamp scope] Changed edge timestamp did not advance after parent solid rerun.');
+  }
+  if (secondTubeTimestamp !== firstTubeTimestamp) {
+    throw new Error('[history timestamp scope] Edge-scoped tube reran even though its selected edge geometry was unchanged.');
+  }
+
+  console.log('✓ Reference selection timestamp scope preserves unchanged edge caches');
+  return partHistory;
 }
 
 export async function test_fillet_rebuild_re_resolves_stale_edge_object(partHistory) {

@@ -29,7 +29,7 @@ export function _manifoldize() {
         }, 60 * 1000);
     } catch { }
 
-    this.deduplicateFaceNames()
+    this.deduplicateFaceNames();
 
 
 

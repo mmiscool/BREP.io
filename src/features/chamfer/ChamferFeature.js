@@ -21,6 +21,7 @@ const inputParamsSchema = {
     edges: {
         type: "reference_selection",
         selectionFilter: ["EDGE", "FACE"],
+        timestampDependency: "parentSolid",
         multiple: true,
         default_value: null,
         hint: "Select edges or faces to apply the chamfer",
