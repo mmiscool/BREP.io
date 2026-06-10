@@ -4,6 +4,7 @@ const debugMode = false;
 
 export class SelectionState {
     static hoverColor = '#fbff00';
+    static traceMaterialChanges = false;
 
     static attach(obj, { deep = false } = {}) {
         if (!obj || typeof obj !== 'object') return false;
@@ -80,6 +81,11 @@ export class SelectionState {
             }
 
             SelectionState._seedBaseMaterials(target);
+            if (SelectionState._shouldTraceMaterials()) {
+                for (const materialTarget of SelectionState._getDrawableTargets(target)) {
+                    SelectionState._installMaterialWatcher(materialTarget);
+                }
+            }
             if (!wasAttached) state._attached = true;
 
             if (!wasAttached && (state.selected || state.hovered)) {
@@ -109,6 +115,10 @@ export class SelectionState {
         try { SelectionState.hoverColor = String(color); } catch { }
     }
 
+    static setMaterialTraceEnabled(enabled = true) {
+        SelectionState.traceMaterialChanges = !!enabled;
+    }
+
     static apply(obj, { force = false } = {}) {
         if (!obj || typeof obj !== 'object') return;
         SelectionState.attach(obj);
@@ -129,7 +139,7 @@ export class SelectionState {
     }
 
     static setBaseMaterial(obj, material, { force = true } = {}) {
-        if (!obj || !material) return;
+        if (!obj || !SelectionState._isUsableMaterial(material)) return;
         SelectionState.attach(obj);
         const targets = SelectionState._getDrawableTargets(obj);
         for (const target of targets) {
@@ -143,15 +153,16 @@ export class SelectionState {
     static getBaseMaterial(obj, rootType = obj?.type) {
         if (!obj) return null;
         const ud = obj.userData || {};
-        if (ud.__baseMaterial) return ud.__baseMaterial;
-        if (ud.__defaultMaterial) return ud.__defaultMaterial;
+        if (SelectionState._isUsableMaterial(ud.__baseMaterial)) return ud.__baseMaterial;
+        if (SelectionState._isUsableMaterial(ud.__defaultMaterial)) return ud.__defaultMaterial;
+        if (SelectionState._isUsableMaterial(obj.material)) return obj.material;
 
         const type = rootType || obj.type || '';
-        if (type === 'FACE') return CADmaterials.FACE?.BASE ?? obj.material;
-        if (type === 'PLANE') return CADmaterials.PLANE?.BASE ?? CADmaterials.FACE?.BASE ?? obj.material;
-        if (type === 'EDGE') return CADmaterials.EDGE?.BASE ?? obj.material;
-        if (type === 'VERTEX') return CADmaterials.VERTEX?.BASE ?? obj.material;
-        return obj.material ?? null;
+        if (type === 'FACE') return CADmaterials.FACE?.BASE ?? null;
+        if (type === 'PLANE') return CADmaterials.PLANE?.BASE ?? CADmaterials.FACE?.BASE ?? null;
+        if (type === 'EDGE') return CADmaterials.EDGE?.BASE ?? null;
+        if (type === 'VERTEX') return CADmaterials.VERTEX?.BASE ?? null;
+        return null;
     }
 
     static getHoverTargets(target) {
@@ -206,11 +217,18 @@ export class SelectionState {
         for (const target of targets) {
             if (!target) continue;
             target.userData = target.userData || {};
+            if (!SelectionState._isUsableMaterial(target.userData.__defaultMaterial)) {
+                try { delete target.userData.__defaultMaterial; } catch { }
+            }
+            if (!SelectionState._isUsableMaterial(target.userData.__baseMaterial)) {
+                try { delete target.userData.__baseMaterial; } catch { }
+            }
             if (!target.userData.__baseMaterial) {
-                if (target.userData.__defaultMaterial) {
+                if (SelectionState._isUsableMaterial(target.userData.__defaultMaterial)) {
                     target.userData.__baseMaterial = target.userData.__defaultMaterial;
-                } else if (target.material) {
+                } else if (SelectionState._isUsableMaterial(target.material)) {
                     target.userData.__baseMaterial = target.material;
+                    if (!target.userData.__defaultMaterial) target.userData.__defaultMaterial = target.material;
                 }
             }
         }
@@ -397,11 +415,14 @@ export class SelectionState {
             if (!force) return;
             SelectionState._clearHover(target);
         }
+        if (SelectionState._shouldUseInPlaceHover(target, rootType)) {
+            if (SelectionState._applyInPlaceHoverColor(target, ud)) return;
+        }
         const hoverBase = ud.__hoverMaterial || null;
         if (hoverBase) {
             const hoverColor = SelectionState.hoverColor;
             const hoverMat = SelectionState._cloneMaterialWithColor(hoverBase, hoverColor);
-            ud.__hoverOrigMat = SelectionState.getBaseMaterial(target, rootType) || target.material || null;
+            ud.__hoverOrigMat = target.material || SelectionState.getBaseMaterial(target, rootType) || null;
             ud.__hoverMatApplied = true;
             ud.__hoverMat = hoverMat;
             if (hoverMat) SelectionState._assignMaterial(target, hoverMat);
@@ -411,7 +432,7 @@ export class SelectionState {
         if (!base) return;
         const hoverColor = SelectionState.hoverColor;
         const hoverMat = SelectionState._cloneMaterialWithColor(base, hoverColor);
-        ud.__hoverOrigMat = base;
+        ud.__hoverOrigMat = target.material || base;
         ud.__hoverMatApplied = true;
         ud.__hoverMat = hoverMat;
         if (hoverMat) SelectionState._assignMaterial(target, hoverMat);
@@ -419,15 +440,26 @@ export class SelectionState {
 
     static _clearHover(target) {
         const ud = target.userData || {};
+        if (ud.__hoverColorApplied) {
+            SelectionState._clearInPlaceHoverColor(target, ud);
+            return;
+        }
         if (!ud.__hoverMatApplied) return;
+        const hoverMat = ud.__hoverMat;
+        const origMat = ud.__hoverOrigMat || null;
         try {
-            if (ud.__hoverMat && ud.__hoverMat !== ud.__hoverOrigMat) {
-                if (Array.isArray(ud.__hoverMat)) {
-                    for (const m of ud.__hoverMat) {
+            if (origMat && target.material === hoverMat) {
+                SelectionState._assignMaterial(target, origMat);
+            }
+        } catch { }
+        try {
+            if (hoverMat && hoverMat !== origMat) {
+                if (Array.isArray(hoverMat)) {
+                    for (const m of hoverMat) {
                         try { if (m && typeof m.dispose === 'function') m.dispose(); } catch { }
                     }
-                } else if (typeof ud.__hoverMat.dispose === 'function') {
-                    ud.__hoverMat.dispose();
+                } else if (typeof hoverMat.dispose === 'function') {
+                    hoverMat.dispose();
                 }
             }
         } catch { }
@@ -437,20 +469,93 @@ export class SelectionState {
     }
 
     static _assignMaterial(target, material) {
+        const traceEnabled = SelectionState._shouldTraceMaterials();
         try {
-            const prev = target?.material;
-            if (prev !== material && debugMode) {
-                console.log('[SelectionState] material changed', {
-                    name: target?.name,
-                    type: target?.type,
-                    prev,
-                    next: material,
-                    target,
-                });
-                console.trace('[SelectionState] material stack');
-            }
+            if (traceEnabled) SelectionState._installMaterialWatcher(target);
         } catch { }
-        try { target.material = material; } catch { }
+        const prev = target?.material;
+        let watcherLogged = false;
+        try {
+            target.material = material;
+            watcherLogged = !!target?.__brepMaterialWatcherInstalled;
+        } catch { }
+        if (traceEnabled && !watcherLogged && prev !== material) {
+            SelectionState._traceMaterialChange(target, prev, material);
+        }
+    }
+
+    static _shouldUseInPlaceHover(target, rootType) {
+        if (!target) return false;
+        if (target.userData?.sketchFeatureId || target.userData?.sketchGeometryId != null) return true;
+        if (rootType === 'FACE' && String(target.name || '').includes(':PROFILE')) return true;
+        let parent = target.parent || null;
+        while (parent) {
+            if (parent.type === 'SKETCH' || parent.userData?.sketchFeatureId) return true;
+            parent = parent.parent || null;
+        }
+        return false;
+    }
+
+    static _isUsableMaterial(material) {
+        if (!material) return false;
+        if (Array.isArray(material)) return material.length > 0 && material.every((mat) => SelectionState._isUsableMaterial(mat));
+        return !!(
+            material.isMaterial === true
+            || typeof material.clone === 'function'
+            || typeof material.dispose === 'function'
+            || typeof material.color?.set === 'function'
+        );
+    }
+
+    static _forEachMaterial(material, callback) {
+        if (!material || typeof callback !== 'function') return false;
+        let any = false;
+        const list = Array.isArray(material) ? material : [material];
+        for (const mat of list) {
+            if (!mat) continue;
+            callback(mat);
+            any = true;
+        }
+        return any;
+    }
+
+    static _readMaterialColor(mat) {
+        try {
+            if (mat?.color && typeof mat.color.getHex === 'function') return mat.color.getHex();
+            if (mat?.color && typeof mat.color.getHexString === 'function') return `#${mat.color.getHexString()}`;
+        } catch { }
+        return null;
+    }
+
+    static _applyInPlaceHoverColor(target, ud) {
+        const hoverColor = SelectionState.hoverColor;
+        const records = [];
+        const changed = SelectionState._forEachMaterial(target.material, (mat) => {
+            if (!mat?.color || typeof mat.color.set !== 'function') return;
+            records.push({ mat, color: SelectionState._readMaterialColor(mat) });
+            try {
+                mat.color.set(hoverColor);
+                mat.needsUpdate = true;
+            } catch { }
+        });
+        if (!changed || records.length === 0) return false;
+        ud.__hoverColorApplied = true;
+        ud.__hoverColorRecords = records;
+        return true;
+    }
+
+    static _clearInPlaceHoverColor(target, ud = target?.userData || {}) {
+        const records = Array.isArray(ud.__hoverColorRecords) ? ud.__hoverColorRecords : [];
+        for (const record of records) {
+            const mat = record?.mat;
+            if (!mat?.color || typeof mat.color.set !== 'function') continue;
+            try {
+                if (record.color != null) mat.color.set(record.color);
+                mat.needsUpdate = true;
+            } catch { }
+        }
+        try { delete ud.__hoverColorApplied; } catch { }
+        try { delete ud.__hoverColorRecords; } catch { }
     }
 
     static _cloneMaterialWithColor(material, color) {
@@ -504,5 +609,97 @@ export class SelectionState {
             try { return `#${value.getHexString()}`; } catch { }
         }
         return null;
+    }
+
+    static _shouldTraceMaterials() {
+        try {
+            return !!(
+                SelectionState.traceMaterialChanges
+                || globalThis?.__BREP_TRACE_MATERIALS
+                || globalThis?.window?.__BREP_TRACE_MATERIALS
+            );
+        } catch {
+            return !!SelectionState.traceMaterialChanges;
+        }
+    }
+
+    static _installMaterialWatcher(target) {
+        if (!target || typeof target !== 'object') return false;
+        const desc = Object.getOwnPropertyDescriptor(target, 'material');
+        if (desc?.get?.__brepMaterialWatcher) {
+            try { target.__brepMaterialWatcherInstalled = true; } catch { }
+            return true;
+        }
+        let current;
+        try { current = target.material; } catch { return false; }
+        const getter = function () { return current; };
+        getter.__brepMaterialWatcher = true;
+        const setter = function (next) {
+            const prev = current;
+            current = next;
+            if (prev !== next && SelectionState._shouldTraceMaterials()) {
+                SelectionState._traceMaterialChange(target, prev, next);
+            }
+        };
+        setter.__brepMaterialWatcher = true;
+        try {
+            Object.defineProperty(target, 'material', {
+                get: getter,
+                set: setter,
+                configurable: true,
+                enumerable: true,
+            });
+            target.__brepMaterialWatcherInstalled = true;
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    static _materialDebugSummary(material) {
+        if (Array.isArray(material)) {
+            return material.map((m) => SelectionState._materialDebugSummary(m));
+        }
+        if (!material) return material;
+        const color = (() => {
+            try {
+                if (typeof material.color?.getHexString === 'function') return `#${material.color.getHexString()}`;
+            } catch { }
+            return undefined;
+        })();
+        const resolution = (() => {
+            try {
+                const r = material.resolution;
+                if (r) return { width: r.width, height: r.height };
+            } catch { }
+            return undefined;
+        })();
+        return {
+            uuid: material.uuid,
+            type: material.type,
+            name: material.name,
+            color,
+            opacity: material.opacity,
+            transparent: material.transparent,
+            visible: material.visible,
+            disposed: material.disposed,
+            linewidth: material.linewidth,
+            resolution,
+        };
+    }
+
+    static _traceMaterialChange(target, prev, next) {
+        try {
+            console.log('[SelectionState] material changed', {
+                name: target?.name,
+                type: target?.type,
+                uuid: target?.uuid,
+                id: target?.id,
+                prev: SelectionState._materialDebugSummary(prev),
+                next: SelectionState._materialDebugSummary(next),
+                target,
+            });
+            console.trace('[SelectionState] material change stack');
+        } catch { }
     }
 }

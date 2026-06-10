@@ -17,6 +17,85 @@ export function supportsFeatureDimensionFeatureKey(key) {
   return SUPPORTED_FEATURE_KEYS.has(normalizeFeatureDimensionFeatureKey(key));
 }
 
+export function getFeatureDimensionObjectTypeTag(object) {
+  if (!object) return '';
+  const rawType = object?.userData?.type || object?.userData?.brepType || object?.type || '';
+  return String(rawType).toUpperCase();
+}
+
+export function collectFeatureDimensionReferenceNames(selection) {
+  const out = [];
+  const addName = (candidate) => {
+    if (candidate == null) return;
+    const name = String(candidate).trim();
+    if (!name) return;
+    if (!out.includes(name)) out.push(name);
+  };
+
+  const consume = (value) => {
+    if (value == null) return;
+    if (Array.isArray(value)) {
+      for (const item of value) consume(item);
+      return;
+    }
+    if (typeof value === 'string') {
+      addName(value);
+      return;
+    }
+    if (typeof value === 'object') {
+      if (value.isObject3D) addName(value.name);
+      addName(value.name);
+      addName(value.selectionName);
+      addName(value.id);
+      addName(value.faceName);
+      addName(value.edgeName);
+      if (value.reference != null) consume(value.reference);
+      if (value.target != null) consume(value.target);
+    }
+  };
+
+  consume(selection);
+  return out;
+}
+
+export function resolveFeatureDimensionEffectReferenceObject(entry, selection = null, allowedTypes = null) {
+  const names = collectFeatureDimensionReferenceNames(selection);
+  if (!names.length) return null;
+  const nameSet = new Set(names);
+  const typeSet = allowedTypes instanceof Set
+    ? allowedTypes
+    : (Array.isArray(allowedTypes) ? new Set(allowedTypes.map((type) => String(type).toUpperCase())) : null);
+  const acceptsType = (object) => {
+    if (!(typeSet instanceof Set) || typeSet.size === 0) return true;
+    return typeSet.has(getFeatureDimensionObjectTypeTag(object));
+  };
+  const sources = [
+    ...(Array.isArray(entry?.effects?.removed) ? entry.effects.removed : []),
+    ...(Array.isArray(entry?.effects?.added) ? entry.effects.added : []),
+  ].filter(Boolean);
+
+  const findInTree = (root) => {
+    let match = null;
+    const visit = (obj) => {
+      if (!obj || match) return;
+      if (nameSet.has(String(obj.name || '')) && acceptsType(obj)) {
+        match = obj;
+        return;
+      }
+      const kids = Array.isArray(obj.children) ? obj.children : [];
+      for (const child of kids) visit(child);
+    };
+    visit(root);
+    return match;
+  };
+
+  for (const source of sources) {
+    const match = findInTree(source);
+    if (match) return match;
+  }
+  return null;
+}
+
 export function resolvePortExtensionAnnotationGeometry(portDefinition, minVisibleLength = 0) {
   const pointRaw = Array.isArray(portDefinition?.point) ? portDefinition.point : null;
   const directionRaw = Array.isArray(portDefinition?.direction) ? portDefinition.direction : null;

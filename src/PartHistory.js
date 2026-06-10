@@ -158,13 +158,14 @@ export class PartHistory {
     const originalRemove = this.scene.remove;
     this.scene.remove = (...args) => {
       //console.log("Removing from scene:", args);
-      if (args[0]?.userData?.preventRemove) {
+      const removable = args.filter((obj) => !obj?.userData?.preventRemove);
+      if (!removable.length) {
         //console.log("Removal prevented by object flag.");
         return;
       }
 
       //console.trace();
-      originalRemove.apply(this.scene, args);
+      originalRemove.apply(this.scene, removable);
     };
 
     // overide the scenes add method to console log additions along with the stack trace
@@ -1937,6 +1938,7 @@ export class PartHistory {
         try { await a.free(); } catch { }
         try { await a.visualize(); } catch { }
         await this.scene.add(a);
+        try { SelectionFilter.ensureSelectionHandlers(a, { deep: true }); } catch { }
         // make sure the flag for removal is cleared
         try { a.__removeFlag = false; } catch { }
 

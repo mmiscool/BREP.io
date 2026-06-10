@@ -66,6 +66,42 @@ function makeRectangleSketch() {
   };
 }
 
+function makeSixEdgeGeneratedSketch20260609165436() {
+  return {
+    points: [
+      { id: 0, x: 0, y: 0, fixed: true, construction: true, externalReference: false },
+      { id: 1, x: -10.143414, y: -11.050455, fixed: false, construction: false, externalReference: false },
+      { id: 2, x: -10.143414, y: -11.050455, fixed: false, construction: false, externalReference: false },
+      { id: 3, x: -5.723277, y: -15.107781, fixed: false, construction: false, externalReference: false },
+      { id: 4, x: -5.723277, y: -15.107781, fixed: false, construction: false, externalReference: false },
+      { id: 5, x: 2.636873, y: -6.000049, fixed: false, construction: false, externalReference: false },
+      { id: 6, x: 2.636873, y: -6.000049, fixed: false, construction: false, externalReference: false },
+      { id: 7, x: 12.999972, y: -6.000047, fixed: false, construction: false, externalReference: false },
+      { id: 8, x: 12.999972, y: -6.000047, fixed: false, construction: false, externalReference: false },
+      { id: 9, x: 12.999973, y: 0, fixed: false, construction: false, externalReference: false },
+      { id: 10, x: 12.999973, y: 0, fixed: false, construction: false, externalReference: false },
+      { id: 11, x: 0, y: 0, fixed: true, construction: false, externalReference: false },
+    ],
+    geometries: [
+      { id: 1, type: 'line', points: [0, 1], construction: false },
+      { id: 2, type: 'line', points: [2, 3], construction: false },
+      { id: 3, type: 'line', points: [4, 5], construction: false },
+      { id: 4, type: 'line', points: [6, 7], construction: false },
+      { id: 5, type: 'line', points: [8, 9], construction: false },
+      { id: 6, type: 'line', points: [10, 11], construction: false },
+    ],
+    constraints: [
+      { id: 0, type: '⏚', points: [0], status: 'solved', error: null },
+      { id: 1, type: '≡', points: [1, 2], status: 'solved', error: null },
+      { id: 2, type: '≡', points: [3, 4], status: 'solved', error: null },
+      { id: 3, type: '≡', points: [5, 6], status: 'solved', error: null },
+      { id: 4, type: '≡', points: [7, 8], status: 'solved', error: null },
+      { id: 5, type: '≡', points: [9, 10], status: 'solved', error: null },
+      { id: 6, type: '≡', points: [0, 11], status: 'solved', error: null },
+    ],
+  };
+}
+
 function makeGeneratedHistoryBaseSketch() {
   return {
     points: [
@@ -184,6 +220,74 @@ export async function test_extrude_rectangle_profile_has_one_sidewall_per_sketch
   assertDistinctTrackedFaces(solid, expected, '[extrude sidewalls]');
 
   console.log('✓ Rectangle extrude keeps one side wall face per sketch edge');
+  return partHistory;
+}
+
+export async function test_generated_history_20260609165436_six_edge_profile_has_six_sidewalls(partHistory) {
+  partHistory.expressions = '//Examples:\nx = 10 + 6; \ny = x * 2;\n\nresolution = 32;\n';
+
+  const sketch = await partHistory.newFeature('S');
+  Object.assign(sketch.inputParams, {
+    id: 'S1',
+    sketchPlane: null,
+    editSketch: null,
+    dumpSketchDiagnostics: null,
+    curveResolution: 'resolution',
+  });
+  sketch.persistentData = { sketch: makeSixEdgeGeneratedSketch20260609165436() };
+
+  const extrude = await partHistory.newFeature('E');
+  Object.assign(extrude.inputParams, {
+    id: 'E2',
+    profile: 'S1',
+    consumeProfileSketch: true,
+    distance: 10,
+    distanceBack: 10,
+    boolean: { targets: [], operation: 'NONE', overlapConditioningEnabled: true },
+  });
+
+  await partHistory.runHistory({ throwOnFeatureError: true });
+
+  const expected = [
+    'E2:S1:PROFILE_START',
+    'E2:S1:PROFILE_END',
+    'E2:S1:G1_SW',
+    'E2:S1:G2_SW',
+    'E2:S1:G3_SW',
+    'E2:S1:G4_SW',
+    'E2:S1:G5_SW',
+    'E2:S1:G6_SW',
+  ];
+
+  const assertSixSidewalls = (context) => {
+    const solid = partHistory.getObjectByName('E2');
+    assert(solid, `${context} Expected extrude output E2.`);
+    const faceNames = getSolidFaceNames(solid);
+    for (const faceName of expected) {
+      assert(faceNames.includes(faceName), `${context} Missing face ${faceName}. Faces: ${faceNames.join(', ')}`);
+    }
+    assert(faceNames.length === expected.length, `${context} Expected exactly 8 faces, received ${faceNames.length}: ${faceNames.join(', ')}`);
+    assertDistinctTrackedFaces(solid, expected, context);
+
+    const renderedFaceNames = (solid.children || [])
+      .filter((child) => String(child?.type || '').toUpperCase() === 'FACE')
+      .map((child) => child.name);
+    for (const faceName of expected) {
+      assert(renderedFaceNames.includes(faceName), `${context} Missing rendered face ${faceName}. Rendered: ${renderedFaceNames.join(', ')}`);
+    }
+    assert(
+      renderedFaceNames.length === expected.length,
+      `${context} Expected exactly 8 rendered faces, received ${renderedFaceNames.length}: ${renderedFaceNames.join(', ')}`,
+    );
+  };
+
+  assertSixSidewalls('[generated 20260609165436 initial]');
+
+  extrude.inputParams.distance = 12;
+  await partHistory.runHistory({ throwOnFeatureError: true });
+  assertSixSidewalls('[generated 20260609165436 distance edit]');
+
+  console.log('✓ Generated history 20260609165436 keeps six side wall faces');
   return partHistory;
 }
 

@@ -1,6 +1,7 @@
 import { BREP } from "../BREP/BREP.js";
 import { computeBoundaryLoopsFromFaceNative } from "../BREP/Sweep.js";
 import { RevolveFeature } from "../features/revolve/RevolveFeature.js";
+import { PartHistory } from "../PartHistory.js";
 
 function analyzeMeshTopology(solid) {
     const triVerts = Array.isArray(solid?._triVerts) ? solid._triVerts : [];
@@ -191,4 +192,77 @@ export async function test_revolve_axis_edge_profile_reuses_axis_vertices_for_pa
     if (typeof revolve._isCoherentlyOrientedManifold === "function" && revolve._isCoherentlyOrientedManifold() !== true) {
         throw new Error("Expected partial revolve around a profile edge to be coherently oriented.");
     }
+}
+
+export async function test_revolve_restored_consumed_sketch_keeps_edge_sidewalls_after_angle_edit(partHistory = new PartHistory()) {
+    partHistory.expressions = "resolution = 32;";
+
+    const sketch = await partHistory.newFeature("S");
+    Object.assign(sketch.inputParams, {
+        id: "S1",
+        sketchPlane: null,
+        curveResolution: "resolution",
+    });
+    sketch.persistentData = {
+        sketch: {
+            points: [
+                { id: 0, x: 0, y: 0, fixed: true, construction: true, externalReference: false },
+                { id: 1, x: 0, y: 0, fixed: false, construction: false, externalReference: false },
+                { id: 2, x: 3, y: 0, fixed: false, construction: false, externalReference: false },
+                { id: 3, x: 3, y: 0, fixed: false, construction: false, externalReference: false },
+                { id: 4, x: 3, y: 4, fixed: false, construction: false, externalReference: false },
+                { id: 5, x: 3, y: 4, fixed: false, construction: false, externalReference: false },
+                { id: 6, x: 0, y: 4, fixed: false, construction: false, externalReference: false },
+                { id: 7, x: 0, y: 4, fixed: false, construction: false, externalReference: false },
+                { id: 8, x: 0, y: 0, fixed: false, construction: false, externalReference: false },
+            ],
+            geometries: [
+                { id: 1, type: "line", points: [1, 2], construction: false },
+                { id: 2, type: "line", points: [3, 4], construction: false },
+                { id: 3, type: "line", points: [5, 6], construction: false },
+                { id: 4, type: "line", points: [7, 8], construction: false },
+            ],
+            constraints: [
+                { id: 1, type: "≡", points: [2, 3] },
+                { id: 2, type: "≡", points: [4, 5] },
+                { id: 3, type: "≡", points: [6, 7] },
+                { id: 4, type: "≡", points: [8, 1] },
+            ],
+        },
+    };
+
+    const revolve = await partHistory.newFeature("R");
+    Object.assign(revolve.inputParams, {
+        id: "R2",
+        profile: "S1",
+        consumeProfileSketch: true,
+        axis: "S1:G4",
+        angle: 120,
+        resolution: "resolution",
+        boolean: { targets: [], operation: "NONE", overlapConditioningEnabled: true },
+    });
+
+    const assertEdgeSidewalls = (context) => {
+        const solid = partHistory.getObjectByName("R2");
+        if (!solid) throw new Error(`${context} Expected revolve output R2.`);
+        const faceNames = typeof solid.getFaceNames === "function" ? solid.getFaceNames() : [];
+        for (const faceName of ["S1:G1_RV", "S1:G2_RV", "S1:G3_RV"]) {
+            if (!faceNames.includes(faceName)) {
+                throw new Error(`${context} Missing revolve sidewall ${faceName}. Faces: ${faceNames.join(", ")}`);
+            }
+        }
+        if (faceNames.some((faceName) => faceName === "S1:PROFILE_RV" || faceName === "R2:S1:PROFILE_RV")) {
+            throw new Error(`${context} Revolve sidewalls collapsed to profile-level face. Faces: ${faceNames.join(", ")}`);
+        }
+    };
+
+    await partHistory.runHistory({ throwOnFeatureError: true });
+    assertEdgeSidewalls("[revolve restored sketch initial]");
+
+    revolve.inputParams.angle = 180;
+    await partHistory.runHistory({ throwOnFeatureError: true });
+    assertEdgeSidewalls("[revolve restored sketch angle edit]");
+
+    console.log("✓ Revolve keeps edge side wall faces after editing a consumed sketch profile");
+    return partHistory;
 }

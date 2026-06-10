@@ -1556,7 +1556,11 @@ export class SchemaForm {
             try { namedPreview = scene.getObjectByName(`__refPreview__${normalized}`); } catch (_) { namedPreview = null; }
             if (namedPreview && namedPreview !== sceneObj && namedPreview !== ghost) pushTarget(namedPreview);
 
-            if (!targets.length) return;
+            if (!targets.length) {
+                inputEl.__refChipHoverActive = false;
+                try { SelectionFilter.clearHover(); } catch (_) { }
+                return;
+            }
             if (!isActive && ghost && ghost.isObject3D && !ghost.parent) {
                 try {
                     const group = this._ensureReferencePreviewGroup(inputEl);
@@ -1580,9 +1584,10 @@ export class SchemaForm {
     _clearReferenceSelectionHover(inputEl) {
         try {
             if (!inputEl) return;
-            if (!inputEl.__refChipHoverActive) return;
+            const hadChipHover = !!inputEl.__refChipHoverActive;
             inputEl.__refChipHoverActive = false;
             SelectionFilter.clearHover();
+            if (!hadChipHover && !inputEl.__refPreviewHoverGroup) return;
             if (SchemaForm.__activeRefInput !== inputEl && inputEl.__refPreviewHoverGroup) {
                 inputEl.__refPreviewHoverGroup = false;
                 try { this._removeReferencePreviewGroup(inputEl); } catch (_) { }
@@ -2540,6 +2545,7 @@ export class SchemaForm {
                 SchemaForm.clearReferenceSelectionGhosts(scene, { keep });
             } catch (_) { }
         }
+        try { SelectionFilter.clearHover(); } catch (_) { }
         SelectionFilter.restoreAllowedSelectionTypes();
     }
 

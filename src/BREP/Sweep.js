@@ -489,6 +489,65 @@ function buildSweepEdgeInput(name, polyline, metadataJson = '') {
   };
 }
 
+function keySweepPoint(point, quant = 1e-5) {
+  return `${Math.round((Number(point?.[0]) || 0) / quant)},${Math.round((Number(point?.[1]) || 0) / quant)},${Math.round((Number(point?.[2]) || 0) / quant)}`;
+}
+
+function buildBoundaryPointKeySet(boundaryLoops, quant = 1e-5) {
+  const keys = new Set();
+  for (const loop of Array.isArray(boundaryLoops) ? boundaryLoops : []) {
+    const points = Array.isArray(loop?.pts) ? loop.pts : loop;
+    if (!Array.isArray(points)) continue;
+    for (const point of points) {
+      if (!Array.isArray(point) || point.length < 3) continue;
+      keys.add(keySweepPoint(point, quant));
+    }
+  }
+  return keys;
+}
+
+function edgePolylineMatchesBoundary(polyline, boundaryPointKeys, quant = 1e-5) {
+  if (!Array.isArray(polyline) || polyline.length < 2 || !boundaryPointKeys?.size) return false;
+  for (let i = 0; i + 1 < polyline.length; i++) {
+    const a = polyline[i];
+    const b = polyline[i + 1];
+    if (!Array.isArray(a) || !Array.isArray(b)) continue;
+    if (boundaryPointKeys.has(keySweepPoint(a, quant)) && boundaryPointKeys.has(keySweepPoint(b, quant))) {
+      return true;
+    }
+  }
+  const first = polyline[0];
+  const last = polyline[polyline.length - 1];
+  return boundaryPointKeys.has(keySweepPoint(first, quant)) && boundaryPointKeys.has(keySweepPoint(last, quant));
+}
+
+function getRestoredSketchBoundaryEdgeInputs(face, featureTag, boundaryLoops, faceNormal, distance, distanceBack) {
+  const parent = face?.parent;
+  if (!parent || String(parent?.type || '').toUpperCase() !== 'SKETCH') return [];
+  const boundaryPointKeys = buildBoundaryPointKeySet(boundaryLoops);
+  if (!boundaryPointKeys.size) return [];
+
+  const inputs = [];
+  const seen = new Set();
+  const children = Array.isArray(parent.children) ? parent.children : [];
+  for (const child of children) {
+    if (!child || String(child?.type || '').toUpperCase() !== 'EDGE') continue;
+    const rawName = String(child?.name || child?.userData?.edgeName || '').trim();
+    if (!rawName || seen.has(rawName) || isSyntheticSweepSourceEdgeName(rawName)) continue;
+    const polyline = getEdgePolylineWorld(child, { dedupe: false }).map((p) => [p[0], p[1], p[2]]);
+    if (!edgePolylineMatchesBoundary(polyline, boundaryPointKeys)) continue;
+    const input = buildSweepEdgeInput(
+      `${featureTag}${rawName}_SW`,
+      polyline,
+      buildSweepEdgeMetadataJson(child, faceNormal, distance, distanceBack),
+    );
+    if (!input) continue;
+    seen.add(rawName);
+    inputs.push(input);
+  }
+  return inputs.length > 1 ? inputs : [];
+}
+
 function getSolidFaceBoundaryEdgeInputs(face, featureTag) {
   const faceName = String(face?.name || face?.userData?.faceName || '').trim();
   if (!faceName) return [];
@@ -580,9 +639,15 @@ export function generateNativeSweep(target, params = {}) {
     polyline: getEdgePolylineWorld(edge, { dedupe: false }).map((p) => [p[0], p[1], p[2]]),
     metadataJson: buildSweepEdgeMetadataJson(edge, faceNormal, distance, distanceBack),
   })).filter((entry) => Array.isArray(entry.polyline) && entry.polyline.length >= 2);
+  const restoredSketchEdgeInputs = (sourceIsSketchFace && !sketchEdgeInputs.length)
+    ? getRestoredSketchBoundaryEdgeInputs(face, featureTag, boundaryLoops, faceNormal, distance, distanceBack)
+    : [];
+  const solidBoundaryEdgeInputs = (!sourceIsSketchFace || !sketchEdgeInputs.length)
+    ? getSolidFaceBoundaryEdgeInputs(face, featureTag)
+    : [];
   const edgeInputs = sourceIsSketchFace
-    ? sketchEdgeInputs
-    : getSolidFaceBoundaryEdgeInputs(face, featureTag);
+    ? (sketchEdgeInputs.length ? sketchEdgeInputs : (restoredSketchEdgeInputs.length ? restoredSketchEdgeInputs : solidBoundaryEdgeInputs))
+    : solidBoundaryEdgeInputs;
 
   let pathPoints = [];
   if (Array.isArray(sweepPathEdges) && sweepPathEdges.length) {

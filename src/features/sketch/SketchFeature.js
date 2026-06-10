@@ -1,6 +1,7 @@
 
 import { LineGeometry } from 'three/examples/jsm/Addons.js';
 import { BREP } from "../../BREP/BREP.js";
+import { SelectionFilter } from '../../UI/SelectionFilter.js';
 import { SelectionState } from '../../UI/SelectionState.js';
 import { renderButtonField } from '../../UI/featureDialogWidgets/buttonField.js';
 import { deepClone } from '../../utils/deepClone.js';
@@ -587,12 +588,14 @@ export class SketchFeature {
         const applySketchEdgeStyle = (edge) => {
             if (!edge) return;
             edge.renderOrder = 2;
+            try { edge.computeLineDistances?.(); } catch { }
             try {
                 const baseMat = edge.material;
                 const sketchMat = (baseMat && typeof baseMat.clone === 'function') ? baseMat.clone() : null;
                 if (sketchMat) {
                     sketchMat.depthTest = false;
                     sketchMat.depthWrite = false;
+                    if (typeof sketchMat.dashed !== 'undefined') sketchMat.dashed = false;
                     sketchMat.needsUpdate = true;
                     SelectionState.setBaseMaterial(edge, sketchMat);
                 }
@@ -1336,6 +1339,7 @@ export class SketchFeature {
         }
 
         this._updateSketchChangeState(this.persistentData?.sketch || sketch);
+        try { SelectionFilter.ensureSelectionHandlers(sceneGroup, { deep: true }); } catch { }
         return { added: [sceneGroup], removed: [] };
     }
 }

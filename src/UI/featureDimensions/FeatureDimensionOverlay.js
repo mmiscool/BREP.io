@@ -14,6 +14,9 @@ import { computeFaceNormal, computeFaceOrigin } from '../faceUtils.js';
 import { SchemaForm } from '../featureDialogs.js';
 import { buildPortDefinitionFromInputs } from '../../features/port/portUtils.js';
 import {
+  collectFeatureDimensionReferenceNames,
+  getFeatureDimensionObjectTypeTag,
+  resolveFeatureDimensionEffectReferenceObject,
   resolvePortExtensionAnnotationGeometry,
   supportsFeatureDimensionFeatureKey,
 } from './featureDimensionUtils.js';
@@ -153,6 +156,8 @@ export class FeatureDimensionOverlay {
       this._group = new THREE.Group();
       this._group.name = 'feature-dimension-overlays';
       this._group.userData.excludeFromFit = true;
+      this._group.userData.preventRemove = true;
+      this._group.userData.featureDimensionOverlay = true;
       try { this.viewer.scene.add(this._group); } catch { this._group = null; }
     }
 
@@ -182,6 +187,7 @@ export class FeatureDimensionOverlay {
     this._labelOverlay = null;
 
     if (this._group && this.viewer?.scene) {
+      try { this._group.userData.preventRemove = false; } catch { }
       try { this.viewer.scene.remove(this._group); } catch { }
     }
     this._group = null;
@@ -243,7 +249,7 @@ export class FeatureDimensionOverlay {
     try { this._labelOverlay?.setVisible?.(!this._suppressed); } catch { }
   }
 
-  refresh() {
+  refresh({ preserveExistingOnEmpty = false } = {}) {
     if (!this._active) {
       this.clearActive();
       return;
@@ -270,6 +276,12 @@ export class FeatureDimensionOverlay {
 
     const annotations = this.#buildAnnotations(this._active);
     if (!Array.isArray(annotations) || !annotations.length) {
+      if (
+        preserveExistingOnEmpty
+        && (this._lineMap.size || this._arrowGroupMap.size || this._arrowPickMeshes.length)
+      ) {
+        return;
+      }
       this._labelRecords.clear();
       this._arrowPickMeshes = [];
       this.#clearVisuals();
@@ -559,15 +571,17 @@ export class FeatureDimensionOverlay {
 
   #resolveProfileObject(profileSelection) {
     const scene = this.viewer?.scene || null;
-    const profileObject = resolveSelectionObject(scene, profileSelection) || null;
+    const profileObject = resolveSelectionObject(scene, profileSelection)
+      || resolveFeatureDimensionEffectReferenceObject(this._active?.entry, profileSelection, new Set(['FACE', 'SKETCH', 'PLANE']))
+      || null;
     if (!profileObject) return null;
 
-    const objectType = this.#objectTypeTag(profileObject);
+    const objectType = getFeatureDimensionObjectTypeTag(profileObject);
     const shouldSearchChildren = objectType === 'SKETCH'
       || (!profileObject?.geometry && Array.isArray(profileObject?.children));
     if (!shouldSearchChildren) return profileObject;
 
-    const faceChild = profileObject.children?.find?.((child) => this.#objectTypeTag(child) === 'FACE')
+    const faceChild = profileObject.children?.find?.((child) => getFeatureDimensionObjectTypeTag(child) === 'FACE')
       || profileObject.children?.find?.((child) => child?.userData?.faceName);
     return faceChild || profileObject;
   }
@@ -636,7 +650,7 @@ export class FeatureDimensionOverlay {
 
     const scene = this.viewer?.scene || null;
     const axisObject = resolveSelectionObject(scene, axisSelection) || null;
-    const axisType = this.#objectTypeTag(axisObject);
+    const axisType = getFeatureDimensionObjectTypeTag(axisObject);
 
     let points = null;
     try {
@@ -661,6 +675,28 @@ export class FeatureDimensionOverlay {
     if (axisObject) {
       const origin = extractWorldPoint(axisObject);
       const direction = getElementDirection(null, axisObject);
+      if (origin && direction && direction.lengthSq() > EPS) {
+        return { point: origin.clone(), direction: direction.clone().normalize() };
+      }
+    }
+
+    const consumedAxisObject = resolveFeatureDimensionEffectReferenceObject(this._active?.entry, axisSelection, new Set(['EDGE']));
+    if (consumedAxisObject) {
+      let consumedPoints = null;
+      try {
+        if (typeof consumedAxisObject?.points === 'function') consumedPoints = consumedAxisObject.points(true);
+      } catch { }
+      if (Array.isArray(consumedPoints) && consumedPoints.length >= 2) {
+        const first = consumedPoints[0];
+        const last = consumedPoints[consumedPoints.length - 1];
+        const pointA = new THREE.Vector3(toFiniteNumber(first?.x, 0), toFiniteNumber(first?.y, 0), toFiniteNumber(first?.z, 0));
+        const pointB = new THREE.Vector3(toFiniteNumber(last?.x, 0), toFiniteNumber(last?.y, 0), toFiniteNumber(last?.z, 0));
+        const direction = pointB.clone().sub(pointA);
+        if (direction.lengthSq() > EPS) return { point: pointA.clone().add(pointB).multiplyScalar(0.5), direction: direction.normalize() };
+      }
+
+      const origin = extractWorldPoint(consumedAxisObject);
+      const direction = getElementDirection(null, consumedAxisObject);
       if (origin && direction && direction.lengthSq() > EPS) {
         return { point: origin.clone(), direction: direction.clone().normalize() };
       }
@@ -709,47 +745,6 @@ export class FeatureDimensionOverlay {
     return runtimePort;
   }
 
-  #objectTypeTag(object) {
-    if (!object) return '';
-    const rawType = object?.userData?.type || object?.userData?.brepType || object?.type || '';
-    return String(rawType).toUpperCase();
-  }
-
-  #collectSelectionReferenceNames(selection) {
-    const out = [];
-    const addName = (candidate) => {
-      if (candidate == null) return;
-      const name = String(candidate).trim();
-      if (!name) return;
-      if (!out.includes(name)) out.push(name);
-    };
-
-    const consume = (value) => {
-      if (value == null) return;
-      if (Array.isArray(value)) {
-        for (const item of value) consume(item);
-        return;
-      }
-      if (typeof value === 'string') {
-        addName(value);
-        return;
-      }
-      if (typeof value === 'object') {
-        if (value.isObject3D) addName(value.name);
-        addName(value.name);
-        addName(value.selectionName);
-        addName(value.id);
-        addName(value.faceName);
-        addName(value.edgeName);
-        if (value.reference != null) consume(value.reference);
-        if (value.target != null) consume(value.target);
-      }
-    };
-
-    consume(selection);
-    return out;
-  }
-
   #resolveReferenceSnapshot(fieldKey, selection = null, allowedTypes = null) {
     const snapshots = this._active?.entry?.persistentData?.__refPreviewSnapshots;
     const bucket = snapshots && typeof snapshots === 'object' ? snapshots[fieldKey] : null;
@@ -761,7 +756,7 @@ export class FeatureDimensionOverlay {
       return allowedTypes.has(type);
     };
 
-    const names = this.#collectSelectionReferenceNames(selection);
+    const names = collectFeatureDimensionReferenceNames(selection);
     for (const name of names) {
       if (!Object.prototype.hasOwnProperty.call(bucket, name)) continue;
       const snapshot = bucket[name];

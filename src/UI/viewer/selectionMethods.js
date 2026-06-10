@@ -230,8 +230,43 @@ export const selectionMethods = {
         return { hit: null, target: null };
     },
 
-    // Temporarily make FrontSide materials DoubleSide for picking without changing render appearance.
+    // Three's Line2 raycast expects a live material.resolution; cloned or restored
+    // sketch edge materials can miss it until the next resize/render sync.
+    _syncLineMaterialResolutionForPicking() {
+        if (!this.scene || typeof this.scene.traverse !== 'function') return;
+        const rect = this.renderer?.domElement?.getBoundingClientRect?.();
+        const width = Math.max(1, Math.floor(rect?.width || this.renderer?.domElement?.clientWidth || 1));
+        const height = Math.max(1, Math.floor(rect?.height || this.renderer?.domElement?.clientHeight || 1));
+        const syncMaterial = (mat) => {
+            if (!mat) return;
+            let resolution = null;
+            try { resolution = mat.resolution || null; } catch { resolution = null; }
+            if (!resolution && mat.uniforms?.resolution?.value) {
+                resolution = mat.uniforms.resolution.value;
+                try { mat.resolution = resolution; } catch { }
+            }
+            if (resolution && typeof resolution.set === 'function') {
+                try { resolution.set(width, height); } catch { }
+                return;
+            }
+            if (resolution && Number.isFinite(resolution.width) && Number.isFinite(resolution.height)) {
+                try {
+                    resolution.width = width;
+                    resolution.height = height;
+                } catch { }
+                return;
+            }
+            try { mat.resolution = new THREE.Vector2(width, height); } catch { }
+        };
+        this.scene.traverse((obj) => {
+            if (!obj || (!obj.isLine2 && !obj.isLineSegments2)) return;
+            const mat = obj.material;
+            if (Array.isArray(mat)) mat.forEach(syncMaterial);
+            else syncMaterial(mat);
+        });
+    },
 
+    // Temporarily make FrontSide materials DoubleSide for picking without changing render appearance.
     _withDoubleSidedPicking(fn) {
         if (!fn) return null;
         const touched = new Set();
@@ -243,6 +278,7 @@ export const selectionMethods = {
             }
         };
         try {
+            this._syncLineMaterialResolutionForPicking();
             if (this.scene && typeof this.scene.traverse === 'function') {
                 this.scene.traverse((obj) => {
                     if (!obj) return;

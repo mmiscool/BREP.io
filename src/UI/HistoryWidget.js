@@ -42,6 +42,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
     this._runPromise = null;
     this._featureDragRunTimer = null;
     this._featureDragRunPending = false;
+    this._historyRunInFlight = false;
     this._lastHeaderSyncTs = -Infinity;
     this._lastHistoryRunUiYieldTs = -Infinity;
     this._featureDimensionOverlay = null;
@@ -321,11 +322,13 @@ export class HistoryWidget extends HistoryCollectionWidget {
     if (!ph || typeof ph.runHistory !== 'function' || ph.__historyWidgetPatched) return;
     const original = ph.runHistory.bind(ph);
     ph.runHistory = async (...args) => {
+      this._historyRunInFlight = true;
       this.#beforePartHistoryRun();
       await this.#yieldForHistoryRunUi({ force: true });
       try {
         return await original(...args);
       } finally {
+        this._historyRunInFlight = false;
         this.#afterPartHistoryMutated();
       }
     };
@@ -455,10 +458,13 @@ export class HistoryWidget extends HistoryCollectionWidget {
     if (runPromise && typeof runPromise.then === 'function') {
       runPromise.then(() => {
         this.partHistory?.queueHistorySnapshot?.({ reason: 'edit' });
+        this._syncFeatureDimensionOverlay();
       });
     } else {
       this.partHistory?.queueHistorySnapshot?.({ reason: 'edit' });
+      this._syncFeatureDimensionOverlay();
     }
+    return runPromise;
   }
 
   #handleFormReady({ id, entry }) {
@@ -753,7 +759,7 @@ export class HistoryWidget extends HistoryCollectionWidget {
         form,
       });
       overlay.setSuppressed(suppressForTransform);
-      overlay.refresh();
+      overlay.refresh({ preserveExistingOnEmpty: !!this._historyRunInFlight });
     } catch (error) {
       console.warn('[HistoryWidget] Feature dimension overlay sync failed:', error);
       try { overlay.clearActive(); } catch { /* ignore */ }

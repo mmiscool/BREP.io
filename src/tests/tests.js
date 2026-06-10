@@ -54,6 +54,7 @@ import {
 import {
     test_extrude_rectangle_profile_has_one_sidewall_per_sketch_edge,
     test_feature_edge_name_resolution_prefers_boolean_result_over_raw_tool,
+    test_generated_history_20260609165436_six_edge_profile_has_six_sidewalls,
     test_generated_history_20260609042734_preserves_s22_subtract_sidewalls,
     test_generated_history_20260609045351_fillet_expanded_replay_uses_subtract_result,
     test_generated_history_20260609074231_outset_fillet_end_caps_merge_into_planar_faces,
@@ -310,7 +311,12 @@ import { test_sheetMetal_nonManifold_sm_f18 } from './test_sheetMetal_nonManifol
 import { test_sheetMetal_tab_circular_hole_wall } from './test_sheetMetal_tab_circular_hole_wall.js';
 import { test_sheetMetal_flat_pattern_files_use_model_and_feature_names } from './test_sheetMetal_flatPatternFiles.js';
 import { test_sheetMetal_flat_pattern_preview_visualize_is_idempotent } from './test_sheetMetal_flatPatternPreview.js';
-import { afterRun_sketch_openLoop, test_sketch_openLoop } from './test_sketch_openLoop.js';
+import {
+    afterRun_sketch_openLoop,
+    afterRun_sketch_snapshot_restore_selection_handlers,
+    test_sketch_openLoop,
+    test_sketch_snapshot_restore_selection_handlers,
+} from './test_sketch_openLoop.js';
 import {
     afterRun_sketch_face_attachment_alignment,
     test_sketch_face_attachment_alignment,
@@ -327,7 +333,13 @@ import {
 import { afterRun_solidMetrics, test_solidMetrics } from './test_solidMetrics.js';
 import { test_solidPointMinGap } from './test_solidPointMinGap.js';
 import { test_stlLoader } from './test_stlLoader.js';
-import { test_selection_owning_feature_resolution } from './test_selection_owning_feature.js';
+import {
+    test_selection_hover_material_restores_before_dispose,
+    test_selection_filter_empty_hover_clears_in_place_sketch_hover,
+    test_selection_line2_resolution_repair,
+    test_selection_owning_feature_resolution,
+    test_selection_sketch_hover_tints_material_in_place,
+} from './test_selection_owning_feature.js';
 import {
     test_solid_overlap_diagnostics_detects_cross_solid_overlap,
     test_solid_overlap_diagnostics_detects_coplanar_overlap,
@@ -372,7 +384,9 @@ import {
     test_pmi_monochrome_label_svg_uses_backdrop_color,
 } from './test_pmiViewsWidget.js';
 import {
+    test_feature_dimension_effect_reference_resolves_consumed_profile_and_axis,
     test_feature_dimension_overlay_supports_port,
+    test_part_history_prevent_remove_survives_multi_child_scene_clear,
     test_port_extension_annotation_geometry_preserves_extension_value,
 } from './test_featureDimensionOverlay.js';
 import {
@@ -399,6 +413,7 @@ import {
     test_revolve_feature_resolves_face_and_edge_string_references,
     test_revolve_axis_edge_profile_reuses_axis_vertices_for_partial_sweep,
     test_revolve_generates_manifold_native_faces_for_axis_edge_profile,
+    test_revolve_restored_consumed_sketch_keeps_edge_sidewalls_after_angle_edit,
 } from './test_revolveFeature.js';
 import {
     afterRun_remesh_simplify_imported_fixture_stl,
@@ -470,6 +485,7 @@ export const testFunctions = [
     { test: test_revolve_feature_resolves_face_and_edge_string_references, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_revolve_axis_edge_profile_reuses_axis_vertices_for_partial_sweep, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_revolve_generates_manifold_native_faces_for_axis_edge_profile, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_revolve_restored_consumed_sketch_keeps_edge_sidewalls_after_angle_edit, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_remesh_simplify_uses_kernel_simplify_without_full_tolerance_weld, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     {
         test: test_remesh_simplify_imported_fixture_stl,
@@ -632,6 +648,8 @@ export const testFunctions = [
     { test: test_primitiveTorus, afterRun: afterRun_primitiveTorus, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_primitiveSphere, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_feature_dimension_overlay_supports_port, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_feature_dimension_effect_reference_resolves_consumed_profile_and_axis, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_part_history_prevent_remove_survives_multi_child_scene_clear, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_port_extension_annotation_geometry_preserves_extension_value, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_transform_reference_sanitize_preserves_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_transform_reference_base_uses_face_pick_point, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -772,6 +790,7 @@ export const testFunctions = [
     { test: test_wire_harness_routes_render_as_scene_solids, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_wire_harness_route_results_persist_in_model_json, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_openLoop, afterRun: afterRun_sketch_openLoop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sketch_snapshot_restore_selection_handlers, afterRun: afterRun_sketch_snapshot_restore_selection_handlers, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     {
         test: test_sketch_face_attachment_alignment,
         afterRun: afterRun_sketch_face_attachment_alignment,
@@ -1014,6 +1033,7 @@ export const testFunctions = [
     { test: test_hole_thread_symbolic, afterRun: afterRun_hole_thread_symbolic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_hole_thread_modeled, afterRun: afterRun_hole_thread_modeled, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_extrude_rectangle_profile_has_one_sidewall_per_sketch_edge, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_generated_history_20260609165436_six_edge_profile_has_six_sidewalls, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_feature_edge_name_resolution_prefers_boolean_result_over_raw_tool, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_run_history_calls_are_serialized, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_subtract_extrude_preserves_rectangle_tool_sidewall_faces, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -1029,6 +1049,10 @@ export const testFunctions = [
     { test: test_history_expand_does_not_dirty, afterRun: afterRun_history_expand_does_not_dirty, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_history_test_snippet_persistent_data_allowlist, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_selection_owning_feature_resolution, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_selection_line2_resolution_repair, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_selection_hover_material_restores_before_dispose, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_selection_sketch_hover_tints_material_in_place, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_selection_filter_empty_hover_clears_in_place_sketch_hover, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_solid_overlap_diagnostics_detects_coplanar_overlap, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_solid_overlap_diagnostics_ignores_boundary_touching_faces, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_solid_overlap_diagnostics_detects_cross_solid_overlap, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

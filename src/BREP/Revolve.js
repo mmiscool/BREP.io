@@ -44,6 +44,82 @@ function computeFaceCentroidWorld(faceObj) {
   return null;
 }
 
+function isSyntheticRevolveSourceEdgeName(name) {
+  const raw = String(name || '').trim();
+  if (!raw) return true;
+  if (raw === 'FACE' || /^FACE_\d+$/.test(raw)) return true;
+  return /_REPAIR_\d+/.test(raw);
+}
+
+function keyRevolvePoint(point, quant = 1e-5) {
+  return `${Math.round((Number(point?.[0]) || 0) / quant)},${Math.round((Number(point?.[1]) || 0) / quant)},${Math.round((Number(point?.[2]) || 0) / quant)}`;
+}
+
+function buildBoundaryPointKeySet(boundaryLoops, quant = 1e-5) {
+  const keys = new Set();
+  for (const loop of Array.isArray(boundaryLoops) ? boundaryLoops : []) {
+    const points = Array.isArray(loop?.pts) ? loop.pts : loop;
+    if (!Array.isArray(points)) continue;
+    for (const point of points) {
+      if (!Array.isArray(point) || point.length < 3) continue;
+      keys.add(keyRevolvePoint(point, quant));
+    }
+  }
+  return keys;
+}
+
+function edgePolylineMatchesBoundary(polyline, boundaryPointKeys, quant = 1e-5) {
+  if (!Array.isArray(polyline) || polyline.length < 2 || !boundaryPointKeys?.size) return false;
+  for (let i = 0; i + 1 < polyline.length; i++) {
+    const a = polyline[i];
+    const b = polyline[i + 1];
+    if (!Array.isArray(a) || !Array.isArray(b)) continue;
+    if (boundaryPointKeys.has(keyRevolvePoint(a, quant)) && boundaryPointKeys.has(keyRevolvePoint(b, quant))) {
+      return true;
+    }
+  }
+  const first = polyline[0];
+  const last = polyline[polyline.length - 1];
+  return boundaryPointKeys.has(keyRevolvePoint(first, quant)) && boundaryPointKeys.has(keyRevolvePoint(last, quant));
+}
+
+function buildRevolveEdgeInput(edge, polyline) {
+  const rawName = String(edge?.name || edge?.userData?.edgeName || 'EDGE').trim();
+  if (!rawName || isSyntheticRevolveSourceEdgeName(rawName)) return null;
+  if (!Array.isArray(polyline) || polyline.length < 2) return null;
+  return {
+    name: `${rawName}_RV`,
+    polyline,
+    metadataJson: JSON.stringify({
+      faceType: 'SIDEWALL',
+      sourceEdgeName: rawName,
+    }),
+  };
+}
+
+function getRestoredSketchBoundaryEdgeInputs(face, boundaryLoops) {
+  const parent = face?.parent;
+  if (!parent || String(parent?.type || '').toUpperCase() !== 'SKETCH') return [];
+  const boundaryPointKeys = buildBoundaryPointKeySet(boundaryLoops);
+  if (!boundaryPointKeys.size) return [];
+
+  const inputs = [];
+  const seen = new Set();
+  const children = Array.isArray(parent.children) ? parent.children : [];
+  for (const child of children) {
+    if (!child || String(child?.type || '').toUpperCase() !== 'EDGE') continue;
+    const rawName = String(child?.name || child?.userData?.edgeName || '').trim();
+    if (!rawName || seen.has(rawName) || isSyntheticRevolveSourceEdgeName(rawName)) continue;
+    const polyline = getEdgePolylineWorld(child, { dedupe: false }).map((p) => [p[0], p[1], p[2]]);
+    if (!edgePolylineMatchesBoundary(polyline, boundaryPointKeys)) continue;
+    const input = buildRevolveEdgeInput(child, polyline);
+    if (!input) continue;
+    seen.add(rawName);
+    inputs.push(input);
+  }
+  return inputs.length > 1 ? inputs : [];
+}
+
 function generateNativeRevolve(target, params = {}) {
   requireNativeRevolveBuilder();
   const { face, axis, angle = 360, resolution = 64 } = params;
@@ -88,16 +164,15 @@ function generateNativeRevolve(target, params = {}) {
     throw new Error('Revolve generation requires boundary loops on the source face.');
   }
 
-  const edgeInputs = (Array.isArray(face?.edges) ? face.edges : [])
-    .map((edge) => ({
-      name: `${edge?.name || 'EDGE'}_RV`,
-      polyline: getEdgePolylineWorld(edge, { dedupe: false }).map((p) => [p[0], p[1], p[2]]),
-      metadataJson: JSON.stringify({
-        faceType: 'SIDEWALL',
-        sourceEdgeName: String(edge?.name || edge?.userData?.edgeName || 'EDGE'),
-      }),
-    }))
-    .filter((entry) => Array.isArray(entry.polyline) && entry.polyline.length >= 2);
+  let edgeInputs = (Array.isArray(face?.edges) ? face.edges : [])
+    .map((edge) => buildRevolveEdgeInput(
+      edge,
+      getEdgePolylineWorld(edge, { dedupe: false }).map((p) => [p[0], p[1], p[2]]),
+    ))
+    .filter(Boolean);
+  if (!edgeInputs.length && face?.parent?.type === 'SKETCH') {
+    edgeInputs = getRestoredSketchBoundaryEdgeInputs(face, boundaryLoops);
+  }
 
   const snapshot = manifold.buildRevolveAuthoringState({
     name: target.name || params.name || 'Revolve',
