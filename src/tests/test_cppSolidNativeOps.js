@@ -2,6 +2,7 @@ import { Solid } from "../BREP/BetterSolid.js";
 import {
     __testOnlyMergeCoplanarAdjacentFilletEndCaps,
     __testOnlyReversePostBooleanFilletEndCapNudge,
+    __testOnlySettleOutsetFilletEndCapsTowardPlanarNeighbors,
     __testOnlyCollapseFilletSideWallFaces,
     __testOnlyReassignTinyFilletSidewallSliverTriangles,
 } from "../BREP/SolidMethods/fillet.js";
@@ -909,6 +910,94 @@ function buildSyntheticCoplanarEndCapSolid() {
     return solid;
 }
 
+function buildSyntheticNonCoplanarPlanarAdjacentEndCapSolid() {
+    const solid = new Solid();
+    const A = [0, 0, 0];
+    const B = [1.5, 0, 0.2];
+    const C = [0, 1, 0];
+    const D = [3, 0, 0];
+
+    solid
+        .addTriangle("FILLET_ENDCAP", A, B, D)
+        .addTriangle("HOST_MAIN", A, D, C)
+        .addTriangle("SIDE_A", A, C, B)
+        .addTriangle("SIDE_B", B, C, D);
+
+    solid.setFaceMetadata("HOST_MAIN", { marker: "host-main" });
+    solid.setFaceMetadata("FILLET_ENDCAP", {
+        filletSourceArea: 0.3,
+        filletRoundFace: "F_TEST_TUBE_Outer",
+        filletEndCap: true,
+        sourceFeatureId: "F_TEST",
+    });
+    return solid;
+}
+
+function buildSyntheticSlightlyOffsetOutsetEndCapSolid() {
+    const solid = new Solid();
+    const A = [0, 0, 0];
+    const B = [0.5, -1.5, 0.018];
+    const C = [0, 1, 0];
+    const D = [3, 0, 0];
+
+    solid
+        .addTriangle("FILLET_ENDCAP", A, B, D)
+        .addTriangle("HOST_MAIN", A, D, C)
+        .addTriangle("SIDE_A", A, C, B)
+        .addTriangle("SIDE_B", B, C, D);
+
+    solid.setFaceMetadata("HOST_MAIN", { marker: "host-main" });
+    solid.setFaceMetadata("FILLET_ENDCAP", {
+        filletSourceArea: 0.3,
+        filletRoundFace: "F_TEST_TUBE_Outer",
+        filletEndCap: true,
+        sourceFeatureId: "F_TEST",
+    });
+    return solid;
+}
+
+function buildSyntheticMultiCandidateCoplanarEndCapSolid() {
+    const solid = new Solid();
+    const A = [0, 0, 0];
+    const E = [1.5, -1, 0];
+    const B = [3, 0, 0];
+    const C = [0, 1, 0];
+    const D = [-1, 0.5, 0];
+    const A0 = [0, 0, -1];
+    const E0 = [1.5, -1, -1];
+    const B0 = [3, 0, -1];
+    const C0 = [0, 1, -1];
+    const D0 = [-1, 0.5, -1];
+
+    solid
+        .addTriangle("F_TEST_HOST_LONG", A, E, B)
+        .addTriangle("FILLET_ENDCAP", A, B, C)
+        .addTriangle("HOST_SHORT", A, C, D)
+        .addTriangle("BOTTOM", A0, D0, C0)
+        .addTriangle("BOTTOM", A0, C0, B0)
+        .addTriangle("BOTTOM", A0, B0, E0)
+        .addTriangle("SIDE_AE", A, A0, E0)
+        .addTriangle("SIDE_AE", A, E0, E)
+        .addTriangle("SIDE_EB", E, E0, B0)
+        .addTriangle("SIDE_EB", E, B0, B)
+        .addTriangle("SIDE_BC", B, B0, C0)
+        .addTriangle("SIDE_BC", B, C0, C)
+        .addTriangle("SIDE_CD", C, C0, D0)
+        .addTriangle("SIDE_CD", C, D0, D)
+        .addTriangle("SIDE_DA", D, D0, A0)
+        .addTriangle("SIDE_DA", D, A0, A);
+
+    solid.setFaceMetadata("HOST_SHORT", { marker: "host-short", sourceFeatureId: "E2" });
+    solid.setFaceMetadata("F_TEST_HOST_LONG", { marker: "host-long", sourceFeatureId: "F_TEST" });
+    solid.setFaceMetadata("FILLET_ENDCAP", {
+        filletSourceArea: 1.5,
+        filletRoundFace: "F_TEST_TUBE_Outer",
+        filletEndCap: true,
+        sourceFeatureId: "F_TEST",
+    });
+    return solid;
+}
+
 export async function test_cppSolidNative_mergeCoplanarAdjacentFilletEndCaps_retags_triangles_to_planar_neighbor() {
     if (manifoldBuildSource !== "local" || typeof manifold?.buildFilletAuthoringState !== "function") {
         return;
@@ -939,6 +1028,71 @@ export async function test_cppSolidNative_mergeCoplanarAdjacentFilletEndCaps_ret
     }
     if (topMetadata.filletEndCap === true) {
         throw new Error("Expected merged target face metadata to exclude filletEndCap.");
+    }
+
+    const angledSolid = buildSyntheticNonCoplanarPlanarAdjacentEndCapSolid();
+    const angledSummary = __testOnlyMergeCoplanarAdjacentFilletEndCaps(angledSolid, { featureID: "F_TEST" });
+    if (Number(angledSummary?.mergedEndCaps || 0) !== 0) {
+        throw new Error(`Expected non-coplanar planar-adjacent fillet end cap to stay separate, received ${angledSummary?.mergedEndCaps} merge(s).`);
+    }
+
+    const angledFaceNames = new Set(angledSolid.getFaceNames?.() || []);
+    if (!angledFaceNames.has("FILLET_ENDCAP")) {
+        throw new Error("Expected non-coplanar FILLET_ENDCAP face to remain tagged as an end cap.");
+    }
+    if (!angledFaceNames.has("HOST_MAIN")) {
+        throw new Error("Expected HOST_MAIN to remain separate from the non-coplanar end cap.");
+    }
+
+    const offsetSolid = buildSyntheticSlightlyOffsetOutsetEndCapSolid();
+    const preSettleSummary = __testOnlyMergeCoplanarAdjacentFilletEndCaps(offsetSolid, {
+        featureID: "F_TEST",
+        nudgeFaceDistance: 0.0001,
+    });
+    if (Number(preSettleSummary?.mergedEndCaps || 0) !== 0) {
+        throw new Error(`Expected offset end cap to miss strict merge before settle, received ${preSettleSummary?.mergedEndCaps} merge(s).`);
+    }
+
+    const settleSummary = __testOnlySettleOutsetFilletEndCapsTowardPlanarNeighbors(offsetSolid, {
+        featureID: "F_TEST",
+        radius: 0.9,
+        nudgeFaceDistance: 0.0001,
+        outsetEndCapFaceNames: new Set(["FILLET_ENDCAP"]),
+    });
+    if (Number(settleSummary?.settledFaces || 0) !== 1) {
+        throw new Error(`Expected one outset end cap to settle toward HOST_MAIN, received ${settleSummary?.settledFaces}.`);
+    }
+
+    const postSettleDistanceTolerance = Math.max(0.008, Math.min(0.03, Number(settleSummary?.maxProjectionDistance || 0) * 2));
+    const postSettleSummary = __testOnlyMergeCoplanarAdjacentFilletEndCaps(offsetSolid, {
+        featureID: "F_TEST",
+        nudgeFaceDistance: 0.0001,
+        minimumDistanceTolerance: postSettleDistanceTolerance,
+        minimumPlanarityTolerance: Math.max(0.03, Math.min(0.12, postSettleDistanceTolerance * 4)),
+    });
+    if (Number(postSettleSummary?.mergedEndCaps || 0) !== 1) {
+        throw new Error(`Expected settled outset end cap to merge, received ${postSettleSummary?.mergedEndCaps}.`);
+    }
+    const offsetFaceNames = new Set(offsetSolid.getFaceNames?.() || []);
+    if (offsetFaceNames.has("FILLET_ENDCAP")) {
+        throw new Error("Expected settled FILLET_ENDCAP to be retagged into HOST_MAIN.");
+    }
+    const offsetHostTriangles = offsetSolid.getFace("HOST_MAIN") || [];
+    if (offsetHostTriangles.length !== 2) {
+        throw new Error(`Expected HOST_MAIN to own 2 triangles after settled merge, received ${offsetHostTriangles.length}.`);
+    }
+
+    const multiCandidateSolid = buildSyntheticMultiCandidateCoplanarEndCapSolid();
+    const multiCandidateSummary = __testOnlyMergeCoplanarAdjacentFilletEndCaps(multiCandidateSolid, {
+        featureID: "F_TEST",
+    });
+    if (Number(multiCandidateSummary?.mergedEndCaps || 0) !== 1) {
+        throw new Error(`Expected multi-candidate end cap to merge once, received ${multiCandidateSummary?.mergedEndCaps}.`);
+    }
+    const longHostTriangles = multiCandidateSolid.getFace("F_TEST_HOST_LONG") || [];
+    const shortHostTriangles = multiCandidateSolid.getFace("HOST_SHORT") || [];
+    if (longHostTriangles.length !== 2 || shortHostTriangles.length !== 1) {
+        throw new Error(`Expected longest shared edge candidate to receive the end cap, got long=${longHostTriangles.length}, short=${shortHostTriangles.length}.`);
     }
 }
 

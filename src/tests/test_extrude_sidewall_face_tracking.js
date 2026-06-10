@@ -494,7 +494,9 @@ export async function test_run_history_calls_are_serialized(partHistory) {
   return partHistory;
 }
 
-async function addGeneratedHistoryThroughE23(partHistory) {
+async function addGeneratedHistoryThroughE23(partHistory, opts = {}) {
+  const revolveAngle = opts?.revolveAngle ?? 53;
+  const shellDistance = opts?.shellDistance ?? '-.5';
   partHistory.expressions = '//Examples:\nx = 10 + 6; \ny = x * 2;\n\nresolution = 32;\n';
 
   const sketch1 = await partHistory.newFeature('S');
@@ -521,7 +523,7 @@ async function addGeneratedHistoryThroughE23(partHistory) {
     profile: 'E2:S1:PROFILE_START',
     consumeProfileSketch: true,
     axis: 'E2:S1:G3_SW|E2:S1:PROFILE_START[0]',
-    angle: 53,
+    angle: revolveAngle,
     resolution: 'resolution',
     boolean: {
       targets: ['E2'],
@@ -533,7 +535,7 @@ async function addGeneratedHistoryThroughE23(partHistory) {
   const shell = await partHistory.newFeature('O.S');
   Object.assign(shell.inputParams, {
     id: 'O.S17',
-    distance: '-.5',
+    distance: shellDistance,
     faces: ['E2:S1:PROFILE_START_END'],
     replaceOriginalSolid: true,
     debugSeparateRoundedCornerPipe: false,
@@ -621,5 +623,141 @@ export async function test_generated_history_20260609045351_fillet_expanded_repl
   assertNoLiveSolidNamed(partHistory, 'E23', '[generated 20260609045351 pre-fillet replay]');
 
   console.log('✓ Generated history 20260609045351 fillet expansion resolves subtract-result edges');
+  return partHistory;
+}
+
+export async function test_generated_history_20260609074231_outset_fillet_end_caps_merge_into_planar_faces(partHistory) {
+  await addGeneratedHistoryThroughE23(partHistory, {
+    revolveAngle: 69,
+    shellDistance: '-1',
+  });
+  const edgeRefs = [
+    'E23:S22:G1_SW|E23:S22:G2_SW[0]',
+    'E23:S22:G3_SW|E23:S22:G4_SW[0]',
+    'E23:S22:G2_SW|E23:S22:G3_SW[0]',
+    'E23:S22:G1_SW|E23:S22:G4_SW[0]',
+    'E2:S1:G2_SW_START|E2:S1:G3_SW_START[0]',
+  ];
+
+  const fillet = await partHistory.newFeature('F');
+  Object.assign(fillet.inputParams, {
+    id: 'F26',
+    edges: edgeRefs,
+    radius: '.9',
+    resolution: 'resolution',
+    direction: 'AUTO',
+    debug: 'NONE',
+    inflate: 0,
+    nudgeFaceDistance: 0.0001,
+    renameFaces: true,
+  });
+
+  await partHistory.runHistory({ throwOnFeatureError: true });
+  const finalSolid = partHistory.getObjectByName('E2_O.S17');
+  assert(finalSolid, '[generated 20260609074231] Expected final filleted solid E2_O.S17.');
+
+  const faceNames = getSolidFaceNames(finalSolid);
+  const lingeringEndCaps = faceNames.filter((faceName) => {
+    const metadata = typeof finalSolid.getFaceMetadata === 'function'
+      ? finalSolid.getFaceMetadata(faceName) || {}
+      : {};
+    return metadata?.filletEndCap === true && /^F26_FILLET_/.test(faceName) && /_END_CAP_[12]$/.test(faceName);
+  });
+  const boundaries = typeof finalSolid.getBoundaryEdgePolylines === 'function'
+    ? finalSolid.getBoundaryEdgePolylines() || []
+    : [];
+  const lingeringEndCapsOnG3End = lingeringEndCaps.filter((faceName) => (
+    boundaries.some((edge) => (
+      (edge?.faceA === faceName && edge?.faceB === 'E2:S1:G3_SW_END')
+      || (edge?.faceB === faceName && edge?.faceA === 'E2:S1:G3_SW_END')
+    ))
+  ));
+  const lingeringEndCapsOnG3Start = lingeringEndCaps.filter((faceName) => (
+    boundaries.some((edge) => (
+      (edge?.faceA === faceName && edge?.faceB === 'E2:S1:G3_SW_START')
+      || (edge?.faceB === faceName && edge?.faceA === 'E2:S1:G3_SW_START')
+    ))
+  ));
+  const reportedEndCap = 'F26_FILLET_E23_S22_G1_SW_E23_S22_G4_SW_80f5dd68_3_END_CAP_1';
+  const reportedStartEndCap = 'F26_FILLET_E23_S22_G2_SW_E23_S22_G3_SW_1138d474_2_END_CAP_1';
+  assert(
+    !faceNames.includes(reportedEndCap),
+    `[generated 20260609074231] Expected reported fillet end cap ${reportedEndCap} to merge into E2:S1:G3_SW_END; settle=${finalSolid.__filletOutsetEndCapSettleCount} merge=${finalSolid.__filletEndCapMergeCount}`,
+  );
+  assert(
+    !faceNames.includes(reportedStartEndCap),
+    `[generated 20260609074231] Expected reported fillet end cap ${reportedStartEndCap} to merge into E2:S1:G3_SW_START; settle=${finalSolid.__filletOutsetEndCapSettleCount} merge=${finalSolid.__filletEndCapMergeCount}`,
+  );
+  assert(
+    lingeringEndCapsOnG3End.length === 0,
+    `[generated 20260609074231] Expected all F26 end caps adjacent to E2:S1:G3_SW_END to merge; remaining=${lingeringEndCapsOnG3End.join(', ')} settle=${finalSolid.__filletOutsetEndCapSettleCount} merge=${finalSolid.__filletEndCapMergeCount}`,
+  );
+  assert(
+    lingeringEndCapsOnG3Start.length === 0,
+    `[generated 20260609074231] Expected all F26 end caps adjacent to E2:S1:G3_SW_START to merge; remaining=${lingeringEndCapsOnG3Start.join(', ')} settle=${finalSolid.__filletOutsetEndCapSettleCount} merge=${finalSolid.__filletEndCapMergeCount}`,
+  );
+  assert(
+    faceNames.includes('E2:S1:G3_SW_END'),
+    `[generated 20260609074231] Expected adjacent planar face E2:S1:G3_SW_END to survive. Faces: ${faceNames.join(', ')}`,
+  );
+  assert(
+    faceNames.includes('E2:S1:G3_SW_START'),
+    `[generated 20260609074231] Expected adjacent planar face E2:S1:G3_SW_START to survive. Faces: ${faceNames.join(', ')}`,
+  );
+
+  console.log('✓ Generated history 20260609074231 merges outset fillet end caps into planar faces');
+  return partHistory;
+}
+
+export async function buildGeneratedHistory20260609150657(partHistory) {
+  await addGeneratedHistoryThroughE23(partHistory, {
+    revolveAngle: 69,
+    shellDistance: '-1.5',
+  });
+  const fillet = await partHistory.newFeature('F');
+  Object.assign(fillet.inputParams, {
+    id: 'F26',
+    edges: [
+      'E23:S22:G1_SW|E23:S22:G2_SW[0]',
+      'E23:S22:G3_SW|E23:S22:G4_SW[0]',
+      'E23:S22:G2_SW|E23:S22:G3_SW[0]',
+      'E23:S22:G1_SW|E23:S22:G4_SW[0]',
+      'E2:S1:G2_SW_START|E2:S1:G3_SW_START[0]',
+    ],
+    radius: '1',
+    resolution: 'resolution',
+    direction: 'AUTO',
+    debug: 'NONE',
+    inflate: 0,
+    nudgeFaceDistance: 0.0001,
+    renameFaces: true,
+  });
+  return partHistory;
+}
+
+export async function test_generated_history_20260609150657_outset_fillet_start_end_caps_merge_into_planar_face(partHistory) {
+  await buildGeneratedHistory20260609150657(partHistory);
+  await partHistory.runHistory({ throwOnFeatureError: true });
+  const finalSolid = partHistory.getObjectByName('E2_O.S17');
+  assert(finalSolid, '[generated 20260609150657] Expected final filleted solid E2_O.S17.');
+
+  const faceNames = getSolidFaceNames(finalSolid);
+  const expectedMergedEndCaps = [
+    'F26_FILLET_E23_S22_G1_SW_E23_S22_G2_SW_085f311a_0_END_CAP_2',
+    'F26_FILLET_E23_S22_G1_SW_E23_S22_G4_SW_80f5dd68_3_END_CAP_2',
+    'F26_FILLET_E23_S22_G2_SW_E23_S22_G3_SW_1138d474_2_END_CAP_2',
+    'F26_FILLET_E23_S22_G3_SW_E23_S22_G4_SW_0b4b4a76_1_END_CAP_1',
+  ];
+  const remainingExpectedEndCaps = expectedMergedEndCaps.filter((faceName) => faceNames.includes(faceName));
+  assert(
+    remainingExpectedEndCaps.length === 0,
+    `[generated 20260609150657] Expected selected fillet end caps to merge into E2:S1:G3_SW_START; remaining=${remainingExpectedEndCaps.join(', ')} settle=${finalSolid.__filletOutsetEndCapSettleCount} merge=${finalSolid.__filletEndCapMergeCount}`,
+  );
+  assert(
+    faceNames.includes('E2:S1:G3_SW_START'),
+    `[generated 20260609150657] Expected adjacent planar face E2:S1:G3_SW_START to survive. Faces: ${faceNames.join(', ')}`,
+  );
+
+  console.log('✓ Generated history 20260609150657 merges start-side outset fillet end caps into planar face');
   return partHistory;
 }

@@ -521,6 +521,10 @@ function analyzePlanarFaceTriangles(triangles, {
   let sy = 0;
   let sz = 0;
   let totalArea = 0;
+  let referenceNx = 0;
+  let referenceNy = 0;
+  let referenceNz = 0;
+  let hasReferenceNormal = false;
   const vertices = [];
   const pointTol = Math.max(1e-8, Math.abs(Number(pointTolerance) || 0));
   const addUniqueVertex = createUniquePoint3Accumulator(vertices, pointTol);
@@ -547,11 +551,25 @@ function analyzePlanarFaceTriangles(triangles, {
     const twiceArea = Math.hypot(cx, cy, cz);
     if (!(twiceArea > 1e-12)) continue;
 
+    let alignedCx = cx;
+    let alignedCy = cy;
+    let alignedCz = cz;
+    if (!hasReferenceNormal) {
+      referenceNx = cx;
+      referenceNy = cy;
+      referenceNz = cz;
+      hasReferenceNormal = true;
+    } else if (((cx * referenceNx) + (cy * referenceNy) + (cz * referenceNz)) < 0) {
+      alignedCx = -cx;
+      alignedCy = -cy;
+      alignedCz = -cz;
+    }
+
     const area = twiceArea * 0.5;
     totalArea += area;
-    nx += cx * 0.5;
-    ny += cy * 0.5;
-    nz += cz * 0.5;
+    nx += alignedCx * 0.5;
+    ny += alignedCy * 0.5;
+    nz += alignedCz * 0.5;
     sx += ((p1.x + p2.x + p3.x) / 3) * area;
     sy += ((p1.y + p2.y + p3.y) / 3) * area;
     sz += ((p1.z + p2.z + p3.z) / 3) * area;
@@ -587,6 +605,36 @@ function analyzePlanarFaceTriangles(triangles, {
     vertices,
     maxPlaneDistance,
   };
+}
+
+function analyzePlanarFaceTrianglesNearPlane(triangles, referenceAnalysis, {
+  pointTolerance = 1e-6,
+  planarityTolerance = 1e-5,
+  planeDistanceTolerance = 1e-5,
+} = {}) {
+  if (!referenceAnalysis || !Array.isArray(referenceAnalysis.normal)) return null;
+  const tris = Array.isArray(triangles) ? triangles : [];
+  if (tris.length === 0) return null;
+  const planeTol = Math.max(1e-7, Math.abs(Number(planeDistanceTolerance) || 0));
+  const localTriangles = [];
+  for (const tri of tris) {
+    const p1 = toPoint3Object(tri?.p1);
+    const p2 = toPoint3Object(tri?.p2);
+    const p3 = toPoint3Object(tri?.p3);
+    if (!p1 || !p2 || !p3) continue;
+    if (
+      Math.abs(pointDistanceToFacePlane(p1, referenceAnalysis)) <= planeTol
+      && Math.abs(pointDistanceToFacePlane(p2, referenceAnalysis)) <= planeTol
+      && Math.abs(pointDistanceToFacePlane(p3, referenceAnalysis)) <= planeTol
+    ) {
+      localTriangles.push(tri);
+    }
+  }
+  if (localTriangles.length === 0) return null;
+  return analyzePlanarFaceTriangles(localTriangles, {
+    pointTolerance,
+    planarityTolerance,
+  });
 }
 
 function pointDistanceToFacePlane(point, faceAnalysis) {
@@ -740,7 +788,14 @@ function findCoplanarAdjacentFaceForFilletEndCap(solid, endCapFaceName, {
       : {};
     if (neighborMetadata?.filletEndCap === true) continue;
 
-    const neighborAnalysis = getFaceAnalysis(neighborName);
+    let neighborAnalysis = getFaceAnalysis(neighborName);
+    if (!neighborAnalysis) {
+      neighborAnalysis = analyzePlanarFaceTrianglesNearPlane(faceTriangles.get(neighborName), endCapAnalysis, {
+        pointTolerance: Math.max(distanceTolerance * 0.5, 1e-6),
+        planarityTolerance,
+        planeDistanceTolerance: Math.max(distanceTolerance * 4, planarityTolerance, boundaryMatchTolerance),
+      });
+    }
     if (!neighborAnalysis) continue;
     if (!arePlanarFaceAnalysesCoplanar(endCapAnalysis, neighborAnalysis, {
       distanceTolerance,
@@ -788,10 +843,10 @@ function findCoplanarAdjacentFaceForFilletEndCap(solid, endCapFaceName, {
     };
     if (
       !best
-      || candidate.ownershipRank > best.ownershipRank
-      || (candidate.ownershipRank === best.ownershipRank && candidate.sharedLength > best.sharedLength)
-      || (candidate.ownershipRank === best.ownershipRank
-        && candidate.sharedLength === best.sharedLength
+      || candidate.sharedLength > best.sharedLength
+      || (candidate.sharedLength === best.sharedLength && candidate.ownershipRank > best.ownershipRank)
+      || (candidate.sharedLength === best.sharedLength
+        && candidate.ownershipRank === best.ownershipRank
         && candidate.area > best.area)
     ) {
       best = candidate;
@@ -811,8 +866,10 @@ function mergeCoplanarAdjacentFilletEndCaps(solid, opts = {}) {
   const logProcess = !!opts?.consoleLogProcess || debug;
   const nudgeDistance = Math.abs(Number(opts?.nudgeFaceDistance) || 0);
   const solidTol = deriveSolidToleranceFromVerts(solid, 1e-5);
-  const distanceTolerance = Math.max(solidTol * 4, 2e-4, nudgeDistance * 3);
-  const planarityTolerance = Math.max(distanceTolerance * 2, 2e-4, nudgeDistance * 4);
+  const minimumDistanceTolerance = Math.max(0.001, Math.abs(Number(opts?.minimumDistanceTolerance) || 0));
+  const minimumPlanarityTolerance = Math.max(0.002, Math.abs(Number(opts?.minimumPlanarityTolerance) || 0));
+  const distanceTolerance = Math.max(solidTol * 12, minimumDistanceTolerance, nudgeDistance * 6);
+  const planarityTolerance = Math.max(distanceTolerance * 4, minimumPlanarityTolerance, nudgeDistance * 10);
   const normalTolerance = Math.max(1e-6, Math.abs(Number(opts?.normalTolerance) || 2e-4));
   const core = getSyncedCppSolidCore(solid);
   let mergedEndCaps = 0;
@@ -830,11 +887,11 @@ function mergeCoplanarAdjacentFilletEndCaps(solid, opts = {}) {
       });
     if (endCapFaceNames.length === 0) break;
 
-    let mergedThisPass = false;
     const mergeContext = createCoplanarEndCapMergeContext(solid, {
       planarityTolerance,
       distanceTolerance,
     });
+    const mergeCandidates = [];
     for (const endCapFaceName of endCapFaceNames) {
       const target = findCoplanarAdjacentFaceForFilletEndCap(solid, endCapFaceName, {
         featureID,
@@ -844,7 +901,24 @@ function mergeCoplanarAdjacentFilletEndCaps(solid, opts = {}) {
         context: mergeContext,
       });
       if (!target?.faceName) continue;
+      mergeCandidates.push({ endCapFaceName, target });
+    }
+    if (mergeCandidates.length === 0) break;
+    if (debug && mergeCandidates.length !== endCapFaceNames.length) {
+      console.log('[Solid.fillet] Some fillet end caps had no coplanar merge candidate.', {
+        featureID,
+        pass,
+        endCapCount: endCapFaceNames.length,
+        candidateCount: mergeCandidates.length,
+        missing: endCapFaceNames.filter((name) => !mergeCandidates.some((candidate) => candidate.endCapFaceName === name)),
+        distanceTolerance,
+        planarityTolerance,
+        normalTolerance,
+      });
+    }
 
+    let mergedThisPass = false;
+    for (const { endCapFaceName, target } of mergeCandidates) {
       const targetMetadata = cloneFaceMetadataObject(core.getFaceMetadata(target.faceName) || {});
       if (logProcess) {
         console.log('[Solid.fillet] Renaming fillet face.', {
@@ -899,10 +973,14 @@ function mergeCoplanarAdjacentFilletEndCaps(solid, opts = {}) {
           normalTolerance,
         });
       }
-      break;
     }
 
     if (!mergedThisPass) break;
+    syncSolidAuthoringStateFromCpp(solid, core);
+    solid._dirty = true;
+    solid._faceIndex = null;
+    try { if (solid._manifold && typeof solid._manifold.delete === 'function') solid._manifold.delete(); } catch { }
+    solid._manifold = null;
   }
 
   return {
@@ -910,6 +988,287 @@ function mergeCoplanarAdjacentFilletEndCaps(solid, opts = {}) {
     distanceTolerance,
     planarityTolerance,
     normalTolerance,
+  };
+}
+
+function collectFaceVertexIndicesFromAuthoringState(solid, faceName) {
+  const tv = Array.isArray(solid?._triVerts) ? solid._triVerts : null;
+  const ids = Array.isArray(solid?._triIDs) ? solid._triIDs : null;
+  const faceToId = solid?._faceNameToID instanceof Map ? solid._faceNameToID : null;
+  if (!tv || !ids || !faceToId || !faceName) return [];
+  const faceIDRaw = faceToId.get(faceName);
+  if (!Number.isFinite(Number(faceIDRaw))) return [];
+  const faceID = faceIDRaw >>> 0;
+  const triCount = Math.min(ids.length, (tv.length / 3) | 0);
+  const vertices = new Set();
+  for (let triIndex = 0; triIndex < triCount; triIndex += 1) {
+    if ((ids[triIndex] >>> 0) !== faceID) continue;
+    const base = triIndex * 3;
+    vertices.add(tv[base + 0] >>> 0);
+    vertices.add(tv[base + 1] >>> 0);
+    vertices.add(tv[base + 2] >>> 0);
+  }
+  return Array.from(vertices);
+}
+
+function invalidateSolidAuthoringAfterVertexMutation(solid) {
+  if (!solid) return;
+  const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : null;
+  if (vp) {
+    const stride = Math.max(3, Number(solid?._numProp ?? 3) || 3);
+    solid._vertKeyToIndex = new Map();
+    for (let i = 0; i + 2 < vp.length; i += stride) {
+      solid._vertKeyToIndex.set(`${vp[i]},${vp[i + 1]},${vp[i + 2]}`, (i / stride) | 0);
+    }
+  }
+  solid._faceIndex = null;
+  solid._dirty = true;
+  try { if (solid._manifold && typeof solid._manifold.delete === 'function') solid._manifold.delete(); } catch { }
+  solid._manifold = null;
+  solid._cppSolidCoreSyncStamp = null;
+}
+
+function findNearlyCoplanarAdjacentFaceForFilletEndCap(solid, endCapFaceName, {
+  featureID = '',
+  context = null,
+  maxProjectionDistance = 0.002,
+  normalTolerance = 2e-4,
+} = {}) {
+  if (!solid || !endCapFaceName || !context) return null;
+  const {
+    faceTriangles,
+    getFaceAnalysis,
+    getBoundarySegments,
+    getNativeSharedLength,
+    minSharedBoundaryLength,
+    boundaryMatchTolerance,
+    boundaryDirectionTolerance,
+  } = context;
+
+  const endCapAnalysis = getFaceAnalysis(endCapFaceName);
+  if (!endCapAnalysis) return null;
+  const endCapBoundarySegments = getBoundarySegments(endCapFaceName);
+  const featureToken = String(featureID || '').trim();
+  const projectionLimit = Math.max(1e-7, Math.abs(Number(maxProjectionDistance) || 0));
+  const normalTol = Math.max(1e-8, Math.abs(Number(normalTolerance) || 0));
+  let best = null;
+
+  for (const neighborName of faceTriangles.keys()) {
+    if (!neighborName || neighborName === endCapFaceName) continue;
+    const neighborMetadata = (typeof solid.getFaceMetadata === 'function')
+      ? (solid.getFaceMetadata(neighborName) || {})
+      : {};
+    if (neighborMetadata?.filletEndCap === true) continue;
+
+    let neighborAnalysis = getFaceAnalysis(neighborName);
+    if (!neighborAnalysis) {
+      neighborAnalysis = analyzePlanarFaceTrianglesNearPlane(faceTriangles.get(neighborName), endCapAnalysis, {
+        pointTolerance: Math.max(projectionLimit * 0.5, 1e-6),
+        planarityTolerance: Math.max(projectionLimit, boundaryMatchTolerance),
+        planeDistanceTolerance: Math.max(projectionLimit, boundaryMatchTolerance),
+      });
+    }
+    if (!neighborAnalysis) continue;
+    const normalA = Array.isArray(endCapAnalysis.normal) ? endCapAnalysis.normal : null;
+    const normalB = Array.isArray(neighborAnalysis.normal) ? neighborAnalysis.normal : null;
+    if (!normalA || !normalB) continue;
+    const dot = Math.abs(
+      (normalA[0] * normalB[0])
+      + (normalA[1] * normalB[1])
+      + (normalA[2] * normalB[2]),
+    );
+    if ((1 - dot) > normalTol) continue;
+
+    const nativeSharedLength = getNativeSharedLength(endCapFaceName, neighborName);
+    let sharedLength = nativeSharedLength;
+    if (endCapBoundarySegments.length > 0) {
+      const neighborBoundarySegments = getBoundarySegments(neighborName);
+      if (neighborBoundarySegments.length > 0) {
+        sharedLength = Math.max(
+          sharedLength,
+          computeSharedBoundaryLength(endCapBoundarySegments, neighborBoundarySegments, {
+            matchTolerance: boundaryMatchTolerance,
+            directionTolerance: boundaryDirectionTolerance,
+          }),
+        );
+      }
+    }
+    if (!(sharedLength > minSharedBoundaryLength)) continue;
+
+    let maxAbsPlaneDistance = 0;
+    let totalAbsPlaneDistance = 0;
+    const vertices = Array.isArray(endCapAnalysis.vertices) ? endCapAnalysis.vertices : [];
+    if (vertices.length === 0) continue;
+    for (const vertex of vertices) {
+      const distance = Math.abs(pointDistanceToFacePlane(vertex, neighborAnalysis));
+      if (distance > maxAbsPlaneDistance) maxAbsPlaneDistance = distance;
+      totalAbsPlaneDistance += distance;
+      if (distance > projectionLimit) break;
+    }
+    if (maxAbsPlaneDistance > projectionLimit) continue;
+
+    const neighborFeatureId = String(
+      neighborMetadata?.sourceFeatureId
+      || neighborMetadata?.featureID
+      || '',
+    ).trim();
+    const ownershipRank = (
+      featureToken
+      && neighborFeatureId
+      && neighborFeatureId !== featureToken
+    ) || (
+      featureToken
+      && !String(neighborName || '').startsWith(`${featureToken}_`)
+    )
+      ? 1
+      : 0;
+
+    const candidate = {
+      faceName: neighborName,
+      sharedLength,
+      area: Number(neighborAnalysis.area) || 0,
+      ownershipRank,
+      maxAbsPlaneDistance,
+      totalAbsPlaneDistance,
+      targetAnalysis: neighborAnalysis,
+    };
+    if (
+      !best
+      || candidate.sharedLength > best.sharedLength
+      || (candidate.sharedLength === best.sharedLength && candidate.ownershipRank > best.ownershipRank)
+      || (candidate.sharedLength === best.sharedLength
+        && candidate.ownershipRank === best.ownershipRank
+        && candidate.maxAbsPlaneDistance < best.maxAbsPlaneDistance)
+      || (candidate.sharedLength === best.sharedLength
+        && candidate.ownershipRank === best.ownershipRank
+        && candidate.maxAbsPlaneDistance === best.maxAbsPlaneDistance
+        && candidate.totalAbsPlaneDistance < best.totalAbsPlaneDistance)
+      || (candidate.sharedLength === best.sharedLength
+        && candidate.ownershipRank === best.ownershipRank
+        && candidate.maxAbsPlaneDistance === best.maxAbsPlaneDistance
+        && candidate.totalAbsPlaneDistance === best.totalAbsPlaneDistance
+        && candidate.area > best.area)
+    ) {
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+function settleOutsetFilletEndCapsTowardPlanarNeighbors(solid, opts = {}) {
+  const outsetEndCapFaceNames = opts?.outsetEndCapFaceNames instanceof Set
+    ? opts.outsetEndCapFaceNames
+    : new Set(Array.isArray(opts?.outsetEndCapFaceNames) ? opts.outsetEndCapFaceNames : []);
+  if (!solid || outsetEndCapFaceNames.size === 0 || !Array.isArray(solid?._vertProperties)) {
+    return { settledFaces: 0, movedVertices: 0, maxProjectionDistance: 0 };
+  }
+
+  const featureID = String(opts?.featureID || '').trim();
+  const debug = !!opts?.debug;
+  const nudgeDistance = Math.abs(Number(opts?.nudgeFaceDistance) || 0);
+  const radius = Math.abs(Number(opts?.radius) || 0);
+  const solidTol = deriveSolidToleranceFromVerts(solid, 1e-5);
+  const baseDistanceTolerance = Math.max(solidTol * 12, 0.001, nudgeDistance * 6);
+  const basePlanarityTolerance = Math.max(baseDistanceTolerance * 4, 0.002, nudgeDistance * 10);
+  const maxSettleDistance = Math.max(
+    Number.isFinite(Number(opts?.maxSettleDistance)) ? Math.abs(Number(opts.maxSettleDistance)) : 0,
+    nudgeDistance * 300,
+    radius * 0.03,
+    solidTol * 1200,
+    0.025,
+  );
+  const relaxedDistanceTolerance = Math.max(baseDistanceTolerance, maxSettleDistance * 3);
+  const relaxedPlanarityTolerance = Math.max(basePlanarityTolerance, maxSettleDistance * 5);
+  const normalTolerance = Math.max(1e-6, Math.abs(Number(opts?.normalTolerance) || 1e-3));
+  const mergeContext = createCoplanarEndCapMergeContext(solid, {
+    planarityTolerance: relaxedPlanarityTolerance,
+    distanceTolerance: relaxedDistanceTolerance,
+  });
+  if (!mergeContext) return { settledFaces: 0, movedVertices: 0, maxProjectionDistance: 0 };
+
+  const vp = solid._vertProperties;
+  const vertexStride = Math.max(3, Number(solid?._numProp ?? 3) || 3);
+  let settledFaces = 0;
+  let movedVertices = 0;
+  let maxProjectionDistance = 0;
+  const details = [];
+
+  for (const rawFaceName of outsetEndCapFaceNames) {
+    const faceName = String(rawFaceName || '').trim();
+    if (!faceName) continue;
+    const metadata = (typeof solid.getFaceMetadata === 'function') ? (solid.getFaceMetadata(faceName) || {}) : {};
+    if (metadata?.filletEndCap !== true) continue;
+
+    const target = findNearlyCoplanarAdjacentFaceForFilletEndCap(solid, faceName, {
+      featureID,
+      context: mergeContext,
+      maxProjectionDistance: maxSettleDistance,
+      normalTolerance,
+    });
+    if (!target?.faceName || !target?.targetAnalysis) continue;
+    const normal = target.targetAnalysis.normal;
+    const planeOffset = Number(target.targetAnalysis.planeOffset || 0);
+    if (!Array.isArray(normal) || normal.length < 3) continue;
+
+    const vertexIndices = collectFaceVertexIndicesFromAuthoringState(solid, faceName);
+    if (vertexIndices.length === 0) continue;
+    let movedThisFace = 0;
+    let maxFaceProjectionDistance = 0;
+    for (const vertexIndex of vertexIndices) {
+      const base = vertexIndex * vertexStride;
+      if (base + 2 >= vp.length) continue;
+      const signedDistance = (
+        (normal[0] * (Number(vp[base + 0]) || 0))
+        + (normal[1] * (Number(vp[base + 1]) || 0))
+        + (normal[2] * (Number(vp[base + 2]) || 0))
+        - planeOffset
+      );
+      const absDistance = Math.abs(signedDistance);
+      if (absDistance > maxSettleDistance) continue;
+      if (absDistance > maxFaceProjectionDistance) maxFaceProjectionDistance = absDistance;
+      if (absDistance <= 1e-10) continue;
+      vp[base + 0] -= signedDistance * normal[0];
+      vp[base + 1] -= signedDistance * normal[1];
+      vp[base + 2] -= signedDistance * normal[2];
+      movedThisFace += 1;
+    }
+    if (movedThisFace <= 0) continue;
+    settledFaces += 1;
+    movedVertices += movedThisFace;
+    if (maxFaceProjectionDistance > maxProjectionDistance) maxProjectionDistance = maxFaceProjectionDistance;
+    details.push({
+      faceName,
+      targetFaceName: target.faceName,
+      sharedLength: target.sharedLength,
+      movedVertices: movedThisFace,
+      maxProjectionDistance: maxFaceProjectionDistance,
+    });
+  }
+
+  if (settledFaces > 0) {
+    invalidateSolidAuthoringAfterVertexMutation(solid);
+    if (debug) {
+      console.log('[Solid.fillet] Settled outset fillet end caps toward planar neighbors.', {
+        featureID,
+        settledFaces,
+        movedVertices,
+        maxProjectionDistance,
+        maxSettleDistance,
+        relaxedDistanceTolerance,
+        relaxedPlanarityTolerance,
+        details,
+      });
+    }
+  }
+
+  return {
+    settledFaces,
+    movedVertices,
+    maxProjectionDistance,
+    maxSettleDistance,
+    relaxedDistanceTolerance,
+    relaxedPlanarityTolerance,
+    details,
   };
 }
 
@@ -1932,8 +2291,32 @@ function reassignTinyFilletSidewallSliverTriangles(solid, opts = {}) {
 
 export { reversePostBooleanFilletEndCapNudge as __testOnlyReversePostBooleanFilletEndCapNudge };
 export { mergeCoplanarAdjacentFilletEndCaps as __testOnlyMergeCoplanarAdjacentFilletEndCaps };
+export { settleOutsetFilletEndCapsTowardPlanarNeighbors as __testOnlySettleOutsetFilletEndCapsTowardPlanarNeighbors };
 export { reassignTinyFilletSidewallSliverTriangles as __testOnlyReassignTinyFilletSidewallSliverTriangles };
 export { collapseFilletSideWallFaces as __testOnlyCollapseFilletSideWallFaces };
+
+function collectOutsetFilletEndCapFaceNames(nativeResult, edgePayload, directionMode) {
+  const out = new Set();
+  const addEntryName = (name) => {
+    const baseName = String(name || '').trim();
+    if (!baseName) return;
+    out.add(`${baseName}_END_CAP_1`);
+    out.add(`${baseName}_END_CAP_2`);
+  };
+  const summaries = Array.isArray(nativeResult?.entrySummaries) ? nativeResult.entrySummaries : [];
+  for (const summary of summaries) {
+    if (summary?.cornerBridge === true) continue;
+    const direction = String(summary?.edgeDirection || '').toUpperCase();
+    if (direction !== 'OUTSET') continue;
+    addEntryName(summary?.name);
+  }
+  if (out.size === 0 && String(directionMode || '').toUpperCase() === 'OUTSET') {
+    for (const entry of Array.isArray(edgePayload) ? edgePayload : []) {
+      addEntryName(entry?.name);
+    }
+  }
+  return out;
+}
 
 /**
  * Apply fillets to this Solid and return a new Solid with the result.
@@ -2100,6 +2483,10 @@ export async function fillet(opts = {}) {
   try {
     result.__filletCornerBridgeCount = Math.max(0, Number(nativeResult?.entryCount || 0) - edgePayload.length);
   } catch { }
+  const outsetEndCapFaceNames = collectOutsetFilletEndCapFaceNames(nativeResult, edgePayload, directionMode);
+  try {
+    result.__filletOutsetEndCapFaceNames = Array.from(outsetEndCapFaceNames);
+  } catch { }
   result.__filletEndCapReverseNudgeEnabled = reverseEndCapNudge;
   if (reverseEndCapNudge) {
     try {
@@ -2117,6 +2504,51 @@ export async function fillet(opts = {}) {
   } else {
     result.__filletEndCapReverseNudgeCount = 0;
   }
+  let endCapMergeNudgeDistance = nudgeFaceDistance;
+  let endCapMergeMinimumDistanceTolerance = 0;
+  let endCapMergeMinimumPlanarityTolerance = 0;
+  result.__filletOutsetEndCapSettleEnabled = mergeCoplanarEndCaps && outsetEndCapFaceNames.size > 0;
+  if (mergeCoplanarEndCaps && outsetEndCapFaceNames.size > 0) {
+    try {
+      const outsetSettleSummary = settleOutsetFilletEndCapsTowardPlanarNeighbors(result, {
+        featureID,
+        radius,
+        debug: logProcess,
+        nudgeFaceDistance,
+        outsetEndCapFaceNames,
+      });
+      result.__filletOutsetEndCapSettleCount = Math.max(0, Number(outsetSettleSummary?.settledFaces || 0));
+      result.__filletOutsetEndCapSettleVertexCount = Math.max(0, Number(outsetSettleSummary?.movedVertices || 0));
+      result.__filletOutsetEndCapSettleMaxDistance = Math.max(0, Number(outsetSettleSummary?.maxProjectionDistance || 0));
+      if (result.__filletOutsetEndCapSettleCount > 0) {
+        const settledMergeDistanceTolerance = Math.max(
+          0.008,
+          Math.min(0.03, result.__filletOutsetEndCapSettleMaxDistance * 2),
+        );
+        endCapMergeMinimumDistanceTolerance = Math.max(
+          endCapMergeMinimumDistanceTolerance,
+          settledMergeDistanceTolerance,
+        );
+        endCapMergeMinimumPlanarityTolerance = Math.max(
+          endCapMergeMinimumPlanarityTolerance,
+          0.03,
+          Math.min(0.12, endCapMergeMinimumDistanceTolerance * 4),
+        );
+      }
+    } catch (error) {
+      console.warn('[Solid.fillet] Failed to settle outset fillet end caps before merge.', {
+        featureID,
+        error: error?.message || error,
+      });
+      result.__filletOutsetEndCapSettleCount = 0;
+      result.__filletOutsetEndCapSettleVertexCount = 0;
+      result.__filletOutsetEndCapSettleMaxDistance = 0;
+    }
+  } else {
+    result.__filletOutsetEndCapSettleCount = 0;
+    result.__filletOutsetEndCapSettleVertexCount = 0;
+    result.__filletOutsetEndCapSettleMaxDistance = 0;
+  }
   result.__filletEndCapMergeEnabled = mergeCoplanarEndCaps;
   if (mergeCoplanarEndCaps) {
     try {
@@ -2124,7 +2556,9 @@ export async function fillet(opts = {}) {
         featureID,
         debug: logProcess,
         consoleLogProcess: logProcess,
-        nudgeFaceDistance,
+        nudgeFaceDistance: endCapMergeNudgeDistance,
+        minimumDistanceTolerance: endCapMergeMinimumDistanceTolerance,
+        minimumPlanarityTolerance: endCapMergeMinimumPlanarityTolerance,
       });
       result.__filletEndCapMergeCount = Math.max(0, Number(endCapMergeSummary?.mergedEndCaps || 0));
     } catch (error) {

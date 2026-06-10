@@ -6624,6 +6624,18 @@ emscripten::val BuildFilletAuthoringState(const emscripten::val& options) {
   result.set("finalSnapshot", final_snapshot);
   result.set("directionDecision", batch_result["directionDecision"]);
   result.set("entryCount", static_cast<uint32_t>(built_entries.size()));
+  emscripten::val entry_summaries = emscripten::val::array();
+  uint32_t entry_summary_index = 0;
+  for (const BuiltFilletEntry& entry : built_entries) {
+    emscripten::val summary = emscripten::val::object();
+    summary.set("name", entry.fillet_name);
+    summary.set("edgeReference", entry.edge_reference);
+    summary.set("edgeDirection", entry.edge_direction);
+    summary.set("directionReason", entry.direction_reason);
+    summary.set("cornerBridge", entry.corner_bridge);
+    entry_summaries.set(entry_summary_index++, summary);
+  }
+  result.set("entrySummaries", entry_summaries);
   result.set("nativeKernel", true);
   if (profile) {
     emscripten::val extra = emscripten::val::object();
