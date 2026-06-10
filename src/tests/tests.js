@@ -384,10 +384,14 @@ import {
     test_pmi_monochrome_label_svg_uses_backdrop_color,
 } from './test_pmiViewsWidget.js';
 import {
+    test_feature_dimension_annotation_builder_dispatches_registered_primitive,
+    test_reference_snapshot_store_uses_generic_reference_snapshots_key,
     test_feature_dimension_effect_reference_resolves_consumed_profile_and_axis,
     test_feature_dimension_overlay_supports_port,
+    test_feature_dimension_registry_support_and_transform_toggle_agree,
     test_part_history_prevent_remove_survives_multi_child_scene_clear,
     test_port_extension_annotation_geometry_preserves_extension_value,
+    test_transform_control_scene_binding_readds_and_removes_overlay_roots,
 } from './test_featureDimensionOverlay.js';
 import {
     test_port_definition_uses_transform_reference_and_direction_reference,
@@ -648,8 +652,12 @@ export const testFunctions = [
     { test: test_primitiveTorus, afterRun: afterRun_primitiveTorus, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_primitiveSphere, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_feature_dimension_overlay_supports_port, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_feature_dimension_registry_support_and_transform_toggle_agree, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_feature_dimension_annotation_builder_dispatches_registered_primitive, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_reference_snapshot_store_uses_generic_reference_snapshots_key, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_feature_dimension_effect_reference_resolves_consumed_profile_and_axis, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_part_history_prevent_remove_survives_multi_child_scene_clear, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_transform_control_scene_binding_readds_and_removes_overlay_roots, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_port_extension_annotation_geometry_preserves_extension_value, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_transform_reference_sanitize_preserves_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_transform_reference_base_uses_face_pick_point, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

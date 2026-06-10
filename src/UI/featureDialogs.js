@@ -3,6 +3,25 @@
 import * as THREE from 'three';
 import { Line2, LineGeometry, LineMaterial } from 'three/examples/jsm/Addons.js';
 import { SelectionFilter } from './SelectionFilter.js';
+import {
+    buildReferenceSnapshot,
+    ensureReferenceSnapshotBucket,
+    extractEdgeWorldPositions as extractReferenceSnapshotEdgeWorldPositions,
+    isReferenceSnapshotUsable,
+    normalizeReferenceSnapshotName,
+} from './referenceSnapshotStore.js';
+import {
+    allowSceneOverlayRemoval,
+    markSceneOverlayObject,
+} from './sceneOverlayUtils.js';
+import {
+    addTransformControlToScene,
+    getTransformControlSceneGroup,
+    markTransformControlTarget,
+    refreshTransformControlSceneOverlay,
+    removeTransformControlSceneObjects,
+    restoreTransformControlSceneObjects,
+} from './transformControlSceneBinding.js';
 // Use hybrid translate+rotate gizmo used by the Viewer
 import { CombinedTransformControls } from './controls/CombinedTransformControls.js';
 import { getWidgetRenderer } from './featureDialogWidgets/index.js';
@@ -13,18 +32,18 @@ import {
 } from '../utils/transformReferenceUtils.js';
 import { Solid } from '../BREP/BetterSolid.js';
 import { applySolidAuthoringStateSnapshot } from '../BREP/CppSolidCore.js';
+import { supportsTransformDimensionToggle as supportsFeatureTransformDimensionToggle } from './featureDimensions/FeatureDimensionRegistry.js';
 const REF_PREVIEW_COLORS = {
     EDGE: '#ff00ff',
     FACE: '#ffc400',
     PLANE: '#2eff2e',
     VERTEX: '#00ffff',
 };
-const FEATURE_DIMENSION_TOGGLEABLE_TYPES = new Set(['P.CU', 'P.CY', 'P.CO', 'P.S', 'P.PY', 'P.T', 'E', 'R', 'PORT']);
 
 function supportsTransformDimensionToggle(entry = null, fieldKey = null) {
     if (String(fieldKey || '') !== 'transform') return false;
-    const type = String(entry?.type || '').trim().toUpperCase();
-    return FEATURE_DIMENSION_TOGGLEABLE_TYPES.has(type);
+    const type = String(entry?.constructor?.shortName || entry?.type || entry?.inputParams?.type || '').trim().toUpperCase();
+    return supportsFeatureTransformDimensionToggle(type);
 }
 
 
@@ -92,11 +111,7 @@ export class SchemaForm {
         try {
             // Detach and dispose controls
             s.controls.detach();
-            if (s.viewer && s.viewer.scene) {
-                try { if (s.controls && s.controls.isObject3D) s.viewer.scene.remove(s.controls); } catch (_) { }
-                try { if (s.controls && s.controls.__helper && s.controls.__helper.isObject3D) s.viewer.scene.remove(s.controls.__helper); } catch (_) { }
-                try { if (s.group && s.group.isObject3D) s.viewer.scene.remove(s.group); } catch (_) { }
-            }
+            removeTransformControlSceneObjects(s);
             try { s.controls.dispose(); } catch (_) { }
         } catch (_) { }
         try {
@@ -114,10 +129,6 @@ export class SchemaForm {
             if (controlsSource && s.controlsChangeHandler && typeof controlsSource.removeEventListener === 'function') {
                 controlsSource.removeEventListener('change', s.controlsChangeHandler);
             }
-        } catch (_) { }
-        try {
-            // Remove target object
-            if (s.viewer && s.viewer.scene && s.target) s.viewer.scene.remove(s.target);
         } catch (_) { }
         try { if (window.__BREP_activeXform) window.__BREP_activeXform = null; } catch (_) { }
         try {
@@ -247,12 +258,7 @@ export class SchemaForm {
             });
         } catch (_) { }
         for (const ghost of ghosts) {
-            try {
-                ghost.traverse?.((obj) => {
-                    try { if (obj.userData) obj.userData.preventRemove = false; } catch (_) { }
-                });
-            } catch (_) { }
-            try { if (ghost.userData) ghost.userData.preventRemove = false; } catch (_) { }
+            allowSceneOverlayRemoval(ghost, { deep: true });
             try {
                 if (ghost.parent && typeof ghost.parent.remove === 'function') ghost.parent.remove(ghost);
                 else if (typeof scene.remove === 'function') scene.remove(ghost);
@@ -803,62 +809,16 @@ export class SchemaForm {
         if (!entry.persistentData || typeof entry.persistentData !== 'object') {
             entry.persistentData = {};
         }
-        if (!entry.persistentData.__refPreviewSnapshots || typeof entry.persistentData.__refPreviewSnapshots !== 'object') {
-            entry.persistentData.__refPreviewSnapshots = {};
-        }
         const key = (inputEl?.dataset?.key || inputEl?.dataset?.refKey || inputEl?.__refPreviewKey || '__default');
-        if (!entry.persistentData.__refPreviewSnapshots[key] || typeof entry.persistentData.__refPreviewSnapshots[key] !== 'object') {
-            entry.persistentData.__refPreviewSnapshots[key] = {};
-        }
-        return entry.persistentData.__refPreviewSnapshots[key];
+        return ensureReferenceSnapshotBucket(entry.persistentData, key);
     }
 
     _resolveReferencePreviewName(obj) {
-        if (!obj) return null;
-        const raw = obj.name != null ? String(obj.name).trim() : '';
-        if (raw) return raw;
-        const type = obj.type || 'OBJECT';
-        const pos = obj.position || {};
-        const x = Number.isFinite(pos.x) ? pos.x : 0;
-        const y = Number.isFinite(pos.y) ? pos.y : 0;
-        const z = Number.isFinite(pos.z) ? pos.z : 0;
-        return `${type}(${x},${y},${z})`;
+        return normalizeReferenceSnapshotName(obj);
     }
 
     _extractEdgeWorldPositions(obj) {
-        if (!obj) return [];
-        try {
-            if (typeof obj.points === 'function') {
-                const pts = obj.points(true);
-                if (Array.isArray(pts) && pts.length) {
-                    const flat = [];
-                    for (const p of pts) {
-                        if (!p) continue;
-                        const x = Number(p.x);
-                        const y = Number(p.y);
-                        const z = Number(p.z);
-                        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
-                        flat.push(x, y, z);
-                    }
-                    if (flat.length >= 6) return flat;
-                }
-            }
-        } catch (_) { /* ignore */ }
-
-        try {
-            const geom = obj.geometry;
-            const pos = geom && typeof geom.getAttribute === 'function' ? geom.getAttribute('position') : null;
-            if (!pos || pos.itemSize !== 3 || pos.count < 2) return [];
-            const tmp = new THREE.Vector3();
-            const flat = [];
-            for (let i = 0; i < pos.count; i++) {
-                tmp.set(pos.getX(i), pos.getY(i), pos.getZ(i));
-                tmp.applyMatrix4(obj.matrixWorld);
-                flat.push(tmp.x, tmp.y, tmp.z);
-            }
-            return flat.length >= 6 ? flat : [];
-        } catch (_) { /* ignore */ }
-        return [];
+        return extractReferenceSnapshotEdgeWorldPositions(obj);
     }
 
     _syncPreviewLineResolution(mat) {
@@ -1001,17 +961,6 @@ export class SchemaForm {
         return obj;
     }
 
-    _getOwningFeatureIdForObject(obj) {
-        let cur = obj;
-        let guard = 0;
-        while (cur && guard < 8) {
-            if (cur.owningFeatureID != null) return cur.owningFeatureID;
-            cur = cur.parent || null;
-            guard += 1;
-        }
-        return null;
-    }
-
     _buildEdgePreviewFromObject(obj, refName, colorHex = REF_PREVIEW_COLORS.EDGE) {
         if (!obj) return null;
         const positions = this._extractEdgeWorldPositions(obj);
@@ -1025,34 +974,6 @@ export class SchemaForm {
         try { if (line.material && typeof line.material.dashed !== 'undefined') line.material.dashed = false; } catch (_) { }
         line.type = 'REF_PREVIEW_EDGE';
         return this._configurePreviewObject(line, refName, 'EDGE');
-    }
-
-    _extractFaceEdgePositions(face) {
-        if (!face) return [];
-        const out = [];
-        const addEdge = (edge) => {
-            const positions = this._extractEdgeWorldPositions(edge);
-            if (positions && positions.length >= 6) out.push(positions);
-        };
-
-        if (Array.isArray(face.edges) && face.edges.length) {
-            for (const edge of face.edges) addEdge(edge);
-            return out;
-        }
-
-        const faceName = face?.name || face?.userData?.faceName || null;
-        const parentSolid = face?.parentSolid || face?.userData?.parentSolid || face?.parent || null;
-        if (!faceName || !parentSolid || !Array.isArray(parentSolid.children)) return out;
-
-        for (const child of parentSolid.children) {
-            if (!child || child.type !== SelectionFilter.EDGE) continue;
-            const faceA = child?.userData?.faceA || null;
-            const faceB = child?.userData?.faceB || null;
-            if (faceA === faceName || faceB === faceName) {
-                addEdge(child);
-            }
-        }
-        return out;
     }
 
     _buildReferencePreviewObject(obj, refName) {
@@ -1167,12 +1088,8 @@ export class SchemaForm {
         }
         const group = new THREE.Group();
         try { group.name = `__REF_PREVIEW_GROUP__${inputEl?.dataset?.key || ''}`; } catch (_) { }
-        try {
-            group.userData = group.userData || {};
-            group.userData.preventRemove = true;
-            group.userData.excludeFromFit = true;
-            group.userData.refPreview = true;
-        } catch (_) { }
+        markSceneOverlayObject(group, { preserve: true, overlayType: 'referencePreview' });
+        try { group.userData.refPreview = true; } catch (_) { }
         try { group.renderOrder = 10040; } catch (_) { }
         try { group.raycast = () => { }; } catch (_) { }
         inputEl.__refPreviewGroup = group;
@@ -1183,7 +1100,7 @@ export class SchemaForm {
     _removeReferencePreviewGroup(inputEl) {
         const group = inputEl?.__refPreviewGroup;
         if (!group || !group.isObject3D) return;
-        try { if (group.userData) group.userData.preventRemove = false; } catch (_) { }
+        allowSceneOverlayRemoval(group, { deep: true });
         try { if (group.parent) group.parent.remove(group); } catch (_) { }
     }
 
@@ -1332,14 +1249,16 @@ export class SchemaForm {
             if (!cache) return;
             const ghost = this._buildReferencePreviewObject(obj, refName);
             if (!ghost) return;
-            const sourceUuid = obj.uuid || null;
-            const sourceFeatureId = this._getOwningFeatureIdForObject(obj);
-            const sourceTimestamp = (obj.timestamp ?? obj.userData?.timestamp ?? null);
+            const snapshot = buildReferenceSnapshot(obj);
+            const sourceFeatureId = snapshot?.sourceFeatureId ?? null;
+            const sourceUuid = snapshot?.sourceUuid ?? obj.uuid ?? null;
+            const sourceTimestamp = snapshot?.sourceTimestamp ?? (obj.timestamp ?? obj.userData?.timestamp ?? null);
             const objType = String(obj.type || '').toUpperCase();
-            const isEdge = objType === SelectionFilter.EDGE || objType === 'EDGE';
+            const snapshotType = String(snapshot?.type || objType).toUpperCase();
+            const isEdge = snapshotType === 'EDGE';
             cache.set(refName, {
                 object: ghost,
-                type: obj.type || null,
+                type: snapshot?.type || obj.type || null,
                 sourceUuid,
                 sourceFeatureId,
                 sourceTimestamp,
@@ -1347,21 +1266,7 @@ export class SchemaForm {
             });
             try {
                 const store = this._getReferencePreviewPersistentBucket(inputEl);
-                if (store) {
-                    if (objType === SelectionFilter.EDGE || objType === 'EDGE') {
-                        const positions = this._extractEdgeWorldPositions(obj);
-                        if (positions && positions.length >= 6) {
-                            store[refName] = { type: 'EDGE', positions, sourceUuid, sourceFeatureId, sourceTimestamp };
-                        }
-                    } else if (objType === SelectionFilter.VERTEX || objType === 'VERTEX') {
-                        const pos = new THREE.Vector3();
-                        try {
-                            if (typeof obj.getWorldPosition === 'function') obj.getWorldPosition(pos);
-                            else pos.set(obj.position?.x || 0, obj.position?.y || 0, obj.position?.z || 0);
-                        } catch (_) { }
-                        store[refName] = { type: 'VERTEX', position: [pos.x, pos.y, pos.z], sourceUuid, sourceFeatureId, sourceTimestamp };
-                    }
-                }
+                if (store && snapshot) store[refName] = snapshot;
             } catch (_) { }
             if (SchemaForm.__activeRefInput === inputEl) {
                 try { this._syncActiveReferenceSelectionPreview(inputEl, def); } catch (_) { }
@@ -1457,16 +1362,7 @@ export class SchemaForm {
             if (!store) missing = true;
             if (!missing) {
                 for (const name of names) {
-                    const snap = store ? store[name] : null;
-                    const type = String(snap?.type || '').toUpperCase();
-                    if (!snap) { missing = true; break; }
-                    if (type === 'EDGE') {
-                        if (!Array.isArray(snap.positions) || snap.positions.length < 6) { missing = true; break; }
-                    } else if (type === 'VERTEX') {
-                        if (!Array.isArray(snap.position) || snap.position.length < 3) { missing = true; break; }
-                    } else if (type === 'FACE' || type === 'PLANE') {
-                        if (!Array.isArray(snap.edgePositions) || snap.edgePositions.length === 0) { missing = true; break; }
-                    } else {
+                    if (!isReferenceSnapshotUsable(store ? store[name] : null)) {
                         missing = true;
                         break;
                     }
@@ -1815,7 +1711,8 @@ export class SchemaForm {
         } catch (_) { }
         try {
             ghost.name = source.name ? `__refSelectionAdded__${source.name}` : '__refSelectionAdded__';
-            ghost.userData = { ...(ghost.userData || {}), preventRemove: true, excludeFromFit: true, referenceSelectionGhost: true };
+            markSceneOverlayObject(ghost, { preserve: true, overlayType: 'referenceSelectionGhost', deep: true });
+            ghost.userData = { ...(ghost.userData || {}), referenceSelectionGhost: true };
             ghost.renderOrder = Math.max(Number(ghost.renderOrder) || 0, 10);
         } catch (_) { }
         try { SchemaForm.removeSheetMetalFlatPatternChildren(ghost); } catch (_) { }
@@ -1859,11 +1756,8 @@ export class SchemaForm {
         if (!added.length) return null;
         const group = new THREE.Group();
         group.name = `__REF_SELECTION_ADDED_GHOSTS__${featureId}`;
-        group.userData = {
-            preventRemove: true,
-            excludeFromFit: true,
-            referenceSelectionGhost: true,
-        };
+        markSceneOverlayObject(group, { preserve: true, overlayType: 'referenceSelectionGhost' });
+        try { group.userData.referenceSelectionGhost = true; } catch (_) { }
         group.raycast = () => { };
         for (const source of added) {
             let addedSource = source;
@@ -1907,7 +1801,7 @@ export class SchemaForm {
         try {
             const group = state.ghostGroup;
             if (group) {
-                try { if (group.userData) group.userData.preventRemove = false; } catch (_) { }
+                allowSceneOverlayRemoval(group, { deep: true });
                 try { if (group.parent) group.parent.remove(group); } catch (_) { }
                 try { this._disposeReferenceSelectionGhost(group); } catch (_) { }
             }
@@ -2157,6 +2051,7 @@ export class SchemaForm {
             target.quaternion.copy(absolute.quaternion);
             target.scale.copy(absolute.scale);
         } catch (_) { }
+        markTransformControlTarget(target);
         viewer.scene.add(target);
 
         const TCctor = CombinedTransformControls;
@@ -2198,18 +2093,11 @@ export class SchemaForm {
                         if (adapter && typeof adapter.stepId === 'string' && activeState.stepId && activeState.stepId !== adapter.stepId) return;
                         if (!viewer || !viewer.scene) return;
                         if (!tc || typeof tc.attach !== 'function') return;
-                        if (target && target.isObject3D) { try { viewer.scene.add(target); } catch (_) { } }
-                        const helper = (typeof tc.getHelper === 'function') ? tc.getHelper() : null;
-                        if (helper && helper.isObject3D) { try { viewer.scene.add(helper); tc.__helper = helper; } catch (_) { } }
-                        else if (tc && tc.isObject3D) { try { viewer.scene.add(tc); } catch (_) { } }
-                        else if (tc.__fallbackGroup && tc.__fallbackGroup.isObject3D) { try { viewer.scene.add(tc.__fallbackGroup); } catch (_) { } }
-                        try { if (typeof tc.attach === 'function') tc.attach(target); } catch (_) { }
+                        const restored = restoreTransformControlSceneObjects(viewer, tc, target);
+                        if (restored?.group) activeState.group = restored.group;
                         try {
-                            const m = (typeof tc.getMode === 'function') ? tc.getMode() : (tc.mode || 'translate');
-                            if (typeof tc.setMode === 'function') tc.setMode(m);
+                            if (window.__BREP_activeXform) window.__BREP_activeXform.group = restored?.group || getTransformControlSceneGroup(tc);
                         } catch (_) { }
-                        try { viewer.render && viewer.render(); } catch (_) { }
-                        try { refreshOverlay(); } catch (_) { }
                         try { updateForCamera(); } catch (_) { }
                     } catch (_) { }
                 };
@@ -2217,37 +2105,8 @@ export class SchemaForm {
                 else setTimeout(addBack, 0);
             } catch (_) { }
         };
-        const markOverlay = (obj) => {
-            if (!obj || !obj.isObject3D) return;
-            const apply = (node) => {
-                try {
-                    if (!node || !node.isObject3D) return;
-                    const ud = node.userData || (node.userData = {});
-                    if (ud.__brepOverlayHook) return;
-                    const prev = node.onBeforeRender;
-                    node.onBeforeRender = function (renderer, scene, camera, geometry, material, group) {
-                        try { renderer.clearDepth(); } catch (_) { }
-                        if (typeof prev === 'function') {
-                            prev.call(this, renderer, scene, camera, geometry, material, group);
-                        }
-                    };
-                    ud.__brepOverlayHook = true;
-                } catch (_) { }
-            };
-            apply(obj);
-            if (typeof obj.traverse === 'function') obj.traverse((child) => apply(child));
-        };
-
         const refreshOverlay = () => {
-            try {
-                markOverlay(tc);
-                markOverlay(tc._gizmo);
-                markOverlay(tc._helper);
-                markOverlay(tc.gizmo);
-                markOverlay(tc.helper);
-                markOverlay(tc.__helper);
-                markOverlay(tc.__fallbackGroup);
-            } catch (_) { }
+            refreshTransformControlSceneOverlay(tc);
         };
 
         const updateForCamera = () => {
@@ -2393,56 +2252,22 @@ export class SchemaForm {
                 viewer,
                 isOver,
                 target,
-                group: tc.__fallbackGroup || (tc && tc.isObject3D ? tc : null),
+                group: getTransformControlSceneGroup(tc),
                 updateForCamera,
             };
         } catch (_) { }
 
-        let addedToScene = false;
-        try { markOverlay(tc._gizmo); } catch (_) { }
-        try { markOverlay(tc._helper); } catch (_) { }
-        try { markOverlay(tc.gizmo); } catch (_) { }
-        try { markOverlay(tc.helper); } catch (_) { }
-
+        const sceneBinding = addTransformControlToScene(viewer, tc);
         try {
-            // Preferred modern API: helper root on the controls
-            const helper = (typeof tc.getHelper === 'function') ? tc.getHelper() : null;
-            if (helper && helper.isObject3D) {
-                try { helper.userData = helper.userData || {}; helper.userData.excludeFromFit = true; } catch (_) { }
-                markOverlay(helper);
-                viewer.scene.add(helper); addedToScene = true; tc.__helper = helper;
-            }
-            else if (tc && tc.isObject3D) {
-                try { tc.userData = tc.userData || {}; tc.userData.excludeFromFit = true; } catch (_) { }
-                markOverlay(tc);
-                viewer.scene.add(tc); addedToScene = true;
-            }
-        } catch (_) { /* tolerate builds where controls aren't Object3D */ }
-        if (!addedToScene) {
-            // Fallback: try adding known internal object3D parts if present
-            try {
-                const group = new THREE.Group();
-                group.name = 'TransformControlsGroup';
-                const candidates = [tc?.gizmo, tc?._gizmo, tc?.picker, tc?._picker, tc?.helper, tc?._helper];
-                let attached = 0;
-                for (const cand of candidates) {
-                    if (cand && cand.isObject3D) { try { group.add(cand); attached++; } catch (_) { } }
-                }
-                if (attached > 0) {
-                    try { group.userData = group.userData || {}; group.userData.excludeFromFit = true; } catch (_) { }
-                    markOverlay(group);
-                    viewer.scene.add(group); addedToScene = true; tc.__fallbackGroup = group;
-                }
-            } catch (_) { /* ignore */ }
-            if (!addedToScene) {
-
-                console.warn('[TransformControls] Could not add gizmo to scene (no Object3D found).');
-            }
+            if (window.__BREP_activeXform) window.__BREP_activeXform.group = sceneBinding.group || getTransformControlSceneGroup(tc);
+        } catch (_) { }
+        if (!sceneBinding.addedToScene) {
+            console.warn('[TransformControls] Could not add gizmo to scene (no Object3D found).');
         }
         try { tc.showX = true; tc.showY = true; tc.showZ = true; } catch (_) { }
         try { tc.setSpace('world'); } catch (_) { }
         try { tc.addEventListener('change', () => { try { viewer.render(); } catch (_) { } }); } catch (_) { }
-        try { tc.attach(target); markOverlay(tc); markOverlay(tc.__helper); markOverlay(tc.__fallbackGroup); } catch (_) { }
+        try { tc.attach(target); refreshTransformControlSceneOverlay(tc); } catch (_) { }
 
         // Mark active
         inputEl.setAttribute('active-transform', 'true');
@@ -2459,7 +2284,7 @@ export class SchemaForm {
             target,
             controls: tc,
             viewer,
-            group: tc.__fallbackGroup || (tc && tc.isObject3D ? tc : null),
+            group: getTransformControlSceneGroup(tc),
             captureHandlers: null,
             controlsChangeHandler: updateForCamera,
             controlsChangeSource: viewer?.controls || null,

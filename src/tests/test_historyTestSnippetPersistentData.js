@@ -28,7 +28,7 @@ export function test_history_test_snippet_persistent_data_allowlist() {
             constraints: [],
           },
           lastProfileDiagnostics: { transient: true },
-          __refPreviewSnapshots: { transient: true },
+          referenceSnapshots: { transient: true },
         },
       },
       {
@@ -135,6 +135,6 @@ export function test_history_test_snippet_persistent_data_allowlist() {
 
   assertExcludes(snippet, '__open', 'UI-only input params');
   assertExcludes(snippet, 'lastProfileDiagnostics', 'Sketch transient diagnostics');
-  assertExcludes(snippet, '__refPreviewSnapshots', 'reference preview snapshots');
+  assertExcludes(snippet, 'referenceSnapshots', 'reference snapshots');
   assertExcludes(snippet, 'miterSummary', 'derived fillet summary');
 }

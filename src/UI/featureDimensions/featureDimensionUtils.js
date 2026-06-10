@@ -1,20 +1,15 @@
 import * as THREE from 'three';
+export {
+  normalizeFeatureDimensionFeatureKey,
+  supportsFeatureDimensionFeatureKey,
+  supportsTransformDimensionToggle,
+} from './FeatureDimensionRegistry.js';
 
 const EPS = 1e-9;
-const SUPPORTED_FEATURE_KEYS = new Set(['P.CU', 'P.CY', 'P.CO', 'P.S', 'P.PY', 'P.T', 'E', 'R', 'PORT']);
 
 function toFiniteNumber(value, fallback = 0) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
-}
-
-export function normalizeFeatureDimensionFeatureKey(raw) {
-  if (!raw) return '';
-  return String(raw).trim().toUpperCase();
-}
-
-export function supportsFeatureDimensionFeatureKey(key) {
-  return SUPPORTED_FEATURE_KEYS.has(normalizeFeatureDimensionFeatureKey(key));
 }
 
 export function getFeatureDimensionObjectTypeTag(object) {

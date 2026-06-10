@@ -9,6 +9,7 @@ import {
     buildSolidAuthoringStateSnapshot,
 } from "../../BREP/CppSolidCore.js";
 import { cleanupFilletSingleNeighborIslands } from "../../BREP/SolidMethods/fillet.js";
+import { getReferenceSnapshotBucket } from "../../UI/referenceSnapshotStore.js";
 
 const DEBUG_MODE_NONE = "NONE";
 const DEBUG_MODE_ADVANCED_OPTIONS = "ADVANCED OPTIONS";
@@ -893,7 +894,7 @@ export class FilletFeature {
         // Resolve inputs from sanitizeInputParams()
         profiler.start('resolve inputs');
         const rawInputSelections = Array.isArray(this.inputParams.edges) ? this.inputParams.edges.filter(Boolean) : [];
-        const previewSnapshots = this.persistentData?.__refPreviewSnapshots?.edges || null;
+        const previewSnapshots = getReferenceSnapshotBucket(this.persistentData, 'edges');
         const expanded = expandReferenceSelections(rawInputSelections, partHistory, previewSnapshots);
         const inputObjects = expanded.selections;
         const edgeObjs = collectEdgesFromSelection(inputObjects);
