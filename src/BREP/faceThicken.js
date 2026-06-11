@@ -1,4 +1,5 @@
 import { Solid } from './BetterSolid.js';
+import { repairGeneratedFaceIDProvenance } from './faceIdRepair.js';
 import { Manifold, THREE } from './SolidShared.js';
 
 const EPS = 1e-9;
@@ -51,6 +52,63 @@ function getFaceLabel(face) {
   if (raw == null) return null;
   const label = String(raw).trim();
   return label || null;
+}
+
+function clonePlainMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return {};
+  try {
+    return JSON.parse(JSON.stringify(metadata)) || {};
+  } catch {
+    return { ...metadata };
+  }
+}
+
+function getSourceFaceMetadata(face, faceName = null) {
+  const name = String(faceName || getFaceLabel(face) || '').trim();
+  let metadata = null;
+  try {
+    metadata = typeof face?.getMetadata === 'function' ? face.getMetadata() : null;
+  } catch {
+    metadata = null;
+  }
+  if ((!metadata || typeof metadata !== 'object') && name) {
+    const solid = face?.parentSolid || face?.parent || null;
+    try {
+      metadata = typeof solid?.getFaceMetadata === 'function' ? solid.getFaceMetadata(name) : null;
+    } catch {
+      metadata = null;
+    }
+  }
+  return clonePlainMetadata(metadata);
+}
+
+function mergeSourceFaceMetadataMaps(...maps) {
+  const out = new Map();
+  for (const map of maps) {
+    if (map instanceof Map) {
+      for (const [name, metadata] of map.entries()) {
+        const key = String(name || '').trim();
+        if (key) out.set(key, clonePlainMetadata(metadata));
+      }
+    } else if (map && typeof map === 'object') {
+      for (const [name, metadata] of Object.entries(map)) {
+        const key = String(name || '').trim();
+        if (key) out.set(key, clonePlainMetadata(metadata));
+      }
+    }
+  }
+  return out;
+}
+
+function sourceFaceRoleFromMetadata(metadata) {
+  return String(
+    metadata?.offsetShellFaceRole
+    || metadata?.faceRole
+    || metadata?.faceType
+    || metadata?.type
+    || metadata?.role
+    || '',
+  ).trim().toLowerCase().replace(/[-\s]+/g, '_');
 }
 
 function getFaceLabelList(value) {
@@ -1481,12 +1539,24 @@ function buildThickenClassificationState(labels, distance) {
     if (!label || capLabels.has(label)) return;
     capLabels.add(label);
     const sourceFaceName = String(entry?.sourceFaceName || labels.sourceFaceName || '').trim() || labels.sourceFaceName;
+    const sourceMetadata = clonePlainMetadata(entry?.sourceFaceMetadata);
+    const sourceFaceRole = sourceFaceRoleFromMetadata(sourceMetadata);
+    const sourceFeatureId = String(
+      sourceMetadata?.sourceFeatureId
+      || sourceMetadata?.sourceFeatureID
+      || sourceMetadata?.featureID
+      || sourceMetadata?.featureId
+      || '',
+    ).trim();
     capGroups.push({
       label,
       kind,
       metadata: {
         type: kind === 'start' ? 'start_cap' : 'end_cap',
+        faceRole: kind === 'start' ? 'start_cap' : 'end_cap',
         sourceFaceName,
+        ...(sourceFaceRole ? { sourceFaceRole } : {}),
+        ...(sourceFeatureId ? { sourceFeatureId } : {}),
         distance,
       },
     });
@@ -1512,6 +1582,7 @@ function buildThickenClassificationState(labels, distance) {
         kind: 'sidewall',
         metadata: {
           type: 'sidewall',
+          faceRole: 'sidewall',
           sourceFaceName: labels.sourceFaceName,
           loopIndex: entry.loopIndex,
           edgeIndex: entry.edgeIndex,
@@ -3319,26 +3390,55 @@ function triangleSplitCullSolid(solid, options = {}) {
 }
 
 function applySourceFaceMetadataToThickenResult(result, face, labels, sourceFaceName) {
-  let sourceMetadata = null;
+  let fallbackSourceMetadata = null;
   try {
-    sourceMetadata = typeof face?.getMetadata === 'function' ? (face.getMetadata() || null) : null;
+    fallbackSourceMetadata = typeof face?.getMetadata === 'function' ? (face.getMetadata() || null) : null;
   } catch {
-    sourceMetadata = null;
+    fallbackSourceMetadata = null;
   }
-  if (!sourceMetadata || typeof result?.setFaceMetadata !== 'function') return;
+  if (typeof result?.setFaceMetadata !== 'function') return;
+  const fallbackMetadata = clonePlainMetadata(fallbackSourceMetadata);
+  const entriesFor = (kind) => {
+    const source = kind === 'start' ? labels?.startCaps : labels?.endCaps;
+    if (Array.isArray(source) && source.length) return source;
+    return [{
+      label: kind === 'start' ? labels?.start : labels?.end,
+      sourceFaceName,
+      sourceFaceMetadata: fallbackMetadata,
+    }];
+  };
+  const metadataFor = (entry, kind) => {
+    const entrySourceMetadata = clonePlainMetadata(entry?.sourceFaceMetadata);
+    const sourceMetadata = Object.keys(entrySourceMetadata).length ? entrySourceMetadata : fallbackMetadata;
+    const sourceRole = sourceFaceRoleFromMetadata(sourceMetadata);
+    const sourceFeatureId = String(
+      sourceMetadata?.sourceFeatureId
+      || sourceMetadata?.sourceFeatureID
+      || sourceMetadata?.featureID
+      || sourceMetadata?.featureId
+      || face?.owningFeatureID
+      || face?.parentSolid?.owningFeatureID
+      || '',
+    ).trim();
+    const capType = kind === 'start' ? 'start_cap' : 'end_cap';
+    return {
+      ...sourceMetadata,
+      type: capType,
+      faceRole: capType,
+      sourceFaceName: String(entry?.sourceFaceName || sourceFaceName || '').trim() || sourceFaceName,
+      ...(sourceRole ? { sourceFaceRole: sourceRole } : {}),
+      ...(sourceFeatureId ? { sourceFeatureId } : {}),
+    };
+  };
   try {
-    result.setFaceMetadata(labels.start, {
-      ...sourceMetadata,
-      type: 'start_cap',
-      sourceFaceName,
-      sourceFeatureId: face?.owningFeatureID ?? face?.parentSolid?.owningFeatureID ?? sourceMetadata?.sourceFeatureId ?? null,
-    });
-    result.setFaceMetadata(labels.end, {
-      ...sourceMetadata,
-      type: 'end_cap',
-      sourceFaceName,
-      sourceFeatureId: face?.owningFeatureID ?? face?.parentSolid?.owningFeatureID ?? sourceMetadata?.sourceFeatureId ?? null,
-    });
+    for (const entry of entriesFor('start')) {
+      const label = String(entry?.label || '').trim();
+      if (label) result.setFaceMetadata(label, metadataFor(entry, 'start'));
+    }
+    for (const entry of entriesFor('end')) {
+      const label = String(entry?.label || '').trim();
+      if (label) result.setFaceMetadata(label, metadataFor(entry, 'end'));
+    }
   } catch {
     /* ignore metadata propagation errors */
   }
@@ -3461,6 +3561,7 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
     ? options.sourceFaceNames.map((name) => String(name || '').trim()).filter(Boolean)
     : [sourceFaceName];
   const capSourceFaceNames = sourceFaceNames.length ? sourceFaceNames : [sourceFaceName];
+  const sourceFaceMetadataByName = mergeSourceFaceMetadataMaps(options.sourceFaceMetadataByName);
   const capLabelsBySourceFaceName = new Map();
   for (const name of capSourceFaceNames) {
     const sourceName = String(name || '').trim();
@@ -3468,6 +3569,7 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
     capLabelsBySourceFaceName.set(sourceName, {
       start: `${sourceName}_START`,
       end: `${sourceName}_END`,
+      sourceFaceMetadata: sourceFaceMetadataByName.get(sourceName) || {},
     });
   }
   const fallbackCapLabels = capLabelsBySourceFaceName.get(sourceFaceName)
@@ -3481,10 +3583,12 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
     startCaps: Array.from(capLabelsBySourceFaceName.entries(), ([name, caps]) => ({
       label: caps.start,
       sourceFaceName: name,
+      sourceFaceMetadata: caps.sourceFaceMetadata || {},
     })),
     endCaps: Array.from(capLabelsBySourceFaceName.entries(), ([name, caps]) => ({
       label: caps.end,
       sourceFaceName: name,
+      sourceFaceMetadata: caps.sourceFaceMetadata || {},
     })),
     capLabelsBySourceFaceName,
     sidewalls: loops.flatMap((loop, loopIndex) => (Array.isArray(loop?.edges) ? loop.edges : []).map((edge, edgeIndex) => {
@@ -3995,6 +4099,7 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
     );
 
     applySourceFaceMetadataToThickenResult(staged, face, labels, sourceFaceName);
+    const faceIDRepair = repairGeneratedFaceIDProvenance(staged);
     staged.__thickenMethod = 'triangle_split_cull';
     staged.__thickenClassificationMethod = 'raw_face_ids';
     staged.__thickenDiagnostics = {
@@ -4033,6 +4138,9 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
       capReclassifiedTriangleCount,
       nonManifoldCulledTriangleCount,
       boundaryCapTriangleCount,
+      faceIDRepairChangedTriangles: faceIDRepair.changedTriangles || 0,
+      intersectionCapReassignedTriangles: faceIDRepair.intersectionCapReassignedTriangles || 0,
+      directStartEndCapBoundaryReassignedTriangles: faceIDRepair.directStartEndCapBoundaryReassignedTriangles || 0,
       splitCullPasses: cleanup?.passCount || 0,
       adjacentBoundaryNormalContributionCount: surface.adjacentNormalStats?.contributionCount || 0,
       adjacentBoundaryNormalVertexCount: surface.adjacentNormalStats?.contributedVertexCount || 0,
@@ -4077,6 +4185,9 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
         capReclassifiedTriangleCount,
         nonManifoldCulledTriangleCount,
         boundaryCapTriangleCount,
+        faceIDRepairChangedTriangles: faceIDRepair.changedTriangles || 0,
+        intersectionCapReassignedTriangles: faceIDRepair.intersectionCapReassignedTriangles || 0,
+        directStartEndCapBoundaryReassignedTriangles: faceIDRepair.directStartEndCapBoundaryReassignedTriangles || 0,
         splitCullPasses: cleanup?.passCount || 0,
         adjacentBoundaryNormalContributionCount: surface.adjacentNormalStats?.contributionCount || 0,
         adjacentBoundaryNormalVertexCount: surface.adjacentNormalStats?.contributedVertexCount || 0,
@@ -4096,12 +4207,17 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
 export function thickenFaceToSolid(face, distance, options = {}) {
   const surface = extractFaceSurface(face, options);
   const sourceFaceName = String(options.sourceFaceName || face?.userData?.faceName || face?.name || '').trim();
+  const sourceFaceMetadataByName = mergeSourceFaceMetadataMaps(
+    options.sourceFaceMetadataByName,
+    sourceFaceName ? new Map([[sourceFaceName, getSourceFaceMetadata(face, sourceFaceName)]]) : null,
+  );
   return thickenSurfaceToSolid(surface, face, distance, {
     ...options,
     sourceFaceNames: Array.isArray(options.sourceFaceNames)
       ? options.sourceFaceNames
       : (sourceFaceName ? [sourceFaceName] : undefined),
     sourceFaceName,
+    sourceFaceMetadataByName,
   });
 }
 
@@ -4115,6 +4231,10 @@ export function thickenFacesToSolid(faces, distance, options = {}) {
   const sourceFaceNames = faceList.map((face, index) => (
     String(face?.userData?.faceName || face?.name || `FACE_${index + 1}`).trim() || `FACE_${index + 1}`
   ));
+  const sourceMetadataEntries = faceList.map((face, index) => [
+    sourceFaceNames[index],
+    getSourceFaceMetadata(face, sourceFaceNames[index]),
+  ]);
   const featureId = sanitizeToken(options.featureId || options.name || sourceFaceNames[0] || 'THICKEN', 'THICKEN');
   const sourceFaceName = String(options.sourceFaceName || `${featureId}_PATCH`).trim() || `${featureId}_PATCH`;
   const surface = extractFacesSurface(faceList, options);
@@ -4122,5 +4242,9 @@ export function thickenFacesToSolid(faces, distance, options = {}) {
     ...options,
     sourceFaceName,
     sourceFaceNames,
+    sourceFaceMetadataByName: mergeSourceFaceMetadataMaps(
+      options.sourceFaceMetadataByName,
+      new Map(sourceMetadataEntries),
+    ),
   });
 }

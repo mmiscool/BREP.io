@@ -285,6 +285,12 @@ import {
     afterRun_thicken_sphere_torus_union,
     test_thicken_sphere_torus_union,
 } from './test_thicken_sphere_torus_union.js';
+import {
+    test_face_id_repair_uses_metadata_roles_without_name_suffixes,
+    test_face_id_repair_accepts_feature_scoped_metadata_roles,
+    test_solid_face_queries_fall_back_to_authoring_arrays_for_non_manifold_meshes,
+    test_visualize_does_not_repair_face_ids,
+} from './test_face_id_repair.js';
 import { test_plane } from './test_plane.js';
 import { test_primitiveCone } from './test_primitiveCone.js';
 import { test_primitiveCube } from './test_primitiveCube.js';
@@ -649,6 +655,10 @@ export const testFunctions = [
         exportSolids: false,
         resetHistory: true,
     },
+    { test: test_face_id_repair_uses_metadata_roles_without_name_suffixes, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_face_id_repair_accepts_feature_scoped_metadata_roles, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_solid_face_queries_fall_back_to_authoring_arrays_for_non_manifold_meshes, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_visualize_does_not_repair_face_ids, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_primitiveCone, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_primitiveTorus, afterRun: afterRun_primitiveTorus, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_primitiveSphere, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },

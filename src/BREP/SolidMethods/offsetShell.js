@@ -6,6 +6,7 @@ import {
     groupConnectedFacesBySharedEdges,
     thickenFacesToSolid,
 } from "../faceThicken.js";
+import { repairGeneratedFaceIDProvenance } from "../faceIdRepair.js";
 import { THREE } from "../SolidShared.js";
 import { manifold } from "../setupManifold.js";
 import { unionMany } from "./booleanOps.js";
@@ -32,6 +33,74 @@ function getFaceName(entry) {
     if (raw == null) return null;
     const name = String(raw).trim();
     return name || null;
+}
+
+function normalizeFaceRole(value) {
+    return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[-\s]+/g, "_");
+}
+
+function normalizeOffsetShellFaceRole(metadata = {}) {
+    if (metadata?.offsetShellRoundedPipe === true) return "rounded_pipe";
+    const role = normalizeFaceRole(
+        metadata?.offsetShellFaceRole
+        || metadata?.faceRole
+        || metadata?.faceType
+        || metadata?.type
+        || metadata?.role
+        || "",
+    );
+    if (role === "sidewall" || role === "side_wall") return "sidewall";
+    if (role === "start_cap" || role === "startcap" || role === "start") return "start_cap";
+    if (role === "end_cap" || role === "endcap" || role === "end") return "end_cap";
+    if (role === "rounded_pipe" || role === "round_pipe" || role === "pipe_outer" || role === "tube_outer") return "rounded_pipe";
+    return role;
+}
+
+function normalizeOffsetShellSourceFaceRole(metadata = {}) {
+    const role = normalizeFaceRole(
+        metadata?.sourceFaceRole
+        || metadata?.sourceFaceType
+        || metadata?.sourceType
+        || metadata?.sourceMetadata?.faceRole
+        || metadata?.sourceMetadata?.faceType
+        || metadata?.sourceMetadata?.type
+        || "",
+    );
+    if (role === "sidewall" || role === "side_wall") return "sidewall";
+    if (role === "start_cap" || role === "startcap" || role === "start") return "start_cap";
+    if (role === "end_cap" || role === "endcap" || role === "end") return "end_cap";
+    return role;
+}
+
+function getFaceMetadataSafe(solid, faceName) {
+    const key = String(faceName || "").trim();
+    if (!key) return {};
+    try {
+        const metadata = typeof solid?.getFaceMetadata === "function" ? solid.getFaceMetadata(key) : null;
+        return metadata && typeof metadata === "object" ? metadata : {};
+    } catch {
+        return {};
+    }
+}
+
+function isOffsetShellSidewallFace(faceName, metadata = {}) {
+    void faceName;
+    return normalizeOffsetShellFaceRole(metadata) === "sidewall";
+}
+
+function isOffsetShellSidewallCapFace(faceName, metadata = {}) {
+    void faceName;
+    const role = normalizeOffsetShellFaceRole(metadata);
+    if (role !== "start_cap" && role !== "end_cap") return false;
+    return normalizeOffsetShellSourceFaceRole(metadata) === "sidewall";
+}
+
+function isOffsetShellRoundedPipeFace(faceName, metadata = {}) {
+    void faceName;
+    return normalizeOffsetShellFaceRole(metadata) === "rounded_pipe";
 }
 
 function getSelectedFaceNames(faces, sourceFaces) {
@@ -252,41 +321,35 @@ function getSolidFaceNames(solid) {
     return [];
 }
 
-function appendStartSuffixToNonRoundedPipeFaces(solid, featureId = "") {
-    if (!solid || typeof solid.renameFace !== "function") return 0;
+function tagPipeRemainderBoundaryFaces(solid, featureId = "") {
+    if (!solid || typeof solid.setFaceMetadata !== "function") return 0;
 
-    const normalizedFeatureId = String(featureId || "").trim();
+    const sourceFeatureId = String(featureId || "").trim();
     const faceNames = getSolidFaceNames(solid);
-    let renamedCount = 0;
-
-    const getFaceMetadata = (faceName) => {
-        try {
-            return typeof solid.getFaceMetadata === "function" ? (solid.getFaceMetadata(faceName) || {}) : {};
-        } catch {
-            return {};
-        }
-    };
-    const isRoundedPipeFace = (faceName, metadata = {}) => {
-        if (metadata?.offsetShellRoundedPipe === true) return true;
-        const name = String(faceName || "");
-        if (!name.includes("ROUND_PIPE")) return false;
-        if (normalizedFeatureId && !name.includes(`${normalizedFeatureId}_ROUND_PIPE`)) return false;
-        return /ROUND_PIPE.*_Outer(?:$|[_|])/u.test(name);
-    };
+    let taggedCount = 0;
 
     for (const faceName of faceNames) {
-        if (!faceName || faceName.endsWith("_START")) continue;
-        const metadata = getFaceMetadata(faceName);
-        if (isRoundedPipeFace(faceName, metadata)) continue;
+        if (!faceName) continue;
+        const metadata = getFaceMetadataSafe(solid, faceName);
+        if (isOffsetShellRoundedPipeFace(faceName, metadata)) continue;
+        const role = normalizeOffsetShellFaceRole(metadata);
+        if (role === "start_cap") continue;
         try {
-            solid.renameFace(faceName, `${faceName}_START`);
-            renamedCount += 1;
+            solid.setFaceMetadata(faceName, {
+                ...metadata,
+                type: "start_cap",
+                faceRole: "start_cap",
+                offsetShellFaceRole: "start_cap",
+                offsetShellPipeRemainderBoundary: true,
+                ...(sourceFeatureId ? { sourceFeatureId } : {}),
+            });
+            taggedCount += 1;
         } catch {
-            /* ignore individual relabel failures */
+            /* ignore individual metadata failures */
         }
     }
 
-    return renamedCount;
+    return taggedCount;
 }
 
 function deduplicateSolidFaceNames(solid) {
@@ -321,6 +384,64 @@ function triangleAreaFromArrays(p1, p2, p3) {
     const ny = (uz * vx) - (ux * vz);
     const nz = (ux * vy) - (uy * vx);
     return Math.hypot(nx, ny, nz) * 0.5;
+}
+
+function removeDegenerateTrianglesFromAuthoringArrays(solid) {
+    const tv = Array.isArray(solid?._triVerts) ? solid._triVerts : null;
+    const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : null;
+    const ids = Array.isArray(solid?._triIDs) ? solid._triIDs : null;
+    if (!tv || !vp || !ids) return 0;
+
+    const triCount = Math.min(ids.length, (tv.length / 3) | 0);
+    const nextTriVerts = [];
+    const nextTriIDs = [];
+    let removed = 0;
+    const point = (vertexIndex) => {
+        const base = (vertexIndex >>> 0) * 3;
+        return [
+            Number(vp[base + 0]) || 0,
+            Number(vp[base + 1]) || 0,
+            Number(vp[base + 2]) || 0,
+        ];
+    };
+    const distanceSq = (a, b) => {
+        const dx = a[0] - b[0];
+        const dy = a[1] - b[1];
+        const dz = a[2] - b[2];
+        return (dx * dx) + (dy * dy) + (dz * dz);
+    };
+    const duplicateToleranceSq = 1e-20;
+
+    for (let triIndex = 0; triIndex < triCount; triIndex += 1) {
+        const base = triIndex * 3;
+        const a = tv[base + 0] >>> 0;
+        const b = tv[base + 1] >>> 0;
+        const c = tv[base + 2] >>> 0;
+        const p1 = point(a);
+        const p2 = point(b);
+        const p3 = point(c);
+        const duplicate =
+            distanceSq(p1, p2) <= duplicateToleranceSq
+            || distanceSq(p2, p3) <= duplicateToleranceSq
+            || distanceSq(p3, p1) <= duplicateToleranceSq;
+        if (duplicate || triangleAreaFromArrays(p1, p2, p3) <= 1e-12) {
+            removed += 1;
+            continue;
+        }
+        nextTriVerts.push(a, b, c);
+        nextTriIDs.push(ids[triIndex]);
+    }
+
+    if (removed > 0) {
+        solid._triVerts = nextTriVerts;
+        solid._triIDs = nextTriIDs;
+        solid._dirty = true;
+        solid._faceIndex = null;
+        solid._manifold = null;
+        solid._visualizeCache = null;
+        solid._cppSolidCoreSyncStamp = null;
+    }
+    return removed;
 }
 
 function solidModelScale(solid) {
@@ -428,18 +549,6 @@ function faceTriangleArea(face) {
     return area;
 }
 
-function isOffsetShellSidewallFaceName(faceName, metadata = {}) {
-    return (
-        metadata?.type === "sidewall"
-        || metadata?.faceType === "sidewall"
-        || /_SW(?:$|[_|])/u.test(String(faceName || ""))
-    );
-}
-
-function isOffsetShellSidewallCapFaceName(faceName) {
-    return /_SW_(?:START|END)(?:$|[_|])/u.test(String(faceName || ""));
-}
-
 function collectSidewallFaceAreas(solid) {
     const out = new Map();
     let faces = null;
@@ -453,9 +562,8 @@ function collectSidewallFaceAreas(solid) {
         for (const face of faces) {
             const faceName = String(face?.faceName || "").trim();
             if (!faceName) continue;
-            let metadata = {};
-            try { metadata = solid?.getFaceMetadata?.(faceName) || {}; } catch { metadata = {}; }
-            if (!isOffsetShellSidewallFaceName(faceName, metadata)) continue;
+            const metadata = getFaceMetadataSafe(solid, faceName);
+            if (!isOffsetShellSidewallFace(faceName, metadata)) continue;
             const area = faceTriangleArea(face);
             if (area > 0) out.set(faceName, (out.get(faceName) || 0) + area);
         }
@@ -473,9 +581,8 @@ function collectSidewallFaceAreas(solid) {
         const faceID = faceIDRaw >>> 0;
         const faceName = String(faceNameRaw || "").trim();
         if (!faceName) continue;
-        let metadata = {};
-        try { metadata = solid?.getFaceMetadata?.(faceName) || {}; } catch { metadata = {}; }
-        if (isOffsetShellSidewallFaceName(faceName, metadata)) sidewallIDs.set(faceID, faceName);
+        const metadata = getFaceMetadataSafe(solid, faceName);
+        if (isOffsetShellSidewallFace(faceName, metadata)) sidewallIDs.set(faceID, faceName);
     }
 
     const triCount = Math.min(ids.length, (tv.length / 3) | 0);
@@ -516,7 +623,8 @@ function buildSidewallAreaLossCollapseTargets(solid, originalAreas, opts = {}) {
     let matchedSidewallAreaCount = 0;
 
     for (const [faceName, originalAreaRaw] of original.entries()) {
-        if (isOffsetShellSidewallCapFaceName(faceName)) continue;
+        const metadata = getFaceMetadataSafe(solid, faceName);
+        if (isOffsetShellSidewallCapFace(faceName, metadata)) continue;
         const originalArea = Number(originalAreaRaw) || 0;
         if (!(originalArea > minOriginalArea)) continue;
         const finalArea = Number(finalAreas.get(faceName) || 0);
@@ -612,8 +720,7 @@ function createSurvivingSidewallFaceIndex(shellSolid) {
     };
 
     const indexSidewallFace = (faceName, metadata = null) => {
-        const isSidewall = /_SW$/.test(faceName) || metadata?.type === "sidewall";
-        if (!isSidewall) return;
+        if (!isOffsetShellSidewallFace(faceName, metadata || {})) return;
         index.actualSidewallFaceCount += 1;
         index.faceNames.add(faceName);
         const sourceEdgeName = String(metadata?.sourceEdgeName || "").trim();
@@ -636,7 +743,7 @@ function createSurvivingSidewallFaceIndex(shellSolid) {
             const metadata = typeof shellSolid?.getFaceMetadata === "function"
                 ? (shellSolid.getFaceMetadata(faceName) || null)
                 : null;
-            const isSidewall = /_SW$/.test(faceName) || metadata?.type === "sidewall";
+            const isSidewall = isOffsetShellSidewallFace(faceName, metadata || {});
             const area = faceTriangleArea(face);
             if (area <= areaTolerance) {
                 if (isSidewall) index.skippedEmptySidewallFaceCount += 1;
@@ -650,9 +757,8 @@ function createSurvivingSidewallFaceIndex(shellSolid) {
     }
 
     for (const faceName of faceNames) {
-        let metadata = null;
-        try { metadata = shellSolid?.getFaceMetadata?.(faceName) || null; } catch { metadata = null; }
-        if (!/_SW$/.test(faceName) && metadata?.type !== "sidewall") continue;
+        const metadata = getFaceMetadataSafe(shellSolid, faceName);
+        if (!isOffsetShellSidewallFace(faceName, metadata)) continue;
         indexSidewallFace(faceName, metadata);
     }
     return index;
@@ -842,7 +948,6 @@ function collapseOffsetShellRoundedPipeSlivers(solid, opts = {}) {
         };
     }
 
-    const featureId = String(opts?.featureId || opts?.featureID || "").trim();
     const modelScale = solidModelScale(solid);
     const radius = Math.abs(Number(opts?.radius ?? opts?.offsetDistance ?? opts?.distance ?? 0)) || 0;
     const pipeSliverHeightTolerance = Math.max(
@@ -853,24 +958,10 @@ function collapseOffsetShellRoundedPipeSlivers(solid, opts = {}) {
     );
     const pipeSliverHeightToleranceSq = pipeSliverHeightTolerance * pipeSliverHeightTolerance;
     const debug = opts?.debug === true;
-    const getFaceMetadata = (faceName) => {
-        try {
-            return (typeof solid.getFaceMetadata === "function") ? (solid.getFaceMetadata(faceName) || {}) : {};
-        } catch {
-            return {};
-        }
-    };
     const collapseSidewallFaceNames = new Set(
         Array.from(opts?.collapseSidewallFaceNames || [], (faceName) => String(faceName || "").trim()).filter(Boolean),
     );
     const hasCollapseSidewallFilter = Object.prototype.hasOwnProperty.call(opts || {}, "collapseSidewallFaceNames");
-    const isRoundedPipeFace = (faceName, metadata = {}) => {
-        if (metadata?.offsetShellRoundedPipe === true) return true;
-        const name = String(faceName || "");
-        if (!name.includes("ROUND_PIPE")) return false;
-        if (featureId && !name.includes(`${featureId}_ROUND_PIPE`)) return false;
-        return /ROUND_PIPE.*_Outer(?:$|[_|])/u.test(name);
-    };
 
     const sidewallFaceIDs = new Set();
     const pipeFaceIDs = new Set();
@@ -880,11 +971,11 @@ function collapseOffsetShellRoundedPipeSlivers(solid, opts = {}) {
         const faceName = String(faceNameRaw || "").trim();
         if (!faceName) continue;
         faceNamesByID.set(faceID, faceName);
-        const metadata = getFaceMetadata(faceName);
-        if (isOffsetShellSidewallFaceName(faceName, metadata) && (!hasCollapseSidewallFilter || collapseSidewallFaceNames.has(faceName))) {
+        const metadata = getFaceMetadataSafe(solid, faceName);
+        if (isOffsetShellSidewallFace(faceName, metadata) && (!hasCollapseSidewallFilter || collapseSidewallFaceNames.has(faceName))) {
             sidewallFaceIDs.add(faceID);
         }
-        if (isRoundedPipeFace(faceName, metadata)) pipeFaceIDs.add(faceID);
+        if (isOffsetShellRoundedPipeFace(faceName, metadata)) pipeFaceIDs.add(faceID);
     }
     if (sidewallFaceIDs.size === 0 || pipeFaceIDs.size === 0) {
         return {
@@ -1161,16 +1252,7 @@ function collapseOffsetShellRoundedPipeSlivers(solid, opts = {}) {
     solid._cppSolidCoreSyncStamp = null;
 
     let removedDegenerateTriangles = 0;
-    solid._manifoldize();
-
-
-    // if (typeof solid.removeDegenerateTriangles === "function") {
-    //     try {
-    //         removedDegenerateTriangles = Math.max(0, Number(solid.removeDegenerateTriangles() || 0));
-    //     } catch {
-    //         removedDegenerateTriangles = 0;
-    //     }
-    // }
+    removedDegenerateTriangles = removeDegenerateTrianglesFromAuthoringArrays(solid);
 
     const summary = {
         enabled: true,
@@ -1209,28 +1291,12 @@ function reassignAreaLossSidewallFacesToDominantNeighbor(solid, opts = {}) {
         return { reassignedTriangles: 0, reassignedFaces: 0, removedFaceLabels: 0 };
     }
 
-    const featureId = String(opts?.featureId || opts?.featureID || "").trim();
     const debug = opts?.debug === true;
     const allowRoundedPipeNeighbors = opts?.allowRoundedPipeNeighbors === true;
     const preferRoundedPipeNeighbors = opts?.preferRoundedPipeNeighbors === true;
     const protectedNeighborFaceNames = new Set(
         Array.from(opts?.protectedNeighborFaceNames || [], (faceName) => String(faceName || "").trim()).filter(Boolean),
     );
-    const getFaceMetadata = (faceName) => {
-        try {
-            return (typeof solid.getFaceMetadata === "function") ? (solid.getFaceMetadata(faceName) || {}) : {};
-        } catch {
-            return {};
-        }
-    };
-    const isRoundedPipeFace = (faceName, metadata = {}) => {
-        if (metadata?.offsetShellRoundedPipe === true) return true;
-        const name = String(faceName || "");
-        if (!name.includes("ROUND_PIPE")) return false;
-        if (featureId && !name.includes(`${featureId}_ROUND_PIPE`)) return false;
-        return /ROUND_PIPE.*_Outer(?:$|[_|])/u.test(name);
-    };
-
     const targetFaceIDs = new Set();
     const targetFaceNamesByID = new Map();
     const pipeFaceIDs = new Set();
@@ -1238,13 +1304,13 @@ function reassignAreaLossSidewallFacesToDominantNeighbor(solid, opts = {}) {
         const faceID = faceIDRaw >>> 0;
         const faceName = String(faceNameRaw || "").trim();
         if (!faceName) continue;
-        const metadata = getFaceMetadata(faceName);
-        if (collapseSidewallFaceNames.has(faceName) && isOffsetShellSidewallFaceName(faceName, metadata)) {
-            if (isOffsetShellSidewallCapFaceName(faceName)) continue;
+        const metadata = getFaceMetadataSafe(solid, faceName);
+        if (collapseSidewallFaceNames.has(faceName) && isOffsetShellSidewallFace(faceName, metadata)) {
+            if (isOffsetShellSidewallCapFace(faceName, metadata)) continue;
             targetFaceIDs.add(faceID);
             targetFaceNamesByID.set(faceID, faceName);
         }
-        if (isRoundedPipeFace(faceName, metadata)) pipeFaceIDs.add(faceID);
+        if (isOffsetShellRoundedPipeFace(faceName, metadata)) pipeFaceIDs.add(faceID);
     }
     if (targetFaceIDs.size === 0) {
         return { reassignedTriangles: 0, reassignedFaces: 0, removedFaceLabels: 0 };
@@ -1468,6 +1534,32 @@ function isClosedPath(points, tolerance) {
         && pointDistanceSq(points[0], points[points.length - 1]) <= (tolerance * tolerance);
 }
 
+function tagNativeTubeOuterFaces(solid, tubeName, featureId = "") {
+    if (!solid || typeof solid.setFaceMetadata !== "function") return 0;
+    const outerFaceName = `${String(tubeName || "").trim() || "Tube"}_Outer`;
+    const sourceFeatureId = String(featureId || "").trim();
+    const faceNames = getSolidFaceNames(solid);
+    let taggedCount = 0;
+    for (const faceName of faceNames) {
+        if (faceName !== outerFaceName) continue;
+        const metadata = getFaceMetadataSafe(solid, faceName);
+        try {
+            solid.setFaceMetadata(faceName, {
+                ...metadata,
+                type: "rounded_pipe",
+                faceRole: "rounded_pipe",
+                offsetShellFaceRole: "rounded_pipe",
+                offsetShellRoundedPipe: true,
+                ...(sourceFeatureId ? { sourceFeatureId } : {}),
+            });
+            taggedCount += 1;
+        } catch {
+            /* ignore individual metadata failures */
+        }
+    }
+    return taggedCount;
+}
+
 function buildNativeTubeSolid(sourceSolid, points, radius, {
     closed = false,
     featureId = "OffsetShell",
@@ -1500,6 +1592,7 @@ function buildNativeTubeSolid(sourceSolid, points, radius, {
     solid._auxEdges = [];
     try { solid.name = name || `${featureId}_RoundedPipe`; } catch { /* ignore */ }
     try { solid.owningFeatureID = featureId; } catch { /* ignore */ }
+    tagNativeTubeOuterFaces(solid, name || `${featureId}_RoundedPipe`, featureId);
     const triCount = Array.isArray(solid._triVerts) ? Math.floor(solid._triVerts.length / 3) : 0;
     return triCount > 0 ? solid : null;
 }
@@ -1740,7 +1833,7 @@ export function offsetShell(faces, distance, options = {}) {
         shellUnionWallMs: 0,
         pipeSliverCollapseCount: 0,
         pipeSliverCollapseRemovedDegenerateTriangles: 0,
-        pipeRemainderStartFaceRenameCount: 0,
+        pipeRemainderBoundaryFaceTaggedCount: 0,
         pipeRemainderFaceNamesDeduplicated: false,
         shellFaceNamesDeduplicated: false,
         sidewallAreaLoss: null,
@@ -1787,8 +1880,9 @@ export function offsetShell(faces, distance, options = {}) {
                 try { pipeOutsideSource._cppSolidCoreSyncStamp = null; } catch { /* ignore */ }
                 try { pipeOutsideSource.name = `${newSolidName}_ROUND_PIPE_REMAINDER`; } catch { /* ignore */ }
                 try { pipeOutsideSource.owningFeatureID = featureId; } catch { /* ignore */ }
-                roundedCorners.pipeRemainderStartFaceRenameCount = appendStartSuffixToNonRoundedPipeFaces(pipeOutsideSource, featureId);
+                roundedCorners.pipeRemainderBoundaryFaceTaggedCount = tagPipeRemainderBoundaryFaces(pipeOutsideSource, featureId);
                 roundedCorners.pipeRemainderFaceNamesDeduplicated = deduplicateSolidFaceNames(pipeOutsideSource);
+                roundedCorners.pipeRemainderFaceIDRepair = repairGeneratedFaceIDProvenance(pipeOutsideSource);
                 if (options?.debugSeparateRoundedCornerPipe) {
                     roundedCorners.status = "separated";
                     roundedCorners.shellUnionStrategy = "debug_separate";
@@ -1960,6 +2054,7 @@ export function offsetShell(faces, distance, options = {}) {
         }
     }
 
+    const faceIDRepair = repairGeneratedFaceIDProvenance(combined);
     try { combined.name = newSolidName; } catch { /* ignore */ }
     const buildMethod = roundedCorners.status === "applied"
         ? "face_thicken_union_shell_with_rounded_corners"
@@ -1990,6 +2085,7 @@ export function offsetShell(faces, distance, options = {}) {
         unionFailureCount: Number(unionDiagnostics?.unionFailureCount || 0),
         firstUnionError: unionDiagnostics?.firstUnionError || null,
         roundedCorners,
+        faceIDRepair,
     };
     try {
         combined.userData = {
@@ -2006,6 +2102,7 @@ export function offsetShell(faces, distance, options = {}) {
                 adjacentBoundaryNormalDotThreshold: smoothSelectedAdjacentNormals ? smoothAdjacentNormalDotThreshold : null,
                 unionStrategy: unionDiagnostics?.unionStrategy || "unknown",
                 roundedCorners,
+                faceIDRepair,
             },
         };
     } catch { /* ignore */ }

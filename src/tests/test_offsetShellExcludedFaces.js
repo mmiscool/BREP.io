@@ -5,6 +5,34 @@ import {
   __testOnlyReassignAreaLossSidewallFacesToDominantNeighbor,
 } from '../BREP/SolidMethods/offsetShell.js';
 
+function normalizeRole(value) {
+  return String(value || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
+}
+
+function metadataRole(metadata = {}) {
+  return normalizeRole(metadata?.offsetShellFaceRole || metadata?.faceRole || metadata?.faceType || metadata?.type || '');
+}
+
+function setOffsetShellRole(solid, faceName, metadata) {
+  if (typeof solid?.setFaceMetadata === 'function') {
+    solid.setFaceMetadata(faceName, metadata);
+  }
+}
+
+function findVertexIndexByCoords(solid, coords, tolerance = 1e-9) {
+  const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : [];
+  for (let i = 0; i + 2 < vp.length; i += 3) {
+    if (
+      Math.abs(Number(vp[i + 0]) - Number(coords[0])) <= tolerance
+      && Math.abs(Number(vp[i + 1]) - Number(coords[1])) <= tolerance
+      && Math.abs(Number(vp[i + 2]) - Number(coords[2])) <= tolerance
+    ) {
+      return (i / 3) | 0;
+    }
+  }
+  return -1;
+}
+
 export async function test_offsetShell_thickens_all_faces_except_selected(partHistory) {
   await partHistory.reset();
   partHistory.features = [];
@@ -346,8 +374,8 @@ export async function afterRun_offsetShell_debug_separates_rounded_tube_remainde
     throw new Error(`Expected debugAddedSolidNames to include the tube remainder, got ${debugNames.join(", ")}.`);
   }
 
-  if (!(Number(rounded.pipeRemainderStartFaceRenameCount) > 0)) {
-    throw new Error(`Expected non-pipe tube remainder faces to be renamed with _START, got ${JSON.stringify(rounded)}.`);
+  if (!(Number(rounded.pipeRemainderBoundaryFaceTaggedCount) > 0)) {
+    throw new Error(`Expected non-pipe tube remainder faces to be tagged as boundary caps, got ${JSON.stringify(rounded)}.`);
   }
   if (rounded.pipeRemainderFaceNamesDeduplicated !== true) {
     throw new Error(`Expected debug tube remainder face names to be deduplicated, got ${JSON.stringify(rounded)}.`);
@@ -355,28 +383,27 @@ export async function afterRun_offsetShell_debug_separates_rounded_tube_remainde
 
   const pipeFaceNames = typeof pipe.getFaceNames === "function" ? pipe.getFaceNames() : [];
   const nonPipeNames = pipeFaceNames.filter((faceName) => {
-    const name = String(faceName || "");
-    if (!name) return false;
-    const metadata = typeof pipe.getFaceMetadata === "function" ? (pipe.getFaceMetadata(name) || {}) : {};
-    if (metadata.offsetShellRoundedPipe === true) return false;
-    return !/ROUND_PIPE.*_Outer(?:$|[_|])/u.test(name);
+    const metadata = typeof pipe.getFaceMetadata === "function" ? (pipe.getFaceMetadata(faceName) || {}) : {};
+    return metadata.offsetShellRoundedPipe !== true && metadataRole(metadata) !== "rounded_pipe";
   });
   if (!nonPipeNames.length) {
     throw new Error(`Expected debug rounded tube remainder to contain non-pipe faces, got ${pipeFaceNames.join(", ")}.`);
   }
-  const unsuffixedNonPipeNames = nonPipeNames.filter((faceName) => !String(faceName || "").endsWith("_START"));
-  if (unsuffixedNonPipeNames.length) {
-    throw new Error(`Expected non-pipe tube remainder faces to end with _START, got ${unsuffixedNonPipeNames.join(", ")}.`);
+  const untaggedBoundaryNames = nonPipeNames.filter((faceName) => {
+    const metadata = typeof pipe.getFaceMetadata === "function" ? (pipe.getFaceMetadata(faceName) || {}) : {};
+    return metadata.offsetShellPipeRemainderBoundary !== true || metadataRole(metadata) !== "start_cap";
+  });
+  if (untaggedBoundaryNames.length) {
+    throw new Error(`Expected non-pipe tube remainder faces to be tagged as start caps, got ${untaggedBoundaryNames.join(", ")}.`);
   }
 
-  const suffixedPipeNames = pipeFaceNames.filter((faceName) => {
-    const name = String(faceName || "");
-    if (!name.endsWith("_START")) return false;
-    const metadata = typeof pipe.getFaceMetadata === "function" ? (pipe.getFaceMetadata(name) || {}) : {};
-    return metadata.offsetShellRoundedPipe === true || /ROUND_PIPE.*_Outer(?:$|[_|])/u.test(name);
+  const boundaryTaggedPipeNames = pipeFaceNames.filter((faceName) => {
+    const metadata = typeof pipe.getFaceMetadata === "function" ? (pipe.getFaceMetadata(faceName) || {}) : {};
+    return (metadata.offsetShellRoundedPipe === true || metadataRole(metadata) === "rounded_pipe")
+      && metadata.offsetShellPipeRemainderBoundary === true;
   });
-  if (suffixedPipeNames.length) {
-    throw new Error(`Expected rounded pipe faces to keep their names, got ${suffixedPipeNames.join(", ")}.`);
+  if (boundaryTaggedPipeNames.length) {
+    throw new Error(`Expected rounded pipe faces not to be tagged as boundary caps, got ${boundaryTaggedPipeNames.join(", ")}.`);
   }
 }
 
@@ -451,11 +478,16 @@ export async function test_offsetShell_pipe_sliver_collapse_moves_only_pipe_vert
   const solid = new Solid();
   solid.name = "PIPE_SLIVER_COLLAPSE";
   solid
-    .addTriangle("BASE_SW", [0, 0, 0], [1, 0, 0], [0, 1, 0])
-    .addTriangle("OS_TEST_ROUND_PIPE_Outer", [0, 0, 0], [1, 0, 0], [0.02, 0.01, 0]);
+    .addTriangle("BASE_FACE", [0, 0, 0], [1, 0, 0], [0, 1, 0])
+    .addTriangle("PIPE_FACE", [0, 0, 0], [1, 0, 0], [0.02, 0.01, 0]);
+  setOffsetShellRole(solid, "BASE_FACE", { type: "sidewall", faceRole: "sidewall" });
+  setOffsetShellRole(solid, "PIPE_FACE", { type: "rounded_pipe", faceRole: "rounded_pipe", offsetShellRoundedPipe: true });
 
-  const sidewallFaceID = solid._faceNameToID.get("BASE_SW");
-  const pipeVertexIndex = solid._vertKeyToIndex.get("0.02,0.01,0");
+  const sidewallFaceID = solid._faceNameToID.get("BASE_FACE");
+  const pipeVertexIndex = findVertexIndexByCoords(solid, [0.02, 0.01, 0]);
+  if (pipeVertexIndex < 0) {
+    throw new Error("Expected to locate pipe-only vertex before collapse.");
+  }
   const sidewallVertexIndices = [];
   for (let i = 0; i < solid._triIDs.length; i += 1) {
     if (solid._triIDs[i] !== sidewallFaceID) continue;
@@ -473,12 +505,12 @@ export async function test_offsetShell_pipe_sliver_collapse_moves_only_pipe_vert
   ]);
 
   const areaLoss = __testOnlyBuildSidewallAreaLossCollapseTargets(solid, new Map([
-    ["BASE_SW", 50],
+    ["BASE_FACE", 50],
   ]), {
     areaLossThreshold: 0.98,
   });
-  if (!areaLoss.collapseFaceNames.includes("BASE_SW")) {
-    throw new Error(`Expected BASE_SW to be selected by >98% area loss, got ${JSON.stringify(areaLoss)}.`);
+  if (!areaLoss.collapseFaceNames.includes("BASE_FACE")) {
+    throw new Error(`Expected BASE_FACE to be selected by >98% area loss, got ${JSON.stringify(areaLoss)}.`);
   }
 
   const summary = __testOnlyCollapseOffsetShellRoundedPipeSlivers(solid, {
@@ -521,18 +553,23 @@ export async function test_offsetShell_pipe_sliver_collapse_falls_back_to_shorte
   const solid = new Solid();
   solid.name = "PIPE_SLIVER_COLLAPSE_SHORTEST_EDGE";
   solid
-    .addTriangle("BASE_SW", [0, 0, 0], [1, 0, 0], [0, 1, 0])
-    .addTriangle("OS_TEST_ROUND_PIPE_Outer", [0, 0, 0], [1, 0, 0], [0.02, 0.01, 0])
+    .addTriangle("BASE_FACE", [0, 0, 0], [1, 0, 0], [0, 1, 0])
+    .addTriangle("PIPE_FACE", [0, 0, 0], [1, 0, 0], [0.02, 0.01, 0])
     .addTriangle("ADJACENT_KEEPER", [0.02, 0.01, 0], [0.02, 0.02, 0], [0.03, 0.01, 0]);
+  setOffsetShellRole(solid, "BASE_FACE", { type: "sidewall", faceRole: "sidewall" });
+  setOffsetShellRole(solid, "PIPE_FACE", { type: "rounded_pipe", faceRole: "rounded_pipe", offsetShellRoundedPipe: true });
 
-  const pipeVertexIndex = solid._vertKeyToIndex.get("0.02,0.01,0");
+  const pipeVertexIndex = findVertexIndexByCoords(solid, [0.02, 0.01, 0]);
+  if (pipeVertexIndex < 0) {
+    throw new Error("Expected to locate pipe vertex before shortest-edge collapse.");
+  }
   const areaLoss = __testOnlyBuildSidewallAreaLossCollapseTargets(solid, new Map([
-    ["BASE_SW", 50],
+    ["BASE_FACE", 50],
   ]), {
     areaLossThreshold: 0.98,
   });
-  if (!areaLoss.collapseFaceNames.includes("BASE_SW")) {
-    throw new Error(`Expected BASE_SW to be selected by >98% area loss, got ${JSON.stringify(areaLoss)}.`);
+  if (!areaLoss.collapseFaceNames.includes("BASE_FACE")) {
+    throw new Error(`Expected BASE_FACE to be selected by >98% area loss, got ${JSON.stringify(areaLoss)}.`);
   }
 
   const summary = __testOnlyCollapseOffsetShellRoundedPipeSlivers(solid, {
@@ -612,20 +649,20 @@ export async function test_offsetShell_area_loss_sidewall_reassign_preserves_sou
   const solid = new Solid();
   solid.name = "AREA_LOSS_SIDEWALL_REASSIGN_PRESERVE_SOURCE_END";
   solid
-    .addTriangle("E2_S1_G3_SW_E2_S1_PROFILE_START_END_0_SW", [0, 0, 0], [1, 0, 0], [0, -1, 0])
-    .addTriangle("E2:S1:G3_SW_END", [0, 0, 0], [1, 0, 0], [0.05, 0.001, 0])
-    .addTriangle("E2:S1:G3_SW_END", [0.05, 0.001, 0], [1, 0, 0], [1, 0.001, 0]);
+    .addTriangle("SOURCE_SIDEWALL", [0, 0, 0], [1, 0, 0], [0, -1, 0])
+    .addTriangle("SOURCE_SIDEWALL_END_CAP", [0, 0, 0], [1, 0, 0], [0.05, 0.001, 0])
+    .addTriangle("SOURCE_SIDEWALL_END_CAP", [0.05, 0.001, 0], [1, 0, 0], [1, 0.001, 0]);
 
-  solid.setFaceMetadata("E2:S1:G3_SW_END", { type: "sidewall" });
-  solid.setFaceMetadata("E2_S1_G3_SW_E2_S1_PROFILE_START_END_0_SW", { type: "sidewall" });
+  solid.setFaceMetadata("SOURCE_SIDEWALL", { type: "sidewall", faceRole: "sidewall" });
+  solid.setFaceMetadata("SOURCE_SIDEWALL_END_CAP", { type: "end_cap", faceRole: "end_cap", sourceFaceRole: "sidewall" });
   const summary = __testOnlyReassignAreaLossSidewallFacesToDominantNeighbor(solid, {
-    collapseSidewallFaceNames: ["E2:S1:G3_SW_END"],
+    collapseSidewallFaceNames: ["SOURCE_SIDEWALL_END_CAP"],
   });
 
   if (summary.reassignedTriangles !== 0 || summary.reassignedFaces !== 0) {
     throw new Error(`Expected source sidewall end cap to be preserved, got ${JSON.stringify(summary)}.`);
   }
-  if (!solid.getFaceNames().includes("E2:S1:G3_SW_END")) {
-    throw new Error("Expected E2:S1:G3_SW_END face label to remain after sidewall reassign.");
+  if (!solid.getFaceNames().includes("SOURCE_SIDEWALL_END_CAP")) {
+    throw new Error("Expected SOURCE_SIDEWALL_END_CAP face label to remain after sidewall reassign.");
   }
 }
