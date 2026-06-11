@@ -59,6 +59,20 @@ export const HISTORY_COLLECTION_WIDGET_CSS = `
   .hc-item.is-running .hc-title {
     color: #eaf2ff;
   }
+  .hc-item.has-error {
+    border-color: var(--danger);
+    box-shadow: inset 0 0 0 1px rgba(239,68,68,.45), 0 0 0 1px rgba(239,68,68,.18);
+  }
+  .hc-item.has-error .hc-header-row {
+    background: linear-gradient(90deg, rgba(239,68,68,.18), rgba(239,68,68,.05));
+  }
+  .hc-item.has-error .hc-title,
+  .hc-item.has-error .hc-meta {
+    color: #fecaca;
+  }
+  .hc-item.has-error .hc-meta {
+    font-weight: 600;
+  }
   .hc-header-row {
     display: flex;
     align-items: stretch;

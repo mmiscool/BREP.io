@@ -52,15 +52,21 @@ export class ExplodeBodyAnnotation extends BaseAnnotation {
   }
 
   async run(renderingContext) {
-    const { pmimode, group } = renderingContext;
-    if (!pmimode || !group) return [];
+    const { pmimode, group, ctx } = renderingContext;
+    if (!pmimode || !group) {
+      ctx?.reportAnnotationError?.('Explode annotation could not access the PMI render context.');
+      return [];
+    }
 
     const ann = this.inputParams || {};
     ensurePersistent(ann);
     ann.transform = sanitizeTransform(ann.transform);
 
     const solids = ExplodeBodyAnnotation._resolveSolidReferences(ann, pmimode, true);
-    if (!solids.length) return [];
+    if (!solids.length) {
+      ctx?.reportAnnotationError?.('Explode annotation could not resolve any target solids.');
+      return [];
+    }
 
     const snapshots = ExplodeBodyAnnotation._ensureOriginalSnapshots(ann, solids, false, pmimode?.viewer);
     const shouldDrawTrace = ann.showTraceLine !== false;

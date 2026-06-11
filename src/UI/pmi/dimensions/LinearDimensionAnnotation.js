@@ -18,6 +18,8 @@ const inputParamsSchema = {
     default_value: [],
     label: 'Targets',
     hint: 'Select vertices, edges, or a planar face/linear edge and target',
+    minSelections: 1,
+    maxSelections: 2,
   },
   planeRefName: {
     type: 'reference_selection',
@@ -104,7 +106,10 @@ export class LinearDimensionAnnotation extends BaseAnnotation {
     const labelInfo = formatLinearLabel(measured, ann);
     ann.value = labelInfo.display;
 
-    if (!pts || !pts.p0 || !pts.p1) return [];
+    if (!pts || !pts.p0 || !pts.p1) {
+      ctx?.reportAnnotationError?.('Linear dimension could not resolve two measurement points.');
+      return [];
+    }
 
     if (!ann.persistentData || typeof ann.persistentData !== 'object') {
       ann.persistentData = {};
@@ -126,7 +131,10 @@ export class LinearDimensionAnnotation extends BaseAnnotation {
         screenSizeWorld: ctx.screenSizeWorld,
         fallbackScreenSizeWorld: (pixels) => screenSizeWorld(pmimode?.viewer, pixels),
       });
-      if (!geometry) return [];
+      if (!geometry) {
+        ctx?.reportAnnotationError?.('Linear dimension geometry could not be generated from the selected targets.');
+        return [];
+      }
 
       for (const [start, end] of geometry.segments) {
         group.add(makeOverlayLine(start, end, color));
@@ -145,7 +153,9 @@ export class LinearDimensionAnnotation extends BaseAnnotation {
       const labelText = ctx.formatReferenceLabel ? ctx.formatReferenceLabel(ann, displayInfo.raw) : displayInfo.display;
       const labelPos = geometry.labelPosition;
       if (labelPos) ctx.updateLabel(idx, labelText, labelPos, ann);
-    } catch { /* ignore */ }
+    } catch (error) {
+      ctx?.reportAnnotationError?.(error, 'Linear dimension failed to render.');
+    }
     return [];
   }
 
@@ -343,7 +353,7 @@ function computeEdgeNormalDimPoints(pmimode, objects) {
 }
 
 function normalizeTargetList(value) {
-  if (Array.isArray(value)) return value;
+  if (Array.isArray(value)) return value.slice(0, 2);
   if (value == null || value === '') return [];
   return [value];
 }

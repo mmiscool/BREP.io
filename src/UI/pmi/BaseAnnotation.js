@@ -232,8 +232,15 @@ function sanitizeAnnotationParams(schema, rawParams, ann) {
         if (def.multiple) {
           const arr = Array.isArray(value) ? value : (value ? [value] : []);
           sanitized[key] = arr.map((v) => (v == null ? '' : String(v))).filter((s) => s.length);
+          const maxSelections = normalizeSelectionBound(def.maxSelections);
+          if (maxSelections !== null && sanitized[key].length > maxSelections) {
+            sanitized[key] = sanitized[key].slice(0, maxSelections);
+          }
           if (!sanitized[key].length && hasExisting && Array.isArray(ann[key])) {
             sanitized[key] = ann[key].slice();
+            if (maxSelections !== null && sanitized[key].length > maxSelections) {
+              sanitized[key] = sanitized[key].slice(0, maxSelections);
+            }
           }
         } else {
           sanitized[key] = value == null ? (hasExisting ? String(ann[key] ?? '') : '') : String(value);
@@ -260,6 +267,12 @@ function sanitizeAnnotationParams(schema, rawParams, ann) {
   }
 
   return sanitized;
+}
+
+function normalizeSelectionBound(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return Math.max(0, Math.floor(numeric));
 }
 
 function normalizeTransform(value, fallback) {

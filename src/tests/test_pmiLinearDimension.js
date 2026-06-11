@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { resolveHistoryDisplayInfo } from "../UI/history/historyDisplayInfo.js";
 import { buildLinearDimensionGeometry } from "../UI/dimensions/dimensionGeometry.js";
 import {
   LinearDimensionAnnotation,
@@ -193,4 +194,53 @@ export async function test_pmi_linear_dimension_single_edge_still_measures_edge_
   );
   assert(points?.measurementMode !== "edgeNormal", "Expected a single edge to keep length dimension behavior.");
   assertApprox(points.p0.distanceTo(points.p1), 10, 1e-9, "Expected single edge length.");
+}
+
+export async function test_pmi_linear_dimension_limits_targets_to_two() {
+  const schema = LinearDimensionAnnotation.inputParamsSchema?.targets || {};
+  assert(schema.maxSelections === 2, "Expected linear dimension target selector to cap selections at two.");
+
+  const ann = { targets: ["A", "B", "C"] };
+  LinearDimensionAnnotation.applyParams(null, ann, ann);
+  assert(Array.isArray(ann.targets), "Expected linear dimension targets to stay an array.");
+  assert(ann.targets.length === 2, "Expected linear dimension params to clamp targets to two.");
+  assert(ann.targets[0] === "A" && ann.targets[1] === "B", "Expected linear dimension to keep the first two targets.");
+
+  const scene = new THREE.Scene();
+  scene.add(makeVertex("A", new THREE.Vector3(0, 0, 0)));
+  scene.add(makeVertex("B", new THREE.Vector3(1, 0, 0)));
+  scene.add(makeVertex("C", new THREE.Vector3(100, 0, 0)));
+  scene.updateMatrixWorld(true);
+
+  const points = __testOnlyLinearDimensionInternals.computeDimPoints(
+    makePMIMode(scene),
+    { targets: ["A", "B", "C"] },
+  );
+  assertApprox(points.p0.distanceTo(points.p1), 1, 1e-9, "Expected runtime measurement to ignore targets after the first two.");
+}
+
+export async function test_pmi_annotation_failure_status_is_visible() {
+  const entry = {
+    type: "linear",
+    inputParams: { id: "DIM1", type: "linear" },
+    lastRun: {
+      ok: false,
+      durationMs: 4.2,
+      errorMessage: "Linear dimension could not resolve two measurement points.",
+    },
+  };
+  const history = {
+    registry: {
+      resolve(type) {
+        return type === "linear" ? LinearDimensionAnnotation : null;
+      },
+    },
+  };
+  const info = resolveHistoryDisplayInfo(entry, { history });
+  assert(info.hasError === true, "Expected failed annotation to be marked as an error.");
+  assert(String(info.statusText || "").includes("Error"), "Expected failed annotation status text to show Error.");
+  assert(
+    String(info.statusTitle || "").includes("could not resolve"),
+    "Expected failed annotation status title to include the render error message.",
+  );
 }

@@ -99,7 +99,10 @@ export class AngleDimensionAnnotation extends BaseAnnotation {
     ensurePersistent(ann);
     try {
       const elements = computeAngleElementsWithGeometry(pmimode, ann, ctx);
-      if (!elements || !elements.__2d) return [];
+      if (!elements || !elements.__2d) {
+        ctx?.reportAnnotationError?.('Angle dimension could not resolve two measurable elements.');
+        return [];
+      }
 
       const color = 0xf59e0b;
       const { N, P, A_d, B_d, V2, basis, sweep = 0, dirSign = 1, bisector = null } = elements.__2d;
@@ -117,7 +120,10 @@ export class AngleDimensionAnnotation extends BaseAnnotation {
         screenSizeWorld: ctx.screenSizeWorld,
         fallbackScreenSizeWorld: (pixels) => screenSizeWorld(pmimode?.viewer, pixels),
       });
-      if (!geometry) return [];
+      if (!geometry) {
+        ctx?.reportAnnotationError?.('Angle dimension geometry could not be generated from the selected elements.');
+        return [];
+      }
 
       for (let i = 0; i < geometry.arcPoints.length - 1; i += 1) {
         group.add(makeOverlayLine(geometry.arcPoints[i], geometry.arcPoints[i + 1], color));
@@ -137,7 +143,9 @@ export class AngleDimensionAnnotation extends BaseAnnotation {
         const labelPos = geometry.labelPosition;
         if (labelPos) ctx.updateLabel(idx, txt, labelPos, ann);
       }
-    } catch { /* ignore rendering errors */ }
+    } catch (error) {
+      ctx?.reportAnnotationError?.(error, 'Angle dimension failed to render.');
+    }
     return [];
   }
 

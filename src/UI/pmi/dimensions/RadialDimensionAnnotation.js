@@ -111,7 +111,10 @@ export class RadialDimensionAnnotation extends BaseAnnotation {
     ensurePersistent(ann);
     try {
       const data = computeRadialPoints(pmimode, ann, ctx);
-      if (!data || !data.center || !data.radiusPoint) return [];
+      if (!data || !data.center || !data.radiusPoint) {
+        ctx?.reportAnnotationError?.('Radial dimension could not resolve a radial face and center/radius geometry.');
+        return [];
+      }
       const { center, radiusPoint, planeNormal, planePoint, radius } = data;
       const color = 0xff6b35;
 
@@ -174,6 +177,7 @@ export class RadialDimensionAnnotation extends BaseAnnotation {
         if (labelPos) ctx.updateLabel(idx, txt, labelPos, ann);
       }
     } catch (e) {
+      ctx?.reportAnnotationError?.(e, 'Radial dimension failed to render.');
       console.warn('RadialDimensionAnnotation render error:', e);
     }
     return [];

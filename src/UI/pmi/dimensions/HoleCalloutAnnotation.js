@@ -98,7 +98,14 @@ export class HoleCalloutAnnotation extends BaseAnnotation {
     const objPoint = objectRepresentativePoint(scene, targetObj);
     const descriptor = findHoleDescriptor(viewer?.partHistory, targetObj, objPoint, ann.target);
     const targetPoint = descriptor?.center ? arrToVec(descriptor.center) : objPoint;
-    if (!targetPoint) return [];
+    if (!targetPoint) {
+      ctx?.reportAnnotationError?.('Hole callout could not resolve the selected target.');
+      return [];
+    }
+    if (!descriptor) {
+      ctx?.reportAnnotationError?.('Hole callout could not identify hole metadata for the selected target.');
+      return [];
+    }
 
     const qty = resolveHoleQuantity(ann, descriptor, viewer?.partHistory);
     const labelText = descriptor ? formatHoleCallout(descriptor, qty, {

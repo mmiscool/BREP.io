@@ -22,6 +22,24 @@ const cssEscape = (value) => {
   return String(value).replace(/"/g, '\\"');
 };
 
+function getNowMs() {
+  try {
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+      return performance.now();
+    }
+  } catch { /* ignore */ }
+  return Date.now();
+}
+
+function formatAnnotationRenderError(error, fallbackMessage = 'Annotation failed to generate.') {
+  if (typeof error === 'string' && error.trim()) return error.trim();
+  if (error && typeof error === 'object') {
+    const message = typeof error.message === 'string' ? error.message.trim() : '';
+    if (message) return message;
+  }
+  return String(fallbackMessage || 'Annotation failed to generate.').trim() || 'Annotation failed to generate.';
+}
+
 // Register built-in annotation types
 export class PMIMode {
   /**
@@ -1188,9 +1206,31 @@ export class PMIMode {
     };
     this.__explodeTraceState = new Map();
     entities.forEach((entity, i) => {
+      let reportedError = false;
+      const startMs = getNowMs();
+      const reportError = (error, fallbackMessage = 'Annotation failed to generate.') => {
+        reportedError = true;
+        const message = formatAnnotationRenderError(error, fallbackMessage);
+        const durationMs = getNowMs() - startMs;
+        if (this.#setAnnotationRenderError(entity, message, durationMs)) {
+          this.#notifyAnnotationStatusChanged(entity);
+        }
+      };
+      const clearError = () => {
+        if (reportedError) return;
+        if (this.#clearAnnotationRenderError(entity)) {
+          this.#notifyAnnotationStatusChanged(entity);
+        }
+      };
       try {
-        if (entity?.enabled === false) return;
-        if (!entity || typeof entity.run !== 'function') return;
+        if (entity?.enabled === false) {
+          clearError();
+          return;
+        }
+        if (!entity || typeof entity.run !== 'function') {
+          reportError('No renderer is available for this annotation.');
+          return;
+        }
         if (!entity.persistentData || typeof entity.persistentData !== 'object') {
           entity.setPersistentData({});
         }
@@ -1198,16 +1238,52 @@ export class PMIMode {
           pmimode: this,
           group,
           idx: i,
-          ctx,
+          ctx: {
+            ...ctx,
+            reportAnnotationError: reportError,
+            clearAnnotationError: clearError,
+          },
         };
         const runResult = entity.run(renderingContext);
         if (runResult && typeof runResult.then === 'function') {
-          runResult.catch(() => {});
+          runResult.then(
+            () => { clearError(); },
+            (error) => { reportError(error); },
+          );
+        } else {
+          clearError();
         }
-      } catch { }
+      } catch (error) {
+        reportError(error);
+      }
     });
     try { this.viewer.render(); } catch { }
     // No post-check necessary
+  }
+
+  #setAnnotationRenderError(entity, message, durationMs = 0) {
+    if (!entity) return false;
+    const safeMessage = String(message || 'Annotation failed to generate.').trim() || 'Annotation failed to generate.';
+    const prev = entity.lastRun;
+    const changed = !(prev && prev.ok === false && String(prev.errorMessage || '') === safeMessage);
+    entity.lastRun = {
+      ok: false,
+      durationMs: Number.isFinite(durationMs) ? Math.max(0, durationMs) : 0,
+      errorMessage: safeMessage,
+    };
+    return changed;
+  }
+
+  #clearAnnotationRenderError(entity) {
+    if (!entity || !entity.lastRun || entity.lastRun.ok !== false) return false;
+    try { delete entity.lastRun; } catch { entity.lastRun = null; }
+    return true;
+  }
+
+  #notifyAnnotationStatusChanged(entity) {
+    try {
+      this._annotationHistory?.notifyListeners?.({ reason: 'status', entry: entity, history: this._annotationHistory });
+    } catch { /* ignore */ }
   }
 
   // Wrap label text in parentheses when marked as a reference dimension

@@ -75,10 +75,25 @@ function resolveStatus(entry, { isRunning = false } = {}) {
     const parts = [];
     const label = formatDuration(duration);
     if (label) parts.push(label);
-    if (entry.lastRun.ok === false) parts.push('✖');
+    if (entry.lastRun.ok === false) {
+      parts.push('Error');
+      const title = firstString(
+        entry.lastRun.errorMessage
+        || entry.lastRun.message
+        || entry.lastRun.error
+        || 'Last run failed.'
+      );
+      return {
+        label: parts.join(' ').trim() || 'Error',
+        title,
+        color: '#ef4444',
+        error: true,
+        running: false,
+      };
+    }
     return {
       label: parts.join(' ').trim(),
-      error: entry.lastRun.ok === false,
+      error: false,
       running: false,
     };
   }

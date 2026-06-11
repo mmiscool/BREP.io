@@ -100,6 +100,11 @@ export class LeaderAnnotation extends BaseAnnotation {
     }
 
     if (!targets.length || !labelPos) {
+      if (!targets.length) {
+        ctx?.reportAnnotationError?.('Leader annotation could not resolve any selected targets.');
+      } else {
+        ctx?.reportAnnotationError?.('Leader annotation could not resolve a label position.');
+      }
       return [];
     }
 
