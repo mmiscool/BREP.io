@@ -141,10 +141,3 @@ export async function test_solid_overlap_diagnostics_detects_cross_solid_overlap
     'Expected SOLID_B highlight set to include B_FACE_1.',
   );
 }
-
-export async function test_solid_overlap_diagnostics(partHistory) {
-  await test_solid_overlap_diagnostics_detects_coplanar_overlap(partHistory);
-  await test_solid_overlap_diagnostics_ignores_boundary_touching_faces(partHistory);
-  await test_solid_overlap_diagnostics_detects_cross_solid_overlap(partHistory);
-  return partHistory;
-}

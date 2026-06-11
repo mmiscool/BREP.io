@@ -105,7 +105,6 @@ export const manifold = await (async () => {
 
 
 export const Manifold = manifold.Manifold;
-export const CrossSection = manifold.CrossSection;
 export const ManifoldMesh = manifold.Mesh;
 export const manifoldBuildSource = MANIFOLD_RUNTIME_SOURCE;
 export const manifoldHasCustomExtensions = typeof manifold.sum === 'function';

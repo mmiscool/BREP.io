@@ -43,8 +43,6 @@ export function test_transform_reference_sanitize_preserves_metadata() {
   assert(sanitized.reference.faceIndex === 3, 'Expected face index metadata to persist.');
 }
 
-export const test_transform_reference_sanitizer_preserves_reference_metadata = test_transform_reference_sanitize_preserves_metadata;
-
 export function test_transform_reference_base_uses_face_pick_point() {
   const scene = new THREE.Scene();
   const face = new THREE.Object3D();
@@ -91,8 +89,6 @@ export function test_referenced_transform_matrix_uses_vertex_reference_origin() 
 
   assertVec3(position, [11, 22, 33], 'Expected referenced transform to offset from the selected vertex.');
 }
-
-export const test_transform_reference_matrix_uses_vertex_origin = test_referenced_transform_matrix_uses_vertex_reference_origin;
 
 export function test_port_definition_uses_transform_reference_without_anchor() {
   const scene = new THREE.Scene();

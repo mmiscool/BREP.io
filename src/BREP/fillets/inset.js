@@ -1,19 +1,12 @@
 import * as THREE from 'three';
 
 // Scratch vectors
-const __vAB = new THREE.Vector3();
-const __vAC = new THREE.Vector3();
-const __vAP = new THREE.Vector3();
-const __vBP = new THREE.Vector3();
-const __vCP = new THREE.Vector3();
-const __vCB = new THREE.Vector3();
 const __tmp1 = new THREE.Vector3();
 const __tmp2 = new THREE.Vector3();
 const __tmp3 = new THREE.Vector3();
 const __tmp4 = new THREE.Vector3();
 const __tmp5 = new THREE.Vector3();
 const __tmp6 = new THREE.Vector3();
-const __projOut = new THREE.Vector3();
 
 function getScaleAdaptiveTolerance(radius, baseEpsilon = 1e-12) {
   return Math.max(baseEpsilon, baseEpsilon * Math.abs(radius));
@@ -21,10 +14,6 @@ function getScaleAdaptiveTolerance(radius, baseEpsilon = 1e-12) {
 
 function getDistanceTolerance(radius) {
   return Math.max(1e-9, 1e-6 * Math.abs(radius));
-}
-
-function getAngleTolerance() {
-  return 1e-6; // radians
 }
 
 // Lightweight spatial index keyed by voxel cells for triangle centroid spheres
@@ -137,160 +126,6 @@ function getCachedSpatialIndex(faceData, faceKey = null) {
   return idx;
 }
 
-function clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }
-function isFiniteVec3(v) { return Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z); }
-
-// Output-parameter version to avoid allocating new vectors per call
-function closestPointOnTriangleToOut(P, A, B, C, out) {
-  // Real-Time Collision Detection (Christer Ericson)
-  const AB = __vAB.subVectors(B, A);
-  const AC = __vAC.subVectors(C, A);
-  const AP = __vAP.subVectors(P, A);
-  const d1 = AB.dot(AP);
-  const d2 = AC.dot(AP);
-  if (d1 <= 0 && d2 <= 0) { out.copy(A); return out; }
-  const BP = __vBP.subVectors(P, B);
-  const d3 = AB.dot(BP);
-  const d4 = AC.dot(BP);
-  if (d3 >= 0 && d4 <= d3) { out.copy(B); return out; }
-  const vc = d1 * d4 - d3 * d2;
-  if (vc <= 0 && d1 >= 0 && d3 <= 0) { const v = d1 / (d1 - d3); out.copy(A).addScaledVector(AB, v); return out; }
-  const CP = __vCP.subVectors(P, C);
-  const d5 = AB.dot(CP);
-  const d6 = AC.dot(CP);
-  if (d6 >= 0 && d5 <= d6) { out.copy(C); return out; }
-  const vb = d5 * d2 - d1 * d6;
-  if (vb <= 0 && d2 >= 0 && d6 <= 0) { const w = d2 / (d2 - d6); out.copy(A).addScaledVector(AC, w); return out; }
-  const va = d3 * d6 - d5 * d4;
-  if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) { const w = (d4 - d3) / ((d4 - d3) + (d5 - d6)); out.copy(B).addScaledVector(__vCB.subVectors(C, B), w); return out; }
-  const denom = 1 / (AB.dot(AB) * AC.dot(AC) - Math.pow(AB.dot(AC), 2));
-  const v = (AC.dot(AC) * AB.dot(AP) - AB.dot(AC) * AC.dot(AP)) * denom;
-  const w = (AB.dot(AB) * AC.dot(AP) - AB.dot(AC) * AB.dot(AP)) * denom;
-  out.copy(A).addScaledVector(AB, v).addScaledVector(AC, w); return out;
-}
-
-function projectPointOntoFaceTriangles(tris, point, faceData = null, faceKey = null) {
-  if (!Array.isArray(tris) || tris.length === 0) return point.clone();
-  const data = faceData && Array.isArray(faceData) ? faceData : getCachedFaceDataForTris(tris, faceKey);
-  if (!data || !data.length) return point.clone();
-  const spatialIndex = getCachedSpatialIndex(data, faceKey);
-  let best = null;
-  const a = __tmp1, b = __tmp2, c = __tmp3, q = __projOut;
-  if (spatialIndex) {
-    const nearby = spatialIndex.getNearbyTriangles(point);
-    if (nearby.length) {
-      for (const idx of nearby) {
-        if (idx >= data.length) continue;
-        const t = data[idx].triangle;
-        a.set(t.p1[0], t.p1[1], t.p1[2]);
-        b.set(t.p2[0], t.p2[1], t.p2[2]);
-        c.set(t.p3[0], t.p3[1], t.p3[2]);
-        closestPointOnTriangleToOut(point, a, b, c, q);
-        const d2 = q.distanceToSquared(point);
-        if (!best || d2 < best.d2) best = { d2, q: q.clone() };
-      }
-      if (best && data.length > 64) {
-        const bestDist = Math.sqrt(best.d2);
-        const visited = new Set(nearby);
-        for (let i = 0; i < data.length; i++) {
-          if (visited.has(i)) continue;
-          const d = data[i];
-          const dx = d.cx - point.x, dy = d.cy - point.y, dz = d.cz - point.z;
-          const centerD2 = dx * dx + dy * dy + dz * dz;
-          const rad = d.rad || 0;
-          const thr = bestDist + rad;
-          if (centerD2 > thr * thr) continue;
-          const t = d.triangle;
-          a.set(t.p1[0], t.p1[1], t.p1[2]);
-          b.set(t.p2[0], t.p2[1], t.p2[2]);
-          c.set(t.p3[0], t.p3[1], t.p3[2]);
-          closestPointOnTriangleToOut(point, a, b, c, q);
-          const d2 = q.distanceToSquared(point);
-          if (d2 < best.d2) best = { d2, q: q.clone() };
-        }
-      }
-    } else {
-      const candidates = data.map((d, i) => ({ i, d2: (d.cx - point.x) ** 2 + (d.cy - point.y) ** 2 + (d.cz - point.z) ** 2 }));
-      candidates.sort((a, b) => a.d2 - b.d2);
-      const K = Math.min(16, candidates.length);
-      for (let k = 0; k < K; k++) {
-        const t = data[candidates[k].i].triangle;
-        a.set(t.p1[0], t.p1[1], t.p1[2]);
-        b.set(t.p2[0], t.p2[1], t.p2[2]);
-        c.set(t.p3[0], t.p3[1], t.p3[2]);
-        closestPointOnTriangleToOut(point, a, b, c, q);
-        const d2 = q.distanceToSquared(point);
-        if (!best || d2 < best.d2) best = { d2, q: q.clone() };
-      }
-    }
-  } else {
-    const K = Math.min(16, data.length);
-    const pairs = data.map((d, i) => ({ i, d2: (d.cx - point.x) ** 2 + (d.cy - point.y) ** 2 + (d.cz - point.z) ** 2 }));
-    pairs.sort((a, b) => a.d2 - b.d2);
-    for (let k = 0; k < K; k++) {
-      const t = data[pairs[k].i].triangle;
-      a.set(t.p1[0], t.p1[1], t.p1[2]);
-      b.set(t.p2[0], t.p2[1], t.p2[2]);
-      c.set(t.p3[0], t.p3[1], t.p3[2]);
-      closestPointOnTriangleToOut(point, a, b, c, q);
-      const d2 = q.distanceToSquared(point);
-      if (!best || d2 < best.d2) best = { d2, q: q.clone() };
-    }
-  }
-  return best ? best.q : point.clone();
-}
-
-function batchProjectPointsOntoFace(tris, points, faceData = null, faceKey = null) {
-  if (!Array.isArray(points) || !points.length) return [];
-  if (!Array.isArray(tris) || !tris.length) return points.map(p => p.clone());
-  const data = faceData && Array.isArray(faceData) ? faceData : getCachedFaceDataForTris(tris, faceKey);
-  const spatialIndex = getCachedSpatialIndex(data, faceKey);
-  const results = new Array(points.length);
-  if (spatialIndex) {
-    const cell = new Map(); // cellKey -> indices
-    const inv = spatialIndex.invCellSize;
-    for (let i = 0; i < points.length; i++) {
-      const p = points[i];
-      const key = `${Math.floor(p.x * inv)},${Math.floor(p.y * inv)},${Math.floor(p.z * inv)}`;
-      let arr = cell.get(key); if (!arr) { arr = []; cell.set(key, arr); }
-      arr.push(i);
-    }
-    for (const [key, indices] of cell.entries()) {
-      const [ix, iy, iz] = key.split(',').map(Number);
-      const neigh = [];
-      for (let dx = -1; dx <= 1; dx++)
-        for (let dy = -1; dy <= 1; dy++)
-          for (let dz = -1; dz <= 1; dz++) {
-            const k = `${ix + dx},${iy + dy},${iz + dz}`;
-            const list = spatialIndex.grid.get(k);
-            if (list) for (const t of list) neigh.push(t);
-          }
-      const unique = Array.from(new Set(neigh));
-      for (const i of indices) {
-        const p = points[i];
-        let best = null;
-        const a = __tmp1, b = __tmp2, c = __tmp3, q = __projOut;
-        for (const idx of unique) {
-          const d = data[idx]; if (!d) continue;
-          const t = d.triangle;
-          a.set(t.p1[0], t.p1[1], t.p1[2]);
-          b.set(t.p2[0], t.p2[1], t.p2[2]);
-          c.set(t.p3[0], t.p3[1], t.p3[2]);
-          closestPointOnTriangleToOut(p, a, b, c, q);
-          const d2 = q.distanceToSquared(p);
-          if (!best || d2 < best.d2) best = { d2, q: q.clone() };
-        }
-        results[i] = best ? best.q : p.clone();
-      }
-    }
-  } else {
-    for (let i = 0; i < points.length; i++) {
-      results[i] = projectPointOntoFaceTriangles(tris, points[i], data, faceKey);
-    }
-  }
-  return results;
-}
-
 function averageFaceNormalObjectSpace(solid, faceName) {
   const tris = solid.getFace(faceName);
   if (!tris || !tris.length) return new THREE.Vector3(0, 1, 0);
@@ -353,15 +188,7 @@ function localFaceNormalAtPoint(solid, faceName, p, faceData = null, faceKey = n
 }
 
 export {
-  getScaleAdaptiveTolerance,
   getDistanceTolerance,
-  getAngleTolerance,
-  getCachedFaceDataForTris,
-  getCachedSpatialIndex,
-  clamp,
-  isFiniteVec3,
-  projectPointOntoFaceTriangles,
-  batchProjectPointsOntoFace,
   averageFaceNormalObjectSpace,
   localFaceNormalAtPoint,
 };

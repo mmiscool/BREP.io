@@ -54,8 +54,6 @@ export {
 export {
     union,
     unionMany,
-    buildNativeUnionManyResult,
-    hasNativeBooleanUnionManyBuilder,
     subtract,
     intersect,
     _expandTriIDsFromMesh as _expandTriIDsFromMeshStatic,

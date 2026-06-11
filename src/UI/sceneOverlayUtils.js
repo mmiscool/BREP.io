@@ -51,12 +51,3 @@ export function isSceneRemovalProtected(object) {
   }
   return false;
 }
-
-export function removeSceneOverlayObject(scene, object) {
-  if (!object) return;
-  allowSceneOverlayRemoval(object, { deep: true });
-  try {
-    if (object.parent && typeof object.parent.remove === 'function') object.parent.remove(object);
-    else if (scene && typeof scene.remove === 'function') scene.remove(object);
-  } catch { /* ignore overlay removal failures */ }
-}

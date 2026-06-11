@@ -3,10 +3,30 @@
     "vendor/**",
     "**/samples/**",
     "apiExamples/**",
-    "**/docs/**",
-
+    "brep-io-kernel-examples/**",
+    "src/UI/sketcher/handDrawToVectors/demo.js",
+    "src/UI/sketcher/handDrawToVectors/style.css",
+    "src/features/textToFace/fontUrlLoaders.vite.js",
+    "src/main-cad.js",
+    "src/tools/*CapturePage.js",
+    "src/tools/dialogCapturePageFactory.js",
+    "src/tools/fontAuditPage.js",
+    "src/wireHarness/pathFinderLogic/demo.css",
+    "src/wireHarness/pathFinderLogic/demo.js",
+    "src/wireHarness/pathFinderLogic/js/digraphs/digraph_simple_builder.js",
+    "src/wireHarness/pathFinderLogic/js/digraphs/spt_html.js",
+    "src/wireHarness/pathFinderLogic/js/test_digraph_builders.js",
+    "**/docs/**"
   ],
   "ignoreExports": [
+    {
+      "file": "src/UI/sketcher/handDrawToVectors/fuzzydraw.js",
+      "exports": [
+        "defaultOptions",
+        "loadPNGToImageData",
+        "shapesToSVG"
+      ]
+    },
     {
       "file": "src/UI/assembly/constraintSelectionUtils.js",
       "exports": ["*"]

@@ -44,19 +44,19 @@ export function vectorFromAny(value) {
   return null;
 }
 
-export function clampToUnit(value) {
+function clampToUnit(value) {
   if (value > 1) return 1;
   if (value < -1) return -1;
   return value;
 }
 
-export function signedAngle2D(a, b) {
+function signedAngle2D(a, b) {
   const cross = a.x * b.y - a.y * b.x;
   const dot = a.x * b.x + a.y * b.y;
   return Math.atan2(cross, dot);
 }
 
-export function rotate2D(vec, angle) {
+function rotate2D(vec, angle) {
   const c = Math.cos(angle);
   const s = Math.sin(angle);
   return new THREE.Vector2(vec.x * c - vec.y * s, vec.x * s + vec.y * c);
@@ -84,7 +84,7 @@ export function dirTo2D(dir, basis) {
   return new THREE.Vector2(dir.dot(basis.U), dir.dot(basis.V));
 }
 
-export function from2D(p2, planePoint, basis) {
+function from2D(p2, planePoint, basis) {
   return planePoint.clone()
     .add(basis.U.clone().multiplyScalar(p2.x))
     .add(basis.V.clone().multiplyScalar(p2.y));
@@ -98,7 +98,7 @@ export function intersectLines2D(p1, d1, p2, d2) {
   return new THREE.Vector2(p1.x + d1.x * t, p1.y + d1.y * t);
 }
 
-export function projectPointToPlane(point, planePoint, planeNormal) {
+function projectPointToPlane(point, planePoint, planeNormal) {
   const distance = point.clone().sub(planePoint).dot(planeNormal);
   return point.clone().sub(planeNormal.clone().multiplyScalar(distance));
 }

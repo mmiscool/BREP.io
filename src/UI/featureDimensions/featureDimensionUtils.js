@@ -1,8 +1,4 @@
 import * as THREE from 'three';
-export {
-  supportsFeatureDimensionFeatureKey,
-  supportsTransformDimensionToggle,
-} from './FeatureDimensionRegistry.js';
 
 const EPS = 1e-9;
 

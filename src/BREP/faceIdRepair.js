@@ -281,9 +281,3 @@ export function repairGeneratedFaceIDProvenance(solid) {
     directStartEndCapBoundaryReassignedTriangles,
   };
 }
-
-export {
-  getFaceRole as __testOnlyGetFaceRole,
-  repairDirectStartEndCapBoundaries as __testOnlyRepairDirectStartEndCapBoundaries,
-  reassignTemporaryIntersectionCapTriangles as __testOnlyReassignTemporaryIntersectionCapTriangles,
-};

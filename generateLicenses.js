@@ -430,12 +430,7 @@ const licenseText = readFileSync("LICENSE.md", "utf-8");
 // read README and render markdown to HTML (lightweight renderer, no deps)
 const readmeText = readFileSync("README.md", "utf-8");
 
-const escape = (s = "") => String(s)
-  .replaceAll("&", "&amp;")
-  .replaceAll("<", "&lt;")
-  .replaceAll(">", "&gt;")
-  .replaceAll('"', "&quot;")
-  .replaceAll("'", "&#39;");
+const escape = escapeHTML;
 
 const stripAssetDecorators = (value = "") => String(value).split(/[?#]/)[0].trim();
 

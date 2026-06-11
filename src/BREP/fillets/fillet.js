@@ -19,8 +19,6 @@ function solidFromSnapshot(snapshot, name, opts = {}) {
     try { solid.name = name; } catch { }
     return solid;
 }
-export { fixTJunctionsAndPatchHoles } from './outset.js';
-
 function hasNativeFilletEdgeBuilder() {
     return typeof manifold?.buildFilletEdgeAuthoringState === 'function';
 }

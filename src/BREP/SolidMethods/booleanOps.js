@@ -20,7 +20,7 @@ function hasNativeBooleanCombinedBuilder() {
     return typeof manifold?.buildBooleanCombinedAuthoringState === "function";
 }
 
-export function hasNativeBooleanUnionManyBuilder() {
+function hasNativeBooleanUnionManyBuilder() {
     return typeof manifold?.buildBooleanUnionManyAuthoringState === "function";
 }
 
@@ -574,7 +574,7 @@ function unionManyNodesBalanced(nodes, options, diagnostics) {
     return round[0] || null;
 }
 
-export function buildNativeUnionManyResult(solids, SolidCtor = null, options = {}) {
+function buildNativeUnionManyResult(solids, SolidCtor = null, options = {}) {
     const inputs = Array.isArray(solids) ? solids.filter(Boolean) : [];
     if (!inputs.length) return null;
     requireNativeBooleanUnionManyBuilder("Solid.unionMany");

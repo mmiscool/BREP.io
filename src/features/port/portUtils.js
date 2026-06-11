@@ -78,7 +78,7 @@ export function normalizePortDefinition(raw, fallbackFeatureId = 'Port') {
   };
 }
 
-export function clonePortDefinition(definition) {
+function clonePortDefinition(definition) {
   return JSON.parse(JSON.stringify(normalizePortDefinition(definition)));
 }
 
@@ -94,7 +94,7 @@ function pickOrthogonalUnit(direction) {
   return yAxis;
 }
 
-export function createRotationArrayFromDirection(directionArray) {
+function createRotationArrayFromDirection(directionArray) {
   const xAxis = new THREE.Vector3(...normalizeDirectionArray(directionArray, [1, 0, 0]));
   const yAxis = pickOrthogonalUnit(xAxis);
   const zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize();

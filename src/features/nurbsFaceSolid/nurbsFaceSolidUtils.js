@@ -1,5 +1,3 @@
-import * as THREE from "three";
-
 export const DEFAULT_CAGE_DIVISIONS = [3, 3, 3];
 export const DEFAULT_CAGE_PADDING = 0.08;
 
@@ -33,13 +31,6 @@ const isFiniteVec3 = (value) =>
   && Number.isFinite(Number(value[0]))
   && Number.isFinite(Number(value[1]))
   && Number.isFinite(Number(value[2]));
-
-const vec3DistanceSq = (a, b) => {
-  const dx = a[0] - b[0];
-  const dy = a[1] - b[1];
-  const dz = a[2] - b[2];
-  return dx * dx + dy * dy + dz * dz;
-};
 
 const boundaryKey = (i, j, k) => `${i}:${j}:${k}`;
 
@@ -97,7 +88,7 @@ export function sanitizeCageDivisions(input, fallback = DEFAULT_CAGE_DIVISIONS) 
   ];
 }
 
-export function cagePointCount(dimsInput) {
+function cagePointCount(dimsInput) {
   const dims = sanitizeCageDivisions(dimsInput);
   let count = 0;
   forEachBoundaryCoordinate(dims, () => {
@@ -226,7 +217,7 @@ export function computeBoundsFromPoints(pointsInput) {
   };
 }
 
-export function expandBounds(boundsInput, paddingFraction = DEFAULT_CAGE_PADDING) {
+function expandBounds(boundsInput, paddingFraction = DEFAULT_CAGE_PADDING) {
   const bounds = (boundsInput && typeof boundsInput === "object") ? boundsInput : BOUNDS_FALLBACK;
   const min = toVec3(bounds.min, BOUNDS_FALLBACK.min);
   const max = toVec3(bounds.max, BOUNDS_FALLBACK.max);
@@ -259,7 +250,7 @@ function sampleBoundsPoint(bounds, dims, i, j, k) {
   ];
 }
 
-export function createDefaultCage(boundsInput, options = {}) {
+function createDefaultCage(boundsInput, options = {}) {
   const dims = sanitizeCageDivisions(options.divisions || DEFAULT_CAGE_DIVISIONS);
   const padding = toFiniteNumber(options.padding, DEFAULT_CAGE_PADDING);
   const expandedBounds = expandBounds(boundsInput || BOUNDS_FALLBACK, padding);
@@ -522,13 +513,6 @@ function mapPointToUVW(point, bounds) {
   ];
 }
 
-export function deformPointWithCage(pointInput, cageInput) {
-  const context = buildDeformationContext(cageInput);
-  if (!context) return toVec3(pointInput);
-  const [u, v, w] = mapPointToUVW(pointInput, context.baseBounds);
-  return evaluateDeformationContextAtUVW(context, u, v, w);
-}
-
 export function deformPointsWithCage(pointsInput, cage) {
   const points = Array.isArray(pointsInput) ? pointsInput : [];
   const context = buildDeformationContext(cage);
@@ -537,168 +521,6 @@ export function deformPointsWithCage(pointsInput, cage) {
     const [u, v, w] = mapPointToUVW(point, context.baseBounds);
     return evaluateDeformationContextAtUVW(context, u, v, w);
   });
-}
-
-export function buildFaceShellSource(faceObj, options = {}) {
-  if (!faceObj || faceObj.type !== "FACE" || !faceObj.geometry) return null;
-
-  const thicknessRaw = toFiniteNumber(options.thickness, 1);
-  const thickness = Math.max(EPS, Math.abs(thicknessRaw));
-  const twoSided = options.twoSided !== false;
-  const quant = Math.max(1e-9, toFiniteNumber(options.quantization, 1e-6));
-  const invQuant = 1 / quant;
-
-  try { faceObj.updateMatrixWorld?.(true); } catch { }
-
-  const geometry = faceObj.geometry;
-  const posAttr = geometry.getAttribute?.("position");
-  if (!posAttr || posAttr.itemSize !== 3 || posAttr.count < 3) return null;
-
-  let normalAttr = geometry.getAttribute?.("normal") || null;
-  let tempGeom = null;
-  if (!normalAttr || normalAttr.count !== posAttr.count) {
-    try {
-      tempGeom = geometry.clone();
-      tempGeom.computeVertexNormals();
-      normalAttr = tempGeom.getAttribute("normal");
-    } catch {
-      normalAttr = null;
-    }
-  }
-
-  const fallbackNormal = (() => {
-    try {
-      if (typeof faceObj.getAverageNormal === "function") {
-        const n = faceObj.getAverageNormal().clone();
-        if (n && n.lengthSq() > EPS) return n.normalize().toArray();
-      }
-    } catch { }
-    return [0, 0, 1];
-  })();
-
-  const normalMatrix = new THREE.Matrix3().getNormalMatrix(faceObj.matrixWorld);
-  const tmpPos = new THREE.Vector3();
-  const tmpNormal = new THREE.Vector3();
-
-  const canonicalPositions = [];
-  const canonicalNormalSums = [];
-  const canonicalMap = new Map();
-  const origToCanonical = new Array(posAttr.count);
-
-  const keyOf = (p) => {
-    const x = Math.round(p[0] * invQuant) / invQuant;
-    const y = Math.round(p[1] * invQuant) / invQuant;
-    const z = Math.round(p[2] * invQuant) / invQuant;
-    return `${x},${y},${z}`;
-  };
-
-  for (let i = 0; i < posAttr.count; i++) {
-    tmpPos.set(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)).applyMatrix4(faceObj.matrixWorld);
-    const position = [tmpPos.x, tmpPos.y, tmpPos.z];
-    const key = keyOf(position);
-    let canonicalIndex = canonicalMap.get(key);
-    if (canonicalIndex == null) {
-      canonicalIndex = canonicalPositions.length;
-      canonicalMap.set(key, canonicalIndex);
-      canonicalPositions.push(position);
-      canonicalNormalSums.push([0, 0, 0]);
-    }
-    origToCanonical[i] = canonicalIndex;
-
-    if (normalAttr && i < normalAttr.count) {
-      tmpNormal
-        .set(normalAttr.getX(i), normalAttr.getY(i), normalAttr.getZ(i))
-        .applyMatrix3(normalMatrix);
-      if (tmpNormal.lengthSq() > EPS) tmpNormal.normalize();
-    } else {
-      tmpNormal.set(fallbackNormal[0], fallbackNormal[1], fallbackNormal[2]);
-    }
-    const sum = canonicalNormalSums[canonicalIndex];
-    sum[0] += tmpNormal.x;
-    sum[1] += tmpNormal.y;
-    sum[2] += tmpNormal.z;
-  }
-
-  const triangles = [];
-  const edgeCounts = new Map();
-  const indexAttr = geometry.getIndex?.() || null;
-  const triCount = indexAttr
-    ? ((indexAttr.count / 3) | 0)
-    : ((posAttr.count / 3) | 0);
-
-  const addEdgeCount = (a, b) => {
-    const i = Math.min(a, b);
-    const j = Math.max(a, b);
-    const key = `${i},${j}`;
-    edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
-  };
-
-  for (let t = 0; t < triCount; t++) {
-    const oa = indexAttr ? (indexAttr.getX(t * 3 + 0) >>> 0) : (t * 3 + 0);
-    const ob = indexAttr ? (indexAttr.getX(t * 3 + 1) >>> 0) : (t * 3 + 1);
-    const oc = indexAttr ? (indexAttr.getX(t * 3 + 2) >>> 0) : (t * 3 + 2);
-    const a = origToCanonical[oa] >>> 0;
-    const b = origToCanonical[ob] >>> 0;
-    const c = origToCanonical[oc] >>> 0;
-    if (a === b || b === c || c === a) continue;
-    triangles.push([a, b, c]);
-    addEdgeCount(a, b);
-    addEdgeCount(b, c);
-    addEdgeCount(c, a);
-  }
-
-  if (!triangles.length || canonicalPositions.length < 3) {
-    try { tempGeom?.dispose?.(); } catch { }
-    return null;
-  }
-
-  const normals = canonicalNormalSums.map((sum) => {
-    const n = new THREE.Vector3(sum[0], sum[1], sum[2]);
-    if (n.lengthSq() < EPS) n.set(fallbackNormal[0], fallbackNormal[1], fallbackNormal[2]);
-    return n.normalize().toArray();
-  });
-
-  const offsetTop = twoSided ? (thickness * 0.5) : 0;
-  const offsetBottom = twoSided ? (-thickness * 0.5) : (-thickness);
-  const top = canonicalPositions.map((p, idx) => {
-    const n = normals[idx];
-    return [
-      p[0] + n[0] * offsetTop,
-      p[1] + n[1] * offsetTop,
-      p[2] + n[2] * offsetTop,
-    ];
-  });
-  const bottom = canonicalPositions.map((p, idx) => {
-    const n = normals[idx];
-    return [
-      p[0] + n[0] * offsetBottom,
-      p[1] + n[1] * offsetBottom,
-      p[2] + n[2] * offsetBottom,
-    ];
-  });
-
-  const boundaryEdges = [];
-  for (const [key, count] of edgeCounts.entries()) {
-    if (count !== 1) continue;
-    const parts = key.split(",");
-    const a = Number(parts[0]);
-    const b = Number(parts[1]);
-    if (Number.isFinite(a) && Number.isFinite(b)) boundaryEdges.push([a, b]);
-  }
-
-  const bounds = computeBoundsFromPoints([...top, ...bottom]);
-  const sourceSignature = `${String(faceObj.uuid || faceObj.name || "FACE")}:${canonicalPositions.length}:${triangles.length}`;
-
-  try { tempGeom?.dispose?.(); } catch { }
-
-  return {
-    top,
-    bottom,
-    triangles,
-    boundaryEdges,
-    bounds,
-    sourceSignature,
-  };
 }
 
 export function computeCenterFromBounds(boundsInput) {
@@ -734,17 +556,4 @@ export function addTriangleFacingOutward(solid, faceName, p0, p1, p2, center) {
   const dot = nx * vx + ny * vy + nz * vz;
   if (dot > 0) solid.addTriangle(faceName, p0, p2, p1);
   else solid.addTriangle(faceName, p0, p1, p2);
-}
-
-export function mergeNearDuplicatePoints(pointsInput, tolerance = 1e-9) {
-  const points = Array.isArray(pointsInput) ? pointsInput : [];
-  if (!points.length) return [];
-  const out = [toVec3(points[0])];
-  const tolSq = tolerance * tolerance;
-  for (let i = 1; i < points.length; i++) {
-    const p = toVec3(points[i]);
-    const prev = out[out.length - 1];
-    if (vec3DistanceSq(p, prev) > tolSq) out.push(p);
-  }
-  return out;
 }

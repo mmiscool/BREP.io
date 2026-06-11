@@ -109,7 +109,7 @@ export function buildWireHarnessSheetTableData(connections = [], routeResults = 
   }, rows.length, TABLE_COLUMNS.length);
 }
 
-export function estimateWireHarnessSheetTableSizeIn(sheet, tableData) {
+function estimateWireHarnessSheetTableSizeIn(sheet, tableData) {
   const widthIn = Math.max(1, normalizeNumber(sheet?.widthIn, 11));
   const heightIn = Math.max(1, normalizeNumber(sheet?.heightIn, 8.5));
   const colFractions = Array.isArray(tableData?.colFractions) ? tableData.colFractions : [];
@@ -136,7 +136,7 @@ export function estimateWireHarnessSheetTableSizeIn(sheet, tableData) {
   return { width, height };
 }
 
-export function createWireHarnessSheetTableElement(sheet, connections = [], routeResults = new Map()) {
+function createWireHarnessSheetTableElement(sheet, connections = [], routeResults = new Map()) {
   const tableData = buildWireHarnessSheetTableData(connections, routeResults);
   const { width, height } = estimateWireHarnessSheetTableSizeIn(sheet, tableData);
   const sheetWidth = Math.max(1, normalizeNumber(sheet?.widthIn, 11));

@@ -39,7 +39,7 @@ export function prettyConfiguratorLabel(name) {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-export function normalizeConfiguratorFieldName(rawName, index = 0, usedNames = new Set()) {
+function normalizeConfiguratorFieldName(rawName, index = 0, usedNames = new Set()) {
   let next = String(rawName ?? '').trim();
   next = next.replace(/\s+/g, '_').replace(/[^A-Za-z0-9_$]/g, '_').replace(/_+/g, '_');
   if (!next) next = `field${index + 1}`;
@@ -145,12 +145,4 @@ export function normalizeConfiguratorState(rawState) {
   }
 
   return out;
-}
-
-export function configuratorStateSignature(state) {
-  try {
-    return JSON.stringify(normalizeConfiguratorState(state));
-  } catch {
-    return '';
-  }
 }

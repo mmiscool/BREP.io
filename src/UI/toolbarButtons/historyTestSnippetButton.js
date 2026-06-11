@@ -325,6 +325,4 @@ export function createHistoryTestSnippetButton(viewer) {
 
 export {
   buildTestSnippet,
-  extractSnippetPersistentData,
-  sanitizeInputParamsForSnippet,
 };

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-export function dedupeConsecutivePoints(points, eps = 0) {
+function dedupeConsecutivePoints(points, eps = 0) {
   if (!Array.isArray(points) || points.length === 0) return [];
   const out = [points[0]];
   const useEps = Number.isFinite(eps) && eps > 0;

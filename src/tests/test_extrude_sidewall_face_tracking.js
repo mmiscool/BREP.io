@@ -813,7 +813,7 @@ export async function test_generated_history_20260609074231_outset_fillet_end_ca
   return partHistory;
 }
 
-export async function buildGeneratedHistory20260609150657(partHistory) {
+async function buildGeneratedHistory20260609150657(partHistory) {
   await addGeneratedHistoryThroughE23(partHistory, {
     revolveAngle: 69,
     shellDistance: '-1.5',

@@ -2,7 +2,7 @@ import { existsSync, readFileSync, realpathSync } from "fs";
 import path from "path";
 import { createRequire } from "module";
 
-export const LOCAL_LICENSE_SCAN_SOURCE =
+const LOCAL_LICENSE_SCAN_SOURCE =
   "installed node_modules graph (dependencies + optionalDependencies)";
 
 const VENDORED_MANIFOLD_PACKAGE_JSON = path.join(

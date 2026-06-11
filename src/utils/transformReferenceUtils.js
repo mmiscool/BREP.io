@@ -172,7 +172,7 @@ function makeBasisTransform(origin, xAxis, THREE = THREE_NS) {
   };
 }
 
-export function sanitizeTransformReference(value) {
+function sanitizeTransformReference(value) {
   if (value == null) return null;
   if (value?.isObject3D) {
     const name = normalizeReferenceName(value);
@@ -277,26 +277,4 @@ export function composeReferencedTransformMatrix(transform, source, options = {}
   const delta = sanitizeTransformValue(transform);
   const base = resolveTransformReferenceBase(delta.reference, source, options, THREE);
   return combineBaseWithDeltaDeg(base, delta, THREE);
-}
-
-export function resolveReferencedTransform(transform, source, options = {}, THREE = THREE_NS) {
-  const matrix = composeReferencedTransformMatrix(transform, source, options, THREE);
-  const position = new THREE.Vector3();
-  const quaternion = new THREE.Quaternion();
-  const scale = new THREE.Vector3();
-  matrix.decompose(position, quaternion, scale);
-  const euler = new THREE.Euler().setFromQuaternion(quaternion, 'XYZ');
-  const sanitized = sanitizeTransformValue(transform);
-  const resolved = {
-    position: [position.x, position.y, position.z],
-    rotationEuler: [
-      THREE.MathUtils.radToDeg(euler.x),
-      THREE.MathUtils.radToDeg(euler.y),
-      THREE.MathUtils.radToDeg(euler.z),
-    ],
-    quaternion: [quaternion.x, quaternion.y, quaternion.z, quaternion.w],
-    scale: [scale.x, scale.y, scale.z],
-  };
-  if (sanitized.reference) resolved.reference = sanitized.reference;
-  return resolved;
 }

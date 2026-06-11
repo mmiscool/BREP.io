@@ -365,7 +365,7 @@ export function computeTriangleMaterialIndices(solid, mesh, opts = {}) {
  * @param {{unit?: 'millimeter'|'inch'|'foot'|'meter'|'centimeter'|'micron', precision?: number, scale?: number, metadataManager?: any, useMetadataColors?: boolean, includeFaceTags?: boolean, applyWorldTransform?: boolean, defaultFaceColor?: any}} opts
  * @returns {string}
  */
-export function build3MFModelXML(solids, opts = {}) {
+function build3MFModelXML(solids, opts = {}) {
   const unit = opts.unit || 'millimeter';
   const precision = Number.isFinite(opts.precision) ? opts.precision : 6;
   const scale = Number.isFinite(opts.scale) ? opts.scale : 1.0;

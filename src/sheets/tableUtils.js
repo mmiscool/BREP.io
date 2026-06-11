@@ -64,17 +64,6 @@ function normalizeTextDecoration(value, fallback = null) {
   return String(value).trim().toLowerCase() === "underline" ? "underline" : "none";
 }
 
-export const TABLE_CELL_STYLE_KEYS = [
-  "fontFamily",
-  "fontSize",
-  "fontWeight",
-  "fontStyle",
-  "textDecoration",
-  "textAlign",
-  "verticalAlign",
-  "color",
-];
-
 export function normalizeTableCellStyle(rawStyle) {
   if (!rawStyle || typeof rawStyle !== "object" || Array.isArray(rawStyle)) return {};
   const style = {};
@@ -108,7 +97,7 @@ export function normalizeTableCellStyle(rawStyle) {
   return style;
 }
 
-export function createTableCell(text = "") {
+function createTableCell(text = "") {
   return {
     text: sanitizeText(text, ""),
     rowSpan: 1,
@@ -118,7 +107,7 @@ export function createTableCell(text = "") {
   };
 }
 
-export function normalizeTableFractions(values, count) {
+function normalizeTableFractions(values, count) {
   const size = Math.max(1, clampPositiveInt(count, 1));
   const source = Array.isArray(values) ? values.slice(0, size) : [];
   const normalized = [];
@@ -248,11 +237,6 @@ export function resolveTableCellAnchor(tableData, row, col) {
   return { row, col, cell };
 }
 
-export function isTableCellCovered(tableData, row, col) {
-  const anchor = resolveTableCellAnchor(tableData, row, col);
-  return !!anchor && (anchor.row !== row || anchor.col !== col);
-}
-
 export function getTableSelectionRect(selection) {
   if (!selection) return null;
   const rows = [selection.anchorRow, selection.focusRow].map((value) => clampIndex(value, 0));
@@ -284,7 +268,7 @@ export function cloneTableData(tableData, fallbackRows = 3, fallbackCols = 3) {
   };
 }
 
-export function forEachTableAnchor(tableData, callback) {
+function forEachTableAnchor(tableData, callback) {
   if (typeof callback !== "function") return;
   const normalized = normalizeTableData(tableData);
   const rowCount = getTableRowCount(normalized, 0);

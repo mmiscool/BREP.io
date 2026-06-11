@@ -1,4 +1,4 @@
-export async function test_filletsMoreDifficult(partHistory) {
+async function buildFilletsMoreDifficultScenario(partHistory) {
   // Recreate the scenario from the provided saved state
 
   // 1) Cone
@@ -38,5 +38,5 @@ export async function test_filletsMoreDifficult(partHistory) {
 
 // Alias with the requested test name spelling for the runner/export folder
 export async function test_fillets_more_dificult(partHistory) {
-  return test_filletsMoreDifficult(partHistory);
+  return buildFilletsMoreDifficultScenario(partHistory);
 }

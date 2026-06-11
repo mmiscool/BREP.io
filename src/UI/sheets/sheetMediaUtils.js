@@ -1,6 +1,6 @@
 export const DEFAULT_IMAGE_INSERT_WIDTH_IN = 3.2;
 export const DEFAULT_IMAGE_INSERT_HEIGHT_IN = 2.0;
-export const MAX_IMAGE_INSERT_HEIGHT_IN = 2.4;
+const MAX_IMAGE_INSERT_HEIGHT_IN = 2.4;
 
 function toFiniteNumber(value, fallback = 0) {
   const number = Number(value);

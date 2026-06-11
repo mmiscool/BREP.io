@@ -10,7 +10,7 @@ const MODEL_EXTENSIONS = [
   ".json",
 ];
 
-export function sanitizeFlatPatternFileStem(raw, fallback = "flat_pattern") {
+function sanitizeFlatPatternFileStem(raw, fallback = "flat_pattern") {
   const text = String(raw ?? "").trim();
   const base = text.length ? text : fallback;
   const cleaned = base
@@ -20,7 +20,7 @@ export function sanitizeFlatPatternFileStem(raw, fallback = "flat_pattern") {
   return cleaned || fallback;
 }
 
-export function modelPathToFlatPatternBaseName(raw, fallback = "part") {
+function modelPathToFlatPatternBaseName(raw, fallback = "part") {
   const normalized = String(raw ?? "").replace(/\\/g, "/").trim();
   const last = normalized.split("/").filter(Boolean).pop() || normalized || fallback;
   let stem = String(last || fallback).trim();
@@ -47,7 +47,7 @@ export function resolveViewerFlatPatternBaseName(viewer, fallback = "part") {
   return modelPathToFlatPatternBaseName(fallback, "part");
 }
 
-export function isSheetMetalSolid(object) {
+function isSheetMetalSolid(object) {
   return !!(
     object
     && object.type === "SOLID"
@@ -55,7 +55,7 @@ export function isSheetMetalSolid(object) {
   );
 }
 
-export function collectSheetMetalSolidsFromScene(scene, options = {}) {
+function collectSheetMetalSolidsFromScene(scene, options = {}) {
   const visibleOnly = options.visibleOnly !== false;
   if (!scene || typeof scene.traverse !== "function") return [];
   const solids = [];
@@ -75,7 +75,7 @@ export function collectSheetMetalSolidsFromViewer(viewer, options = {}) {
   return collectSheetMetalSolidsFromScene(scene, options);
 }
 
-export function resolveSheetMetalFeatureName(solid, index = 0) {
+function resolveSheetMetalFeatureName(solid, index = 0) {
   const candidates = [
     solid?.userData?.sheetMetalModel?.featureID,
     solid?.userData?.sheetMetal?.featureID,

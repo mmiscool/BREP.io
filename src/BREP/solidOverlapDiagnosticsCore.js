@@ -458,7 +458,7 @@ function collectSolidFaceEntriesFromBrep(solid, options = {}) {
   return faceEntries;
 }
 
-export function collectSolidFaceEntries(solid, options = {}) {
+function collectSolidFaceEntries(solid, options = {}) {
   const fromBrep = collectSolidFaceEntriesFromBrep(solid, options);
   if (fromBrep.length) return fromBrep;
   return collectSolidFaceEntriesFromMeshChildren(solid, options);
