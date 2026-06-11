@@ -340,6 +340,8 @@ export function buildAngleDimensionGeometry({
 export function buildLinearDimensionGeometry({
   pointA = null,
   pointB = null,
+  extensionAnchorA = null,
+  extensionAnchorB = null,
   normal = null,
   offset = 0,
   showExtensions = true,
@@ -377,9 +379,9 @@ export function buildLinearDimensionGeometry({
   const offsetB = p1.clone().addScaledVector(tangent, safeOffset);
 
   const segments = [];
-  if (showExtensions !== false && safeOffset !== 0) {
-    segments.push([p0.clone(), offsetA.clone()]);
-    segments.push([p1.clone(), offsetB.clone()]);
+  if (showExtensions !== false) {
+    segments.push(...buildLinearExtensionSegments(extensionAnchorA, p0, offsetA));
+    segments.push(...buildLinearExtensionSegments(extensionAnchorB, p1, offsetB));
   }
   segments.push([offsetA.clone(), offsetB.clone()]);
 
@@ -421,4 +423,17 @@ export function buildLinearDimensionGeometry({
     labelPosition,
     leaderSegment,
   };
+}
+
+function buildLinearExtensionSegments(anchorValue, measuredPoint, dimensionPoint) {
+  const out = [];
+  const anchor = vectorFromAny(anchorValue) || measuredPoint;
+  const epsSq = 1e-12;
+  if (anchor.distanceToSquared(measuredPoint) > epsSq) {
+    out.push([anchor.clone(), measuredPoint.clone()]);
+  }
+  if (measuredPoint.distanceToSquared(dimensionPoint) > epsSq) {
+    out.push([measuredPoint.clone(), dimensionPoint.clone()]);
+  }
+  return out;
 }

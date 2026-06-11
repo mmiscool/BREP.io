@@ -380,6 +380,14 @@ import {
     test_pmi_view_visibility_state_normalizes,
 } from './test_pmiViewsManager.js';
 import {
+    test_pmi_linear_dimension_edge_target_measures_perpendicular_to_edge,
+    test_pmi_linear_dimension_face_extensions_can_jog_to_measurement_line,
+    test_pmi_linear_dimension_face_target_measures_perpendicular_to_face,
+    test_pmi_linear_dimension_parallel_edges_measure_perpendicular_spacing,
+    test_pmi_linear_dimension_parallel_faces_measure_plane_spacing,
+    test_pmi_linear_dimension_single_edge_still_measures_edge_length,
+} from './test_pmiLinearDimension.js';
+import {
     test_pmi_radial_dimension_accepts_pipe_aux_path_face,
     test_pmi_radial_dimension_uses_offset_shell_pipe_radius_override,
     test_pmi_radial_dimension_uses_fillet_pipe_radius_override,
@@ -802,6 +810,12 @@ export const testFunctions = [
     { test: test_pmi_view_text_size_setting_normalizes, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_pmi_view_visibility_state_normalizes, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_pmi_view_visibility_state_round_trip, afterRun: afterRun_pmi_view_visibility_state_round_trip, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_pmi_linear_dimension_face_target_measures_perpendicular_to_face, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_pmi_linear_dimension_parallel_faces_measure_plane_spacing, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_pmi_linear_dimension_face_extensions_can_jog_to_measurement_line, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_pmi_linear_dimension_edge_target_measures_perpendicular_to_edge, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_pmi_linear_dimension_parallel_edges_measure_perpendicular_spacing, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_pmi_linear_dimension_single_edge_still_measures_edge_length, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_pmi_radial_dimension_accepts_pipe_aux_path_face, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_pmi_radial_dimension_uses_fillet_pipe_radius_override, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_pmi_radial_dimension_uses_offset_shell_pipe_radius_override, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

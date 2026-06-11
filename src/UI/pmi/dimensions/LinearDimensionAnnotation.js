@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { BaseAnnotation } from '../BaseAnnotation.js';
-import { addArrowCone, makeOverlayLine, objectRepresentativePoint, screenSizeWorld } from '../annUtils.js';
+import { addArrowCone, getElementDirection, makeOverlayLine, objectRepresentativePoint, screenSizeWorld } from '../annUtils.js';
 import { buildLinearDimensionGeometry, vectorFromAny } from '../../dimensions/dimensionGeometry.js';
 
 const inputParamsSchema = {
@@ -13,11 +13,11 @@ const inputParamsSchema = {
 
   targets: {
     type: 'reference_selection',
-    selectionFilter: ['VERTEX', 'EDGE'],
+    selectionFilter: ['VERTEX', 'EDGE', 'FACE'],
     multiple: true,
     default_value: [],
     label: 'Targets',
-    hint: 'Select two vertices, or a vertex and an edge, or a single edge',
+    hint: 'Select vertices, edges, or a planar face/linear edge and target',
   },
   planeRefName: {
     type: 'reference_selection',
@@ -79,7 +79,7 @@ export class LinearDimensionAnnotation extends BaseAnnotation {
   static title = 'Linear';
   static inputParamsSchema = inputParamsSchema;
   static showContexButton(selectedItems) {
-    const refs = BaseAnnotation._collectSelectionRefs(selectedItems, ['VERTEX', 'EDGE']);
+    const refs = BaseAnnotation._collectSelectionRefs(selectedItems, ['VERTEX', 'EDGE', 'FACE']);
     if (!refs.length) return false;
     return { params: { targets: refs.slice(0, 2) } };
   }
@@ -117,6 +117,8 @@ export class LinearDimensionAnnotation extends BaseAnnotation {
       const geometry = buildLinearDimensionGeometry({
         pointA: pts.p0,
         pointB: pts.p1,
+        extensionAnchorA: pts.extensionAnchorA,
+        extensionAnchorB: pts.extensionAnchorB,
         normal,
         offset: ann?.offset,
         showExtensions: ann?.showExt !== false,
@@ -157,7 +159,7 @@ export class LinearDimensionAnnotation extends BaseAnnotation {
       const p1 = pts.p1;
       const normal = ctx.alignNormal ? ctx.alignNormal(ann?.alignment || 'view', ann) : new THREE.Vector3(0, 0, 1);
       const dir = new THREE.Vector3().subVectors(p1, p0).normalize();
-      const t = new THREE.Vector3().crossVectors(normal, dir).normalize();
+      const t = safeDimensionTangent(normal, dir);
       const mid = new THREE.Vector3().addVectors(p0, p1).multiplyScalar(0.5);
       const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, mid);
 
@@ -204,10 +206,31 @@ function computeDimPoints(pmimode, ann) {
       if (objects.length) {
         const vertices = [];
         const edges = [];
+        const faces = [];
         for (const obj of objects) {
           const type = typeof obj?.type === 'string' ? obj.type.toUpperCase() : '';
           if (type === 'VERTEX') vertices.push(obj);
           else if (type === 'EDGE') edges.push(obj);
+          else if (type === 'FACE' || type === 'PLANE') faces.push(obj);
+        }
+        const primary = objects[0] || null;
+        const hasFaceTarget = faces.length > 0 || objects.some((obj) => isFaceLikeObject(obj));
+        const hasEdgeTarget = edges.length > 0 || objects.some((obj) => isEdgeLikeObject(obj));
+        if (isFaceLikeObject(primary)) {
+          const faceNormalDim = computeFaceNormalDimPoints(pmimode, objects);
+          if (faceNormalDim) return faceNormalDim;
+        }
+        if (isEdgeLikeObject(primary) && objects.length >= 2) {
+          const edgeNormalDim = computeEdgeNormalDimPoints(pmimode, objects);
+          if (edgeNormalDim) return edgeNormalDim;
+        }
+        if (hasFaceTarget) {
+          const faceNormalDim = computeFaceNormalDimPoints(pmimode, objects);
+          if (faceNormalDim) return faceNormalDim;
+        }
+        if (hasEdgeTarget && objects.length >= 2) {
+          const edgeNormalDim = computeEdgeNormalDimPoints(pmimode, objects);
+          if (edgeNormalDim) return edgeNormalDim;
         }
         const viewer = pmimode?.viewer;
         if (vertices.length >= 2) {
@@ -229,6 +252,7 @@ function computeDimPoints(pmimode, ann) {
           }
         }
       }
+      return null;
     }
   } catch { /* ignore */ }
   if (!hasTargets) {
@@ -256,6 +280,65 @@ function computeDimPoints(pmimode, ann) {
   return {
     p0: vectorFromAnnotationPoint(ann?.p0) || new THREE.Vector3(0, 0, 0),
     p1: vectorFromAnnotationPoint(ann?.p1) || new THREE.Vector3(0, 0, 0),
+  };
+}
+
+function computeFaceNormalDimPoints(pmimode, objects) {
+  const viewer = pmimode?.viewer;
+  const list = Array.isArray(objects) ? objects.filter(Boolean) : [];
+  const faceIndex = list.findIndex((obj) => isFaceLikeObject(obj));
+  if (faceIndex < 0) return null;
+  const baseFace = list[faceIndex];
+  const planeInfo = resolvePlanarFacePlane(viewer, baseFace);
+  if (!planeInfo) return null;
+
+  const targetObj = list.find((obj, index) => index !== faceIndex && obj);
+  if (!targetObj) return null;
+  const target = resolveFaceNormalTargetPoint(viewer, targetObj, planeInfo);
+  if (!target?.point) return null;
+
+  const signedDistance = target.point.clone().sub(planeInfo.point).dot(planeInfo.normal);
+  const foot = target.point.clone().addScaledVector(planeInfo.normal, -signedDistance);
+  const targetPoint = foot.clone().addScaledVector(planeInfo.normal, signedDistance);
+  const baseAnchor = planeInfo.anchor || planeInfo.point;
+
+  if (foot.distanceToSquared(targetPoint) <= 1e-12) return null;
+  return {
+    p0: foot,
+    p1: targetPoint,
+    extensionAnchorA: baseAnchor,
+    extensionAnchorB: target.anchor || target.point,
+    measurementNormal: planeInfo.normal.clone(),
+    measurementMode: 'faceNormal',
+  };
+}
+
+function computeEdgeNormalDimPoints(pmimode, objects) {
+  const viewer = pmimode?.viewer;
+  const list = Array.isArray(objects) ? objects.filter(Boolean) : [];
+  const edgeIndex = list.findIndex((obj) => isEdgeLikeObject(obj));
+  if (edgeIndex < 0 || list.length < 2) return null;
+  const baseEdge = resolveLinearEdgeLine(list[edgeIndex]);
+  if (!baseEdge) return null;
+
+  const targetObj = list.find((obj, index) => index !== edgeIndex && obj);
+  if (!targetObj) return null;
+  const target = resolveEdgeNormalTargetPoint(viewer, targetObj, baseEdge);
+  if (!target?.point) return null;
+
+  const projection = projectPointOnLine(target.point, baseEdge.point, baseEdge.direction);
+  if (!projection) return null;
+  const foot = projection;
+  const targetPoint = target.point.clone();
+
+  if (foot.distanceToSquared(targetPoint) <= 1e-12) return null;
+  return {
+    p0: foot,
+    p1: targetPoint,
+    extensionAnchorA: baseEdge.anchor.clone(),
+    extensionAnchorB: target.anchor || target.point,
+    measurementMode: 'edgeNormal',
+    referenceDirection: baseEdge.direction.clone(),
   };
 }
 
@@ -296,6 +379,301 @@ function resolveVertexPoint(viewer, vertex) {
   if (rep && rep.isVector3) return rep.clone();
   if (vertex?.getWorldPosition) return vertex.getWorldPosition(new THREE.Vector3());
   return null;
+}
+
+function isFaceLikeObject(obj) {
+  if (!obj) return false;
+  const runtimeType = String(obj.type || '').toUpperCase();
+  const metaType = String(obj.userData?.type || obj.userData?.brepType || '').toUpperCase();
+  return runtimeType === 'FACE'
+    || runtimeType === 'PLANE'
+    || metaType === 'FACE'
+    || metaType === 'PLANE';
+}
+
+function isEdgeLikeObject(obj) {
+  if (!obj) return false;
+  const runtimeType = String(obj.type || '').toUpperCase();
+  const metaType = String(obj.userData?.type || obj.userData?.brepType || '').toUpperCase();
+  return runtimeType === 'EDGE'
+    || metaType === 'EDGE'
+    || obj.isLine
+    || obj.isLine2
+    || obj.isLineSegments
+    || obj.isLineLoop;
+}
+
+function resolvePlanarFacePlane(viewer, faceObj) {
+  try {
+    if (!isFaceLikeObject(faceObj)) return null;
+    const normal = getElementDirection(viewer, faceObj);
+    if (!normal || normal.lengthSq() <= 1e-12) return null;
+    normal.normalize();
+    const anchor = objectRepresentativePoint(viewer, faceObj);
+    if (!anchor) return null;
+
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, anchor);
+    const projectedAnchor = plane.projectPoint(anchor, anchor.clone());
+    if (!isPlanarFaceGeometry(faceObj, plane)) return null;
+
+    return {
+      point: projectedAnchor,
+      normal,
+      anchor: projectedAnchor.clone(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isPlanarFaceGeometry(faceObj, plane) {
+  try {
+    if (String(faceObj?.type || '').toUpperCase() === 'PLANE') return true;
+    const geom = faceObj?.geometry;
+    const pos = geom?.getAttribute?.('position');
+    if (!pos || !Number.isFinite(pos.count) || pos.count < 3) return true;
+    faceObj.updateMatrixWorld?.(true);
+    const matrix = faceObj.matrixWorld || new THREE.Matrix4();
+    const point = new THREE.Vector3();
+    const box = new THREE.Box3();
+    let maxDist = 0;
+    for (let i = 0; i < pos.count; i += 1) {
+      point.set(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(matrix);
+      box.expandByPoint(point);
+      maxDist = Math.max(maxDist, Math.abs(plane.distanceToPoint(point)));
+    }
+    const size = box.getSize(new THREE.Vector3());
+    const scale = Math.max(size.length(), 1);
+    return maxDist <= Math.max(1e-5, scale * 1e-5);
+  } catch {
+    return true;
+  }
+}
+
+function resolveFaceNormalTargetPoint(viewer, targetObj, basePlane) {
+  if (!targetObj || !basePlane) return null;
+  if (isFaceLikeObject(targetObj)) {
+    const targetPlane = resolvePlanarFacePlane(viewer, targetObj);
+    if (targetPlane) {
+      const alignment = Math.abs(targetPlane.normal.dot(basePlane.normal));
+      if (alignment > 1 - 1e-5) {
+        return { point: targetPlane.point.clone(), anchor: targetPlane.anchor.clone() };
+      }
+      return { point: targetPlane.point.clone(), anchor: targetPlane.anchor.clone() };
+    }
+  }
+  const type = String(targetObj?.type || '').toUpperCase();
+  if (type === 'VERTEX') {
+    const point = resolveVertexPoint(viewer, targetObj);
+    return point ? { point, anchor: point.clone() } : null;
+  }
+  if (isEdgeLikeObject(targetObj)) {
+    const midpoint = edgeMidpointWorld(targetObj);
+    if (midpoint) return { point: midpoint, anchor: midpoint.clone() };
+  }
+  const point = objectRepresentativePoint(viewer, targetObj);
+  return point ? { point: point.clone(), anchor: point.clone() } : null;
+}
+
+function resolveEdgeNormalTargetPoint(viewer, targetObj, baseEdge) {
+  if (!targetObj || !baseEdge) return null;
+  if (isEdgeLikeObject(targetObj)) {
+    const targetEdge = resolveLinearEdgeLine(targetObj);
+    if (targetEdge) {
+      const pair = closestPointsBetweenInfiniteLines(baseEdge.point, baseEdge.direction, targetEdge.point, targetEdge.direction);
+      if (pair) {
+        return { point: pair.targetPoint, anchor: targetEdge.anchor.clone() };
+      }
+      const point = targetEdge.anchor.clone();
+      return { point, anchor: targetEdge.anchor.clone() };
+    }
+  }
+  if (isFaceLikeObject(targetObj)) {
+    const targetPlane = resolvePlanarFacePlane(viewer, targetObj);
+    if (targetPlane) return { point: targetPlane.point.clone(), anchor: targetPlane.anchor.clone() };
+  }
+  const type = String(targetObj?.type || '').toUpperCase();
+  if (type === 'VERTEX') {
+    const point = resolveVertexPoint(viewer, targetObj);
+    return point ? { point, anchor: point.clone() } : null;
+  }
+  const point = objectRepresentativePoint(viewer, targetObj);
+  return point ? { point: point.clone(), anchor: point.clone() } : null;
+}
+
+function resolveLinearEdgeLine(edgeObj) {
+  const points = edgeWorldPoints(edgeObj);
+  if (!Array.isArray(points) || points.length < 2) return null;
+  const first = points[0];
+  let last = null;
+  for (let i = points.length - 1; i >= 1; i -= 1) {
+    if (points[i]?.distanceToSquared(first) > 1e-12) {
+      last = points[i];
+      break;
+    }
+  }
+  if (!last) return null;
+  const direction = last.clone().sub(first);
+  if (direction.lengthSq() <= 1e-12) return null;
+  direction.normalize();
+  if (!pointsAreCollinear(points, first, direction)) return null;
+  const anchor = averagePoints(points) || first.clone().add(last).multiplyScalar(0.5);
+  return {
+    point: first.clone(),
+    direction,
+    anchor,
+    points,
+  };
+}
+
+function edgeWorldPoints(edgeObj) {
+  if (!edgeObj) return null;
+  try { edgeObj.updateMatrixWorld?.(true); } catch { /* ignore */ }
+  const matrixWorld = edgeObj.matrixWorld || null;
+  const out = [];
+  const push = (value, isLocal = false) => {
+    const point = vectorFromAny(value);
+    if (!point) return;
+    if (isLocal && matrixWorld) point.applyMatrix4(matrixWorld);
+    const last = out[out.length - 1];
+    if (last && last.distanceToSquared(point) <= 1e-14) return;
+    out.push(point);
+  };
+
+  try {
+    if (typeof edgeObj.points === 'function') {
+      const pts = edgeObj.points(true);
+      if (Array.isArray(pts)) {
+        for (const point of pts) push(point, false);
+      }
+      if (out.length >= 2) return out;
+      out.length = 0;
+    }
+  } catch { /* ignore */ }
+
+  const poly = Array.isArray(edgeObj?.userData?.polylineLocal)
+    ? edgeObj.userData.polylineLocal
+    : null;
+  if (poly) {
+    for (const point of poly) push(point, true);
+    if (out.length >= 2) return out;
+    out.length = 0;
+  }
+
+  const startAttr = edgeObj?.geometry?.attributes?.instanceStart;
+  const endAttr = edgeObj?.geometry?.attributes?.instanceEnd;
+  if (startAttr && endAttr) {
+    const count = Math.min(startAttr.count || 0, endAttr.count || 0);
+    for (let i = 0; i < count; i += 1) {
+      const a = new THREE.Vector3(startAttr.getX(i), startAttr.getY(i), startAttr.getZ(i));
+      const b = new THREE.Vector3(endAttr.getX(i), endAttr.getY(i), endAttr.getZ(i));
+      if (matrixWorld) {
+        a.applyMatrix4(matrixWorld);
+        b.applyMatrix4(matrixWorld);
+      }
+      push(a, false);
+      push(b, false);
+    }
+    if (out.length >= 2) return out;
+    out.length = 0;
+  }
+
+  const pos = edgeObj?.geometry?.getAttribute?.('position');
+  if (pos && pos.itemSize === 3 && pos.count >= 2) {
+    for (let i = 0; i < pos.count; i += 1) {
+      const point = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i));
+      if (matrixWorld) point.applyMatrix4(matrixWorld);
+      push(point, false);
+    }
+    if (out.length >= 2) return out;
+  }
+
+  return null;
+}
+
+function pointsAreCollinear(points, origin, direction) {
+  if (!Array.isArray(points) || points.length < 2 || !origin || !direction) return false;
+  const box = new THREE.Box3();
+  for (const point of points) {
+    if (point) box.expandByPoint(point);
+  }
+  const scale = Math.max(box.getSize(new THREE.Vector3()).length(), 1);
+  const tolerance = Math.max(1e-6, scale * 1e-5);
+  const rel = new THREE.Vector3();
+  const parallel = new THREE.Vector3();
+  for (const point of points) {
+    if (!point) continue;
+    rel.copy(point).sub(origin);
+    const t = rel.dot(direction);
+    parallel.copy(direction).multiplyScalar(t);
+    if (rel.sub(parallel).length() > tolerance) return false;
+  }
+  return true;
+}
+
+function averagePoints(points) {
+  if (!Array.isArray(points) || !points.length) return null;
+  const sum = new THREE.Vector3();
+  let count = 0;
+  for (const point of points) {
+    if (!point) continue;
+    sum.add(point);
+    count += 1;
+  }
+  return count ? sum.multiplyScalar(1 / count) : null;
+}
+
+function projectPointOnLine(point, linePoint, lineDirection) {
+  if (!point || !linePoint || !lineDirection || lineDirection.lengthSq() <= 1e-12) return null;
+  const dir = lineDirection.clone().normalize();
+  const t = point.clone().sub(linePoint).dot(dir);
+  return linePoint.clone().addScaledVector(dir, t);
+}
+
+function closestPointsBetweenInfiniteLines(aPoint, aDir, bPoint, bDir) {
+  if (!aPoint || !aDir || !bPoint || !bDir) return null;
+  const u = aDir.clone();
+  const v = bDir.clone();
+  if (u.lengthSq() <= 1e-12 || v.lengthSq() <= 1e-12) return null;
+  u.normalize();
+  v.normalize();
+  const w0 = aPoint.clone().sub(bPoint);
+  const b = u.dot(v);
+  const d = u.dot(w0);
+  const e = v.dot(w0);
+  const denom = 1 - (b * b);
+  if (Math.abs(denom) <= 1e-10) {
+    return null;
+  }
+  const s = ((b * e) - d) / denom;
+  const t = (e - (b * d)) / denom;
+  return {
+    basePoint: aPoint.clone().addScaledVector(u, s),
+    targetPoint: bPoint.clone().addScaledVector(v, t),
+  };
+}
+
+function edgeMidpointWorld(edge) {
+  const ends = edgeEndpointsWorld(edge);
+  if (ends?.a && ends?.b) {
+    return new THREE.Vector3().addVectors(ends.a, ends.b).multiplyScalar(0.5);
+  }
+  return null;
+}
+
+function safeDimensionTangent(normal, dir) {
+  const n = normal?.clone?.() || new THREE.Vector3(0, 0, 1);
+  if (!n.lengthSq()) n.set(0, 0, 1);
+  n.normalize();
+  const d = dir?.clone?.() || new THREE.Vector3(1, 0, 0);
+  if (!d.lengthSq()) d.set(1, 0, 0);
+  d.normalize();
+  const t = new THREE.Vector3().crossVectors(n, d);
+  if (t.lengthSq() > 1e-12) return t.normalize();
+  const fallbackAxis = Math.abs(d.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+  t.crossVectors(d, fallbackAxis);
+  if (t.lengthSq() > 1e-12) return t.normalize();
+  return new THREE.Vector3(1, 0, 0);
 }
 
 function closestEndpointToPoint(edges, point) {
@@ -508,3 +886,10 @@ function vectorFromAnnotationPoint(point) {
   if (typeof point === 'object') return new THREE.Vector3(point.x || 0, point.y || 0, point.z || 0);
   return null;
 }
+
+export const __testOnlyLinearDimensionInternals = {
+  computeDimPoints,
+  computeEdgeNormalDimPoints,
+  computeFaceNormalDimPoints,
+  resolvePlanarFacePlane,
+};
