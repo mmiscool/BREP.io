@@ -2,14 +2,14 @@ function emptyAnnotations() {
   return [];
 }
 
-export function normalizeFeatureDimensionFeatureKey(raw) {
+function normalizeFeatureDimensionFeatureKey(raw) {
   if (!raw) return '';
   return String(raw).trim().toUpperCase();
 }
 
 const FEATURE_DIMENSION_DESCRIPTORS = new Map();
 
-export function registerFeatureDimensionDescriptor(descriptor = {}) {
+function registerFeatureDimensionDescriptor(descriptor = {}) {
   const featureKey = normalizeFeatureDimensionFeatureKey(descriptor.featureKey);
   if (!featureKey) return null;
 
@@ -25,7 +25,7 @@ export function registerFeatureDimensionDescriptor(descriptor = {}) {
   return normalized;
 }
 
-export function getFeatureDimensionDescriptor(featureKey) {
+function getFeatureDimensionDescriptor(featureKey) {
   return FEATURE_DIMENSION_DESCRIPTORS.get(normalizeFeatureDimensionFeatureKey(featureKey)) || null;
 }
 

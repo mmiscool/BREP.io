@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { SelectionFilter } from './SelectionFilter.js';
 
-export const REFERENCE_SNAPSHOT_STORE_KEY = 'referenceSnapshots';
+const REFERENCE_SNAPSHOT_STORE_KEY = 'referenceSnapshots';
 const DEFAULT_FIELD_KEY = '__default';
 const EPS = 1e-12;
 
-export function normalizeReferenceSnapshotFieldKey(raw) {
+function normalizeReferenceSnapshotFieldKey(raw) {
   const key = String(raw || '').trim();
   return key || DEFAULT_FIELD_KEY;
 }
@@ -22,7 +22,7 @@ export function normalizeReferenceSnapshotName(obj) {
   return `${type}(${x},${y},${z})`;
 }
 
-export function getReferenceSnapshotStore(persistentData) {
+function getReferenceSnapshotStore(persistentData) {
   const store = persistentData?.[REFERENCE_SNAPSHOT_STORE_KEY];
   return store && typeof store === 'object' ? store : null;
 }
@@ -46,7 +46,7 @@ export function getReferenceSnapshotBucket(persistentData, fieldKey) {
   return bucket && typeof bucket === 'object' ? bucket : null;
 }
 
-export function setReferenceSnapshot(persistentData, fieldKey, refName, snapshot) {
+function setReferenceSnapshot(persistentData, fieldKey, refName, snapshot) {
   const name = String(refName || '').trim();
   if (!name || !snapshot || typeof snapshot !== 'object') return false;
   const bucket = ensureReferenceSnapshotBucket(persistentData, fieldKey);
@@ -92,7 +92,7 @@ export function extractEdgeWorldPositions(obj) {
   return [];
 }
 
-export function extractFaceEdgePositions(face) {
+function extractFaceEdgePositions(face) {
   if (!face) return [];
   const out = [];
   const addEdge = (edge) => {
@@ -118,7 +118,7 @@ export function extractFaceEdgePositions(face) {
   return out;
 }
 
-export function extractFaceCenterNormal(face, edgePositions = null) {
+function extractFaceCenterNormal(face, edgePositions = null) {
   if (!face) return null;
   try { face.updateMatrixWorld?.(true); } catch { /* ignore */ }
 
@@ -240,7 +240,7 @@ export function extractFaceCenterNormal(face, edgePositions = null) {
   };
 }
 
-export function getOwningFeatureIdForSnapshotObject(obj) {
+function getOwningFeatureIdForSnapshotObject(obj) {
   let cur = obj;
   let guard = 0;
   while (cur && guard < 8) {

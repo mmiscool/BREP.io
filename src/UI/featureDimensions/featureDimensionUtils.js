@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 export {
-  normalizeFeatureDimensionFeatureKey,
   supportsFeatureDimensionFeatureKey,
   supportsTransformDimensionToggle,
 } from './FeatureDimensionRegistry.js';

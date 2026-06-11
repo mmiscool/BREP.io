@@ -14,7 +14,7 @@ export function markTransformControlTarget(target) {
   });
 }
 
-export function markTransformControlObject(object) {
+function markTransformControlObject(object) {
   markSceneOverlayObject(object, {
     preserve: true,
     overlayType: 'transformControl',
@@ -23,7 +23,7 @@ export function markTransformControlObject(object) {
   installTransformControlDepthOverlay(object);
 }
 
-export function installTransformControlDepthOverlay(object) {
+function installTransformControlDepthOverlay(object) {
   if (!object || !object.isObject3D) return;
   const apply = (node) => {
     try {
