@@ -111,6 +111,12 @@ function sourceFaceRoleFromMetadata(metadata) {
   ).trim().toLowerCase().replace(/[-\s]+/g, '_');
 }
 
+function isSourceSidewallFace(sourceFaceName, metadata = {}) {
+  const role = sourceFaceRoleFromMetadata(metadata);
+  if (role === 'sidewall' || role === 'side_wall') return true;
+  return /(?:^|[_:])SW$/u.test(String(sourceFaceName || '').trim());
+}
+
 function getFaceLabelList(value) {
   const rawList = Array.isArray(value) ? value : (value == null ? [] : [value]);
   const labels = [];
@@ -1548,6 +1554,23 @@ function buildThickenClassificationState(labels, distance) {
       || sourceMetadata?.featureId
       || '',
     ).trim();
+    if (kind === 'start' && entry?.mergeWithSourceSidewall === true) {
+      capGroups.push({
+        label,
+        kind,
+        metadata: {
+          ...sourceMetadata,
+          faceRole: 'sidewall',
+          offsetShellFaceRole: 'sidewall',
+          sourceFaceName,
+          sourceFaceRole: sourceFaceRole || 'sidewall',
+          sourceCapRole: 'start_cap',
+          ...(sourceFeatureId ? { sourceFeatureId } : {}),
+          distance,
+        },
+      });
+      return;
+    }
     capGroups.push({
       label,
       kind,
@@ -3421,6 +3444,17 @@ function applySourceFaceMetadataToThickenResult(result, face, labels, sourceFace
       || '',
     ).trim();
     const capType = kind === 'start' ? 'start_cap' : 'end_cap';
+    if (kind === 'start' && entry?.mergeWithSourceSidewall === true) {
+      return {
+        ...sourceMetadata,
+        faceRole: 'sidewall',
+        offsetShellFaceRole: 'sidewall',
+        sourceFaceName: String(entry?.sourceFaceName || sourceFaceName || '').trim() || sourceFaceName,
+        sourceFaceRole: sourceRole || 'sidewall',
+        sourceCapRole: capType,
+        ...(sourceFeatureId ? { sourceFeatureId } : {}),
+      };
+    }
     return {
       ...sourceMetadata,
       type: capType,
@@ -3566,10 +3600,18 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
   for (const name of capSourceFaceNames) {
     const sourceName = String(name || '').trim();
     if (!sourceName || capLabelsBySourceFaceName.has(sourceName)) continue;
+    const sourceFaceMetadata = sourceFaceMetadataByName.get(sourceName) || {};
+    const mergeWithSourceSidewall = (
+      options.mergeSourceStartCaps === true
+      || options.mergeSourceSidewallStartCaps === true
+    )
+      && isSourceSidewallFace(sourceName, sourceFaceMetadata);
+    const mergeWithSourceStartFace = options.mergeSourceStartCaps === true || mergeWithSourceSidewall;
     capLabelsBySourceFaceName.set(sourceName, {
-      start: `${sourceName}_START`,
+      start: mergeWithSourceStartFace ? sourceName : `${sourceName}_START`,
       end: `${sourceName}_END`,
-      sourceFaceMetadata: sourceFaceMetadataByName.get(sourceName) || {},
+      sourceFaceMetadata,
+      mergeWithSourceSidewall,
     });
   }
   const fallbackCapLabels = capLabelsBySourceFaceName.get(sourceFaceName)
@@ -3584,6 +3626,7 @@ function thickenSurfaceToSolid(surface, face, distance, options = {}) {
       label: caps.start,
       sourceFaceName: name,
       sourceFaceMetadata: caps.sourceFaceMetadata || {},
+      mergeWithSourceSidewall: caps.mergeWithSourceSidewall === true,
     })),
     endCaps: Array.from(capLabelsBySourceFaceName.entries(), ([name, caps]) => ({
       label: caps.end,

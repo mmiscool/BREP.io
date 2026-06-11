@@ -365,6 +365,7 @@ function tagPipeRemainderBoundaryFaces(solid, featureId = "") {
         if (isOffsetShellRoundedPipeFace(faceName, metadata)) continue;
         const role = normalizeOffsetShellFaceRole(metadata);
         if (role === "start_cap") continue;
+        if (role === "sidewall") continue;
         try {
             solid.setFaceMetadata(faceName, {
                 ...metadata,
@@ -1862,6 +1863,7 @@ export function offsetShell(faces, distance, options = {}) {
                 featureId,
                 name: featureId,
                 skipTriangleSplit: true,
+                mergeSourceStartCaps: true,
             };
             if (smoothSelectedAdjacentNormals) {
                 thickenOptions.adjacentNormalFaceNames = thickenedFaceNames;

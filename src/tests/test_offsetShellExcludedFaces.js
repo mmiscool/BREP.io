@@ -290,6 +290,31 @@ export async function afterRun_offsetShell_repro_20260607082324_removes_area_los
   if (shell.getFaceNames().includes(targetFaceName)) {
     throw new Error(`Expected ${targetFaceName} to be removed from final solid.`);
   }
+  const faceNames = shell.getFaceNames();
+  if (faceNames.includes("E2:S1:G6_SW_START")) {
+    throw new Error("Expected source sidewall start cap E2:S1:G6_SW_START to merge into E2:S1:G6_SW.");
+  }
+  if (!faceNames.includes("E2:S1:G6_SW")) {
+    throw new Error(`Expected merged source sidewall E2:S1:G6_SW to remain, got ${faceNames.join(", ")}.`);
+  }
+  if (faceNames.includes("E2:S1:PROFILE_END_START")) {
+    throw new Error("Expected source cap E2:S1:PROFILE_END_START to merge into E2:S1:PROFILE_END.");
+  }
+  if (!faceNames.includes("E2:S1:PROFILE_END")) {
+    throw new Error(`Expected merged source cap E2:S1:PROFILE_END to remain, got ${faceNames.join(", ")}.`);
+  }
+  const mergedSidewallMetadata = typeof shell.getFaceMetadata === "function"
+    ? (shell.getFaceMetadata("E2:S1:G6_SW") || {})
+    : {};
+  if (metadataRole(mergedSidewallMetadata) !== "sidewall") {
+    throw new Error(`Expected merged E2:S1:G6_SW metadata to remain sidewall, got ${JSON.stringify(mergedSidewallMetadata)}.`);
+  }
+  const mergedEndCapMetadata = typeof shell.getFaceMetadata === "function"
+    ? (shell.getFaceMetadata("E2:S1:PROFILE_END") || {})
+    : {};
+  if (metadataRole(mergedEndCapMetadata) !== "start_cap") {
+    throw new Error(`Expected merged E2:S1:PROFILE_END metadata to remain a start cap, got ${JSON.stringify(mergedEndCapMetadata)}.`);
+  }
 }
 
 function getFaceAreaStats(solid, faceName) {
