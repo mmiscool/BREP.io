@@ -13,16 +13,13 @@ export async function test_offsetShell_preserves_source_centerlines(partHistory)
 
   const auxEdges = Array.isArray(shell?._auxEdges) ? shell._auxEdges : [];
   const centerlines = auxEdges.filter((aux) => aux?.centerline);
-  if (centerlines.length !== 1) {
-    throw new Error(`Expected exactly one preserved centerline, got ${centerlines.length}.`);
-  }
   if (auxEdges.some((aux) => aux?.name === 'CYL_CL_REFERENCE')) {
     throw new Error('Offset shell should not preserve non-centerline auxiliary edges.');
   }
 
-  const axis = centerlines[0];
-  if (axis.name !== 'CYL_CL_AXIS') {
-    throw new Error(`Expected preserved centerline name CYL_CL_AXIS, got ${axis.name || 'unnamed'}.`);
+  const axis = centerlines.find((aux) => aux?.name === 'CYL_CL_AXIS');
+  if (!axis) {
+    throw new Error(`Expected preserved source centerline CYL_CL_AXIS, got ${centerlines.map((aux) => aux?.name || 'unnamed').join(', ')}.`);
   }
   if (!Array.isArray(axis.points) || axis.points.length !== 2) {
     throw new Error('Expected preserved centerline to keep two points.');

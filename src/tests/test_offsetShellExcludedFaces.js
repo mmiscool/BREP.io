@@ -143,6 +143,31 @@ export async function afterRun_offsetShell_negative_distance_rounds_unselected_s
   if (!shell) {
     throw new Error("Expected negative offset shell result P.CU_NEG_OS_NEG in the scene.");
   }
+  const auxEdges = Array.isArray(shell._auxEdges) ? shell._auxEdges : [];
+  const pipeCenterlines = auxEdges.filter((aux) => {
+    const name = String(aux?.name || "");
+    return aux?.centerline === true && name.startsWith("OS_NEG_ROUND_PIPE") && name.endsWith("_PATH");
+  });
+  if (!pipeCenterlines.length) {
+    throw new Error(`Expected final offset shell to preserve generated rounded-pipe centerlines, got ${auxEdges.map((aux) => aux?.name || "").join(", ")}.`);
+  }
+
+  const pipeFaceName = (typeof shell.getFaceNames === "function" ? shell.getFaceNames() : [])
+    .find((faceName) => {
+      const metadata = typeof shell.getFaceMetadata === "function" ? (shell.getFaceMetadata(faceName) || {}) : {};
+      return metadata.offsetShellRoundedPipe === true || metadataRole(metadata) === "rounded_pipe";
+    });
+  if (!pipeFaceName) {
+    throw new Error("Expected final offset shell to retain rounded-pipe face metadata.");
+  }
+  const pipeMetadata = shell.getFaceMetadata(pipeFaceName) || {};
+  if (Math.abs(Number(pipeMetadata.pmiRadiusOverride) - 0.5) > 1e-9) {
+    throw new Error(`Expected rounded-pipe PMI radius override 0.5 on ${pipeFaceName}, got ${JSON.stringify(pipeMetadata)}.`);
+  }
+  const centerlineName = String(pipeMetadata.pmiCenterlineAuxName || pipeMetadata.centerlineAuxName || pipeMetadata.pathName || "");
+  if (!centerlineName || !pipeCenterlines.some((aux) => aux?.name === centerlineName)) {
+    throw new Error(`Expected rounded-pipe metadata to reference a preserved centerline, got ${JSON.stringify(pipeMetadata)}.`);
+  }
 }
 
 export async function test_offsetShell_repro_20260607082324_removes_area_loss_sidewall(partHistory) {

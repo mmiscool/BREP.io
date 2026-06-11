@@ -1397,6 +1397,8 @@ struct BuiltFilletEntry {
   std::vector<Vec3> edge_polyline;
   std::vector<Vec3> tube_cap_start;
   std::vector<Vec3> tube_cap_end;
+  double radius = 0.0;
+  double requested_radius = 0.0;
   bool closed_loop = false;
   bool corner_bridge = false;
   std::string merge_target_face_name;
@@ -5920,6 +5922,8 @@ emscripten::val BuildFilletEdgeAuthoringState(const emscripten::val& options) {
   result.set("wedgeSnapshot", segment_result["wedgeSnapshot"]);
   result.set("tubeSnapshot", segment_result["tubeSnapshot"]);
   result.set("finalSnapshot", segment_result["finalSnapshot"]);
+  result.set("radius", radius);
+  result.set("requestedRadius", requested_radius);
   result.set("closedLoop", result_closed);
   result.set("nativeKernel", true);
   if (!centerline_result["radiusClamp"].isUndefined() &&
@@ -6211,6 +6215,16 @@ emscripten::val BuildFilletAuthoringState(const emscripten::val& options) {
       built.wedge_snapshot = entry["wedgeSnapshot"];
       built.tube_snapshot = entry["tubeSnapshot"];
       built.final_snapshot = entry["finalSnapshot"];
+      built.radius = radius;
+      built.requested_radius = radius;
+      if (!entry["radius"].isUndefined() && !entry["radius"].isNull()) {
+        built.radius = ReadFiniteNumber(entry["radius"], "radius");
+      }
+      if (!entry["requestedRadius"].isUndefined() &&
+          !entry["requestedRadius"].isNull()) {
+        built.requested_radius =
+            ReadFiniteNumber(entry["requestedRadius"], "requestedRadius");
+      }
       built.centerline_points = ReadPoints(entry["centerline"], "centerline");
       built.edge_points = ReadPoints(entry["edge"], "edge");
       built.closed_loop =
@@ -6545,18 +6559,37 @@ emscripten::val BuildFilletAuthoringState(const emscripten::val& options) {
         }
       };
 
-      emscripten::val metadata = emscripten::val::object();
-      metadata.set("filletMergedSideWall", true);
-      metadata.set("filletSideWall", true);
-      metadata.set("filletSideWallEdge", entry.edge_reference);
-      metadata.set("filletSideWallIncludesStartCap", include_start_cap);
-      metadata.set("filletSideWallIncludesEndCap", include_end_cap);
-      const std::string merge_face_metadata_json = JsonStringifyObject(metadata);
+      emscripten::val tube_metadata = emscripten::val::object();
+      tube_metadata.set("type", std::string("pipe"));
+      tube_metadata.set("source", std::string("FilletFeature"));
+      tube_metadata.set("featureID", entry.fillet_name);
+      tube_metadata.set("inflatedRadius", entry.radius);
+      tube_metadata.set("pmiRadiusOverride", entry.requested_radius);
+      tube_metadata.set("radiusOverride", entry.requested_radius);
+      tube_metadata.set("filletMergedSideWall", true);
+      tube_metadata.set("filletSideWall", true);
+      tube_metadata.set("filletSideWallEdge", entry.edge_reference);
+      tube_metadata.set("filletSideWallIncludesStartCap", include_start_cap);
+      tube_metadata.set("filletSideWallIncludesEndCap", include_end_cap);
+      if (!entry.edge_reference.empty()) {
+        tube_metadata.set("edgeReference", entry.edge_reference);
+      }
+      const std::string tube_merge_face_metadata_json =
+          JsonStringifyObject(tube_metadata);
+
+      emscripten::val side_metadata = emscripten::val::object();
+      side_metadata.set("filletMergedSideWall", true);
+      side_metadata.set("filletSideWall", true);
+      side_metadata.set("filletSideWallEdge", entry.edge_reference);
+      side_metadata.set("filletSideWallIncludesStartCap", include_start_cap);
+      side_metadata.set("filletSideWallIncludesEndCap", include_end_cap);
+      const std::string side_merge_face_metadata_json =
+          JsonStringifyObject(side_metadata);
 
       apply_merge_group(tube_merge_target_face_name, tube_merge_face_names,
-                        merge_face_metadata_json);
+                        tube_merge_face_metadata_json);
       apply_merge_group(side_merge_target_face_name, side_merge_face_names,
-                        merge_face_metadata_json);
+                        side_merge_face_metadata_json);
 
       emscripten::val grouped_snapshot = core.GetAuthoringState();
       SnapshotInfo grouped_info = ReadBooleanReadySnapshotInfo(

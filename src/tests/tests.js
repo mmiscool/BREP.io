@@ -380,6 +380,11 @@ import {
     test_pmi_view_visibility_state_normalizes,
 } from './test_pmiViewsManager.js';
 import {
+    test_pmi_radial_dimension_accepts_pipe_aux_path_face,
+    test_pmi_radial_dimension_uses_offset_shell_pipe_radius_override,
+    test_pmi_radial_dimension_uses_fillet_pipe_radius_override,
+} from './test_pmiRadialDimension.js';
+import {
     afterRun_pmi_view_visibility_state_round_trip,
     test_pmi_view_visibility_state_round_trip,
 } from './test_pmiViewVisibilityState.js';
@@ -797,6 +802,9 @@ export const testFunctions = [
     { test: test_pmi_view_text_size_setting_normalizes, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_pmi_view_visibility_state_normalizes, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_pmi_view_visibility_state_round_trip, afterRun: afterRun_pmi_view_visibility_state_round_trip, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_pmi_radial_dimension_accepts_pipe_aux_path_face, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_pmi_radial_dimension_uses_fillet_pipe_radius_override, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_pmi_radial_dimension_uses_offset_shell_pipe_radius_override, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_pmi_monochrome_label_svg_uses_backdrop_color, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_pmi_monochrome_label_layout_is_tighter_than_shaded, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_pmi_enter_edit_mode_reuses_shared_flow, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

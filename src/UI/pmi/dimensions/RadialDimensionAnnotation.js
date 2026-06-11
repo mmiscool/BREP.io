@@ -14,8 +14,8 @@ const inputParamsSchema = {
     selectionFilter: ['FACE'],
     multiple: false,
     default_value: '',
-    label: 'Cylindrical Face',
-    hint: 'Select cylindrical face',
+    label: 'Radial Face',
+    hint: 'Select cylindrical, pipe, or fillet face',
   },
   planeRef: {
     type: 'reference_selection',
@@ -82,7 +82,7 @@ export class RadialDimensionAnnotation extends BaseAnnotation {
     const allowed = new Set(['FACE']);
     for (const item of items) {
       if (!BaseAnnotation._isSelectionType(item, allowed)) continue;
-      if (!hasCylindricalMetadata(item)) continue;
+      if (!hasRadialFaceData(item)) continue;
       const ref = BaseAnnotation._selectionRefName(item);
       if (ref) return { params: { cylindricalFaceRef: ref } };
     }
@@ -243,11 +243,12 @@ function computeRadialPoints(pmimode, ann, _ctx) {
     let radiusPoint = null;
     let perpendicular = null;
     const originalCenter = new THREE.Vector3();
-    let metadata = null;
+    let metadata = readRadialFaceMetadata(faceObj);
     let radiusOverride = null;
 
     if (owner && typeof owner.getFaceMetadata === 'function') {
-      metadata = owner.getFaceMetadata(ann.cylindricalFaceRef);
+      const ownerMetadata = owner.getFaceMetadata(ann.cylindricalFaceRef);
+      if (ownerMetadata && typeof ownerMetadata === 'object' && Object.keys(ownerMetadata).length > 0) metadata = ownerMetadata;
       if (metadata && (metadata.type === 'cylindrical' || metadata.type === 'conical')) {
         if (metadata.type === 'cylindrical') {
           center = new THREE.Vector3(metadata.center[0], metadata.center[1], metadata.center[2]);
@@ -273,16 +274,14 @@ function computeRadialPoints(pmimode, ann, _ctx) {
         }
       }
 
-      if (metadata && typeof metadata === 'object') {
-        const overrideCandidate = metadata.pmiRadiusOverride ?? metadata.radiusOverride;
-        if (Number.isFinite(overrideCandidate) && overrideCandidate > 0) {
-          radiusOverride = Math.abs(overrideCandidate);
-        }
-      }
+    }
+
+    if (metadata && typeof metadata === 'object') {
+      radiusOverride = readPositiveNumber(metadata.pmiRadiusOverride ?? metadata.radiusOverride ?? metadata.offsetShellRadius);
     }
 
     if ((!center || !axis || !Number.isFinite(radius) || radius <= 0) && owner) {
-      const pipeData = inferPipeFaceDataFromAuxEdges(owner, faceObj);
+      const pipeData = inferPipeFaceDataFromAuxEdges(owner, faceObj, metadata);
       if (pipeData) {
         center = pipeData.center;
         axis = pipeData.axis;
@@ -373,9 +372,26 @@ function isCylindricalMetadata(meta) {
   return false;
 }
 
+function isPipeMetadata(meta) {
+  if (!meta || typeof meta !== 'object') return false;
+  const type = String(meta.type || '').toLowerCase();
+  if (type !== 'pipe' && type !== 'rounded_pipe') return false;
+  const override = readPositiveNumber(meta.pmiRadiusOverride ?? meta.radiusOverride);
+  const inflated = readPositiveNumber(meta.inflatedRadius ?? meta.radius);
+  if (Number.isFinite(override) || Number.isFinite(inflated)) return true;
+  const role = String(meta.offsetShellFaceRole || meta.faceRole || '').toLowerCase();
+  return meta.offsetShellRoundedPipe === true || role === 'rounded_pipe';
+}
+
+function readPositiveNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.abs(number) : null;
+}
+
 function readCylindricalMetadata(obj) {
   if (!obj) return null;
   const ud = obj.userData || null;
+  if (isCylindricalMetadata(ud)) return ud;
   if (ud?.metadata && isCylindricalMetadata(ud.metadata)) return ud.metadata;
   if (typeof obj.getMetadata === 'function') {
     try {
@@ -398,15 +414,62 @@ function readCylindricalMetadata(obj) {
   return null;
 }
 
-function hasCylindricalMetadata(target) {
+function readRadialFaceMetadata(obj) {
+  const cylindrical = readCylindricalMetadata(obj);
+  if (cylindrical) return cylindrical;
+  if (!obj) return null;
+  const ud = obj.userData || null;
+  if (isPipeMetadata(ud)) return ud;
+  if (ud?.metadata && isPipeMetadata(ud.metadata)) return ud.metadata;
+  if (typeof obj.getMetadata === 'function') {
+    try {
+      const meta = obj.getMetadata();
+      if (isPipeMetadata(meta)) return meta;
+    } catch { /* ignore */ }
+  }
+  const faceName = obj?.name || ud?.faceName || null;
+  let owner = obj?.parentSolid || ud?.parentSolid || obj?.parent || null;
+  while (owner) {
+    if (faceName && typeof owner.getFaceMetadata === 'function') {
+      try {
+        const meta = owner.getFaceMetadata(faceName);
+        if (isPipeMetadata(meta)) return meta;
+      } catch { /* ignore */ }
+      break;
+    }
+    owner = owner.parent || null;
+  }
+  return null;
+}
+
+function hasRadialFaceData(target) {
   if (!target) return false;
-  if (readCylindricalMetadata(target)) return true;
+  if (readRadialFaceMetadata(target)) return true;
+  if (hasPipeFaceAuxPath(target)) return true;
   if (Array.isArray(target.faces)) {
     for (const face of target.faces) {
-      if (readCylindricalMetadata(face)) return true;
+      if (readRadialFaceMetadata(face)) return true;
+      if (hasPipeFaceAuxPath(face)) return true;
     }
   }
-  if (target.parent && readCylindricalMetadata(target.parent)) return true;
+  if (target.parent && readRadialFaceMetadata(target.parent)) return true;
+  return false;
+}
+
+function hasPipeFaceAuxPath(target) {
+  try {
+    if (!target) return false;
+    const faceName = (target.name || target.userData?.faceName || '').trim();
+    const baseName = pipeFaceBaseName(faceName);
+    const metadata = readRadialFaceMetadata(target);
+    let owner = target.parentSolid || target.userData?.parentSolid || target.parent || null;
+    while (owner) {
+      const auxEdges = Array.isArray(owner._auxEdges) ? owner._auxEdges : null;
+      if (auxEdges && findPipeCenterlineAuxEdge(auxEdges, faceName, metadata)) return true;
+      if (!baseName && !metadata) return false;
+      owner = owner.parent || null;
+    }
+  } catch { /* ignore */ }
   return false;
 }
 
@@ -456,16 +519,14 @@ function computeRadialLabelPosition(pmimode, ann, center, radiusPoint, planeNorm
   }
 }
 
-function inferPipeFaceDataFromAuxEdges(owner, faceObj) {
+function inferPipeFaceDataFromAuxEdges(owner, faceObj, metadata = null) {
   try {
     if (!owner || !faceObj) return null;
     const auxEdges = Array.isArray(owner._auxEdges) ? owner._auxEdges : null;
     if (!auxEdges || auxEdges.length === 0) return null;
     const faceName = (faceObj.name || faceObj.userData?.faceName || '').trim();
     if (!faceName) return null;
-    const baseName = pipeFaceBaseName(faceName);
-    if (!baseName) return null;
-    const aux = findAuxEdgeByName(auxEdges, `${baseName}_PATH`);
+    const aux = findPipeCenterlineAuxEdge(auxEdges, faceName, metadata);
     if (!aux || !Array.isArray(aux.points) || aux.points.length < 2) return null;
 
     owner.updateMatrixWorld?.(true);
@@ -504,6 +565,40 @@ function inferPipeFaceDataFromAuxEdges(owner, faceObj) {
   } catch {
     return null;
   }
+}
+
+function findPipeCenterlineAuxEdge(auxEdges, faceName, metadata = null) {
+  if (!Array.isArray(auxEdges) || !faceName) return null;
+  const candidates = pipeCenterlineNameCandidates(faceName, metadata);
+  for (const name of candidates) {
+    const aux = findAuxEdgeByName(auxEdges, name);
+    if (aux) return aux;
+  }
+  const featureId = String(metadata?.sourceFeatureId || metadata?.featureID || metadata?.featureId || '').trim();
+  if (featureId) {
+    const featurePrefix = `${featureId}_ROUND_PIPE`;
+    for (const aux of auxEdges) {
+      const name = String(aux?.name || '').trim();
+      if (aux?.centerline && name.startsWith(featurePrefix) && name.endsWith('_PATH')) return aux;
+    }
+  }
+  return null;
+}
+
+function pipeCenterlineNameCandidates(faceName, metadata = null) {
+  const out = [];
+  const add = (value) => {
+    const name = String(value || '').trim();
+    if (name && !out.includes(name)) out.push(name);
+  };
+  add(metadata?.pmiCenterlineAuxName);
+  add(metadata?.centerlineAuxName);
+  add(metadata?.pathName);
+  add(metadata?.auxEdgeName);
+  add(metadata?.centerlineName);
+  const baseName = pipeFaceBaseName(faceName);
+  if (baseName) add(`${baseName}_PATH`);
+  return out;
 }
 
 function findAuxEdgeByName(auxEdges, name) {
@@ -626,7 +721,7 @@ function estimatePolylineTangent(polyline, center, closedLoop = false) {
 }
 
 function pipeFaceBaseName(faceName) {
-  const match = /^(.*?)(_Outer|_Inner|_CapStart|_CapEnd)$/i.exec(faceName);
+  const match = /^(.*?)(_Outer|_Inner|_CapStart|_CapEnd)(?:_\d+)?$/i.exec(faceName);
   return match ? match[1] : null;
 }
 
@@ -722,3 +817,10 @@ function vectorFromAny(value) {
   }
   return null;
 }
+
+export const __testOnlyRadialDimensionInternals = {
+  computeRadialPoints,
+  hasRadialFaceData,
+  isPipeMetadata,
+  measureRadialValue,
+};

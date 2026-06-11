@@ -119,6 +119,44 @@ function getSelectedFaceNames(faces, sourceFaces) {
     return selected;
 }
 
+function cloneAuxEdgeRecord(aux, { forceCenterline = false } = {}) {
+    const name = String(aux?.name || "EDGE").trim() || "EDGE";
+    const points = Array.isArray(aux?.points)
+        ? aux.points.map((point) => {
+            if (Array.isArray(point) && point.length >= 3) {
+                const x = Number(point[0]);
+                const y = Number(point[1]);
+                const z = Number(point[2]);
+                if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) return [x, y, z];
+                return null;
+            }
+            if (point && typeof point === "object") {
+                const x = Number(point.x);
+                const y = Number(point.y);
+                const z = Number(point.z);
+                if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) return [x, y, z];
+            }
+            return null;
+        }).filter(Boolean)
+        : [];
+    if (points.length < 2) return null;
+
+    const entry = {
+        name,
+        points,
+        closedLoop: !!aux?.closedLoop,
+        polylineWorld: !!aux?.polylineWorld,
+        centerline: forceCenterline || !!aux?.centerline,
+    };
+    const materialKey = String(aux?.materialKey || "").trim();
+    if (materialKey) entry.materialKey = materialKey;
+    const faceA = String(aux?.faceA || "").trim();
+    const faceB = String(aux?.faceB || "").trim();
+    if (faceA) entry.faceA = faceA;
+    if (faceB) entry.faceB = faceB;
+    return entry;
+}
+
 function cloneCenterlineAuxEdges(sourceSolid) {
     const source = Array.isArray(sourceSolid?._auxEdges) ? sourceSolid._auxEdges : [];
     const out = [];
@@ -126,49 +164,31 @@ function cloneCenterlineAuxEdges(sourceSolid) {
         const name = String(aux?.name || "EDGE");
         const isCenterline = !!aux?.centerline || /centerline/i.test(name);
         if (!isCenterline) continue;
-
-        const points = Array.isArray(aux?.points)
-            ? aux.points.map((point) => {
-                if (Array.isArray(point) && point.length >= 3) {
-                    const x = Number(point[0]);
-                    const y = Number(point[1]);
-                    const z = Number(point[2]);
-                    if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) return [x, y, z];
-                    return null;
-                }
-                if (point && typeof point === "object") {
-                    const x = Number(point.x);
-                    const y = Number(point.y);
-                    const z = Number(point.z);
-                    if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) return [x, y, z];
-                }
-                return null;
-            }).filter(Boolean)
-            : [];
-        if (points.length < 2) continue;
-
-        const entry = {
-            name,
-            points,
-            closedLoop: !!aux?.closedLoop,
-            polylineWorld: !!aux?.polylineWorld,
-            centerline: true,
-        };
-        const materialKey = String(aux?.materialKey || "").trim();
-        if (materialKey) entry.materialKey = materialKey;
-        const faceA = String(aux?.faceA || "").trim();
-        const faceB = String(aux?.faceB || "").trim();
-        if (faceA) entry.faceA = faceA;
-        if (faceB) entry.faceB = faceB;
-        out.push(entry);
+        const entry = cloneAuxEdgeRecord(aux, { forceCenterline: true });
+        if (entry) out.push(entry);
     }
     return out;
 }
 
-function appendSourceCenterlines(targetSolid, sourceSolid) {
+function cloneOffsetShellPipeCenterlineAuxEdges(sourceSolid, featureId = "") {
+    const source = Array.isArray(sourceSolid?._auxEdges) ? sourceSolid._auxEdges : [];
+    const prefix = `${String(featureId || "").trim()}_ROUND_PIPE`;
+    const out = [];
+    for (const aux of source) {
+        const name = String(aux?.name || "").trim();
+        if (!name || !name.endsWith("_PATH")) continue;
+        if (prefix !== "_ROUND_PIPE" && !name.startsWith(prefix)) continue;
+        if (!aux?.centerline && !/centerline/i.test(name) && !/_PATH$/i.test(name)) continue;
+        const entry = cloneAuxEdgeRecord(aux, { forceCenterline: true });
+        if (entry) out.push(entry);
+    }
+    return out;
+}
+
+function appendAuxEdges(targetSolid, auxEdges) {
     if (!targetSolid) return targetSolid;
-    const centerlines = cloneCenterlineAuxEdges(sourceSolid);
-    if (!centerlines.length) return targetSolid;
+    const additionsSource = Array.isArray(auxEdges) ? auxEdges : [];
+    if (!additionsSource.length) return targetSolid;
     const existing = Array.isArray(targetSolid._auxEdges) ? targetSolid._auxEdges : [];
     const keyFor = (aux) => JSON.stringify({
         name: String(aux?.name || "EDGE"),
@@ -176,17 +196,28 @@ function appendSourceCenterlines(targetSolid, sourceSolid) {
         closedLoop: !!aux?.closedLoop,
     });
     const seen = new Set(existing.map(keyFor));
-    const additions = centerlines.filter((aux) => {
-        const key = keyFor(aux);
-        if (seen.has(key)) return false;
+    const additions = [];
+    for (const aux of additionsSource) {
+        const entry = cloneAuxEdgeRecord(aux, { forceCenterline: !!aux?.centerline });
+        if (!entry) continue;
+        const key = keyFor(entry);
+        if (seen.has(key)) continue;
         seen.add(key);
-        return true;
-    });
+        additions.push(entry);
+    }
     if (!additions.length) return targetSolid;
     targetSolid._auxEdges = [...existing, ...additions];
     targetSolid._visualizeCache = null;
     targetSolid._cppSolidCoreSyncStamp = null;
     return targetSolid;
+}
+
+function appendSourceCenterlines(targetSolid, sourceSolid) {
+    return appendAuxEdges(targetSolid, cloneCenterlineAuxEdges(sourceSolid));
+}
+
+function appendOffsetShellPipeCenterlines(targetSolid, centerlines) {
+    return appendAuxEdges(targetSolid, centerlines);
 }
 
 function pointArrayFromAny(point) {
@@ -350,6 +381,66 @@ function tagPipeRemainderBoundaryFaces(solid, featureId = "") {
     }
 
     return taggedCount;
+}
+
+function roundedPipePathNameForFace(faceName) {
+    const raw = String(faceName || "").trim();
+    if (!raw) return "";
+    const match = /^(.*?)(_Outer|_Inner|_CapStart|_CapEnd)(?:_\d+)?$/i.exec(raw);
+    return match ? `${match[1]}_PATH` : "";
+}
+
+function enrichOffsetShellRoundedPipeMetadata(solid, {
+    featureId = "",
+    radius = null,
+} = {}) {
+    if (!solid || typeof solid.setFaceMetadata !== "function") return 0;
+    const sourceFeatureId = String(featureId || "").trim();
+    const radiusValue = Math.abs(Number(radius));
+    const hasRadius = Number.isFinite(radiusValue) && radiusValue > 0;
+    let updated = 0;
+
+    for (const faceName of getSolidFaceNames(solid)) {
+        if (!faceName) continue;
+        const metadata = getFaceMetadataSafe(solid, faceName);
+        const looksLikeRoundedPipe = isOffsetShellRoundedPipeFace(faceName, metadata)
+            || /_ROUND_PIPE(?:_\d+)?_Outer(?:_\d+)?$/i.test(faceName);
+        if (!looksLikeRoundedPipe) continue;
+
+        const pathName = String(
+            metadata.pmiCenterlineAuxName
+            || metadata.centerlineAuxName
+            || metadata.pathName
+            || roundedPipePathNameForFace(faceName)
+            || "",
+        ).trim();
+        try {
+            solid.setFaceMetadata(faceName, {
+                ...metadata,
+                type: "rounded_pipe",
+                faceRole: "rounded_pipe",
+                offsetShellFaceRole: "rounded_pipe",
+                offsetShellRoundedPipe: true,
+                ...(sourceFeatureId ? { sourceFeatureId } : {}),
+                ...(hasRadius ? {
+                    radius: radiusValue,
+                    inflatedRadius: radiusValue,
+                    radiusOverride: radiusValue,
+                    pmiRadiusOverride: radiusValue,
+                    offsetShellRadius: radiusValue,
+                } : {}),
+                ...(pathName ? {
+                    pathName,
+                    centerlineAuxName: pathName,
+                    pmiCenterlineAuxName: pathName,
+                } : {}),
+            });
+            updated += 1;
+        } catch {
+            /* ignore individual metadata failures */
+        }
+    }
+    return updated;
 }
 
 function deduplicateSolidFaceNames(solid) {
@@ -1534,10 +1625,13 @@ function isClosedPath(points, tolerance) {
         && pointDistanceSq(points[0], points[points.length - 1]) <= (tolerance * tolerance);
 }
 
-function tagNativeTubeOuterFaces(solid, tubeName, featureId = "") {
+function tagNativeTubeOuterFaces(solid, tubeName, featureId = "", radius = null) {
     if (!solid || typeof solid.setFaceMetadata !== "function") return 0;
     const outerFaceName = `${String(tubeName || "").trim() || "Tube"}_Outer`;
     const sourceFeatureId = String(featureId || "").trim();
+    const pathName = `${String(tubeName || "").trim() || "Tube"}_PATH`;
+    const radiusValue = Math.abs(Number(radius));
+    const hasRadius = Number.isFinite(radiusValue) && radiusValue > 0;
     const faceNames = getSolidFaceNames(solid);
     let taggedCount = 0;
     for (const faceName of faceNames) {
@@ -1551,6 +1645,16 @@ function tagNativeTubeOuterFaces(solid, tubeName, featureId = "") {
                 offsetShellFaceRole: "rounded_pipe",
                 offsetShellRoundedPipe: true,
                 ...(sourceFeatureId ? { sourceFeatureId } : {}),
+                ...(hasRadius ? {
+                    radius: radiusValue,
+                    inflatedRadius: radiusValue,
+                    radiusOverride: radiusValue,
+                    pmiRadiusOverride: radiusValue,
+                    offsetShellRadius: radiusValue,
+                } : {}),
+                pathName,
+                centerlineAuxName: pathName,
+                pmiCenterlineAuxName: pathName,
             });
             taggedCount += 1;
         } catch {
@@ -1589,10 +1693,10 @@ function buildNativeTubeSolid(sourceSolid, points, radius, {
     solid._dirty = true;
     solid._manifold = null;
     solid._faceIndex = null;
-    solid._auxEdges = [];
+    solid._auxEdges = cloneCenterlineAuxEdges(solid);
     try { solid.name = name || `${featureId}_RoundedPipe`; } catch { /* ignore */ }
     try { solid.owningFeatureID = featureId; } catch { /* ignore */ }
-    tagNativeTubeOuterFaces(solid, name || `${featureId}_RoundedPipe`, featureId);
+    tagNativeTubeOuterFaces(solid, name || `${featureId}_RoundedPipe`, featureId, radius);
     const triCount = Array.isArray(solid._triVerts) ? Math.floor(solid._triVerts.length / 3) : 0;
     return triCount > 0 ? solid : null;
 }
@@ -1844,6 +1948,7 @@ export function offsetShell(faces, distance, options = {}) {
         firstError: null,
     };
 
+    let roundedPipeCenterlines = [];
     if (offsetDistance < 0) {
         let roundedPipe = null;
         try {
@@ -1855,6 +1960,13 @@ export function offsetShell(faces, distance, options = {}) {
             });
             Object.assign(roundedCorners, built?.diagnostics || {});
             roundedPipe = built?.solid || null;
+            if (roundedPipe) {
+                roundedPipeCenterlines = cloneOffsetShellPipeCenterlineAuxEdges(roundedPipe, featureId);
+                enrichOffsetShellRoundedPipeMetadata(roundedPipe, {
+                    featureId,
+                    radius: Math.abs(offsetDistance),
+                });
+            }
         } catch (error) {
             roundedCorners.status = "edge_collection_failed";
             roundedCorners.firstError = String(error?.message || error || "unknown error").slice(0, 240);
@@ -1874,12 +1986,16 @@ export function offsetShell(faces, distance, options = {}) {
             roundedCorners.pipeSubtractWallMs = roundMs(nowMs() - subtractStart);
 
             if (pipeOutsideSource) {
-                // Temporary roundover tooling should not contribute visual aux edges
-                // to the final shell; source centerlines are restored once below.
-                try { pipeOutsideSource._auxEdges = []; } catch { /* ignore */ }
+                // Keep only the generated tube centerlines; other temporary/source aux
+                // records are restored from their owning solids separately.
+                try { pipeOutsideSource._auxEdges = roundedPipeCenterlines.map((aux) => cloneAuxEdgeRecord(aux, { forceCenterline: true })).filter(Boolean); } catch { /* ignore */ }
                 try { pipeOutsideSource._cppSolidCoreSyncStamp = null; } catch { /* ignore */ }
                 try { pipeOutsideSource.name = `${newSolidName}_ROUND_PIPE_REMAINDER`; } catch { /* ignore */ }
                 try { pipeOutsideSource.owningFeatureID = featureId; } catch { /* ignore */ }
+                enrichOffsetShellRoundedPipeMetadata(pipeOutsideSource, {
+                    featureId,
+                    radius: Math.abs(offsetDistance),
+                });
                 roundedCorners.pipeRemainderBoundaryFaceTaggedCount = tagPipeRemainderBoundaryFaces(pipeOutsideSource, featureId);
                 roundedCorners.pipeRemainderFaceNamesDeduplicated = deduplicateSolidFaceNames(pipeOutsideSource);
                 roundedCorners.pipeRemainderFaceIDRepair = repairGeneratedFaceIDProvenance(pipeOutsideSource);
@@ -1900,6 +2016,11 @@ export function offsetShell(faces, distance, options = {}) {
                         });
                         if (roundedShell) {
                             combined = roundedShell;
+                            appendOffsetShellPipeCenterlines(combined, roundedPipeCenterlines);
+                            enrichOffsetShellRoundedPipeMetadata(combined, {
+                                featureId,
+                                radius: Math.abs(offsetDistance),
+                            });
                             roundedCorners.shellFaceNamesDeduplicated = deduplicateSolidFaceNames(combined);
                             const cleanupBaselineSnapshot = buildSolidAuthoringStateSnapshot(combined);
                             const cleanupBaselineTopology = analyzeSolidMeshTopology(combined);
@@ -2033,6 +2154,11 @@ export function offsetShell(faces, distance, options = {}) {
                             roundedCorners.sidewallAreaLoss = sidewallAreaLoss;
                             roundedCorners.pipeSliverCollapse = pipeSliverCollapse;
                             roundedCorners.areaLossSidewallReassign = areaLossSidewallReassign;
+                            appendOffsetShellPipeCenterlines(combined, roundedPipeCenterlines);
+                            enrichOffsetShellRoundedPipeMetadata(combined, {
+                                featureId,
+                                radius: Math.abs(offsetDistance),
+                            });
                             roundedCorners.pipeSliverCollapseCount = (rollbackCleanup || rollbackPipeSliverCollapse)
                                 ? 0
                                 : Number(pipeSliverCollapse?.collapsedPipeVertices || 0);
@@ -2055,6 +2181,13 @@ export function offsetShell(faces, distance, options = {}) {
     }
 
     const faceIDRepair = repairGeneratedFaceIDProvenance(combined);
+    if (offsetDistance < 0) {
+        appendOffsetShellPipeCenterlines(combined, roundedPipeCenterlines);
+        enrichOffsetShellRoundedPipeMetadata(combined, {
+            featureId,
+            radius: Math.abs(offsetDistance),
+        });
+    }
     try { combined.name = newSolidName; } catch { /* ignore */ }
     const buildMethod = roundedCorners.status === "applied"
         ? "face_thicken_union_shell_with_rounded_corners"

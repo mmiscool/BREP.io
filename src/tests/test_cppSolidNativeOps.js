@@ -802,6 +802,15 @@ export async function test_cppSolidNative_solidFillet_preserves_tube_centerline_
     if (!roundFaceName) {
         throw new Error("Expected Solid.fillet() result to retain the round tube face.");
     }
+    const roundMetadata = typeof result.getFaceMetadata === "function"
+        ? (result.getFaceMetadata(roundFaceName) || {})
+        : {};
+    if (roundMetadata.type !== "pipe") {
+        throw new Error(`Expected fillet round face "${roundFaceName}" to retain pipe metadata, got ${JSON.stringify(roundMetadata)}.`);
+    }
+    if (Math.abs(Number(roundMetadata.pmiRadiusOverride) - 0.25) > 1e-9) {
+        throw new Error(`Expected fillet round face "${roundFaceName}" to retain PMI radius override 0.25, got ${JSON.stringify(roundMetadata)}.`);
+    }
 
     const expectedAuxName = `${String(roundFaceName).replace(/_Outer$/, "")}_PATH`;
     const auxEdges = Array.isArray(result._auxEdges) ? result._auxEdges : [];
