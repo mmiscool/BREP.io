@@ -212,6 +212,70 @@ export async function test_selection_hover_material_restores_before_dispose() {
   assert(hoverMaterial.disposed === true, 'Expected temporary hover material to be disposed after restore.');
 }
 
+export async function test_selection_profile_named_solid_face_hover_does_not_tint_shared_face_material() {
+  let sharedColor = '#00009e';
+  let hoverMaterial = null;
+  const sharedFaceMaterial = {
+    type: 'SharedFaceMaterial',
+    isMaterial: true,
+    color: {
+      set(next) { sharedColor = next; },
+      getHex() { return sharedColor; },
+    },
+    clone() {
+      let cloneColor = sharedColor;
+      hoverMaterial = {
+        type: 'HoverFaceMaterial',
+        isMaterial: true,
+        color: {
+          set(next) { cloneColor = next; },
+          getHex() { return cloneColor; },
+        },
+        disposed: false,
+        dispose() {
+          this.disposed = true;
+        },
+        get currentColor() { return cloneColor; },
+      };
+      return hoverMaterial;
+    },
+    get currentColor() { return sharedColor; },
+  };
+  const hoveredFace = {
+    type: 'FACE',
+    name: 'E2:S1:PROFILE_END_START',
+    material: sharedFaceMaterial,
+    userData: {},
+  };
+  const siblingFace = {
+    type: 'FACE',
+    name: 'E2:S1:G2_SW_END',
+    material: sharedFaceMaterial,
+    userData: {},
+  };
+
+  SelectionState.attach(hoveredFace);
+  SelectionState.attach(siblingFace);
+  hoveredFace.hovered = true;
+
+  assert(hoverMaterial, 'Expected solid face hover to create a temporary material.');
+  assert(hoveredFace.material === hoverMaterial, 'Expected profile-named solid face hover to assign only the temporary material.');
+  assert(siblingFace.material === sharedFaceMaterial, 'Expected sibling face to keep the shared base material.');
+  assert(
+    sharedFaceMaterial.currentColor === '#00009e',
+    `Expected shared face material color to remain unchanged, got ${sharedFaceMaterial.currentColor}.`,
+  );
+  assert(
+    hoverMaterial.currentColor === SelectionState.hoverColor,
+    `Expected hover material color ${SelectionState.hoverColor}, got ${hoverMaterial.currentColor}.`,
+  );
+
+  hoveredFace.hovered = false;
+
+  assert(hoveredFace.material === sharedFaceMaterial, 'Expected profile-named solid face hover clear to restore the base material.');
+  assert(hoverMaterial.disposed === true, 'Expected profile-named solid face hover material to be disposed.');
+}
+
 export async function test_selection_sketch_hover_tints_material_in_place() {
   const makeSketchMaterial = (initialColor, type) => {
     let color = initialColor;

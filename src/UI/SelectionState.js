@@ -487,7 +487,6 @@ export class SelectionState {
     static _shouldUseInPlaceHover(target, rootType) {
         if (!target) return false;
         if (target.userData?.sketchFeatureId || target.userData?.sketchGeometryId != null) return true;
-        if (rootType === 'FACE' && String(target.name || '').includes(':PROFILE')) return true;
         let parent = target.parent || null;
         while (parent) {
             if (parent.type === 'SKETCH' || parent.userData?.sketchFeatureId) return true;

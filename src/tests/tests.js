@@ -338,6 +338,7 @@ import {
     test_selection_filter_empty_hover_clears_in_place_sketch_hover,
     test_selection_line2_resolution_repair,
     test_selection_owning_feature_resolution,
+    test_selection_profile_named_solid_face_hover_does_not_tint_shared_face_material,
     test_selection_sketch_hover_tints_material_in_place,
 } from './test_selection_owning_feature.js';
 import {
@@ -1059,6 +1060,7 @@ export const testFunctions = [
     { test: test_selection_owning_feature_resolution, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_selection_line2_resolution_repair, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_selection_hover_material_restores_before_dispose, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_selection_profile_named_solid_face_hover_does_not_tint_shared_face_material, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_selection_sketch_hover_tints_material_in_place, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_selection_filter_empty_hover_clears_in_place_sketch_hover, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_solid_overlap_diagnostics_detects_coplanar_overlap, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
