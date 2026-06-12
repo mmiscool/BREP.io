@@ -56,7 +56,7 @@ try {
   const envScript = path.join(emsdkDir, "emsdk_env.sh");
 
   const installScript = `
-set -euo pipefail
+set -eo pipefail
 if [ ! -d ${quotedEmsdkDir} ]; then
   git clone ${quotedRepo} ${quotedEmsdkDir}
 fi
@@ -70,7 +70,7 @@ emcmake --version >/dev/null
 cd ${quotedRootDir}
 `.trim();
 
-  run("bash", ["-lc", installScript]);
+  run("bash", ["-c", installScript]);
   console.log(`[installEmscripten] EMSDK ${emsdkVersion} is installed at ${emsdkDir}.`);
 } catch (error) {
   console.error("[installEmscripten] Failed.");

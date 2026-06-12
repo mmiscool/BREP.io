@@ -74,7 +74,7 @@ const runWithEmscripten = (commandText) => {
   const quoted = commandText.replaceAll('"', '\\"');
   const quotedCache = emCacheDir.replaceAll('"', '\\"');
   run("bash", [
-    "-lc",
+    "-c",
     `cd "${emsdkDir}" && ./emsdk install ${emsdkVersion} >/dev/null && ./emsdk activate ${emsdkVersion} >/dev/null && source "${emsdkEnvScript}" >/dev/null && export EM_CACHE="${quotedCache}" && mkdir -p "${quotedCache}" && cd "${rootDir}" && ${quoted}`,
   ]);
 };
