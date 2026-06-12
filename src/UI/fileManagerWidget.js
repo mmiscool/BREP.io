@@ -29,6 +29,7 @@ import {
   writeBrowserStorageValue,
 } from '../utils/browserStorage.js';
 import { CADmaterials } from './CADmaterials.js';
+import { FloatingWindow } from './FloatingWindow.js';
 import { HISTORY_COLLECTION_REFRESH_EVENT } from './history/HistoryCollectionWidget.js';
 import { generateSheetsPdfBytes } from './sheets/Sheet2DEditorWindow.js';
 import { WorkspaceFileBrowserWidget } from './WorkspaceFileBrowserWidget.js';
@@ -583,34 +584,15 @@ export class FileManagerWidget {
       .fm-save-line { margin-bottom: 6px; }
 
       /* Save target dialog */
-      .fm-save-target-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(2, 6, 23, 0.72);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10060;
-        padding: 16px;
-        box-sizing: border-box;
-      }
       .fm-save-target-panel {
-        width: min(1100px, 96vw);
-        height: min(760px, 90vh);
-        max-height: 90vh;
+        width: 100%;
+        height: 100%;
         display: flex;
         flex-direction: column;
         gap: 10px;
-        background: #0b0e14;
-        border: 1px solid #1f2937;
-        border-radius: 12px;
         color: #e5e7eb;
         padding: 14px;
-        box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-      }
-      .fm-save-target-title {
-        font-weight: 700;
-        font-size: 14px;
+        box-sizing: border-box;
       }
       .fm-save-target-controls {
         display: flex;
@@ -649,52 +631,23 @@ export class FileManagerWidget {
       .fm-save-target-status[data-tone="error"] {
         color: #fca5a5;
       }
-      .fm-save-target-actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: 8px;
-      }
-      .fm-home-confirm-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(2, 6, 23, 0.72);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10055;
-        padding: 16px;
-        box-sizing: border-box;
-      }
       .fm-home-confirm-panel {
-        width: min(420px, 92vw);
+        width: 100%;
+        height: 100%;
         display: flex;
         flex-direction: column;
         gap: 12px;
-        background: #0b0e14;
-        border: 1px solid #1f2937;
-        border-radius: 12px;
         color: #e5e7eb;
         padding: 16px;
-        box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-      }
-      .fm-home-confirm-title {
-        font-weight: 700;
-        font-size: 14px;
+        box-sizing: border-box;
       }
       .fm-home-confirm-copy {
         font-size: 12px;
         line-height: 1.45;
         color: #cbd5f5;
       }
-      .fm-home-confirm-actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: 8px;
-        flex-wrap: wrap;
-      }
       @media (max-width: 760px) {
         .fm-save-target-panel {
-          width: min(98vw, 1100px);
           padding: 10px;
         }
       }
@@ -754,52 +707,36 @@ export class FileManagerWidget {
   async _openNavigateHomeDialog() {
     return await new Promise((resolve) => {
       let closed = false;
-
-      const overlay = document.createElement('div');
-      overlay.className = 'fm-home-confirm-overlay';
+      let fw = null;
 
       const panel = document.createElement('section');
       panel.className = 'fm-home-confirm-panel';
-      overlay.appendChild(panel);
-
-      const title = document.createElement('div');
-      title.className = 'fm-home-confirm-title';
-      title.textContent = 'Unsaved changes';
-      panel.appendChild(title);
 
       const copy = document.createElement('div');
       copy.className = 'fm-home-confirm-copy';
       copy.textContent = 'This part has unsaved changes. Do you want to save before returning to Home?';
       panel.appendChild(copy);
 
-      const actions = document.createElement('div');
-      actions.className = 'fm-home-confirm-actions';
-
       const cancelBtn = document.createElement('button');
       cancelBtn.type = 'button';
-      cancelBtn.className = 'fm-btn';
+      cancelBtn.className = 'fw-btn fm-btn';
       cancelBtn.textContent = 'Cancel';
 
       const discardBtn = document.createElement('button');
       discardBtn.type = 'button';
-      discardBtn.className = 'fm-btn danger';
+      discardBtn.className = 'fw-btn fm-btn danger';
       discardBtn.textContent = "Don't save";
 
       const saveBtn = document.createElement('button');
       saveBtn.type = 'button';
-      saveBtn.className = 'fm-btn';
+      saveBtn.className = 'fw-btn fm-btn';
       saveBtn.textContent = 'Save and return';
-
-      actions.appendChild(cancelBtn);
-      actions.appendChild(discardBtn);
-      actions.appendChild(saveBtn);
-      panel.appendChild(actions);
 
       const close = (result) => {
         if (closed) return;
         closed = true;
         try { document.removeEventListener('keydown', onKeyDown, true); } catch { /* ignore */ }
-        try { overlay.remove(); } catch { /* ignore */ }
+        try { fw?.destroy?.(); } catch { /* ignore */ }
         resolve(result || 'cancel');
       };
 
@@ -820,11 +757,22 @@ export class FileManagerWidget {
       cancelBtn.addEventListener('click', () => close('cancel'));
       discardBtn.addEventListener('click', () => close('discard'));
       saveBtn.addEventListener('click', () => close('save'));
-      overlay.addEventListener('click', (event) => {
-        if (event.target === overlay) close('cancel');
-      });
 
-      document.body.appendChild(overlay);
+      fw = new FloatingWindow({
+        title: 'Unsaved changes',
+        width: 440,
+        height: 180,
+        minWidth: 340,
+        minHeight: 140,
+        modal: true,
+        closeOnBackdrop: true,
+        closeOnEscape: true,
+        onClose: () => close('cancel'),
+      });
+      fw.addHeaderAction(cancelBtn);
+      fw.addHeaderAction(discardBtn);
+      fw.addHeaderAction(saveBtn);
+      fw.content.appendChild(panel);
       document.addEventListener('keydown', onKeyDown, true);
       requestAnimationFrame(() => {
         try { saveBtn.focus(); } catch { /* ignore */ }
@@ -900,18 +848,10 @@ export class FileManagerWidget {
       let closed = false;
       let browser = null;
       let selectedBranch = initialBranch;
-
-      const overlay = document.createElement('div');
-      overlay.className = 'fm-save-target-overlay';
+      let fw = null;
 
       const panel = document.createElement('section');
       panel.className = 'fm-save-target-panel';
-      overlay.appendChild(panel);
-
-      const title = document.createElement('div');
-      title.className = 'fm-save-target-title';
-      title.textContent = 'Save Model';
-      panel.appendChild(title);
 
       const controls = document.createElement('div');
       controls.className = 'fm-save-target-controls';
@@ -940,19 +880,14 @@ export class FileManagerWidget {
       panel.appendChild(controls);
       panel.appendChild(status);
 
-      const actions = document.createElement('div');
-      actions.className = 'fm-save-target-actions';
       const cancelBtn = document.createElement('button');
       cancelBtn.type = 'button';
-      cancelBtn.className = 'fm-btn';
+      cancelBtn.className = 'fw-btn fm-btn';
       cancelBtn.textContent = 'Cancel';
       const saveBtn = document.createElement('button');
       saveBtn.type = 'button';
-      saveBtn.className = 'fm-btn';
+      saveBtn.className = 'fw-btn fm-btn';
       saveBtn.textContent = 'Save';
-      actions.appendChild(cancelBtn);
-      actions.appendChild(saveBtn);
-      panel.appendChild(actions);
 
       const setStatus = (message = '', tone = '') => {
         status.textContent = String(message || '');
@@ -972,7 +907,7 @@ export class FileManagerWidget {
         closed = true;
         try { document.removeEventListener('keydown', onKeyDown, true); } catch { /* ignore */ }
         try { browser?.destroy?.(); } catch { /* ignore */ }
-        try { overlay.remove(); } catch { /* ignore */ }
+        try { fw?.destroy?.(); } catch { /* ignore */ }
         resolve(result || null);
       };
 
@@ -991,9 +926,6 @@ export class FileManagerWidget {
       };
 
       cancelBtn.addEventListener('click', () => close(null));
-      overlay.addEventListener('click', (event) => {
-        if (event.target === overlay) close(null);
-      });
 
       saveBtn.addEventListener('click', () => {
         const fileName = stripModelFileExtension(fileInput.value || '');
@@ -1093,7 +1025,20 @@ export class FileManagerWidget {
         scrollBody: true,
       });
 
-      document.body.appendChild(overlay);
+      fw = new FloatingWindow({
+        title: 'Save Model',
+        width: Math.min(1100, Math.max(360, window.innerWidth - 48)),
+        height: Math.min(760, Math.max(420, window.innerHeight - 80)),
+        minWidth: 420,
+        minHeight: 320,
+        modal: true,
+        closeOnBackdrop: true,
+        closeOnEscape: true,
+        onClose: () => close(null),
+      });
+      fw.addHeaderAction(cancelBtn);
+      fw.addHeaderAction(saveBtn);
+      fw.content.appendChild(panel);
       document.addEventListener('keydown', onKeyDown, true);
 
       const fallbackLocation = (initialSource === 'github' && !initialRepo)

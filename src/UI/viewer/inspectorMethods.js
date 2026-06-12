@@ -736,32 +736,20 @@ export const inspectorMethods = {
     },
 
     _showModal(title, text, opts = {}) {
-        const mask = document.createElement('div');
-        mask.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);backdrop-filter:blur(2px);z-index:7;display:flex;align-items:center;justify-content:center;';
+        let fw = null;
         const box = document.createElement('div');
-        box.style.cssText = 'width:min(980px,90vw);height:min(70vh,720px);background:#0b0d10;border:1px solid #2a3442;border-radius:10px;box-shadow:0 12px 28px rgba(0,0,0,.35);display:flex;flex-direction:column;overflow:hidden;';
-        const header = document.createElement('div');
-        header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid #1e2430;color:#e5e7eb;font:600 13px ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;';
-        header.textContent = title || 'Diagnostics';
-        const close = document.createElement('button');
-        close.textContent = '✕';
-        close.title = 'Close';
-        close.style.cssText = 'margin-left:auto;background:transparent;border:0;color:#9aa4b2;cursor:pointer;font:700 14px ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;padding:4px;';
+        box.style.cssText = 'width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;';
         const pre = document.createElement('textarea');
         pre.readOnly = true;
         pre.value = text || '';
         pre.style.cssText = 'flex:1;resize:none;background:#0f141a;color:#e5e7eb;border:0;padding:10px 12px;font:12px/1.3 ui-monospace,Menlo,Consolas,monospace;white-space:pre;';
-        const foot = document.createElement('div');
-        foot.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;padding:8px 12px;border-top:1px solid #1e2430;';
         const copyBtn = document.createElement('button');
-        copyBtn.className = 'mtb-btn';
+        copyBtn.className = 'fw-btn mtb-btn';
         copyBtn.textContent = 'Copy JSON';
-        copyBtn.style.cssText = 'background:#1b2433;border:1px solid #334155;color:#e5e7eb;padding:6px 10px;border-radius:8px;cursor:pointer;font-weight:700;font-size:12px;';
         copyBtn.addEventListener('click', async () => { try { await navigator.clipboard.writeText(pre.value); copyBtn.textContent = 'Copied!'; setTimeout(() => copyBtn.textContent = 'Copy JSON', 900); } catch { } });
         const dlBtn = document.createElement('button');
-        dlBtn.className = 'mtb-btn';
+        dlBtn.className = 'fw-btn mtb-btn';
         dlBtn.textContent = 'Download';
-        dlBtn.style.cssText = copyBtn.style.cssText;
         dlBtn.addEventListener('click', () => {
             try {
                 const content = (opts && typeof opts.onDownload === 'function') ? opts.onDownload() : pre.value;
@@ -773,17 +761,21 @@ export const inspectorMethods = {
             } catch { }
         });
 
-        close.addEventListener('click', () => { try { document.body.removeChild(mask); } catch { } });
-        mask.addEventListener('click', (e) => { if (e.target === mask) { try { document.body.removeChild(mask); } catch { } } });
-
-        header.appendChild(close);
-        box.appendChild(header);
+        fw = new FloatingWindow({
+            title: title || 'Diagnostics',
+            width: Math.min(980, Math.max(360, window.innerWidth - 96)),
+            height: Math.min(720, Math.max(320, Math.round(window.innerHeight * 0.7))),
+            minWidth: 360,
+            minHeight: 260,
+            modal: true,
+            closeOnBackdrop: true,
+            closeOnEscape: true,
+            onClose: () => { try { fw?.destroy?.(); } catch { } },
+        });
+        fw.addHeaderAction(copyBtn);
+        fw.addHeaderAction(dlBtn);
         box.appendChild(pre);
-        foot.appendChild(copyBtn);
-        foot.appendChild(dlBtn);
-        box.appendChild(foot);
-        mask.appendChild(box);
-        document.body.appendChild(mask);
+        fw.content.appendChild(box);
     }
 
     // ----------------------------------------

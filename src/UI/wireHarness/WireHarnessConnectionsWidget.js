@@ -6,6 +6,7 @@ import {
 import { listWireHarnessRouteObjectsForConnection } from '../../wireHarness/wireHarnessRouteRenderer.js';
 import { insertWireHarnessFormboard } from '../../wireHarness/wireHarnessFormboard.js';
 import { insertWireHarnessConnectionTable } from '../../wireHarness/wireHarnessSheetTable.js';
+import { FloatingWindow } from '../FloatingWindow.js';
 
 function normalizeText(value, fallback = '') {
   const next = String(value == null ? '' : value).trim();
@@ -437,18 +438,10 @@ export class WireHarnessConnectionsWidget {
     const manager = this.viewer?.partHistory?.sheet2DManager || null;
     const sheets = Array.isArray(manager?.getSheets?.()) ? manager.getSheets() : [];
 
-    const overlay = document.createElement('div');
-    overlay.className = 'wire-harness-modal-overlay';
-    overlay.addEventListener('click', (event) => {
-      if (event.target === overlay) this._closeInsertToSheetWindow();
-    });
+    let fw = null;
 
     const modal = document.createElement('div');
     modal.className = 'wire-harness-modal wire-harness-modal-compact';
-
-    const title = document.createElement('div');
-    title.className = 'wire-harness-modal-title';
-    title.textContent = 'Insert Into 2D Sheet';
 
     const hint = document.createElement('div');
     hint.className = 'wire-harness-modal-hint';
@@ -481,32 +474,37 @@ export class WireHarnessConnectionsWidget {
     }
     field.appendChild(select);
 
-    const actions = document.createElement('div');
-    actions.className = 'wire-harness-modal-actions';
-
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
-    cancelBtn.className = 'wire-harness-btn';
+    cancelBtn.className = 'fw-btn wire-harness-btn';
     cancelBtn.textContent = 'Cancel';
     cancelBtn.addEventListener('click', () => this._closeInsertToSheetWindow());
 
     const insertBtn = document.createElement('button');
     insertBtn.type = 'button';
-    insertBtn.className = 'wire-harness-btn wire-harness-btn-primary';
+    insertBtn.className = 'fw-btn wire-harness-btn wire-harness-btn-primary';
     insertBtn.textContent = 'Insert';
     insertBtn.addEventListener('click', () => {
       this._insertConnectionListIntoSheet(select.value);
     });
 
-    actions.appendChild(cancelBtn);
-    actions.appendChild(insertBtn);
-    modal.appendChild(title);
     modal.appendChild(hint);
     modal.appendChild(field);
-    modal.appendChild(actions);
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-    this._sheetInsertOverlay = overlay;
+    fw = new FloatingWindow({
+      title: 'Insert Into 2D Sheet',
+      width: 520,
+      height: 230,
+      minWidth: 360,
+      minHeight: 180,
+      modal: true,
+      closeOnBackdrop: true,
+      closeOnEscape: true,
+      onClose: () => this._closeInsertToSheetWindow(),
+    });
+    fw.addHeaderAction(cancelBtn);
+    fw.addHeaderAction(insertBtn);
+    fw.content.appendChild(modal);
+    this._sheetInsertOverlay = fw;
 
     try { select.focus(); } catch { /* ignore */ }
   }
@@ -515,7 +513,8 @@ export class WireHarnessConnectionsWidget {
     const overlay = this._sheetInsertOverlay || null;
     this._sheetInsertOverlay = null;
     if (!overlay) return;
-    try { overlay.remove(); } catch { /* ignore */ }
+    try { overlay.destroy?.(); } catch { /* ignore */ }
+    try { overlay.remove?.(); } catch { /* ignore */ }
   }
 
   _closeInsertFormboardWindow() {
@@ -775,35 +774,15 @@ export class WireHarnessConnectionsWidget {
         border-radius: 8px;
         color: #9ca3af;
       }
-      .wire-harness-modal-overlay {
-        position: fixed;
-        inset: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: rgba(0, 0, 0, 0.66);
-        z-index: 30;
-      }
       .wire-harness-modal {
-        width: min(880px, calc(100vw - 32px));
-        height: min(80vh, 820px);
+        width: 100%;
+        height: 100%;
         display: flex;
         flex-direction: column;
         gap: 8px;
         padding: 12px;
-        border: 1px solid #1f2937;
-        border-radius: 10px;
-        background: #0b0e14;
         color: #e5e7eb;
-        box-shadow: 0 10px 40px rgba(0,0,0,.5);
-      }
-      .wire-harness-modal-compact {
-        width: min(520px, calc(100vw - 32px));
-        height: auto;
-      }
-      .wire-harness-modal-title {
-        font-size: 14px;
-        font-weight: 700;
+        box-sizing: border-box;
       }
       .wire-harness-modal-hint {
         font-size: 12px;
@@ -832,11 +811,6 @@ export class WireHarnessConnectionsWidget {
         color: #dbe7ff;
         padding: 10px;
         font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      }
-      .wire-harness-modal-actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: 8px;
       }
     `;
     document.head.appendChild(style);

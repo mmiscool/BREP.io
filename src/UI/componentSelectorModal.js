@@ -1,4 +1,5 @@
 import { getComponentRecord } from '../services/componentLibrary.js';
+import { FloatingWindow } from './FloatingWindow.js';
 import { WorkspaceFileBrowserWidget } from './WorkspaceFileBrowserWidget.js';
 
 function buildScope(entry) {
@@ -19,15 +20,9 @@ export function openComponentSelectorModal({ title = 'Select Component' } = {}) 
     let browser = null;
     let settled = false;
 
-    const overlay = document.createElement('div');
-    overlay.className = 'component-selector-overlay';
-
+    let fw = null;
     const panel = document.createElement('section');
     panel.className = 'component-selector-panel';
-
-    const header = document.createElement('div');
-    header.className = 'cs-header';
-    header.textContent = title;
 
     const body = document.createElement('div');
     body.className = 'cs-body';
@@ -36,43 +31,36 @@ export function openComponentSelectorModal({ title = 'Select Component' } = {}) 
     browserMount.className = 'cs-browser-mount';
     body.appendChild(browserMount);
 
-    const footer = document.createElement('div');
-    footer.className = 'cs-footer';
-
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
-    cancelBtn.className = 'cs-btn';
+    cancelBtn.className = 'fw-btn cs-btn';
     cancelBtn.textContent = 'Cancel';
-    footer.appendChild(cancelBtn);
 
-    panel.appendChild(header);
     panel.appendChild(body);
-    panel.appendChild(footer);
-    overlay.appendChild(panel);
-    document.body.appendChild(overlay);
 
     const cleanup = (result) => {
       if (settled) return;
       settled = true;
       try { browser?.destroy?.(); } catch { /* ignore */ }
-      try { document.removeEventListener('keydown', onKeyDown, true); } catch { /* ignore */ }
-      try { document.body.removeChild(overlay); } catch { /* ignore */ }
+      try { fw?.destroy?.(); } catch { /* ignore */ }
       resolve(result ?? null);
     };
 
-    const onKeyDown = (event) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      event.stopPropagation();
-      cleanup(null);
-    };
-
-    document.addEventListener('keydown', onKeyDown, true);
-
     cancelBtn.addEventListener('click', () => cleanup(null));
-    overlay.addEventListener('click', (event) => {
-      if (event.target === overlay) cleanup(null);
+
+    fw = new FloatingWindow({
+      title,
+      width: Math.min(1100, Math.max(320, window.innerWidth - 48)),
+      height: Math.min(760, Math.max(320, window.innerHeight - 80)),
+      minWidth: 360,
+      minHeight: 260,
+      modal: true,
+      closeOnBackdrop: true,
+      closeOnEscape: true,
+      onClose: () => cleanup(null),
     });
+    fw.addHeaderAction(cancelBtn);
+    fw.content.appendChild(panel);
 
     browser = new WorkspaceFileBrowserWidget({
       container: browserMount,
@@ -98,37 +86,13 @@ export function openComponentSelectorModal({ title = 'Select Component' } = {}) 
   const style = document.createElement('style');
   style.id = 'component-selector-styles';
   style.textContent = `
-    .component-selector-overlay {
-      position: fixed;
-      inset: 0;
-      z-index: 2000;
-      background: rgba(2, 6, 16, 0.62);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 18px;
-      box-sizing: border-box;
-    }
     .component-selector-panel {
-      width: min(1100px, 96vw);
-      height: min(760px, 90vh);
-      background: #071126;
-      border: 1px solid #274268;
-      border-radius: 12px;
-      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
-      overflow: hidden;
+      width: 100%;
+      height: 100%;
       display: flex;
       flex-direction: column;
       color: #dbe5f0;
       font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    }
-    .cs-header {
-      padding: 12px 14px;
-      border-bottom: 1px solid #22385a;
-      font-weight: 700;
-      color: #dbe5f0;
-      letter-spacing: 0.02em;
-      background: rgba(255, 255, 255, 0.03);
     }
     .cs-body {
       min-height: 0;
@@ -140,12 +104,6 @@ export function openComponentSelectorModal({ title = 'Select Component' } = {}) 
       width: 100%;
       height: 100%;
       min-height: 0;
-    }
-    .cs-footer {
-      border-top: 1px solid #22385a;
-      padding: 10px 12px;
-      display: flex;
-      justify-content: flex-end;
     }
     .cs-btn {
       border: 1px solid #2d405f;

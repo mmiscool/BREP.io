@@ -1,5 +1,6 @@
 // PluginsWidget - manage plugin URLs (GitHub repos or generic base/entry URLs)
 import { getSavedPluginUrls, savePluginUrls, loadPlugins, parseGithubUrl, getPluginEnabledMap, savePluginEnabledMap } from '../plugins/pluginManager.js';
+import { FloatingWindow } from './FloatingWindow.js';
 
 export class PluginsWidget {
   constructor(viewer) {
@@ -28,13 +29,11 @@ export class PluginsWidget {
       .plg-hint { color: #9aa0aa; font-size: 11px; }
       .plg-status { color: #9ca3af; font-size: 11px; white-space: pre-wrap; }
 
-      /* Modal styles */
-      .plg-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 10; }
-      .plg-modal { background: #0b0e14; color: #e5e7eb; border: 1px solid #1f2937; border-radius: 10px; padding: 14px; width: min(520px, calc(100vw - 32px)); box-shadow: 0 10px 40px rgba(0,0,0,.5); }
-      .plg-modal h3 { margin: 0 0 8px 0; font-size: 14px; }
+      .plg-modal { display: flex; flex-direction: column; gap: 10px; color: #e5e7eb; padding: 10px; }
       .plg-modal p { margin: 6px 0; color: #9aa0aa; font-size: 12px; }
       .plg-input { width: 100%; border-radius: 8px; padding: 6px 8px; margin-bottom: 20px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; }
-      .plg-modal .plg-row { margin-top: 10px; justify-content: flex-end; }
+      .plg-risk-copy { margin: 0; color: #fca5a5; font-size: 13px; line-height: 1.35; }
+      .plg-confirm-copy { margin: 0; color: #cbd5e1; font-size: 12px; line-height: 1.35; }
       .plg-err { color: #ef4444; font-size: 12px; min-height: 16px; }
     `;
     document.head.appendChild(style);
@@ -146,15 +145,12 @@ export class PluginsWidget {
   _save() { try { savePluginUrls(this.urls || []); } catch { } }
 
   _openAddModal() {
-    const overlay = document.createElement('div');
-    overlay.className = 'plg-modal-overlay';
+    let fw = null;
     const modal = document.createElement('div');
     modal.className = 'plg-modal';
 
-    const title = document.createElement('h3');
-    title.textContent = 'Add third-party plugin';
-    const h2 = document.createElement('h2');
-    h2.style.color = 'red';
+    const h2 = document.createElement('div');
+    h2.className = 'plg-risk-copy';
     h2.innerHTML = `Installing third-party plugins can be risky. <br><br>
     These plugins run code that we do not control, and malicious or poorly written plugins could compromise your data, expose sensitive information, or harm the stability and security of your application.
     <br><br>Only proceed if you fully trust the source of the plugin.
@@ -166,7 +162,8 @@ export class PluginsWidget {
     urlInput.className = 'plg-input';
     urlInput.placeholder = 'GitHub repo or base/entry URL (e.g., https://github.com/USER/REPO or http://localhost:8080/)';
 
-    const p2 = document.createElement('h2');
+    const p2 = document.createElement('div');
+    p2.className = 'plg-confirm-copy';
     p2.innerHTML = '<br>To proceed, type "yes" below to confirm you understand the risks of third-party plugins.';
     const confirmInput = document.createElement('input');
     confirmInput.className = 'plg-input';
@@ -175,17 +172,12 @@ export class PluginsWidget {
     const err = document.createElement('div');
     err.className = 'plg-err';
 
-    const buttons = document.createElement('div');
-    buttons.className = 'plg-row';
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'plg-btn';
-    cancelBtn.textContent = 'Cancel';
     const okBtn = document.createElement('button');
-    okBtn.className = 'plg-btn';
+    okBtn.className = 'fw-btn plg-btn';
     okBtn.textContent = 'Add Plugin';
     okBtn.disabled = true;
 
-    const close = () => { try { document.body.removeChild(overlay); } catch { } };
+    const close = () => { try { fw?.destroy?.(); } catch { } };
 
     const validate = () => {
       const v = String(urlInput.value || '').trim();
@@ -215,8 +207,6 @@ export class PluginsWidget {
 
     urlInput.addEventListener('input', validate);
     confirmInput.addEventListener('input', validate);
-    cancelBtn.addEventListener('click', close);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
     okBtn.addEventListener('click', () => {
       const v = String(urlInput.value || '').trim();
       const c = String(confirmInput.value || '').trim().toLowerCase();
@@ -241,17 +231,24 @@ export class PluginsWidget {
       close();
     });
 
-    modal.appendChild(title);
     modal.appendChild(h2);
     modal.appendChild(urlInput);
     modal.appendChild(p2);
     modal.appendChild(confirmInput);
     modal.appendChild(err);
-    buttons.appendChild(cancelBtn);
-    buttons.appendChild(okBtn);
-    modal.appendChild(buttons);
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
+    fw = new FloatingWindow({
+      title: 'Add third-party plugin',
+      width: 560,
+      height: 520,
+      minWidth: 360,
+      minHeight: 320,
+      modal: true,
+      closeOnBackdrop: true,
+      closeOnEscape: true,
+      onClose: close,
+    });
+    fw.addHeaderAction(okBtn);
+    fw.content.appendChild(modal);
 
     try { urlInput.focus(); } catch { }
   }
