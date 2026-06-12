@@ -6,6 +6,7 @@ import {
   collectSheetMetalSolidsFromViewer,
   resolveViewerFlatPatternBaseName,
 } from '../../features/sheetMetal/flatPatternFiles.js';
+import { FloatingWindow } from '../FloatingWindow.js';
 import { generateSheetsPdfBytes } from '../sheets/Sheet2DEditorWindow.js';
 
 async function _captureThumbnail(viewer, size = 256) {
@@ -41,19 +42,13 @@ function _ensureExportDialogStyles() {
   const style = document.createElement('style');
   style.id = 'export-dialog-styles';
   style.textContent = `
-      .exp-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 11; }
-      .exp-modal { background: #0b0e14; color: #e5e7eb; border: 1px solid #1f2937; border-radius: 10px; padding: 14px; width: min(480px, calc(100vw - 32px)); box-shadow: 0 10px 40px rgba(0,0,0,.5); }
-      .exp-title { margin: 0 0 8px 0; font-size: 14px; font-weight: 700; }
+      .exp-modal { color: #e5e7eb; padding: 6px; width: 100%; box-sizing: border-box; }
       .exp-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
       .exp-col { display: flex; flex-direction: column; gap: 6px; }
       .exp-label { width: 90px; color: #9aa0aa; font-size: 12px; }
       .exp-input, .exp-select { flex: 1 1 auto; padding: 6px 8px; border-radius: 8px; background: #0b0e14; color: #e5e7eb; border: 1px solid #374151; outline: none; font-size: 12px; }
       .exp-input:focus, .exp-select:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.15); }
       .exp-hint { color: #9aa0aa; font-size: 12px; margin-top: 6px; }
-      .exp-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-      .exp-btn { background: rgba(255,255,255,.03); color: #f9fafb; border: 1px solid #374151; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 12px; line-height: 1; }
-      .exp-btn:hover { border-color: #3b82f6; background: rgba(59,130,246,.12); }
-      .exp-btn:active { transform: translateY(1px); }
     `;
   document.head.appendChild(style);
 }
@@ -447,14 +442,21 @@ function _openExportDialog(viewer) {
   const solids = _collectSolids(viewer);
   if (!solids.length) { alert('No solids to export.'); return; }
 
-  const overlay = document.createElement('div');
-  overlay.className = 'exp-modal-overlay';
+  const fw = new FloatingWindow({
+    title: 'Export',
+    width: 480,
+    height: 500,
+    minWidth: 400,
+    minHeight: 360,
+    modal: true,
+    closeOnBackdrop: true,
+    closeOnEscape: true,
+    onClose: () => {
+      try { fw.destroy(); } catch {}
+    },
+  });
   const modal = document.createElement('div');
   modal.className = 'exp-modal';
-
-  const title = document.createElement('div');
-  title.className = 'exp-title';
-  title.textContent = 'Export';
 
   const baseDefault = _safeName(viewer?.fileManagerWidget?.currentName || solids[0]?.name || 'part');
 
@@ -563,13 +565,9 @@ function _openExportDialog(viewer) {
 
   const hint = document.createElement('div'); hint.className = 'exp-hint'; hint.textContent = '3MF includes feature history when available. STL/OBJ/STEP export triangulated meshes. BREP JSON saves editable feature history only.';
 
-  // Buttons
-  const buttons = document.createElement('div'); buttons.className = 'exp-buttons';
-  const btnCancel = document.createElement('button'); btnCancel.className = 'exp-btn'; btnCancel.textContent = 'Cancel';
-  btnCancel.addEventListener('click', () => { try { document.body.removeChild(overlay); } catch {} });
-  const btnExport = document.createElement('button'); btnExport.className = 'exp-btn'; btnExport.textContent = 'Export';
+  const btnExport = document.createElement('button'); btnExport.className = 'fw-btn'; btnExport.textContent = 'Export';
 
-  const close = () => { try { document.body.removeChild(overlay); } catch {} };
+  const close = () => { try { fw.close(); } catch {} };
 
   btnExport.addEventListener('click', async () => {
     try {
@@ -767,10 +765,8 @@ function _openExportDialog(viewer) {
     }
   });
 
-  buttons.appendChild(btnCancel);
-  buttons.appendChild(btnExport);
+  fw.addHeaderAction(btnExport);
 
-  modal.appendChild(title);
   modal.appendChild(rowName);
   modal.appendChild(rowFmt);
   modal.appendChild(rowUnit);
@@ -780,9 +776,7 @@ function _openExportDialog(viewer) {
   modal.appendChild(rowStepFaces);
   modal.appendChild(rowStepEdges);
   modal.appendChild(hint);
-  modal.appendChild(buttons);
-  overlay.appendChild(modal);
-  document.body.appendChild(overlay);
+  fw.content.appendChild(modal);
 
   try { inpName.focus(); inpName.select(); } catch {}
 }

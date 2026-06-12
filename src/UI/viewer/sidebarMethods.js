@@ -54,8 +54,7 @@ export const sidebarMethods = {
         }
         if (this._settingsWindow?.root?.isConnected) {
             try {
-                this._settingsWindow.root.style.display = 'flex';
-                this._settingsWindow.bringToFront?.();
+                this._settingsWindow.show?.();
             } catch { /* ignore */ }
             return this._settingsWindow;
         }
@@ -72,7 +71,7 @@ export const sidebarMethods = {
             top: 56,
             shaded: false,
             onClose: () => {
-                try { fw.root.style.display = 'none'; } catch { /* ignore */ }
+                try { fw.hide(); } catch { /* ignore */ }
             },
         });
 

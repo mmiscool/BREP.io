@@ -1,4 +1,5 @@
 import { deepClone } from "../../utils/deepClone.js";
+import { FloatingWindow } from "../FloatingWindow.js";
 
 function safeName(raw, fallback = "sheet_metal") {
   const text = String(raw || "").trim();
@@ -91,14 +92,9 @@ function ensureSheetMetalDebugStyles() {
   const style = document.createElement("style");
   style.id = "sheet-metal-debug-dialog-styles";
   style.textContent = `
-    .smdbg-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.62); display: flex; align-items: center; justify-content: center; z-index: 20; }
-    .smdbg-modal { background: #0b0e14; color: #e5e7eb; border: 1px solid #1f2937; border-radius: 10px; padding: 12px; width: min(860px, calc(100vw - 32px)); height: min(78vh, 780px); box-shadow: 0 10px 40px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 8px; }
-    .smdbg-title { font-size: 14px; font-weight: 700; }
+    .smdbg-modal { color: #e5e7eb; padding: 6px; width: 100%; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; }
     .smdbg-hint { font-size: 12px; color: #9aa0aa; }
     .smdbg-text { flex: 1 1 auto; width: 100%; resize: none; background: #06080c; color: #dbe7ff; border: 1px solid #374151; border-radius: 8px; padding: 10px; font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    .smdbg-actions { display: flex; justify-content: flex-end; gap: 8px; }
-    .smdbg-btn { background: rgba(255,255,255,.03); color: #f9fafb; border: 1px solid #374151; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 12px; line-height: 1; }
-    .smdbg-btn:hover { border-color: #3b82f6; background: rgba(59,130,246,.12); }
   `;
   document.head.appendChild(style);
 }
@@ -133,15 +129,25 @@ async function copyTextToClipboard(text) {
 
 function openDebugDialog(jsonText, copiedToClipboard = false) {
   ensureSheetMetalDebugStyles();
-  const overlay = document.createElement("div");
-  overlay.className = "smdbg-overlay";
+
+  const pageWidth = Number(window?.innerWidth) || 900;
+  const pageHeight = Number(window?.innerHeight) || 760;
+  const fw = new FloatingWindow({
+    title: "Sheet Metal Debug JSON",
+    width: Math.max(520, Math.min(860, pageWidth - 32)),
+    height: Math.max(420, Math.min(780, Math.round(pageHeight * 0.78))),
+    minWidth: 460,
+    minHeight: 320,
+    modal: true,
+    closeOnBackdrop: true,
+    closeOnEscape: true,
+    onClose: () => {
+      try { fw.destroy(); } catch {}
+    },
+  });
 
   const modal = document.createElement("div");
   modal.className = "smdbg-modal";
-
-  const title = document.createElement("div");
-  title.className = "smdbg-title";
-  title.textContent = "Sheet Metal Debug JSON";
 
   const hint = document.createElement("div");
   hint.className = "smdbg-hint";
@@ -154,11 +160,8 @@ function openDebugDialog(jsonText, copiedToClipboard = false) {
   text.value = jsonText;
   text.readOnly = true;
 
-  const actions = document.createElement("div");
-  actions.className = "smdbg-actions";
-
   const copyBtn = document.createElement("button");
-  copyBtn.className = "smdbg-btn";
+  copyBtn.className = "fw-btn";
   copyBtn.textContent = "Copy";
   copyBtn.addEventListener("click", async () => {
     const ok = await copyTextToClipboard(text.value);
@@ -167,21 +170,10 @@ function openDebugDialog(jsonText, copiedToClipboard = false) {
       : "Clipboard copy failed. Use Ctrl/Cmd+C in the textbox.";
   });
 
-  const closeBtn = document.createElement("button");
-  closeBtn.className = "smdbg-btn";
-  closeBtn.textContent = "Close";
-  closeBtn.addEventListener("click", () => {
-    try { document.body.removeChild(overlay); } catch {}
-  });
-
-  actions.appendChild(copyBtn);
-  actions.appendChild(closeBtn);
-  modal.appendChild(title);
+  fw.addHeaderAction(copyBtn);
   modal.appendChild(hint);
   modal.appendChild(text);
-  modal.appendChild(actions);
-  overlay.appendChild(modal);
-  document.body.appendChild(overlay);
+  fw.content.appendChild(modal);
 
   try {
     text.focus();

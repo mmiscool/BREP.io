@@ -328,6 +328,7 @@ export class SelectionState {
             try { delete ud.__selectedMat; } catch { }
             try { delete ud.__selectedMatBase; } catch { }
             try { delete ud.__selectedColor; } catch { }
+            try { delete ud.__selectedLinewidth; } catch { }
         } catch { }
         if (base) SelectionState._assignMaterial(target, base);
     }
@@ -342,12 +343,14 @@ export class SelectionState {
         } else if (rootType === 'EDGE') {
             const selMat = CADmaterials.EDGE?.SELECTED ?? CADmaterials.EDGE?.BASE ?? base;
             const selColor = SelectionState._resolveColor(selMat?.color ?? selMat?.color?.getHexString?.());
+            const selLinewidth = Number(selMat?.linewidth);
             if (selColor && base) {
                 const ud = target.userData || (target.userData = {});
                 const prevMat = ud.__selectedMat;
                 const sameBase = ud.__selectedMatBase === base;
                 const sameColor = ud.__selectedColor === selColor;
-                if (prevMat && sameBase && sameColor) {
+                const sameLinewidth = ud.__selectedLinewidth === selLinewidth;
+                if (prevMat && sameBase && sameColor && sameLinewidth) {
                     mat = prevMat;
                 } else {
                     if (prevMat && prevMat !== base) {
@@ -362,9 +365,11 @@ export class SelectionState {
                         } catch { }
                     }
                     mat = SelectionState._cloneMaterialWithColor(base, selColor);
+                    SelectionState._copyLinewidth(mat, selLinewidth);
                     ud.__selectedMat = mat;
                     ud.__selectedMatBase = base;
                     ud.__selectedColor = selColor;
+                    ud.__selectedLinewidth = selLinewidth;
                 }
             } else {
                 mat = selMat ?? base;
@@ -593,6 +598,20 @@ export class SelectionState {
             }
         } catch { }
         return clone;
+    }
+
+    static _copyLinewidth(material, linewidth) {
+        if (!Number.isFinite(linewidth)) return;
+        if (Array.isArray(material)) {
+            for (const m of material) SelectionState._copyLinewidth(m, linewidth);
+            return;
+        }
+        try {
+            if (material && typeof material.linewidth !== 'undefined') {
+                material.linewidth = linewidth;
+                material.needsUpdate = true;
+            }
+        } catch { }
     }
 
     static _resolveColor(value) {

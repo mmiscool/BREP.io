@@ -290,6 +290,7 @@ export class CADmaterialWidget {
             this._settings['__RENDERER_MODE__'] = mode;
             this._saveAllSettings();
             try { this.viewer?.setRendererMode?.(mode); } catch { }
+            this._requestViewerRender();
         });
         rendererRow.appendChild(rendererSelect);
         this.uiElement.appendChild(rendererRow);
@@ -357,6 +358,56 @@ export class CADmaterialWidget {
             writeBrowserStorageValue(this._storageKey, JSON.stringify(this._settings, null, 2));
             console.log(JSON.stringify(this._settings, null, 2));
         } catch {/* ignore */ }
+        this._requestViewerRender();
+    }
+    _requestViewerRender() {
+        if (this._renderRequestPending) return;
+        this._renderRequestPending = true;
+        const run = () => {
+            this._renderRequestPending = false;
+            try { this.viewer?.render?.(); } catch { /* ignore */ }
+        };
+        try {
+            if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+            else setTimeout(run, 0);
+        } catch {
+            run();
+        }
+    }
+    _markMaterialChanged(material) {
+        try {
+            if (material) material.needsUpdate = true;
+        } catch { /* ignore */ }
+        this._syncSelectedEdgeMaterialCache(material);
+        this._requestViewerRender();
+    }
+    _syncSelectedEdgeMaterialCache(material) {
+        if (!material || material !== CADmaterials.EDGE?.SELECTED) return;
+        const scene = this.viewer?.scene;
+        if (!scene || typeof scene.traverse !== 'function') return;
+        const color = material.color && typeof material.color.getHexString === 'function'
+            ? `#${material.color.getHexString()}`
+            : null;
+        const linewidth = Number(material.linewidth);
+        const applyToMaterial = (mat) => {
+            if (!mat) return;
+            if (Array.isArray(mat)) {
+                mat.forEach(applyToMaterial);
+                return;
+            }
+            try {
+                if (color && mat.color && typeof mat.color.set === 'function') mat.color.set(color);
+                if (Number.isFinite(linewidth) && typeof mat.linewidth !== 'undefined') mat.linewidth = linewidth;
+                mat.needsUpdate = true;
+            } catch { /* ignore */ }
+        };
+        scene.traverse((obj) => {
+            const ud = obj?.userData;
+            if (!ud?.__selectedMat) return;
+            applyToMaterial(ud.__selectedMat);
+            try { ud.__selectedColor = color; } catch { /* ignore */ }
+            try { ud.__selectedLinewidth = linewidth; } catch { /* ignore */ }
+        });
     }
     _isMaterial(m) {
         return m && (m.isMaterial === true || m instanceof THREE.Material);
@@ -596,8 +647,10 @@ export class CADmaterialWidget {
             const material = this._materialMap.get(labelText);
             if (!material) continue;
             this._applyMaterialSettings(material, defaults);
+            this._markMaterialChanged(material);
             this._syncMaterialControls(labelText, material);
         }
+        this._requestViewerRender();
     }
     _getMatKey(labelText) {
         return String(labelText);
@@ -652,12 +705,17 @@ export class CADmaterialWidget {
         this._applySavedToMaterial(labelText, material);
         const controls = this._controlRefs.get(labelText) || {};
 
+        const title = document.createElement('div');
+        title.className = 'cmw-mat-title';
+        title.textContent = labelText;
+        container.appendChild(title);
+
         // Color row
         if (material.color && typeof material.color.getHexString === 'function') {
             const colorRow = makeRightSpan();
             const colorLabel = document.createElement("label");
             colorLabel.className = 'cmw-label';
-            colorLabel.textContent = labelText;
+            colorLabel.textContent = 'Color';
             colorRow.appendChild(colorLabel);
             const colorInput = document.createElement("input");
             colorInput.type = "color";
@@ -668,6 +726,7 @@ export class CADmaterialWidget {
                 // Normalize UI value back to sanitized form so user sees what is applied
                 if (v !== event.target.value) event.target.value = v;
                 material.color.set(v);
+                this._markMaterialChanged(material);
                 this._setSettingsFor(labelText, { color: v });
             });
             colorRow.appendChild(colorInput);
@@ -685,6 +744,7 @@ export class CADmaterialWidget {
                 value: material.linewidth ?? 1,
                 onInput: (v) => {
                     material.linewidth = v;
+                    this._markMaterialChanged(material);
                     this._setSettingsFor(labelText, { linewidth: v });
                 },
             });
@@ -703,6 +763,7 @@ export class CADmaterialWidget {
                 value: material.size ?? 6,
                 onInput: (v) => {
                     material.size = v;
+                    this._markMaterialChanged(material);
                     this._setSettingsFor(labelText, { pointSize: v });
                 },
             });
@@ -728,6 +789,7 @@ export class CADmaterialWidget {
                 onInput: (v) => {
                     material.opacity = v;
                     material.transparent = material.opacity < 1;
+                    this._markMaterialChanged(material);
                     this._setSettingsFor(labelText, { opacity: material.opacity });
                 },
             });
@@ -747,6 +809,7 @@ export class CADmaterialWidget {
             wfInput.checked = !!material.wireframe;
             wfInput.addEventListener("change", (event) => {
                 material.wireframe = !!event.target.checked;
+                this._markMaterialChanged(material);
                 this._setSettingsFor(labelText, { wireframe: material.wireframe });
             });
             wfRow.appendChild(wfInput);
@@ -765,6 +828,7 @@ export class CADmaterialWidget {
             dsInput.checked = material.side === THREE.DoubleSide;
             dsInput.addEventListener("change", (event) => {
                 material.side = event.target.checked ? THREE.DoubleSide : THREE.FrontSide;
+                this._markMaterialChanged(material);
                 this._setSettingsFor(labelText, { doubleSided: event.target.checked });
             });
             dsRow.appendChild(dsInput);
@@ -796,7 +860,24 @@ export class CADmaterialWidget {
                 border-bottom: 1px solid var(--cmw-border);
                 background: transparent;
             }
-            .cmw-mat { display: flex; flex-direction: column; }
+            .cmw-mat {
+                display: flex;
+                flex-direction: column;
+                margin: 12px;
+                border: 1px solid rgba(148, 163, 184, 0.22);
+                border-radius: 8px;
+                background: rgba(15, 23, 42, 0.28);
+                overflow: hidden;
+            }
+            .cmw-mat + .cmw-mat { margin-top: 0; }
+            .cmw-mat-title {
+                padding: 8px 12px;
+                border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+                background: rgba(255, 255, 255, 0.035);
+                font-weight: 700;
+                color: #f8fafc;
+                letter-spacing: 0;
+            }
             .cmw-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
             .cmw-row-range { align-items: flex-start; }
             .cmw-row-range .cmw-label { margin-top: 20px; }

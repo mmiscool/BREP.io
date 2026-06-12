@@ -3,6 +3,7 @@ import {
   collectSheetMetalSolidsFromViewer,
   resolveViewerFlatPatternBaseName,
 } from "../../features/sheetMetal/flatPatternFiles.js";
+import { FloatingWindow } from "../FloatingWindow.js";
 
 function downloadFile(filename, content, mime = "application/octet-stream") {
   const blob = new Blob([content], { type: mime });
@@ -23,17 +24,12 @@ function ensureFlatExportDialogStyles() {
   const style = document.createElement("style");
   style.id = "flat-export-dialog-styles";
   style.textContent = `
-    .flat-exp-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 11; }
-    .flat-exp-modal { background: #0b0e14; color: #e5e7eb; border: 1px solid #1f2937; border-radius: 10px; padding: 14px; width: min(420px, calc(100vw - 32px)); box-shadow: 0 10px 40px rgba(0,0,0,.5); }
-    .flat-exp-title { margin: 0 0 8px 0; font-size: 14px; font-weight: 700; }
+    .flat-exp-modal { color: #e5e7eb; padding: 6px; width: 100%; box-sizing: border-box; }
     .flat-exp-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
     .flat-exp-label { width: 90px; color: #9aa0aa; font-size: 12px; }
     .flat-exp-input, .flat-exp-select { flex: 1 1 auto; padding: 6px 8px; border-radius: 8px; background: #0b0e14; color: #e5e7eb; border: 1px solid #374151; outline: none; font-size: 12px; }
     .flat-exp-input:focus, .flat-exp-select:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.15); }
     .flat-exp-hint { color: #9aa0aa; font-size: 12px; margin-top: 6px; }
-    .flat-exp-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-    .flat-exp-btn { background: rgba(255,255,255,.03); color: #f9fafb; border: 1px solid #374151; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 12px; line-height: 1; }
-    .flat-exp-btn:hover { border-color: #3b82f6; background: rgba(59,130,246,.12); }
   `;
   document.head.appendChild(style);
 }
@@ -47,14 +43,21 @@ function openFlatExportDialog(viewer) {
 
   ensureFlatExportDialogStyles();
 
-  const overlay = document.createElement("div");
-  overlay.className = "flat-exp-overlay";
+  const fw = new FloatingWindow({
+    title: "Export Flat Pattern",
+    width: 420,
+    height: 250,
+    minWidth: 360,
+    minHeight: 220,
+    modal: true,
+    closeOnBackdrop: true,
+    closeOnEscape: true,
+    onClose: () => {
+      try { fw.destroy(); } catch {}
+    },
+  });
   const modal = document.createElement("div");
   modal.className = "flat-exp-modal";
-
-  const title = document.createElement("div");
-  title.className = "flat-exp-title";
-  title.textContent = "Export Flat Pattern";
 
   const rowName = document.createElement("div");
   rowName.className = "flat-exp-row";
@@ -91,17 +94,11 @@ function openFlatExportDialog(viewer) {
     ? `Exports ${solids.length} visible sheet metal flat patterns. File names use the current model name plus the sheet metal feature name.`
     : "Cut lines export as black solid lines. Bend UP lines export as blue dashed lines, bend DOWN lines as magenta dashed lines, with UP/DOWN angle labels.";
 
-  const buttons = document.createElement("div");
-  buttons.className = "flat-exp-buttons";
-  const btnCancel = document.createElement("button");
-  btnCancel.className = "flat-exp-btn";
-  btnCancel.textContent = "Cancel";
   const btnExport = document.createElement("button");
-  btnExport.className = "flat-exp-btn";
+  btnExport.className = "fw-btn";
   btnExport.textContent = "Export";
 
-  const close = () => { try { document.body.removeChild(overlay); } catch {} };
-  btnCancel.addEventListener("click", close);
+  const close = () => { try { fw.close(); } catch {} };
 
   btnExport.addEventListener("click", () => {
     try {
@@ -127,16 +124,12 @@ function openFlatExportDialog(viewer) {
     }
   });
 
-  buttons.appendChild(btnCancel);
-  buttons.appendChild(btnExport);
+  fw.addHeaderAction(btnExport);
 
-  modal.appendChild(title);
   modal.appendChild(rowName);
   modal.appendChild(rowFmt);
   modal.appendChild(hint);
-  modal.appendChild(buttons);
-  overlay.appendChild(modal);
-  document.body.appendChild(overlay);
+  fw.content.appendChild(modal);
 
   try {
     inpName.focus();

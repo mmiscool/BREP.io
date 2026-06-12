@@ -1,3 +1,5 @@
+import { FloatingWindow } from '../FloatingWindow.js';
+
 const DEFAULT_EXPRESSIONS = '//Examples:\nx = 10 + 6; \ny = x * 2;';
 const UI_ONLY_INPUT_PARAM_KEYS = new Set(['__open']);
 const DIALOG_STYLE_ID = 'history-test-snippet-dialog-styles';
@@ -206,30 +208,35 @@ function ensureDialogStyles() {
   const style = document.createElement('style');
   style.id = DIALOG_STYLE_ID;
   style.textContent = `
-    .testsnip-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.62); display: flex; align-items: center; justify-content: center; z-index: 30; }
-    .testsnip-modal { background: #0b0e14; color: #e5e7eb; border: 1px solid #1f2937; border-radius: 10px; padding: 12px; width: min(940px, calc(100vw - 32px)); height: min(80vh, 820px); box-shadow: 0 10px 40px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 8px; }
-    .testsnip-title { font-size: 14px; font-weight: 700; }
+    .testsnip-modal { color: #e5e7eb; padding: 6px; width: 100%; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; }
     .testsnip-hint { font-size: 12px; color: #9aa0aa; }
     .testsnip-text { flex: 1 1 auto; width: 100%; resize: none; background: #06080c; color: #dbe7ff; border: 1px solid #374151; border-radius: 8px; padding: 10px; font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    .testsnip-actions { display: flex; justify-content: flex-end; gap: 8px; }
-    .testsnip-btn { background: rgba(255,255,255,.03); color: #f9fafb; border: 1px solid #374151; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 12px; line-height: 1; }
-    .testsnip-btn:hover { border-color: #3b82f6; background: rgba(59,130,246,.12); }
-    .testsnip-link { text-decoration: none; display: inline-flex; align-items: center; }
+    .testsnip-link { text-decoration: none; }
   `;
   document.head.appendChild(style);
 }
 
 function openSnippetDialog({ snippet, functionName, featureCount, copied }) {
   ensureDialogStyles();
-  const overlay = document.createElement('div');
-  overlay.className = 'testsnip-overlay';
+
+  const pageWidth = Number(window?.innerWidth) || 980;
+  const pageHeight = Number(window?.innerHeight) || 760;
+  const fw = new FloatingWindow({
+    title: 'Generated Test Snippet',
+    width: Math.max(520, Math.min(940, pageWidth - 32)),
+    height: Math.max(420, Math.min(820, Math.round(pageHeight * 0.8))),
+    minWidth: 460,
+    minHeight: 320,
+    modal: true,
+    closeOnBackdrop: true,
+    closeOnEscape: true,
+    onClose: () => {
+      try { fw.destroy(); } catch { /* ignore */ }
+    },
+  });
 
   const modal = document.createElement('div');
   modal.className = 'testsnip-modal';
-
-  const title = document.createElement('div');
-  title.className = 'testsnip-title';
-  title.textContent = 'Generated Test Snippet';
 
   const hint = document.createElement('div');
   hint.className = 'testsnip-hint';
@@ -243,18 +250,15 @@ function openSnippetDialog({ snippet, functionName, featureCount, copied }) {
   code3.value = String(snippet || '');
   code3.readOnly = true;
 
-  const actions = document.createElement('div');
-  actions.className = 'testsnip-actions';
-
   const issueLink = document.createElement('a');
-  issueLink.className = 'testsnip-btn testsnip-link';
+  issueLink.className = 'fw-btn testsnip-link';
   issueLink.textContent = 'Open GitHub Issue';
   issueLink.href = buildBugReportUrl(functionName, featureCount);
   issueLink.target = '_blank';
   issueLink.rel = 'noopener noreferrer';
 
   const copyBtn = document.createElement('button');
-  copyBtn.className = 'testsnip-btn';
+  copyBtn.className = 'fw-btn';
   copyBtn.textContent = 'Copy';
   copyBtn.addEventListener('click', async () => {
     const ok = await copyTextToClipboard(code3.value);
@@ -263,28 +267,11 @@ function openSnippetDialog({ snippet, functionName, featureCount, copied }) {
       : 'Clipboard copy failed. Use Ctrl/Cmd+C in the textbox.';
   });
 
-  const closeBtn = document.createElement('button');
-  closeBtn.className = 'testsnip-btn';
-  closeBtn.textContent = 'Close';
-  closeBtn.addEventListener('click', () => {
-    try { document.body.removeChild(overlay); } catch { /* ignore */ }
-  });
-
-  actions.appendChild(issueLink);
-  actions.appendChild(copyBtn);
-  actions.appendChild(closeBtn);
-  modal.appendChild(title);
+  fw.addHeaderAction(issueLink);
+  fw.addHeaderAction(copyBtn);
   modal.appendChild(hint);
   modal.appendChild(code3);
-  modal.appendChild(actions);
-  overlay.appendChild(modal);
-
-  overlay.addEventListener('click', (event) => {
-    if (event.target !== overlay) return;
-    try { document.body.removeChild(overlay); } catch { /* ignore */ }
-  });
-
-  document.body.appendChild(overlay);
+  fw.content.appendChild(modal);
 
   try {
     code3.focus();

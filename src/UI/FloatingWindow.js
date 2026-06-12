@@ -16,6 +16,12 @@ export class FloatingWindow {
     shaded = false,
     zIndex = 10,
     closable = true,
+    modal = false,
+    closeOnBackdrop = true,
+    closeOnEscape = true,
+    backdrop = true,
+    restoreFocus = true,
+    center = null,
     onClose = null,
   } = {}) {
     this._minW = Math.max(160, Number(minWidth) || 260);
@@ -30,6 +36,14 @@ export class FloatingWindow {
     this._moveThreshold = 5; // px to distinguish click vs drag
     this._wasTopmostOnPointerDown = false;
     this._closable = closable !== false;
+    this._modal = Boolean(modal);
+    this._closeOnBackdrop = closeOnBackdrop !== false;
+    this._closeOnEscape = closeOnEscape !== false;
+    this._hasBackdrop = backdrop !== false;
+    this._restoreFocus = restoreFocus !== false;
+    this._center = center == null ? this._modal : Boolean(center);
+    this._previousFocus = null;
+    this._modalActive = false;
     this._isTransparent = false;
     this._visibilityObserver = null;
     this._lastVisible = null;
@@ -39,6 +53,7 @@ export class FloatingWindow {
 
     const root = document.createElement('div');
     root.className = 'floating-window';
+    if (this._modal) root.classList.add('floating-window--modal');
     root.style.zIndex = String(zIndex);
     root.style.width = Math.max(this._minW, Number(width) || 420) + 'px';
     root.style.height = Math.max(this._minH, Number(height) || 320) + 'px';
@@ -47,13 +62,17 @@ export class FloatingWindow {
     const { innerWidth: vw = 0, innerHeight: vh = 0 } = window || {};
     let left = (x != null) ? Number(x) : null;
     let topPx = (y != null) ? Number(y) : null;
+    const w = parseInt(root.style.width, 10) || 0;
+    const h = parseInt(root.style.height, 10) || 0;
+    if (this._center && left == null && topPx == null && bottom == null) {
+      left = Math.max(8, Math.round((vw - w) / 2));
+      topPx = Math.max(8, Math.round((vh - h) / 2));
+    }
     if (left == null && right != null && Number.isFinite(Number(right))) {
-      const w = parseInt(root.style.width, 10) || 0;
       left = Math.max(8, (vw - w - Number(right)));
     }
     if (topPx == null) {
       if (bottom != null && Number.isFinite(Number(bottom))) {
-        const h = parseInt(root.style.height, 10) || 0;
         topPx = Math.max(8, (vh - h - Number(bottom)));
       } else {
         topPx = Number(top) || 40;
@@ -98,10 +117,21 @@ export class FloatingWindow {
       resizers.push(handle);
       root.appendChild(handle);
     }
-    document.body.appendChild(root);
+    let modalOverlay = null;
+    if (this._modal) {
+      modalOverlay = document.createElement('div');
+      modalOverlay.className = `floating-window-modal-overlay${this._hasBackdrop ? '' : ' floating-window-modal-overlay--clear'}`;
+      modalOverlay.style.zIndex = String(Math.max(0, Number(zIndex) || 0));
+      modalOverlay.appendChild(root);
+      document.body.appendChild(modalOverlay);
+      root.style.zIndex = String(Math.max(1, (Number(zIndex) || 0) + 1));
+    } else {
+      document.body.appendChild(root);
+    }
 
     // Persist refs
     this.root = root;
+    this.modalOverlay = modalOverlay;
     this.header = header;
     this.titleEl = titleEl;
     this.actionsEl = actions;
@@ -109,6 +139,7 @@ export class FloatingWindow {
     this.resizers = resizers;
     this.transparencyButton = transparencyBtn;
     this.closeButton = closeBtn;
+    this._onModalKeyDown = (ev) => this._handleModalKeyDown(ev);
 
     // Initial shaded state
     this.setShaded(this._isShaded);
@@ -125,6 +156,15 @@ export class FloatingWindow {
       this._bringToFront();
     }, true);
 
+    if (modalOverlay) {
+      modalOverlay.addEventListener('pointerdown', (ev) => {
+        if (!this._closeOnBackdrop || ev.target !== modalOverlay) return;
+        try { ev.preventDefault(); ev.stopPropagation(); } catch {}
+        this.close();
+      });
+      this._activateModal();
+    }
+
     // Keyboard: toggle shade
     header.addEventListener('keydown', (ev) => {
       // Only toggle when focus is on header or title; ignore when on action buttons/inputs
@@ -139,9 +179,11 @@ export class FloatingWindow {
   }
 
   destroy() {
+    this._deactivateModal();
     try { this._visibilityObserver?.disconnect?.(); } catch {}
+    try { this.modalOverlay && this.modalOverlay.parentNode && this.modalOverlay.parentNode.removeChild(this.modalOverlay); } catch {}
     try { this.root && this.root.parentNode && this.root.parentNode.removeChild(this.root); } catch {}
-    this.root = null; this.header = null; this.actionsEl = null; this.titleEl = null; this.content = null; this.resizers = null; this.transparencyButton = null; this.closeButton = null;
+    this.root = null; this.modalOverlay = null; this.header = null; this.actionsEl = null; this.titleEl = null; this.content = null; this.resizers = null; this.transparencyButton = null; this.closeButton = null;
   }
 
   setTitle(text) { if (this.titleEl) this.titleEl.textContent = String(text || ''); }
@@ -163,9 +205,26 @@ export class FloatingWindow {
   close() {
     if (typeof this.onClose === 'function') {
       this.onClose();
-      return;
+    } else {
+      this.hide();
     }
+    if (this._modal && this._isVisible()) this.hide();
+  }
+  show() {
+    if (this.modalOverlay) this.modalOverlay.style.display = 'flex';
+    if (this.root) this.root.style.display = 'flex';
+    this._activateModal();
+    this._bringToFront();
+    this.focus();
+  }
+  hide() {
     if (this.root) this.root.style.display = 'none';
+    if (this.modalOverlay) this.modalOverlay.style.display = 'none';
+    this._deactivateModal();
+  }
+  focus() {
+    const target = this._getFocusableElements()[0] || this.closeButton || this.header || this.root;
+    try { target?.focus?.({ preventScroll: true }); } catch { try { target?.focus?.(); } catch {} }
   }
   bringToFront() { this._bringToFront(); }
   setTransparent(transparent) {
@@ -192,8 +251,11 @@ export class FloatingWindow {
     const current = this._readZIndex(this.root);
     if (!Number.isFinite(current)) return;
     if (current <= maxZ) {
-      this.root.style.zIndex = String(maxZ + 1);
+      const nextZ = maxZ + 1;
+      if (this.modalOverlay) this.modalOverlay.style.zIndex = String(Math.max(0, nextZ - 1));
+      this.root.style.zIndex = String(nextZ);
     }
+    if (this._modal && this._modalActive) FloatingWindow._activeModal = this;
   }
   _isTopmost() {
     if (!this.root) return false;
@@ -211,9 +273,10 @@ export class FloatingWindow {
     return topmost === this.root;
   }
   _isVisible() {
-    if (!this.root || !window || !window.getComputedStyle) return false;
+    const target = this.modalOverlay || this.root;
+    if (!target || !window || !window.getComputedStyle) return false;
     try {
-      return window.getComputedStyle(this.root).display !== 'none';
+      return window.getComputedStyle(target).display !== 'none';
     } catch {
       return true;
     }
@@ -244,10 +307,16 @@ export class FloatingWindow {
     if (!this.root || typeof MutationObserver === 'undefined') return;
     this._visibilityObserver = new MutationObserver(() => {
       const visible = this._isVisible();
-      if (visible && !this._lastVisible) this._bringToFront();
+      if (visible && !this._lastVisible) {
+        this._activateModal();
+        this._bringToFront();
+      } else if (!visible && this._lastVisible) {
+        this._deactivateModal();
+      }
       this._lastVisible = visible;
     });
     this._visibilityObserver.observe(this.root, { attributes: true, attributeFilter: ['style', 'class', 'hidden'] });
+    if (this.modalOverlay) this._visibilityObserver.observe(this.modalOverlay, { attributes: true, attributeFilter: ['style', 'class', 'hidden'] });
   }
   setShaded(shaded) {
     this._isShaded = Boolean(shaded);
@@ -392,6 +461,9 @@ export class FloatingWindow {
     style.id = 'floating-window-styles';
     style.textContent = `
       .floating-window { position: fixed; background:#0b0b0e; color:#e5e7eb; border:1px solid #2a2a33; border-radius:12px; box-shadow:0 10px 28px rgba(0,0,0,.55); display:flex; flex-direction:column; overflow:hidden; user-select:none; }
+      .floating-window-modal-overlay { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.58); pointer-events:auto; }
+      .floating-window-modal-overlay--clear { background:transparent; }
+      .floating-window--modal { position:fixed; }
       .floating-window.is-transparent { opacity:.58; }
       .floating-window.is-transparent:hover,
       .floating-window.is-transparent:focus-within,
@@ -438,4 +510,84 @@ export class FloatingWindow {
       return Math.max(28, Math.round(r.height));
     } catch { return 42; }
   }
+
+  _activateModal() {
+    if (!this._modal || this._modalActive || !this._isVisible()) return;
+    this._modalActive = true;
+    FloatingWindow._activeModal = this;
+    try { this._previousFocus = document.activeElement || null; } catch { this._previousFocus = null; }
+    FloatingWindow._modalOpenCount = Math.max(0, (FloatingWindow._modalOpenCount || 0)) + 1;
+    FloatingWindow._syncGlobalDialogFlag();
+    try { document.addEventListener('keydown', this._onModalKeyDown, true); } catch {}
+  }
+
+  _deactivateModal() {
+    if (!this._modal || !this._modalActive) return;
+    this._modalActive = false;
+    if (FloatingWindow._activeModal === this) FloatingWindow._activeModal = null;
+    FloatingWindow._modalOpenCount = Math.max(0, (FloatingWindow._modalOpenCount || 0) - 1);
+    FloatingWindow._syncGlobalDialogFlag();
+    try { document.removeEventListener('keydown', this._onModalKeyDown, true); } catch {}
+    if (this._restoreFocus && this._previousFocus && this._previousFocus !== document.body) {
+      try { this._previousFocus.focus?.({ preventScroll: true }); } catch { try { this._previousFocus.focus?.(); } catch {} }
+    }
+    this._previousFocus = null;
+  }
+
+  _handleModalKeyDown(ev) {
+    if (!this._modal || !this._modalActive || !this._isVisible()) return;
+    if (FloatingWindow._activeModal && FloatingWindow._activeModal !== this) return;
+    if (ev.key === 'Escape' && this._closeOnEscape && this._closable) {
+      try { ev.preventDefault(); ev.stopPropagation(); } catch {}
+      this.close();
+      return;
+    }
+    if (ev.key !== 'Tab') return;
+    const focusable = this._getFocusableElements();
+    if (!focusable.length) {
+      try { ev.preventDefault(); this.focus(); } catch {}
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (ev.shiftKey && (!active || active === first || !this.root.contains(active))) {
+      ev.preventDefault();
+      try { last.focus(); } catch {}
+    } else if (!ev.shiftKey && active === last) {
+      ev.preventDefault();
+      try { first.focus(); } catch {}
+    }
+  }
+
+  _getFocusableElements() {
+    if (!this.root) return [];
+    const selector = [
+      'button:not([disabled])',
+      '[href]',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(',');
+    try {
+      return Array.from(this.root.querySelectorAll(selector)).filter((el) => {
+        if (!el || el.hidden) return false;
+        const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+        return !style || (style.display !== 'none' && style.visibility !== 'hidden');
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  static _syncGlobalDialogFlag() {
+    try {
+      const hasFloatingModal = (FloatingWindow._modalOpenCount || 0) > 0;
+      const hasLegacyDialog = typeof window.isDialogOpen === 'function' && window.isDialogOpen();
+      window.__BREPDialogOpen = hasFloatingModal || hasLegacyDialog;
+    } catch {}
+  }
 }
+
+FloatingWindow._modalOpenCount = 0;
