@@ -6,6 +6,7 @@ import { AssemblyConstraintsWidget } from '../assembly/AssemblyConstraintsWidget
 import { CADmaterialWidget } from '../CADmaterials.js';
 import { expressionsManager } from '../expressionsManager.js';
 import { SchemaForm } from '../featureDialogs.js';
+import { FloatingWindow } from '../FloatingWindow.js';
 import { FileManagerWidget } from '../fileManagerWidget.js';
 import { HistoryWidget } from '../HistoryWidget.js';
 import { MainToolbar } from '../MainToolbar.js';
@@ -23,6 +24,66 @@ import { WireHarnessConnectionsWidget } from '../wireHarness/WireHarnessConnecti
 import { ASSEMBLY_CONSTRAINTS_TITLE, SIDEBAR_HOME_BANNER_HEIGHT_PX } from './constants.js';
 
 export const sidebarMethods = {
+    _ensureSettingsWindowStyles() {
+        if (typeof document === 'undefined') return;
+        if (document.getElementById('cad-settings-window-styles')) return;
+        const style = document.createElement('style');
+        style.id = 'cad-settings-window-styles';
+        style.textContent = `
+            .cad-settings-window {
+                display: flex;
+                flex-direction: column;
+                gap: 0;
+                width: 100%;
+                height: 100%;
+                min-height: 0;
+                box-sizing: border-box;
+            }
+            .cad-settings-window .cmw {
+                max-width: none;
+            }
+        `;
+        document.head.appendChild(style);
+    },
+
+    openSettingsDialog() {
+        if (typeof document === 'undefined') return null;
+        this._ensureSettingsWindowStyles();
+        if (!this.cadMaterialsUi) {
+            try { this.cadMaterialsUi = new CADmaterialWidget(this); } catch { return null; }
+        }
+        if (this._settingsWindow?.root?.isConnected) {
+            try {
+                this._settingsWindow.root.style.display = 'flex';
+                this._settingsWindow.bringToFront?.();
+            } catch { /* ignore */ }
+            return this._settingsWindow;
+        }
+
+        const pageWidth = Number(window?.innerWidth) || 900;
+        const pageHeight = Number(window?.innerHeight) || 720;
+        const fw = new FloatingWindow({
+            title: 'Display Settings',
+            width: Math.max(420, Math.min(760, pageWidth - 32)),
+            height: Math.max(360, Math.min(720, pageHeight - 80)),
+            minWidth: 360,
+            minHeight: 260,
+            right: 16,
+            top: 56,
+            shaded: false,
+            onClose: () => {
+                try { fw.root.style.display = 'none'; } catch { /* ignore */ }
+            },
+        });
+
+        const content = document.createElement('div');
+        content.className = 'cad-settings-window';
+        content.appendChild(this.cadMaterialsUi.uiElement);
+        fw.content.appendChild(content);
+        this._settingsWindow = fw;
+        return fw;
+    },
+
     _setSidebarAutoHideSuspended(suspended) {
         const next = !!suspended;
         if (this._sidebarAutoHideSuspended === next) return;
@@ -313,8 +374,6 @@ export const sidebarMethods = {
             sheetsSection.uiElement.appendChild(this.sheet2DWidget.uiElement);
 
             this.cadMaterialsUi = await new CADmaterialWidget(this);
-            const displaySection = await this.accordion.addSection("Display Settings");
-            await displaySection.uiElement.appendChild(this.cadMaterialsUi.uiElement);
 
             this._pluginUiReady = false;
             await this.accordion.collapseAll();
@@ -408,20 +467,11 @@ export const sidebarMethods = {
             workbenches: ['SIMULATION'],
         });
 
-        // CADmaterials (Settings panel)
+        // CADmaterials (Settings dialog)
         this.cadMaterialsUi = await new CADmaterialWidget(this);
-        const displaySection = await this.accordion.addSection("Display Settings");
-        await displaySection.uiElement.appendChild(this.cadMaterialsUi.uiElement);
-        this._registerWorkbenchPanel({
-            id: 'displaySettings',
-            title: 'Display Settings',
-            section: displaySection,
-            source: 'builtin',
-            workbenches: ['MODELING', 'IMPORT', 'SURFACING', 'SHEET_METAL', 'ASSEMBLIES', 'WIRE_HARNESS', 'PMI', 'ALL'],
-        });
 
         // From this point on, plugin UI can be added immediately,
-        // and should be inserted just before the "Display Settings" panel.
+        // and should be inserted before the built-in Plugins panel.
         this._pluginUiReady = true;
 
         // Drain any queued plugin side panels so they appear immediately before settings

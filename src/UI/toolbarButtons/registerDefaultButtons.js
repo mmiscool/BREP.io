@@ -20,6 +20,7 @@ import { createSheetMetalFlatExportButton } from './sheetMetalFlatExportButton.j
 import { createSheetMetalDebugButton } from './sheetMetalDebugButton.js';
 import { createHomeButton } from './homeButton.js';
 import { createGuidedTourButton } from './guidedTourButton.js';
+import { createSettingsButton } from './settingsButton.js';
 
 function isLocalhostRuntime() {
   try {
@@ -48,6 +49,7 @@ export function registerDefaultToolbarButtons(viewer) {
     { id: 'import', create: createImportButton, source: 'builtin' },
     { id: 'export', create: createExportButton, source: 'builtin' },
     { id: 'share', create: createShareButton, source: 'builtin' },
+    { id: 'settings', create: createSettingsButton, source: 'builtin' },
     { id: 'sheetEditor', create: createSheetEditorButton, source: 'builtin' },
     { id: 'sheetMetalFlatExport', create: createSheetMetalFlatExportButton, source: 'builtin' },
   ];

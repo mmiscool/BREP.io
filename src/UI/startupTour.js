@@ -277,7 +277,7 @@ function getDefaultSteps() {
     {
       id: 'sidebar',
       title: 'Sidebar panels',
-      body: 'These panels hold History, Scene Manager, Display Settings, and other tools. Click a header to expand or collapse.',
+      body: 'These panels hold History, Scene Manager, and other tools. Click a header to expand or collapse. Use the gear button for display settings.',
       target: () => document.getElementById('sidebar'),
       padding: 6,
     },

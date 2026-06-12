@@ -400,11 +400,11 @@ export class FloatingWindow {
       .floating-window__header { display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #23232b; cursor:grab; font:600 13px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; letter-spacing:.2px; }
       .floating-window__title { flex:1; }
       .floating-window__actions { display:flex; align-items:center; gap:6px; }
-      .floating-window__actions .fw-btn { background:#1f2937; color:#f9fafb; border:1px solid #374151; padding:6px 8px; border-radius:8px; cursor:pointer; font:700 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      .floating-window__actions .fw-btn { box-sizing:border-box; display:inline-flex; align-items:center; justify-content:center; height:27px; min-height:27px; max-height:27px; min-width:32px; background:#1f2937; color:#f9fafb; border:1px solid #374151; padding:0 10px; border-radius:8px; cursor:pointer; font:700 12px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; text-align:center; vertical-align:middle; }
       .floating-window__actions .fw-btn:hover { background:#2b3545; }
-      .floating-window__actions .floating-window__transparency { padding:4px 8px; border-radius:8px; color:#f1f5f9; }
+      .floating-window__actions .floating-window__transparency { width:32px; padding:0; border-radius:8px; color:#f1f5f9; }
       .floating-window__actions .floating-window__transparency[aria-pressed="true"] { background:#334155; border-color:#64748b; }
-      .floating-window__actions .floating-window__close { padding:4px 8px; border-radius:8px; color:#f1f5f9; }
+      .floating-window__actions .floating-window__close { width:32px; padding:0; border-radius:8px; color:#f1f5f9; }
       .floating-window__actions .floating-window__close:hover { background:#3a1f24; border-color:#5b2a33; }
       .floating-window__content { flex:1; overflow:auto; padding:8px; user-select:text; }
       .floating-window.is-shaded .floating-window__content { display:none; }

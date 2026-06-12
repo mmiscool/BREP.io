@@ -81,7 +81,6 @@ class ScriptRunnerPanel {
       }
     });
 
-    alert('hello world');
 
     fw.addHeaderAction(btnRun);
     fw.addHeaderAction(btnRefresh);

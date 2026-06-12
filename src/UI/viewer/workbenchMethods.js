@@ -375,10 +375,10 @@ export const workbenchMethods = {
                 pre.textContent = String(panel.content);
                 sec.uiElement.appendChild(pre);
             }
-            // Reposition this plugin section to immediately before the Display Settings panel, if present
+            // Reposition this plugin section to immediately before the built-in Plugins panel, if present.
             try {
                 const root = this.accordion.uiElement;
-                const targetTitle = root.querySelector('.accordion-title[name="accordion-title-Display Settings"]');
+                const targetTitle = root.querySelector('.accordion-title[name="accordion-title-Plugins"]');
                 if (targetTitle) {
                     const secTitle = root.querySelector(`.accordion-title[name="accordion-title-${t}"]`);
                     if (secTitle && sec.uiElement && secTitle !== targetTitle) {
