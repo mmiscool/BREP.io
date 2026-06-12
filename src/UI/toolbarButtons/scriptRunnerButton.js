@@ -3,11 +3,15 @@ import { FloatingWindow } from '../FloatingWindow.js';
 
 const PANEL_KEY = Symbol('ScriptRunnerPanel');
 const CONSOLE_TREE_CHILD_LIMIT = 300;
-const DEFAULT_SNIPPET = `// Access the app environment via the global "env" object.
+const DEFAULT_SNIPPET = `
+// Access the app environment via the global "env" object.
 console.log('env keys', Object.keys(env || {}));
 
 // Example: log the active part history entry
-console.log('active history', viewer?.partHistory?.getActiveStep?.());
+console.log('active history', viewer?.partHistory);
+
+
+
 `;
 
 class ScriptRunnerPanel {
