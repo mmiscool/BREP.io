@@ -16,10 +16,10 @@ export function renderComponentSelectorField({ ui, key, def, id, controlWrap }) 
   btn.className = 'btn component-selector-btn';
   btn.textContent = String(def.buttonLabel || 'Choose…');
 
-  const clearBtn = document.createElement('button');
-  clearBtn.type = 'button';
-  clearBtn.className = 'btn btn-slim component-selector-clear';
-  clearBtn.textContent = 'Clear';
+  const actionBtn = document.createElement('button');
+  actionBtn.type = 'button';
+  actionBtn.className = 'btn component-selector-action';
+  actionBtn.textContent = String(def.actionButtonLabel || def.actionLabel || 'Open');
 
   const applyValue = (value, record) => {
     inputEl.value = value || '';
@@ -48,15 +48,31 @@ export function renderComponentSelectorField({ ui, key, def, id, controlWrap }) 
     applyValue(record.path || record.name || '', record);
   });
 
-  clearBtn.addEventListener('click', () => {
-    applyValue('', null);
+  actionBtn.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ui._stopActiveReferenceSelection();
+    try {
+      if (typeof def.actionFunction === 'function') {
+        const ctx = {
+          featureID: ui.params?.featureID ?? ui.params?.id ?? null,
+          key,
+          viewer: ui.options?.viewer || null,
+          partHistory: ui.options?.partHistory || null,
+          feature: ui.options?.featureRef || null,
+          params: ui.params,
+          schemaDef: def,
+          form: ui,
+        };
+        def.actionFunction(ctx);
+      }
+    } catch (_) { /* ignore handler errors */ }
   });
 
   wrap.appendChild(inputEl);
   const controls = document.createElement('div');
   controls.className = 'component-selector-controls';
   controls.appendChild(btn);
-  controls.appendChild(clearBtn);
+  if (typeof def.actionFunction === 'function') controls.appendChild(actionBtn);
   wrap.appendChild(controls);
 
   if (controlWrap instanceof HTMLElement) {
@@ -93,9 +109,15 @@ export function renderComponentSelectorField({ ui, key, def, id, controlWrap }) 
       display: flex;
       gap: 6px;
       flex: 0 0 auto;
+      align-items: stretch;
     }
-    .component-selector-clear {
-      padding: 4px 8px;
+    .component-selector-controls .btn {
+      min-height: 38px;
+      height: 38px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      white-space: nowrap;
     }
   `;
   document.head.appendChild(style);

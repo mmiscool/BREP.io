@@ -4,6 +4,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { BREP } from '../../BREP/BREP.js';
 import { createPortGroupFromDefinition, normalizePortDefinition } from '../port/portUtils.js';
 import { base64ToUint8Array, getComponentRecord } from '../../services/componentLibrary.js';
+import { openAssemblyComponentSource } from '../../UI/assembly/openAssemblyComponentSource.js';
 
 const THREE = BREP.THREE;
 
@@ -55,9 +56,13 @@ const inputParamsSchema = {
     type: 'component_selector',
     label: 'Component',
     buttonLabel: 'Select…',
+    actionButtonLabel: 'Open Part',
     hint: 'Pick a saved 3MF component to insert into this assembly.',
     dialogTitle: 'Select Component',
     onSelect: handleComponentSelection,
+    actionFunction: (ctx) => {
+      openAssemblyComponentSource(ctx?.feature || null, ctx?.viewer || null);
+    },
   },
   instanceName: {
     type: 'string',

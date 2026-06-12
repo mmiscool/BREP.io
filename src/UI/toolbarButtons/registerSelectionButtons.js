@@ -5,6 +5,10 @@ import { createMetadataButton } from './metadataButton.js';
 import { createToggleSelectionVisibilityButton } from './toggleSelectionVisibilityButton.js';
 import { createEditOwningFeatureButton } from './editOwningFeatureButton.js';
 import {
+  findOwningAssemblyComponent,
+  openAssemblyComponentSource,
+} from '../assembly/openAssemblyComponentSource.js';
+import {
   isSingleSelectionOfTypes,
   resolveOwningFeatureIdForSelection,
   resolveSketchLikeFeatureIdForSelection,
@@ -21,28 +25,7 @@ const hasType = (items, types) => {
   return items.some((obj) => typeSet.has(String(obj?.type || '').toUpperCase()));
 };
 const getSingleSelectionComponent = (items, viewer) => {
-  if (!Array.isArray(items) || items.length === 0) return null;
-  const findComponent = (obj) => {
-    if (!obj) return null;
-    if (viewer && typeof viewer._findOwningComponent === 'function') {
-      try { return viewer._findOwningComponent(obj); } catch { }
-    }
-    let cur = obj;
-    while (cur) {
-      if (cur.isAssemblyComponent || String(cur.type || '').toUpperCase() === SelectionFilter.COMPONENT) return cur;
-      cur = cur.parent || null;
-    }
-    return null;
-  };
-  let component = null;
-  for (const item of items) {
-    const obj = item?.object || item?.target || item;
-    const owning = findComponent(obj);
-    if (!owning) return null;
-    if (!component) component = owning;
-    else if (component !== owning) return null;
-  }
-  return component;
+  return findOwningAssemblyComponent(items, viewer);
 };
 
 const getSingleSelectionSolid = (items, viewer) => {
@@ -187,6 +170,24 @@ export function registerSelectionToolbarButtons(viewer) {
           }
           viewer._activateComponentTransform(component);
         }
+      },
+      shouldShow: (selection) => isNonSimulationWorkbench(viewer) && !!getSingleSelectionComponent(selection, viewer),
+    });
+  } catch { }
+
+  try {
+    SelectionFilter.registerSelectionAction({
+      id: 'selection-action-open-component-source',
+      label: 'Open Part',
+      title: 'Open the selected component source part in a new CAD window',
+      onClick: () => {
+        const selection = SelectionFilter.getSelectedObjects();
+        const component = getSingleSelectionComponent(selection, viewer);
+        if (!component) {
+          viewer?._toast?.('Select a single component.');
+          return;
+        }
+        openAssemblyComponentSource(component, viewer);
       },
       shouldShow: (selection) => isNonSimulationWorkbench(viewer) && !!getSingleSelectionComponent(selection, viewer),
     });
