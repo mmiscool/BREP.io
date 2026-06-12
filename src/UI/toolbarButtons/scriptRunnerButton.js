@@ -52,10 +52,12 @@ class ScriptRunnerPanel {
 
   _ensureWindow() {
     if (this.root) return;
+    const pageHeight = Number(window?.innerHeight) || 520;
+    const initialHeight = Math.max(320, Math.round(pageHeight * 0.95));
     const fw = new FloatingWindow({
       title: 'Script Runner',
       width: 760,
-      height: 520,
+      height: initialHeight,
       right: 16,
       top: 56,
       shaded: false,
@@ -78,6 +80,8 @@ class ScriptRunnerPanel {
         this._setStatus('Unable to refresh env autocomplete');
       }
     });
+
+    alert('hello world');
 
     fw.addHeaderAction(btnRun);
     fw.addHeaderAction(btnRefresh);
