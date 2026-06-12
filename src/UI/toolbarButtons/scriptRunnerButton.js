@@ -25,6 +25,7 @@ class ScriptRunnerPanel {
     this._initializedValue = false;
     this._consoleHeight = 180;
     this._lastContentRect = null;
+    this._isRunning = false;
   }
 
   toggle() {
@@ -183,6 +184,10 @@ class ScriptRunnerPanel {
   }
 
   async _runCode() {
+    if (this._isRunning) {
+      this._setStatus('Already running');
+      return;
+    }
     const code = this.editorEl?.value || '';
     if (!code.trim()) {
       this._setStatus('Nothing to run');
@@ -190,6 +195,7 @@ class ScriptRunnerPanel {
     }
     this._appendOutput(`>>> Running at ${new Date().toLocaleTimeString()}`);
     this._setStatus('Running...');
+    this._isRunning = true;
 
     const exec = () => {
       const runtimeViewer = window.viewer ?? this.viewer ?? null;
@@ -200,13 +206,17 @@ class ScriptRunnerPanel {
     };
 
     try {
-      const result = exec();
-      if (result instanceof Promise) {
-        const resolved = await result;
-        this._appendOutput(this._stringify(resolved));
+      const runResult = await this._withConsoleCapture(async () => {
+        const result = exec();
+        if (result && typeof result.then === 'function') {
+          return { value: await result, async: true };
+        }
+        return { value: result, async: false };
+      });
+      this._appendOutput(this._stringify(runResult.value));
+      if (runResult.async) {
         this._setStatus('Completed (async)');
       } else {
-        this._appendOutput(this._stringify(result));
         this._setStatus('Completed');
       }
     } catch (e) {
@@ -214,6 +224,69 @@ class ScriptRunnerPanel {
       this._appendOutput(msg, true);
       this._setStatus('Error');
       try { console.error('[ScriptRunner]', e); } catch {}
+    } finally {
+      this._isRunning = false;
+    }
+  }
+
+  async _withConsoleCapture(fn) {
+    const consoleObj = window.console;
+    if (!consoleObj) return fn();
+    const methods = ['log', 'info', 'warn', 'error', 'debug', 'table', 'trace'];
+    const originals = new Map();
+
+    for (const method of methods) {
+      const original = consoleObj[method];
+      if (typeof original !== 'function') continue;
+      originals.set(method, original);
+      try {
+        consoleObj[method] = (...args) => {
+          try {
+            this._appendOutput(this._formatConsoleArgs(method, args), method === 'error' ? true : method);
+          } catch {}
+          return original.apply(consoleObj, args);
+        };
+      } catch {}
+    }
+
+    try {
+      return await fn();
+    } finally {
+      for (const [method, original] of originals.entries()) {
+        try { consoleObj[method] = original; } catch {}
+      }
+    }
+  }
+
+  _formatConsoleArgs(method, args) {
+    const prefix = method === 'log' ? '' : `${method}: `;
+    if (!args.length) return prefix.trimEnd();
+    return `${prefix}${args.map((arg) => this._stringifyConsoleArg(arg)).join(' ')}`;
+  }
+
+  _stringifyConsoleArg(value) {
+    if (typeof value === 'string') return value;
+    if (value instanceof Error) return value.stack || value.message || String(value);
+    if (typeof value === 'function') return value.toString();
+    if (value === undefined) return 'undefined';
+    if (value === null) return 'null';
+    if (typeof value === 'symbol') return value.toString();
+    if (typeof value === 'bigint') return `${value.toString()}n`;
+    try {
+      const seen = new WeakSet();
+      const json = JSON.stringify(value, (_key, item) => {
+        if (typeof item === 'bigint') return `${item.toString()}n`;
+        if (typeof item === 'function') return item.toString();
+        if (typeof item === 'symbol') return item.toString();
+        if (item && typeof item === 'object') {
+          if (seen.has(item)) return '[Circular]';
+          seen.add(item);
+        }
+        return item;
+      }, 2);
+      return typeof json === 'string' ? json : String(value);
+    } catch {
+      try { return String(value); } catch { return '[unprintable]'; }
     }
   }
 
@@ -222,9 +295,17 @@ class ScriptRunnerPanel {
     const line = document.createElement('div');
     line.textContent = text;
     line.style.whiteSpace = 'pre-wrap';
-    line.style.color = isError ? '#fca5a5' : '#d1d5db';
+    line.style.color = this._outputColor(isError);
     this.outputEl.appendChild(line);
     this.outputEl.scrollTop = this.outputEl.scrollHeight;
+  }
+
+  _outputColor(kind) {
+    if (kind === true || kind === 'error') return '#fca5a5';
+    if (kind === 'warn') return '#fbbf24';
+    if (kind === 'info') return '#93c5fd';
+    if (kind === 'debug') return '#9ca3af';
+    return '#d1d5db';
   }
 
   _setStatus(msg) {
