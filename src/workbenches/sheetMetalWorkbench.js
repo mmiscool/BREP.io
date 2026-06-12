@@ -23,9 +23,9 @@ export const SHEET_METAL_WORKBENCH = {
     pmiViews: true,
   },
   toolbarButtons: [
-    'home',
     'new',
     'save',
+    'saveAs',
     'zoomToFit',
     'wireframe',
     'import',

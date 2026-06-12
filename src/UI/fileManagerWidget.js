@@ -1371,6 +1371,16 @@ export class FileManagerWidget {
     }
   }
 
+  async saveCurrentAs() {
+    const previousForce = this._forceSaveTargetDialog;
+    this._forceSaveTargetDialog = true;
+    try {
+      return await this.saveCurrent();
+    } finally {
+      this._forceSaveTargetDialog = previousForce;
+    }
+  }
+
   _collectSolidsForExport() {
     const scene = this.viewer?.partHistory?.scene || this.viewer?.scene;
     if (!scene) return [];

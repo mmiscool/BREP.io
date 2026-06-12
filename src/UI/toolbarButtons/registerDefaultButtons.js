@@ -2,7 +2,7 @@
 // Each button's logic is implemented in its own module.
 
 import { createNewButton } from './newButton.js';
-import { createSaveButton } from './saveButton.js';
+import { createSaveAsButton, createSaveButton } from './saveButton.js';
 import { createUndoButton, createRedoButton } from './undoRedoButtons.js';
 import { createZoomToFitButton } from './zoomToFitButton.js';
 import { createWireframeToggleButton } from './wireframeToggleButton.js';
@@ -18,7 +18,6 @@ import { createSolidOverlapDiagnosticsButton } from './solidOverlapDiagnosticsBu
 import { createSheetEditorButton } from './sheetEditorButton.js';
 import { createSheetMetalFlatExportButton } from './sheetMetalFlatExportButton.js';
 import { createSheetMetalDebugButton } from './sheetMetalDebugButton.js';
-import { createHomeButton } from './homeButton.js';
 import { createGuidedTourButton } from './guidedTourButton.js';
 import { createSettingsButton } from './settingsButton.js';
 
@@ -40,9 +39,9 @@ export function registerDefaultToolbarButtons(viewer) {
   const isLocalhost = isLocalhostRuntime();
 
   const creators = [
-    { id: 'home', create: createHomeButton, source: 'builtin' },
     { id: 'new', create: createNewButton, source: 'builtin' },
     { id: 'save', create: createSaveButton, source: 'builtin' },
+    { id: 'saveAs', create: createSaveAsButton, source: 'builtin' },
     { id: 'zoomToFit', create: createZoomToFitButton, source: 'builtin' },
     { id: 'wireframe', create: createWireframeToggleButton, source: 'builtin' },
     { id: 'solidOverlapDiagnostics', create: createSolidOverlapDiagnosticsButton, source: 'builtin' },

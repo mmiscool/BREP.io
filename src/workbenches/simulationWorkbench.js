@@ -42,9 +42,9 @@ export const SIMULATION_WORKBENCH = {
     pmiViews: true,
   },
   toolbarButtons: [
-    'home',
     'new',
     'save',
+    'saveAs',
     'zoomToFit',
     'wireframe',
     'import',

@@ -29,6 +29,8 @@ export const MODELING_WORKBENCH = {
     'TEXT',
     'HX',
     'SP',
+    'O.S',
+    'SP',
   ],
   contextFamilies: {
     features: true,
@@ -40,9 +42,9 @@ export const MODELING_WORKBENCH = {
     pmiViews: true,
   },
   toolbarButtons: [
-    'home',
     'new',
     'save',
+    'saveAs',
     'zoomToFit',
     'wireframe',
     'import',

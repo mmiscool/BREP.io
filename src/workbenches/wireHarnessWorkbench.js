@@ -19,9 +19,9 @@ export const WIRE_HARNESS_WORKBENCH = {
     wireHarnessConnections: true,
   },
   toolbarButtons: [
-    'home',
     'new',
     'save',
+    'saveAs',
     'zoomToFit',
     'wireframe',
     'import',

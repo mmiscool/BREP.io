@@ -126,3 +126,27 @@ export function createSaveButton(viewer) {
 
   return { label: '💾', title: 'Save current model', onClick };
 }
+
+export function createSaveAsButton(viewer) {
+  async function onClick() {
+    try {
+      if (viewer?.fileManagerWidget?.saveCurrentAs) {
+        await viewer.fileManagerWidget.saveCurrentAs();
+        return;
+      }
+      if (viewer?.fileManagerWidget?.saveCurrent) {
+        const previousForce = viewer.fileManagerWidget._forceSaveTargetDialog;
+        viewer.fileManagerWidget._forceSaveTargetDialog = true;
+        try {
+          await viewer.fileManagerWidget.saveCurrent();
+        } finally {
+          viewer.fileManagerWidget._forceSaveTargetDialog = previousForce;
+        }
+        return;
+      }
+    } catch { }
+    alert('Save As is unavailable.');
+  }
+
+  return { label: '💾+', title: 'Save current model as...', onClick };
+}
