@@ -25,6 +25,8 @@ export class BrowserTesting {
 
     // Test registry (names in stable order)
     this.testNames = testFunctions.map(func => func.test.name);
+    this._initialOrder = new Map(this.testNames.map((name, idx) => [name, idx]));
+    this._sortState = { key: null, direction: "asc" };
     //console.log(testFunctions, this.testNames);
 
     this.currentIndex = 0;
@@ -32,6 +34,9 @@ export class BrowserTesting {
     // Per-test runtime state
     this.enabled = new Map(this.testNames.map(n => [n, true]));
     this.status = new Map(this.testNames.map(n => [n, ""]));   // "", "pass", "fail"
+    this.durationMs = new Map(this.testNames.map(n => [n, null]));
+    this._isRunningSelected = false;
+    this._stopRequested = false;
     this.errors = new Map(); // name -> { message, stack } captured on failure
     // Per-test canvas snapshot
     this.screenshots = new Map(); // name -> dataURL
@@ -131,54 +136,108 @@ export class BrowserTesting {
   _buildUI() {
     // Floating window container (draggable, shade-on-title, resizable)
     const fw = new FloatingWindow({ title: 'Browser Testing', width: 500, height: 700, right: 16, top: 40, shaded: false });
-
-    // Controls row
-    const controls = document.createElement("div");
-    Object.assign(controls.style, {
-      padding: "10px 12px",
-      display: "grid",
-      gridTemplateColumns: "repeat(4, 1fr)",
-      gap: "8px",
-      borderBottom: "1px solid #23232b",
+    Object.assign(fw.content.style, {
+      padding: "0",
+      overflowX: "hidden",
+      overflowY: "auto",
     });
 
-    const btnRunCurrent = makeButton("Run (current)");
-    const btnPrev = makeButton("Previous");
-    const btnNext = makeButton("Next");
-    const btnRunAll = makeButton("Run All");
-
-    controls.appendChild(btnRunCurrent);
-    controls.appendChild(btnPrev);
-    controls.appendChild(btnNext);
-    controls.appendChild(btnRunAll);
+    const btnPrev = makeHeaderButton("⏮️", "Run previous test");
+    const btnNext = makeHeaderButton("⏭️", "Run next test");
+    const btnRunSelected = makeHeaderButton("▶️", "Run selected tests");
+    const btnStop = makeHeaderButton("⏹️", "Stop after current test");
+    this._runSelectedButton = btnRunSelected;
+    this._stopButton = btnStop;
+    fw.addHeaderAction(btnPrev);
+    fw.addHeaderAction(btnNext);
+    fw.addHeaderAction(btnRunSelected);
+    fw.addHeaderAction(btnStop);
 
     // Table container (content area already scrolls; this keeps structure)
     const tableWrap = document.createElement("div");
-    // Object.assign(tableWrap.style, {
-    //   overflow: "auto",
-    //   maxHeight: "100%",
-    // });
+    Object.assign(tableWrap.style, {
+      maxWidth: "100%",
+      overflow: "visible",
+    });
 
     // Table
     const table = document.createElement("table");
     Object.assign(table.style, {
       width: "100%",
-      borderCollapse: "collapse",
+      maxWidth: "100%",
+      borderCollapse: "separate",
+      borderSpacing: "0",
+      tableLayout: "fixed",
     });
 
+    const colgroup = document.createElement("colgroup");
+    const testCol = document.createElement("col");
+    const statusCol = document.createElement("col");
+    const durationCol = document.createElement("col");
+    const actionsCol = document.createElement("col");
+    statusCol.style.width = "58px";
+    durationCol.style.width = "64px";
+    actionsCol.style.width = "82px";
+    colgroup.appendChild(testCol);
+    colgroup.appendChild(statusCol);
+    colgroup.appendChild(durationCol);
+    colgroup.appendChild(actionsCol);
+    table.appendChild(colgroup);
+
     // THEAD
+    this._sortHeaderButtons = new Map();
+    const makeSortHeader = (label, key) => {
+      const cell = th("", null);
+      const button = sortHeaderButton(label);
+      button.addEventListener("click", () => this._toggleSort(key));
+      cell.appendChild(button);
+      this._sortHeaderButtons.set(key, button);
+      return cell;
+    };
+
     const thead = document.createElement("thead");
     const headRow = document.createElement("tr");
-    headRow.appendChild(th("Test (enable/disable)", "50%"));
-    headRow.appendChild(th("Status", "20%"));
-    headRow.appendChild(th("Actions", "30%"));
+
+    const testHeader = th("", null);
+    const headerLabel = document.createElement("div");
+    Object.assign(headerLabel.style, {
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      minWidth: "0",
+      width: "100%",
+    });
+    const selectAll = document.createElement("input");
+    selectAll.type = "checkbox";
+    selectAll.checked = true;
+    selectAll.title = "Check or uncheck all tests";
+    selectAll.setAttribute("aria-label", "Check or uncheck all tests");
+    selectAll.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+    selectAll.addEventListener("change", () => {
+      this._setAllEnabled(selectAll.checked);
+    });
+    this._selectAllCheckbox = selectAll;
+    const headerText = sortHeaderButton("Test");
+    headerText.addEventListener("click", () => this._toggleSort("name"));
+    this._sortHeaderButtons.set("name", headerText);
+    headerLabel.appendChild(selectAll);
+    headerLabel.appendChild(headerText);
+    testHeader.appendChild(headerLabel);
+
+    headRow.appendChild(testHeader);
+    headRow.appendChild(makeSortHeader("Status", "status"));
+    headRow.appendChild(makeSortHeader("Time", "duration"));
+    headRow.appendChild(th("Actions", null));
     thead.appendChild(headRow);
     table.appendChild(thead);
 
     // TBODY (rows per test)
     const tbody = document.createElement("tbody");
-    this._rowRefs = new Map(); // name -> { row, checkbox, statusCell, runBtn, logBtn }
-    this.testNames.forEach((name, idx) => {
+    this._tbody = tbody;
+    this._rowRefs = new Map(); // name -> { row, checkbox, statusCell, durationCell, runBtn, logBtn }
+    this.testNames.forEach((name) => {
       const row = document.createElement("tr");
       Object.assign(row.style, rowStyle());
 
@@ -186,18 +245,28 @@ export class BrowserTesting {
       const c1 = document.createElement("td");
       c1.style.height = "10px";
       Object.assign(c1.style, cellStyle());
+      c1.style.overflow = "hidden";
       const label = document.createElement("label");
-      label.style.display = "flex";
-      label.style.alignItems = "center";
-      label.style.gap = "8px";
+      Object.assign(label.style, {
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        minWidth: "0",
+        width: "100%",
+      });
+      label.title = name;
       const cb = document.createElement("input");
       cb.type = "checkbox";
       cb.checked = true;
+      cb.style.flex = "0 0 auto";
       cb.addEventListener("change", () => {
         this.enabled.set(name, cb.checked);
+        this._syncSelectAllCheckbox();
       });
       const text = document.createElement("span");
       text.textContent = name;
+      text.title = name;
+      Object.assign(text.style, truncateTextStyle());
       label.appendChild(cb);
       label.appendChild(text);
       c1.appendChild(label);
@@ -207,28 +276,49 @@ export class BrowserTesting {
       Object.assign(c2.style, cellStyle());
       updateStatusCell(c2, this.status.get(name));
 
-      // col 3: actions
+      // col 3: duration
       const c3 = document.createElement("td");
       Object.assign(c3.style, cellStyle());
-      c3.style.display = "flex";
-      c3.style.gap = "6px";
+      c3.style.overflow = "hidden";
+      updateDurationCell(c3, this.durationMs.get(name));
+
+      // col 4: actions
+      const c4 = document.createElement("td");
+      Object.assign(c4.style, cellStyle());
+      c4.style.overflow = "hidden";
+      const actionWrap = document.createElement("div");
+      Object.assign(actionWrap.style, {
+        display: "flex",
+        alignItems: "center",
+        gap: "4px",
+        minWidth: "0",
+        width: "100%",
+      });
       const runBtn = miniButton("▷");
-      const logBtn = miniButton("Show Log");
-      c3.appendChild(runBtn);
-      c3.appendChild(logBtn);
+      runBtn.title = `Run ${name}`;
+      runBtn.setAttribute("aria-label", `Run ${name}`);
+      runBtn.style.flex = "0 0 28px";
+      runBtn.style.width = "28px";
+      const logBtn = miniButton("Log");
+      logBtn.title = `Show log for ${name}`;
+      logBtn.setAttribute("aria-label", `Show log for ${name}`);
+      logBtn.style.flex = "1 1 0";
+      logBtn.style.minWidth = "0";
+      actionWrap.appendChild(runBtn);
+      actionWrap.appendChild(logBtn);
+      c4.appendChild(actionWrap);
 
       // row events
       row.addEventListener("click", (e) => {
         // Don't change selection if clicking a control that handles its own action
-        const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : "";
-        if (tag === "button" || tag === "input" || tag === "label") return;
-        this._selectRow(idx);
+        if (e.target?.closest?.("button,input,label")) return;
+        this._selectByName(name);
       });
 
       // hook up actions
       runBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
-        this._selectRow(idx);
+        this._selectByName(name);
         await this._runSingleByName(name);
       });
       logBtn.addEventListener("click", (e) => {
@@ -240,9 +330,10 @@ export class BrowserTesting {
       row.appendChild(c1);
       row.appendChild(c2);
       row.appendChild(c3);
+      row.appendChild(c4);
       tbody.appendChild(row);
 
-      this._rowRefs.set(name, { row, checkbox: cb, statusCell: c2, runBtn, logBtn });
+      this._rowRefs.set(name, { row, checkbox: cb, statusCell: c2, durationCell: c3, runBtn, logBtn });
     });
 
     table.appendChild(tbody);
@@ -256,34 +347,42 @@ export class BrowserTesting {
       color: "#a7aab3",
       display: "flex",
       justifyContent: "space-between",
+      minWidth: "0",
+      boxSizing: "border-box",
     });
     this._selectionLabel = document.createElement("span");
     this._selectionLabel.textContent = this._currentLabel();
+    Object.assign(this._selectionLabel.style, truncateTextStyle());
     footer.appendChild(this._selectionLabel);
 
     // Assemble widget
-    fw.content.appendChild(controls);
     fw.content.appendChild(tableWrap);
     fw.content.appendChild(footer);
 
-    // Wire top buttons
-    btnRunCurrent.addEventListener("click", async () => {
-      const name = this.testNames[this.currentIndex];
-      await this._runSingleByName(name);
+    // Wire header buttons
+    btnPrev.addEventListener("click", async () => {
+      await this._moveSelectionAndRun(-1);
     });
-    btnPrev.addEventListener("click", () => this._moveSelection(-1));
-    btnNext.addEventListener("click", () => this._moveSelection(+1));
-    btnRunAll.addEventListener("click", async () => {
-      await this._runAllEnabled();
+    btnNext.addEventListener("click", async () => {
+      await this._moveSelectionAndRun(+1);
+    });
+    btnRunSelected.addEventListener("click", async () => {
+      await this._runSelected();
+    });
+    btnStop.addEventListener("click", () => {
+      this._requestStop();
     });
 
     // Initial selected row styling
     this._applySelectionStyles();
+    this._syncSelectAllCheckbox();
+    this._syncStopButton();
+    this._syncSortHeaders();
 
     // Start shaded/collapsed if desired by default; keep behavior off by default
     // fw.setShaded(true);
 
-    return { window: fw, controls, table, tbody };
+    return { window: fw, table, tbody };
   }
 
   // ====== Selection helpers ======
@@ -293,15 +392,92 @@ export class BrowserTesting {
   }
 
   _moveSelection(delta) {
-    if (!this.testNames.length) return;
+    if (!this.testNames.length) return null;
     this.currentIndex = (this.currentIndex + delta + this.testNames.length) % this.testNames.length;
     this._applySelectionStyles();
+    this._scrollRowIntoView();
+    return this.testNames[this.currentIndex];
+  }
+
+  async _moveSelectionAndRun(delta) {
+    const name = this._moveSelection(delta);
+    if (!name) return;
+    await this._runSingleByName(name);
   }
 
   _selectRow(idx) {
     if (idx < 0 || idx >= this.testNames.length) return;
     this.currentIndex = idx;
     this._applySelectionStyles();
+    this._scrollRowIntoView();
+  }
+
+  _selectByName(name) {
+    const idx = this.testNames.indexOf(name);
+    if (idx < 0) return;
+    this._selectRow(idx);
+  }
+
+  _toggleSort(key) {
+    const selectedName = this.testNames[this.currentIndex] || null;
+    const nextDirection = this._sortState.key === key && this._sortState.direction === "asc"
+      ? "desc"
+      : "asc";
+    this._sortState = { key, direction: nextDirection };
+    this._sortTests();
+    if (selectedName) {
+      const nextIndex = this.testNames.indexOf(selectedName);
+      if (nextIndex >= 0) this.currentIndex = nextIndex;
+    }
+    this._renderRows();
+    this._applySelectionStyles();
+    this._scrollRowIntoView();
+    this._syncSortHeaders();
+  }
+
+  _sortTests() {
+    const { key, direction } = this._sortState;
+    if (!key) return;
+    const directionFactor = direction === "desc" ? -1 : 1;
+    this.testNames.sort((a, b) => {
+      let cmp = 0;
+      if (key === "name") {
+        cmp = a.localeCompare(b);
+        if (cmp !== 0) return cmp * directionFactor;
+      } else if (key === "status") {
+        cmp = compareStatusValues(this.status.get(a), this.status.get(b), direction);
+        if (cmp !== 0) return cmp;
+      } else if (key === "duration") {
+        cmp = compareDurationValues(this.durationMs.get(a), this.durationMs.get(b), direction);
+        if (cmp !== 0) return cmp;
+      }
+      return (this._initialOrder.get(a) ?? 0) - (this._initialOrder.get(b) ?? 0);
+    });
+  }
+
+  _renderRows() {
+    if (!this._tbody) return;
+    const fragment = document.createDocumentFragment();
+    this.testNames.forEach((name) => {
+      const row = this._rowRefs.get(name)?.row;
+      if (row) fragment.appendChild(row);
+    });
+    this._tbody.appendChild(fragment);
+  }
+
+  _syncSortHeaders() {
+    if (!this._sortHeaderButtons) return;
+    this._sortHeaderButtons.forEach((button, key) => {
+      const active = this._sortState.key === key;
+      const marker = active ? (this._sortState.direction === "asc" ? " ▲" : " ▼") : "";
+      const label = button.dataset.label || button.textContent.replace(/[ ▲▼]+$/u, "");
+      button.dataset.label = label;
+      button.textContent = `${label}${marker}`;
+      button.setAttribute("aria-sort", active ? (this._sortState.direction === "asc" ? "ascending" : "descending") : "none");
+      button.title = active
+        ? `Sort ${label} ${this._sortState.direction === "asc" ? "descending" : "ascending"}`
+        : `Sort ${label}`;
+    });
   }
 
   _applySelectionStyles() {
@@ -319,11 +495,108 @@ export class BrowserTesting {
     });
   }
 
+  _scrollRowIntoView(name = this.testNames[this.currentIndex]) {
+    const row = this._rowRefs.get(name)?.row;
+    if (!row) return;
+
+    const scrollContainer = this.ui?.window?.content || row.closest?.(".floating-window__content");
+    if (scrollContainer) {
+      try {
+        const rowRect = row.getBoundingClientRect();
+        const containerRect = scrollContainer.getBoundingClientRect();
+        const headerRect = this.ui?.table?.querySelector?.("thead")?.getBoundingClientRect?.();
+        const stickyHeaderHeight = headerRect ? Math.max(0, Math.min(headerRect.height, containerRect.height)) : 0;
+        const visibleTop = containerRect.top + stickyHeaderHeight;
+        const visibleBottom = containerRect.bottom;
+        const fullyVisible = rowRect.top >= visibleTop && rowRect.bottom <= visibleBottom;
+        if (fullyVisible) return;
+      } catch {}
+    }
+
+    try {
+      row.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "auto" });
+    } catch {
+      try { row.scrollIntoView(false); } catch {}
+    }
+  }
+
+  _setAllEnabled(enabled) {
+    const nextEnabled = Boolean(enabled);
+    this.testNames.forEach((name) => {
+      this.enabled.set(name, nextEnabled);
+      const ref = this._rowRefs.get(name);
+      if (ref?.checkbox) ref.checkbox.checked = nextEnabled;
+    });
+    this._syncSelectAllCheckbox();
+  }
+
+  _syncSelectAllCheckbox() {
+    const total = this.testNames.length;
+    const enabledCount = this.testNames.reduce((count, name) => (
+      this.enabled.get(name) ? count + 1 : count
+    ), 0);
+
+    if (this._selectAllCheckbox) {
+      this._selectAllCheckbox.checked = total > 0 && enabledCount === total;
+      this._selectAllCheckbox.indeterminate = enabledCount > 0 && enabledCount < total;
+      this._selectAllCheckbox.title = enabledCount === total
+        ? "Uncheck all tests"
+        : "Check all tests";
+    }
+
+    if (this._runSelectedButton) {
+      const disabled = enabledCount === 0 || this._isRunningSelected;
+      this._runSelectedButton.disabled = disabled;
+      this._runSelectedButton.style.opacity = disabled ? "0.5" : "1";
+      this._runSelectedButton.style.cursor = disabled ? "not-allowed" : "pointer";
+      this._runSelectedButton.title = this._isRunningSelected
+        ? "Selected tests are running"
+        : `Run ${enabledCount} selected test${enabledCount === 1 ? "" : "s"}`;
+    }
+  }
+
+  _requestStop() {
+    if (!this._isRunningSelected) return;
+    this._stopRequested = true;
+    this._syncStopButton();
+  }
+
+  _syncStopButton() {
+    if (!this._stopButton) return;
+    const disabled = !this._isRunningSelected || this._stopRequested;
+    this._stopButton.disabled = disabled;
+    this._stopButton.style.opacity = disabled ? "0.5" : "1";
+    this._stopButton.style.cursor = disabled ? "not-allowed" : "pointer";
+    this._stopButton.title = this._stopRequested
+      ? "Stop requested"
+      : (this._isRunningSelected ? "Stop after current test" : "No selected run is active");
+  }
+
   // ====== Status + error helpers ======
   _setStatus(name, value /* "", "pass", "fail" */) {
     this.status.set(name, value);
     const ref = this._rowRefs.get(name);
     if (ref) updateStatusCell(ref.statusCell, value);
+    this._resortAfterValueChange("status");
+  }
+
+  _setDuration(name, value) {
+    this.durationMs.set(name, value);
+    const ref = this._rowRefs.get(name);
+    if (ref) updateDurationCell(ref.durationCell, value);
+    this._resortAfterValueChange("duration");
+  }
+
+  _resortAfterValueChange(key) {
+    if (this._sortState.key !== key) return;
+    const selectedName = this.testNames[this.currentIndex] || null;
+    this._sortTests();
+    if (selectedName) {
+      const nextIndex = this.testNames.indexOf(selectedName);
+      if (nextIndex >= 0) this.currentIndex = nextIndex;
+    }
+    this._renderRows();
+    this._applySelectionStyles();
   }
 
   _setError(name, error) {
@@ -406,17 +679,32 @@ export class BrowserTesting {
 
   // ====== Execution helpers ======
   async _runSingleByName(name) {
+    if (!name) return;
+    const runStartMs = getNowMs();
+    const functionToRun = testFunctions.find(func => func.test.name === name);
     // clear previous error for this test
     this._setError(name, null);
     this._setStatus(name, "");
+    this._setDuration(name, "running");
 
     // Visually mark as running
     const ref = this._rowRefs.get(name);
     if (ref) {
       ref.row.style.background = "#151726";
     }
+    this._scrollRowIntoView(name);
 
-    const functionToRun = testFunctions.find(func => func.test.name === name);
+    if (!functionToRun) {
+      const err = new Error(`Unknown test: ${name}`);
+      this._setError(name, err);
+      this._setStatus(name, "fail");
+      if (ref) {
+        const idx = this.testNames.indexOf(name);
+        ref.row.style.background = idx === this.currentIndex ? "#12131a" : "transparent";
+      }
+      this._setDuration(name, getNowMs() - runStartMs);
+      return;
+    }
 
     try {
       // Try a single-test runner if provided; otherwise fall back to calling the function directly.
@@ -447,6 +735,7 @@ export class BrowserTesting {
       this._setError(name, err);
       this._setStatus(name, "fail");
     } finally {
+      this._setDuration(name, getNowMs() - runStartMs);
       // restore background depending on selection
       const idx = this.testNames.indexOf(name);
       if (ref) {
@@ -486,17 +775,31 @@ export class BrowserTesting {
   }
 
 
-  async _runAllEnabled() {
+  async _runSelected() {
+    if (this._isRunningSelected) return;
+
+    this._isRunningSelected = true;
+    this._stopRequested = false;
+    this._syncSelectAllCheckbox();
+    this._syncStopButton();
+
     // Reset quick screenshot board
     this.popupDiv.innerHTML = "";
 
-    for (let i = 0; i < this.testNames.length; i++) {
-      const name = this.testNames[i];
-      if (!this.enabled.get(name)) continue;
-      this._selectRow(i);
-       
-      await this._runSingleByName(name);
-       
+    try {
+      for (let i = 0; i < this.testNames.length; i++) {
+        if (this._stopRequested) break;
+        const name = this.testNames[i];
+        if (!this.enabled.get(name)) continue;
+        this._selectRow(i);
+
+        await this._runSingleByName(name);
+      }
+    } finally {
+      this._isRunningSelected = false;
+      this._stopRequested = false;
+      this._syncSelectAllCheckbox();
+      this._syncStopButton();
     }
   }
 }
@@ -514,6 +817,11 @@ function darkButtonStyle() {
     outline: "none",
     transition: "background 120ms ease, transform 60ms ease, box-shadow 120ms ease",
     userSelect: "none",
+    minWidth: "0",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    width: "100%",
   };
 }
 function decorateButtonHover(btn) {
@@ -541,6 +849,50 @@ function makeButton(label) {
   decorateButtonHover(btn);
   return btn;
 }
+function makeHeaderButton(label, title) {
+  const btn = document.createElement("button");
+  btn.className = "fw-btn";
+  btn.type = "button";
+  btn.textContent = label;
+  btn.title = title;
+  btn.setAttribute("aria-label", title);
+  btn.style.minWidth = "36px";
+  btn.style.textAlign = "center";
+  btn.style.fontSize = "14px";
+  btn.style.lineHeight = "1";
+  return btn;
+}
+function sortHeaderButton(label) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.dataset.label = label;
+  btn.textContent = label;
+  Object.assign(btn.style, {
+    appearance: "none",
+    background: "transparent",
+    border: "0",
+    color: "#9aa0aa",
+    cursor: "pointer",
+    display: "block",
+    font: "inherit",
+    fontWeight: "600",
+    margin: "0",
+    minWidth: "0",
+    overflow: "hidden",
+    padding: "0",
+    textAlign: "left",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    width: "100%",
+  });
+  btn.addEventListener("mouseenter", () => {
+    btn.style.color = "#e5e7eb";
+  });
+  btn.addEventListener("mouseleave", () => {
+    btn.style.color = "#9aa0aa";
+  });
+  return btn;
+}
 function miniButton(label) {
   const btn = makeButton(label);
   btn.style.padding = "3px";
@@ -552,10 +904,18 @@ function th(text, width) {
   const th = document.createElement("th");
   th.textContent = text;
   th.style.textAlign = "left";
-  th.style.padding = "10px 12px";
+  th.style.padding = "8px 6px";
   th.style.borderBottom = "1px solid #23232b";
   th.style.color = "#9aa0aa";
   th.style.fontWeight = "600";
+  th.style.background = "#0b0b0e";
+  th.style.position = "sticky";
+  th.style.top = "0";
+  th.style.zIndex = "3";
+  th.style.overflow = "hidden";
+  th.style.textOverflow = "ellipsis";
+  th.style.whiteSpace = "nowrap";
+  th.style.boxSizing = "border-box";
   if (width) th.style.width = width;
   return th;
 }
@@ -566,10 +926,83 @@ function rowStyle() {
 }
 function cellStyle() {
   return {
-    padding: "3px 12px",
+    padding: "3px 6px",
     verticalAlign: "middle",
-
+    boxSizing: "border-box",
   };
+}
+function truncateTextStyle() {
+  return {
+    display: "block",
+    minWidth: "0",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  };
+}
+function compareStatusValues(a, b, direction = "asc") {
+  const rank = (value) => {
+    if (value === "fail") return 0;
+    if (value === "pass") return 1;
+    return 2;
+  };
+  const aRank = rank(a);
+  const bRank = rank(b);
+  const aEmpty = aRank === 2;
+  const bEmpty = bRank === 2;
+  if (aEmpty !== bEmpty) return aEmpty ? 1 : -1;
+  const cmp = aRank - bRank;
+  return direction === "desc" ? -cmp : cmp;
+}
+function compareDurationValues(a, b, direction = "asc") {
+  const aNumber = typeof a === "number" && Number.isFinite(a);
+  const bNumber = typeof b === "number" && Number.isFinite(b);
+  if (aNumber && bNumber) {
+    const cmp = a - b;
+    return direction === "desc" ? -cmp : cmp;
+  }
+  if (aNumber) return -1;
+  if (bNumber) return 1;
+  if (a === b) return 0;
+  if (a === "running") return -1;
+  if (b === "running") return 1;
+  return 0;
+}
+function getNowMs() {
+  try {
+    if (typeof performance !== "undefined" && typeof performance.now === "function") {
+      return performance.now();
+    }
+  } catch {}
+  return Date.now();
+}
+function formatDurationMs(value) {
+  const ms = Math.max(0, Number(value) || 0);
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 10000) return `${(ms / 1000).toFixed(2)}s`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = String(totalSeconds % 60).padStart(2, "0");
+  return `${minutes}:${seconds}`;
+}
+function updateDurationCell(cell, value) {
+  cell.textContent = "";
+  const label = document.createElement("span");
+  const isRunning = value === "running";
+  const text = isRunning ? "..." : (value == null ? "" : formatDurationMs(value));
+  label.textContent = text;
+  label.title = isRunning ? "Running" : text;
+  label.style.display = "block";
+  label.style.maxWidth = "100%";
+  label.style.overflow = "hidden";
+  label.style.textOverflow = "ellipsis";
+  label.style.whiteSpace = "nowrap";
+  label.style.textAlign = "right";
+  label.style.color = isRunning ? "#dbeafe" : "#a7aab3";
+  label.style.fontVariantNumeric = "tabular-nums";
+  cell.appendChild(label);
 }
 function updateStatusCell(cell, value) {
   // value: "", "pass", "fail"
@@ -580,6 +1013,11 @@ function updateStatusCell(cell, value) {
   badge.style.letterSpacing = "0.5px";
   badge.style.padding = value ? "2px 8px" : "0";
   badge.style.borderRadius = "999px";
+  badge.style.display = "inline-block";
+  badge.style.maxWidth = "100%";
+  badge.style.overflow = "hidden";
+  badge.style.textOverflow = "ellipsis";
+  badge.style.boxSizing = "border-box";
   if (value === "pass") {
     badge.style.background = "#093d2a";
     badge.style.color = "#86efac";

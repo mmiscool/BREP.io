@@ -30,6 +30,7 @@ export class FloatingWindow {
     this._moveThreshold = 5; // px to distinguish click vs drag
     this._wasTopmostOnPointerDown = false;
     this._closable = closable !== false;
+    this._isTransparent = false;
     this._visibilityObserver = null;
     this._lastVisible = null;
     this.onClose = (typeof onClose === 'function') ? onClose : null;
@@ -75,7 +76,9 @@ export class FloatingWindow {
     actions.className = 'floating-window__actions';
     header.appendChild(titleEl);
     header.appendChild(actions);
+    const transparencyBtn = this._buildTransparencyButton();
     const closeBtn = this._closable ? this._buildCloseButton() : null;
+    actions.appendChild(transparencyBtn);
     if (closeBtn) actions.appendChild(closeBtn);
 
     // Content
@@ -104,6 +107,7 @@ export class FloatingWindow {
     this.actionsEl = actions;
     this.content = content;
     this.resizers = resizers;
+    this.transparencyButton = transparencyBtn;
     this.closeButton = closeBtn;
 
     // Initial shaded state
@@ -137,12 +141,19 @@ export class FloatingWindow {
   destroy() {
     try { this._visibilityObserver?.disconnect?.(); } catch {}
     try { this.root && this.root.parentNode && this.root.parentNode.removeChild(this.root); } catch {}
-    this.root = null; this.header = null; this.actionsEl = null; this.titleEl = null; this.content = null; this.resizers = null; this.closeButton = null;
+    this.root = null; this.header = null; this.actionsEl = null; this.titleEl = null; this.content = null; this.resizers = null; this.transparencyButton = null; this.closeButton = null;
   }
 
   setTitle(text) { if (this.titleEl) this.titleEl.textContent = String(text || ''); }
   addHeaderAction(el) {
     if (!el || !this.actionsEl) return;
+    const anchor = this.transparencyButton && this.transparencyButton.parentNode === this.actionsEl
+      ? this.transparencyButton
+      : this.closeButton;
+    if (anchor && anchor.parentNode === this.actionsEl) {
+      this.actionsEl.insertBefore(el, anchor);
+      return;
+    }
     if (this.closeButton && this.closeButton.parentNode === this.actionsEl) {
       this.actionsEl.insertBefore(el, this.closeButton);
     } else {
@@ -157,6 +168,19 @@ export class FloatingWindow {
     if (this.root) this.root.style.display = 'none';
   }
   bringToFront() { this._bringToFront(); }
+  setTransparent(transparent) {
+    this._isTransparent = Boolean(transparent);
+    if (!this.root) return;
+    this.root.classList.toggle('is-transparent', this._isTransparent);
+    if (this.transparencyButton) {
+      this.transparencyButton.setAttribute('aria-pressed', this._isTransparent ? 'true' : 'false');
+      this.transparencyButton.setAttribute('title', this._isTransparent ? 'Disable transparency' : 'Enable transparency');
+    }
+    try {
+      this.root.dispatchEvent(new CustomEvent('transparencychange', { detail: { transparent: this._isTransparent } }));
+    } catch {}
+  }
+  toggleTransparent() { this.setTransparent(!this._isTransparent); }
   _bringToFrontIfVisible() {
     const visible = this._isVisible();
     this._lastVisible = visible;
@@ -245,6 +269,21 @@ export class FloatingWindow {
     } catch {}
   }
   toggleShaded() { this.setShaded(!this._isShaded); }
+
+  _buildTransparencyButton() {
+    const btn = document.createElement('button');
+    btn.className = 'fw-btn floating-window__transparency';
+    btn.type = 'button';
+    btn.textContent = '◐';
+    btn.setAttribute('aria-label', 'Toggle transparency');
+    btn.setAttribute('aria-pressed', 'false');
+    btn.setAttribute('title', 'Enable transparency');
+    btn.addEventListener('click', (ev) => {
+      try { ev.stopPropagation(); } catch {}
+      this.toggleTransparent();
+    });
+    return btn;
+  }
 
   _buildCloseButton() {
     const btn = document.createElement('button');
@@ -353,12 +392,18 @@ export class FloatingWindow {
     style.id = 'floating-window-styles';
     style.textContent = `
       .floating-window { position: fixed; background:#0b0b0e; color:#e5e7eb; border:1px solid #2a2a33; border-radius:12px; box-shadow:0 10px 28px rgba(0,0,0,.55); display:flex; flex-direction:column; overflow:hidden; user-select:none; }
+      .floating-window.is-transparent { opacity:.58; }
+      .floating-window.is-transparent:hover,
+      .floating-window.is-transparent:focus-within,
+      .floating-window.is-transparent.is-resizing { opacity:.78; }
       .floating-window.is-shaded { overflow:hidden; }
       .floating-window__header { display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #23232b; cursor:grab; font:600 13px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; letter-spacing:.2px; }
       .floating-window__title { flex:1; }
       .floating-window__actions { display:flex; align-items:center; gap:6px; }
       .floating-window__actions .fw-btn { background:#1f2937; color:#f9fafb; border:1px solid #374151; padding:6px 8px; border-radius:8px; cursor:pointer; font:700 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
       .floating-window__actions .fw-btn:hover { background:#2b3545; }
+      .floating-window__actions .floating-window__transparency { padding:4px 8px; border-radius:8px; color:#f1f5f9; }
+      .floating-window__actions .floating-window__transparency[aria-pressed="true"] { background:#334155; border-color:#64748b; }
       .floating-window__actions .floating-window__close { padding:4px 8px; border-radius:8px; color:#f1f5f9; }
       .floating-window__actions .floating-window__close:hover { background:#3a1f24; border-color:#5b2a33; }
       .floating-window__content { flex:1; overflow:auto; padding:8px; user-select:text; }
