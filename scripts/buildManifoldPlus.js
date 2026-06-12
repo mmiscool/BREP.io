@@ -53,6 +53,17 @@ const prependToPath = (dir) => {
   process.env.PATH = [dir, ...segments].join(path.delimiter);
 };
 
+const commandAvailable = (command) => {
+  const result = spawnSync(command, ["--version"], {
+    cwd: rootDir,
+    stdio: "ignore",
+    shell: false,
+  });
+  return result.status === 0;
+};
+
+const emscriptenToolsAvailable = () => commandAvailable("emcmake") && commandAvailable("emcc");
+
 const runWithEmscripten = (commandText) => {
   if (isWindows) {
     throw new Error(
@@ -64,11 +75,15 @@ const runWithEmscripten = (commandText) => {
   const quotedCache = emCacheDir.replaceAll('"', '\\"');
   run("bash", [
     "-lc",
-    `cd "${emsdkDir}" && ./emsdk install ${emsdkVersion} >/dev/null && source "${emsdkEnvScript}" >/dev/null && export EM_CACHE="${quotedCache}" && mkdir -p "${quotedCache}" && cd "${rootDir}" && ${quoted}`,
+    `cd "${emsdkDir}" && ./emsdk install ${emsdkVersion} >/dev/null && ./emsdk activate ${emsdkVersion} >/dev/null && source "${emsdkEnvScript}" >/dev/null && export EM_CACHE="${quotedCache}" && mkdir -p "${quotedCache}" && cd "${rootDir}" && ${quoted}`,
   ]);
 };
 
 const runEmscriptenCommand = (command, args) => {
+  if (!existsSync(emsdkEnvScript) && (command === "emcmake" || command === "emcc") && !emscriptenToolsAvailable()) {
+    run("node", ["./scripts/installEmscripten.js"]);
+  }
+
   if (existsSync(emsdkEnvScript)) {
     const commandText = [command, ...args].join(" ");
     runWithEmscripten(commandText);

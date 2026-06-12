@@ -7,6 +7,7 @@
     "build": "pnpm prepareFonts && pnpm build:kernel && vite build",
     "build:cloudflare": "node ./scripts/buildCloudflare.js",
     "build:manifoldPlus": "node ./scripts/buildManifoldPlus.js",
+    "install:emscripten": "node ./scripts/installEmscripten.js",
     "buildThreadGeometry": "node ./scripts/prepareManifoldRuntime.js && node ./scripts/bootstrapThreadGeometryCatalog.js && node ./scripts/buildThreadGeometry.js",
     "build:kernel": "node ./scripts/prepareManifoldRuntime.js && pnpm generateLicenses && vite build --config vite.config.kernel.js && node ./scripts/syncKernelAssets.js",
     "lint": "eslint .",
