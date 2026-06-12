@@ -43,7 +43,7 @@ function _ensureStyles() {
     }
     .selection-state-item {
       display: grid;
-      grid-template-columns: auto 1fr;
+      grid-template-columns: auto minmax(0, 1fr) auto;
       gap: 6px 10px;
       align-items: center;
       padding: 4px 6px;
@@ -62,6 +62,26 @@ function _ensureStyles() {
       font-size: 12px;
       color: #e5e7eb;
       word-break: break-word;
+    }
+    .selection-state-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+    }
+    .selection-state-action {
+      background: #1b2433;
+      color: #e5e7eb;
+      border: 1px solid #2a3442;
+      border-radius: 6px;
+      padding: 4px 7px;
+      cursor: pointer;
+      font-size: 11px;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+    .selection-state-action:hover {
+      filter: brightness(1.12);
     }
     .selection-state-empty {
       color: #9aa0aa;
@@ -82,6 +102,22 @@ function _labelFor(obj) {
     || obj.userData?.name
     || null;
   return name || '(unnamed)';
+}
+
+function _makeActionButton(label, title, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'selection-state-action';
+  button.textContent = label;
+  button.title = title;
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    try { onClick(); } catch (err) {
+      try { console.warn(`[SelectionStatePanel] ${label} action failed:`, err); } catch { }
+    }
+  });
+  return button;
 }
 
 class SelectionStatePanel {
@@ -158,6 +194,31 @@ class SelectionStatePanel {
     this._render();
   }
 
+  _openPropertiesFor(obj) {
+    if (!obj || !this.viewer) return;
+    if (typeof this.viewer._openInspectorPanel === 'function') {
+      this.viewer._openInspectorPanel();
+    } else if (typeof this.viewer.toggleInspectorPanel === 'function' && !this.viewer._inspectorOpen) {
+      this.viewer.toggleInspectorPanel();
+    }
+    if (typeof this.viewer._updateInspectorFor === 'function') {
+      this.viewer._updateInspectorFor(obj);
+    }
+  }
+
+  _openMetadataFor(obj) {
+    if (!obj || !this.viewer) return;
+    const controller = this.viewer.__metadataPanelController || null;
+    if (controller && typeof controller.openPanel === 'function' && typeof controller.handleSelection === 'function') {
+      controller.openPanel();
+      controller.handleSelection(obj);
+      return;
+    }
+    if (typeof this.viewer.handleMetadataSelection === 'function') {
+      this.viewer.handleMetadataSelection(obj);
+    }
+  }
+
   _render() {
     const list = this.listEl;
     const countEl = this.countEl;
@@ -185,8 +246,13 @@ class SelectionStatePanel {
       const name = document.createElement('div');
       name.className = 'selection-state-name';
       name.textContent = _labelFor(obj);
+      const actions = document.createElement('div');
+      actions.className = 'selection-state-actions';
+      actions.appendChild(_makeActionButton('Properties', `Open properties for ${_labelFor(obj)}`, () => this._openPropertiesFor(obj)));
+      actions.appendChild(_makeActionButton('Metadata', `Open metadata for ${_labelFor(obj)}`, () => this._openMetadataFor(obj)));
       row.appendChild(type);
       row.appendChild(name);
+      row.appendChild(actions);
       list.appendChild(row);
     }
   }

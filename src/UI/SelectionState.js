@@ -420,7 +420,7 @@ export class SelectionState {
             if (!force) return;
             SelectionState._clearHover(target);
         }
-        if (SelectionState._shouldUseInPlaceHover(target, rootType)) {
+        if (SelectionState._shouldUseInPlaceHover(target)) {
             if (SelectionState._applyInPlaceHoverColor(target, ud)) return;
         }
         const hoverBase = ud.__hoverMaterial || null;
@@ -489,7 +489,7 @@ export class SelectionState {
         }
     }
 
-    static _shouldUseInPlaceHover(target, rootType) {
+    static _shouldUseInPlaceHover(target) {
         if (!target) return false;
         if (target.userData?.sketchFeatureId || target.userData?.sketchGeometryId != null) return true;
         let parent = target.parent || null;
