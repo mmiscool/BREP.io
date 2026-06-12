@@ -27,7 +27,7 @@ const run = (command, args, options = {}) => {
 };
 
 const commandAvailable = (command) => {
-  const result = spawnSync(command, ["--version"], {
+  const result = spawnSync("bash", ["-c", `command -v ${quoteForBash(command)} >/dev/null 2>&1`], {
     cwd: rootDir,
     stdio: "ignore",
     shell: false,
@@ -65,8 +65,9 @@ git fetch --tags --force
 ./emsdk install ${quotedVersion}
 ./emsdk activate ${quotedVersion}
 source ${quoteForBash(envScript)} >/dev/null
+command -v emcc >/dev/null
+command -v emcmake >/dev/null
 emcc --version
-emcmake --version >/dev/null
 cd ${quotedRootDir}
 `.trim();
 

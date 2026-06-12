@@ -54,7 +54,8 @@ const prependToPath = (dir) => {
 };
 
 const commandAvailable = (command) => {
-  const result = spawnSync(command, ["--version"], {
+  const safeCommand = String(command).replaceAll("'", "'\\''");
+  const result = spawnSync("bash", ["-c", `command -v '${safeCommand}' >/dev/null 2>&1`], {
     cwd: rootDir,
     stdio: "ignore",
     shell: false,
