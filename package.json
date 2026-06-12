@@ -7,12 +7,11 @@
     "build": "pnpm prepareFonts && pnpm build:kernel && vite build",
     "build:cloudflare": "node ./scripts/buildCloudflare.js",
     "build:manifoldPlus": "node ./scripts/buildManifoldPlus.js",
-    "install:emscripten": "node ./scripts/installEmscripten.js",
     "buildThreadGeometry": "node ./scripts/prepareManifoldRuntime.js && node ./scripts/bootstrapThreadGeometryCatalog.js && node ./scripts/buildThreadGeometry.js",
     "build:kernel": "node ./scripts/prepareManifoldRuntime.js && pnpm generateLicenses && vite build --config vite.config.kernel.js && node ./scripts/syncKernelAssets.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "liveTesting": "nodemon --watch src --ignore \"src/generated/**\" --ext js --exec \"pnpm test\"",
+    "liveTesting": "node --watch --watch-preserve-output ./scripts/liveTesting.js",
     "test": "node ./scripts/prepareManifoldRuntime.js && node ./src/tests/tests.js",
     "generateLicenses": "node ./generateLicenses.js && node ./scripts/generateLicenseBundle.js",
     "prepareFonts": "node ./scripts/prepareFontAssets.js",
@@ -75,7 +74,6 @@
     "vite-plugin-wasm": "^3.5.0",
     "eslint": "^9.39.3",
     "globals": "^16.5.0",
-    "nodemon": "^3.1.14",
     "playwright": "^1.58.2",
     "vite": "^7.3.1"
   }

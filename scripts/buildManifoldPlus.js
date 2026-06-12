@@ -7,7 +7,7 @@ const rootDir = process.cwd();
 const sourceDir = path.join(rootDir, "manifold-plus");
 const buildDir = path.join(sourceDir, "build");
 const distDir = path.join(sourceDir, "dist");
-const emsdkDir = process.env.EMSDK || path.join(os.homedir(), "emsdk");
+const emsdkDir = process.env.EMSDK || path.join(rootDir, "vendor", "emsdk");
 const emsdkEnvScript = path.join(emsdkDir, "emsdk_env.sh");
 const emsdkVersion = "3.1.64";
 const emCacheDir = path.join(rootDir, ".emscripten_cache");
@@ -22,6 +22,8 @@ const cmakeBinary = isWindows
 const pipBinary = isWindows
   ? path.join(cmakeBinDir, "pip.exe")
   : path.join(cmakeBinDir, "pip");
+
+const quoteForBash = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
 
 const run = (command, args, options = {}) => {
   const result = spawnSync(command, args, {
@@ -53,17 +55,11 @@ const prependToPath = (dir) => {
   process.env.PATH = [dir, ...segments].join(path.delimiter);
 };
 
-const commandAvailable = (command) => {
-  const safeCommand = String(command).replaceAll("'", "'\\''");
-  const result = spawnSync("bash", ["-c", `command -v '${safeCommand}' >/dev/null 2>&1`], {
-    cwd: rootDir,
-    stdio: "ignore",
-    shell: false,
-  });
-  return result.status === 0;
+const ensureSubmodules = () => {
+  const paths = ["vendor/manifold3d"];
+  if (!process.env.EMSDK) paths.push("vendor/emsdk");
+  run("git", ["submodule", "update", "--init", "--recursive", "--", ...paths]);
 };
-
-const emscriptenToolsAvailable = () => commandAvailable("emcmake") && commandAvailable("emcc");
 
 const runWithEmscripten = (commandText) => {
   if (isWindows) {
@@ -72,26 +68,33 @@ const runWithEmscripten = (commandText) => {
     );
   }
 
-  const quoted = commandText.replaceAll('"', '\\"');
-  const quotedCache = emCacheDir.replaceAll('"', '\\"');
+  const quotedCache = quoteForBash(emCacheDir);
   run("bash", [
     "-c",
-    `cd "${emsdkDir}" && ./emsdk install ${emsdkVersion} >/dev/null && ./emsdk activate ${emsdkVersion} >/dev/null && source "${emsdkEnvScript}" >/dev/null && export EM_CACHE="${quotedCache}" && mkdir -p "${quotedCache}" && cd "${rootDir}" && ${quoted}`,
+    [
+      "set -eo pipefail",
+      `cd ${quoteForBash(emsdkDir)}`,
+      `./emsdk install ${quoteForBash(emsdkVersion)} >/dev/null`,
+      `./emsdk activate ${quoteForBash(emsdkVersion)} >/dev/null`,
+      `source ${quoteForBash(emsdkEnvScript)} >/dev/null`,
+      `export EM_CACHE=${quotedCache}`,
+      `mkdir -p ${quotedCache}`,
+      `cd ${quoteForBash(rootDir)}`,
+      commandText,
+    ].join(" && "),
   ]);
 };
 
 const runEmscriptenCommand = (command, args) => {
-  if (!existsSync(emsdkEnvScript) && (command === "emcmake" || command === "emcc") && !emscriptenToolsAvailable()) {
-    run("node", ["./scripts/installEmscripten.js"]);
+  if (!existsSync(path.join(emsdkDir, "emsdk"))) {
+    const location = process.env.EMSDK ? emsdkDir : path.relative(rootDir, emsdkDir);
+    throw new Error(
+      `EMSDK checkout not found at '${location}'. Run 'git submodule update --init --recursive' and retry.`
+    );
   }
 
-  if (existsSync(emsdkEnvScript)) {
-    const commandText = [command, ...args].join(" ");
-    runWithEmscripten(commandText);
-    return;
-  }
-
-  run(command, args);
+  const commandText = [command, ...args].map(quoteForBash).join(" ");
+  runWithEmscripten(commandText);
 };
 
 const ensureCmakeAvailable = () => {
@@ -156,9 +159,11 @@ const applyBrowserEmbindDestructorGuard = (jsPath) => {
 };
 
 try {
+  ensureSubmodules();
+
   if (!existsSync(path.join(rootDir, "vendor", "manifold3d", "CMakeLists.txt"))) {
     throw new Error(
-      "Missing manifold3d submodule. Run 'git submodule update --init --recursive' and retry."
+      "Missing manifold3d submodule after automatic initialization."
     );
   }
 

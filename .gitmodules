@@ -1,3 +1,6 @@
 [submodule "vendor/manifold3d"]
 	path = vendor/manifold3d
 	url = https://github.com/elalish/manifold.git
+[submodule "vendor/emsdk"]
+	path = vendor/emsdk
+	url = https://github.com/emscripten-core/emsdk.git

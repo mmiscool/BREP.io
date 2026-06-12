@@ -126,7 +126,6 @@ Prerequisites:
 - Node.js 18+
 - `pnpm`
 - `git submodule update --init --recursive`
-- Emscripten SDK (`emcmake`/`emcc` on `PATH`, or run `pnpm install:emscripten`)
 
 Install and run locally:
 
@@ -146,8 +145,7 @@ Then open the Vite URL shown in your terminal.
 |---|---|
 | `pnpm dev` | Prepares fonts, builds the kernel bundle, then runs the Vite dev server. |
 | `pnpm build` | Production build of the app into `dist/` (includes kernel build step). |
-| `pnpm build:manifoldPlus` | Builds the local manifold wasm/js bundle from the `vendor/manifold3d` submodule plus local custom bindings. |
-| `pnpm install:emscripten` | Installs/activates EMSDK if `emcmake`/`emcc` are missing. Uses `$EMSDK` or `$HOME/emsdk`; override the version with `$EMSDK_VERSION`. |
+| `pnpm build:manifoldPlus` | Builds the local manifold wasm/js bundle from the `vendor/manifold3d` submodule plus local custom bindings, using project-local EMSDK from `vendor/emsdk`. |
 | `pnpm build:kernel` | Builds the ESM kernel bundle into `dist-kernel/` and syncs assets. |
 | `pnpm use:manifold:npm` | Switches runtime/builds to the published `manifold-3d` npm package. |
 | `pnpm use:manifold:local` | Switches runtime/builds to the locally compiled manifold bundle. |
@@ -166,8 +164,8 @@ Build outputs:
 
 The kernel build compiles a custom wasm bundle from the `vendor/manifold3d` git submodule. CI environments must:
 
-- fetch submodules
-- install Emscripten/EMSDK before running `pnpm build` (`pnpm install:emscripten` can bootstrap it)
+- fetch submodules, including `vendor/emsdk`
+- allow `pnpm build` to download the pinned project-local Emscripten SDK payload through `vendor/emsdk`
 
 This repo includes GitHub Actions workflows for:
 
