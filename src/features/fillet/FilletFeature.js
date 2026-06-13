@@ -17,11 +17,11 @@ const DEBUG_MODE_CONSOLE_LOG_PROCESS = "CONSOLE.LOG PROCESS";
 const DEBUG_MODE_WEDGE_AND_TUBE = "WEDGE AND TUBE";
 const DEBUG_MODE_WEDGE_AND_TUBE_AFTER_BOOLEAN = "WEDGE AND TUBE AFTER BOOLEAN";
 const DEBUG_MODE_COMBINED_BEFORE_TARGET = "COMBINED FILLET BEFORE TARGET BOOLEAN";
-const FINAL_FILLET_SIMPLIFY_TOLERANCE = 0.0009;
+const FINAL_FILLET_SIMPLIFY_TOLERANCE = 0.001;
 const FILLET_NATIVE_TINY_FACE_ISLAND_CLEANUP_AREA = 0.01;
 const FILLET_POST_COLLAPSE_TINY_TRIANGLE_THRESHOLD = 0.001;
 const FILLET_POST_COLLAPSE_TINY_FACE_ISLAND_CLEANUP_AREA = 0.01;
-const FILLET_CACHE_VERSION = 6;
+const FILLET_CACHE_VERSION = 8;
 
 const inputParamsSchema = {
     id: {
@@ -84,6 +84,11 @@ const inputParamsSchema = {
         type: "boolean",
         default_value: true,
         hint: "Allow fillet cleanup to rename/relabel generated faces.",
+    },
+    collapseFilletSideWalls: {
+        type: "boolean",
+        default_value: true,
+        hint: "Collapse fillet wedge sidewall triangles into the round face.",
     },
 };
 
@@ -398,6 +403,7 @@ function buildFilletCacheKey({
     direction,
     inflate,
     nudgeFaceDistance,
+    collapseFilletSideWalls,
 }) {
     const faceStateCache = new Map();
     const edgeSignatures = (Array.isArray(edgeObjs) ? edgeObjs : [])
@@ -413,6 +419,7 @@ function buildFilletCacheKey({
             direction,
             inflate,
             nudgeFaceDistance,
+            collapseFilletSideWalls,
         }),
         edgeSignatures,
         dependencyHash: stableValueHash({
@@ -997,6 +1004,8 @@ export class FilletFeature {
 
         let result = null;
         const renameFaces = this.inputParams?.renameFaces !== false;
+        const collapseFilletSideWalls = this.inputParams?.collapseFilletSideWalls !== false;
+        const finalFilletSimplifyEnabled = true;
         const inflateInput = Number(this.inputParams.inflate) || 0;
         const inflate = inflateInput === 0 ? r * 0.1 : inflateInput;
         const nudgeFaceDistance = this.inputParams?.nudgeFaceDistance;
@@ -1009,6 +1018,7 @@ export class FilletFeature {
             direction: dir,
             inflate,
             nudgeFaceDistance,
+            collapseFilletSideWalls,
         });
         profiler.end('build dependency signature', { edges: cacheKey.edgeSignatures.length });
         const cacheEntry = this.persistentData?.filletSolidCache || null;
@@ -1061,6 +1071,7 @@ export class FilletFeature {
                 cleanupTinyFaceIslandsArea: FILLET_NATIVE_TINY_FACE_ISLAND_CLEANUP_AREA,
                 mergeCoplanarEndCaps: true,
                 renameFaces,
+                collapseFilletSideWalls,
                 reassignSliverTriangles: true,
                 debug: debugEnabled,
                 consoleLogProcess: debugLogsEnabled,
@@ -1071,9 +1082,9 @@ export class FilletFeature {
             profiler.end('native fillet build', { cacheMiss: true });
         }
         try {
-            result.__filletFinalSimplifyEnabled = true;
+            result.__filletFinalSimplifyEnabled = finalFilletSimplifyEnabled;
             result.__filletNativeTinyFaceIslandCleanupEnabled = true;
-            result.__filletSideWallCollapseEnabled = false;
+            result.__filletSideWallCollapseEnabled = collapseFilletSideWalls;
             result.__filletPostCollapseTinyTriangleCollapseEnabled = true;
             result.__filletPostCollapseTinyFaceIslandCleanupEnabled = true;
         } catch { }
@@ -1108,19 +1119,6 @@ export class FilletFeature {
         };
         if (!result) {
             throw new Error(`[FilletFeature] Fillet returned no result for feature ${fid || '(unknown)'}.`);
-        }
-        if (!cacheHit && typeof result.simplify === 'function') {
-            try {
-                const simplifyStart = nowMs();
-                result.simplify(FINAL_FILLET_SIMPLIFY_TOLERANCE, true);
-                profiler.instant('final simplify', simplifyStart, { tolerance: FINAL_FILLET_SIMPLIFY_TOLERANCE });
-            } catch (e) {
-                console.warn('[FilletFeature] Final simplify cleanup failed; keeping unsimplified fillet result.', {
-                    featureID: fid,
-                    tolerance: FINAL_FILLET_SIMPLIFY_TOLERANCE,
-                    error: e,
-                });
-            }
         }
         const { triCount, vertCount } = getSolidGeometryCounts(result);
         if (triCount === 0 || vertCount === 0) {
@@ -1178,6 +1176,21 @@ export class FilletFeature {
             }
             profiler.end('post cleanup and visualize', { objects: added.length });
         }
+        if (finalFilletSimplifyEnabled && !cacheHit && typeof result.simplify === 'function') {
+            try {
+                const simplifyStart = nowMs();
+                result.simplify(FINAL_FILLET_SIMPLIFY_TOLERANCE, true);
+                result.__filletFinalSimplifyEnabled = true;
+                if (typeof result.visualize === 'function') result.visualize();
+                profiler.instant('final simplify', simplifyStart, { tolerance: FINAL_FILLET_SIMPLIFY_TOLERANCE });
+            } catch (e) {
+                console.warn('[FilletFeature] Final simplify cleanup failed; keeping unsimplified fillet result.', {
+                    featureID: fid,
+                    tolerance: FINAL_FILLET_SIMPLIFY_TOLERANCE,
+                    error: e,
+                });
+            }
+        }
 
         profiler.start('write fillet cache');
         const debugSnapshotsForCache = [];
@@ -1205,6 +1218,7 @@ export class FilletFeature {
                     dependencyHash: cacheKey.dependencyHash,
                     edgeSignatures: cacheKey.edgeSignatures,
                     renameFaces,
+                    collapseFilletSideWalls,
                     finalSnapshot: cloneAuthoringSnapshot(buildSolidAuthoringStateSnapshot(result)),
                     debugSnapshots: debugSnapshotsForCache,
                     debugMode: debugModeForCache,

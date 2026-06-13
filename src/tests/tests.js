@@ -110,6 +110,22 @@ import {
     test_generated_history_20260607180752_offset_shell_negative_one_keeps_cleanup,
 } from './test_generated_history_20260607180752.js';
 import {
+    afterRun_generated_history_20260612230031,
+    test_generated_history_20260612230031,
+} from './test_generated_history_20260612230031.js';
+import {
+    afterRun_generated_history_20260612232755,
+    test_generated_history_20260612232755,
+} from './test_generated_history_20260612232755.js';
+import {
+    afterRun_generated_history_20260613000139,
+    test_generated_history_20260613000139,
+} from './test_generated_history_20260613000139.js';
+import {
+    afterRun_generated_history_20260613003952,
+    test_generated_history_20260613003952,
+} from './test_generated_history_20260613003952.js';
+import {
     afterRun_fillet_preserves_original_face_names,
     test_fillet_preserves_original_face_names,
 } from './test_fillet_preserves_original_face_names.js';
@@ -200,6 +216,7 @@ import {
     test_cppSolidNative_buildFilletEdgeAuthoringState_returns_standard_edge_snapshots,
     test_cppSolidNative_collapseFilletSideWallFaces_collapses_away_from_round_face,
     test_cppSolidNative_collapseFilletSideWallFaces_collapses_strip_vertices,
+    test_cppSolidNative_collapseFilletSideWallFaces_moves_shared_endcap_edge_vertices,
     test_cppSolidNative_collapseFilletSideWallFaces_preserves_shared_endpoint_junctions,
     test_cppSolidNative_cleanupTinyFaceIslands_reassigns_small_face_and_prunes_metadata,
     test_cppSolidNative_filletEdge_finalSnapshot_preserves_face_names_and_metadata,
@@ -548,6 +565,7 @@ export const testFunctions = [
     { test: test_cppSolidNative_reassignTinyFilletSidewallSliverTriangles_merges_triangle_whose_vertices_lie_on_single_planar_face_boundary, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_collapseFilletSideWallFaces_collapses_strip_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_collapseFilletSideWallFaces_collapses_away_from_round_face, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cppSolidNative_collapseFilletSideWallFaces_moves_shared_endcap_edge_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_collapseFilletSideWallFaces_preserves_shared_endpoint_junctions, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_open_tube_preserves_expected_face_labels, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppTube_closed_hollow_tube_preserves_expected_face_labels, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -1031,6 +1049,38 @@ export const testFunctions = [
     },
     {
         test: test_generated_history_20260607180752_offset_shell_cleanup_toggles_disable_pipe_collapse,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_generated_history_20260612230031,
+        afterRun: afterRun_generated_history_20260612230031,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_generated_history_20260612232755,
+        afterRun: afterRun_generated_history_20260612232755,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_generated_history_20260613000139,
+        afterRun: afterRun_generated_history_20260613000139,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_generated_history_20260613003952,
+        afterRun: afterRun_generated_history_20260613003952,
         printArtifacts: false,
         exportFaces: false,
         exportSolids: false,

@@ -266,7 +266,7 @@ export const sidebarMethods = {
             } catch { /* ignore */ }
 
             banner = document.createElement('A');
-            banner.href = this._homeBannerUrl || '#';
+            banner.href = this._homeBannerUrl + "../" || '#';
             banner.type = 'button';
             banner.className = 'cad-sidebar-home-banner';
             banner.title = opensExternalHome ? 'Open BREP.io' : 'Back to workspace';
@@ -276,6 +276,7 @@ export const sidebarMethods = {
                 event.stopPropagation();
                 if (this._homeBannerUrl) {
                     try {
+                        console.error('Opening home page' + (this._homeBannerOpenInNewTab ? ' in a new tab.' : '.'));
                         const target = this._homeBannerOpenInNewTab ? '_blank' : '_self';
                         const opened = window.open(
                             this._homeBannerUrl,
@@ -290,6 +291,7 @@ export const sidebarMethods = {
                     }
                     return;
                 }
+                alert('No home URL configured');
                 void navigateHomeWithGuard(this);
             });
 

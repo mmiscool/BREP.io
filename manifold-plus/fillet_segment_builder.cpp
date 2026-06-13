@@ -593,6 +593,38 @@ bool JsonContains(const std::string& json, const std::string& needle) {
   return !json.empty() && json.find(needle) != std::string::npos;
 }
 
+bool IsFilletWedgeSideWallMetadata(const std::string& metadata_json) {
+  return JsonContains(metadata_json, "\"filletWedgeSideWall\":true");
+}
+
+void CollectFilletWedgeSideWallMetadata(
+    const std::unordered_map<std::string, std::string>& source,
+    std::unordered_map<std::string, std::string>& out) {
+  for (const auto& entry : source) {
+    if (IsFilletWedgeSideWallMetadata(entry.second)) {
+      out[entry.first] = entry.second;
+    }
+  }
+}
+
+void ReapplyFilletWedgeSideWallMetadataByName(
+    const std::unordered_map<uint32_t, std::string>& id_to_face_name,
+    std::unordered_map<std::string, std::string>& face_metadata_json,
+    const std::unordered_map<std::string, std::string>& preserved_metadata) {
+  if (preserved_metadata.empty()) return;
+  for (const auto& entry : id_to_face_name) {
+    const std::string& face_name = entry.second;
+    const auto preserved = preserved_metadata.find(face_name);
+    if (preserved == preserved_metadata.end()) continue;
+    const auto current = face_metadata_json.find(face_name);
+    if (current != face_metadata_json.end() &&
+        IsFilletWedgeSideWallMetadata(current->second)) {
+      continue;
+    }
+    face_metadata_json[face_name] = preserved->second;
+  }
+}
+
 double NativeNowMs() {
   using Clock = std::chrono::steady_clock;
   return std::chrono::duration<double, std::milli>(
@@ -1104,28 +1136,60 @@ std::string FilletSourceAreaMetadataJson(double area,
   return json.str();
 }
 
+std::string FilletWedgeSideWallMetadataJson(
+    double area, const std::string& round_face_name,
+    const std::string& edge_reference, const std::string& role) {
+  std::ostringstream json;
+  json.precision(std::numeric_limits<double>::max_digits10);
+  json << "{\"filletSourceArea\":" << area
+       << ",\"filletRoundFace\":\"" << round_face_name << "\""
+       << ",\"filletSideWall\":true"
+       << ",\"filletWedgeSideWall\":true"
+       << ",\"filletSideWallRole\":\"" << role << "\"";
+  if (!edge_reference.empty()) {
+    json << ",\"filletSideWallEdge\":\"" << edge_reference << "\""
+         << ",\"edgeReference\":\"" << edge_reference << "\"";
+  }
+  json << "}";
+  return json.str();
+}
+
 std::unordered_map<std::string, std::string> BuildWedgeMetadata(
-    const emscripten::val& wedge_snapshot, const std::string& name, bool closed) {
+    const emscripten::val& wedge_snapshot, const std::string& name, bool closed,
+    const std::string& edge_reference) {
   std::unordered_map<std::string, std::string> metadata;
   const auto id_to_face_name = BuildResolvedIdToFaceName(wedge_snapshot);
   const std::string round_face_name = name + "_TUBE_Outer";
   for (const auto& entry : id_to_face_name) {
     const std::string& face_name = entry.second;
-    if (face_name != (name + "_WEDGE_A") && face_name != (name + "_WEDGE_B") &&
-        face_name != (name + "_END_CAP_1") && face_name != (name + "_END_CAP_2")) {
+    const bool is_closed_wedge_side =
+        closed && (face_name == (name + "_WEDGE_A") ||
+                   face_name == (name + "_WEDGE_B"));
+    const bool is_open_wedge_side =
+        !closed && (face_name == (name + "_SURFACE_CA") ||
+                    face_name == (name + "_SURFACE_CB"));
+    const bool is_end_cap =
+        face_name == (name + "_END_CAP_1") ||
+        face_name == (name + "_END_CAP_2");
+    if (!is_closed_wedge_side && !is_open_wedge_side && !is_end_cap) {
       continue;
     }
-    if (closed &&
-        (face_name == (name + "_END_CAP_1") || face_name == (name + "_END_CAP_2"))) {
+    if (closed && is_end_cap) {
       continue;
     }
     const double area = ComputeFaceArea(wedge_snapshot, entry.first);
     if (!(area > 0.0)) continue;
-    metadata.emplace(face_name,
-                     FilletSourceAreaMetadataJson(
-                         area, round_face_name,
-                         face_name == (name + "_END_CAP_1") ||
-                             face_name == (name + "_END_CAP_2")));
+    if (is_closed_wedge_side || is_open_wedge_side) {
+      const std::string role =
+          face_name.size() > name.size() + 1 ? face_name.substr(name.size() + 1)
+                                             : face_name;
+      metadata.emplace(face_name,
+                       FilletWedgeSideWallMetadataJson(
+                           area, round_face_name, edge_reference, role));
+    } else {
+      metadata.emplace(face_name,
+                       FilletSourceAreaMetadataJson(area, round_face_name, true));
+    }
   }
   return metadata;
 }
@@ -3516,7 +3580,7 @@ emscripten::val BuildFilletSegmentAuthoringState(const emscripten::val& options)
   const double wedge_metadata_start_ms = NativeNowMs();
   wedge_snapshot = ApplyFaceOpsAndMetadata(
       wedge_snapshot, wedge_push_faces,
-      BuildWedgeMetadata(wedge_snapshot, name, closed));
+      BuildWedgeMetadata(wedge_snapshot, name, closed, edge_reference));
   if (profile) {
     LogNativeFilletProfile(feature_id, "segment wedge metadata/push",
                            NativeNowMs() - wedge_metadata_start_ms);
@@ -5782,7 +5846,7 @@ emscripten::val BuildFilletEdgeAuthoringState(const emscripten::val& options) {
     throw std::runtime_error("Degenerate centerline: all points are identical.");
   }
 
-  constexpr uint32_t kMaxFilletBuildCenterlineSamples = 33;
+  constexpr uint32_t kMaxFilletBuildCenterlineSamples = 64;
   const uint32_t original_centerline_count =
       static_cast<uint32_t>(centerline.size());
   if (original_centerline_count > kMaxFilletBuildCenterlineSamples &&
@@ -6965,6 +7029,7 @@ emscripten::val BuildFilletCombinedAuthoringState(const emscripten::val& options
 
   GroupState inset_group;
   GroupState outset_group;
+  std::unordered_map<std::string, std::string> preserved_wedge_sidewall_metadata;
   const emscripten::val entries = options["entries"];
   if (!entries.isUndefined() && !entries.isNull()) {
     const uint32_t length = entries["length"].as<uint32_t>();
@@ -7016,6 +7081,8 @@ emscripten::val BuildFilletCombinedAuthoringState(const emscripten::val& options
 
       SnapshotInfo info =
           ReadBooleanReadySnapshotInfo(entry_snapshot, merge_target_face_name);
+      CollectFilletWedgeSideWallMetadata(info.face_metadata_json,
+                                         preserved_wedge_sidewall_metadata);
       manifold::Manifold entry_manifold(info.mesh);
       const std::string direction = ReadString(entry["direction"], "INSET");
       GroupState& group =
@@ -7057,6 +7124,7 @@ emscripten::val BuildFilletCombinedAuthoringState(const emscripten::val& options
     merged_id_to_face_name =
         CombineIdMaps(merged_id_to_face_name, inset_group.id_to_face_name);
     MergeMetadataMaps(merged_metadata, inset_group.metadata);
+    MergeMetadataMaps(merged_metadata, preserved_wedge_sidewall_metadata);
   }
   if (outset_group.manifold) {
     const double outset_start_ms = NativeNowMs();
@@ -7068,6 +7136,7 @@ emscripten::val BuildFilletCombinedAuthoringState(const emscripten::val& options
     merged_id_to_face_name =
         CombineIdMaps(merged_id_to_face_name, outset_group.id_to_face_name);
     MergeMetadataMaps(merged_metadata, outset_group.metadata);
+    MergeMetadataMaps(merged_metadata, preserved_wedge_sidewall_metadata);
   }
 
   const double get_mesh_start_ms = NativeNowMs();
@@ -7082,6 +7151,8 @@ emscripten::val BuildFilletCombinedAuthoringState(const emscripten::val& options
   for (const auto& entry : merged_id_to_face_name) {
     merged_face_name_to_id[entry.second] = entry.first;
   }
+  ReapplyFilletWedgeSideWallMetadataByName(
+      merged_id_to_face_name, merged_metadata, preserved_wedge_sidewall_metadata);
 
   append_debug_mesh_snapshot("combinePreRelabel",
                              feature_id + "_COMBINE_PRE_RELABEL", final_mesh,
@@ -7092,6 +7163,8 @@ emscripten::val BuildFilletCombinedAuthoringState(const emscripten::val& options
     RelabelFallbackFacesByAdjacency(final_mesh, merged_id_to_face_name,
                                     merged_face_name_to_id, merged_metadata,
                                     feature_id);
+    ReapplyFilletWedgeSideWallMetadataByName(
+        merged_id_to_face_name, merged_metadata, preserved_wedge_sidewall_metadata);
     if (profile) {
       LogNativeFilletProfile(feature_id, "combine relabel fallback faces",
                              NativeNowMs() - relabel_start_ms);
@@ -7105,6 +7178,8 @@ emscripten::val BuildFilletCombinedAuthoringState(const emscripten::val& options
   CleanupTinyFaceIslands(final_mesh, merged_id_to_face_name,
                          merged_face_name_to_id, merged_metadata,
                          cleanup_tiny_face_islands_area);
+  ReapplyFilletWedgeSideWallMetadataByName(
+      merged_id_to_face_name, merged_metadata, preserved_wedge_sidewall_metadata);
   if (profile) {
     LogNativeFilletProfile(feature_id, "combine cleanup tiny islands",
                            NativeNowMs() - cleanup_start_ms);

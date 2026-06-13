@@ -1292,6 +1292,71 @@ export async function test_cppSolidNative_collapseFilletSideWallFaces_collapses_
     }
 }
 
+export async function test_cppSolidNative_collapseFilletSideWallFaces_moves_shared_endcap_edge_vertices() {
+    const solid = new Solid();
+    const sideWallName = "F_TEST_FILLET_EDGE_abcd1234_SURFACE_CA";
+    const endCapName = "F_TEST_FILLET_EDGE_abcd1234_END_CAP_1";
+    const A = [0, 0, 0];
+    const B = [2, 0, 0];
+    const C = [2, 0.2, 0];
+    const D = [2.4, 0.2, 0];
+
+    solid
+        .addTriangle("HOST", A, B, [0, -1, 0])
+        .addTriangle(sideWallName, A, B, C)
+        .addTriangle(endCapName, B, C, D);
+
+    solid.setFaceMetadata("HOST", { marker: "preserve-me" });
+    solid.setFaceMetadata(sideWallName, {
+        filletWedgeSideWall: true,
+        filletRoundFace: "F_TEST_FILLET_EDGE_abcd1234_TUBE_Outer",
+        sourceFeatureId: "F_TEST",
+    });
+    solid.setFaceMetadata(endCapName, {
+        filletEndCap: true,
+        filletRoundFace: "F_TEST_FILLET_EDGE_abcd1234_TUBE_Outer",
+        sourceFeatureId: "F_TEST",
+    });
+
+    const collectYValuesForFace = (faceName) => {
+        const faceID = solid._faceNameToID.get(faceName);
+        const out = [];
+        for (let triIndex = 0; triIndex < solid._triIDs.length; triIndex += 1) {
+            if ((solid._triIDs[triIndex] >>> 0) !== (faceID >>> 0)) continue;
+            const base = triIndex * 3;
+            for (const vertexIndex of [
+                solid._triVerts[base + 0],
+                solid._triVerts[base + 1],
+                solid._triVerts[base + 2],
+            ]) {
+                out.push(solid._vertProperties[(vertexIndex * 3) + 1]);
+            }
+        }
+        return out;
+    };
+    const beforeEndCapYValues = collectYValuesForFace(endCapName);
+    const beforeEndCapHostEdgeCount = beforeEndCapYValues.filter((y) => approx(y, 0, 1e-9)).length;
+
+    const summary = __testOnlyCollapseFilletSideWallFaces(solid, { featureID: "F_TEST" });
+    if (Number(summary?.collapsedTriangles || 0) !== 1) {
+        throw new Error(`Expected the side-wall triangle to collapse, received ${summary?.collapsedTriangles}.`);
+    }
+    if (!(Number(summary?.movedSideWallVertices || 0) >= 1)) {
+        throw new Error("Expected side-wall collapse to move the shared end-cap edge vertex.");
+    }
+
+    const afterEndCapYValues = collectYValuesForFace(endCapName);
+    const afterEndCapHostEdgeCount = afterEndCapYValues.filter((y) => approx(y, 0, 1e-9)).length;
+    if (afterEndCapHostEdgeCount <= beforeEndCapHostEdgeCount) {
+        throw new Error(`Expected shared end-cap edge vertex to move onto host edge y=0, before=${beforeEndCapYValues.join(",")} after=${afterEndCapYValues.join(",")}.`);
+    }
+
+    const hostYValues = collectYValuesForFace("HOST");
+    if (!hostYValues.some((y) => approx(y, -1, 1e-9))) {
+        throw new Error("Expected non-shared host geometry to remain in place.");
+    }
+}
+
 export async function test_cppSolidNative_collapseFilletSideWallFaces_preserves_shared_endpoint_junctions() {
     const solid = new Solid();
     const sideWallAName = "F_TEST_FILLET_SIDEWALL_EDGE_A_aaaa1111";
