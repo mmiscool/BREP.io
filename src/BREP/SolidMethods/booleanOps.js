@@ -699,7 +699,6 @@ function _applyFixedBooleanResultWeld(solid) {
 
 function _cleanupBooleanResult(solid) {
     try { _dropDisconnectedIslandsByVolume(solid, BOOLEAN_DISCONNECTED_ISLAND_MIN_VOLUME); } catch { }
-    try { solid.deduplicateFaceNames(); } catch { console.log("Failed cleanup duplicate face names"); }
     return _applyFixedBooleanResultWeld(solid);
 }
 

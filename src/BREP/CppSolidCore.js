@@ -16,6 +16,8 @@ const cloneSnapshotEntries = (entries = []) => Array.from(entries || [], (entry)
     entry?.[1],
 ]);
 
+const snapshotArray = (values) => values ?? [];
+
 const toPlainEntryArray = (mapLike, serializer = (value) => value) => {
     if (!(mapLike instanceof Map)) return [];
     return Array.from(mapLike.entries(), ([key, value]) => [key, serializer(value)]);
@@ -811,9 +813,9 @@ export class CppSolidCore {
         const snapshot = this._native.getAuthoringState();
         return {
             numProp: Number(snapshot?.numProp ?? 3),
-            vertProperties: Array.from(snapshot?.vertProperties ?? []),
-            triVerts: Array.from(snapshot?.triVerts ?? []),
-            triIDs: Array.from(snapshot?.triIDs ?? []),
+            vertProperties: snapshotArray(snapshot?.vertProperties),
+            triVerts: snapshotArray(snapshot?.triVerts),
+            triIDs: snapshotArray(snapshot?.triIDs),
             faceNameToID: new Map(cloneSnapshotEntries(snapshot?.faceNameToID)),
             idToFaceName: new Map(cloneSnapshotEntries(snapshot?.idToFaceName)),
             faceMetadataJson: new Map(cloneSnapshotEntries(snapshot?.faceMetadataJson)),
@@ -866,11 +868,11 @@ export class CppSolidCore {
         const snapshot = this._native.prepareManifoldMesh();
         return {
             numProp: Number(snapshot?.numProp ?? 3),
-            vertProperties: Array.from(snapshot?.vertProperties ?? []),
-            triVerts: Array.from(snapshot?.triVerts ?? []),
-            faceID: Array.from(snapshot?.faceID ?? []),
-            mergeFromVert: Array.from(snapshot?.mergeFromVert ?? []),
-            mergeToVert: Array.from(snapshot?.mergeToVert ?? []),
+            vertProperties: snapshotArray(snapshot?.vertProperties),
+            triVerts: snapshotArray(snapshot?.triVerts),
+            faceID: snapshotArray(snapshot?.faceID),
+            mergeFromVert: snapshotArray(snapshot?.mergeFromVert),
+            mergeToVert: snapshotArray(snapshot?.mergeToVert),
             vertexCount: Number(snapshot?.vertexCount ?? 0),
             triangleCount: Number(snapshot?.triangleCount ?? 0),
         };
