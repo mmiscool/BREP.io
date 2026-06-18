@@ -177,7 +177,7 @@ try {
     sourceDir,
     "-B",
     buildDir,
-    "-DCMAKE_BUILD_TYPE=MinSizeRel",
+    "-DCMAKE_BUILD_TYPE=Release",
     "-DMANIFOLD_PAR=OFF",
     "-DMANIFOLD_USE_BUILTIN_TBB=ON",
     "-DMANIFOLD_DEBUG=OFF",
