@@ -47,6 +47,8 @@ export class FloatingWindow {
     this._isTransparent = false;
     this._visibilityObserver = null;
     this._lastVisible = null;
+    this._viewportResizeTimer = 0;
+    this._onViewportResize = () => this._scheduleViewportConstrain();
     this.onClose = (typeof onClose === 'function') ? onClose : null;
 
     this._ensureStyles();
@@ -145,6 +147,8 @@ export class FloatingWindow {
     this.setShaded(this._isShaded);
     this._setupVisibilityObserver();
     this._bringToFrontIfVisible();
+    this._constrainToViewport();
+    try { window.addEventListener('resize', this._onViewportResize, { passive: true }); } catch {}
 
     // Events: drag-to-move on header (but click toggles shade if not dragged)
     header.addEventListener('pointerdown', (ev) => this._onHeaderPointerDown(ev));
@@ -180,6 +184,11 @@ export class FloatingWindow {
 
   destroy() {
     this._deactivateModal();
+    try { window.removeEventListener('resize', this._onViewportResize); } catch {}
+    if (this._viewportResizeTimer) {
+      try { window.clearTimeout?.(this._viewportResizeTimer); } catch {}
+      this._viewportResizeTimer = 0;
+    }
     try { this._visibilityObserver?.disconnect?.(); } catch {}
     try { this.modalOverlay && this.modalOverlay.parentNode && this.modalOverlay.parentNode.removeChild(this.modalOverlay); } catch {}
     try { this.root && this.root.parentNode && this.root.parentNode.removeChild(this.root); } catch {}
@@ -213,6 +222,7 @@ export class FloatingWindow {
   show() {
     if (this.modalOverlay) this.modalOverlay.style.display = 'flex';
     if (this.root) this.root.style.display = 'flex';
+    this._scheduleViewportConstrain();
     this._activateModal();
     this._bringToFront();
     this.focus();
@@ -310,6 +320,7 @@ export class FloatingWindow {
       if (visible && !this._lastVisible) {
         this._activateModal();
         this._bringToFront();
+        this._scheduleViewportConstrain();
       } else if (!visible && this._lastVisible) {
         this._deactivateModal();
       }
@@ -336,6 +347,7 @@ export class FloatingWindow {
     try {
       this.root.dispatchEvent(new CustomEvent('shadechange', { detail: { shaded: this._isShaded } }));
     } catch {}
+    this._scheduleViewportConstrain();
   }
   toggleShaded() { this.setShaded(!this._isShaded); }
 
@@ -449,10 +461,70 @@ export class FloatingWindow {
       window.removeEventListener('pointermove', onMove, true);
       window.removeEventListener('pointerup', onUp, true);
       this.root.classList.remove('is-resizing');
+      this._constrainToViewport();
     };
     window.addEventListener('pointermove', onMove, true);
     window.addEventListener('pointerup', onUp, true);
     try { ev.preventDefault(); ev.stopPropagation(); } catch {}
+  }
+
+  _scheduleViewportConstrain() {
+    if (!this.root) return;
+    if (this._viewportResizeTimer) return;
+    this._viewportResizeTimer = window.setTimeout(() => {
+      this._viewportResizeTimer = 0;
+      this._constrainToViewport();
+    }, 0);
+  }
+
+  _constrainToViewport() {
+    if (!this.root) return;
+    const vw = Math.max(0, Number(window.innerWidth || document.documentElement?.clientWidth || 0) || 0);
+    const vh = Math.max(0, Number(window.innerHeight || document.documentElement?.clientHeight || 0) || 0);
+    if (!vw || !vh) return;
+
+    const rect = this.root.getBoundingClientRect();
+    const styleLeft = parseFloat(this.root.style.left || '');
+    const styleTop = parseFloat(this.root.style.top || '');
+    const styleWidth = parseFloat(this.root.style.width || '');
+    const styleHeight = parseFloat(this.root.style.height || '');
+    const rectWidth = Number(rect.width) || 0;
+    const rectHeight = Number(rect.height) || 0;
+    let left = Number.isFinite(styleLeft) ? styleLeft : rect.left;
+    let top = Number.isFinite(styleTop) ? styleTop : rect.top;
+    let width = rectWidth || (Number.isFinite(styleWidth) && styleWidth > 0 ? styleWidth : this._minW);
+    let height = rectHeight || (Number.isFinite(styleHeight) && styleHeight > 0 ? styleHeight : this._minH);
+
+    if (!Number.isFinite(left)) left = 0;
+    if (!Number.isFinite(top)) top = 0;
+    if (!Number.isFinite(width) || width <= 0) width = this._minW;
+    if (!Number.isFinite(height) || height <= 0) height = this._isShaded ? this._headerHeight() : this._minH;
+
+    const maxWidth = Math.max(1, vw);
+    if (width > maxWidth) {
+      const widthChrome = rectWidth && Number.isFinite(styleWidth) ? Math.max(0, rectWidth - styleWidth) : 0;
+      const nextStyleWidth = Math.max(1, maxWidth - widthChrome);
+      width = maxWidth;
+      this.root.style.width = Math.round(nextStyleWidth) + 'px';
+    }
+
+    let visibleHeight = this._isShaded ? (rectHeight || this._headerHeight()) : height;
+    const maxHeight = Math.max(1, vh);
+    if (!this._isShaded && visibleHeight > maxHeight) {
+      const heightChrome = rectHeight && Number.isFinite(styleHeight) ? Math.max(0, rectHeight - styleHeight) : 0;
+      const nextStyleHeight = Math.max(1, maxHeight - heightChrome);
+      visibleHeight = maxHeight;
+      height = maxHeight;
+      this.root.style.height = Math.round(nextStyleHeight) + 'px';
+      this._unshadedH = Math.round(nextStyleHeight);
+    }
+
+    const maxLeft = Math.max(0, vw - width);
+    const maxTop = Math.max(0, vh - visibleHeight);
+    const nextLeft = Math.min(Math.max(0, left), maxLeft);
+    const nextTop = Math.min(Math.max(0, top), maxTop);
+    if (Math.round(nextLeft) !== Math.round(left)) this.root.style.left = Math.round(nextLeft) + 'px';
+    if (Math.round(nextTop) !== Math.round(top)) this.root.style.top = Math.round(nextTop) + 'px';
   }
 
   _ensureStyles() {
