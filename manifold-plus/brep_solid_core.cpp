@@ -1,6 +1,7 @@
 #include "brep_solid_core.h"
 #include "fillet_segment_builder.h"
 
+#include <emscripten/bind.h>
 #include <manifold/manifold.h>
 
 #include <algorithm>
@@ -839,6 +840,21 @@ emscripten::val BrepSolidCore::PrepareManifoldMesh() {
   snapshot.set("faceID", ToJsArray(mesh.faceID));
   snapshot.set("mergeFromVert", ToJsArray(mesh.mergeFromVert));
   snapshot.set("mergeToVert", ToJsArray(mesh.mergeToVert));
+  snapshot.set("triangleCount", static_cast<uint32_t>(mesh.NumTri()));
+  snapshot.set("vertexCount", static_cast<uint32_t>(mesh.NumVert()));
+  return snapshot;
+}
+
+emscripten::val BrepSolidCore::PrepareManifoldMeshTyped() {
+  manifold::MeshGL mesh = BuildPreparedMeshGL();
+
+  emscripten::val snapshot = emscripten::val::object();
+  snapshot.set("numProp", mesh.numProp);
+  snapshot.set("vertProperties", ToJsTypedArray(mesh.vertProperties));
+  snapshot.set("triVerts", ToJsTypedArray(mesh.triVerts));
+  snapshot.set("faceID", ToJsTypedArray(mesh.faceID));
+  snapshot.set("mergeFromVert", ToJsTypedArray(mesh.mergeFromVert));
+  snapshot.set("mergeToVert", ToJsTypedArray(mesh.mergeToVert));
   snapshot.set("triangleCount", static_cast<uint32_t>(mesh.NumTri()));
   snapshot.set("vertexCount", static_cast<uint32_t>(mesh.NumVert()));
   return snapshot;
@@ -2481,6 +2497,20 @@ emscripten::val BrepSolidCore::ToJsArray(const std::vector<uint32_t>& values) {
     out.set(static_cast<uint32_t>(i), values[i]);
   }
   return out;
+}
+
+emscripten::val BrepSolidCore::ToJsTypedArray(
+    const std::vector<float>& values) {
+  return emscripten::val(
+             emscripten::typed_memory_view(values.size(), values.data()))
+      .call<emscripten::val>("slice");
+}
+
+emscripten::val BrepSolidCore::ToJsTypedArray(
+    const std::vector<uint32_t>& values) {
+  return emscripten::val(
+             emscripten::typed_memory_view(values.size(), values.data()))
+      .call<emscripten::val>("slice");
 }
 
 emscripten::val BrepSolidCore::ToStringArray(

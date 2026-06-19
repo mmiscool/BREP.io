@@ -335,6 +335,19 @@ export async function test_cppSolidCore_prepareManifoldMesh_repairs_orientation(
         if (prepared.mergeFromVert.length !== prepared.mergeToVert.length) {
             throw new Error("Expected prepareManifoldMesh merge arrays to stay aligned.");
         }
+
+        const preparedTyped = core.prepareManifoldMeshTyped();
+        if (!(preparedTyped?.vertProperties instanceof Float32Array)) {
+            throw new Error("Expected prepareManifoldMeshTyped to return Float32Array vertex properties.");
+        }
+        if (!(preparedTyped?.triVerts instanceof Uint32Array) || !(preparedTyped?.faceID instanceof Uint32Array)) {
+            throw new Error("Expected prepareManifoldMeshTyped to return Uint32Array triangle buffers.");
+        }
+        if (preparedTyped.triVerts.length !== prepared.triVerts.length
+            || preparedTyped.faceID.length !== prepared.faceID.length
+            || preparedTyped.vertProperties.length !== prepared.vertProperties.length) {
+            throw new Error("Expected prepareManifoldMeshTyped buffers to match prepareManifoldMesh lengths.");
+        }
     } finally {
         core.dispose();
     }

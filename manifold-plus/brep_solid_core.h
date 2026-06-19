@@ -41,6 +41,7 @@ class BrepSolidCore {
   bool FixTriangleWindingsByAdjacency();
   void InvertNormals();
   emscripten::val PrepareManifoldMesh();
+  emscripten::val PrepareManifoldMeshTyped();
 
   void SetFaceMetadataJson(const std::string& face_name,
                            const std::string& metadata_json);
@@ -76,6 +77,8 @@ class BrepSolidCore {
   static std::string MakeVertexKey(double x, double y, double z);
   static emscripten::val ToJsArray(const std::vector<float>& values);
   static emscripten::val ToJsArray(const std::vector<uint32_t>& values);
+  static emscripten::val ToJsTypedArray(const std::vector<float>& values);
+  static emscripten::val ToJsTypedArray(const std::vector<uint32_t>& values);
   static emscripten::val ToStringArray(const std::vector<std::string>& values);
   static emscripten::val ToStringMapEntries(
       const std::unordered_map<std::string, std::string>& values);

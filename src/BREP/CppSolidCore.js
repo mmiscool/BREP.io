@@ -878,6 +878,23 @@ export class CppSolidCore {
         };
     }
 
+    prepareManifoldMeshTyped() {
+        const prepareTyped = this._native?.prepareManifoldMeshTyped;
+        const snapshot = (typeof prepareTyped === "function")
+            ? prepareTyped.call(this._native)
+            : this._native.prepareManifoldMesh();
+        return {
+            numProp: Number(snapshot?.numProp ?? 3),
+            vertProperties: snapshotArray(snapshot?.vertProperties),
+            triVerts: snapshotArray(snapshot?.triVerts),
+            faceID: snapshotArray(snapshot?.faceID),
+            mergeFromVert: snapshotArray(snapshot?.mergeFromVert),
+            mergeToVert: snapshotArray(snapshot?.mergeToVert),
+            vertexCount: Number(snapshot?.vertexCount ?? 0),
+            triangleCount: Number(snapshot?.triangleCount ?? 0),
+        };
+    }
+
     vertexCount() {
         return Number(this._native.vertexCount());
     }

@@ -26,6 +26,8 @@ EMSCRIPTEN_BINDINGS(manifold_plus_solid_bindings) {
       .function("invertNormals", &manifoldplus::BrepSolidCore::InvertNormals)
       .function("prepareManifoldMesh",
                 &manifoldplus::BrepSolidCore::PrepareManifoldMesh)
+      .function("prepareManifoldMeshTyped",
+                &manifoldplus::BrepSolidCore::PrepareManifoldMeshTyped)
       .function("setFaceMetadataJson",
                 &manifoldplus::BrepSolidCore::SetFaceMetadataJson)
       .function("getFaceMetadataJson",

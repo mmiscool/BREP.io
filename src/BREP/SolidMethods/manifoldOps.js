@@ -9,6 +9,16 @@ import {
     syncSolidAuthoringStateToCpp,
 } from "../CppSolidCore.js";
 
+const asFloat32Array = (values) => {
+    if (values instanceof Float32Array) return values;
+    return new Float32Array(values ?? []);
+};
+
+const asUint32Array = (values) => {
+    if (values instanceof Uint32Array) return values;
+    return new Uint32Array(values ?? []);
+};
+
 /**
  * Manifold lifecycle helpers: rebuild, welding, orientation fixes.
  */
@@ -55,16 +65,16 @@ export function _manifoldize() {
         );
         this._cppSolidCore = this._cppSolidCore || new CppSolidCore();
         syncSolidAuthoringStateToCpp(this, this._cppSolidCore);
-        const prepared = this._cppSolidCore.prepareManifoldMesh();
+        const prepared = this._cppSolidCore.prepareManifoldMeshTyped();
         syncSolidAuthoringStateFromCpp(this, this._cppSolidCore);
 
         const mesh = new ManifoldMesh({
             numProp: Number(prepared?.numProp ?? this._numProp ?? 3),
-            vertProperties: new Float32Array(prepared?.vertProperties ?? []),
-            triVerts: new Uint32Array(prepared?.triVerts ?? []),
-            faceID: new Uint32Array(prepared?.faceID ?? []),
-            mergeFromVert: new Uint32Array(prepared?.mergeFromVert ?? []),
-            mergeToVert: new Uint32Array(prepared?.mergeToVert ?? []),
+            vertProperties: asFloat32Array(prepared?.vertProperties),
+            triVerts: asUint32Array(prepared?.triVerts),
+            faceID: asUint32Array(prepared?.faceID),
+            mergeFromVert: asUint32Array(prepared?.mergeFromVert),
+            mergeToVert: asUint32Array(prepared?.mergeToVert),
         });
 
         try {
