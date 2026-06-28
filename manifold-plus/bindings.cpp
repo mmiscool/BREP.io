@@ -1,6 +1,7 @@
 #include <emscripten/bind.h>
 
 #include "fillet_segment_builder.h"
+#include "mesh_to_brep_builder.h"
 #include "primitive_builder.h"
 #include "sweep_builder.h"
 #include "tube_builder.h"
@@ -15,6 +16,8 @@ EMSCRIPTEN_BINDINGS(manifold_plus_bindings) {
   emscripten::function("sum", &SumNumbers);
   emscripten::function("buildPrimitiveAuthoringState",
                        &manifoldplus::BuildPrimitiveAuthoringState);
+  emscripten::function("buildMeshToBrepAuthoringState",
+                       &manifoldplus::BuildMeshToBrepAuthoringState);
   emscripten::function("buildTubeAuthoringState",
                        &manifoldplus::BuildTubeAuthoringState);
   emscripten::function("buildFilletSegmentAuthoringState",

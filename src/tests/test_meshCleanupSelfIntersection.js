@@ -38,6 +38,10 @@ function hasVertexNear(solid, expected, tolerance = 1e-8) {
   return false;
 }
 
+function approxEqual(a, b, tolerance = 1e-6) {
+  return Math.abs(a - b) <= tolerance;
+}
+
 function addBox(solid, name, min, max) {
   const [x0, y0, z0] = min;
   const [x1, y1, z1] = max;
@@ -105,4 +109,114 @@ export async function test_mesh_cleanup_split_then_winding_removes_internal_over
   if (typeof solid._isCoherentlyOrientedManifold === 'function') {
     assert(solid._isCoherentlyOrientedManifold() === true, '[mesh-cleanup overlap] Expected coherent manifold orientation.');
   }
+}
+
+export async function test_mesh_cleanup_find_one_triangle_intersected_by_multiple_triangles() {
+  const solid = new Solid();
+  solid.addTriangle('BASE', [0, 0, 0], [3, 0, 0], [0, 3, 0]);
+  solid.addTriangle('CUT_X', [1, -0.25, -1], [1, 2, 1], [1, 2, -1]);
+  solid.addTriangle('CUT_Y', [-0.25, 1, -1], [2, 1, 1], [2, 1, -1]);
+
+  const hits = solid.findSelfIntersections();
+  assert(hits.filter((hit) => hit.triangleA === 0 || hit.triangleB === 0).length >= 2, '[mesh-cleanup multi] Expected the base triangle to collect multiple hits.');
+  const splitCount = solid.splitSelfIntersectingTriangles();
+  assert(splitCount >= 2, `[mesh-cleanup multi] Expected at least two split pairs, received ${splitCount}.`);
+  assert(solid._triIDs.length === solid._triVerts.length / 3, '[mesh-cleanup multi] Face IDs must stay per-triangle.');
+}
+
+export async function test_mesh_cleanup_two_cut_segments_cross_inside_same_triangle() {
+  const solid = new Solid();
+  solid.addTriangle('BASE', [0, 0, 0], [3, 0, 0], [0, 3, 0]);
+  solid.addTriangle('CUT_X', [1, -0.5, -1], [1, -0.5, 1], [1, 2.5, 0]);
+  solid.addTriangle('CUT_Y', [-0.5, 1, -1], [-0.5, 1, 1], [2.5, 1, 0]);
+
+  solid.splitSelfIntersectingTriangles();
+  assert(hasVertexNear(solid, [1, 1, 0]), '[mesh-cleanup crossing cuts] Missing crossing vertex inserted inside source triangle.');
+}
+
+export async function test_mesh_cleanup_intersection_endpoint_on_shared_mesh_edge() {
+  const solid = new Solid();
+  solid.addTriangle('A', [0, 0, 0], [1, 0, 0], [0, 1, 0]);
+  solid.addTriangle('B', [1, 0, 0], [1, 1, 0], [0, 1, 0]);
+  solid.addTriangle('CUT', [0.5, 0.5, 0], [0.5, 0.5, 1], [0.8, 0.8, 1]);
+
+  const splitCount = solid.splitSelfIntersectingTriangles();
+  assert(splitCount >= 1, `[mesh-cleanup shared edge endpoint] Expected split pair, received ${splitCount}.`);
+  assert(hasVertexNear(solid, [0.5, 0.5, 0]), '[mesh-cleanup shared edge endpoint] Missing endpoint vertex on shared edge.');
+}
+
+export async function test_mesh_cleanup_detects_coplanar_partial_triangle_overlap() {
+  const solid = new Solid();
+  solid.addTriangle('A', [0, 0, 0], [2, 0, 0], [0, 2, 0]);
+  solid.addTriangle('B', [0.5, 0.25, 0], [2.5, 0.25, 0], [0.5, 2.25, 0]);
+
+  const hits = solid.findSelfIntersections();
+  assert(hits.some((hit) => hit.type === 'coplanar'), '[mesh-cleanup coplanar] Expected coplanar overlap record.');
+  assert(solid.splitSelfIntersectingTriangles() >= 1, '[mesh-cleanup coplanar] Expected coplanar overlap to be processed.');
+}
+
+export async function test_mesh_cleanup_removes_geometrically_duplicate_triangles() {
+  const solid = new Solid();
+  solid.addTriangle('A', [0, 0, 0], [1, 0, 0], [0, 1, 0]);
+  solid.addTriangle('B', [0, 1, 0], [1, 0, 0], [0, 0, 0]);
+
+  const report = solid.cleanupSelfIntersections({ validate: false, removeInternal: false });
+  assert(report.duplicateTrianglesRemoved === 1, `[mesh-cleanup duplicate] Expected one duplicate removed, received ${report.duplicateTrianglesRemoved}.`);
+  assert(solid._triVerts.length / 3 === 1, '[mesh-cleanup duplicate] Expected one triangle to remain.');
+}
+
+export async function test_mesh_cleanup_removes_closed_box_completely_inside_another() {
+  const solid = new Solid();
+  addBox(solid, 'OUTER', [0, 0, 0], [3, 3, 3]);
+  addBox(solid, 'INNER', [1, 1, 1], [2, 2, 2]);
+
+  const report = solid.cleanupSelfIntersections({ validate: false });
+  assert(report.internalTrianglesRemoved >= 12, `[mesh-cleanup nested box] Expected inner shell removal, removed ${report.internalTrianglesRemoved}.`);
+  assert(solid._triVerts.length / 3 === 12, '[mesh-cleanup nested box] Expected only the outer box triangles to remain.');
+}
+
+export async function test_mesh_cleanup_overlapping_boxes_volume_equals_union() {
+  const solid = new Solid();
+  addBox(solid, 'A', [0, 0, 0], [2, 2, 2]);
+  addBox(solid, 'B', [1, 1, 0], [3, 3, 2]);
+
+  const report = solid.cleanupSelfIntersections({ validate: false });
+  assert(report.intersectionFree === true && report.closed === true, '[mesh-cleanup box union] Expected closed intersection-free cleanup.');
+  assert(approxEqual(solid.volume(), 14, 1e-5), `[mesh-cleanup box union] Expected union volume 14, received ${solid.volume()}.`);
+}
+
+export async function test_mesh_cleanup_disjoint_closed_boxes_are_preserved() {
+  const solid = new Solid();
+  addBox(solid, 'A', [0, 0, 0], [1, 1, 1]);
+  addBox(solid, 'B', [2, 0, 0], [3, 1, 1]);
+
+  const report = solid.cleanupSelfIntersections({ validate: false });
+  assert(report.internalTrianglesRemoved === 0, '[mesh-cleanup disjoint boxes] Disjoint boxes should not be culled.');
+  assert(solid._triVerts.length / 3 === 24, '[mesh-cleanup disjoint boxes] Expected both boxes to remain.');
+}
+
+export async function test_mesh_cleanup_preserves_face_ids_after_splitting() {
+  const solid = new Solid();
+  solid.addTriangle('FACE_A', [0, 0, 0], [2, 0, 0], [0, 2, 0]);
+  solid.addTriangle('FACE_B', [0.5, -0.25, -1], [0.5, 1.5, 1], [0.5, 1.5, -1]);
+  const faceAID = solid._faceNameToID.get('FACE_A');
+
+  solid.splitSelfIntersectingTriangles();
+  const faceAFragments = solid._triIDs.filter((id) => id === faceAID).length;
+  assert(faceAFragments > 1, '[mesh-cleanup face IDs] Expected split FACE_A fragments to inherit the source face ID.');
+  assert(solid._triIDs.length === solid._triVerts.length / 3, '[mesh-cleanup face IDs] Face ID count must match triangle count.');
+}
+
+export async function test_mesh_cleanup_complete_operation_is_idempotent() {
+  const solid = new Solid();
+  addBox(solid, 'A', [0, 0, 0], [2, 2, 2]);
+  addBox(solid, 'B', [1, 1, 0], [3, 3, 2]);
+
+  const first = solid.cleanupSelfIntersections({ validate: false });
+  const triCount = solid._triVerts.length / 3;
+  const vertCount = solid._vertProperties.length / 3;
+  const second = solid.cleanupSelfIntersections({ validate: false });
+  assert(first.complete === true, '[mesh-cleanup idempotence] Initial cleanup should complete.');
+  assert(second.intersectionsFound === 0, '[mesh-cleanup idempotence] Second cleanup should find no intersections.');
+  assert(solid._triVerts.length / 3 === triCount && solid._vertProperties.length / 3 === vertCount, '[mesh-cleanup idempotence] Second cleanup should not change geometry counts.');
 }

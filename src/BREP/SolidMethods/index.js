@@ -36,13 +36,17 @@ export {
     collapseTinyTriangles,
     cleanupTinyFaceIslands,
     remesh,
-    splitSelfIntersectingTriangles,
     removeDegenerateTriangles,
     removeInternalTriangles,
     removeInternalTrianglesByRaycast,
-    removeInternalTrianglesByWinding,
     mergeTinyFaces,
 } from "./meshCleanup.js";
+export {
+    findSelfIntersections,
+    splitSelfIntersectingTriangles,
+    cleanupSelfIntersections,
+    removeInternalTrianglesByWinding,
+} from "./selfIntersectionCleanup.js";
 export {
     getMesh,
     _ensureFaceIndex,

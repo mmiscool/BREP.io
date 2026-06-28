@@ -19,6 +19,7 @@ export const SURFACING_WORKBENCH = {
     'CE',
     'ES',
     'OVL',
+    'SIC',
     'RM',
     'O.S',
     'THK',

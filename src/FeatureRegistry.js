@@ -24,6 +24,7 @@ import { ImageHeightmapSolidFeature } from './features/imageHeightSolid/ImageHei
 import { TextToFaceFeature } from './features/textToFace/TextToFaceFeature.js';
 import { TransformFeature } from './features/transform/TransformFeature.js';
 import { OverlapCleanupFeature } from './features/overlapCleanup/OverlapCleanupFeature.js';
+import { SelfIntersectionCleanupFeature } from './features/selfIntersectionCleanup/SelfIntersectionCleanupFeature.js';
 import { HelixFeature } from './features/helix/HelixFeature.js';
 import { HoleFeature } from './features/hole/HoleFeature.js';
 import { PatternFeature } from './features/pattern/PatternFeature.js';
@@ -122,6 +123,7 @@ export class FeatureRegistry {
     this.register(TextToFaceFeature);
     this.register(TransformFeature);
     this.register(OverlapCleanupFeature);
+    this.register(SelfIntersectionCleanupFeature);
     this.register(PatternLinearFeature);
     this.register(PatternRadialFeature);
     this.register(AssemblyComponentFeature);
@@ -158,6 +160,10 @@ export class FeatureRegistry {
     this.aliases.set('PUSHFACE', PushFaceFeature);
     // Thicken variations
     this.aliases.set('THICKEN', ThickenFeature);
+    // Self Intersection Cleanup variations
+    this.aliases.set('SELF INTERSECTION CLEANUP', SelfIntersectionCleanupFeature);
+    this.aliases.set('SELFINTERSECTIONCLEANUP', SelfIntersectionCleanupFeature);
+    this.aliases.set('SPLIT SELF INTERSECTIONS', SelfIntersectionCleanupFeature);
   }
 
   register(FeatureClass) {

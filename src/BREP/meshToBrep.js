@@ -1,5 +1,11 @@
 import * as THREE from "three";
 import { Solid } from "./BetterSolid.js";
+import { applySolidAuthoringStateSnapshot } from "./CppSolidCore.js";
+import { manifold } from "./setupManifold.js";
+
+function hasNativeMeshToBrepBuilder() {
+    return typeof manifold?.buildMeshToBrepAuthoringState === "function";
+}
 
 /**
  * MeshToBrep: Builds a Solid from a triangle mesh by grouping triangles
@@ -65,6 +71,11 @@ export class MeshToBrep extends Solid {
     toBrep() { return this; }
 
     _buildFromGeometry(geometry) {
+        if (hasNativeMeshToBrepBuilder()) {
+            this._buildFromGeometryNative(geometry);
+            return;
+        }
+
         // Ensure we have positions
         const posAttr = geometry.getAttribute('position');
         if (!posAttr) throw new Error("Geometry has no 'position' attribute");
@@ -557,5 +568,33 @@ export class MeshToBrep extends Solid {
 
         // Let downstream visualization build per-face meshes and edges
         // We'll leave winding correction/orientation to _manifoldize()
+    }
+
+    _buildFromGeometryNative(geometry) {
+        const posAttr = geometry.getAttribute('position');
+        if (!posAttr) throw new Error("Geometry has no 'position' attribute");
+        if (posAttr.itemSize !== 3) {
+            throw new Error("MeshToBrep requires a position attribute with itemSize=3");
+        }
+
+        const idxAttr = geometry.getIndex();
+        const norAttr = geometry.getAttribute('normal');
+        const snapshot = manifold.buildMeshToBrepAuthoringState({
+            positions: posAttr.array,
+            indices: idxAttr ? idxAttr.array : [],
+            normals: (norAttr && norAttr.count === posAttr.count && norAttr.itemSize === 3)
+                ? norAttr.array
+                : [],
+            faceDeflectionAngle: this.faceDeflectionAngle,
+            weldTolerance: this.weldTolerance,
+            extractPlanarFaces: this.extractPlanarFaces,
+            planarMinAreaPercent: this.planarMinAreaPercent,
+            planarNormalToleranceDeg: this.planarNormalToleranceDeg,
+            planarDistanceTolerance: this.planarDistanceTolerance,
+        });
+        applySolidAuthoringStateSnapshot(this, snapshot);
+        this._dirty = true;
+        this._manifold = null;
+        this._faceIndex = null;
     }
 }

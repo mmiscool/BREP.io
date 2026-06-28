@@ -188,6 +188,16 @@ import {
     test_mesh_cleanup_split_crossing_triangles_inserts_intersection_edges,
     test_mesh_cleanup_split_point_intersection_inserts_vertex,
     test_mesh_cleanup_split_then_winding_removes_internal_overlap,
+    test_mesh_cleanup_find_one_triangle_intersected_by_multiple_triangles,
+    test_mesh_cleanup_two_cut_segments_cross_inside_same_triangle,
+    test_mesh_cleanup_intersection_endpoint_on_shared_mesh_edge,
+    test_mesh_cleanup_detects_coplanar_partial_triangle_overlap,
+    test_mesh_cleanup_removes_geometrically_duplicate_triangles,
+    test_mesh_cleanup_removes_closed_box_completely_inside_another,
+    test_mesh_cleanup_overlapping_boxes_volume_equals_union,
+    test_mesh_cleanup_disjoint_closed_boxes_are_preserved,
+    test_mesh_cleanup_preserves_face_ids_after_splitting,
+    test_mesh_cleanup_complete_operation_is_idempotent,
 } from './test_meshCleanupSelfIntersection.js';
 import {
     afterRun_fillet_face_names_and_merge_metadata_survive_native_manifold_rebuild,
@@ -464,6 +474,11 @@ import {
     test_remesh_simplify_uses_kernel_simplify_without_full_tolerance_weld,
     test_solid_simplify_preserves_face_tags_and_metadata,
 } from './test_remeshFeature.js';
+import {
+    test_self_intersection_cleanup_feature_context_button_for_single_solid,
+    test_self_intersection_cleanup_feature_is_available_in_modeling_and_surfacing,
+    test_self_intersection_cleanup_feature_splits_selected_solid,
+} from './test_selfIntersectionCleanupFeature.js';
 import { test_revolve_after_union_preserves_face_reference_resolution } from './test_revolve_after_union_face_reference.js';
 import {
     afterRun_primitive_boolean_union_preserves_face_grouping,
@@ -538,6 +553,9 @@ export const testFunctions = [
         exportSolids: false,
         resetHistory: true,
     },
+    { test: test_self_intersection_cleanup_feature_splits_selected_solid, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_self_intersection_cleanup_feature_context_button_for_single_solid, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_self_intersection_cleanup_feature_is_available_in_modeling_and_surfacing, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_solid_simplify_preserves_face_tags_and_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_revolve_after_union_preserves_face_reference_resolution, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cppSolidNative_setEpsilon_welds_vertices, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -589,6 +607,16 @@ export const testFunctions = [
     { test: test_mesh_cleanup_split_crossing_triangles_inserts_intersection_edges, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_mesh_cleanup_split_point_intersection_inserts_vertex, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_mesh_cleanup_split_then_winding_removes_internal_overlap, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_mesh_cleanup_find_one_triangle_intersected_by_multiple_triangles, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_mesh_cleanup_two_cut_segments_cross_inside_same_triangle, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_mesh_cleanup_intersection_endpoint_on_shared_mesh_edge, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_mesh_cleanup_detects_coplanar_partial_triangle_overlap, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_mesh_cleanup_removes_geometrically_duplicate_triangles, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_mesh_cleanup_removes_closed_box_completely_inside_another, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_mesh_cleanup_overlapping_boxes_volume_equals_union, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_mesh_cleanup_disjoint_closed_boxes_are_preserved, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_mesh_cleanup_preserves_face_ids_after_splitting, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_mesh_cleanup_complete_operation_is_idempotent, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     {
         test: test_offsetFace_preserves_individual_edges,
         afterRun: afterRun_offsetFace_preserves_individual_edges,

@@ -2,6 +2,10 @@ import * as THREE from "three";
 import { LineMaterial, LineSegments2, LineSegmentsGeometry } from "three/examples/jsm/Addons.js";
 import { BREP } from "../../BREP/BREP.js";
 import { CombinedTransformControls } from "../../UI/controls/CombinedTransformControls.js";
+import {
+  allowSceneOverlayRemoval,
+  markSceneOverlayObject,
+} from "../../UI/sceneOverlayUtils.js";
 
 const noop = () => { };
 
@@ -970,6 +974,11 @@ export class PolygonSolidEditorSession {
     control.visible = false;
     control.userData = control.userData || {};
     control.userData.excludeFromFit = true;
+    markSceneOverlayObject(control, {
+      preserve: true,
+      overlayType: "polygonSolidTransformControl",
+      deep: true,
+    });
     this.viewer.scene.add(control);
 
     const onChange = () => this._handleControlChange();
@@ -989,6 +998,7 @@ export class PolygonSolidEditorSession {
       try { this._control.removeEventListener("dragging-changed", listeners.onDragging); } catch { }
     }
     try { this._control.detach?.(); } catch { }
+    try { allowSceneOverlayRemoval(this._control, { deep: true }); } catch { }
     try { this.viewer?.scene?.remove(this._control); } catch { }
     try { this._control.dispose?.(); } catch { }
     this._control = null;
@@ -1391,6 +1401,16 @@ export class PolygonSolidEditorSession {
 
   _attachControlToSelection() {
     if (!this._control) return;
+    if (!this._control.parent && this.viewer?.scene) {
+      try {
+        markSceneOverlayObject(this._control, {
+          preserve: true,
+          overlayType: "polygonSolidTransformControl",
+          deep: true,
+        });
+        this.viewer.scene.add(this._control);
+      } catch { }
+    }
     if (!this._selectedId || !this._displayOptions.showControlPoints) {
       this._control.detach?.();
       this._control.enabled = false;

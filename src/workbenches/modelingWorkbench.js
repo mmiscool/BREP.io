@@ -30,6 +30,7 @@ export const MODELING_WORKBENCH = {
     'HX',
     'SP',
     'O.S',
+    'SIC',
     'SP',
   ],
   contextFamilies: {

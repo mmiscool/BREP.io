@@ -547,12 +547,30 @@ export class Solid extends THREE.Group {
     }
 
     /**
+     * Find triangle-triangle self intersections without mutating authored geometry.
+     * @param {object} [options]
+     * @returns {Array<object>} intersection records
+     */
+    findSelfIntersections(..._args) {
+        return SolidMethods.findSelfIntersections.apply(this, arguments);
+    }
+
+    /**
      * Split self-intersecting triangle pairs conservatively while preserving face IDs.
-     * @param {boolean} [diagnostics=false]
-     * @returns {number} splits applied
+     * @param {boolean|object} [options=false]
+     * @returns {number} intersecting pairs processed
      */
     splitSelfIntersectingTriangles(..._args) {
         return SolidMethods.splitSelfIntersectingTriangles.apply(this, arguments);
+    }
+
+    /**
+     * Split self intersections, remove hidden fragments, and validate the final shell.
+     * @param {object} [options]
+     * @returns {object} cleanup report
+     */
+    cleanupSelfIntersections(..._args) {
+        return SolidMethods.cleanupSelfIntersections.apply(this, arguments);
     }
 
     /**

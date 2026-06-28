@@ -25,6 +25,7 @@ target_sources(
   PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/bindings.cpp
     ${CMAKE_CURRENT_LIST_DIR}/primitive_builder.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/mesh_to_brep_builder.cpp
     ${CMAKE_CURRENT_LIST_DIR}/sweep_builder.cpp
     ${CMAKE_CURRENT_LIST_DIR}/fillet_segment_builder.cpp
     ${CMAKE_CURRENT_LIST_DIR}/brep_solid_core.cpp
