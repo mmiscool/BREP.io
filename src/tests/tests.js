@@ -4,6 +4,11 @@ import { fs } from '../fs.proxy.js';
 import { PartHistory } from "../PartHistory.js";
 import { posix as path } from '../path.proxy.js';
 import { registerSketchSolverTopologyFixtureTests } from './sketchSolverTopologyFixtureLoader.js';
+import { getSolidVolumeExpectations } from './solidVolumeExpectations.js';
+import {
+    assertSceneSolidVolumeExpectations,
+    getSceneSolids,
+} from './solidVolumeTestUtils.js';
 import { test_boolean_subtract } from './test_boolean_subtract.js';
 import {
     afterRun_boolean_operation_target_name_preserved,
@@ -488,6 +493,39 @@ import {
 const IS_NODE_RUNTIME = typeof process !== 'undefined' && process.versions && process.versions.node && typeof window === 'undefined';
 const TEST_LOG_PATH = path.join('tests', 'test-run.log.md');
 const TEST_LOG_VERSION = 1;
+const BROWSER_LOCAL_FILE_SKIP_REASON = 'Requires a local fixture file that is not loaded in the browser test runner.';
+
+function isBrowserRuntime() {
+    return typeof window !== 'undefined';
+}
+
+export function getTestSkipReason(testFunction, options = {}) {
+    const runtime = options.runtime || (isBrowserRuntime() ? 'browser' : 'node');
+    const skip = testFunction?.skip;
+    if (typeof skip === 'function') {
+        const reason = skip({ runtime, testFunction, options });
+        if (reason) return reason === true ? 'Skipped by test configuration.' : String(reason);
+    } else if (skip) {
+        return skip === true ? 'Skipped by test configuration.' : String(skip);
+    }
+    if (runtime === 'browser' && testFunction?.skipInBrowser) {
+        return testFunction.skipInBrowser === true
+            ? 'Skipped in browser test runner.'
+            : String(testFunction.skipInBrowser);
+    }
+    return '';
+}
+
+export function isSkippedTestResult(value) {
+    return !!(value && typeof value === 'object' && value.skipped === true);
+}
+
+function skippedTestResult(reason) {
+    return Object.freeze({
+        skipped: true,
+        reason: String(reason || 'Skipped by test configuration.'),
+    });
+}
 
 function getTestName(testFunction) {
     return (testFunction?.test?.name && String(testFunction.test.name)) || 'unnamed_test';
@@ -552,6 +590,7 @@ export const testFunctions = [
         exportFaces: false,
         exportSolids: false,
         resetHistory: true,
+        skipInBrowser: BROWSER_LOCAL_FILE_SKIP_REASON,
     },
     { test: test_self_intersection_cleanup_feature_splits_selected_solid, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_self_intersection_cleanup_feature_context_button_for_single_solid, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -831,6 +870,7 @@ export const testFunctions = [
         exportFaces: false,
         exportSolids: false,
         resetHistory: true,
+        skipInBrowser: BROWSER_LOCAL_FILE_SKIP_REASON,
     },
     {
         test: test_import3d_extract_multiple_solids_toggle,
@@ -912,6 +952,7 @@ export const testFunctions = [
         exportFaces: false,
         exportSolids: false,
         resetHistory: true,
+        skipInBrowser: BROWSER_LOCAL_FILE_SKIP_REASON,
     },
     { test: test_ExtrudeFace, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     {
@@ -923,7 +964,15 @@ export const testFunctions = [
         resetHistory: true,
     },
     { test: test_Fillet, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
-    { test: test_fillet_angle, afterRun: afterRun_fillet_angle, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    {
+        test: test_fillet_angle,
+        afterRun: afterRun_fillet_angle,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+        skipInBrowser: BROWSER_LOCAL_FILE_SKIP_REASON,
+    },
     {
         test: test_fillet_corner_bridge,
         afterRun: afterRun_fillet_corner_bridge,
@@ -967,6 +1016,7 @@ export const testFunctions = [
         exportFaces: false,
         exportSolids: false,
         resetHistory: true,
+        skipInBrowser: BROWSER_LOCAL_FILE_SKIP_REASON,
     },
     {
         test: test_sketch_profile_tolerant_loop_join,
@@ -975,6 +1025,7 @@ export const testFunctions = [
         exportFaces: false,
         exportSolids: false,
         resetHistory: true,
+        skipInBrowser: BROWSER_LOCAL_FILE_SKIP_REASON,
     },
     {
         test: test_fillet_compound_snapshot_resolution,
@@ -983,6 +1034,7 @@ export const testFunctions = [
         exportFaces: false,
         exportSolids: false,
         resetHistory: true,
+        skipInBrowser: BROWSER_LOCAL_FILE_SKIP_REASON,
     },
     {
         test: test_fillet_generated_history_20260321144106,
@@ -1121,6 +1173,7 @@ export const testFunctions = [
         exportFaces: false,
         exportSolids: false,
         resetHistory: true,
+        skipInBrowser: BROWSER_LOCAL_FILE_SKIP_REASON,
     },
     {
         test: test_fillet_face_names_and_merge_metadata_survive_native_manifold_rebuild,
@@ -1129,6 +1182,7 @@ export const testFunctions = [
         exportFaces: false,
         exportSolids: false,
         resetHistory: true,
+        skipInBrowser: BROWSER_LOCAL_FILE_SKIP_REASON,
     },
     { test: test_Fillet_NonClosed, afterRun: afterRun_Fillet_NonClosed, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_fillets_more_dificult, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
@@ -1266,8 +1320,26 @@ async function registerPartFileTests() {
 
 
 
-// call runTests automatically when executed under Node.js
-if (IS_NODE_RUNTIME) {
+let discoveredTestsRegistered = false;
+
+export async function registerDiscoveredTests() {
+    if (discoveredTestsRegistered) return;
+    // Discover and register part-file import tests (Node only)
+    await registerPartFileTests();
+    // Discover and register sketch solver topology fixtures (Node only)
+    await registerSketchSolverTopologyFixtureTests(testFunctions);
+    discoveredTestsRegistered = true;
+}
+
+function isCliEntryPoint() {
+    if (!IS_NODE_RUNTIME) return false;
+    const entry = process.argv?.[1] ? String(process.argv[1]) : "";
+    if (!entry) return false;
+    return import.meta.url === `file://${entry}` || import.meta.url.endsWith(`/${entry.replace(/^\.\//, "")}`);
+}
+
+// call runTests automatically when executed directly under Node.js
+if (isCliEntryPoint()) {
     runTests(new PartHistory(), null, { testName: getCliRequestedTestName(process.argv) })
         .then(() => {
             // ensure CLI exits promptly once the suite finishes
@@ -1290,10 +1362,7 @@ export async function runTests(partHistory = new PartHistory(), callbackToRunBet
     // delete the ./tests/results directory in an asynchronous way
     await fs.promises.rm('./tests/results', { recursive: true, force: true });
 
-    // Discover and register part-file import tests (Node only)
-    await registerPartFileTests();
-    // Discover and register sketch solver topology fixtures (Node only)
-    await registerSketchSolverTopologyFixtureTests(testFunctions);
+    await registerDiscoveredTests();
 
     const testFunctionsToRun = getRequestedTestFunctions(testFunctions, options.testName);
     const testRunLog = IS_NODE_RUNTIME
@@ -1313,9 +1382,17 @@ export async function runTests(partHistory = new PartHistory(), callbackToRunBet
         let testDurationMs = 0;
         let artifactDurationMs = 0;
         let handledError = null;
+        let skipped = null;
 
         try {
-            handledError = await runSingleTest(testFunction, partHistory);
+            const testResult = await runSingleTest(testFunction, partHistory, {
+                validateSolidVolumes: options.validateSolidVolumes !== false,
+            });
+            if (isSkippedTestResult(testResult)) {
+                skipped = testResult;
+            } else {
+                handledError = testResult;
+            }
             testDurationMs = getMonotonicTimeMs() - testStartMs;
         } catch (err) {
             testDurationMs = getMonotonicTimeMs() - testStartMs;
@@ -1330,6 +1407,19 @@ export async function runTests(partHistory = new PartHistory(), callbackToRunBet
                 });
             }
             console.error(`[runTests] Test failed: ${testName}`, err);
+            continue;
+        }
+
+        if (skipped) {
+            if (testRunLog) {
+                testRunLog.recordTest({
+                    name: testName,
+                    status: 'skipped',
+                    testDurationMs,
+                    artifactDurationMs,
+                    note: skipped.reason,
+                });
+            }
             continue;
         }
 
@@ -1390,7 +1480,29 @@ export async function runTests(partHistory = new PartHistory(), callbackToRunBet
 
 
 
-export async function runSingleTest(testFunction, partHistory = new PartHistory()) {
+function validateSolidVolumeExpectations(testFunction, partHistory) {
+    const solids = getSceneSolids(partHistory);
+    if (!solids.length) return;
+
+    const testName = getTestName(testFunction);
+    const expectations = getSolidVolumeExpectations(testName);
+    if (!expectations) {
+        const solidNames = solids.map((solid, index) => String(solid?.name || `solid_${index}`));
+        throw new Error(
+            `[${testName}] Missing solid volume expectations for ${solids.length} resulting solid(s): `
+                + `${solidNames.join(", ")}.`,
+        );
+    }
+
+    assertSceneSolidVolumeExpectations(partHistory, expectations, testName);
+}
+
+export async function runSingleTest(testFunction, partHistory = new PartHistory(), options = {}) {
+    const skipReason = getTestSkipReason(testFunction, options);
+    if (skipReason) {
+        return skippedTestResult(skipReason);
+    }
+
     let error = null;
     try {
         await testFunction.test(partHistory);
@@ -1398,6 +1510,9 @@ export async function runSingleTest(testFunction, partHistory = new PartHistory(
         // Optional per-test post-run hook for validations/metrics
         if (typeof testFunction.afterRun === 'function') {
             try { await testFunction.afterRun(partHistory); } catch (e) { console.warn('afterRun failed:', e?.message || e); }
+        }
+        if (options.validateSolidVolumes !== false) {
+            validateSolidVolumeExpectations(testFunction, partHistory);
         }
     } catch (e) {
         error = e;
@@ -1484,6 +1599,7 @@ function createTestRunLog({ filter, plannedTests }) {
         const elapsedMs = getMonotonicTimeMs() - startedMs;
         const passed = records.filter(record => record.status === 'passed').length;
         const handledErrors = records.filter(record => record.status === 'handled_error').length;
+        const skipped = records.filter(record => record.status === 'skipped').length;
         const failed = records.filter(record => record.status === 'failed').length;
         const lines = [
             '# BREP Test Run Log',
@@ -1495,6 +1611,7 @@ function createTestRunLog({ filter, plannedTests }) {
             `tests_run: ${records.length}`,
             `passed: ${passed}`,
             `handled_errors: ${handledErrors}`,
+            `skipped: ${skipped}`,
             `failed: ${failed}`,
             `total_elapsed_ms: ${formatDurationMs(elapsedMs)}`,
             '',
@@ -1544,13 +1661,13 @@ function createTestRunLog({ filter, plannedTests }) {
 
     return {
         records,
-        recordTest({ name, status, testDurationMs, artifactDurationMs, error }) {
+        recordTest({ name, status, testDurationMs, artifactDurationMs, error, note }) {
             records.push({
                 name,
                 status,
                 testDurationMs,
                 artifactDurationMs,
-                note: error ? stringifyError(error) : '',
+                note: note || (error ? stringifyError(error) : ''),
                 errorDetails: error ? stringifyError(error) : '',
             });
             write();

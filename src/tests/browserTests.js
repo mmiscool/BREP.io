@@ -3,7 +3,13 @@
 import { FloatingWindow } from '../UI/FloatingWindow.js';
 import { Viewer } from '../UI/viewer.js';
 import { ConsoleCapture } from './ConsoleCapture.js';
-import { runSingleTest, runTests, testFunctions } from './tests.js';
+import {
+  getTestSkipReason,
+  isSkippedTestResult,
+  runSingleTest,
+  runTests,
+  testFunctions,
+} from './tests.js';
 
 
 
@@ -25,6 +31,7 @@ export class BrowserTesting {
 
     // Test registry (names in stable order)
     this.testNames = testFunctions.map(func => func.test.name);
+    this.testFunctionByName = new Map(testFunctions.map(func => [func.test.name, func]));
     this._initialOrder = new Map(this.testNames.map((name, idx) => [name, idx]));
     this._sortState = { key: null, direction: "asc" };
     //console.log(testFunctions, this.testNames);
@@ -33,11 +40,22 @@ export class BrowserTesting {
 
     // Per-test runtime state
     this.enabled = new Map(this.testNames.map(n => [n, true]));
-    this.status = new Map(this.testNames.map(n => [n, ""]));   // "", "pass", "fail"
+    this.status = new Map(this.testNames.map((name) => [
+      name,
+      getTestSkipReason(this.testFunctionByName.get(name), { runtime: "browser" }) ? "skip" : "",
+    ]));   // "", "pass", "fail", "skip"
     this.durationMs = new Map(this.testNames.map(n => [n, null]));
     this._isRunningSelected = false;
     this._stopRequested = false;
     this.errors = new Map(); // name -> { message, stack } captured on failure
+    this.testNames.forEach((name) => {
+      const reason = getTestSkipReason(this.testFunctionByName.get(name), { runtime: "browser" });
+      if (!reason) return;
+      this.errors.set(name, {
+        message: `Skipped: ${reason}`,
+        stack: "",
+      });
+    });
     // Per-test canvas snapshot
     this.screenshots = new Map(); // name -> dataURL
     this.logWindow = null;
@@ -573,7 +591,7 @@ export class BrowserTesting {
   }
 
   // ====== Status + error helpers ======
-  _setStatus(name, value /* "", "pass", "fail" */) {
+  _setStatus(name, value /* "", "pass", "fail", "skip" */) {
     this.status.set(name, value);
     const ref = this._rowRefs.get(name);
     if (ref) updateStatusCell(ref.statusCell, value);
@@ -711,7 +729,15 @@ export class BrowserTesting {
       if (typeof runSingleTest === "function") {
         this.startLogging();
         this.env.partHistory.reset();
-        await runSingleTest(functionToRun, this.env.partHistory);
+        const testResult = await runSingleTest(functionToRun, this.env.partHistory);
+        if (isSkippedTestResult(testResult)) {
+          this._setError(name, {
+            message: `Skipped: ${testResult.reason}`,
+            stack: "",
+          });
+          this._setStatus(name, "skip");
+          return;
+        }
         // After the test completes, zoom-to-fit then capture a canvas snapshot for the log
         try {
           if (typeof this.env.zoomToFit === 'function') {
@@ -943,13 +969,14 @@ function truncateTextStyle() {
 function compareStatusValues(a, b, direction = "asc") {
   const rank = (value) => {
     if (value === "fail") return 0;
-    if (value === "pass") return 1;
-    return 2;
+    if (value === "skip") return 1;
+    if (value === "pass") return 2;
+    return 3;
   };
   const aRank = rank(a);
   const bRank = rank(b);
-  const aEmpty = aRank === 2;
-  const bEmpty = bRank === 2;
+  const aEmpty = aRank === 3;
+  const bEmpty = bRank === 3;
   if (aEmpty !== bEmpty) return aEmpty ? 1 : -1;
   const cmp = aRank - bRank;
   return direction === "desc" ? -cmp : cmp;
@@ -1005,10 +1032,10 @@ function updateDurationCell(cell, value) {
   cell.appendChild(label);
 }
 function updateStatusCell(cell, value) {
-  // value: "", "pass", "fail"
+  // value: "", "pass", "fail", "skip"
   cell.textContent = "";
   const badge = document.createElement("span");
-  badge.textContent = value === "" ? "" : value.toUpperCase();
+  badge.textContent = value === "" ? "" : (value === "skip" ? "SKIP" : value.toUpperCase());
   badge.style.fontWeight = "800";
   badge.style.letterSpacing = "0.5px";
   badge.style.padding = value ? "2px 8px" : "0";
@@ -1026,6 +1053,10 @@ function updateStatusCell(cell, value) {
     badge.style.background = "#3a0b0f";
     badge.style.color = "#fca5a5";
     badge.style.border = "1px solid #7f1d1d";
+  } else if (value === "skip") {
+    badge.style.background = "#2b2f3a";
+    badge.style.color = "#cbd5e1";
+    badge.style.border = "1px solid #475569";
   } else {
     badge.style.background = "transparent";
     badge.style.color = "#a7aab3";

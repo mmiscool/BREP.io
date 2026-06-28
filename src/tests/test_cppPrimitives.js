@@ -1,5 +1,15 @@
 import { Cone, Cube, Cylinder, Pyramid, Torus, primitiveHasNativeBuilder, Sphere } from "../BREP/primitives.js";
 import { manifoldBuildSource } from "../BREP/setupManifold.js";
+import {
+    assertSolidVolume,
+    expectedBoxVolume,
+    expectedConeVolume,
+    expectedCylinderVolume,
+    expectedPyramidVolume,
+    expectedSphereVolume,
+    expectedTorusVolume,
+    volumeTolerance,
+} from "./solidVolumeTestUtils.js";
 
 function assert(condition, message) {
     if (!condition) throw new Error(message || "Assertion failed.");
@@ -12,7 +22,13 @@ function shouldSkip() {
 export async function test_cppPrimitive_cube_preserves_expected_face_labels() {
     if (shouldSkip()) return;
 
-    const cube = new Cube({ x: 2, y: 3, z: 4, name: "CPP_CUBE" });
+    const x = 2;
+    const y = 3;
+    const z = 4;
+    const cube = new Cube({ x, y, z, name: "CPP_CUBE" });
+    const expectedVolume = expectedBoxVolume(x, y, z);
+    assertSolidVolume(cube, expectedVolume, volumeTolerance(expectedVolume), "native cube primitive");
+
     const faceNames = new Set(cube.getFaceNames());
     const expected = ["CPP_CUBE_NX", "CPP_CUBE_PX", "CPP_CUBE_NY", "CPP_CUBE_PY", "CPP_CUBE_NZ", "CPP_CUBE_PZ"];
 
@@ -25,7 +41,13 @@ export async function test_cppPrimitive_cube_preserves_expected_face_labels() {
 export async function test_cppPrimitive_cylinder_preserves_expected_face_labels_and_metadata() {
     if (shouldSkip()) return;
 
-    const cylinder = new Cylinder({ radius: 2, height: 7, resolution: 24, name: "CPP_CYL" });
+    const radius = 2;
+    const height = 7;
+    const resolution = 24;
+    const cylinder = new Cylinder({ radius, height, resolution, name: "CPP_CYL" });
+    const expectedVolume = expectedCylinderVolume(radius, height, resolution);
+    assertSolidVolume(cylinder, expectedVolume, volumeTolerance(expectedVolume), "native cylinder primitive");
+
     const faceNames = new Set(cylinder.getFaceNames());
     assert(faceNames.has("CPP_CYL_B"), "Expected native cylinder to expose bottom face.");
     assert(faceNames.has("CPP_CYL_T"), "Expected native cylinder to expose top face.");
@@ -47,7 +69,14 @@ export async function test_cppPrimitive_cylinder_preserves_expected_face_labels_
 export async function test_cppPrimitive_cone_preserves_expected_face_labels_and_metadata() {
     if (shouldSkip()) return;
 
-    const cone = new Cone({ r1: 1, r2: 3, h: 5, resolution: 24, name: "CPP_CONE" });
+    const radiusTop = 1;
+    const radiusBottom = 3;
+    const height = 5;
+    const resolution = 24;
+    const cone = new Cone({ r1: radiusTop, r2: radiusBottom, h: height, resolution, name: "CPP_CONE" });
+    const expectedVolume = expectedConeVolume(radiusTop, radiusBottom, height, resolution);
+    assertSolidVolume(cone, expectedVolume, volumeTolerance(expectedVolume), "native cone primitive");
+
     const faceNames = new Set(cone.getFaceNames());
     assert(faceNames.has("CPP_CONE_B"), "Expected native cone to expose bottom face.");
     assert(faceNames.has("CPP_CONE_T"), "Expected native cone to expose top face.");
@@ -70,7 +99,20 @@ export async function test_cppPrimitive_cone_preserves_expected_face_labels_and_
 export async function test_cppPrimitive_torus_and_pyramid_preserve_face_labels() {
     if (shouldSkip()) return;
 
-    const torus = new Torus({ mR: 10, tR: 2, resolution: 24, arcDegrees: 270, name: "CPP_TORUS" });
+    const torusMajorRadius = 10;
+    const torusTubeRadius = 2;
+    const torusResolution = 24;
+    const torusArc = 270;
+    const torus = new Torus({
+        mR: torusMajorRadius,
+        tR: torusTubeRadius,
+        resolution: torusResolution,
+        arcDegrees: torusArc,
+        name: "CPP_TORUS",
+    });
+    const expectedTorusPartialVolume = expectedTorusVolume(torusMajorRadius, torusTubeRadius, torusResolution, torusArc);
+    assertSolidVolume(torus, expectedTorusPartialVolume, volumeTolerance(expectedTorusPartialVolume), "native partial torus primitive");
+
     const torusFaceNames = new Set(torus.getFaceNames());
     assert(torusFaceNames.has("CPP_TORUS_Side"), "Expected native torus to expose side face.");
     assert(torusFaceNames.has("CPP_TORUS_Cap0"), "Expected native partial torus to expose start cap.");
@@ -90,7 +132,17 @@ export async function test_cppPrimitive_torus_and_pyramid_preserve_face_labels()
     assert(torusTubeCenterline?.closedLoop === false, "Expected partial native torus tube centerline to be open.");
     assert(Array.isArray(torusTubeCenterline?.points) && torusTubeCenterline.points.length === 25, "Expected partial native torus tube centerline to include arc endpoints.");
 
-    const fullTorus = new Torus({ mR: 10, tR: 2, resolution: 24, arcDegrees: 360, name: "CPP_TORUS_FULL" });
+    const fullTorusArc = 360;
+    const fullTorus = new Torus({
+        mR: torusMajorRadius,
+        tR: torusTubeRadius,
+        resolution: torusResolution,
+        arcDegrees: fullTorusArc,
+        name: "CPP_TORUS_FULL",
+    });
+    const expectedFullTorusVolume = expectedTorusVolume(torusMajorRadius, torusTubeRadius, torusResolution, fullTorusArc);
+    assertSolidVolume(fullTorus, expectedFullTorusVolume, volumeTolerance(expectedFullTorusVolume), "native full torus primitive");
+
     const fullTorusFaceNames = new Set(fullTorus.getFaceNames());
     assert(fullTorusFaceNames.has("CPP_TORUS_FULL_Side"), "Expected closed native torus to expose side face.");
     assert(!fullTorusFaceNames.has("CPP_TORUS_FULL_Cap0"), "Did not expect start cap on closed native torus.");
@@ -101,7 +153,13 @@ export async function test_cppPrimitive_torus_and_pyramid_preserve_face_labels()
     assert(fullTorusTubeCenterline?.closedLoop === true, "Expected full native torus tube centerline to be closed.");
     assert(Array.isArray(fullTorusTubeCenterline?.points) && fullTorusTubeCenterline.points.length === 24, "Expected full native torus tube centerline to match major resolution.");
 
-    const pyramid = new Pyramid({ bL: 6, s: 4, h: 8, name: "CPP_PYRAMID" });
+    const baseSideLength = 6;
+    const sides = 4;
+    const height = 8;
+    const pyramid = new Pyramid({ bL: baseSideLength, s: sides, h: height, name: "CPP_PYRAMID" });
+    const pyramidVolume = expectedPyramidVolume(baseSideLength, sides, height);
+    assertSolidVolume(pyramid, pyramidVolume, volumeTolerance(pyramidVolume), "native pyramid primitive");
+
     const pyramidFaceNames = new Set(pyramid.getFaceNames());
     assert(pyramidFaceNames.has("CPP_PYRAMID_Base"), "Expected native pyramid to expose base face.");
     for (let i = 0; i < 4; i++) {
@@ -112,7 +170,12 @@ export async function test_cppPrimitive_torus_and_pyramid_preserve_face_labels()
 export async function test_cppPrimitive_sphere_preserves_single_face_label() {
     if (shouldSkip()) return;
 
-    const sphere = new Sphere({ r: 5, resolution: 16, name: "CPP_SPHERE" });
+    const radius = 5;
+    const resolution = 16;
+    const sphere = new Sphere({ r: radius, resolution, name: "CPP_SPHERE" });
+    const expectedVolume = expectedSphereVolume(radius, resolution);
+    assertSolidVolume(sphere, expectedVolume, volumeTolerance(expectedVolume), "native sphere primitive");
+
     const faceNames = sphere.getFaceNames();
     assert(faceNames.length === 1 && faceNames[0] === "CPP_SPHERE", "Expected native sphere to expose a single named face.");
     assert(sphere.getTriangleCount() > 0, "Expected native sphere to contain triangles.");
