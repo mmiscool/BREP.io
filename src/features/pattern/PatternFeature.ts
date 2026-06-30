@@ -42,7 +42,7 @@ const inputParamsSchema = {
     options: ["count and pitch", "count and span"],
     default_value: "count and pitch",
     label: "Count Mode",
-    hint: "Use the distance/angle as the current pitch value or divide it across the full span",
+    hint: "Use the distance/angle as the per-step pitch, or divide it across the full span",
   },
   offset: {
     type: "transform",
@@ -81,7 +81,7 @@ const inputParamsSchema = {
   totalAngleDeg: {
     type: "number",
     default_value: 360,
-    hint: "Total sweep angle for CIRCULAR",
+    hint: "Angle between circular instances, or total span when Count Mode is count and span",
   },
   booleanMode: {
     type: "options",
@@ -97,10 +97,7 @@ export class PatternFeature {
   static inputParamsSchema = inputParamsSchema;
   static showContexButton(selectedItems: any) {
     const items = Array.isArray(selectedItems) ? selectedItems : [];
-    const solids = items
-      .filter((it) => String(it?.type || '').toUpperCase() === 'SOLID')
-      .map((it) => it?.name)
-      .filter((name) => !!name);
+    const solids = selectedNamesByType(items, 'SOLID');
     if (!solids.length) return false;
     const edge = items.find((it) => String(it?.type || '').toUpperCase() === 'EDGE');
     const edgeName = edge?.name || edge?.userData?.edgeName || null;
@@ -135,70 +132,41 @@ export class PatternFeature {
     return hidden;
   }
 
-  async run(partHistory: any) {
-    // Tolerant: accept SOLID directly, or objects with parentSolid
-    const raw = Array.isArray(this.inputParams.solids) ? this.inputParams.solids.filter(Boolean) : [];
-    const solids = [];
-    for (const o of raw) {
-      if (!o) continue;
-      if (o.type === 'SOLID') solids.push(o);
-      else if (o.parentSolid && o.parentSolid.type === 'SOLID') solids.push(o.parentSolid);
-      else if (o.parent && o.parent.type === 'SOLID') solids.push(o.parent);
-    }
-    if (solids.length === 0) {
-      console.warn('[PatternFeature] No solids resolved from selection.');
-    }
-    if (!solids.length) return { added: [], removed: [] };
+  async run(_partHistory: any) {
+    const solids = resolveSourceSolids(this.inputParams.solids);
+    if (!solids.length) return noSourceResult();
 
     const mode = String(this.inputParams.mode || 'LINEAR').toUpperCase();
     const count = Math.max(1, (this.inputParams.count | 0));
-    const booleanMode = (this.inputParams.booleanMode || 'NONE').toUpperCase();
 
-    // Fallbacks: if no solids resolved, try currently selected solids; else last SOLID in scene
-    let sources = solids;
-    if (!sources.length && partHistory && partHistory.scene) {
-      try {
-        const selected = [];
-        partHistory.scene.traverse((o) => { if (o && o.type === 'SOLID' && o.selected) selected.push(o); });
-        if (selected.length) sources = selected;
-      } catch (_) { /* ignore */ }
-      if (!sources.length) {
-        try {
-          const solidsInScene = partHistory.scene.children.filter(ch => ch && ch.type === 'SOLID');
-          if (solidsInScene.length) sources = [solidsInScene[solidsInScene.length - 1]]; // most recent
-        } catch (_) { /* ignore */ }
-      }
-      if (!sources.length) console.warn('[PatternFeature] No sources available (selection and scene empty).');
+    return isUnionMode(this.inputParams.booleanMode)
+      ? { added: solids.map((src) => this.#unionPattern(src, count, mode)), removed: solids }
+      : { added: solids.flatMap((src) => this.#patternInstances(src, count, mode)), removed: [] };
+  }
+
+  #unionPattern(src, count, mode) {
+    const clones = this.#patternInstances(src, count, mode, false);
+    const unionName = `${src.name || 'Pattern'}::UNION`;
+    const result = BREP.Solid.unionMany([src, ...clones], { name: unionName }) || src;
+    try { result.name = unionName; } catch { /* ignore rename failures */ }
+    result.visualize();
+    try { src.__removeFlag = true; } catch { /* ignore remove flag failures */ }
+    return result;
+  }
+
+  #patternInstances(src, count, mode, doVisualize = true) {
+    if (mode === 'LINEAR') {
+      return this.#linearPattern(src, count, resolveLinearDelta(this.inputParams, count), doVisualize);
     }
-
-    // BOOLEAN UNION: fuse each source with its generated clones and replace original
-    if (booleanMode === 'UNION') {
-      const out = [];
-      for (const src of sources) {
-        const clones = (mode === 'LINEAR')
-          ? this.#linearPattern(src, count, resolveLinearDelta(this.inputParams, count), /*doVisualize*/ false)
-          : this.#circularPattern(src, count, this.inputParams.axisRef, Number(this.inputParams.totalAngleDeg) || 360, Number(this.inputParams.centerOffset) || 0, this.inputParams.countMode, /*doVisualize*/ false);
-
-        const unionName = `${src.name || 'Pattern'}::UNION`;
-        const acc = BREP.Solid.unionMany([src, ...clones], { name: unionName }) || src;
-        try { acc.name = unionName; } catch { /* ignore rename failures */ }
-        acc.visualize();
-        try { src.__removeFlag = true; } catch { /* ignore remove flag failures */ }
-        out.push(acc);
-      }
-      const removedSources = sources.filter(Boolean);
-      return { added: out, removed: removedSources };
-    }
-
-    // NON-BOOLEAN: return clones as separate bodies
-    const instances = [];
-    for (const src of sources) {
-      const clones = (mode === 'LINEAR')
-        ? this.#linearPattern(src, count, resolveLinearDelta(this.inputParams, count))
-        : this.#circularPattern(src, count, this.inputParams.axisRef, Number(this.inputParams.totalAngleDeg) || 360, Number(this.inputParams.centerOffset) || 0, this.inputParams.countMode);
-      for (const c of clones) instances.push(c);
-    }
-    return { added: instances, removed: [] };
+    return this.#circularPattern(
+      src,
+      count,
+      this.inputParams.axisRef,
+      Number(this.inputParams.totalAngleDeg) || 360,
+      Number(this.inputParams.centerOffset) || 0,
+      this.inputParams.countMode,
+      doVisualize,
+    );
   }
 
   #linearPattern(src, count, deltaPos, doVisualize = true) {
@@ -206,15 +174,7 @@ export class PatternFeature {
     const out = [];
     for (let i = 1; i <= count - 1; i++) {
       const t = new THREE.Matrix4().makeTranslation(d.x * i, d.y * i, d.z * i);
-      const c = src.clone();
-      c.bakeTransform(t);
-      const fallbackId = PatternFeature.shortName || PatternFeature.longName || 'Pattern';
-      const featureID = this.inputParams.featureID || fallbackId;
-      const idx = i + 1;
-      try { retagSolidFaces(c, `${featureID}_${idx}`); } catch (_) { /* best-effort */ }
-      c.name = `${featureID}_${idx}`;
-      if (doVisualize) c.visualize();
-      out.push(c);
+      out.push(this.#cloneInstance(src, t, i + 1, doVisualize));
     }
     return out;
   }
@@ -239,17 +199,23 @@ export class PatternFeature {
       const T0 = new THREE.Matrix4().makeTranslation(-center.x, -center.y, -center.z);
       const M = new THREE.Matrix4().multiply(T1).multiply(RS).multiply(T0);
 
-      const c = src.clone();
-      c.bakeTransform(M);
-      const fallbackId = PatternFeature.shortName || PatternFeature.longName || 'Pattern';
-      const featureID = this.inputParams.featureID || fallbackId;
-      const idx = i + 1;
-      try { retagSolidFaces(c, `${featureID}_${idx}`); } catch (_) { /* best-effort */ }
-      c.name = `${featureID}_${idx}`;
-      if (doVisualize) c.visualize();
-      out.push(c);
+      out.push(this.#cloneInstance(src, M, i + 1, doVisualize));
     }
     return out;
+  }
+
+  #cloneInstance(src, matrix, index, doVisualize = true) {
+    const clone = src.clone();
+    clone.bakeTransform(matrix);
+    const name = `${this.#featureID()}_${index}`;
+    retagSolidFaces(clone, name);
+    clone.name = name;
+    if (doVisualize) clone.visualize();
+    return clone;
+  }
+
+  #featureID() {
+    return this.inputParams.featureID || PatternFeature.shortName || PatternFeature.longName || 'Pattern';
   }
 }
 
@@ -266,6 +232,41 @@ function toFiniteNumber(value: any, fallback: number) {
 
 function normalizeOptionKey(value: any) {
   return String(value || '').trim().replace(/[\s-]+/g, '_').toUpperCase();
+}
+
+function selectedNamesByType(items: any[] = [], typeName: string) {
+  const normalizedType = String(typeName || '').toUpperCase();
+  return items
+    .filter((item) => String(item?.type || '').toUpperCase() === normalizedType)
+    .map((item) => item?.name)
+    .filter((name) => !!name);
+}
+
+function resolveSourceSolids(selection: any) {
+  const raw = Array.isArray(selection) ? selection.filter(Boolean) : [];
+  const solids = [];
+  for (const item of raw) {
+    const solid = resolveSolidReference(item);
+    if (solid) solids.push(solid);
+  }
+  return solids;
+}
+
+function resolveSolidReference(item: any) {
+  return [item, item?.parentSolid, item?.parent].find(isSolidObject) || null;
+}
+
+function isSolidObject(item: any) {
+  return item?.type === 'SOLID';
+}
+
+function noSourceResult() {
+  console.warn('[PatternFeature] No solids resolved from selection.');
+  return { added: [], removed: [] };
+}
+
+function isUnionMode(value: any) {
+  return String(value || 'NONE').toUpperCase() === 'UNION';
 }
 
 function resolveLinearDelta(params: AnyRecord = {}, count = 1) {
@@ -292,7 +293,7 @@ function computeDirectionFromReference(refObj: any) {
 
 function computeAxisFromEdge(edgeObj: any) {
   if (!edgeObj) return null;
-  const mat = edgeObj.matrixWorld;
+  const mat = edgeObj.matrixWorld || new THREE.Matrix4();
   let A = new THREE.Vector3(0, 0, 0), B = new THREE.Vector3(0, 1, 0);
   const cached = edgeObj?.userData?.polylineLocal;
   const isWorld = !!(edgeObj?.userData?.polylineWorld);
