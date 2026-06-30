@@ -23,8 +23,6 @@ export const MODELING_WORKBENCH = {
     'H',
     'PF',
     'THK',
-    'PATLIN',
-    'PATRAD',
     'PATTERN',
     'XFORM',
     'M',

@@ -28,8 +28,6 @@ import { SelfIntersectionCleanupFeature } from './features/selfIntersectionClean
 import { HelixFeature } from './features/helix/HelixFeature.js';
 import { HoleFeature } from './features/hole/HoleFeature.js';
 import { PatternFeature } from './features/pattern/PatternFeature.js';
-import { PatternLinearFeature } from './features/patternLinear/PatternLinearFeature.js';
-import { PatternRadialFeature } from './features/patternRadial/PatternRadialFeature.js';
 import { TubeFeature } from './features/tube/TubeFeature.js';
 import { AssemblyComponentFeature } from './features/assemblyComponent/AssemblyComponentFeature.js';
 import { OffsetShellFeature } from './features/offsetShell/OffsetShellFeature.js';
@@ -138,10 +136,7 @@ export class FeatureRegistry {
     this.register(TransformFeature);
     this.register(OverlapCleanupFeature);
     this.register(SelfIntersectionCleanupFeature);
-    this.register(PatternLinearFeature);
-    this.register(PatternRadialFeature);
     this.register(AssemblyComponentFeature);
-    // Keep legacy combined Pattern for backward compatibility
     this.register(PatternFeature);
 
     // Backward-compat aliases for renamed features
@@ -222,10 +217,6 @@ export class FeatureRegistry {
       const className = normalizeKey(fc.name);
       if (shortName === searchName || longName === searchName || className === searchName) return fc;
     }
-    // Aliases for new split pattern features
-    if (searchName === 'PATTERN' || searchName === 'PATTERN FEATURE') return PatternLinearFeature;
-    if (searchName === 'PATTERN LINEAR') return PatternLinearFeature;
-    if (searchName === 'PATTERN RADIAL') return PatternRadialFeature;
     return this.aliases.get(searchName) || null;
   }
 

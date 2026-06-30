@@ -620,11 +620,11 @@ export const solidVolumeExpectations = Object.freeze({
                 volume: 1000
             },
             {
-                name: "PATLIN25_2",
+                name: "PATTERN25_2",
                 volume: 1000
             },
             {
-                name: "PATLIN25_3",
+                name: "PATTERN25_3",
                 volume: 1000
             },
             {
@@ -632,24 +632,16 @@ export const solidVolumeExpectations = Object.freeze({
                 volume: 1000
             },
             {
-                name: "PATRAD27_2",
+                name: "PATTERN27_2",
                 volume: 999.999999488937
             },
             {
-                name: "PATRAD27_3",
+                name: "PATTERN27_3",
                 volume: 1000
             },
             {
-                name: "PATRAD27_4",
+                name: "PATTERN27_4",
                 volume: 999.999999488937
-            },
-            {
-                name: "P.CU28",
-                volume: 1000
-            },
-            {
-                name: "PATTERN29_2",
-                volume: 1000
             }
         ]
     },

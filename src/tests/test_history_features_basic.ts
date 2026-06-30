@@ -115,24 +115,23 @@ export async function test_history_features_basic(partHistory) {
   thicken.inputParams.face = `${thickenBase.inputParams.featureID}_PZ`;
   thicken.inputParams.distance = 0.5;
 
-  const patLinBase = await partHistory.newFeature("P.CU");
-  const patLin = await partHistory.newFeature("PATLIN");
-  patLin.inputParams.solids = [patLinBase.inputParams.featureID];
-  patLin.inputParams.count = 3;
-  patLin.inputParams.offset = { position: [3, 0, 0], rotationEuler: [0, 0, 0], scale: [1, 1, 1] };
+  const patLinearBase = await partHistory.newFeature("P.CU");
+  const patLinear = await partHistory.newFeature("PATTERN");
+  patLinear.inputParams.solids = [patLinearBase.inputParams.featureID];
+  patLinear.inputParams.mode = "LINEAR";
+  patLinear.inputParams.linearInputMode = "vector distance";
+  patLinear.inputParams.directionRef = axisEdgeName;
+  patLinear.inputParams.linearDistance = 3;
+  patLinear.inputParams.count = 3;
 
-  const patRadBase = await partHistory.newFeature("P.CU");
-  const patRad = await partHistory.newFeature("PATRAD");
-  patRad.inputParams.solids = [patRadBase.inputParams.featureID];
-  patRad.inputParams.axisRef = axisEdgeName;
-  patRad.inputParams.count = 4;
-  patRad.inputParams.totalAngleDeg = 180;
-
-  const patLegacyBase = await partHistory.newFeature("P.CU");
-  const patLegacy = await partHistory.newFeature("PATTERN");
-  patLegacy.inputParams.solids = [patLegacyBase.inputParams.featureID];
-  patLegacy.inputParams.mode = "LINEAR";
-  patLegacy.inputParams.count = 2;
+  const patCircularBase = await partHistory.newFeature("P.CU");
+  const patCircular = await partHistory.newFeature("PATTERN");
+  patCircular.inputParams.solids = [patCircularBase.inputParams.featureID];
+  patCircular.inputParams.mode = "CIRCULAR";
+  patCircular.inputParams.countMode = "count and span";
+  patCircular.inputParams.axisRef = axisEdgeName;
+  patCircular.inputParams.count = 4;
+  patCircular.inputParams.totalAngleDeg = 180;
 
   const acomp = await partHistory.newFeature("ACOMP");
   acomp.inputParams.componentName = "missing_component";

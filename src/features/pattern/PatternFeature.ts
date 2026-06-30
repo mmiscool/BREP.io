@@ -24,11 +24,25 @@ const inputParamsSchema = {
     hint: "Pattern type",
   },
   // Linear params
+  linearInputMode: {
+    type: "options",
+    options: ["transform", "vector distance"],
+    default_value: "vector distance",
+    label: "Linear Input",
+    hint: "Use transform controls or a selected direction plus distance",
+  },
   count: {
     type: "number",
     default_value: 3,
     step: 1,
     hint: "Instance count (>= 1)",
+  },
+  countMode: {
+    type: "options",
+    options: ["count and pitch", "count and span"],
+    default_value: "count and pitch",
+    label: "Count Mode",
+    hint: "Use the distance/angle as the current pitch value or divide it across the full span",
   },
   offset: {
     type: "transform",
@@ -36,13 +50,28 @@ const inputParamsSchema = {
     label: "Offset (use gizmo)",
     hint: "Use Move gizmo to set direction and distance (position only)",
   },
+  directionRef: {
+    type: "reference_selection",
+    selectionFilter: ["EDGE", "FACE", "PLANE"],
+    multiple: false,
+    default_value: null,
+    label: "Direction",
+    hint: "Select an EDGE direction or FACE/PLANE normal for linear spacing",
+  },
+  linearDistance: {
+    type: "number",
+    default_value: 10,
+    label: "Distance",
+    hint: "Distance between linear pattern instances along the selected direction",
+  },
   // Circular params
   axisRef: {
     type: "reference_selection",
-    selectionFilter: ["FACE", "PLANE"],
+    selectionFilter: ["EDGE"],
     multiple: false,
     default_value: null,
-    hint: "Axis reference (FACE normal or plane normal through its centroid)",
+    label: "Axis",
+    hint: "Select an EDGE to define the circular pattern axis",
   },
   centerOffset: {
     type: "number",
@@ -66,6 +95,22 @@ export class PatternFeature {
   static shortName = "PATTERN";
   static longName = "Pattern";
   static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems: any) {
+    const items = Array.isArray(selectedItems) ? selectedItems : [];
+    const solids = items
+      .filter((it) => String(it?.type || '').toUpperCase() === 'SOLID')
+      .map((it) => it?.name)
+      .filter((name) => !!name);
+    if (!solids.length) return false;
+    const edge = items.find((it) => String(it?.type || '').toUpperCase() === 'EDGE');
+    const edgeName = edge?.name || edge?.userData?.edgeName || null;
+    const params: AnyRecord = { solids };
+    if (edgeName) {
+      params.mode = 'CIRCULAR';
+      params.axisRef = edgeName;
+    }
+    return { params };
+  }
 
   inputParams: AnyRecord;
   persistentData: AnyRecord;
@@ -81,9 +126,13 @@ export class PatternFeature {
       : context?.params || {};
     const mode = String(params?.mode || "LINEAR").toUpperCase();
     if (mode === "CIRCULAR") {
-      return ["offset"];
+      return ["linearInputMode", "offset", "directionRef", "linearDistance"];
     }
-    return ["axisRef", "centerOffset", "totalAngleDeg"];
+    const linearInputMode = normalizeOptionKey(params?.linearInputMode || "vector distance");
+    const hidden = ["axisRef", "centerOffset", "totalAngleDeg"];
+    if (linearInputMode === "VECTOR_DISTANCE") hidden.push("offset");
+    else hidden.push("directionRef", "linearDistance");
+    return hidden;
   }
 
   async run(partHistory: any) {
@@ -101,7 +150,7 @@ export class PatternFeature {
     }
     if (!solids.length) return { added: [], removed: [] };
 
-    const mode = (this.inputParams.mode || 'LINEAR').toUpperCase();
+    const mode = String(this.inputParams.mode || 'LINEAR').toUpperCase();
     const count = Math.max(1, (this.inputParams.count | 0));
     const booleanMode = (this.inputParams.booleanMode || 'NONE').toUpperCase();
 
@@ -127,8 +176,8 @@ export class PatternFeature {
       const out = [];
       for (const src of sources) {
         const clones = (mode === 'LINEAR')
-          ? this.#linearPattern(src, count, (this.inputParams.offset && this.inputParams.offset.position) || [10, 0, 0], /*doVisualize*/ false)
-          : this.#circularPattern(src, count, this.inputParams.axisRef, Number(this.inputParams.totalAngleDeg) || 360, Number(this.inputParams.centerOffset) || 0, /*doVisualize*/ false);
+          ? this.#linearPattern(src, count, resolveLinearDelta(this.inputParams, count), /*doVisualize*/ false)
+          : this.#circularPattern(src, count, this.inputParams.axisRef, Number(this.inputParams.totalAngleDeg) || 360, Number(this.inputParams.centerOffset) || 0, this.inputParams.countMode, /*doVisualize*/ false);
 
         const unionName = `${src.name || 'Pattern'}::UNION`;
         const acc = BREP.Solid.unionMany([src, ...clones], { name: unionName }) || src;
@@ -145,8 +194,8 @@ export class PatternFeature {
     const instances = [];
     for (const src of sources) {
       const clones = (mode === 'LINEAR')
-        ? this.#linearPattern(src, count, (this.inputParams.offset && this.inputParams.offset.position) || [10, 0, 0])
-        : this.#circularPattern(src, count, this.inputParams.axisRef, Number(this.inputParams.totalAngleDeg) || 360, Number(this.inputParams.centerOffset) || 0);
+        ? this.#linearPattern(src, count, resolveLinearDelta(this.inputParams, count))
+        : this.#circularPattern(src, count, this.inputParams.axisRef, Number(this.inputParams.totalAngleDeg) || 360, Number(this.inputParams.centerOffset) || 0, this.inputParams.countMode);
       for (const c of clones) instances.push(c);
     }
     return { added: instances, removed: [] };
@@ -170,15 +219,18 @@ export class PatternFeature {
     return out;
   }
 
-  #circularPattern(src, count, axisRef, totalAngleDeg, centerOffset, doVisualize = true) {
+  #circularPattern(src, count, axisRef, totalAngleDeg, centerOffset, countMode, doVisualize = true) {
     // Determine axis and center from reference
     const ref = Array.isArray(axisRef) ? axisRef[0] : axisRef;
-    const plane = computeRefPlane(ref);
-    const axis = plane?.normal || new THREE.Vector3(0, 1, 0);
-    const center = (plane?.point || new THREE.Vector3()).clone().addScaledVector(axis, centerOffset || 0);
+    const axisInfo = computeAxisFromEdge(ref);
+    const axis = axisInfo?.dir || new THREE.Vector3(0, 1, 0);
+    const center = (axisInfo?.point || new THREE.Vector3()).clone().addScaledVector(axis, centerOffset || 0);
 
     const out = [];
-    const step = (count <= 1) ? 0 : THREE.MathUtils.degToRad(totalAngleDeg) / count;
+    const divisor = normalizeOptionKey(countMode || "count and pitch") === "COUNT_AND_SPAN"
+      ? Math.max(1, count - 1)
+      : count;
+    const step = (count <= 1) ? 0 : THREE.MathUtils.degToRad(totalAngleDeg) / divisor;
     for (let i = 1; i <= count - 1; i++) {
       const theta = step * i;
       const q = new THREE.Quaternion().setFromAxisAngle(axis, theta);
@@ -207,48 +259,118 @@ function toVec3(v: any, dx: number, dy: number, dz: number) {
   return new THREE.Vector3(dx, dy, dz);
 }
 
-function computeRefPlane(refObj: any) {
+function toFiniteNumber(value: any, fallback: number) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function normalizeOptionKey(value: any) {
+  return String(value || '').trim().replace(/[\s-]+/g, '_').toUpperCase();
+}
+
+function resolveLinearDelta(params: AnyRecord = {}, count = 1) {
+  const linearInputMode = normalizeOptionKey(params?.linearInputMode || "vector distance");
+  const isSpan = normalizeOptionKey(params?.countMode || "count and pitch") === "COUNT_AND_SPAN";
+  const spanDivisor = isSpan ? Math.max(1, count - 1) : 1;
+  if (linearInputMode !== "VECTOR_DISTANCE") {
+    return toVec3((params.offset && params.offset.position) || [10, 0, 0], 10, 0, 0).multiplyScalar(1 / spanDivisor);
+  }
+  const ref = Array.isArray(params.directionRef) ? params.directionRef[0] : params.directionRef;
+  const direction = computeDirectionFromReference(ref) || new THREE.Vector3(1, 0, 0);
+  const distance = toFiniteNumber(params.linearDistance, 10);
+  return direction.clone().multiplyScalar(distance / spanDivisor);
+}
+
+function computeDirectionFromReference(refObj: any) {
   if (!refObj) return null;
-  // FACE: use area-weighted centroid and average normal
-  if (refObj.type === 'FACE' && refObj.geometry) {
-    const pos = refObj.geometry.getAttribute('position');
-    if (!pos || pos.count < 3) return null;
-    const a = new THREE.Vector3();
-    const b = new THREE.Vector3();
-    const c = new THREE.Vector3();
-    const centroid = new THREE.Vector3();
-    const nAccum = new THREE.Vector3();
-    let areaSum = 0;
-    const toWorld = (out: any, i: number) => out.set(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(refObj.matrixWorld);
-    const triCount = (pos.count / 3) | 0;
-    for (let t = 0; t < triCount; t++) {
-      const i0 = 3 * t + 0, i1 = 3 * t + 1, i2 = 3 * t + 2;
-      toWorld(a, i0); toWorld(b, i1); toWorld(c, i2);
-      const ab = new THREE.Vector3().subVectors(b, a);
-      const ac = new THREE.Vector3().subVectors(c, a);
-      const cross = new THREE.Vector3().crossVectors(ac, ab);
-      const triArea = 0.5 * cross.length();
-      if (triArea > 0) {
-        centroid.copy(a).add(b).add(c).multiplyScalar(1 / 3);
-        nAccum.add(cross);
-        areaSum += triArea;
+  const type = String(refObj?.type || '').toUpperCase();
+  if (type === 'EDGE') return computeAxisFromEdge(refObj)?.dir || null;
+  if (type === 'FACE') return computeFaceNormal(refObj);
+  if (type === 'PLANE') return computePlaneNormal(refObj);
+  return computeAxisFromEdge(refObj)?.dir || computeFaceNormal(refObj) || computePlaneNormal(refObj);
+}
+
+function computeAxisFromEdge(edgeObj: any) {
+  if (!edgeObj) return null;
+  const mat = edgeObj.matrixWorld;
+  let A = new THREE.Vector3(0, 0, 0), B = new THREE.Vector3(0, 1, 0);
+  const cached = edgeObj?.userData?.polylineLocal;
+  const isWorld = !!(edgeObj?.userData?.polylineWorld);
+  if (Array.isArray(cached) && cached.length >= 2) {
+    const pick = [];
+    for (let i = 0; i < cached.length && pick.length < 2; i++) {
+      const p = cached[i];
+      if (!pick.length) { pick.push(p); continue; }
+      const q = pick[0];
+      if (Math.abs(p[0] - q[0]) > 1e-12 || Math.abs(p[1] - q[1]) > 1e-12 || Math.abs(p[2] - q[2]) > 1e-12) pick.push(p);
+    }
+    if (pick.length >= 2) {
+      if (isWorld) {
+        A.set(pick[0][0], pick[0][1], pick[0][2]);
+        B.set(pick[1][0], pick[1][1], pick[1][2]);
+      } else {
+        A.set(pick[0][0], pick[0][1], pick[0][2]).applyMatrix4(mat);
+        B.set(pick[1][0], pick[1][1], pick[1][2]).applyMatrix4(mat);
       }
     }
-    if (areaSum <= 0 || nAccum.lengthSq() === 0) return null;
-    const point = centroid.multiplyScalar(1); // centroid from last tri (good enough for axis ref)
-    const normal = nAccum.normalize();
-    return { point, normal };
+  } else {
+    const aStart = edgeObj?.geometry?.attributes?.instanceStart;
+    const aEnd = edgeObj?.geometry?.attributes?.instanceEnd;
+    if (aStart && aEnd && aStart.count >= 1) {
+      const s = new THREE.Vector3(aStart.getX(0), aStart.getY(0), aStart.getZ(0)).applyMatrix4(mat);
+      const e = new THREE.Vector3(aEnd.getX(0), aEnd.getY(0), aEnd.getZ(0)).applyMatrix4(mat);
+      A.copy(s); B.copy(e);
+    } else {
+      const pos = edgeObj?.geometry?.getAttribute?.('position');
+      if (pos && pos.count >= 2) {
+        const s = new THREE.Vector3(pos.getX(0), pos.getY(0), pos.getZ(0)).applyMatrix4(mat);
+        const e = new THREE.Vector3(pos.getX(pos.count - 1), pos.getY(pos.count - 1), pos.getZ(pos.count - 1)).applyMatrix4(mat);
+        A.copy(s); B.copy(e);
+      }
+    }
   }
+  const dir = B.clone().sub(A);
+  if (dir.lengthSq() < 1e-12) dir.set(0, 1, 0); else dir.normalize();
+  return { point: A, dir };
+}
 
-  // PLANE: use world position and +Z direction transformed by world quaternion
+function computeFaceNormal(faceObj: any) {
+  if (!faceObj?.geometry) return null;
+  const pos = faceObj.geometry.getAttribute?.('position');
+  if (!pos || pos.count < 3) return null;
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const ab = new THREE.Vector3();
+  const ac = new THREE.Vector3();
+  const nAccum = new THREE.Vector3();
+  const toWorld = (out: any, i: number) => out
+    .set(pos.getX(i), pos.getY(i), pos.getZ(i))
+    .applyMatrix4(faceObj.matrixWorld);
+  const triCount = (pos.count / 3) | 0;
+  for (let t = 0; t < triCount; t++) {
+    const i0 = 3 * t + 0;
+    const i1 = 3 * t + 1;
+    const i2 = 3 * t + 2;
+    toWorld(a, i0); toWorld(b, i1); toWorld(c, i2);
+    ab.subVectors(b, a);
+    ac.subVectors(c, a);
+    nAccum.add(new THREE.Vector3().crossVectors(ac, ab));
+  }
+  if (nAccum.lengthSq() <= 1e-12) return null;
+  return nAccum.normalize();
+}
+
+function computePlaneNormal(planeObj: any) {
   try {
-    const point = new THREE.Vector3();
-    refObj.getWorldPosition(point);
     const q = new THREE.Quaternion();
-    refObj.getWorldQuaternion(q);
-    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(q).normalize();
-    return { point, normal };
-  } catch (_) { return null; }
+    planeObj.getWorldQuaternion(q);
+    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+    if (normal.lengthSq() <= 1e-12) return null;
+    return normal.normalize();
+  } catch (_) {
+    return null;
+  }
 }
 
 // Retag all face labels in a Solid with a unique suffix so IDs remain distinct

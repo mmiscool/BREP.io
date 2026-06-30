@@ -22,8 +22,6 @@ export const SIMULATION_WORKBENCH = {
     'CH',
     'H',
     'PF',
-    'PATLIN',
-    'PATRAD',
     'PATTERN',
     'XFORM',
     'M',

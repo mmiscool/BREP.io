@@ -79,9 +79,7 @@ Solid operations:
 - [Transform](docs/features/transform.md)
 
 Pattern, import, and generation:
-- [Pattern (Legacy Combined)](docs/features/pattern.md)
-- [Pattern Linear](docs/features/pattern-linear.md)
-- [Pattern Radial](docs/features/pattern-radial.md)
+- [Pattern](docs/features/pattern.md)
 - [Import 3D Model](docs/features/import-3d-model.md)
 - [Image Heightmap Solid](docs/features/image-heightmap-solid.md)
 - [Image to Face](docs/features/image-to-face.md)
