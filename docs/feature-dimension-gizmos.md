@@ -4,9 +4,9 @@ This document covers the shared draggable dimension gizmo infrastructure used by
 
 ## Source Files
 
-- `src/UI/featureDimensions/FeatureDimensionOverlay.js`
-- `src/UI/HistoryWidget.js`
-- `src/UI/viewer.js`
+- `src/UI/featureDimensions/FeatureDimensionOverlay.ts`
+- `src/UI/HistoryWidget.ts`
+- `src/UI/viewer.ts`
 
 ## Scope and Separation from PMI
 

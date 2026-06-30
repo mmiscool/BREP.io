@@ -5,7 +5,7 @@ Creates an empty authored solid with vertex buffers, triangle buffers, face-name
 ## Usage
 
 ```js
-import { Solid } from '../src/BREP/BetterSolid.js';
+import { Solid } from '../src/BREP/BetterSolid.ts';
 
 const solid = new Solid();
 ```

@@ -122,13 +122,13 @@ Workbench definitions should live in separate declarative JavaScript files.
 
 Recommended structure:
 
-- `src/workbenches/modelingWorkbench.js`
-- `src/workbenches/surfacingWorkbench.js`
-- `src/workbenches/sheetMetalWorkbench.js`
-- `src/workbenches/assembliesWorkbench.js`
-- `src/workbenches/pmiWorkbench.js`
-- `src/workbenches/allWorkbench.js`
-- `src/workbenches/index.js`
+- `src/workbenches/modelingWorkbench.ts`
+- `src/workbenches/surfacingWorkbench.ts`
+- `src/workbenches/sheetMetalWorkbench.ts`
+- `src/workbenches/assembliesWorkbench.ts`
+- `src/workbenches/pmiWorkbench.ts`
+- `src/workbenches/allWorkbench.ts`
+- `src/workbenches/index.ts`
 
 Each file should export a plain object. Keep them declarative. Avoid putting UI logic in the config files.
 

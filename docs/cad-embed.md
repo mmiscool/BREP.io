@@ -16,13 +16,12 @@ This document covers the iframe-based `CadEmbed` API for embedding the full BREP
 ## Import
 Package usage:
 ```js
-import { CadEmbed } from "brep-io-kernel";
-// or: import { CadEmbed } from "brep-io-kernel/CAD";
+import { CadEmbed } from "brep-io-kernel/CAD";
 ```
 
 Local repo/dev usage:
 ```js
-import { CadEmbed } from "/src/CAD.js";
+import { CadEmbed } from "/src/CAD.ts";
 ```
 
 CDN usage (direct in browser):
@@ -30,7 +29,7 @@ CDN usage (direct in browser):
 import {
   BREP,
   CadEmbed
-} from "https://cdn.jsdelivr.net/npm/brep-io-kernel@latest/dist-kernel/brep-kernel.js";
+} from "https://cdn.jsdelivr.net/npm/brep-io-kernel@latest/dist-kernel/CAD.js";
 ```
 
 ## Create and Mount

@@ -1,6 +1,6 @@
 # PartHistory Reference
 
-`PartHistory` lives in `src/PartHistory.js` and is the core modeling history manager. It owns the feature list, the shared Three.js scene, the expression scratchpad, configurator state, PMI views, metadata, and the assembly constraint history. It can rebuild geometry deterministically by replaying feature entries, serialize and restore part state, and maintain undo/redo via JSON snapshots.
+`PartHistory` lives in `src/PartHistory.ts` and is the core modeling history manager. It owns the feature list, the shared Three.js scene, the expression scratchpad, configurator state, PMI views, metadata, and the assembly constraint history. It can rebuild geometry deterministically by replaying feature entries, serialize and restore part state, and maintain undo/redo via JSON snapshots.
 
 ## Responsibilities
 

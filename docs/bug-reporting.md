@@ -36,10 +36,10 @@ Example:
 
 If you want to contribute a failing test in a PR:
 
-1. Create a new file in `src/tests`, for example `src/tests/test_bug_extrude_face_case.js`.
+1. Create a new file in `src/tests`, for example `src/tests/test_bug_extrude_face_case.ts`.
 2. Convert the generated function to an exported test function that accepts `partHistory`.
 3. Remove the auto-invocation line at the bottom of the generated snippet.
-4. Import and register the test in `src/tests/tests.js`.
+4. Import and register the test in `src/tests/tests.ts`.
 5. Run `pnpm test` and include results in your PR.
 
 Minimal shape:

@@ -1,0 +1,361 @@
+import * as THREE from 'three';
+import { combineBaseWithDeltaDeg } from '../../utils/xformMath.js';
+import {
+    resolveTransformReferenceName,
+    sanitizeTransformValue,
+} from '../../utils/transformReferenceUtils.js';
+import { renderReferenceSelectionField } from './referenceSelectionField.js';
+
+type AnyRecord = Record<string, any>;
+type TransformValue = ReturnType<typeof sanitizeTransformValue> & AnyRecord;
+
+export function renderTransformField({ ui, key, def, id, controlWrap, valueAdapter = null }) {
+    const inputEl = document.createElement('input');
+    inputEl.type = 'hidden';
+    inputEl.id = id;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'transform-wrap';
+
+    const adapter = (valueAdapter && typeof valueAdapter === 'object') ? valueAdapter as AnyRecord : null;
+    const activationKey = (adapter && typeof adapter.activationKey === 'string') ? adapter.activationKey : key;
+    const sanitizeTRS = (raw): TransformValue => sanitizeTransformValue(raw) as TransformValue;
+    const readTRS = () => {
+        if (adapter && typeof adapter.get === 'function') {
+            try { return sanitizeTRS(adapter.get()); } catch (_) { return sanitizeTRS(null); }
+        }
+        return sanitizeTRS(ui._pickInitialValue(key, def));
+    };
+    const writeTRS = (next) => {
+        const sanitized = sanitizeTRS(next);
+        if (adapter && typeof adapter.set === 'function') {
+            try {
+                adapter.set({
+                    position: sanitized.position.slice(0, 3),
+                    rotationEuler: sanitized.rotationEuler.slice(0, 3),
+                    scale: sanitized.scale.slice(0, 3),
+                    ...(sanitized.reference ? { reference: sanitized.reference } : {}),
+                });
+            } catch (_) { /* ignore adapter errors */ }
+        } else {
+            const next: AnyRecord = {
+                position: sanitized.position.slice(0, 3),
+                rotationEuler: sanitized.rotationEuler.slice(0, 3),
+                scale: sanitized.scale.slice(0, 3),
+            };
+            if (sanitized.reference) next.reference = sanitized.reference;
+            ui.params[key] = next;
+        }
+        return sanitized;
+    };
+    const emitChange = (value) => {
+        if (adapter && typeof adapter.emit === 'function') {
+            try { adapter.emit(value); return; } catch (_) { return; }
+        }
+        ui._emitParamsChange(activationKey, value);
+    };
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn';
+    btn.textContent = String(def.label || 'Position in 3D…');
+
+    const info = document.createElement('div');
+    info.className = 'transform-info';
+    const fmt = (n) => {
+        const v = Number(n);
+        if (!Number.isFinite(v)) return '0';
+        const a = Math.abs(v);
+        const prec = a >= 100 ? 0 : (a >= 10 ? 1 : 2);
+        return String(v.toFixed(prec));
+    };
+    const updateInfo = (value = null) => {
+        const v = value ? sanitizeTRS(value) : readTRS();
+        const p = Array.isArray(v.position) ? v.position : [0, 0, 0];
+        const r = Array.isArray(v.rotationEuler) ? v.rotationEuler : [0, 0, 0];
+        const refName = resolveTransformReferenceName(v.reference);
+        info.textContent = `pos(${fmt(p[0])}, ${fmt(p[1])}, ${fmt(p[2])})  rot(${fmt(r[0])}, ${fmt(r[1])}, ${fmt(r[2])})${refName ? `  ref(${refName})` : ''}`;
+    };
+    updateInfo();
+
+    const modes = document.createElement('div');
+    modes.className = 'transform-modes';
+
+    const getTRS = () => readTRS();
+    const setTRS = (next, applyTarget = true, options: { skipWrite?: boolean } = {}) => {
+        const { skipWrite = false } = options;
+        const sanitized = skipWrite ? sanitizeTRS(next) : writeTRS(next);
+        try {
+            updateInfo(sanitized);
+        } catch (_) {
+            // best effort
+        }
+        try {
+            const row = ui._fieldsWrap.querySelector(`[data-key="${key}"]`);
+            const scope = row || wrap;
+            const map = [
+                ['.tf-pos-x', sanitized.position[0]],
+                ['.tf-pos-y', sanitized.position[1]],
+                ['.tf-pos-z', sanitized.position[2]],
+                ['.tf-rot-x', sanitized.rotationEuler[0]],
+                ['.tf-rot-y', sanitized.rotationEuler[1]],
+                ['.tf-rot-z', sanitized.rotationEuler[2]],
+            ];
+            for (const [sel, val] of map) {
+                const el = scope ? scope.querySelector(sel) : null;
+                if (el) ui._setInputValue(el, 'number', val);
+            }
+        } catch (_) {
+            // best effort
+        }
+        if (applyTarget) {
+            try {
+                const active = ui.activeTransform;
+                if (active && active.inputEl === inputEl && active.target) {
+                    const base = active.baseTransform || { position: [0,0,0], quaternion: [0,0,0,1], scale: [1,1,1] };
+                    const Mabs = combineBaseWithDeltaDeg(base, sanitized, THREE);
+                    const pos = new THREE.Vector3();
+                    const quat = new THREE.Quaternion();
+                    const scl = new THREE.Vector3();
+                    Mabs.decompose(pos, quat, scl);
+                    active.target.position.copy(pos);
+                    active.target.quaternion.copy(quat);
+                    active.target.scale.copy(scl);
+                }
+            } catch (_) {
+                // best effort
+            }
+        }
+        return sanitized;
+    };
+
+    const grid = document.createElement('div');
+    grid.className = 'transform-grid';
+    const addRow = (labelTxt, clsPrefix, valuesArr) => {
+        const rowEl = document.createElement('div');
+        rowEl.className = 'transform-row transform-axis-row';
+        const lab = document.createElement('div');
+        lab.className = 'transform-label';
+        lab.textContent = labelTxt;
+        const inputs = document.createElement('div');
+        inputs.className = 'transform-inputs';
+        const axes = ['x', 'y', 'z'];
+        for (let i = 0; i < 3; i++) {
+            const inp = document.createElement('input');
+            inp.className = 'input transform-input ' + `tf-${clsPrefix}-${axes[i]}`;
+            inp.type = 'number';
+            inp.step = 'any';
+            ui._setInputValue(inp, 'number', valuesArr[i] ?? 0);
+            const numericPatternLocal = /^-?\d*\.?\d*$/;
+            const isNumericLikeLocal = (value) => {
+                if (value === '' || value == null) return true;
+                return numericPatternLocal.test(String(value));
+            };
+            const onFocusToggleTypeLocal = (el) => {
+                try {
+                    if (isNumericLikeLocal(el.value)) {
+                        el.type = 'number';
+                    } else {
+                        el.type = 'text';
+                    }
+                } catch (_) {
+                    // best effort
+                }
+            };
+            inp.addEventListener('focus', () => {
+                onFocusToggleTypeLocal(inp);
+                ui._stopActiveReferenceSelection();
+            });
+            inp.addEventListener('beforeinput', (e) => {
+                try {
+                    const nextVal = String(inp.value || '') + String(e.data || '');
+                    if (!isNumericLikeLocal(nextVal)) {
+                        if (inp.type !== 'text') inp.type = 'text';
+                    } else if (inp.type !== 'number') {
+                        inp.type = 'number';
+                    }
+                } catch (_) {
+                    // best effort
+                }
+            });
+            inp.addEventListener('change', () => {
+                const cur = getTRS();
+                const val = inp.value;
+                if (clsPrefix === 'pos') (cur.position as any[])[i] = val;
+                else (cur.rotationEuler as any[])[i] = val;
+                const updated = setTRS(cur, true);
+                emitChange(updated);
+            });
+            inputs.appendChild(inp);
+        }
+        rowEl.appendChild(lab);
+        rowEl.appendChild(inputs);
+        grid.appendChild(rowEl);
+    };
+    const curTRS = getTRS();
+    addRow('Position', 'pos', curTRS.position);
+    addRow('Rotation (deg)', 'rot', curTRS.rotationEuler);
+
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.className = 'btn btn-slim';
+    resetBtn.textContent = 'Reset';
+    resetBtn.title = 'Reset translation and rotation to 0';
+    resetBtn.addEventListener('click', () => {
+        const cur = getTRS();
+        const next: AnyRecord = { position: [0, 0, 0], rotationEuler: [0, 0, 0], scale: cur.scale };
+        if (cur.reference) next.reference = cur.reference;
+        const updated = setTRS(next, true);
+        emitChange(updated);
+        const featureID = (ui.params && Object.prototype.hasOwnProperty.call(ui.params, 'featureID'))
+            ? ui.params.featureID
+            : (ui.params?.id ?? null);
+        if (typeof ui.options.onChange === 'function') ui.options.onChange(featureID);
+    });
+    modes.appendChild(resetBtn);
+
+    let transformValueAdapter = null;
+    let activate = null;
+    const restartActiveTransform = () => {
+        const active = ui?.activeTransform;
+        if (!active || active.inputEl !== inputEl || typeof activate !== 'function') return;
+        try { activate(); } catch (_) { return; }
+        const reopen = () => {
+            try {
+                activate();
+            } catch (_) {
+                // best effort
+            }
+        };
+        if (typeof queueMicrotask === 'function') queueMicrotask(reopen);
+        else setTimeout(reopen, 0);
+    };
+    const buildTransformAdapter = () => {
+        if (!adapter) return null;
+        const wrapper: AnyRecord = {};
+        if (typeof adapter.stepId === 'string') wrapper.stepId = adapter.stepId;
+        wrapper.get = () => {
+            if (typeof adapter.get === 'function') {
+                try { return sanitizeTRS(adapter.get()); } catch (_) { return readTRS(); }
+            }
+            return readTRS();
+        };
+        wrapper.set = (value) => {
+            const sanitized = sanitizeTRS(value);
+            if (typeof adapter.set === 'function') {
+                try {
+                    adapter.set(sanitized);
+                } catch (_) {
+                    // best effort
+                }
+                setTRS(sanitized, true, { skipWrite: true });
+            } else {
+                setTRS(sanitized, true);
+            }
+            emitChange(sanitized);
+        };
+        if (typeof adapter.getBase === 'function') {
+            wrapper.getBase = () => {
+                try { return adapter.getBase(); } catch (_) { return null; }
+            };
+        }
+        return wrapper;
+    };
+    transformValueAdapter = buildTransformAdapter();
+    activate = () => ui._activateTransformWidget({ inputEl, wrapEl: wrap, key: activationKey, def, valueAdapter: transformValueAdapter });
+    btn.addEventListener('click', activate);
+
+    wrap.appendChild(btn);
+    const details = document.createElement('div');
+    details.className = 'transform-details';
+    details.appendChild(modes);
+    if (Array.isArray(def.referenceSelectionFilter) && def.referenceSelectionFilter.length) {
+        const refSection = document.createElement('div');
+        refSection.className = 'transform-reference-section';
+
+        const refLabel = document.createElement('div');
+        refLabel.className = 'transform-label';
+        refLabel.textContent = String(def.referenceLabel || 'Reference');
+        refSection.appendChild(refLabel);
+
+        const refControlWrap = document.createElement('div');
+        refControlWrap.className = 'transform-reference-control';
+        refSection.appendChild(refControlWrap);
+
+        const applyReferenceValue = (nextReference, options: { shouldEmit?: boolean; shouldRestart?: boolean } = {}) => {
+            const { shouldEmit = false, shouldRestart = false } = options;
+            const current = getTRS();
+            const next: AnyRecord = { ...current };
+            if (nextReference) next.reference = nextReference;
+            else delete next.reference;
+            const updated = setTRS(next, true);
+            if (shouldEmit) emitChange(updated);
+            if (shouldRestart) restartActiveTransform();
+        };
+        const referenceAdapter = {
+            read: () => readTRS().reference || null,
+            write: (next) => {
+                const currentReference = readTRS().reference || null;
+                const currentName = resolveTransformReferenceName(currentReference);
+                const nextName = resolveTransformReferenceName(next);
+                if (
+                    typeof next === 'string'
+                    && currentReference
+                    && typeof currentReference === 'object'
+                    && currentName
+                    && currentName === nextName
+                ) {
+                    applyReferenceValue(currentReference);
+                    return;
+                }
+                applyReferenceValue(next);
+            },
+            emit: (value) => {
+                const currentReference = readTRS().reference || null;
+                const currentName = resolveTransformReferenceName(currentReference);
+                const nextName = resolveTransformReferenceName(value);
+                if (
+                    typeof value === 'string'
+                    && currentReference
+                    && typeof currentReference === 'object'
+                    && currentName
+                    && currentName === nextName
+                ) {
+                    applyReferenceValue(currentReference, { shouldEmit: true, shouldRestart: true });
+                    return;
+                }
+                applyReferenceValue(value, { shouldEmit: true, shouldRestart: true });
+            },
+        };
+        renderReferenceSelectionField({
+            ui,
+            key: `${key}.reference`,
+            def: {
+                type: 'reference_selection',
+                label: String(def.referenceLabel || 'Reference'),
+                placeholder: String(def.referencePlaceholder || 'Click then select in scene…'),
+                selectionFilter: def.referenceSelectionFilter.slice(),
+                multiple: false,
+                selectionValidator: def.referenceSelectionValidator,
+                selectionValidationMessage: def.referenceSelectionValidationMessage,
+            },
+            id: `${id}__reference`,
+            controlWrap: refControlWrap,
+            valueAdapter: referenceAdapter,
+        });
+        details.appendChild(refSection);
+    }
+    details.appendChild(grid);
+    details.appendChild(info);
+    wrap.appendChild(details);
+    wrap.appendChild(inputEl);
+    controlWrap.appendChild(wrap);
+
+    return {
+        inputEl,
+        activate,
+        readValue() {
+            return readTRS();
+        },
+    };
+}

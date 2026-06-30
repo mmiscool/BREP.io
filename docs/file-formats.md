@@ -17,8 +17,8 @@
 - **Import**: Reloads the saved history and recomputes the model.
 
 ## Implementation Notes
-- 3MF exporter lives at `src/exporters/threeMF.js` and packages geometry plus attachments through JSZip.
-- Export dialog logic resides in `src/UI/toolbarButtons/exportButton.js`.
-- Import button handling lives in `src/UI/toolbarButtons/importButton.js`.
+- 3MF exporter lives at `src/exporters/threeMF.ts` and packages geometry plus attachments through JSZip.
+- Export dialog logic resides in `src/UI/toolbarButtons/exportButton.ts`.
+- Import button handling lives in `src/UI/toolbarButtons/importButton.ts`.
 - Feature history is embedded directly as JSON without XML conversion.
 - Face labels carry through export via per-object BaseMaterials, providing human-readable names in other tools. Materials and textures are not reconstructed on import.

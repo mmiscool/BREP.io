@@ -37,7 +37,7 @@ This page links the live `.html` demos under `/apiExamples/`.
 - Demo: [https://BREP.io/apiExamples/Embeded_CAD_CDN.html](https://BREP.io/apiExamples/Embeded_CAD_CDN.html)
 - Source: [apiExamples/Embeded_CAD_CDN.html](https://github.com/mmiscool/BREP/blob/master/apiExamples/Embeded_CAD_CDN.html)
 - Uses direct jsDelivr import:
-  `import { BREP, CadEmbed } from "https://cdn.jsdelivr.net/npm/brep-io-kernel@latest/dist-kernel/brep-kernel.js";`
+  `import { CadEmbed } from "https://cdn.jsdelivr.net/npm/brep-io-kernel@latest/dist-kernel/CAD.js";`
 
 ## Embedded CAD Integration Test
 - Demo: [https://BREP.io/apiExamples/Embeded_CAD_Integration_Test.html](https://BREP.io/apiExamples/Embeded_CAD_Integration_Test.html)

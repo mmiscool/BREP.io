@@ -13,7 +13,7 @@ This is the first step toward moving the BREP kernel off the JavaScript side and
 - It can now ingest/export full Solid authoring snapshots and run `bakeTransform`
   over the vertex buffer on the C++ side.
 - It now also runs `weldVerticesByEpsilon` and `pushFace` on the C++ side.
-- `src/BREP/CppSolidCore.js` provides the JS bridge layer used by tests and future API adaptation work.
+- `src/BREP/CppSolidCore.ts` provides the JS bridge layer used by tests and future API adaptation work.
 - Migrated methods now require the custom local manifold build; they do not silently
   fall back to the old JS implementation.
 

@@ -1,6 +1,6 @@
 # `Edge` Method Index
 
-`Edge` lives in `src/BREP/Edge.js` and extends `Line2`. Instances are typically created by `solid.visualize()`.
+`Edge` lives in `src/BREP/Edge.ts` and extends `Line2`. Instances are typically created by `solid.visualize()`.
 
 Related pages:
 - [BREP Class API Reference](../index.md)

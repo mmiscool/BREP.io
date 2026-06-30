@@ -150,7 +150,7 @@ Then open the Vite URL shown in your terminal.
 | `pnpm use:manifold:npm` | Switches runtime/builds to the published `manifold-3d` npm package. |
 | `pnpm use:manifold:local` | Switches runtime/builds to the locally compiled manifold bundle. |
 | `pnpm which:manifold` | Prints the currently selected manifold source. |
-| `pnpm test` | Runs the Node test suite (`src/tests/tests.js`), writing artifacts to `tests/results/`. |
+| `pnpm test` | Runs the Node test suite (`src/tests/tests.ts`), writing artifacts to `tests/results/`. |
 | `pnpm test -- test_primitiveCube` | Runs one registered test by exact test function name. |
 | `pnpm liveTesting` | Watches `src/` and `tests/` and reruns tests on change. |
 | `pnpm capture` | Captures docs/dialog screenshots. |
@@ -195,9 +195,7 @@ import {
   BREP,
   PartHistory,
   AssemblyConstraintHistory,
-  AssemblyConstraintRegistry,
-  CadEmbed,
-  Sketcher2DEmbed
+  AssemblyConstraintRegistry
 } from "brep-io-kernel";
 ```
 

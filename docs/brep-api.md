@@ -1,9 +1,9 @@
 # BREP.js Export Map and Usage
 
-`src/BREP/BREP.js` aggregates the modeling API under a single `BREP` namespace. Import it once and destructure what you need:
+`src/BREP/BREP.ts` aggregates the modeling API under a single `BREP` namespace. Import it once and destructure what you need:
 
 ```js
-import { BREP } from '../src/BREP/BREP.js';
+import { BREP } from '../src/BREP/BREP.ts';
 const { Solid, Cube, Sweep, filletSolid, applyBooleanOperation } = BREP;
 ```
 
@@ -49,7 +49,7 @@ const { Solid, Cube, Sweep, filletSolid, applyBooleanOperation } = BREP;
 
 ## Quick example
 ```js
-import { BREP } from '../src/BREP/BREP.js';
+import { BREP } from '../src/BREP/BREP.ts';
 
 const box = new BREP.Cube({ x: 10, y: 10, z: 10, name: 'Box' });
 const cyl = new BREP.Cylinder({ radius: 3, height: 10, name: 'Hole' });

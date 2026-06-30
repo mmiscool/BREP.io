@@ -29,7 +29,7 @@ If you pass an empty sketch, the solver will seed an origin point and a fixed (g
 
 ## Constraint symbols and meanings
 Constraint types are single-character symbol strings. Use the Unicode symbols below in code, or
-inspect `src/features/sketch/sketchSolver2D/constraintDefinitions.js` for the canonical list.
+inspect `src/features/sketch/sketchSolver2D/constraintDefinitions.ts` for the canonical list.
 
 ```js
 const CONSTRAINTS = {

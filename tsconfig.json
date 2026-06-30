@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowJs": false,
+    "checkJs": false,
+    "noEmit": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "types": ["node", "vite/client"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "apiExamples/**/*.ts",
+    "scripts/**/*.ts",
+    "bin/**/*.ts",
+    "brep-io-kernel-examples/**/*.ts",
+    "generateLicenses.ts",
+    "test.ts",
+    "vite.config.ts",
+    "vite.config.kernel.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-kernel",
+    "public",
+    "__BREP_DATA__",
+    "manifold-plus",
+    "vendor",
+    "src/generated"
+  ]
+}

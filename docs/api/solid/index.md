@@ -1,6 +1,6 @@
 # `Solid` Method Index
 
-`Solid` lives in `src/BREP/BetterSolid.js` and extends `THREE.Group`.
+`Solid` lives in `src/BREP/BetterSolid.ts` and extends `THREE.Group`.
 
 Related pages:
 - [Solid Developer Guide](../../solid-methods.md)

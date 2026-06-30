@@ -1,0 +1,625 @@
+import * as THREE from 'three';
+import { BaseAssemblyConstraint } from '../BaseAssemblyConstraint.js';
+import { ANGLE_TOLERANCE, MAX_ROTATION_PER_ITERATION, resolveParallelSelection } from '../constraintUtils/parallelAlignment.js';
+import { objectRepresentativePoint, getElementDirection } from '../../UI/pmi/annUtils.js';
+
+type AssemblyConstraintSolveContext = Record<string, any>;
+
+const DEFAULT_ANGLE_LINEAR_TOLERANCE = 1e-12;
+
+const inputParamsSchema = {
+  id: {
+    type: 'string',
+    default_value: null,
+    hint: 'Unique identifier for the constraint.',
+  },
+  elements: {
+    type: 'reference_selection',
+    label: 'Elements',
+    hint: 'Select two faces or edges.',
+    selectionFilter: ['FACE', 'EDGE'],
+    multiple: true,
+    minSelections: 2,
+    maxSelections: 2,
+  },
+  angle: {
+    type: 'number',
+    label: 'Angle (deg)',
+    default_value: 90,
+    hint: 'Desired signed angle between Element A and Element B in degrees. Exterior uses supplementary angle (180 - interior).',
+  },
+  exteriorAngle: {
+    type: 'boolean',
+    label: 'Exterior Angle',
+    default_value: false,
+    hint: 'Measure and solve using the exterior (supplementary) angle.',
+  },
+};
+
+
+export class AngleConstraint extends BaseAssemblyConstraint {
+  static shortName = '∠';
+  static longName = '∠ Angle Constraint';
+  static constraintType = 'angle';
+  static focusField = 'angle';
+  static aliases = ['angle', 'angle_between', 'angular', 'ANGL'];
+  static inputParamsSchema = inputParamsSchema;
+
+  constructor(partHistory: any) {
+    super(partHistory);
+  }
+
+  async solve(context: AssemblyConstraintSolveContext = {}) {
+    const pd = this.persistentData = this.persistentData || {};
+    const [selA, selB] = selectionPair(this.inputParams);
+    const useExteriorAngle = this.#useExteriorAngle();
+    const targetAngleMode = resolveTargetAngleMode(this.inputParams.angle, useExteriorAngle);
+    let effectiveTargetAngleDeg = targetAngleMode.modeDeg;
+    let targetSignPreference = targetAngleMode.signPreference;
+    let effectiveTargetAngleRad = THREE.MathUtils.degToRad(effectiveTargetAngleDeg);
+
+    if (!selA || !selB) {
+      pd.status = 'incomplete';
+      pd.message = 'Select two references to define the constraint.';
+      pd.satisfied = false;
+      pd.error = null;
+      pd.errorDeg = null;
+      pd.lastAppliedRotations = [];
+      pd.lastAppliedMoves = [];
+      return { ok: false, status: 'incomplete', satisfied: false, applied: false, message: pd.message };
+    }
+
+    let infoA;
+    let infoB;
+
+    try {
+      infoA = this.#resolveSelectionInfo(context, selA, 'elements[0]');
+      infoB = this.#resolveSelectionInfo(context, selB, 'elements[1]');
+    } catch (error) {
+      const message = error?.message || 'Unable to resolve selection references.';
+      pd.status = 'invalid-selection';
+      pd.message = message;
+      pd.satisfied = false;
+      pd.error = null;
+      pd.errorDeg = null;
+      pd.lastAppliedRotations = [];
+      pd.lastAppliedMoves = [];
+      pd.exception = error;
+      return { ok: false, status: 'invalid-selection', satisfied: false, applied: false, message, exception: error };
+    }
+
+    if (!infoA || !infoB || !infoA.direction || !infoB.direction) {
+      const message = 'Unable to resolve directions for the selected references.';
+      pd.status = 'invalid-selection';
+      pd.message = message;
+      pd.satisfied = false;
+      pd.error = null;
+      pd.errorDeg = null;
+      pd.lastAppliedRotations = [];
+      pd.lastAppliedMoves = [];
+      return { ok: false, status: 'invalid-selection', satisfied: false, applied: false, message };
+    }
+
+    if (!infoA.component || !infoB.component) {
+      const message = 'Both selections must belong to assembly components.';
+      pd.status = 'invalid-selection';
+      pd.message = message;
+      pd.satisfied = false;
+      pd.error = null;
+      pd.errorDeg = null;
+      pd.lastAppliedRotations = [];
+      pd.lastAppliedMoves = [];
+      return { ok: false, status: 'invalid-selection', satisfied: false, applied: false, message };
+    }
+
+    if (infoA.component === infoB.component) {
+      const message = 'Select references from two different components.';
+      pd.status = 'invalid-selection';
+      pd.message = message;
+      pd.satisfied = false;
+      pd.error = null;
+      pd.errorDeg = null;
+      pd.lastAppliedRotations = [];
+      pd.lastAppliedMoves = [];
+      return { ok: false, status: 'invalid-selection', satisfied: false, applied: false, message };
+    }
+
+    const measurement = this.#measureAngle(infoA, infoB);
+    if (!measurement) {
+      const message = 'Unable to measure angle between selections.';
+      pd.status = 'invalid-selection';
+      pd.message = message;
+      pd.satisfied = false;
+      pd.error = null;
+      pd.errorDeg = null;
+      pd.lastAppliedRotations = [];
+      pd.lastAppliedMoves = [];
+      return { ok: false, status: 'invalid-selection', satisfied: false, applied: false, message };
+    }
+
+    const angle = measurement.angle;
+    const angleDeg = measurement.angleDeg;
+    const signedAngle = measurement.signedAngle;
+    const signedAngleDeg = measurement.signedAngleDeg;
+    const measuredSignPreference = signedAngleDeg < -1e-9 ? -1 : (signedAngleDeg > 1e-9 ? 1 : 0);
+    const exteriorAngle = Math.max(0, Math.PI - angle);
+    const exteriorAngleDeg = Math.max(0, 180 - angleDeg);
+    const measuredModeAngle = useExteriorAngle ? exteriorAngle : angle;
+    const measuredModeAngleDeg = useExteriorAngle ? exteriorAngleDeg : angleDeg;
+    let initializedFromMeasuredAngle = false;
+
+    if (pd.isNewConstraint === true) {
+      effectiveTargetAngleDeg = measuredModeAngleDeg;
+      targetSignPreference = measuredSignPreference || targetSignPreference;
+      effectiveTargetAngleRad = THREE.MathUtils.degToRad(effectiveTargetAngleDeg);
+      initializedFromMeasuredAngle = true;
+      pd.initializedAngle = effectiveTargetAngleDeg;
+      pd.isNewConstraint = false;
+    }
+
+    const desiredSignedAngle = chooseSignedTargetAngle(signedAngle, effectiveTargetAngleRad, targetSignPreference);
+    const error = normalizeSignedAngleRad(signedAngle - desiredSignedAngle);
+
+    const fixedA = context.isComponentFixed?.(infoA.component);
+    const fixedB = context.isComponentFixed?.(infoB.component);
+
+    const linearTolerance = Math.abs(context.tolerance ?? DEFAULT_ANGLE_LINEAR_TOLERANCE);
+    const explicitAngleTol = Number.isFinite(context.angleTolerance) ? Math.abs(context.angleTolerance) : null;
+    const angleTolerance = explicitAngleTol && explicitAngleTol > 0
+      ? Math.max(ANGLE_TOLERANCE, explicitAngleTol)
+      : Math.max(ANGLE_TOLERANCE, linearTolerance * 10);
+
+    pd.error = Math.abs(error);
+    pd.errorDeg = Math.abs(THREE.MathUtils.radToDeg(error));
+
+    if (Math.abs(error) <= angleTolerance) {
+      const message = initializedFromMeasuredAngle
+        ? `Initialized ${useExteriorAngle ? 'exterior' : 'interior'} angle from current orientation.`
+        : 'Angle satisfied within tolerance.';
+      pd.status = 'satisfied';
+      pd.message = message;
+      pd.satisfied = true;
+      pd.lastAppliedRotations = [];
+      pd.lastAppliedMoves = [];
+      if (pd.exception) delete pd.exception;
+      return {
+        ok: true,
+        status: 'satisfied',
+        satisfied: true,
+        applied: false,
+        angle,
+        angleDeg,
+        signedAngle,
+        signedAngleDeg,
+        targetAngle: effectiveTargetAngleRad,
+        targetSignedAngle: desiredSignedAngle,
+        error,
+        message,
+        infoA,
+        infoB,
+        diagnostics: {
+          angle,
+          angleDeg,
+          exteriorAngle,
+          exteriorAngleDeg,
+          measuredModeAngle,
+          measuredModeAngleDeg,
+          signedAngle,
+          signedAngleDeg,
+          targetAngle: effectiveTargetAngleRad,
+          targetSignedAngle: desiredSignedAngle,
+          targetAngleDeg: effectiveTargetAngleDeg,
+          useExteriorAngle,
+          error,
+          initializedFromMeasuredAngle,
+        },
+        persistInputParams: initializedFromMeasuredAngle ? { angle: effectiveTargetAngleDeg } : null,
+      };
+    }
+
+    if (fixedA && fixedB) {
+      const message = 'Both components are fixed; unable to adjust angle.';
+      pd.status = 'blocked';
+      pd.message = message;
+      pd.satisfied = false;
+      pd.lastAppliedRotations = [];
+      pd.lastAppliedMoves = [];
+      if (pd.exception) delete pd.exception;
+      return {
+        ok: false,
+        status: 'blocked',
+        satisfied: false,
+        applied: false,
+        angle,
+        angleDeg,
+        targetAngle: effectiveTargetAngleRad,
+        targetSignedAngle: desiredSignedAngle,
+        error,
+        message,
+        infoA,
+        infoB,
+        diagnostics: {
+          angle,
+          angleDeg,
+          exteriorAngle,
+          exteriorAngleDeg,
+          measuredModeAngle,
+          measuredModeAngleDeg,
+          signedAngle,
+          signedAngleDeg,
+          targetAngle: effectiveTargetAngleRad,
+          targetSignedAngle: desiredSignedAngle,
+          targetAngleDeg: effectiveTargetAngleDeg,
+          useExteriorAngle,
+          error,
+          initializedFromMeasuredAngle,
+        },
+      };
+    }
+
+    const delta = signedAngle - desiredSignedAngle;
+
+    const phiACurrent = 0;
+    const phiBCurrent = signedAngle;
+    let phiATarget;
+    let phiBTarget;
+
+    if (!fixedA && !fixedB) {
+      const halfDelta = delta / 2;
+      phiATarget = phiACurrent + halfDelta;
+      phiBTarget = phiBCurrent - halfDelta;
+    } else if (!fixedA && fixedB) {
+      phiBTarget = phiBCurrent;
+      phiATarget = phiBTarget - desiredSignedAngle;
+    } else {
+      phiATarget = phiACurrent;
+      phiBTarget = phiATarget + desiredSignedAngle;
+    }
+
+    const rotationGain = Math.max(0, Math.min(1, context.rotationGain ?? 1));
+    const rotations = [];
+    let applied = false;
+
+    const applyRotation = (info, currentDir, targetDir, gainMultiplier) => {
+      if (!info?.component || !currentDir || !targetDir) return false;
+      const quaternion = computeRotationTowards(currentDir, targetDir, rotationGain * gainMultiplier);
+      if (!quaternion) return false;
+      const ok = context.applyRotation?.(info.component, quaternion);
+      if (!ok) return false;
+      rotations.push({ component: info.component.name || info.component.uuid, quaternion: quaternion.toArray() });
+      info.component.updateMatrixWorld?.(true);
+      return true;
+    };
+
+    const shareA = (!fixedA && !fixedB) ? 0.5 : (!fixedA ? 1 : 0);
+    const shareB = (!fixedA && !fixedB) ? 0.5 : (!fixedB ? 1 : 0);
+
+    if (shareA > 0) {
+      const targetDirA = this.#directionFromAngle(measurement, phiATarget);
+      applied = applyRotation(infoA, measurement.dirA, targetDirA, shareA) || applied;
+    }
+
+    if (shareB > 0) {
+      const targetDirB = this.#directionFromAngle(measurement, phiBTarget);
+      applied = applyRotation(infoB, measurement.dirB, targetDirB, shareB) || applied;
+    }
+
+    const status = applied ? 'adjusted' : 'pending';
+    const message = applied
+      ? 'Applied rotation to move toward target angle.'
+      : 'Waiting for a movable component to rotate.';
+
+    pd.status = status;
+    pd.message = message;
+    pd.satisfied = false;
+    pd.lastAppliedRotations = rotations;
+    pd.lastAppliedMoves = [];
+    if (pd.exception) delete pd.exception;
+
+    return {
+      ok: true,
+      status,
+      satisfied: false,
+      applied,
+      angle,
+      angleDeg,
+      signedAngle,
+      signedAngleDeg,
+      targetAngle: effectiveTargetAngleRad,
+      targetSignedAngle: desiredSignedAngle,
+      error,
+      message,
+      infoA,
+      infoB,
+      rotations,
+      diagnostics: {
+        angle,
+        angleDeg,
+        exteriorAngle,
+        exteriorAngleDeg,
+        measuredModeAngle,
+        measuredModeAngleDeg,
+        signedAngle,
+        signedAngleDeg,
+        targetAngle: effectiveTargetAngleRad,
+        targetSignedAngle: desiredSignedAngle,
+        targetAngleDeg: effectiveTargetAngleDeg,
+        useExteriorAngle,
+        error,
+        shareA,
+        shareB,
+        desiredSignedAngle,
+        initializedFromMeasuredAngle,
+      },
+    };
+  }
+
+  async run(context: AssemblyConstraintSolveContext = {}) {
+    return this.solve(context);
+  }
+
+  #useExteriorAngle() {
+    return this.inputParams?.exteriorAngle === true;
+  }
+
+  #resolveSelectionInfo(context, selection, label) {
+    const object = context.resolveObject?.(selection) || null;
+    const component = context.resolveComponent?.(selection) || null;
+    const kind = selectionKindFrom(object, selection);
+
+    if (kind === 'FACE') {
+      return resolveParallelSelection(this, context, selection, label);
+    }
+
+    if (kind !== 'EDGE') {
+      throw new Error(`AngleConstraint: Unsupported selection for ${label}.`);
+    }
+
+    const origin = this.#resolveOrigin(object, component) || new THREE.Vector3();
+    const direction = this.#resolveEdgeDirection(object, component);
+
+    if (!direction) {
+      throw new Error('AngleConstraint: Unable to resolve edge direction.');
+    }
+
+    return {
+      selection,
+      object,
+      component: component || null,
+      origin,
+      direction,
+      kind,
+    };
+  }
+
+  #resolveOrigin(object, component) {
+    if (object) {
+      try {
+        const rep = objectRepresentativePoint(null, object);
+        if (rep && typeof rep.clone === 'function') return rep.clone();
+      } catch {
+        // Fall back to getWorldPosition/base world point resolution below.
+      }
+      if (typeof object.getWorldPosition === 'function') {
+        return object.getWorldPosition(new THREE.Vector3());
+      }
+      if (object.isVector3) return object.clone();
+    }
+    if (component) {
+      component.updateMatrixWorld?.(true);
+      if (typeof component.getWorldPosition === 'function') {
+        return component.getWorldPosition(new THREE.Vector3());
+      }
+      if (component.position) {
+        const pos = component.position.clone();
+        component.parent?.updateMatrixWorld?.(true);
+        if (component.parent?.matrixWorld) {
+          return pos.applyMatrix4(component.parent.matrixWorld.clone());
+        }
+        return pos;
+      }
+    }
+    return null;
+  }
+
+  #resolveEdgeDirection(object, component) {
+    const dir = getElementDirection(null, object);
+    if (dir && dir.lengthSq() > 0) return dir.clone().normalize();
+    if (component) {
+      const compDir = getElementDirection(null, component);
+      if (compDir && compDir.lengthSq() > 0) return compDir.clone().normalize();
+    }
+    const geom = object?.geometry;
+    if (geom?.getAttribute) {
+      const pos = geom.getAttribute('position');
+      if (pos && pos.count >= 2) {
+        const a = new THREE.Vector3(pos.getX(0), pos.getY(0), pos.getZ(0));
+        const b = new THREE.Vector3(pos.getX(1), pos.getY(1), pos.getZ(1));
+        object.updateMatrixWorld?.(true);
+        a.applyMatrix4(object.matrixWorld);
+        b.applyMatrix4(object.matrixWorld);
+        return b.sub(a).normalize();
+      }
+    }
+    return null;
+  }
+
+  #measureAngle(infoA, infoB) {
+    const dirA = normalizeOrNull(infoA?.direction);
+    const dirB = normalizeOrNull(infoB?.direction);
+    if (!dirA || !dirB) return null;
+
+    let axis = new THREE.Vector3().crossVectors(dirA, dirB);
+    if (axis.lengthSq() <= 1e-12) {
+      axis = arbitraryPerpendicular(dirA);
+    }
+    if (axis.lengthSq() <= 1e-12) return null;
+    axis.normalize();
+
+    let basisU = new THREE.Vector3().crossVectors(axis, dirA);
+    if (basisU.lengthSq() <= 1e-12) {
+      basisU = arbitraryPerpendicular(dirA);
+    }
+    if (basisU.lengthSq() <= 1e-12) return null;
+    basisU.normalize();
+
+    const cosVal = THREE.MathUtils.clamp(dirA.dot(dirB), -1, 1);
+    const sinVal = THREE.MathUtils.clamp(basisU.dot(dirB), -1, 1);
+    const signedAngle = Math.atan2(sinVal, cosVal);
+    const angle = Math.acos(cosVal);
+
+    return {
+      angle,
+      angleDeg: THREE.MathUtils.radToDeg(angle),
+      signedAngle,
+      signedAngleDeg: THREE.MathUtils.radToDeg(signedAngle),
+      axis,
+      basisU,
+      dirA,
+      dirB,
+    };
+  }
+
+  #directionFromAngle(measurement, angle) {
+    if (!measurement) return null;
+    const { dirA, basisU } = measurement;
+    if (!dirA || !basisU) return null;
+    const cosVal = Math.cos(angle);
+    const sinVal = Math.sin(angle);
+    const out = dirA.clone().multiplyScalar(cosVal).add(basisU.clone().multiplyScalar(sinVal));
+    if (out.lengthSq() === 0) return null;
+    return out.normalize();
+  }
+}
+
+
+
+
+function selectionPair(params) {
+  if (!params || typeof params !== 'object') return [null, null];
+  const raw = Array.isArray(params.elements) ? params.elements : [];
+  const picks = raw.filter((item) => item != null).slice(0, 2);
+  params.elements = picks;
+  if (picks.length === 2) return picks;
+  if (picks.length === 1) return [picks[0], null];
+  return [null, null];
+}
+
+function selectionKindFrom(object, selection) {
+  const val = (selection && typeof selection.kind === 'string') ? selection.kind : null;
+  const raw = (object?.userData?.type || object?.userData?.brepType || object?.type || val || '')
+    .toString()
+    .toUpperCase();
+  if (!raw) return 'UNKNOWN';
+  if (raw.includes('FACE')) return 'FACE';
+  if (raw.includes('EDGE')) return 'EDGE';
+  if (raw.includes('VERTEX') || raw.includes('POINT')) return 'POINT';
+  if (raw.includes('COMPONENT')) return 'COMPONENT';
+  return raw;
+}
+
+function normalizeOrNull(vec) {
+  if (!vec) return null;
+  if (vec.lengthSq() === 0) return null;
+  return vec.clone().normalize();
+}
+
+function arbitraryPerpendicular(dir) {
+  if (!dir || dir.lengthSq() === 0) return new THREE.Vector3(0, 0, 1);
+  const axis = Math.abs(dir.dot(new THREE.Vector3(0, 0, 1))) < 0.9
+    ? new THREE.Vector3(0, 0, 1)
+    : new THREE.Vector3(0, 1, 0);
+  const perp = new THREE.Vector3().crossVectors(dir, axis);
+  if (perp.lengthSq() === 0) {
+    perp.crossVectors(dir, new THREE.Vector3(1, 0, 0));
+  }
+  return perp.lengthSq() === 0 ? new THREE.Vector3(1, 0, 0) : perp.normalize();
+}
+
+function resolveTargetAngleMode(rawValue, useExteriorAngle = false) {
+  const numericValue = Number(rawValue);
+  const safeValue = Number.isFinite(numericValue) ? THREE.MathUtils.clamp(numericValue, -360, 360) : 0;
+  const signPreference = safeValue < -1e-9 ? -1 : (safeValue > 1e-9 ? 1 : 0);
+  const magnitude = normalizePositiveAngleDeg(Math.abs(safeValue));
+  const interiorDeg = magnitude > 180 ? 360 - magnitude : magnitude;
+  const exteriorDeg = interiorDeg >= 180 - 1e-9 ? 0 : 180 - interiorDeg;
+  return {
+    modeDeg: useExteriorAngle ? exteriorDeg : interiorDeg,
+    signPreference,
+  };
+}
+
+function chooseSignedTargetAngle(currentSignedAngle, targetModeAngle, signPreference = 0) {
+  const targetMode = normalizePositiveAngleRad(targetModeAngle);
+  const baseSigned = normalizeSignedAngleRad(targetMode);
+  const absBase = Math.abs(baseSigned);
+
+  if (absBase <= 1e-9 || Math.abs(absBase - Math.PI) <= 1e-9) {
+    return baseSigned;
+  }
+
+  const candidates = [baseSigned, -baseSigned];
+  if (signPreference > 0) {
+    return candidates.find((candidate) => candidate > 0) ?? candidates[0];
+  }
+  if (signPreference < 0) {
+    return candidates.find((candidate) => candidate < 0) ?? candidates[0];
+  }
+
+  const current = Number.isFinite(currentSignedAngle) ? normalizeSignedAngleRad(currentSignedAngle) : 0;
+  let best = candidates[0];
+  let bestDistance = angularDistanceSignedRad(current, best);
+
+  for (let idx = 1; idx < candidates.length; idx += 1) {
+    const distance = angularDistanceSignedRad(current, candidates[idx]);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = candidates[idx];
+    }
+  }
+
+  return best;
+}
+
+function normalizePositiveAngleDeg(value) {
+  if (!Number.isFinite(value)) return 0;
+  const wrapped = ((value % 360) + 360) % 360;
+  return wrapped <= 1e-9 || Math.abs(wrapped - 360) <= 1e-9 ? 0 : wrapped;
+}
+
+function normalizePositiveAngleRad(value) {
+  if (!Number.isFinite(value)) return 0;
+  const twoPi = Math.PI * 2;
+  const wrapped = ((value % twoPi) + twoPi) % twoPi;
+  return wrapped <= 1e-9 || Math.abs(wrapped - twoPi) <= 1e-9 ? 0 : wrapped;
+}
+
+function normalizeSignedAngleRad(value) {
+  const wrapped = normalizePositiveAngleRad(value);
+  if (wrapped > Math.PI) return wrapped - (Math.PI * 2);
+  return wrapped;
+}
+
+function angularDistanceSignedRad(a, b) {
+  return Math.abs(normalizeSignedAngleRad(a - b));
+}
+
+function computeRotationTowards(fromDir, toDir, gain = 1) {
+  if (!fromDir || !toDir) return null;
+  const a = fromDir.clone().normalize();
+  const b = toDir.clone().normalize();
+  const dot = THREE.MathUtils.clamp(a.dot(b), -1, 1);
+  let angle = Math.acos(dot);
+  if (!Number.isFinite(angle) || angle <= 1e-6) return null;
+  let axis = new THREE.Vector3().crossVectors(a, b);
+  if (axis.lengthSq() <= 1e-12) {
+    axis = arbitraryPerpendicular(a);
+  }
+  if (axis.lengthSq() <= 1e-12) return null;
+  axis.normalize();
+  const clampedGain = Math.max(0, Math.min(1, gain));
+  const intendedAngle = angle * clampedGain;
+  const appliedAngle = Math.min(intendedAngle, MAX_ROTATION_PER_ITERATION, angle);
+  if (appliedAngle <= 1e-6) return null;
+  return new THREE.Quaternion().setFromAxisAngle(axis, appliedAngle);
+}

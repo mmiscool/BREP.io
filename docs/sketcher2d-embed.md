@@ -12,12 +12,11 @@ This document covers the iframe-based `Sketcher2DEmbed` API for embedding the 2D
 Package usage:
 ```js
 import { Sketcher2DEmbed } from "brep-io-kernel/Sketcher2D";
-// or: import { Sketcher2DEmbed } from "brep-io-kernel";
 ```
 
 Local repo/dev usage:
 ```js
-import { Sketcher2DEmbed } from "/src/Sketcher2D.js";
+import { Sketcher2DEmbed } from "/src/Sketcher2D.ts";
 ```
 
 ## Create and Mount

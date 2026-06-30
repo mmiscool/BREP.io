@@ -3,26 +3,27 @@
   "version": "1.0.0",
   "scripts": {
     "start": "pnpm dev",
-    "dev": "node ./scripts/prepareFontAssets.js && pnpm prepareFonts && pnpm build:kernel && vite --host 0.0.0.0",
+    "dev": "tsx ./scripts/prepareFontAssets.ts && pnpm prepareFonts && pnpm build:kernel && vite --host 0.0.0.0",
     "build": "pnpm prepareFonts && pnpm build:kernel && vite build",
-    "build:cloudflare": "node ./scripts/buildCloudflare.js",
-    "build:manifoldPlus": "node ./scripts/buildManifoldPlus.js",
-    "benchmark:kernel": "node ./scripts/prepareManifoldRuntime.js && node ./scripts/benchmarkKernel.js",
-    "buildThreadGeometry": "node ./scripts/prepareManifoldRuntime.js && node ./scripts/bootstrapThreadGeometryCatalog.js && node ./scripts/buildThreadGeometry.js",
-    "build:kernel": "node ./scripts/prepareManifoldRuntime.js && pnpm generateLicenses && vite build --config vite.config.kernel.js && node ./scripts/syncKernelAssets.js",
+    "build:cloudflare": "tsx ./scripts/buildCloudflare.ts",
+    "build:manifoldPlus": "tsx ./scripts/buildManifoldPlus.ts",
+    "benchmark:kernel": "tsx ./scripts/prepareManifoldRuntime.ts && tsx ./scripts/benchmarkKernel.ts",
+    "buildThreadGeometry": "tsx ./scripts/prepareManifoldRuntime.ts && tsx ./scripts/buildThreadGeometry.ts",
+    "build:kernel": "tsx ./scripts/prepareManifoldRuntime.ts && pnpm generateLicenses && tsx ./scripts/cleanKernelWorkerAssets.ts && vite build --config vite.config.kernel.ts && tsx ./scripts/buildCliBin.ts && tsx ./scripts/syncKernelAssets.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "liveTesting": "node --watch --watch-preserve-output ./scripts/liveTesting.js",
-    "test": "node ./scripts/prepareManifoldRuntime.js && node ./src/tests/tests.js",
-    "generateLicenses": "node ./generateLicenses.js && node ./scripts/generateLicenseBundle.js",
-    "prepareFonts": "node ./scripts/prepareFontAssets.js",
-    "capture": "node ./scripts/capture.js",
-    "use:manifold:local": "node ./scripts/setManifoldSource.js local",
-    "which:manifold": "node ./scripts/setManifoldSource.js"
+    "typecheck": "tsc --noEmit",
+    "liveTesting": "node --watch --watch-preserve-output --import tsx ./scripts/liveTesting.ts",
+    "test": "tsx ./scripts/prepareManifoldRuntime.ts && tsx ./src/tests/tests.ts",
+    "generateLicenses": "tsx ./generateLicenses.ts && tsx ./scripts/generateLicenseBundle.ts",
+    "prepareFonts": "tsx ./scripts/prepareFontAssets.ts",
+    "capture": "tsx ./scripts/capture.ts",
+    "use:manifold:local": "tsx ./scripts/setManifoldSource.ts local",
+    "which:manifold": "tsx ./scripts/setManifoldSource.ts"
   },
   "type": "module",
   "bin": {
-    "brep-io-kernel": "./bin/brep-io-kernel.js"
+    "brep-io-kernel": "./dist-kernel/bin/brep-io-kernel.js"
   },
   "main": "./dist-kernel/brep-kernel.js",
   "module": "./dist-kernel/brep-kernel.js",
@@ -32,13 +33,13 @@
     "./PartHistory": "./dist-kernel/brep-kernel.js",
     "./AssemblyConstraintHistory": "./dist-kernel/brep-kernel.js",
     "./AssemblyConstraintRegistry": "./dist-kernel/brep-kernel.js",
-    "./SketchSolver2D": "./src/SketchSolver2D.js",
-    "./CAD": "./src/CAD.js",
-    "./Sketcher2D": "./src/Sketcher2D.js",
-    "./Sketcher2DUtils": "./src/Sketcher2DUtils.js"
+    "./SketchSolver2D": "./dist-kernel/SketchSolver2D.js",
+    "./CAD": "./dist-kernel/CAD.js",
+    "./Sketcher2D": "./dist-kernel/Sketcher2D.js",
+    "./Sketcher2DUtils": "./dist-kernel/Sketcher2DUtils.js"
   },
   "imports": {
-    "#textToFace/fontUrlLoaders": "./src/features/textToFace/fontUrlLoaders.kernel.js"
+    "#textToFace/fontUrlLoaders": "./src/features/textToFace/fontUrlLoaders.kernel.ts"
   },
   "files": [
     "bin/**",
@@ -72,10 +73,15 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.3",
-    "vite-plugin-wasm": "^3.5.0",
+    "@types/node": "^26.0.1",
     "eslint": "^9.39.3",
     "globals": "^16.5.0",
+    "jiti": "^2.7.0",
     "playwright": "^1.58.2",
-    "vite": "^7.3.1"
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.62.0",
+    "vite": "^7.3.1",
+    "vite-plugin-wasm": "^3.5.0"
   }
 }

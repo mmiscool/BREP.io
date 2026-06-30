@@ -1,0 +1,170 @@
+import * as THREE from 'three';
+import { generate3MF } from '../../exporters/threeMF.js';
+import {
+  buildSheetMetalFlatPatternPackageFiles,
+  collectSheetMetalSolidsFromViewer,
+  resolveViewerFlatPatternBaseName,
+} from '../../features/sheetMetal/flatPatternFiles.js';
+import { localStorage as LS } from '../../idbStorage.js';
+import { generateSheetsPdfBytes } from '../sheets/Sheet2DEditorWindow.js';
+
+const THUMBNAIL_CAPTURE_SIZE = 240;
+
+function _uint8ToBase64(uint8) {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < uint8.length; i += chunk) {
+    const sub = uint8.subarray(i, i + chunk);
+    binary += String.fromCharCode.apply(null, sub);
+  }
+  return btoa(binary);
+}
+
+
+
+export function createSaveButton(viewer) {
+  async function _captureThumbnail(size = THUMBNAIL_CAPTURE_SIZE) {
+    try {
+      const renderer = viewer?.renderer;
+      const canvas = renderer?.domElement;
+      const cam = viewer?.camera;
+      if (!canvas || !cam) return null;
+
+      // Temporarily reorient exactly like clicking the ViewCube corner (top-front-right)
+      try {
+        const dir = new THREE.Vector3(1, 1, 1);
+        if (viewer?.viewCube && typeof viewer.viewCube._reorientCamera === 'function') {
+          viewer.viewCube._reorientCamera(dir, 'SAVE THUMBNAIL');
+        }
+        // Fit geometry within this oriented view
+        try { viewer.zoomToFit(1.1); } catch {
+          // best effort
+        }
+      } catch {
+        // best effort
+      }
+
+      // Ensure a fresh frame before capture
+      try { viewer.render(); } catch {
+        // best effort
+      }
+
+      // Wait one frame to be safe
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+
+      const srcW = canvas.width || canvas.clientWidth || 1;
+      const srcH = canvas.height || canvas.clientHeight || 1;
+      const dst = document.createElement('canvas');
+      dst.width = size; dst.height = size;
+      const ctx = dst.getContext('2d');
+      if (!ctx) return null;
+      try { ctx.clearRect(0, 0, size, size); } catch {
+        // best effort
+      }
+      const scale = Math.min(size / srcW, size / srcH);
+      const dw = Math.max(1, Math.floor(srcW * scale));
+      const dh = Math.max(1, Math.floor(srcH * scale));
+      const dx = Math.floor((size - dw) / 2);
+      const dy = Math.floor((size - dh) / 2);
+      try { ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; } catch {
+        // best effort
+      }
+      ctx.drawImage(canvas, 0, 0, srcW, srcH, dx, dy, dw, dh);
+      const dataUrl = dst.toDataURL('image/png');
+      return dataUrl;
+    } catch {
+      return null;
+    }
+  }
+  async function onClick() {
+    // Prefer the FileManagerWidget if present
+    try {
+      if (viewer?.fileManagerWidget?.saveCurrent) {
+        await viewer.fileManagerWidget.saveCurrent();
+        return;
+      }
+    } catch {
+      // best effort
+    }
+    // Fallback: quick autosave to IndexedDB storage
+    try {
+      // Produce a compact 3MF that embeds feature history (now includes PMI views) only
+      const json = await viewer?.partHistory?.toJSON?.();
+      let additionalFiles = undefined;
+      let modelMetadata = undefined;
+      try {
+        if (json && typeof json === 'string') {
+          additionalFiles = { 'Metadata/featureHistory.json': json };
+          modelMetadata = { featureHistoryPath: '/Metadata/featureHistory.json' };
+        }
+        const viewFiles = await viewer?.pmiViewsWidget?.captureViewImagesForPackage?.();
+        if (viewFiles && typeof viewFiles === 'object') {
+          additionalFiles = { ...(additionalFiles || {}), ...viewFiles };
+        }
+      } catch {
+        // best effort
+      }
+      const sheetsPdf = await generateSheetsPdfBytes(viewer);
+      if (sheetsPdf instanceof Uint8Array && sheetsPdf.length) {
+        additionalFiles = { ...(additionalFiles || {}), 'sheets.pdf': sheetsPdf };
+        modelMetadata = { ...(modelMetadata || {}), sheetsPdfPath: '/sheets.pdf' };
+      }
+      try {
+        const flatPatterns = buildSheetMetalFlatPatternPackageFiles(
+          collectSheetMetalSolidsFromViewer(viewer),
+          { baseName: resolveViewerFlatPatternBaseName(viewer, 'autosave') },
+        );
+        if (flatPatterns.files.length) {
+          additionalFiles = { ...(additionalFiles || {}), ...flatPatterns.additionalFiles };
+          modelMetadata = {
+            ...(modelMetadata || {}),
+            sheetMetalFlatPatternPaths: flatPatterns.paths.map((p) => `/${p}`).join(';'),
+          };
+        }
+        if (flatPatterns.skipped.length) {
+          console.warn('[SaveButton] Skipped sheet metal flat pattern(s):', flatPatterns.skipped);
+        }
+      } catch (err) {
+        console.warn('[SaveButton] Failed to embed sheet metal flat patterns:', err);
+      }
+
+      const thumbnail = await _captureThumbnail(THUMBNAIL_CAPTURE_SIZE);
+      const bytes = await generate3MF([], { unit: 'millimeter', precision: 6, scale: 1, additionalFiles, modelMetadata, thumbnail });
+      const b64 = _uint8ToBase64(bytes);
+      // Do not persist a separate thumbnail; it's embedded in the 3MF
+      const payload = { savedAt: new Date().toISOString(), data3mf: b64 };
+      LS.setItem('__BREP_DATA__:autosave', JSON.stringify(payload));
+      alert('Saved as "autosave"');
+    } catch {
+      alert('Save failed.');
+    }
+  }
+
+  return { label: '💾', title: 'Save current model', onClick };
+}
+
+export function createSaveAsButton(viewer) {
+  async function onClick() {
+    try {
+      if (viewer?.fileManagerWidget?.saveCurrentAs) {
+        await viewer.fileManagerWidget.saveCurrentAs();
+        return;
+      }
+      if (viewer?.fileManagerWidget?.saveCurrent) {
+        const previousForce = viewer.fileManagerWidget._forceSaveTargetDialog;
+        viewer.fileManagerWidget._forceSaveTargetDialog = true;
+        try {
+          await viewer.fileManagerWidget.saveCurrent();
+        } finally {
+          viewer.fileManagerWidget._forceSaveTargetDialog = previousForce;
+        }
+        return;
+      }
+    } catch {
+      // best effort
+    }
+    alert('Save As is unavailable.');
+  }
+
+  return { label: '💾+', title: 'Save current model as...', onClick };
+}

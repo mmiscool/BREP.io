@@ -1,6 +1,6 @@
 # `Face` Method Index
 
-`Face` lives in `src/BREP/Face.js` and extends `THREE.Mesh`. Instances are typically created by `solid.visualize()`.
+`Face` lives in `src/BREP/Face.ts` and extends `THREE.Mesh`. Instances are typically created by `solid.visualize()`.
 
 Related pages:
 - [BREP Class API Reference](../index.md)

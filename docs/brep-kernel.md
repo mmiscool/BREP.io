@@ -19,7 +19,7 @@ Use these pages alongside it:
 - **Solid / Face / Edge / Vertex** – Core geometry and selection primitives. API docs live under [docs/api/](./api/index.md).
 - **AssemblyComponent** – Assembly-level grouping and transform unit for constraints.
 
-## Primitives (`src/BREP/primitives.js`)
+## Primitives (`src/BREP/primitives.ts`)
 All extend `Solid` and immediately generate geometry.
 - `Cube({ x=1, y=1, z=1, name })`
 - `Pyramid({ bL=1, s=4, h=1, name })` (`s` is side count ≥ 3)
@@ -37,7 +37,7 @@ All extend `Solid` and immediately generate geometry.
 - **OffsetShellSolid.generate(sourceSolid, distance, { newSolidName, featureId='OffsetShell' })** – Static helper to build offset shells.
 - **Face.thicken(distance, options)** – Face-level helper for turning a rendered face into a closed solid.
 
-## Face thickening (`src/BREP/faceThicken.js`)
+## Face thickening (`src/BREP/faceThicken.ts`)
 - `thickenFaceToSolid(face, distance, options = {})` is the implementation behind `Face.thicken(...)`.
 - Requires a valid face with triangulated geometry and a non-zero finite distance.
 - Tries a stitched-shell build first, then falls back to deterministic prism-union construction when needed.
@@ -48,7 +48,7 @@ All extend `Solid` and immediately generate geometry.
   - `result.userData.thicken`
 - Propagates available source-face metadata onto the generated start/end cap faces.
 
-## Fillet utilities (`src/BREP/fillets/fillet.js`)
+## Fillet utilities (`src/BREP/fillets/fillet.ts`)
 - `filletSolid({ edgeToFillet, radius, sideMode='INSET'|'OUTSET', inflate=0.1, resolution=32, showTangentOverlays=false, debug=false, name='fillet' })` – Builds wedge/tube helpers and returns `{ finalSolid, tube, wedge }`; overlays add tangency polylines to the tube for debugging/PMI tagging.
 - `computeFilletCenterline(edgeObj, radius, sideMode)` – Returns centerline/tangents/edge polylines plus a `closedLoop` flag.
 - `attachFilletCenterlineAuxEdge(solid, edgeObj, radius, sideMode='INSET', name='FILLET_CENTERLINE', options)` – Adds centerline as an aux edge; `options` mirrors `Solid.addAuxEdge`.
@@ -75,7 +75,7 @@ All extend `Solid` and immediately generate geometry.
 
 ## Example: boolean with primitives
 ```js
-import { BREP } from '../src/BREP/BREP.js';
+import { BREP } from '../src/BREP/BREP.ts';
 
 const box = new BREP.Cube({ x: 20, y: 10, z: 10, name: 'Box' });
 const hole = new BREP.Cylinder({ radius: 3, height: 10, name: 'Hole' });

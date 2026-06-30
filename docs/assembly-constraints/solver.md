@@ -5,9 +5,9 @@ Status: Implemented
 The assembly constraint solver manages constraint instances attached to an assembly and iteratively applies translations or rotations until every constraint reports that it is satisfied (or until the iteration budget is exhausted). It lives alongside the constraint implementations in `src/assemblyConstraints` and mirrors the documentation pattern already used for PMI annotations.
 
 ## Key Files
-- `src/assemblyConstraints/AssemblyConstraintHistory.js` – orchestrates constraint storage, scheduling, and the iterative solve loop.
-- `src/assemblyConstraints/AssemblyConstraintRegistry.js` – registers built-in constraint classes and resolves aliases.
-- `src/assemblyConstraints/BaseAssemblyConstraint.js` – base class that exposes shared helpers and metadata conventions for concrete constraints.
+- `src/assemblyConstraints/AssemblyConstraintHistory.ts` – orchestrates constraint storage, scheduling, and the iterative solve loop.
+- `src/assemblyConstraints/AssemblyConstraintRegistry.ts` – registers built-in constraint classes and resolves aliases.
+- `src/assemblyConstraints/BaseAssemblyConstraint.ts` – base class that exposes shared helpers and metadata conventions for concrete constraints.
 
 ## Runtime Flow
 - Every constraint entry carries a `type`, `inputParams`, and `persistentData`. Defaults come from the constraint's `inputParamsSchema`, and each entry receives an auto-generated `id` (for example `COIN12`).

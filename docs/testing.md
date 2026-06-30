@@ -1,6 +1,6 @@
 # Testing
 
-The Node test runner lives in `src/tests/tests.js`.
+The Node test runner lives in `src/tests/tests.ts`.
 
 Run the full suite:
 
@@ -22,6 +22,8 @@ pnpm test -- -t test_primitiveCube
 ```
 
 Test names are the exported test function names registered in `testFunctions`, plus generated names for dynamic part-file import tests such as `import_part_fillet_test`.
+
+Tests that require local fixture files should set `requiresLocalFiles: true` on their `testFunctions` entry, or use a string value when the skip reason needs to be specific. The Node runner will still execute them, but the browser runner reports them as skipped instead of failed. Use `skipInBrowser: "reason"` for browser-only skips that are not tied to local files. As a fallback, browser runs also convert missing local fixture reads under `src/tests/partFiles`, `src/tests/fixtures`, or `src/tests/importTestingData` into skipped results. Do not use either flag only because a test builds solids, exports solids, or exercises features such as extrude and revolve; those tests should keep running in the browser when their inputs are self-contained.
 
 Each run clears `tests/results/` first. A full run writes artifacts for every test that enables them; a single-test run writes only that test's artifacts.
 

@@ -1,6 +1,6 @@
 # Solid Developer Guide
 
-`Solid` lives in `src/BREP/BetterSolid.js` and extends `THREE.Group`.
+`Solid` lives in `src/BREP/BetterSolid.ts` and extends `THREE.Group`.
 
 This page is now the concise developer overview for working with `Solid`. The canonical per-method reference lives in the [Solid API index](./api/solid/index.md).
 
@@ -34,7 +34,7 @@ Use:
 - [setEpsilon()](./api/solid/setEpsilon.md)
 
 ```js
-import { Solid } from '../src/BREP/BetterSolid.js';
+import { Solid } from '../src/BREP/BetterSolid.ts';
 
 const solid = new Solid();
 solid.addTriangle('TOP', [0, 0, 1], [1, 0, 1], [0, 1, 1]);

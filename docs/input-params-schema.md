@@ -1,6 +1,6 @@
 # Input Params Schema
 
-Feature, PMI annotation, and assembly constraint dialogs are rendered from an `inputParamsSchema` object by `SchemaForm` (`src/UI/featureDialogs.js`). Each key in the schema corresponds to a param entry; the widget type and its options are driven by the definition object.
+Feature, PMI annotation, and assembly constraint dialogs are rendered from an `inputParamsSchema` object by `SchemaForm` (`src/UI/featureDialogs.ts`). Each key in the schema corresponds to a param entry; the widget type and its options are driven by the definition object.
 
 ```js
 const inputParamsSchema = {
