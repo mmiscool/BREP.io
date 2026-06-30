@@ -997,6 +997,18 @@ export const solidVolumeExpectations = Object.freeze({
             }
         ]
     },
+    test_sheetMetal_cutout_preserves_multiple_profile_loops: {
+        solids: [
+            {
+                name: "SM_MULTI_TAB",
+                volume: 18.881537951849406
+            },
+            {
+                name: "SM_MULTI_CUTOUT:CUTTER",
+                volume: 17.895548688641735
+            }
+        ]
+    },
     test_sketch_face_attachment_alignment: {
         solids: [
             {

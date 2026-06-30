@@ -339,6 +339,10 @@ import { test_sheet_clipboard_image_utils } from './test_sheetClipboardImageUtil
 import { test_sheetMetal_corner_fillet_compound_reference } from './test_sheetMetal_corner_fillet_compound_reference.js';
 import { test_sheetMetal_corner_fillet_selection_resolution } from './test_sheetMetal_corner_fillet_selection_resolution.js';
 import { test_sheetMetal_tab_and_flange_context_buttons } from './test_sheetMetal_context_buttons.js';
+import {
+    afterRun_sheetMetal_cutout_preserves_multiple_profile_loops,
+    test_sheetMetal_cutout_preserves_multiple_profile_loops,
+} from './test_sheetMetal_cutout_multiple_profile_loops.js';
 import { test_sheetMetal_cutout_context_button } from './test_sheetMetal_cutout_context_button.js';
 import { test_sheetMetal_cutoutEdge_flange_controls } from './test_sheetMetal_cutoutEdge_flange_controls.js';
 import {
@@ -1542,6 +1546,7 @@ export const testFunctions: any[] = [
     { test: test_sheetMetal_flat_pattern_preview_visualize_is_idempotent, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_bend_face_cylindrical_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_tab_and_flange_context_buttons, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sheetMetal_cutout_preserves_multiple_profile_loops, afterRun: afterRun_sheetMetal_cutout_preserves_multiple_profile_loops, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_cutout_context_button, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_contour_flange_context_button_prefers_sketch, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_contour_flange_whole_sketch_selection, afterRun: afterRun_sheetMetal_contour_flange_whole_sketch_selection, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

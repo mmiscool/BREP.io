@@ -89,6 +89,43 @@ function buildCutoutCutterFromProfile(profileSelections, featureID, options: any
     return { cutter: null, profileFace, sourceType: "face", reason: "zero_cut_depth" };
   }
 
+  const splitProfileFaces = buildSplitProfileFacesFromGroups(profileFace, featureID);
+  if (splitProfileFaces.length > 1) {
+    const cutters = [];
+    for (let i = 0; i < splitProfileFaces.length; i += 1) {
+      try {
+        const cutter = new BREP.Sweep({
+          face: splitProfileFaces[i],
+          distance: forwardDistance + (forwardDistance > EPS ? 1e-5 : 0),
+          distanceBack: backDistance + (backDistance > EPS ? 1e-5 : 0),
+          mode: "translate",
+          name: `${featureID}:CUTTER:${i + 1}`,
+          omitBaseCap: false,
+        });
+        cutters.push(cutter);
+      } catch {
+        // Fall back to the combined profile sweep below when any split sweep fails.
+        cutters.length = 0;
+        break;
+      }
+    }
+    if (cutters.length === splitProfileFaces.length) {
+      let cutter = cutters[0];
+      for (let i = 1; i < cutters.length; i += 1) {
+        cutter = cutter.union(cutters[i], { overlapConditioningEnabled: false });
+      }
+      cutter.name = `${featureID}:CUTTER`;
+      return {
+        cutter,
+        profileFace,
+        sourceType: "face",
+        forwardDistance,
+        backDistance,
+        splitProfileCount: splitProfileFaces.length,
+      };
+    }
+  }
+
   const forwardBias = forwardDistance > EPS ? 1e-5 : 0;
   const backBias = backDistance > EPS ? 1e-5 : 0;
   const cutter = new BREP.Sweep({
@@ -107,6 +144,45 @@ function buildCutoutCutterFromProfile(profileSelections, featureID, options: any
     forwardDistance,
     backDistance,
   };
+}
+
+function buildSplitProfileFacesFromGroups(faceObj, featureID) {
+  const groups = Array.isArray(faceObj?.userData?.profileGroups)
+    ? faceObj.userData.profileGroups
+    : [];
+  if (groups.length <= 1) return [];
+
+  const normal = (typeof faceObj?.getAverageNormal === "function")
+    ? faceObj.getAverageNormal()
+    : null;
+  const out = [];
+  for (let i = 0; i < groups.length; i += 1) {
+    const group = groups[i] || {};
+    const contour = normalizeProfileWorldLoop(group.contourW);
+    if (contour.length < 3) continue;
+    const holes = (Array.isArray(group.holesW) ? group.holesW : [])
+      .map((hole) => normalizeProfileWorldLoop(hole))
+      .filter((hole) => hole.length >= 3);
+    const clone: any = {
+      ...faceObj,
+      name: `${featureID}:PROFILE:${i + 1}`,
+      userData: {
+        ...(faceObj.userData || {}),
+        boundaryLoopsWorld: [
+          { pts: contour.map((point) => [point.x, point.y, point.z]), isHole: false },
+          ...holes.map((hole) => ({ pts: hole.map((point) => [point.x, point.y, point.z]), isHole: true })),
+        ],
+        profileGroups: [group],
+      },
+      parent: null,
+      edges: [],
+      getAverageNormal: typeof faceObj?.getAverageNormal === "function"
+        ? () => faceObj.getAverageNormal()
+        : (() => (normal?.isVector3 ? normal.clone() : new THREE.Vector3(0, 1, 0))),
+    };
+    out.push(clone);
+  }
+  return out.length > 1 ? out : [];
 }
 
 function collectSketchParents(objects) {
@@ -158,6 +234,24 @@ function collectConsumableInputObjects(objects) {
     out.push(consumable);
   }
   return out;
+}
+
+function normalizeProfileWorldLoop(loop) {
+  const out = [];
+  for (const point of Array.isArray(loop) ? loop : []) {
+    if (point?.isVector3) {
+      out.push(point.clone());
+    } else if (Array.isArray(point) && point.length >= 3) {
+      out.push(new THREE.Vector3(
+        toFiniteNumber(point[0]),
+        toFiniteNumber(point[1]),
+        toFiniteNumber(point[2]),
+      ));
+    }
+  }
+  const deduped = dedupeConsecutivePoints3(out);
+  if (deduped.length >= 2 && isSamePoint3(deduped[0], deduped[deduped.length - 1])) deduped.pop();
+  return deduped;
 }
 
 function readEdgePolyline3D(edgeObj) {
@@ -567,6 +661,35 @@ function buildFlatFromFace(faceObj, featureID, label = "Tab") {
   return { flat, frame };
 }
 
+function profileGroupLoops3FromFace(faceObj) {
+  const normalHint = (typeof faceObj?.getAverageNormal === "function")
+    ? faceObj.getAverageNormal()
+    : null;
+  const groups = Array.isArray(faceObj?.userData?.profileGroups)
+    ? faceObj.userData.profileGroups
+    : [];
+  const loops = [];
+  const seen = new Set();
+  const pushLoop = (loop3) => {
+    const normalized = normalizeWorldLoopToFacePlane(loop3, normalHint);
+    if (normalized.length < 3) return;
+    const key = loopKey3(normalized);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    loops.push(normalized);
+  };
+
+  for (const group of groups) {
+    const contour = normalizeProfileWorldLoop(group?.contourW);
+    if (contour.length >= 3) pushLoop(contour);
+    for (const hole of Array.isArray(group?.holesW) ? group.holesW : []) {
+      const holeLoop = normalizeProfileWorldLoop(hole);
+      if (holeLoop.length >= 3) pushLoop(holeLoop);
+    }
+  }
+  return loops;
+}
+
 function faceOutlineLoops3FromFace(faceObj, _featureID) {
   const normalHint = (typeof faceObj?.getAverageNormal === "function")
     ? faceObj.getAverageNormal()
@@ -711,6 +834,14 @@ function collectCutoutProfileLoops(profileSelections, featureID) {
   };
 
   for (const face of faces) {
+    const profileGroupLoops = profileGroupLoops3FromFace(face);
+    if (profileGroupLoops.length) {
+      for (const loop of profileGroupLoops) {
+        pushLoop(loop, []);
+      }
+      continue;
+    }
+
     const normalHint = (typeof face?.getAverageNormal === "function")
       ? face.getAverageNormal()
       : null;
