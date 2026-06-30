@@ -39,6 +39,7 @@ This document covers the shared draggable dimension gizmo infrastructure used by
 - `P.T` (Primitive Torus)
 - `E` (Extrude)
 - `R` (Revolve)
+- `PATTERN` (Pattern)
 
 ## Current Feature Field Mapping
 
@@ -50,6 +51,7 @@ This document covers the shared draggable dimension gizmo infrastructure used by
 - `P.T`: `majorRadius`, `tubeRadius` (linear), `arc` (angle)
 - `E`: `distance`, `distanceBack` (linear)
 - `R`: `angle` (angle)
+- `PATTERN`: `linearDistance` (linear), `totalAngleDeg` (angle)
 
 ## Annotation Types
 

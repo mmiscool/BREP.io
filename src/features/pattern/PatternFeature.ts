@@ -229,7 +229,7 @@ export class PatternFeature {
     const out = [];
     const divisor = normalizeOptionKey(countMode || "count and pitch") === "COUNT_AND_SPAN"
       ? Math.max(1, count - 1)
-      : count;
+      : 1;
     const step = (count <= 1) ? 0 : THREE.MathUtils.degToRad(totalAngleDeg) / divisor;
     for (let i = 1; i <= count - 1; i++) {
       const theta = step * i;

@@ -58,6 +58,10 @@ function clampNumber(value, { min = -Infinity, max = Infinity } = {}) {
   return numeric;
 }
 
+function normalizeOptionKey(value) {
+  return String(value || '').trim().replace(/[\s-]+/g, '_').toUpperCase();
+}
+
 function closestPointOnLine(point, linePoint, lineDir) {
   const dir = lineDir.clone().normalize();
   const t = point.clone().sub(linePoint).dot(dir);
@@ -266,6 +270,84 @@ export class FeatureDimensionAnnotationBuilder {
         max: 360,
       }),
     ].filter(Boolean);
+  }
+
+  buildPatternAnnotations(params, entryId) {
+    const mode = normalizeOptionKey(params?.mode || 'LINEAR');
+    if (mode === 'CIRCULAR') return this.#buildCircularPatternAnnotations(params, entryId);
+    return this.#buildLinearPatternAnnotations(params, entryId);
+  }
+
+  #buildLinearPatternAnnotations(params, entryId) {
+    const linearInputMode = normalizeOptionKey(params?.linearInputMode || 'vector distance');
+    if (linearInputMode !== 'VECTOR_DISTANCE') return [];
+
+    const directionGeometry = this.#resolveDirectionReferenceGeometry(params.directionRef, 'directionRef');
+    if (!directionGeometry) return [];
+
+    const distance = this.resolveNumericInputParam(params, 'linearDistance', 0);
+    const direction = directionGeometry.direction.clone().normalize();
+    const pointA = directionGeometry.point.clone();
+    const visibleValue = Math.abs(distance) > EPS ? distance : Math.max(0.25, screenSizeWorld(this.viewer, 36));
+    const pointB = pointA.clone().addScaledVector(direction, visibleValue);
+
+    return [
+      this.#linear({
+        entryId,
+        fieldKey: 'linearDistance',
+        pointA,
+        pointB,
+        value: distance,
+        labelPrefix: 'D',
+        dragPlaneValue: visibleValue,
+      }),
+    ].filter(Boolean);
+  }
+
+  #buildCircularPatternAnnotations(params, entryId) {
+    const axisLine = this.#resolveAxisLine(params.axisRef, 'axisRef');
+    if (!axisLine) return [];
+
+    const angle = clampNumber(this.resolveNumericInputParam(params, 'totalAngleDeg', 0), { min: -360, max: 360 });
+    const axis = axisLine.direction.clone().normalize();
+    const startDirection = this.#resolvePatternStartDirection(params, axisLine.point, axis);
+
+    return [
+      this.#angle({
+        entryId,
+        fieldKey: 'totalAngleDeg',
+        vertex: axisLine.point.clone(),
+        planeNormal: axis,
+        startDirection,
+        valueDeg: angle,
+        labelPrefix: 'Angle',
+        min: -360,
+        max: 360,
+      }),
+    ].filter(Boolean);
+  }
+
+  #resolvePatternStartDirection(params, axisPoint, axisDirection) {
+    const sourceCenter = this.#resolveFirstSolidCenter(params?.solids);
+    if (sourceCenter) {
+      const radial = sourceCenter.clone().sub(axisPoint);
+      radial.addScaledVector(axisDirection, -radial.dot(axisDirection));
+      if (radial.lengthSq() > EPS) return radial.normalize();
+    }
+    return this.#arbitraryPerpendicular(axisDirection);
+  }
+
+  #resolveFirstSolidCenter(solidsSelection) {
+    const scene = this.viewer?.scene || null;
+    const source = Array.isArray(solidsSelection) ? solidsSelection[0] : solidsSelection;
+    const solid = resolveSelectionObject(scene, source) || null;
+    if (!solid) return null;
+    try {
+      solid.updateMatrixWorld?.(true);
+      const box = new THREE.Box3().setFromObject(solid);
+      if (!box.isEmpty()) return box.getCenter(new THREE.Vector3());
+    } catch { /* ignore */ }
+    return extractWorldPoint(solid);
   }
 
   buildPortAnnotations(params, entryId, entry = null) {
@@ -481,6 +563,37 @@ export class FeatureDimensionAnnotationBuilder {
     }
 
     return null;
+  }
+
+  #resolveDirectionReferenceGeometry(selection, fieldKey = 'directionRef') {
+    const edgeLine = this.#resolveAxisLine(selection, fieldKey);
+    if (edgeLine) return edgeLine;
+
+    const snapshot = this.#resolveReferenceSnapshot(fieldKey, selection, new Set(['FACE', 'PLANE']));
+    const snapshotGeom = this.#geometryFromFaceSnapshot(snapshot);
+    if (snapshotGeom) {
+      return {
+        point: snapshotGeom.center.clone(),
+        direction: snapshotGeom.normal.clone().normalize(),
+      };
+    }
+
+    const scene = this.viewer?.scene || null;
+    const refObject = resolveSelectionObject(scene, selection)
+      || resolveFeatureDimensionEffectReferenceObject(this.active?.entry, selection, new Set(['FACE', 'PLANE']))
+      || null;
+    if (!refObject) return null;
+
+    const point = this.#computeFaceAverageCenterWorld(refObject)
+      || computeFaceOrigin(refObject)
+      || extractWorldPoint(refObject)
+      || new THREE.Vector3();
+    const direction = computeFaceNormal(refObject) || getElementDirection(null, refObject) || null;
+    if (!direction || direction.lengthSq() <= EPS) return null;
+    return {
+      point: point.clone(),
+      direction: direction.clone().normalize(),
+    };
   }
 
   #resolvePortDefinitionFromParams(params = {}, entry = null) {

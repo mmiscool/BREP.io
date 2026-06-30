@@ -189,6 +189,7 @@ import {
     test_import3d_planar_extraction_merges_sliver_bridge,
 } from './test_import3dPlanarExtraction.js';
 import { test_mirror } from './test_mirror.js';
+import { test_pattern_circular_count_pitch_uses_angle_as_step } from './test_patternFeature.js';
 import {
     test_mesh_cleanup_split_crossing_triangles_inserts_intersection_edges,
     test_mesh_cleanup_split_point_intersection_inserts_vertex,
@@ -443,6 +444,7 @@ import {
     test_pmi_monochrome_label_svg_uses_backdrop_color,
 } from './test_pmiViewsWidget.js';
 import {
+    test_feature_dimension_annotation_builder_dispatches_pattern,
     test_feature_dimension_annotation_builder_dispatches_registered_primitive,
     test_reference_snapshot_store_uses_generic_reference_snapshots_key,
     test_feature_dimension_effect_reference_resolves_consumed_profile_and_axis,
@@ -1053,6 +1055,7 @@ export const testFunctions: any[] = [
     { test: test_feature_dimension_overlay_supports_port, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_feature_dimension_registry_support_and_transform_toggle_agree, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_feature_dimension_annotation_builder_dispatches_registered_primitive, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_feature_dimension_annotation_builder_dispatches_pattern, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_reference_snapshot_store_uses_generic_reference_snapshots_key, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_feature_dimension_effect_reference_resolves_consumed_profile_and_axis, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_part_history_prevent_remove_survives_multi_child_scene_clear, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -1518,6 +1521,7 @@ export const testFunctions: any[] = [
     { test: test_pushFace_feature, afterRun: afterRun_pushFace_feature, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_pushFace, afterRun: afterRun_pushFace, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_mirror, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
+    { test: test_pattern_circular_count_pitch_uses_angle_as_step, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_history_features_basic, afterRun: afterRun_history_features_basic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_history_expand_does_not_dirty, afterRun: afterRun_history_expand_does_not_dirty, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_history_test_snippet_persistent_data_allowlist, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

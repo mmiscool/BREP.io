@@ -91,6 +91,10 @@ function registerDefaultFeatureDimensionDescriptors() {
     buildAnnotations: (context) => callBuilder(context, 'buildRevolveAnnotations', [context.params, context.entryId]),
   });
   registerFeatureDimensionDescriptor({
+    featureKey: 'PATTERN',
+    buildAnnotations: (context) => callBuilder(context, 'buildPatternAnnotations', [context.params, context.entryId]),
+  });
+  registerFeatureDimensionDescriptor({
     featureKey: 'PORT',
     buildAnnotations: (context) => callBuilder(context, 'buildPortAnnotations', [context.params, context.entryId, context.entry]),
   });

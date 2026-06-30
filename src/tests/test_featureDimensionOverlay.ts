@@ -41,7 +41,7 @@ export function test_feature_dimension_overlay_supports_port() {
 }
 
 export function test_feature_dimension_registry_support_and_transform_toggle_agree() {
-  const supportedKeys = ['P.CU', 'P.CY', 'P.CO', 'P.S', 'P.PY', 'P.T', 'E', 'R', 'PORT'];
+  const supportedKeys = ['P.CU', 'P.CY', 'P.CO', 'P.S', 'P.PY', 'P.T', 'E', 'R', 'PATTERN', 'PORT'];
   for (const key of supportedKeys) {
     assert(
       supportsFeatureDimensionFeatureKey(key) === true,
@@ -93,6 +93,66 @@ export function test_feature_dimension_annotation_builder_dispatches_registered_
     linearSpecs.map((spec) => spec.fieldKey).join(',') === 'sizeX,sizeY,sizeZ',
     'Expected registered cube descriptor to dispatch through the annotation builder.',
   );
+}
+
+export function test_feature_dimension_annotation_builder_dispatches_pattern() {
+  const edge = new THREE.Object3D();
+  edge.name = 'AxisEdge';
+  edge.type = 'EDGE';
+  edge.points = () => [
+    { x: 0, y: 0, z: 0 },
+    { x: 0, y: 10, z: 0 },
+  ];
+
+  const linearSpecs = [];
+  const angleSpecs = [];
+
+  const linearBuilder = new FeatureDimensionAnnotationBuilder({
+    active: {
+      entryId: 'PATTERN1',
+      featureKey: 'PATTERN',
+      entry: {
+        inputParams: {
+          mode: 'LINEAR',
+          linearInputMode: 'vector distance',
+          directionRef: edge,
+          linearDistance: 5,
+        },
+      },
+    },
+    createLinearAnnotation: (spec) => {
+      linearSpecs.push(spec);
+      return { id: `${spec.entryId}:${spec.fieldKey}`, fieldKey: spec.fieldKey };
+    },
+    createAngleAnnotation: () => null,
+  });
+
+  const linearAnnotations = linearBuilder.build();
+  assert(linearAnnotations.length === 1, 'Expected Pattern linear vector distance to create one dimension annotation.');
+  assert(linearSpecs[0]?.fieldKey === 'linearDistance', 'Expected Pattern linear annotation to target linearDistance.');
+
+  const angleBuilder = new FeatureDimensionAnnotationBuilder({
+    active: {
+      entryId: 'PATTERN2',
+      featureKey: 'PATTERN',
+      entry: {
+        inputParams: {
+          mode: 'CIRCULAR',
+          axisRef: edge,
+          totalAngleDeg: 180,
+        },
+      },
+    },
+    createLinearAnnotation: () => null,
+    createAngleAnnotation: (spec) => {
+      angleSpecs.push(spec);
+      return { id: `${spec.entryId}:${spec.fieldKey}`, fieldKey: spec.fieldKey };
+    },
+  });
+
+  const angleAnnotations = angleBuilder.build();
+  assert(angleAnnotations.length === 1, 'Expected Pattern circular mode to create one angle annotation.');
+  assert(angleSpecs[0]?.fieldKey === 'totalAngleDeg', 'Expected Pattern angle annotation to target totalAngleDeg.');
 }
 
 export function test_reference_snapshot_store_uses_generic_reference_snapshots_key() {
