@@ -384,7 +384,7 @@ function resamplePolyline3(points, sampleCount) {
     }
     return out;
 }
-export function calculateBendAllowance(midRadius, thickness, kFactor, angleRad) {
+function calculateBendAllowance(midRadius, thickness, kFactor, angleRad) {
     const neutralRadius = midRadius + (kFactor - 0.5) * thickness;
     return Math.abs(angleRad) * neutralRadius;
 }

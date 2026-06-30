@@ -1,4 +1,4 @@
-export type TableCellStyle = {
+type TableCellStyle = {
   fontFamily?: string;
   fontSize?: number;
   fontWeight?: string;
@@ -7,34 +7,6 @@ export type TableCellStyle = {
   textAlign?: "left" | "center" | "right";
   verticalAlign?: "top" | "middle" | "bottom";
   color?: string;
-};
-
-export type TableCell = {
-  text: string;
-  rowSpan: number;
-  colSpan: number;
-  mergedInto: { row: number; col: number } | null;
-  style: TableCellStyle;
-};
-
-export type TableData = {
-  rowFractions: number[];
-  colFractions: number[];
-  cells: TableCell[][];
-};
-
-export type TableSelectionRect = {
-  minRow: number;
-  maxRow: number;
-  minCol: number;
-  maxCol: number;
-};
-
-export type TableSelection = {
-  anchorRow: number;
-  focusRow: number;
-  anchorCol: number;
-  focusCol: number;
 };
 
 function toFiniteNumber(value, fallback = 0) {
