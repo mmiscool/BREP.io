@@ -6,26 +6,6 @@ The Modeling workbench is the default workbench for new parts. It keeps feature 
 
 It combines the feature history tree, 3D viewport, expressions/configurator workflow, and standard modeling toolbars for building and editing parts.
 
-## Tools
-- [New](../tools/new.md)
-- [Save](../tools/save.md)
-- [Save As](../tools/save-as.md)
-- [Zoom To Fit](../tools/zoom-to-fit.md)
-- [Wireframe](../tools/wireframe.md)
-- [Import](../tools/import.md)
-- [Export](../tools/export.md)
-- [Share](../tools/share.md)
-- [Settings](../tools/settings.md)
-- [2D Sheet Editor](../tools/sheet-editor.md)
-- [About](../tools/about.md)
-- [History Test Snippet](../tools/history-test-snippet.md)
-- [Script Runner](../tools/script-runner.md)
-- [Undo](../tools/undo.md)
-- [Redo](../tools/redo.md)
-- [Browser Tests](../tools/tests.md) - localhost only
-- [Guided Tour](../tools/guided-tour.md) - localhost only
-- [Selection State](../tools/selection-state.md) - localhost only
-
 ## Features
 - Reference geometry: [Datium](../features/datium.md), [Plane](../features/plane.md)
 - Primitives: [Cube](../features/primitive-cube.md), [Cylinder](../features/primitive-cylinder.md), [Cone](../features/primitive-cone.md), [Sphere](../features/primitive-sphere.md), [Torus](../features/primitive-torus.md), [Pyramid](../features/primitive-pyramid.md)

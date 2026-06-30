@@ -12,7 +12,6 @@ Use this section for application structure, history replay, expressions, and UI 
 ## UI and Authoring Systems
 
 - [Expressions and Configurator Panel](../../panels/expressions.md)
-- [UI Overview](../../ui-overview.md)
 - [Feature Dimension Gizmos](./feature-dimension-gizmos.md)
 - [Workbench Implementation Plan](./workbench-implementation-plan.md)
 

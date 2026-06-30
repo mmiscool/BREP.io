@@ -3,26 +3,8 @@
 The Sheet Metal workbench narrows creation tools down to sheet-specific features and shared setup geometry.
 
 ## Tools
-- [New](../tools/new.md)
-- [Save](../tools/save.md)
-- [Save As](../tools/save-as.md)
-- [Zoom To Fit](../tools/zoom-to-fit.md)
-- [Wireframe](../tools/wireframe.md)
-- [Import](../tools/import.md)
-- [Export](../tools/export.md)
-- [Share](../tools/share.md)
-- [Settings](../tools/settings.md)
-- [2D Sheet Editor](../tools/sheet-editor.md)
 - [Sheet Metal Flat Pattern Export](../tools/sheet-metal-flat-export.md)
 - [Sheet Metal Debug JSON](../tools/sheet-metal-debug.md) - localhost only
-- [About](../tools/about.md)
-- [History Test Snippet](../tools/history-test-snippet.md)
-- [Script Runner](../tools/script-runner.md)
-- [Undo](../tools/undo.md)
-- [Redo](../tools/redo.md)
-- [Browser Tests](../tools/tests.md) - localhost only
-- [Guided Tour](../tools/guided-tour.md) - localhost only
-- [Selection State](../tools/selection-state.md) - localhost only
 
 ![Sheet Metal Flat Pattern export floating window](../floating-windows/sheet-metal-flat-export.png)
 
