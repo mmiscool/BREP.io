@@ -83,6 +83,20 @@ export class SheetMetalFlangeFeature {
   static angleOverride: any = null;
   static defaultBendRadius: any = null;
   static flangeLengthReferenceOverride: any = null;
+  static showContexButton(selectedItems: any) {
+    const items = Array.isArray(selectedItems) ? selectedItems : [];
+    if (!items.length) return false;
+
+    const picks = items.filter((item) => {
+      const type = String(item?.type || "").toUpperCase();
+      if (type !== "FACE" && type !== "EDGE") return false;
+      if (String(item?.parent?.type || "").toUpperCase() === "SKETCH") return false;
+      return hasSheetMetalFlangeSelectionMetadata(item);
+    });
+    if (!picks.length || picks.length !== items.length) return false;
+
+    return { field: "faces", value: picks };
+  }
 
   inputParams: AnyRecord;
   persistentData: AnyRecord;
@@ -109,4 +123,49 @@ export class SheetMetalFlangeFeature {
       flangeLengthReference: flangeLengthReferenceOverride != null ? String(flangeLengthReferenceOverride) : undefined,
     });
   }
+}
+
+function hasSheetMetalFlangeSelectionMetadata(selection: any) {
+  const meta = selection?.userData?.sheetMetal;
+  if (meta && typeof meta === "object") {
+    if (hasFlangeTargetMetadata(meta)) {
+      return true;
+    }
+  }
+  const type = String(selection?.type || "").toUpperCase();
+  const name = selection?.name || selection?.userData?.faceName || selection?.userData?.edgeName || null;
+  const carrier = findSheetMetalCarrier(selection);
+  if (!carrier || !name) return false;
+
+  try {
+    const metadata = type === "FACE"
+      ? (typeof carrier.getFaceMetadata === "function" ? carrier.getFaceMetadata(name) : null)
+      : (type === "EDGE" ? (typeof carrier.getEdgeMetadata === "function" ? carrier.getEdgeMetadata(name) : null) : null);
+    const sheetMetal = metadata?.sheetMetal;
+    if (sheetMetal && typeof sheetMetal === "object") {
+      if (hasFlangeTargetMetadata(sheetMetal)) {
+        return true;
+      }
+    }
+    return hasFlangeTargetMetadata(metadata);
+  } catch {
+    return false;
+  }
+}
+
+function hasFlangeTargetMetadata(meta: any) {
+  if (!meta || typeof meta !== "object") return false;
+  if (meta.edgeId != null || meta.defaultEdgeId != null) return true;
+  const kind = String(meta.kind || "").trim().toLowerCase();
+  return (kind === "flat_edge_wall" || kind === "flat_cutout_wall" || kind === "edge")
+    && meta.flatId != null;
+}
+
+function findSheetMetalCarrier(selection: any) {
+  let current = selection?.parentSolid || selection?.parent || null;
+  while (current) {
+    if (current?.userData?.sheetMetalModel?.tree) return current;
+    current = current.parent || null;
+  }
+  return null;
 }

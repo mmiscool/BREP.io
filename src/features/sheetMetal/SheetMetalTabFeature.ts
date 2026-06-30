@@ -52,6 +52,22 @@ export class SheetMetalTabFeature {
   static shortName = "SM.TAB";
   static longName = "Sheet Metal Tab";
   static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems: any) {
+    const items = Array.isArray(selectedItems) ? selectedItems : [];
+    if (items.length !== 1) return false;
+
+    const pick = items[0] || null;
+    const type = String(pick?.type || "").toUpperCase();
+    const parentType = String(pick?.parent?.type || "").toUpperCase();
+    const isSketch = type === "SKETCH";
+    const isSketchFace = type === "FACE" && parentType === "SKETCH";
+    if (!isSketch && !isSketchFace) return false;
+
+    const source = isSketchFace ? pick.parent : pick;
+    if (!source) return false;
+
+    return { field: "profile", value: source };
+  }
 
   inputParams: AnyRecord;
   persistentData: AnyRecord;

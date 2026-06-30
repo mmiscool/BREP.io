@@ -338,6 +338,7 @@ import { test_sheetMetal_bend_face_cylindrical_metadata } from './test_sheetMeta
 import { test_sheet_clipboard_image_utils } from './test_sheetClipboardImageUtils.js';
 import { test_sheetMetal_corner_fillet_compound_reference } from './test_sheetMetal_corner_fillet_compound_reference.js';
 import { test_sheetMetal_corner_fillet_selection_resolution } from './test_sheetMetal_corner_fillet_selection_resolution.js';
+import { test_sheetMetal_tab_and_flange_context_buttons } from './test_sheetMetal_context_buttons.js';
 import { test_sheetMetal_cutout_context_button } from './test_sheetMetal_cutout_context_button.js';
 import { test_sheetMetal_cutoutEdge_flange_controls } from './test_sheetMetal_cutoutEdge_flange_controls.js';
 import {
@@ -1540,6 +1541,7 @@ export const testFunctions: any[] = [
     { test: test_sheetMetal_flat_pattern_files_use_model_and_feature_names, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_flat_pattern_preview_visualize_is_idempotent, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_bend_face_cylindrical_metadata, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_sheetMetal_tab_and_flange_context_buttons, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_cutout_context_button, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_contour_flange_context_button_prefers_sketch, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_contour_flange_whole_sketch_selection, afterRun: afterRun_sheetMetal_contour_flange_whole_sketch_selection, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
