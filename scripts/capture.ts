@@ -647,6 +647,17 @@ async function waitForCadReady(page) {
     );
   }, { timeout: 60000 });
 
+  await page.evaluate(`
+    globalThis.__name = globalThis.__name || ((target, value) => {
+      try {
+        if (target && value) {
+          Object.defineProperty(target, "name", { value, configurable: true });
+        }
+      } catch {}
+      return target;
+    });
+  `);
+
   await page.evaluate(() => {
     try {
       localStorage.setItem('__BREP_STARTUP_TOUR_DONE__', '1');
