@@ -1,3 +1,5 @@
+const EXPRESSIONS_CAPTURE_TARGET_ID = 'expressions-doc-capture-target';
+
 function createCubeTransform() {
   return {
     position: [-8, -6, -4],
@@ -118,30 +120,116 @@ export async function prepareExpressionsScreenshot(page, shotId) {
   const shotState = buildShotState(shotId);
   const cubeTransform = createCubeTransform();
 
-  await page.evaluate(async ({ shotIdValue, shotStateValue, cubeTransformValue }) => {
-    const waitForExpressionsAccordion = async (timeoutMs = 10000) => {
+  await page.evaluate(async ({
+    shotIdValue,
+    shotStateValue,
+    cubeTransformValue,
+    captureTargetId,
+  }) => {
+    const waitForExpressionsUi = async (timeoutMs = 15000) => {
       const startedAt = Date.now();
       while (Date.now() - startedAt < timeoutMs) {
+        const manager = window.viewer?.expressionsManager || null;
         const title = Array.from(document.querySelectorAll('.accordion-title'))
           .find((element) => String(element?.textContent || '').trim() === 'Expressions') || null;
         const content = document.getElementById('accordion-content-Expressions');
-        if (title && content) {
-          return { title, content };
+        if (manager && title && content) {
+          return { manager, title, content };
         }
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
-      throw new Error('Expressions accordion section was not created in time.');
+      throw new Error('Expressions UI was not created in time.');
     };
 
     const viewer = window.viewer;
     if (!viewer?.partHistory) throw new Error('Viewer is not ready');
-    if (!viewer?.expressionsManager) throw new Error('Expressions manager is not ready');
 
     const partHistory = viewer.partHistory;
-    const expressionsManager = viewer.expressionsManager;
+    const ensureCaptureTarget = () => {
+      let target = document.getElementById(captureTargetId);
+      if (!target) {
+        target = document.createElement('div');
+        target.id = captureTargetId;
+        document.body.appendChild(target);
+      }
+      target.hidden = false;
+      target.style.position = 'fixed';
+      target.style.left = '16px';
+      target.style.top = '16px';
+      target.style.width = shotIdValue === 'configurator-editor' ? '620px' : '540px';
+      target.style.height = 'auto';
+      target.style.display = 'block';
+      target.style.visibility = 'visible';
+      target.style.pointerEvents = 'none';
+      target.style.zIndex = '2147483646';
+      target.style.background = 'transparent';
+      return target;
+    };
 
     try { viewer.endSketchMode?.(); } catch { /* ignore */ }
     try { viewer.endPMIMode?.(); } catch { /* ignore */ }
+
+    const {
+      manager: expressionsManager,
+      title: expressionsTitle,
+      content: expressionsContent,
+    } = await waitForExpressionsUi();
+    const normalizeExpressionsVisibility = async () => {
+      try {
+        viewer._setSidebarPinned?.(true);
+        viewer._setSidebarAutoHideSuspended?.(true);
+        viewer._setSidebarHoverVisible?.(true);
+        if (viewer.sidebar) {
+          viewer.sidebar.hidden = false;
+          viewer.sidebar.style.display = '';
+          viewer.sidebar.style.visibility = 'visible';
+          viewer.sidebar.style.transform = '';
+          viewer.sidebar.style.width = shotIdValue === 'configurator-editor' ? '620px' : '540px';
+        }
+      } catch { /* ignore */ }
+      try {
+        expressionsTitle.hidden = false;
+        expressionsTitle.style.display = '';
+        expressionsTitle.style.visibility = 'visible';
+        expressionsTitle.removeAttribute('aria-hidden');
+        expressionsContent.hidden = false;
+        expressionsContent.style.display = '';
+        expressionsContent.style.visibility = 'visible';
+        expressionsContent.removeAttribute('aria-hidden');
+        expressionsContent.classList.remove('collapsed');
+      } catch { /* ignore */ }
+      try {
+        expressionsManager.uiElement.hidden = false;
+        expressionsManager.uiElement.style.display = '';
+        expressionsManager.uiElement.style.visibility = 'visible';
+        expressionsManager.textArea?.parentElement?.style?.removeProperty?.('display');
+        const panel = expressionsContent.querySelector('.expressions-panel');
+        if (panel) {
+          panel.hidden = false;
+          panel.style.display = '';
+          panel.style.visibility = 'visible';
+        }
+        for (const element of [
+          expressionsManager.configuratorPanel,
+          expressionsManager.editorPanel,
+        ]) {
+          if (!element) continue;
+          element.style.height = 'auto';
+          element.style.minHeight = '0';
+          element.style.maxHeight = 'none';
+          element.style.overflow = 'visible';
+        }
+      } catch { /* ignore */ }
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    };
+    const moveExpressionsIntoCaptureTarget = async () => {
+      try {
+        const target = ensureCaptureTarget();
+        target.textContent = '';
+        target.appendChild(expressionsManager.uiElement);
+      } catch { /* ignore */ }
+      await normalizeExpressionsVisibility();
+    };
 
     await partHistory.reset();
 
@@ -158,7 +246,6 @@ export async function prepareExpressionsScreenshot(page, shotId) {
     partHistory.currentHistoryStepId = null;
     await partHistory.runHistory();
 
-    const { title: expressionsTitle, content: expressionsContent } = await waitForExpressionsAccordion();
     await new Promise((resolve) => setTimeout(resolve, 800));
 
     try { viewer.historyWidget?.render?.(); } catch { /* ignore */ }
@@ -172,17 +259,7 @@ export async function prepareExpressionsScreenshot(page, shotId) {
       expressionsContent.classList.remove('collapsed');
     } catch { /* ignore */ }
 
-    try {
-      viewer._setSidebarPinned?.(true);
-      viewer._setSidebarAutoHideSuspended?.(true);
-      viewer._setSidebarHoverVisible?.(true);
-    } catch { /* ignore */ }
-
-    try {
-      if (viewer.sidebar) {
-        viewer.sidebar.style.width = shotIdValue === 'configurator-editor' ? '620px' : '540px';
-      }
-    } catch { /* ignore */ }
+    await normalizeExpressionsVisibility();
     try {
       if (viewer.renderer?.domElement) {
         viewer.renderer.domElement.style.opacity = '0';
@@ -203,11 +280,14 @@ export async function prepareExpressionsScreenshot(page, shotId) {
       expressionsManager.toggleEditor?.(false);
     }
 
+    await normalizeExpressionsVisibility();
     expressionsContent?.scrollIntoView?.({ block: 'start' });
+    await moveExpressionsIntoCaptureTarget();
   }, {
     shotIdValue: shotId,
     shotStateValue: shotState,
     cubeTransformValue: cubeTransform,
+    captureTargetId: EXPRESSIONS_CAPTURE_TARGET_ID,
   });
 
   await page.waitForLoadState('networkidle');

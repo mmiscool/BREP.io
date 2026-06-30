@@ -59,6 +59,26 @@ export async function prepareSheetScreenshot(page, shotId = 'sheets-mode') {
     };
 
     const queryToolbarButton = (title) => document.querySelector(`.sheet-slides-topbar button[title="${title}"]`);
+    const waitForToolbarPopover = async (expectedTitle = '') => {
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < 5000) {
+        const popover = editor._toolbarPopover;
+        const rect = popover?.getBoundingClientRect?.();
+        const title = String(popover?.querySelector?.('.sheet-slides-toolbar-popover-title')?.textContent || '').trim();
+        if (
+          popover
+          && popover.style.display !== 'none'
+          && rect
+          && rect.width > 0
+          && rect.height > 0
+          && (!expectedTitle || title === expectedTitle)
+        ) {
+          return popover;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error(`Toolbar popover did not open for ${shotIdValue}`);
+    };
     const selectedElementByType = (type) => (editor.sheetDraft?.elements || []).find((element) => element?.type === type) || null;
     const selectSingle = (element) => {
       if (!element?.id) return;
@@ -227,9 +247,9 @@ export async function prepareSheetScreenshot(page, shotId = 'sheets-mode') {
         return;
       }
       if (shotIdValue === 'sheets-toolbar-line-weight-menu') {
-        editor._toggleToolbarPopover?.('lineWeight', editor._toolbarStrokeWidthButton);
-        await nextFrame();
-        setCaptureTargetFromElements([editor._toolbarSelectionStyleGroup, editor._toolbarPopover], 12);
+        editor._toggleToolbarPopover?.('strokeWidth', editor._toolbarStrokeWidthButton);
+        const popover = await waitForToolbarPopover('Line weight');
+        setCaptureTargetFromElements([editor._toolbarSelectionStyleGroup, popover], 12);
         return;
       }
       if (shotIdValue === 'sheets-toolbar-line-style-menu') {

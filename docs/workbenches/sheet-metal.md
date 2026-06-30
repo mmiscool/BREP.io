@@ -4,6 +4,8 @@ The Sheet Metal workbench focuses the modeling UI on deterministic sheet-metal c
 
 Sheet-metal features build and update a stored `SheetMetalTree`. The folded 3D model and flat 2D representation are regenerated from that tree, and generated faces/edges carry stable `flatId` / `edgeId` metadata so later operations can target the correct sheet edge.
 
+![Sheet Metal workbench showing a tab, flanges, and rounded edges](../SHEET_METAL.png)
+
 ## Tools
 - [Sheet Metal Flat Pattern Export](../tools/sheet-metal-flat-export.md)
 - [Sheet Metal Debug JSON](../tools/sheet-metal-debug.md) - localhost only

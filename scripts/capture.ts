@@ -10,6 +10,7 @@ import { prepareSketchScreenshot } from './capture/docsShots/sketchScreenshot.js
 import { preparePmiScreenshot } from './capture/docsShots/pmiScreenshot.js';
 import { prepareNurbsCageScreenshot } from './capture/docsShots/nurbsCageScreenshot.js';
 import { prepareSheetScreenshot } from './capture/docsShots/sheetScreenshot.js';
+import { prepareSheetMetalScreenshot } from './capture/docsShots/sheetMetalScreenshot.js';
 import { prepareExpressionsScreenshot } from './capture/docsShots/expressionsScreenshot.js';
 import {
   isFloatingWindowScreenshotId,
@@ -23,10 +24,10 @@ import {
 const require = createRequire(import.meta.url);
 const DEFAULT_BASE_URL = process.env.CAPTURE_BASE_URL || 'http://127.0.0.1:5173';
 const LOCAL_CAPTURE_SERVER_URL = 'http://127.0.0.1:5173/';
-const DOCS_CAPTURE_VIEWPORT = { width: 1200, height: 800 };
+const DOCS_CAPTURE_VIEWPORT = { width: 2560*.65, height: 1440 *.65};
 const DEFAULT_VIEWPORT = { ...DOCS_CAPTURE_VIEWPORT };
-const DEVICE_SCALE_FACTOR = 1;
-const OUTPUT_SCALE_MODE: any = 4;
+const DEVICE_SCALE_FACTOR = 4;
+const OUTPUT_SCALE_MODE: any = 8;
 const CAPTURE_HEADLESS = resolveHeadless(process.env.CAPTURE_HEADLESS);
 const CAPTURE_KEEP_OPEN = resolveKeepOpen(process.env.CAPTURE_KEEP_OPEN, CAPTURE_HEADLESS);
 const PLAYWRIGHT_PNG_COMPARATOR = resolvePlaywrightPngComparator();
@@ -51,19 +52,19 @@ const DOC_SHOTS = [
     id: 'expressions-panel',
     label: 'Expressions panel',
     relativePath: join('docs', 'expressions-panel.png'),
-    selector: '#accordion-content-Expressions .expressions-panel',
+    selector: '#expressions-doc-capture-target .expressions-panel',
   },
   {
     id: 'configurator-editor',
     label: 'Configurator editor',
     relativePath: join('docs', 'configurator-editor.png'),
-    selector: '#accordion-content-Expressions .configurator-editor-panel',
+    selector: '#expressions-doc-capture-target .configurator-editor-panel',
   },
   {
     id: 'configurator-field-types',
     label: 'Configurator field types',
     relativePath: join('docs', 'configurator-field-types.png'),
-    selector: '#accordion-content-Expressions .configurator-panel',
+    selector: '#expressions-doc-capture-target .configurator-panel',
   },
   {
     id: 'sketch',
@@ -74,6 +75,11 @@ const DOC_SHOTS = [
     id: 'pmi-mode',
     label: 'PMI mode',
     relativePath: join('docs', 'PMI.png'),
+  },
+  {
+    id: 'sheet-metal-workbench',
+    label: 'Sheet Metal workbench',
+    relativePath: join('docs', 'SHEET_METAL.png'),
   },
   {
     id: 'sheets-mode',
@@ -556,6 +562,20 @@ function parseScope(scopeValue) {
   return parseCsvSet(scopeValue);
 }
 
+function resolveDocShotFilter() {
+  const rawValues = [
+    process.env.CAPTURE_DOC_SHOTS,
+    process.env.CAPTURE_DOC_SHOT,
+    process.env.npm_config_capture_doc_shots,
+    process.env.npm_config_capture_doc_shot,
+  ];
+  for (const rawValue of rawValues) {
+    const parsed = parseCsvSet(rawValue);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
 function parseCsvSet(rawValue) {
   if (!rawValue) return null;
   const parts = String(rawValue)
@@ -724,9 +744,15 @@ async function captureDocsForTarget(page, target) {
     console.warn(`⚠️  Could not load image-to-face source ${DOC_IMAGE_TO_FACE_SOURCE_PATH}:`, error?.message || error);
   }
 
-  const shots = Array.isArray(target.shots) ? target.shots : [];
+  const docShotFilter = resolveDocShotFilter();
+  const configuredShots = Array.isArray(target.shots) ? target.shots : [];
+  const shots = docShotFilter
+    ? configuredShots.filter((shot) => docShotFilter.has(String(shot?.id || '').trim().toLowerCase()))
+    : configuredShots;
   if (!shots.length) {
-    console.warn('⚠️  No documentation shots configured.');
+    console.warn(docShotFilter
+      ? '⚠️  No documentation shots matched CAPTURE_DOC_SHOTS.'
+      : '⚠️  No documentation shots configured.');
     return 0;
   }
 
@@ -802,12 +828,15 @@ function isFeatureDocShot(shotId) {
 async function waitForCadReady(page) {
   await page.waitForFunction(() => {
     const viewer = window.viewer;
+    const toolbar = viewer?.mainToolbar?.root || document.getElementById('main-toolbar');
     return !!(
       viewer
       && viewer.partHistory
       && viewer.historyWidget
       && viewer.renderer
       && viewer.camera
+      && toolbar
+      && toolbar.isConnected
     );
   }, { timeout: 60000 });
 
@@ -839,9 +868,44 @@ async function waitForCadReady(page) {
   });
 }
 
+async function normalizeApplicationWorkbenchChrome(page) {
+  await page.evaluate(async () => {
+    const viewer = window.viewer;
+    const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const toolbar = viewer?.mainToolbar?.root || document.getElementById('main-toolbar');
+    if (toolbar) {
+      toolbar.hidden = false;
+      toolbar.style.display = 'flex';
+      toolbar.style.visibility = 'visible';
+      toolbar.style.opacity = '1';
+      toolbar.style.pointerEvents = 'auto';
+      toolbar.style.zIndex = '1000';
+      toolbar.style.top = '0px';
+      toolbar.style.right = '0px';
+      toolbar.style.transform = '';
+      toolbar.removeAttribute('aria-hidden');
+    }
+    try { viewer?.mainToolbar?.refreshButtons?.(); } catch { /* ignore */ }
+    try { viewer?.mainToolbar?._positionWithSidebar?.(); } catch { /* ignore */ }
+    try {
+      if (viewer?.sidebar) {
+        viewer.sidebar.hidden = false;
+        viewer.sidebar.style.display = '';
+        viewer.sidebar.style.visibility = 'visible';
+        viewer.sidebar.style.transform = '';
+      }
+      viewer?._setSidebarPinned?.(true);
+      viewer?._setSidebarHoverVisible?.(true);
+    } catch { /* ignore */ }
+    await nextFrame();
+  });
+  await page.locator('#main-toolbar').first().waitFor({ state: 'visible', timeout: 15000 });
+}
+
 async function prepareDocsShot(page, shotId, context: any = {}) {
   if (shotId === 'modeling') {
     await prepareModelingScreenshot(page);
+    await normalizeApplicationWorkbenchChrome(page);
     return;
   }
   if (shotId === 'expressions-panel'
@@ -852,14 +916,25 @@ async function prepareDocsShot(page, shotId, context: any = {}) {
   }
   if (shotId === 'sketch') {
     await prepareSketchScreenshot(page, context.fixtureJson || '');
+    await normalizeApplicationWorkbenchChrome(page);
     return;
   }
   if (shotId === 'pmi-mode') {
     await preparePmiScreenshot(page, context.pmiFixtureJson || '');
+    await normalizeApplicationWorkbenchChrome(page);
     return;
   }
-  if (shotId === 'sheets-mode'
-    || shotId === 'sheets-toolbar-insert'
+  if (shotId === 'sheet-metal-workbench') {
+    await prepareSheetMetalScreenshot(page);
+    await normalizeApplicationWorkbenchChrome(page);
+    return;
+  }
+  if (shotId === 'sheets-mode') {
+    await prepareSheetScreenshot(page, shotId);
+    await normalizeApplicationWorkbenchChrome(page);
+    return;
+  }
+  if (shotId === 'sheets-toolbar-insert'
     || shotId === 'sheets-toolbar-shapes-menu'
     || shotId === 'sheets-toolbar-style'
     || shotId === 'sheets-toolbar-fill-menu'
@@ -1070,6 +1145,7 @@ async function maybeNormalizeScreenshot(page, buffer) {
   if (OUTPUT_SCALE_MODE !== 'css') return buffer;
   if (DEVICE_SCALE_FACTOR <= 1) return buffer;
   if (!buffer?.length) return buffer;
+  return buffer;
   const normalized = await downscaleScreenshot(page, buffer, DEVICE_SCALE_FACTOR);
   if (!normalized) return buffer;
   return normalized;
