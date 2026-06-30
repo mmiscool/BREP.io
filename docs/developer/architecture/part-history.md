@@ -84,7 +84,7 @@ Objects are expected to be compatible with Three.js scene nodes. If they impleme
 
 ## Expressions
 
-For the user-facing guide focused specifically on the Expressions panel and configurator workflow, see [Expressions and Configurator](./expressions.md).
+For the user-facing guide focused specifically on the Expressions panel and configurator workflow, see [Expressions and Configurator](../../panels/expressions.md).
 
 `expressions` is a user-editable script string stored on `partHistory.expressions`. Expression-aware inputs evaluate against a shared source built from:
 

@@ -36,6 +36,7 @@ It combines the feature history tree, 3D viewport, expressions/configurator work
 
 ## Panels
 - [Feature History](../panels/feature-history.md)
+- [Expressions and Configurator](../panels/expressions.md)
 - [PMI Views](../panels/pmi-views.md)
 - [2D Sheets](../panels/sheets-2d.md)
 - [Plugins](../panels/plugins.md)
@@ -46,5 +47,5 @@ It combines the feature history tree, 3D viewport, expressions/configurator work
 - The Inspector floating window reports per-face and per-edge metrics such as area, length, and owning feature.
 
 ## Related
-- [All Workbench](all.md)
-- [Expressions and Configurator](../expressions.md)
+- [All Workbench](./all.md)
+- [Expressions and Configurator Panel](../panels/expressions.md)

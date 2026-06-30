@@ -11,4 +11,4 @@ This is a development tool for running browser-side tests and inspecting test st
 Localhost-only. Available in Modeling, Import, Surfacing, Sheet Metal, Assemblies, Wire Harness, PMI, Simulation, and All when development tools are enabled.
 
 ## Related
-- [Testing](../testing.md)
+- [Testing](../developer/testing.md)

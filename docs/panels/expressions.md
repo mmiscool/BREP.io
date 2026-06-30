@@ -13,7 +13,7 @@ This is most useful when you want to build a part once, then resize or retune it
 
 Write variables in the Expressions box, then reference those variable names in feature dialog inputs.
 
-![Expressions panel](./expressions-panel.png)
+![Expressions panel](../expressions-panel.png)
 
 Example:
 
@@ -56,7 +56,7 @@ If no configurator widgets exist, the configurator form stays hidden.
 
 When widgets do exist, the form appears above the Expressions editor.
 
-![Configurator field types](./configurator-field-types.png)
+![Configurator field types](../configurator-field-types.png)
 
 Supported widget types:
 
@@ -93,7 +93,7 @@ configurator.partLabel
 
 Click `Edit Configurator` below the Expressions area to add or change widgets.
 
-![Configurator editor](./configurator-editor.png)
+![Configurator editor](../configurator-editor.png)
 
 Typical setup:
 
@@ -182,5 +182,5 @@ Expressions and configurator values are stored in part history, so they stay wit
 
 ## Related Docs
 
-- [Modeling Workbench](./workbenches/modeling.md)
-- [Part History](./part-history.md)
+- [Modeling Workbench](../workbenches/modeling.md)
+- [Part History](../developer/architecture/part-history.md)

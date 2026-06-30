@@ -3,20 +3,20 @@
 This page describes the structure of the BREP kernel and where responsibilities live in `src/BREP`. It is the architecture overview, not the canonical method reference.
 
 Use these pages alongside it:
-- [Kernel and Geometry Docs](./developer/kernel/index.md) for the navigable kernel doc section.
-- [BREP Class API Reference](./api/index.md) for per-method docs.
+- [Kernel and Geometry Docs](./index.md) for the navigable kernel doc section.
+- [BREP Class API Reference](../api/index.md) for per-method docs.
 - [BREP.js Export Map and Usage](./brep-api.md) for public exports.
 - [Solid Developer Guide](./solid-methods.md) for the high-level `Solid` workflow.
 
 ## Class Docs
 
-- [Solid API Index](./api/solid/index.md)
-- [Face API Index](./api/face/index.md)
-- [Edge API Index](./api/edge/index.md)
+- [Solid API Index](../api/solid/index.md)
+- [Face API Index](../api/face/index.md)
+- [Edge API Index](../api/edge/index.md)
 - [Solid Developer Guide](./solid-methods.md)
 
 ## Core types
-- **Solid / Face / Edge / Vertex** – Core geometry and selection primitives. API docs live under [docs/api/](./api/index.md).
+- **Solid / Face / Edge / Vertex** – Core geometry and selection primitives. API docs live under the [Developer API Reference](../api/index.md).
 - **AssemblyComponent** – Assembly-level grouping and transform unit for constraints.
 
 ## Primitives (`src/BREP/primitives.ts`)
@@ -69,7 +69,7 @@ All extend `Solid` and immediately generate geometry.
 ## How To Read The Kernel Docs
 
 - Start here when you need file-level orientation or want to know which module owns a behavior.
-- Use [docs/api/](./api/index.md) when you need exact method behavior or examples.
+- Use the [Developer API Reference](../api/index.md) when you need exact method behavior or examples.
 - Use [brep-api.md](./brep-api.md) when you need to know what is exported from `BREP.js`.
 - Use [brep-model.md](./brep-model.md) when you want the compact data-model summary.
 

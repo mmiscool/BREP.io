@@ -53,6 +53,6 @@ The Wire Harness workbench is for routed wire runs across assembly ports and spl
 - The `Route` action also shows the JSON payload passed into the routing logic, which is useful when debugging a harness setup.
 
 ## Related Docs
-- [Assemblies Workbench](assemblies.md)
+- [Assemblies Workbench](./assemblies.md)
 - [2D Sheets Mode](../modes/sheets.md)
 - [Spline](../features/spline.md)

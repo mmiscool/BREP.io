@@ -30,6 +30,7 @@ The All workbench is the unfiltered mode. It exposes the full built-in feature s
 
 ## Panels
 - [Feature History](../panels/feature-history.md)
+- [Expressions and Configurator](../panels/expressions.md)
 - [Assembly Constraints](../panels/assembly-constraints.md)
 - [PMI Views](../panels/pmi-views.md)
 - [2D Sheets](../panels/sheets-2d.md)
@@ -38,11 +39,11 @@ The All workbench is the unfiltered mode. It exposes the full built-in feature s
 - [Plugins](../panels/plugins.md)
 
 ## Includes
-- Core construction and solids from the [Modeling Workbench](modeling.md)
-- Surface-oriented tools from the [Surfacing Workbench](surfacing.md)
-- Imported and image-driven flows from the [Import Workbench](import.md)
-- Sheet workflows from the [Sheet Metal Workbench](sheet-metal.md)
-- Assembly setup from the [Assemblies Workbench](assemblies.md)
-- Wire-routing workflows from the [Wire Harness Workbench](wire-harness.md)
-- PMI annotation workflows from the [PMI Workbench](pmi.md)
-- Simulation controls from the [Simulation Workbench](simulation.md)
+- Core construction and solids from the [Modeling Workbench](./modeling.md)
+- Surface-oriented tools from the [Surfacing Workbench](./surfacing.md)
+- Imported and image-driven flows from the [Import Workbench](./import.md)
+- Sheet workflows from the [Sheet Metal Workbench](./sheet-metal.md)
+- Assembly setup from the [Assemblies Workbench](./assemblies.md)
+- Wire-routing workflows from the [Wire Harness Workbench](./wire-harness.md)
+- PMI annotation workflows from the [PMI Workbench](./pmi.md)
+- Simulation controls from the [Simulation Workbench](./simulation.md)

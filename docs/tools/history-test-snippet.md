@@ -11,4 +11,4 @@ The generated snippet is useful for bug reports and regression tests because it 
 Available in Modeling, Import, Surfacing, Sheet Metal, Assemblies, Wire Harness, PMI, Simulation, and All.
 
 ## Related
-- [Testing](../testing.md)
+- [Testing](../developer/testing.md)

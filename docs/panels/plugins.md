@@ -11,4 +11,4 @@ Use it to add, remove, enable, disable, and load plugin sources.
 Available in Modeling, Import, Surfacing, Sheet Metal, Assemblies, Wire Harness, PMI, and All.
 
 ## Related
-- [Plugins and Examples](../plugins.md)
+- [Plugins and Examples](../developer/subsystems/plugins.md)

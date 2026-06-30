@@ -697,7 +697,7 @@ async function renderHome() {
           <div class="hub-brand-banner" aria-label="BREP.io logo">${brepHomeBannerSvg}</div>
         </div>
         <div class="hub-header-actions">
-          <a class="hub-link-btn" href="./help/developer-index.html" target="_blank" rel="noreferrer">Docs</a>
+          <a class="hub-link-btn" href="./help/index.html" target="_blank" rel="noreferrer">Docs</a>
           <button type="button" class="hub-ghost-btn" data-action="toggle-theme" aria-pressed="false" aria-label="Switch to light mode" title="Switch to light mode">🔆</button>
           <button type="button" class="hub-icon-btn" data-action="toggle-settings" title="Settings" aria-label="Settings">⚙</button>
           <button type="button" class="hub-primary-btn" data-action="new">New Model</button>

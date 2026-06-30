@@ -11,5 +11,5 @@ Use it after imports, aggressive surfacing edits, or thickening operations when 
 Available in Modeling, Surfacing, and All.
 
 ## Related
-- [Overlap Cleanup](overlap-cleanup.md)
+- [Overlap Cleanup](./overlap-cleanup.md)
 - [Solid Overlap Diagnostics](../tools/solid-overlap-diagnostics.md)

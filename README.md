@@ -35,9 +35,7 @@ This project is in active development and APIs may continue to evolve.
 ## Documentation Index
 
 General:
-- [Developer Docs Index](docs/developer-index.md)
-- [Highlights](docs/highlights.md)
-- [What's New](docs/whats-new.md)
+- [Developer Docs Index](docs/developer/index.md)
 
 Workbench and mode guides:
 - [Modeling Workbench](docs/workbenches/modeling.md)

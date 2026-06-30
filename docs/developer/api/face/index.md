@@ -4,8 +4,8 @@
 
 Related pages:
 - [BREP Class API Reference](../index.md)
-- [Kernel and Geometry Docs](../../developer/kernel/index.md)
-- [BREP Kernel Reference](../../brep-kernel.md)
+- [Kernel and Geometry Docs](../../kernel/index.md)
+- [BREP Kernel Reference](../../kernel/brep-kernel.md)
 
 ## Methods
 

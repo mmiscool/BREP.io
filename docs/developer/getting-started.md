@@ -13,4 +13,4 @@ See [Testing](./testing.md) for test runner details and single-test selection.
 
 ## API Demos
 - Demo hub: [https://BREP.io/apiExamples/index.html](https://BREP.io/apiExamples/index.html)
-- Full demo list + source links: [API Examples](./api-examples.md)
+- Full demo list + source links: [API Examples](./embedding/api-examples.md)

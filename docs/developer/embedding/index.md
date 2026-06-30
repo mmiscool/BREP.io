@@ -4,14 +4,14 @@ Use this section when embedding the kernel, the full CAD app, or the 2D sketcher
 
 ## Start Here
 
-- [Getting Started](../../getting-started.md)
-- [API Examples](../../api-examples.md)
+- [Getting Started](../getting-started.md)
+- [API Examples](./api-examples.md)
 
 ## Embedding APIs
 
-- [Embeddable CAD App (`CadEmbed`)](../../cad-embed.md)
-- [Embeddable 2D Sketcher (`Sketcher2DEmbed`)](../../sketcher2d-embed.md)
-- [BREP.js Export Map and Usage](../../brep-api.md)
+- [Embeddable CAD App (`CadEmbed`)](./cad-embed.md)
+- [Embeddable 2D Sketcher (`Sketcher2DEmbed`)](./sketcher2d-embed.md)
+- [BREP.js Export Map and Usage](../kernel/brep-api.md)
 
 ## Integration Demo Pages
 
@@ -23,5 +23,5 @@ Use this section when embedding the kernel, the full CAD app, or the 2D sketcher
 ## Related Topics
 
 - [File Formats: Import and Export](../../file-formats.md)
-- [GitHub Repo Storage](../../github-repo-storage.md)
-- [Plugins and Examples](../../plugins.md)
+- [GitHub Repo Storage](./github-repo-storage.md)
+- [Plugins and Examples](../subsystems/plugins.md)

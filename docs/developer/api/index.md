@@ -3,9 +3,9 @@
 This section is the canonical developer API reference for the kernel's core geometry classes. Per-method details should live here rather than in the overview pages.
 
 Related navigation:
-- [Developer Docs](../developer-index.md)
-- [Kernel and Geometry Docs](../developer/kernel/index.md)
-- [BREP Kernel Reference](../brep-kernel.md)
+- [Developer Docs](../index.md)
+- [Kernel and Geometry Docs](../kernel/index.md)
+- [BREP Kernel Reference](../kernel/brep-kernel.md)
 
 ## Class indexes
 

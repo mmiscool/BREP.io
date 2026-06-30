@@ -2,7 +2,7 @@
 
 This app can store models and settings directly in a GitHub repository using a personal access token (PAT). When enabled, GitHub becomes the storage backend instead of the browser’s local IndexedDB/VFS storage.
 
-![Display Settings floating window](floating-windows/display-settings.png)
+![Display Settings floating window](../../floating-windows/display-settings.png)
 
 ## How It Works
 - You provide a GitHub token and select a repo in the **Display Settings** panel.

@@ -10,4 +10,4 @@ Available in Modeling, Import, Surfacing, Sheet Metal, Assemblies, Wire Harness,
 
 ## Related
 - [File Formats](../file-formats.md)
-- [GitHub Repo Storage](../github-repo-storage.md)
+- [GitHub Repo Storage](../developer/embedding/github-repo-storage.md)

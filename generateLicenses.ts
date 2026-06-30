@@ -79,12 +79,24 @@ h1{margin:0 0 18px;font-size:22px;color:var(--accent);font-weight:700}
 .doc-tree,.doc-tree ul{list-style:none;margin:0;padding:0}
 .doc-tree ul{margin-left:10px;padding-left:8px;border-left:1px solid rgba(92,200,255,0.14)}
 .doc-tree li{margin:1px 0}
+.doc-tree-details{display:block}
+.doc-tree-summary{display:flex;align-items:center;gap:4px;min-width:max-content;border-radius:8px;cursor:pointer;color:var(--muted)}
+.doc-tree-summary::-webkit-details-marker{display:none}
+.doc-tree-summary::marker{content:""}
+.doc-tree-toggle{display:inline-flex;align-items:center;justify-content:center;width:14px;height:18px;flex:0 0 14px;color:var(--muted);font-size:11px;transition:transform .12s ease}
+.doc-tree-details[open] > .doc-tree-summary .doc-tree-toggle{transform:rotate(90deg)}
+.doc-tree-summary:hover{background:rgba(92,200,255,0.08)}
 .doc-tree-link,.doc-tree-label{display:block;padding:3px 6px;border-radius:8px;color:var(--muted)}
+.doc-tree-summary .doc-tree-link,.doc-tree-summary .doc-tree-label{flex:1;min-width:0}
 .doc-tree-link{color:var(--text)}
 .doc-tree-link:hover{text-decoration:none;background:rgba(92,200,255,0.08);color:var(--accent)}
+.doc-tree-summary .doc-tree-link:hover{text-decoration:none;background:transparent;color:var(--accent)}
 .doc-tree-item.is-section > .doc-tree-label,.doc-tree-item.is-section > .doc-tree-link{font-weight:700}
+.doc-tree-item.is-section > .doc-tree-details > .doc-tree-summary .doc-tree-label,.doc-tree-item.is-section > .doc-tree-details > .doc-tree-summary .doc-tree-link{font-weight:700}
 .doc-tree-item.is-ancestor > .doc-tree-label,.doc-tree-item.is-ancestor > .doc-tree-link{color:var(--text)}
+.doc-tree-item.is-ancestor > .doc-tree-details > .doc-tree-summary .doc-tree-label,.doc-tree-item.is-ancestor > .doc-tree-details > .doc-tree-summary .doc-tree-link{color:var(--text)}
 .doc-tree-item.is-current > .doc-tree-link,.doc-tree-item.is-current > .doc-tree-label{background:rgba(92,200,255,0.14);color:var(--accent);border:1px solid rgba(92,200,255,0.24)}
+.doc-tree-item.is-current > .doc-tree-details > .doc-tree-summary .doc-tree-link,.doc-tree-item.is-current > .doc-tree-details > .doc-tree-summary .doc-tree-label{background:rgba(92,200,255,0.14);color:var(--accent);border:1px solid rgba(92,200,255,0.24)}
 .doc-card{padding:10px}
 .doc-page-card{padding:10px;margin:0;flex:1;min-height:0;overflow:auto}
 .doc-nav{margin:0 0 0px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;color:var(--muted);flex:none}
@@ -1076,14 +1088,23 @@ const renderSidebarTreeNodes = (node, currentSourcePath = "") => {
     const isCurrent = child?.indexPage?.sourcePath === currentSourcePath || child?.page?.sourcePath === currentSourcePath;
     const isAncestor = !isCurrent && isTreeNodeAncestor(child, currentSourcePath);
     const hasChildren = child?.children?.size > 0;
+    const shouldOpen = hasChildren && (isCurrent || isAncestor);
     const label = child?.indexPage?.title || child?.page?.title || toBreadcrumbLabel(child?.segment || "");
     const href = hasChildren ? child?.indexPage?.href : (child?.page?.href || child?.indexPage?.href || "");
     const stateClass = `${hasChildren ? " is-section" : ""}${isCurrent ? " is-current" : ""}${isAncestor ? " is-ancestor" : ""}`;
     const nodeLabel = href
       ? `<a class="doc-tree-link" href="${escapeHTML(href)}">${escapeHTML(label)}</a>`
       : `<span class="doc-tree-label">${escapeHTML(label)}</span>`;
-    const childTree = hasChildren ? renderSidebarTreeNodes(child, currentSourcePath) : "";
-    return `<li class="doc-tree-item${stateClass}">${nodeLabel}${childTree}</li>`;
+    if (hasChildren) {
+      const childTree = renderSidebarTreeNodes(child, currentSourcePath);
+      return `<li class="doc-tree-item${stateClass}">
+        <details class="doc-tree-details"${shouldOpen ? " open" : ""}>
+          <summary class="doc-tree-summary"><span class="doc-tree-toggle" aria-hidden="true">▶</span>${nodeLabel}</summary>
+          ${childTree}
+        </details>
+      </li>`;
+    }
+    return `<li class="doc-tree-item${stateClass}">${nodeLabel}</li>`;
   }).join("");
   return `<ul>${items}</ul>`;
 };
@@ -1347,6 +1368,11 @@ ${content}
   };
 
   const initSidebarCurrentItem = () => {
+    document.querySelectorAll(".doc-sidebar .doc-tree-summary a").forEach((link) => {
+      link.addEventListener("click", (evt) => {
+        evt.stopPropagation();
+      });
+    });
     const currentItem = document.querySelector(".doc-sidebar .doc-tree-item.is-current .doc-tree-link, .doc-sidebar .doc-tree-item.is-current .doc-tree-label");
     if (!currentItem || typeof currentItem.scrollIntoView !== "function") return;
     window.requestAnimationFrame(() => {

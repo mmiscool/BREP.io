@@ -2,7 +2,7 @@
 
 The Node test runner lives in `src/tests/tests.ts`.
 
-![Browser Testing floating window](floating-windows/browser-testing.png)
+![Browser Testing floating window](../floating-windows/browser-testing.png)
 
 Run the full suite:
 
@@ -35,4 +35,4 @@ Each Node test run also writes `tests/test-run.log`. This log is intentionally s
 
 The generated test snippet window captures the current feature history as a browser-ready repro function for bug reports and regression tests.
 
-![Generated Test Snippet floating window](floating-windows/history-test-snippet.png)
+![Generated Test Snippet floating window](../floating-windows/history-test-snippet.png)

@@ -3,9 +3,9 @@
 `Solid` lives in `src/BREP/BetterSolid.ts` and extends `THREE.Group`.
 
 Related pages:
-- [Solid Developer Guide](../../solid-methods.md)
-- [Kernel and Geometry Docs](../../developer/kernel/index.md)
-- [BREP Kernel Reference](../../brep-kernel.md)
+- [Solid Developer Guide](../../kernel/solid-methods.md)
+- [Kernel and Geometry Docs](../../kernel/index.md)
+- [BREP Kernel Reference](../../kernel/brep-kernel.md)
 
 ## Lifecycle
 

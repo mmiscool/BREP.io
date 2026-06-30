@@ -11,4 +11,4 @@ Use it for ad-hoc automation, inspection, and debugging against `window.env` and
 Available in Modeling, Import, Surfacing, Sheet Metal, Assemblies, Wire Harness, PMI, Simulation, and All.
 
 ## Related
-- [Plugins and Examples](../plugins.md)
+- [Plugins and Examples](../developer/subsystems/plugins.md)

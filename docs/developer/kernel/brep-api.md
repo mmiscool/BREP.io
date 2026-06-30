@@ -14,11 +14,11 @@ const { Solid, Cube, Sweep, filletSolid, applyBooleanOperation } = BREP;
 - `Face.thicken(distance, options)` — Builds a new closed solid from an open face by offsetting the face along its normals and stitching side walls.
 
 ## Reference pages
-- [Kernel and Geometry Docs](./developer/kernel/index.md)
-- [Class API reference](./api/index.md)
-- [Solid methods](./api/solid/index.md)
-- [Face methods](./api/face/index.md)
-- [Edge methods](./api/edge/index.md)
+- [Kernel and Geometry Docs](./index.md)
+- [Class API reference](../api/index.md)
+- [Solid methods](../api/solid/index.md)
+- [Face methods](../api/face/index.md)
+- [Edge methods](../api/edge/index.md)
 - [Kernel architecture overview](./brep-kernel.md)
 
 ## Export categories

@@ -21,7 +21,7 @@ Image to Face traces a PNG into sketch geometry that can be consumed by downstre
 - `placementPlane` – optional target plane/face for placement.
 
 ## Shared Image Editor
-This feature uses the shared editor documented at [Image Editor (Shared)](image-editor.md).
+This feature uses the shared editor documented at [Image Editor (Shared)](./image-editor.md).
 
 Relevant editor functions for Image to Face:
 - Raster editing: brush, eraser, bucket fill, pan/zoom, canvas resize, undo/redo.

@@ -11,4 +11,4 @@ Settings includes display/material controls and storage configuration, including
 Global. Available in every workbench.
 
 ## Related
-- [GitHub Repo Storage](../github-repo-storage.md)
+- [GitHub Repo Storage](../developer/embedding/github-repo-storage.md)

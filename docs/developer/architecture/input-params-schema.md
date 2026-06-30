@@ -24,7 +24,7 @@ const inputParamsSchema = {
 
 ## Expressions in dialogs
 
-For the dedicated user-facing Expressions panel guide, see [Expressions and Configurator](./expressions.md).
+For the dedicated user-facing Expressions panel guide, see [Expressions and Configurator](../../panels/expressions.md).
 
 `SchemaForm` evaluates expression-capable fields against `partHistory.getExpressionsSource()`. That source includes:
 

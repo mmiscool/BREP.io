@@ -4,17 +4,17 @@ Use this section for application structure, history replay, expressions, and UI 
 
 ## Core Architecture
 
-- [BREP Model and Classes](../../brep-model.md)
-- [PartHistory Reference](../../part-history.md)
-- [History Systems](../../history-systems.md)
-- [Input Params Schema](../../input-params-schema.md)
+- [BREP Model and Classes](../kernel/brep-model.md)
+- [PartHistory Reference](./part-history.md)
+- [History Systems](./history-systems.md)
+- [Input Params Schema](./input-params-schema.md)
 
 ## UI and Authoring Systems
 
-- [Expressions and Configurator](../../expressions.md)
+- [Expressions and Configurator Panel](../../panels/expressions.md)
 - [UI Overview](../../ui-overview.md)
-- [Feature Dimension Gizmos](../../feature-dimension-gizmos.md)
-- [Workbench Implementation Plan](../../workbench-implementation-plan.md)
+- [Feature Dimension Gizmos](./feature-dimension-gizmos.md)
+- [Workbench Implementation Plan](./workbench-implementation-plan.md)
 
 ## Related References
 

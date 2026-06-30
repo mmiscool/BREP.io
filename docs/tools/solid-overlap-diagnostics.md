@@ -9,4 +9,4 @@ Opens the Solid Overlap Diagnostics window for inspecting overlapping coplanar f
 Available in All.
 
 ## Related
-- [Inspector](../inspector.md)
+- [Inspector](./inspector.md)
