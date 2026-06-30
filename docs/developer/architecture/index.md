@@ -4,7 +4,7 @@ Use this section for application structure, history replay, expressions, and UI 
 
 ## Core Architecture
 
-- [How It Works](../../how-it-works.md)
+- [BREP Model and Classes](../../brep-model.md)
 - [PartHistory Reference](../../part-history.md)
 - [History Systems](../../history-systems.md)
 - [Input Params Schema](../../input-params-schema.md)
@@ -19,7 +19,7 @@ Use this section for application structure, history replay, expressions, and UI 
 ## Related References
 
 - [Features Index](../../features/index.md)
-- [Modeling Mode](../../modes/modeling.md)
-- [Sketch Mode](../../modes/sketch.md)
-- [PMI Mode](../../modes/pmi.md)
+- [Modeling Workbench](../../workbenches/modeling.md)
+- [Sketch Feature](../../features/sketch.md)
+- [PMI Workbench](../../workbenches/pmi.md)
 - [2D Sheets Mode](../../modes/sheets.md)

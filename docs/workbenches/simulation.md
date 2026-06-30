@@ -1,6 +1,6 @@
-# Import Workbench
+# Simulation Workbench
 
-The Import workbench groups feature flows that start from imported or image-derived source data.
+The Simulation workbench switches the sidebar and contextual selection tools into simulation control mode.
 
 ## Tools
 - [New](../tools/new.md)
@@ -23,14 +23,10 @@ The Import workbench groups feature flows that start from imported or image-deri
 - [Selection State](../tools/selection-state.md) - localhost only
 
 ## Features
-- [Datium](../features/datium.md)
-- [Plane](../features/plane.md)
-- [Import 3D Model](../features/import-3d-model.md)
-- [Image to Face](../features/image-to-face.md)
-- [Image Heightmap Solid](../features/image-heightmap-solid.md)
+- No feature-history creation entries are exposed in this workbench.
 
 ## Panels
-- [Feature History](../panels/feature-history.md)
-- [PMI Views](../panels/pmi-views.md)
-- [2D Sheets](../panels/sheets-2d.md)
-- [Plugins](../panels/plugins.md)
+- [Simulation](../panels/simulation.md)
+
+## Context Tools
+- Simulation Transform appears when a single solid is selected in the Simulation workbench.

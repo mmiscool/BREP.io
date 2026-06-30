@@ -182,5 +182,5 @@ Expressions and configurator values are stored in part history, so they stay wit
 
 ## Related Docs
 
-- [Modeling Mode](./modes/modeling.md)
+- [Modeling Workbench](./workbenches/modeling.md)
 - [Part History](./part-history.md)

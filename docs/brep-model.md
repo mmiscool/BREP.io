@@ -5,6 +5,7 @@ This page is the compact conceptual summary of the BREP data model. It is intent
 ## Overview
 - BREP combines a triangle mesh with per-triangle face labels. Labels map to globally unique IDs in Manifold so selections survive boolean operations.
 - During manifoldization, triangle windings are made consistent, outward orientation is enforced, and an optional weld epsilon deduplicates vertices.
+- `manifold-3d` provides robust manifold meshes while propagating face IDs through CSG, so selections remain stable after union, subtract, and intersect operations.
 - Visualization builds one mesh per face label and edge polylines for label boundaries, enabling semantic selection in the UI and PMI tooling.
 
 ## Solid

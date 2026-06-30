@@ -15,7 +15,6 @@ Use this section for application subsystems outside the core kernel and embed AP
 ## Inspector and Debugging
 
 - [Inspector](../../inspector.md)
-- [Inspector Improvements](../../inspector-improvements.md)
 - [Dialog Screenshots](../../dialog-screenshots.md)
 
 ## PMI and Annotation Systems

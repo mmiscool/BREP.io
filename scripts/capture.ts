@@ -15,6 +15,10 @@ import {
   isFloatingWindowScreenshotId,
   prepareFloatingWindowScreenshot,
 } from './capture/docsShots/floatingWindowScreenshot.js';
+import {
+  isPanelScreenshotId,
+  preparePanelScreenshot,
+} from './capture/docsShots/panelScreenshot.js';
 
 const require = createRequire(import.meta.url);
 const DEFAULT_BASE_URL = process.env.CAPTURE_BASE_URL || 'http://127.0.0.1:5173';
@@ -264,6 +268,48 @@ const DOC_SHOTS = [
     label: 'Wire harness insert-to-sheet floating window',
     relativePath: join('docs', 'floating-windows', 'wire-harness-insert-sheet.png'),
     selector: '.floating-window',
+  },
+  {
+    id: 'panel-feature-history',
+    label: 'Feature History panel',
+    relativePath: join('docs', 'panels', 'feature-history.png'),
+    selector: '#panel-doc-capture-target',
+  },
+  {
+    id: 'panel-assembly-constraints',
+    label: 'Assembly Constraints panel',
+    relativePath: join('docs', 'panels', 'assembly-constraints.png'),
+    selector: '#panel-doc-capture-target',
+  },
+  {
+    id: 'panel-pmi-views',
+    label: 'PMI Views panel',
+    relativePath: join('docs', 'panels', 'pmi-views.png'),
+    selector: '#panel-doc-capture-target',
+  },
+  {
+    id: 'panel-sheets-2d',
+    label: '2D Sheets panel',
+    relativePath: join('docs', 'panels', 'sheets-2d.png'),
+    selector: '#panel-doc-capture-target',
+  },
+  {
+    id: 'panel-wire-harness',
+    label: 'Wire Harness panel',
+    relativePath: join('docs', 'panels', 'wire-harness.png'),
+    selector: '#panel-doc-capture-target',
+  },
+  {
+    id: 'panel-simulation',
+    label: 'Simulation panel',
+    relativePath: join('docs', 'panels', 'simulation.png'),
+    selector: '#panel-doc-capture-target',
+  },
+  {
+    id: 'panel-plugins',
+    label: 'Plugins panel',
+    relativePath: join('docs', 'panels', 'plugins.png'),
+    selector: '#panel-doc-capture-target',
   },
 ];
 const FEATURE_DOC_SHOT_IDS = new Set(['image-to-face-2d', 'image-to-face-3d', 'nurbs-cage-editor']);
@@ -846,6 +892,10 @@ async function prepareDocsShot(page, shotId, context: any = {}) {
   }
   if (isFloatingWindowScreenshotId(shotId)) {
     await prepareFloatingWindowScreenshot(page, shotId);
+    return;
+  }
+  if (isPanelScreenshotId(shotId)) {
+    await preparePanelScreenshot(page, shotId);
     return;
   }
   throw new Error(`Unknown docs shot id "${shotId}"`);

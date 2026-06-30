@@ -15,6 +15,7 @@ Each selection is rendered with the `Object Inspector` tree component, so you ca
 - Expand or collapse sections, or use the search box to filter by key/path.
 - Copy the visible JSON or download a complete copy for offline debugging.
 - Watch for formatted helpers such as `Created by: FeatureID`, `123 units²`, or `123 units` at the top level for quick glances.
+- Inspect face surface area, edge length, and owning feature without expanding heavy mesh data.
 
 > Many expensive sections (triangles, points, vertex lists) are lazily computed and only fetched when you expand them. When a preview lists “Truncated”, click `Download JSON` to export everything.
 
