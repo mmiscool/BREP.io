@@ -11,6 +11,10 @@ import { preparePmiScreenshot } from './capture/docsShots/pmiScreenshot.js';
 import { prepareNurbsCageScreenshot } from './capture/docsShots/nurbsCageScreenshot.js';
 import { prepareSheetScreenshot } from './capture/docsShots/sheetScreenshot.js';
 import { prepareExpressionsScreenshot } from './capture/docsShots/expressionsScreenshot.js';
+import {
+  isFloatingWindowScreenshotId,
+  prepareFloatingWindowScreenshot,
+} from './capture/docsShots/floatingWindowScreenshot.js';
 
 const require = createRequire(import.meta.url);
 const DEFAULT_BASE_URL = process.env.CAPTURE_BASE_URL || 'http://127.0.0.1:5173';
@@ -146,6 +150,120 @@ const DOC_SHOTS = [
     id: 'nurbs-cage-editor',
     label: 'NURBS cage editor',
     relativePath: join('docs', 'features', 'NURBS_Face_Solid_cage_editor.png'),
+  },
+  {
+    id: 'floating-export',
+    label: 'Export floating window',
+    relativePath: join('docs', 'floating-windows', 'export.png'),
+    selector: '.floating-window',
+  },
+  {
+    id: 'floating-metadata',
+    label: 'Metadata floating window',
+    relativePath: join('docs', 'floating-windows', 'metadata.png'),
+    selector: '.floating-window',
+  },
+  {
+    id: 'floating-inspector',
+    label: 'Inspector floating window',
+    relativePath: join('docs', 'floating-windows', 'inspector.png'),
+    selector: '.floating-window',
+  },
+  {
+    id: 'floating-selection-diagnostics',
+    label: 'Selection diagnostics floating window',
+    relativePath: join('docs', 'floating-windows', 'selection-diagnostics.png'),
+    selector: '.floating-window',
+  },
+  {
+    id: 'floating-triangle-debugger',
+    label: 'Triangle Debugger floating window',
+    relativePath: join('docs', 'floating-windows', 'triangle-debugger.png'),
+    selector: '.floating-window',
+  },
+  {
+    id: 'floating-display-settings',
+    label: 'Display Settings floating window',
+    relativePath: join('docs', 'floating-windows', 'display-settings.png'),
+    selector: '.floating-window',
+  },
+  {
+    id: 'floating-share-model',
+    label: 'Share Model floating window',
+    relativePath: join('docs', 'floating-windows', 'share-model.png'),
+    selector: '.floating-window',
+  },
+  {
+    id: 'floating-script-runner',
+    label: 'Script Runner floating window',
+    relativePath: join('docs', 'floating-windows', 'script-runner.png'),
+    selector: '.floating-window',
+  },
+  {
+    id: 'floating-selection-state',
+    label: 'Selection State floating window',
+    relativePath: join('docs', 'floating-windows', 'selection-state.png'),
+    selector: '.floating-window',
+  },
+  {
+    id: 'floating-solid-overlap-diagnostics',
+    label: 'Solid Overlap Diagnostics floating window',
+    relativePath: join('docs', 'floating-windows', 'solid-overlap-diagnostics.png'),
+    selector: '.floating-window',
+  },
+  {
+    id: 'floating-sheet-metal-flat-export',
+    label: 'Sheet Metal Flat Pattern export floating window',
+    relativePath: join('docs', 'floating-windows', 'sheet-metal-flat-export.png'),
+    selector: '.floating-window',
+  },
+  {
+    id: 'floating-sheet-metal-debug',
+    label: 'Sheet Metal Debug JSON floating window',
+    relativePath: join('docs', 'floating-windows', 'sheet-metal-debug.png'),
+    selector: '.floating-window',
+  },
+  {
+    id: 'floating-browser-testing',
+    label: 'Browser Testing floating window',
+    relativePath: join('docs', 'floating-windows', 'browser-testing.png'),
+    selector: '.floating-window',
+  },
+  {
+    id: 'floating-history-test-snippet',
+    label: 'Generated Test Snippet floating window',
+    relativePath: join('docs', 'floating-windows', 'history-test-snippet.png'),
+    selector: '.floating-window',
+  },
+  {
+    id: 'floating-add-plugin',
+    label: 'Add third-party plugin floating window',
+    relativePath: join('docs', 'floating-windows', 'add-plugin.png'),
+    selector: '.floating-window',
+  },
+  {
+    id: 'floating-save-model',
+    label: 'Save Model floating window',
+    relativePath: join('docs', 'floating-windows', 'save-model.png'),
+    selector: '.floating-window',
+  },
+  {
+    id: 'floating-unsaved-changes',
+    label: 'Unsaved changes floating window',
+    relativePath: join('docs', 'floating-windows', 'unsaved-changes.png'),
+    selector: '.floating-window',
+  },
+  {
+    id: 'floating-component-selector',
+    label: 'Component selector floating window',
+    relativePath: join('docs', 'floating-windows', 'component-selector.png'),
+    selector: '.floating-window',
+  },
+  {
+    id: 'floating-wire-harness-insert-sheet',
+    label: 'Wire harness insert-to-sheet floating window',
+    relativePath: join('docs', 'floating-windows', 'wire-harness-insert-sheet.png'),
+    selector: '.floating-window',
   },
 ];
 const FEATURE_DOC_SHOT_IDS = new Set(['image-to-face-2d', 'image-to-face-3d', 'nurbs-cage-editor']);
@@ -724,6 +842,10 @@ async function prepareDocsShot(page, shotId, context: any = {}) {
   }
   if (shotId === 'nurbs-cage-editor') {
     await prepareNurbsCageScreenshot(page);
+    return;
+  }
+  if (isFloatingWindowScreenshotId(shotId)) {
+    await prepareFloatingWindowScreenshot(page, shotId);
     return;
   }
   throw new Error(`Unknown docs shot id "${shotId}"`);

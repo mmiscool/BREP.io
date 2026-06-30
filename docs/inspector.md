@@ -2,6 +2,8 @@
 
 The Inspector is a diagnostic window for answering *“What exactly did I just click?”*. It is meant for troubleshooting mesh issues, confirming the owning feature of a face, or exporting precise coordinates for support requests.
 
+![Inspector floating window](floating-windows/inspector.png)
+
 - The `🧪` button on the main toolbar toggles the panel. The window floats near the lower-left corner, can be dragged or resized, and stays on top of the viewport so you can keep modeling.
 - When the panel opens it shows a placeholder message. Click any entity in the scene (face, edge, or solid) and the Inspector immediately refreshes with the latest selection.
 - The header contains `Download JSON` for a full dump of the current payload (including data that is truncated in the UI) and `Hide` to close the window without clearing the cached selection.
@@ -45,3 +47,13 @@ Each selection is rendered with the `Object Inspector` tree component, so you ca
 - Keep the Inspector open while modeling; every click refreshes instantly, so you can inspect multiple faces without re-opening the window.
 - Use the panel in tandem with the Selection Filter to temporarily expose PMI references, sketches, or assembly items and confirm their metadata.
 - When reporting an issue, include the JSON downloaded from the Inspector so maintainers receive the same diagnostic snapshot you saw in the UI.
+
+## Related Windows
+
+![Metadata floating window](floating-windows/metadata.png)
+
+![Selection Diagnostics floating window](floating-windows/selection-diagnostics.png)
+
+![Triangle Debugger floating window](floating-windows/triangle-debugger.png)
+
+![Solid Overlap Diagnostics floating window](floating-windows/solid-overlap-diagnostics.png)

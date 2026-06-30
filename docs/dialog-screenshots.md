@@ -12,9 +12,11 @@
    - `docs/expressions-panel.png`, `docs/configurator-editor.png`, `docs/configurator-field-types.png`
    - `docs/features/image-to-face-2D_dialog.png`, `docs/features/image-to-face-3D_dialog.png`
    - `docs/features/NURBS_Face_Solid_cage_editor.png`
-   - Full-page documentation captures use a fixed viewport (`1200x760`) for consistent, smaller image size.
+   - `docs/floating-windows/*.png` for floating windows such as Export, Metadata, Inspector, Sheet Metal Flat Pattern export, Script Runner, testing, plugin, and file dialogs.
+   - Full-page documentation captures use a fixed viewport (`1200x800`) for consistent, smaller image size.
 
 For the schema that drives these dialogs (field types, defaults, and selection filters), see [Input Params Schema](./input-params-schema.md).
+For generated floating-window screenshots, see [Floating Windows](./floating-windows.md).
 
 ## Configuration
 

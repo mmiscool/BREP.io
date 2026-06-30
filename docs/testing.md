@@ -2,6 +2,8 @@
 
 The Node test runner lives in `src/tests/tests.ts`.
 
+![Browser Testing floating window](floating-windows/browser-testing.png)
+
 Run the full suite:
 
 ```bash
@@ -28,3 +30,9 @@ Tests that require local fixture files should set `requiresLocalFiles: true` on 
 Each run clears `tests/results/` first. A full run writes artifacts for every test that enables them; a single-test run writes only that test's artifacts.
 
 Each Node test run also writes `tests/test-run.log`. This log is intentionally stored in the repository so Git history preserves the run summary. It includes the selected filter, total elapsed time, and one row per executed test with test runtime, artifact export runtime, total runtime, status, and any failure note.
+
+## Browser Repro Snippets
+
+The generated test snippet window captures the current feature history as a browser-ready repro function for bug reports and regression tests.
+
+![Generated Test Snippet floating window](floating-windows/history-test-snippet.png)

@@ -648,6 +648,10 @@ export class FileManagerWidget {
         line-height: 1.45;
         color: #cbd5f5;
       }
+      .floating-window__actions .fw-btn.fm-home-confirm-action {
+        min-width: max-content;
+        white-space: nowrap;
+      }
       @media (max-width: 760px) {
         .fm-save-target-panel {
           padding: 10px;
@@ -721,17 +725,17 @@ export class FileManagerWidget {
 
       const cancelBtn = document.createElement('button');
       cancelBtn.type = 'button';
-      cancelBtn.className = 'fw-btn fm-btn';
+      cancelBtn.className = 'fw-btn fm-btn fm-home-confirm-action';
       cancelBtn.textContent = 'Cancel';
 
       const discardBtn = document.createElement('button');
       discardBtn.type = 'button';
-      discardBtn.className = 'fw-btn fm-btn danger';
+      discardBtn.className = 'fw-btn fm-btn danger fm-home-confirm-action';
       discardBtn.textContent = "Don't save";
 
       const saveBtn = document.createElement('button');
       saveBtn.type = 'button';
-      saveBtn.className = 'fw-btn fm-btn';
+      saveBtn.className = 'fw-btn fm-btn fm-home-confirm-action';
       saveBtn.textContent = 'Save and return';
 
       const close = (result) => {
@@ -762,9 +766,9 @@ export class FileManagerWidget {
 
       fw = new FloatingWindow({
         title: 'Unsaved changes',
-        width: 440,
+        width: Math.min(620, Math.max(540, window.innerWidth - 32)),
         height: 180,
-        minWidth: 340,
+        minWidth: 500,
         minHeight: 140,
         modal: true,
         closeOnBackdrop: true,
