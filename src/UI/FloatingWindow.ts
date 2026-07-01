@@ -27,6 +27,7 @@ export class FloatingWindow {
     backdrop = true,
     restoreFocus = true,
     center = null,
+    actionPlacement = 'header',
     onClose = null,
   }: any = {}) {
     this._minW = Math.max(160, Number(minWidth) || 260);
@@ -47,6 +48,7 @@ export class FloatingWindow {
     this._hasBackdrop = backdrop !== false;
     this._restoreFocus = restoreFocus !== false;
     this._center = center == null ? this._modal : Boolean(center);
+    this._actionPlacement = this._normalizeActionPlacement(actionPlacement);
     this._previousFocus = null;
     this._modalActive = false;
     this._isTransparent = false;
@@ -111,9 +113,14 @@ export class FloatingWindow {
     const content = document.createElement('div');
     content.className = 'floating-window__content';
 
+    const footerActions = document.createElement('div');
+    footerActions.className = 'floating-window__footer-actions';
+    footerActions.hidden = true;
+
     // Resizers (corners + edges)
     root.appendChild(header);
     root.appendChild(content);
+    root.appendChild(footerActions);
     const resizers = [];
     const resizerDirs = ['nw', 'ne', 'sw', 'se', 'n', 'e', 's', 'w'];
     for (const dir of resizerDirs) {
@@ -142,6 +149,7 @@ export class FloatingWindow {
     this.header = header;
     this.titleEl = titleEl;
     this.actionsEl = actions;
+    this.footerActionsEl = footerActions;
     this.content = content;
     this.resizers = resizers;
     this.transparencyButton = transparencyBtn;
@@ -197,10 +205,15 @@ export class FloatingWindow {
     try { this._visibilityObserver?.disconnect?.(); } catch { /* ignore floating window fallback failures */ }
     try { this.modalOverlay && this.modalOverlay.parentNode && this.modalOverlay.parentNode.removeChild(this.modalOverlay); } catch { /* ignore floating window fallback failures */ }
     try { this.root && this.root.parentNode && this.root.parentNode.removeChild(this.root); } catch { /* ignore floating window fallback failures */ }
-    this.root = null; this.modalOverlay = null; this.header = null; this.actionsEl = null; this.titleEl = null; this.content = null; this.resizers = null; this.transparencyButton = null; this.closeButton = null;
+    this.root = null; this.modalOverlay = null; this.header = null; this.actionsEl = null; this.footerActionsEl = null; this.titleEl = null; this.content = null; this.resizers = null; this.transparencyButton = null; this.closeButton = null;
   }
 
   setTitle(text: any) { if (this.titleEl) this.titleEl.textContent = String(text || ''); }
+  addAction(el: any, placement: any = null) {
+    return this._normalizeActionPlacement(placement || this._actionPlacement) === 'footer'
+      ? this.addFooterAction(el)
+      : this.addHeaderAction(el);
+  }
   addHeaderAction(el: any) {
     if (!el || !this.actionsEl) return;
     const anchor = this.transparencyButton && this.transparencyButton.parentNode === this.actionsEl
@@ -215,6 +228,11 @@ export class FloatingWindow {
     } else {
       this.actionsEl.appendChild(el);
     }
+  }
+  addFooterAction(el: any) {
+    if (!el || !this.footerActionsEl) return;
+    this.footerActionsEl.appendChild(el);
+    this.footerActionsEl.hidden = this._isShaded;
   }
   close() {
     if (typeof this.onClose === 'function') {
@@ -255,6 +273,10 @@ export class FloatingWindow {
     } catch { /* ignore floating window fallback failures */ }
   }
   toggleTransparent() { this.setTransparent(!this._isTransparent); }
+  _normalizeActionPlacement(placement: any) {
+    const value = String(placement || '').trim().toLowerCase();
+    return value === 'footer' || value === 'bottom' ? 'footer' : 'header';
+  }
   _bringToFrontIfVisible() {
     const visible = this._isVisible();
     this._lastVisible = visible;
@@ -343,10 +365,12 @@ export class FloatingWindow {
       this._unshadedH = Math.max(this._minH, Math.round(rect.height));
       const hh = this._headerHeight();
       this.content.hidden = true;
+      if (this.footerActionsEl) this.footerActionsEl.hidden = true;
       this.root.style.height = hh + 'px';
     } else {
       const restore = Math.max(this._minH, Number(this._unshadedH) || parseInt(this.root.style.height, 10) || 320);
       this.content.hidden = false;
+      if (this.footerActionsEl) this.footerActionsEl.hidden = this.footerActionsEl.childElementCount <= 0;
       this.root.style.height = restore + 'px';
     }
     try {
@@ -549,14 +573,19 @@ export class FloatingWindow {
       .floating-window__header { display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #23232b; cursor:grab; font:600 13px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; letter-spacing:.2px; }
       .floating-window__title { flex:1; }
       .floating-window__actions { display:flex; align-items:center; gap:6px; }
-      .floating-window__actions .fw-btn { box-sizing:border-box; display:inline-flex; align-items:center; justify-content:center; height:27px; min-height:27px; max-height:27px; min-width:32px; background:#1f2937; color:#f9fafb; border:1px solid #374151; padding:0 10px; border-radius:8px; cursor:pointer; font:700 12px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; text-align:center; vertical-align:middle; }
-      .floating-window__actions .fw-btn:hover { background:#2b3545; }
+      .floating-window__actions .fw-btn,
+      .floating-window__footer-actions .fw-btn { box-sizing:border-box; display:inline-flex; align-items:center; justify-content:center; height:27px; min-height:27px; max-height:27px; min-width:32px; background:#1f2937; color:#f9fafb; border:1px solid #374151; padding:0 10px; border-radius:8px; cursor:pointer; font:700 12px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; text-align:center; vertical-align:middle; }
+      .floating-window__actions .fw-btn:hover,
+      .floating-window__footer-actions .fw-btn:hover { background:#2b3545; }
       .floating-window__actions .floating-window__transparency { width:32px; padding:0; border-radius:8px; color:#f1f5f9; }
       .floating-window__actions .floating-window__transparency[aria-pressed="true"] { background:#334155; border-color:#64748b; }
       .floating-window__actions .floating-window__close { width:32px; padding:0; border-radius:8px; color:#f1f5f9; }
       .floating-window__actions .floating-window__close:hover { background:#3a1f24; border-color:#5b2a33; }
       .floating-window__content { flex:1; overflow:auto; padding:8px; user-select:text; }
+      .floating-window__footer-actions { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:8px; padding:10px; border-top:1px solid #23232b; background:#0f0f14; user-select:none; }
+      .floating-window__footer-actions[hidden] { display:none; }
       .floating-window.is-shaded .floating-window__content { display:none; }
+      .floating-window.is-shaded .floating-window__footer-actions { display:none; }
       .floating-window__resizer { position:absolute; width:16px; height:16px; z-index:2; touch-action:none; }
       .floating-window__resizer--se { right:2px; bottom:2px; cursor:se-resize; }
       .floating-window__resizer--sw { left:2px; bottom:2px; cursor:sw-resize; }
@@ -650,6 +679,7 @@ export class FloatingWindow {
     try {
       return Array.from<any>(this.root.querySelectorAll(selector)).filter((el: any) => {
         if (!el || el.hidden) return false;
+        if (el.closest && el.closest('[hidden]')) return false;
         const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
         return !style || (style.display !== 'none' && style.visibility !== 'hidden');
       });

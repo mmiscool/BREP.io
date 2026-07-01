@@ -648,7 +648,8 @@ export class FileManagerWidget {
         line-height: 1.45;
         color: #cbd5f5;
       }
-      .floating-window__actions .fw-btn.fm-home-confirm-action {
+      .floating-window__actions .fw-btn.fm-home-confirm-action,
+      .floating-window__footer-actions .fw-btn.fm-home-confirm-action {
         min-width: max-content;
         white-space: nowrap;
       }
@@ -771,13 +772,14 @@ export class FileManagerWidget {
         minWidth: 500,
         minHeight: 140,
         modal: true,
+        actionPlacement: 'footer',
         closeOnBackdrop: true,
         closeOnEscape: true,
         onClose: () => close('cancel'),
       });
-      fw.addHeaderAction(cancelBtn);
-      fw.addHeaderAction(discardBtn);
-      fw.addHeaderAction(saveBtn);
+      fw.addAction(cancelBtn);
+      fw.addAction(discardBtn);
+      fw.addAction(saveBtn);
       fw.content.appendChild(panel);
       document.addEventListener('keydown', onKeyDown, true);
       requestAnimationFrame(() => {
