@@ -1,0 +1,88 @@
+import { runSheetMetalTab } from "./sheetMetalEngineBridge.js";
+
+type AnyRecord = Record<string, any>;
+
+const inputParamsSchema = {
+  id: {
+    type: "string",
+    default_value: null,
+    hint: "Unique identifier for the sheet metal tab",
+  },
+  profile: {
+    type: "reference_selection",
+    selectionFilter: ["FACE", "SKETCH"],
+    multiple: false,
+    default_value: null,
+    hint: "Closed sketch or face defining the tab footprint",
+  },
+  thickness: {
+    type: "number",
+    default_value: 1,
+    min: 0,
+    hint: "Sheet metal thickness. Also used as the tab extrusion distance.",
+  },
+  placementMode: {
+    type: "options",
+    options: ["forward", "reverse", "midplane"],
+    default_value: "forward",
+    hint: "Controls whether material is added forward, backward, or split about the sketch plane.",
+  },
+  bendRadius: {
+    type: "number",
+    default_value: 0.125,
+    min: 0,
+    hint: "Default bend radius captured with the sheet-metal base feature.",
+  },
+  neutralFactor: {
+    type: "number",
+    default_value: 0.5,
+    min: 0,
+    max: 1,
+    step: 0.01,
+    hint: "Neutral factor used for flat pattern bend allowance (0-1).",
+  },
+  consumeProfileSketch: {
+    type: "boolean",
+    default_value: true,
+    hint: "Remove the referenced sketch after creating the tab. Turn off to keep it in the scene.",
+  },
+};
+
+export class SheetMetalTabFeature {
+  static shortName = "SM.TAB";
+  static longName = "Sheet Metal Tab";
+  static inputParamsSchema = inputParamsSchema;
+  static showContexButton(selectedItems: any) {
+    const items = Array.isArray(selectedItems) ? selectedItems : [];
+    if (items.length !== 1) return false;
+
+    const pick = items[0] || null;
+    const type = String(pick?.type || "").toUpperCase();
+    const parentType = String(pick?.parent?.type || "").toUpperCase();
+    const isSketch = type === "SKETCH";
+    const isSketchFace = type === "FACE" && parentType === "SKETCH";
+    if (!isSketch && !isSketchFace) return false;
+
+    const source = isSketchFace ? pick.parent : pick;
+    if (!source) return false;
+
+    return { field: "profile", value: source };
+  }
+
+  inputParams: AnyRecord;
+  persistentData: AnyRecord;
+
+  constructor() {
+    this.inputParams = {};
+    this.persistentData = {};
+  }
+
+  uiFieldsTest() {
+    return [];
+  }
+
+  async run(partHistory: any) {
+    void partHistory;
+    return runSheetMetalTab(this);
+  }
+}

@@ -4,22 +4,21 @@ Use this section for application structure, history replay, expressions, and UI 
 
 ## Core Architecture
 
-- [How It Works](../../how-it-works.md)
-- [PartHistory Reference](../../part-history.md)
-- [History Systems](../../history-systems.md)
-- [Input Params Schema](../../input-params-schema.md)
+- [BREP Model and Classes](../kernel/brep-model.md)
+- [PartHistory Reference](./part-history.md)
+- [History Systems](./history-systems.md)
+- [Input Params Schema](./input-params-schema.md)
 
 ## UI and Authoring Systems
 
-- [Expressions and Configurator](../../expressions.md)
-- [UI Overview](../../ui-overview.md)
-- [Feature Dimension Gizmos](../../feature-dimension-gizmos.md)
-- [Workbench Implementation Plan](../../workbench-implementation-plan.md)
+- [Expressions and Configurator Panel](../../panels/expressions.md)
+- [Feature Dimension Gizmos](./feature-dimension-gizmos.md)
+- [Workbench Architecture](./workbench-architecture.md)
 
 ## Related References
 
 - [Features Index](../../features/index.md)
-- [Modeling Mode](../../modes/modeling.md)
-- [Sketch Mode](../../modes/sketch.md)
-- [PMI Mode](../../modes/pmi.md)
+- [Modeling Workbench](../../workbenches/modeling.md)
+- [Sketch Feature](../../features/sketch.md)
+- [PMI Workbench](../../workbenches/pmi.md)
 - [2D Sheets Mode](../../modes/sheets.md)

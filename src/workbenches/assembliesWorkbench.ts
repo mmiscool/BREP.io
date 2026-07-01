@@ -1,0 +1,38 @@
+import type { WorkbenchDefinition } from './index.js';
+
+export const ASSEMBLIES_WORKBENCH = {
+  id: 'ASSEMBLIES',
+  label: 'Assemblies',
+  featureTypes: [
+    'D',
+    'P',
+    'ACOMP',
+  ],
+  contextFamilies: {
+    features: true,
+    assemblyConstraints: true,
+    pmiAnnotations: false,
+  },
+  sidePanels: {
+    assemblyConstraints: true,
+    pmiViews: true,
+  },
+  toolbarButtons: [
+    'new',
+    'save',
+    'saveAs',
+    'zoomToFit',
+    'wireframe',
+    'import',
+    'export',
+    'share',
+    'sheetEditor',
+    'about',
+    'historyTestSnippet',
+    'scriptRunner',
+    'undo',
+    'redo',
+    'tests',
+    'selectionState',
+  ],
+} satisfies WorkbenchDefinition;

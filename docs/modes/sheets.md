@@ -79,6 +79,11 @@ Text alignment menu:
 - The inset preserves aspect ratio and uses the stored trimmed view image instead of manual crop editing.
 - A selectable anchor point controls which corner, edge midpoint, or center stays fixed when the source PMI view refreshes.
 
+## Wire Harness Tables
+- The Wire Harness panel can insert the current connection list into a 2D sheet as an editable table.
+
+![Wire harness insert-to-sheet floating window](../floating-windows/wire-harness-insert-sheet.png)
+
 ## Typical Workflow
 1. Capture or update PMI views in PMI Mode if you need model callouts.
 2. Open 2D Sheets Mode from the `2D Sheets` section.

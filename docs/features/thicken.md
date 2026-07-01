@@ -34,9 +34,9 @@ Thicken converts one or more selected open faces into individual closed solids b
 - Source face metadata is propagated onto the generated start/end cap faces when available.
 
 ## Related Kernel API
-- UI feature implementation: `src/features/thicken/ThickenFeature.js`
-- Face method entrypoint: `Face.thicken(distance, options)` in `src/BREP/Face.js`
-- Kernel implementation: `thickenFaceToSolid(face, distance, options)` in `src/BREP/faceThicken.js`
+- UI feature implementation: `src/features/thicken/ThickenFeature.ts`
+- Face method entrypoint: `Face.thicken(distance, options)` in `src/BREP/Face.ts`
+- Kernel implementation: `thickenFaceToSolid(face, distance, options)` in `src/BREP/faceThicken.ts`
 
 ## Covered Scenarios
 The test suite currently covers:
@@ -49,4 +49,4 @@ The test suite currently covers:
 - feature serialization and replay
 - multi-face output naming and persistence
 
-See `src/tests/test_thickenFeature.js` for executable examples of the current behavior.
+See `src/tests/test_thickenFeature.ts` for executable examples of the current behavior.

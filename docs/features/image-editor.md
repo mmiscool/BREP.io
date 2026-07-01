@@ -7,8 +7,8 @@ The in-app Image Editor is shared by `Image to Face` and `Image Heightmap Solid`
 ![Image Editor open from Image to Face](image-to-face-2D_dialog.png)
 
 ## Where It Is Used
-- [Image to Face](image-to-face.md) via `editImage`
-- [Image Heightmap Solid](image-heightmap-solid.md) via `editImage`
+- [Image to Face](./image-to-face.md) via `editImage`
+- [Image Heightmap Solid](./image-heightmap-solid.md) via `editImage`
 
 ## Open / Save Flow
 1. Open a feature dialog (`Image to Face` or `Image Heightmap Solid`).

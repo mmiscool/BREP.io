@@ -1,0 +1,1974 @@
+// generateLicenses.js (ES6, no deps, dark mode)
+// Usage: node generateLicenses.js
+// - Builds dependency license data from installed node_modules
+//   (dependencies + optionalDependencies from package.json files)
+// - Produces: about.html (one <div> per license, with repo/homepage + author)
+
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
+import path from "path";
+import { collectDependencyLicenseData } from "./scripts/collectDependencyLicenses.js";
+
+const escapeHTML = (s = "") =>
+  String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+
+let dependencyLicenseData;
+try {
+  dependencyLicenseData = collectDependencyLicenseData({ cwd: process.cwd(), logger: console });
+} catch (error) {
+  console.error("[generateLicenses] Failed to collect dependency licenses.");
+  console.error(error?.message ?? error);
+  process.exit(1);
+}
+
+const data = dependencyLicenseData.data;
+const dependencySourceHtml = `Generated from <code>${escapeHTML(
+  dependencyLicenseData.sourceLabel
+)}</code>.`;
+
+// data shape: { "<LICENSE>": [ { name, versions, paths, license, author?, homepage?, description? }, ... ], ... }
+const licenseKeys = Object.keys(data).sort((a, b) => a.localeCompare(b));
+
+const rootDir = process.cwd();
+const docsSourceDir = path.join(rootDir, "docs");
+const docsOutputDir = path.join(rootDir, "public", "help");
+const rootMdFiles = ["LICENSE.md", "CONTRIBUTING.md"];
+
+const css = `
+:root{
+  --bg:#0b0f14; --panel:#0f141b; --text:#d7dde6; --muted:#9aa7b2;
+  --border:#1b2430; --accent:#5cc8ff; --chip:#121823;
+  --scrollbar-track:#0d131b; --scrollbar-thumb:#253244; --scrollbar-thumb-hover:#35506d;
+}
+*{box-sizing:border-box}
+*{scrollbar-width:thin;scrollbar-color:var(--scrollbar-thumb) var(--scrollbar-track)}
+*::-webkit-scrollbar{width:10px;height:10px}
+*::-webkit-scrollbar-track{background:var(--scrollbar-track)}
+*::-webkit-scrollbar-thumb{background:var(--scrollbar-thumb);border:2px solid var(--scrollbar-track);border-radius:999px}
+*::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-thumb-hover)}
+*::-webkit-scrollbar-corner{background:var(--scrollbar-track)}
+html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--text);font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono','Courier New',monospace}
+main{max-width:none;width:100%;height:100dvh;margin:0;padding:12px;display:flex;flex-direction:column;overflow:hidden}
+h1{margin:0 0 18px;font-size:22px;color:var(--accent);font-weight:700}
+.summary{color:var(--muted);margin-bottom:22px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:10px;margin:0 0 12px}
+.readme{padding:0}
+.readme .header{padding:10px 12px;border-bottom:1px solid var(--border)}
+.readme .content{padding:10px 12px}
+.doc-layout{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:10px;align-items:stretch;width:100%;flex:1;min-height:0;overflow:hidden}
+.doc-main{min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.doc-sidebar{width:max-content;max-width:min(52vw,960px);min-height:0}
+.doc-sidebar-card{width:max-content;max-width:min(52vw,960px);height:100%;margin:0;padding:8px 8px 10px;overflow-y:auto;overflow-x:hidden}
+.doc-sidebar-title{margin:0 0 6px;color:var(--text);font-size:13px;letter-spacing:0.04em;text-transform:uppercase}
+.doc-sidebar-home{display:block;margin:0 0 6px;padding:5px 8px;border:1px solid var(--border);border-radius:10px;background:var(--chip);color:var(--accent);font-weight:700}
+.doc-sidebar-home:hover{text-decoration:none;background:rgba(92,200,255,0.08)}
+.doc-sidebar-home.is-current{background:rgba(92,200,255,0.14);border-color:rgba(92,200,255,0.24)}
+.doc-tree{width:max-content;min-width:100%}
+.doc-tree,.doc-tree ul{list-style:none;margin:0;padding:0}
+.doc-tree ul{margin-left:10px;padding-left:8px;border-left:1px solid rgba(92,200,255,0.14)}
+.doc-tree li{margin:1px 0}
+.doc-tree-details{display:block}
+.doc-tree-summary{display:flex;align-items:center;gap:4px;min-width:max-content;border-radius:8px;cursor:pointer;color:var(--muted)}
+.doc-tree-summary::-webkit-details-marker{display:none}
+.doc-tree-summary::marker{content:""}
+.doc-tree-toggle{display:inline-flex;align-items:center;justify-content:center;width:14px;height:18px;flex:0 0 14px;color:var(--muted);font-size:11px;transition:transform .12s ease}
+.doc-tree-details[open] > .doc-tree-summary .doc-tree-toggle{transform:rotate(90deg)}
+.doc-tree-summary:hover{background:rgba(92,200,255,0.08)}
+.doc-tree-link,.doc-tree-label{display:block;padding:3px 6px;border-radius:8px;color:var(--muted)}
+.doc-tree-summary .doc-tree-link,.doc-tree-summary .doc-tree-label{flex:1;min-width:0}
+.doc-tree-link{color:var(--text)}
+.doc-tree-link:hover{text-decoration:none;background:rgba(92,200,255,0.08);color:var(--accent)}
+.doc-tree-summary .doc-tree-link:hover{text-decoration:none;background:transparent;color:var(--accent)}
+.doc-tree-item.is-section > .doc-tree-label,.doc-tree-item.is-section > .doc-tree-link{font-weight:700}
+.doc-tree-item.is-section > .doc-tree-details > .doc-tree-summary .doc-tree-label,.doc-tree-item.is-section > .doc-tree-details > .doc-tree-summary .doc-tree-link{font-weight:700}
+.doc-tree-item.is-ancestor > .doc-tree-label,.doc-tree-item.is-ancestor > .doc-tree-link{color:var(--text)}
+.doc-tree-item.is-ancestor > .doc-tree-details > .doc-tree-summary .doc-tree-label,.doc-tree-item.is-ancestor > .doc-tree-details > .doc-tree-summary .doc-tree-link{color:var(--text)}
+.doc-tree-item.is-current > .doc-tree-link,.doc-tree-item.is-current > .doc-tree-label{background:rgba(92,200,255,0.14);color:var(--accent);border:1px solid rgba(92,200,255,0.24)}
+.doc-tree-item.is-current > .doc-tree-details > .doc-tree-summary .doc-tree-link,.doc-tree-item.is-current > .doc-tree-details > .doc-tree-summary .doc-tree-label{background:rgba(92,200,255,0.14);color:var(--accent);border:1px solid rgba(92,200,255,0.24)}
+.doc-card{padding:10px}
+.doc-page-card{padding:10px;margin:0;flex:1;min-height:0;overflow:auto}
+.doc-nav{margin:0 0 0px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;color:var(--muted);flex:none}
+.doc-nav-links{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.doc-nav a{color:var(--accent);font-weight:600}
+.doc-breadcrumbs{margin:0 0 8px;display:flex;flex-wrap:wrap;align-items:center;gap:6px;color:var(--muted);font-size:13px;flex:none}
+.doc-breadcrumbs a{color:var(--accent);font-weight:600}
+.doc-breadcrumb-sep{color:var(--muted);opacity:0.8}
+.doc-list{list-style:none;margin:10px 0;padding:0}
+.doc-list li{margin:4px 0}
+.doc-list a{color:var(--accent)}
+.nav-search{margin-left:auto;position:relative;display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;min-width:240px;max-width:520px}
+.search-title{font-weight:700;font-size:14px;margin-bottom:4px}
+.search-hint{color:var(--muted);font-size:12px;margin:0}
+.search-input-row{display:flex;gap:8px;align-items:center;width:100%}
+.search-input{flex:1;border:1px solid var(--border);border-radius:10px;background:var(--chip);color:var(--text);padding:7px 10px}
+.search-input:focus{outline:1px solid var(--accent);box-shadow:0 0 0 3px rgba(92,200,255,0.15)}
+.search-clear{border:1px solid var(--border);background:var(--panel);color:var(--muted);border-radius:10px;padding:6px 10px;cursor:pointer;font-weight:600}
+.search-clear:hover{border-color:var(--accent);color:var(--accent)}
+.search-status{color:var(--muted);font-size:12px;margin-top:4px;width:100%;text-align:right}
+.search-results{position:absolute;top:100%;right:0;margin-top:10px;border:1px solid var(--border);border-radius:12px;background:var(--panel);max-height:360px;overflow:auto;min-width:320px;max-width:520px;box-shadow:0 12px 30px rgba(0,0,0,0.35);z-index:25}
+.search-results ul{list-style:none;margin:0;padding:0}
+.search-item{padding:7px 10px;border-bottom:1px solid var(--border)}
+.search-item:last-child{border-bottom:none}
+.search-item a{display:block;color:var(--accent);font-weight:600}
+.search-snippet{color:var(--muted);font-size:13px;margin-top:4px}
+.search-results mark{background:rgba(92,200,255,0.2);color:var(--text);border-radius:4px;padding:0 2px}
+.prose h1{font-size:24px;margin:0 0 12px}
+.prose h2{font-size:18px;margin:18px 0 8px}
+.prose h3{font-size:16px;margin:14px 0 6px}
+.prose p{margin:0 0 10px}
+.prose ul,.prose ol{margin:0 0 10px 18px}
+.prose li{margin:4px 0}
+.prose :not(pre)>code{background:#0d1520;border:1px solid var(--border);padding:1px 5px;border-radius:6px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono','Courier New',monospace;font-size:12px}
+.prose pre{margin:0;overflow:auto}
+.prose pre code{display:block;border:0;background:transparent;padding:0;white-space:pre;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono','Courier New',monospace;font-size:13px;line-height:1.55;color:#eef4ff}
+.prose .doc-codeblock{margin:10px 0;background:#1a2131;border:1px solid #3a4b74;border-radius:12px;overflow:hidden}
+.prose .doc-codeblock-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 10px;background:#2a3247;border-bottom:1px solid #3a4b74}
+.prose .doc-codeblock-lang{font-size:20px;line-height:1;color:#e7efff;text-transform:lowercase}
+.prose .doc-codeblock-body{padding:10px}
+.prose .doc-codeblock-copy{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid transparent;border-radius:8px;background:transparent;color:#9fc5ff;cursor:pointer}
+.prose .doc-codeblock-copy:hover,.prose .doc-codeblock-copy:focus-visible{border-color:#4f6494;background:rgba(159,197,255,0.08);outline:none}
+.prose .doc-codeblock-copy-icon{display:block;width:18px;height:18px}
+.prose .doc-codeblock-copy-icon svg{display:block;width:100%;height:100%}
+.prose .doc-codeblock-copy.is-copied{color:#a8ffd4}
+.prose .doc-codeblock-copy.is-copied .doc-codeblock-copy-icon svg rect{stroke:currentColor}
+.prose .doc-codeblock-js .tok-keyword{color:#d68dff;font-weight:600}
+.prose .doc-codeblock-js .tok-string{color:#7be3a3}
+.prose .doc-codeblock-js .tok-comment{color:#76839f}
+.prose a{color:var(--accent)}
+.prose img{max-width:100%;height:auto;}
+.prose img.doc-gallery-trigger{cursor:zoom-in}
+.prose img.doc-gallery-source-active{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.prose table{border-collapse:collapse;width:100%;margin:16px 0;background:var(--panel);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.prose th,.prose td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)}
+.prose th{background:var(--chip);color:var(--text);font-weight:600;font-size:13px}
+.prose tr:last-child td{border-bottom:none}
+.prose tbody tr:hover{background:rgba(92,200,255,0.05)}
+.doc-image-modal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;z-index:1200}
+.doc-image-modal[hidden]{display:none!important}
+.doc-image-backdrop{position:absolute;inset:0;border:0;margin:0;padding:0;background:rgba(6,10,14,0.86);cursor:pointer}
+.doc-image-stage{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;max-width:min(96vw,1400px);max-height:90vh;width:100%}
+.doc-image-view{max-width:100%;max-height:66vh;width:auto;height:auto;object-fit:contain;display:block;background:#0a1119;border:1px solid var(--border);border-radius:10px;box-shadow:0 16px 40px rgba(0,0,0,0.45)}
+.doc-image-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;width:min(100%,1000px);padding:6px 10px;border:1px solid var(--border);border-radius:10px;background:rgba(12,18,26,0.78);color:var(--muted);font-size:13px}
+.doc-image-caption{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.doc-image-counter{white-space:nowrap;color:var(--accent);font-variant-numeric:tabular-nums}
+.doc-image-thumbs{width:min(100%,1000px);padding:6px;border:1px solid var(--border);border-radius:10px;background:rgba(12,18,26,0.78);overflow-x:auto;overflow-y:hidden}
+.doc-image-thumbs-list{display:flex;gap:8px;align-items:center;min-width:max-content}
+.doc-image-thumb{width:94px;height:62px;flex:0 0 auto;padding:0;border:1px solid var(--border);border-radius:8px;background:#0a1119;cursor:pointer;overflow:hidden}
+.doc-image-thumb:hover,.doc-image-thumb:focus-visible{border-color:var(--accent)}
+.doc-image-thumb.is-active{border-color:var(--accent);box-shadow:0 0 0 2px rgba(92,200,255,0.2)}
+.doc-image-thumb-img{display:block;width:100%;height:100%;object-fit:cover;background:#070d14}
+.doc-image-nav,.doc-image-close{position:absolute;z-index:2;width:42px;height:42px;border-radius:999px;border:1px solid var(--border);background:rgba(15,20,27,0.9);color:var(--text);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:24px;line-height:1}
+.doc-image-nav:hover,.doc-image-close:hover{border-color:var(--accent);color:var(--accent)}
+.doc-image-nav:disabled{opacity:0.4;cursor:default}
+.doc-image-prev{left:12px;top:50%;transform:translateY(-50%)}
+.doc-image-next{right:12px;top:50%;transform:translateY(-50%)}
+.doc-image-close{top:12px;right:12px;font-size:28px}
+@media (max-width:720px){
+  main{padding:8px}
+  .doc-layout{grid-template-columns:1fr;grid-template-rows:minmax(160px,40vh) minmax(0,1fr)}
+  .doc-sidebar{max-width:none}
+  .doc-sidebar-card{width:100%;max-width:none}
+  .doc-image-modal{padding:10px}
+  .doc-image-view{max-height:52vh}
+  .doc-image-meta{width:100%;font-size:12px}
+  .doc-image-thumbs{width:100%;padding:6px}
+  .doc-image-thumb{width:76px;height:50px}
+  .doc-image-prev{left:4px}
+  .doc-image-next{right:4px}
+  .doc-image-close{top:4px;right:4px}
+}
+.license{
+  background:var(--panel);border:1px solid var(--border);border-radius:14px;
+  padding:10px 10px 6px;margin:0 0 12px;
+}
+.license > h2{margin:0 0 10px;font-size:16px;font-weight:700}
+.pkg{
+  border-top:1px solid var(--border);padding:7px 0;
+  display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;
+}
+.pkg:first-of-type{border-top:none}
+.pkg .meta{display:flex;gap:10px;flex-wrap:wrap}
+.pkg .name{font-weight:600}
+.pkg .desc{color:var(--muted);margin-top:2px}
+.desc{color:var(--muted);margin-top:6px}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+.chip{background:var(--chip);border:1px solid var(--border);border-radius:999px;padding:2px 8px;font-size:12px;color:var(--muted)}
+.footer{margin-top:26px;color:var(--muted);font-size:12px}
+`;
+
+const countPackages = licenseKeys.reduce((n, k) => n + (Array.isArray(data[k]) ? data[k].length : 0), 0);
+
+const FONT_EXTS = new Set([".ttf", ".otf", ".woff", ".woff2", ".ttc"]);
+const FONT_LICENSE_RE = /(?:^|[-_.])(OFL|LICENSE|LICENCE|NOTICE|COPYING|COPYRIGHT|UNLICENSE)(?:[-_.]|$)/i;
+const FONT_FAMILY_NAMES = {
+  "ibm-plex": "IBM Plex",
+  "liberation": "Liberation",
+  "dejavu": "DejaVu",
+  "noto": "Noto",
+  "hack": "Hack",
+  "ubuntu": "Ubuntu",
+  "libre-barcode": "Libre Barcode",
+};
+const FONT_METADATA_LICENSE_MAP = {
+  OFL: "OFL-1.1",
+  APACHE2: "Apache-2.0",
+  APACHE: "Apache-2.0",
+  UFL: "Ubuntu Font Licence 1.0",
+};
+
+const toTitleCase = (value = "") =>
+  value
+    .split(/[-_]+/g)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
+const normalizeFontMetadataLicenseId = (raw = "") => {
+  const key = String(raw).trim().toUpperCase();
+  if (!key) return "";
+  return FONT_METADATA_LICENSE_MAP[key] || String(raw).trim();
+};
+
+const normalizeDetectedLicenseIds = (ids = []) => {
+  const unique = Array.from(new Set(ids.filter(Boolean)));
+  if (unique.length > 1) {
+    return unique.filter((id) => id !== "UNKNOWN");
+  }
+  return unique;
+};
+
+const detectFontLicenseId = (text = "", filename = "") => {
+  const lower = String(text).toLowerCase();
+  const lowerFilename = String(filename).toLowerCase();
+  if (lower.includes("sil open font license") || lower.includes("open font license")) return "OFL-1.1";
+  if (lower.includes("ubuntu font licence") || lower.includes("ubuntu font license")) return "Ubuntu Font Licence 1.0";
+  if (lower.includes("bitstream vera")) return "Bitstream Vera";
+  if (
+    lower.includes("cc0 1.0 universal") ||
+    lower.includes("creativecommons.org/publicdomain/zero") ||
+    lower.includes("creative commons zero")
+  ) {
+    return "CC0-1.0";
+  }
+  if (lower.includes("expat") || lower.includes("mit license") || lower.includes("permission is hereby granted")) return "MIT";
+  if (lower.includes("apache license")) return "Apache-2.0";
+  if (lower.includes("creative commons")) return "CC";
+  if (lower.includes("affero general public license")) return "AGPL";
+  if (lower.includes("gnu general public license")) return "GPL";
+  if (lowerFilename.includes("cc0")) return "CC0-1.0";
+  if (lowerFilename.includes("ofl")) return "OFL-1.1";
+  return "UNKNOWN";
+};
+
+const collectFontFamilyDirs = (fontsRoot) => {
+  const results = [];
+  const entries = readdirSync(fontsRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory());
+  for (const entry of entries) {
+    const dirPath = path.join(fontsRoot, entry.name);
+    const children = readdirSync(dirPath, { withFileTypes: true });
+    const fileChildren = children.filter((child) => child.isFile());
+    const hasFont = fileChildren.some((file) => FONT_EXTS.has(path.extname(file.name).toLowerCase()));
+    const hasLicense = fileChildren.some((file) => FONT_LICENSE_RE.test(file.name));
+    const hasMetadata = fileChildren.some((file) => file.name === "METADATA.pb");
+    if (hasFont || hasLicense || hasMetadata) {
+      results.push({
+        id: entry.name,
+        dirPath,
+        relDir: path.join("src", "assets", "fonts", entry.name),
+      });
+      continue;
+    }
+
+    const subdirs = children.filter((child) => child.isDirectory());
+    for (const subdir of subdirs) {
+      const subPath = path.join(dirPath, subdir.name);
+      const subFiles = readdirSync(subPath, { withFileTypes: true }).filter((child) => child.isFile());
+      const subHasFont = subFiles.some((file) => FONT_EXTS.has(path.extname(file.name).toLowerCase()));
+      const subHasLicense = subFiles.some((file) => FONT_LICENSE_RE.test(file.name));
+      const subHasMetadata = subFiles.some((file) => file.name === "METADATA.pb");
+      if (!subHasFont && !subHasLicense && !subHasMetadata) continue;
+      results.push({
+        id: path.join(entry.name, subdir.name),
+        dirPath: subPath,
+        relDir: path.join("src", "assets", "fonts", entry.name, subdir.name),
+      });
+    }
+  }
+  return results;
+};
+
+const loadFontLicenses = () => {
+  const fontsRoot = path.join(rootDir, "src", "assets", "fonts");
+  if (!existsSync(fontsRoot)) {
+    return { families: [], licenseIds: [] };
+  }
+  const families = [];
+  const entries = collectFontFamilyDirs(fontsRoot);
+  for (const entry of entries) {
+    const familyDir = entry.dirPath;
+    let metadataName = "";
+    let metadataLicenseId = "";
+    const metadataPath = path.join(familyDir, "METADATA.pb");
+    if (existsSync(metadataPath)) {
+      const metadataText = readFileSync(metadataPath, "utf-8");
+      const nameMatch = metadataText.match(/^name:\s+"([^"]+)"/m);
+      if (nameMatch) {
+        metadataName = nameMatch[1].trim();
+      }
+      const licenseMatch = metadataText.match(/^license:\s+"([^"]+)"/m);
+      if (licenseMatch) {
+        metadataLicenseId = normalizeFontMetadataLicenseId(licenseMatch[1]);
+      }
+    }
+    const files = readdirSync(familyDir, { withFileTypes: true }).filter((f) => f.isFile());
+    const fontFiles = files
+      .filter((f) => FONT_EXTS.has(path.extname(f.name).toLowerCase()))
+      .map((f) => f.name)
+      .sort((a, b) => a.localeCompare(b));
+    const licenseFiles = files
+      .filter((f) => FONT_LICENSE_RE.test(f.name))
+      .map((f) => f.name)
+      .sort((a, b) => a.localeCompare(b));
+    const licenseTexts = licenseFiles.map((file) => {
+      const text = readFileSync(path.join(familyDir, file), "utf-8").trimEnd();
+      return { file, text };
+    });
+    const inferredByPath = entry.id.startsWith("google-ofl/") ? "OFL-1.1" : "";
+    const licenseIds = normalizeDetectedLicenseIds(
+      (licenseTexts.map((lic) => detectFontLicenseId(lic.text, lic.file)) as string[]).concat(metadataLicenseId, inferredByPath)
+    );
+    families.push({
+      id: entry.id,
+      name: metadataName || FONT_FAMILY_NAMES[entry.id] || toTitleCase(entry.id),
+      fontFiles,
+      licenseFiles,
+      licenseIds,
+      licenseTexts,
+      relDir: entry.relDir,
+    });
+  }
+  families.sort((a, b) => a.name.localeCompare(b.name));
+  const licenseIds = Array.from(
+    new Set(families.flatMap((family) => family.licenseIds).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b));
+  return { families, licenseIds };
+};
+
+const renderFontLicenseMarkdown = ({ families, licenseIds }) => {
+  const lines = [];
+  lines.push("# Font Licenses");
+  lines.push("");
+  lines.push("This file lists font assets bundled in `src/assets/fonts`.");
+  lines.push("");
+  if (!families.length) {
+    lines.push("_No bundled font assets were found._");
+    lines.push("");
+    return lines.join("\n");
+  }
+  lines.push(`Font families: ${families.length}`);
+  lines.push(`License types: ${licenseIds.length ? licenseIds.join(", ") : "Unknown"}`);
+  lines.push("");
+  for (const family of families) {
+    lines.push(`## ${family.name}`);
+    lines.push(`Fonts: ${family.fontFiles.length ? family.fontFiles.join(", ") : "None found"}`);
+    lines.push(`Licenses: ${family.licenseIds.length ? family.licenseIds.join(", ") : "Unknown"}`);
+    lines.push(`License files: ${family.licenseFiles.length ? family.licenseFiles.map((f) => `${family.relDir}/${f}`).join(", ") : "None found"}`);
+    lines.push("");
+    for (const lic of family.licenseTexts) {
+      lines.push(`### ${lic.file}`);
+      lines.push("");
+      lines.push("```text");
+      lines.push(lic.text);
+      lines.push("```");
+      lines.push("");
+    }
+  }
+  lines.push("Generated by `generateLicenses.js`.");
+  lines.push("");
+  return lines.join("\n");
+};
+
+const renderFontLicenseHtml = ({ families, licenseIds }) => {
+  if (!families.length) {
+    return `<h1>Font Licenses (Bundled Assets)</h1>
+  <div class="summary">No bundled font assets were found.</div>`;
+  }
+  const summary = `${families.length} font famil${families.length === 1 ? "y" : "ies"} • ${
+    licenseIds.length
+  } license type${licenseIds.length === 1 ? "" : "s"}`;
+  let html = `<h1>Font Licenses (Bundled Assets)</h1>
+  <div class="summary">${escapeHTML(summary)}</div>`;
+  for (const family of families) {
+    const licenseLabel = family.licenseIds.length ? family.licenseIds.join(", ") : "Unknown";
+    const fontList = family.fontFiles.length ? family.fontFiles.join(", ") : "None found";
+    const licenseFileList = family.licenseFiles.length
+      ? family.licenseFiles.map((file) => `${family.relDir}/${file}`).join(", ")
+      : "None found";
+    html += `<section class="license">
+    <h2>${escapeHTML(family.name)} <span class="chip">${escapeHTML(licenseLabel)}</span></h2>
+    <div class="desc">Fonts: ${escapeHTML(fontList)}</div>
+    <div class="desc">License files: ${escapeHTML(licenseFileList)}</div>
+  `;
+    for (const lic of family.licenseTexts) {
+      html += `<h3>${escapeHTML(lic.file)}</h3>
+    <div style="white-space: pre-wrap;">${escapeHTML(lic.text)}</div>`;
+    }
+    html += `</section>`;
+  }
+  return html;
+};
+
+const fontLicenseData = loadFontLicenses();
+const fontLicenseMarkdown = renderFontLicenseMarkdown(fontLicenseData);
+const fontLicenseHtml = renderFontLicenseHtml(fontLicenseData);
+
+
+
+
+// read in the actual licence for this product located in LICENSE.md
+const licenseText = readFileSync("LICENSE.md", "utf-8");
+
+// read README and render markdown to HTML (lightweight renderer, no deps)
+const readmeText = readFileSync("README.md", "utf-8");
+
+const escape = escapeHTML;
+
+const stripAssetDecorators = (value = "") => String(value).split(/[?#]/)[0].trim();
+
+const extractImageAltWidth = (altText = "") => {
+  const rawAlt = String(altText ?? "");
+  // Optional markdown extension: trailing "@NNN" sets rendered image width.
+  const match = rawAlt.match(/^(.*?)(?:\s+@(\d{1,4}))\s*$/);
+  if (!match) {
+    return { alt: rawAlt.trim(), width: null };
+  }
+  const width = Number.parseInt(match[2], 10);
+  if (!Number.isFinite(width) || width <= 0) {
+    return { alt: rawAlt.trim(), width: null };
+  }
+  return { alt: match[1].trim(), width };
+};
+
+const resolveMarkdownAssetPath = (src = "", assetBasePath = rootDir) => {
+  const cleanSrc = stripAssetDecorators(src);
+  if (!cleanSrc) return null;
+  if (/^[a-z]+:/i.test(cleanSrc) || cleanSrc.startsWith("//")) return null;
+  if (cleanSrc.startsWith("#")) return null;
+  if (cleanSrc.startsWith("/")) {
+    const relPath = cleanSrc.replace(/^\/+/, "");
+    const publicPath = path.join(rootDir, "public", relPath);
+    if (existsSync(publicPath)) return publicPath;
+    const rootPath = path.join(rootDir, relPath);
+    if (existsSync(rootPath)) return rootPath;
+    return null;
+  }
+  const resolved = path.resolve(assetBasePath || rootDir, cleanSrc);
+  if (!existsSync(resolved)) return null;
+  return resolved;
+};
+
+const injectInlineSvgAttributes = (svgMarkup = "", { alt = "", title = "" } = {}) =>
+  svgMarkup.replace(/<svg\b([^>]*)>/i, (match, attrs = "") => {
+    const hasRole = /\brole\s*=/.test(attrs);
+    const hasAriaLabel = /\baria-label\s*=/.test(attrs);
+    const hasAriaLabelledBy = /\baria-labelledby\s*=/.test(attrs);
+    const hasAriaHidden = /\baria-hidden\s*=/.test(attrs);
+    const hasTitleAttr = /\btitle\s*=/.test(attrs);
+    const trimmedAlt = String(alt || "").trim();
+    const trimmedTitle = String(title || "").trim();
+    const additions = [];
+
+    if (!hasRole) additions.push(' role="img"');
+    if (trimmedAlt) {
+      if (!hasAriaLabel && !hasAriaLabelledBy) additions.push(` aria-label="${trimmedAlt}"`);
+    } else if (!hasAriaLabel && !hasAriaLabelledBy && !hasAriaHidden) {
+      additions.push(' aria-hidden="true"');
+    }
+    if (trimmedTitle && !hasTitleAttr) additions.push(` title="${trimmedTitle}"`);
+
+    return `<svg${attrs}${additions.join("")}>`;
+  });
+
+const tryInlineMarkdownSvg = ({ src = "", alt = "", title = "", assetBasePath = rootDir } = {}) => {
+  const cleanedSrc = stripAssetDecorators(src);
+  if (!cleanedSrc || !cleanedSrc.toLowerCase().endsWith(".svg")) return null;
+  const svgPath = resolveMarkdownAssetPath(cleanedSrc, assetBasePath);
+  if (!svgPath) return null;
+  let raw = "";
+  try {
+    raw = readFileSync(svgPath, "utf-8");
+  } catch {
+    return null;
+  }
+  const svgMatch = raw.match(/<svg\b[\s\S]*<\/svg>/i);
+  if (!svgMatch) return null;
+  return injectInlineSvgAttributes(svgMatch[0], { alt, title });
+};
+
+// Helper function to parse markdown tables
+function parseTable(tableLines) {
+  if (tableLines.length < 2) return null;
+
+  // Parse header row
+  const headerLine = tableLines[0].trim();
+  if (!headerLine.includes('|')) return null;
+
+  // Parse separator row (must be second line)
+  const separatorLine = tableLines[1].trim();
+  if (!separatorLine.match(/^\|?[\s|:-]+\|?$/)) return null;
+
+  // Extract headers
+  const headers = headerLine.split('|')
+    .map(h => h.trim())
+    .filter(h => h !== '');
+
+  // Extract alignment from separator
+  const alignments = separatorLine.split('|')
+    .map(s => s.trim())
+    .filter(s => s !== '')
+    .map(s => {
+      if (s.startsWith(':') && s.endsWith(':')) return 'center';
+      if (s.endsWith(':')) return 'right';
+      return 'left';
+    });
+
+  // Parse data rows
+  const dataRows = tableLines.slice(2).map(line => {
+    const trimmed = line.trim();
+    if (!trimmed.includes('|')) return null;
+    return trimmed.split('|')
+      .map(cell => cell.trim())
+      .filter((cell, idx, arr) => {
+        // Remove empty first/last cells if they're from leading/trailing |
+        return !(cell === '' && (idx === 0 || idx === arr.length - 1));
+      });
+  }).filter(row => row !== null);
+
+  return { headers, alignments, dataRows };
+}
+
+const normalizeCodeLanguage = (rawLanguage = "") => {
+  const firstToken = String(rawLanguage || "").trim().split(/\s+/)[0].toLowerCase();
+  if (!firstToken) return "";
+  if (firstToken === "js" || firstToken === "cjs" || firstToken === "mjs") return "javascript";
+  if (firstToken === "ts" || firstToken === "tsx") return "typescript";
+  if (firstToken === "sh" || firstToken === "shell" || firstToken === "zsh") return "bash";
+  if (firstToken === "yml") return "yaml";
+  return firstToken;
+};
+
+const highlightJavaScriptCode = (rawCode = "") => {
+  const source = String(rawCode ?? "");
+  const tokenRegex = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b(?:const|let|var|function|return|if|else|for|while|switch|case|break|continue|new|class|extends|import|from|export|default|try|catch|finally|throw|await|async|typeof|instanceof|in|of|null|undefined|true|false)\b)/g;
+  let out = "";
+  let lastIdx = 0;
+  for (const match of source.matchAll(tokenRegex)) {
+    const idx = Number(match.index || 0);
+    const token = match[0] || "";
+    out += escape(source.slice(lastIdx, idx));
+    if (token.startsWith("//") || token.startsWith("/*")) {
+      out += `<span class="tok-comment">${escape(token)}</span>`;
+    } else if (token.startsWith('"') || token.startsWith("'") || token.startsWith("`")) {
+      out += `<span class="tok-string">${escape(token)}</span>`;
+    } else {
+      out += `<span class="tok-keyword">${escape(token)}</span>`;
+    }
+    lastIdx = idx + token.length;
+  }
+  out += escape(source.slice(lastIdx));
+  return out;
+};
+
+const renderFencedCodeBlock = ({ language = "", code = "" } = {}) => {
+  const normalizedLanguage = normalizeCodeLanguage(language) || "code";
+  const languageLabel = escape(normalizedLanguage);
+  const languageClass = escape(normalizedLanguage.replace(/[^a-z0-9_-]/gi, "-"));
+  const codeText = String(code ?? "").replace(/\s+$/, "");
+  const codeHtml = normalizedLanguage === "javascript"
+    ? highlightJavaScriptCode(codeText)
+    : escape(codeText);
+  const codeBlockClass = normalizedLanguage === "javascript" ? "doc-codeblock doc-codeblock-js" : "doc-codeblock";
+  return `<div class="${codeBlockClass}" data-code-language="${languageLabel}">
+  <div class="doc-codeblock-header">
+    <span class="doc-codeblock-lang">${languageLabel}</span>
+    <button type="button" class="doc-codeblock-copy" data-copy-code aria-label="Copy code" title="Copy code">
+      <span class="doc-codeblock-copy-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <rect x="9" y="3" width="12" height="16" rx="2" stroke="currentColor" stroke-width="2"></rect>
+          <rect x="3" y="9" width="12" height="12" rx="2" stroke="currentColor" stroke-width="2"></rect>
+        </svg>
+      </span>
+    </button>
+  </div>
+  <div class="doc-codeblock-body"><pre><code class="language-${languageClass}">${codeHtml}</code></pre></div>
+</div>`;
+};
+
+function renderMarkdown(md, { assetBasePath = rootDir } = {}) {
+  // Extract fenced code blocks first and replace with placeholders
+  const codeBlocks = [];
+  let tmp = md;
+  tmp = tmp.replace(/```([\s\S]*?)```/g, (_m, rawBlock) => {
+    const block = String(rawBlock ?? "");
+    let language = "";
+    let code = block;
+    const firstLineMatch = block.match(/^([^\r\n]+)\r?\n([\s\S]*)$/);
+    if (firstLineMatch) {
+      const candidateLanguage = firstLineMatch[1].trim();
+      if (/^[a-z0-9_+-]{1,24}$/i.test(candidateLanguage)) {
+        language = candidateLanguage;
+        code = firstLineMatch[2];
+      }
+    }
+    const idx = codeBlocks.length;
+    codeBlocks.push(renderFencedCodeBlock({ language, code }));
+    return `§§CODE${idx}§§`;
+  });
+
+  const lines = tmp.split(/\r?\n/);
+  let html = "";
+  let inList = false;
+  let listType = null; // 'ul' for unordered, 'ol' for ordered
+  let inTable = false;
+  let tableLines = [];
+  let para = [];
+
+  const flushPara = () => {
+    if (para.length) {
+      const line = para.join(" ").trim();
+      if (line) html += `<p>${inline(line)}</p>`;
+      para = [];
+    }
+  };
+
+  const flushTable = () => {
+    if (tableLines.length >= 2) {
+      const table = parseTable(tableLines);
+      if (table) {
+        html += renderTableHTML(table);
+      } else {
+        // If table parsing failed, treat as regular paragraphs
+        for (const line of tableLines) {
+          para.push(line.trim());
+        }
+        flushPara();
+      }
+    } else {
+      // Not enough lines for a table, treat as paragraphs
+      for (const line of tableLines) {
+        para.push(line.trim());
+      }
+      flushPara();
+    }
+    tableLines = [];
+    inTable = false;
+  };
+
+  const renderTableHTML = (table) => {
+    let tableHTML = '<table>';
+
+    // Header
+    if (table.headers.length > 0) {
+      tableHTML += '<thead><tr>';
+      for (let i = 0; i < table.headers.length; i++) {
+        const align = table.alignments[i] || 'left';
+        const style = align !== 'left' ? ` style="text-align: ${align}"` : '';
+        tableHTML += `<th${style}>${inline(table.headers[i])}</th>`;
+      }
+      tableHTML += '</tr></thead>';
+    }
+
+    // Body
+    if (table.dataRows.length > 0) {
+      tableHTML += '<tbody>';
+      for (const row of table.dataRows) {
+        tableHTML += '<tr>';
+        for (let i = 0; i < row.length; i++) {
+          const align = table.alignments[i] || 'left';
+          const style = align !== 'left' ? ` style="text-align: ${align}"` : '';
+          tableHTML += `<td${style}>${inline(row[i] || '')}</td>`;
+        }
+        tableHTML += '</tr>';
+      }
+      tableHTML += '</tbody>';
+    }
+
+    tableHTML += '</table>';
+    return tableHTML;
+  };
+
+  const inline = (s) => {
+    // escape first; we keep markdown specials (*_`[]()#) unescaped
+    let out = escape(s);
+    // images ![alt](src "title")
+    out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]+)")?\)/g, (_m, alt = "", src = "", title = "") => {
+      const { alt: altAttr, width: explicitWidth } = extractImageAltWidth(alt);
+      const srcAttr = src.trim();
+      const titleValue = title.trim();
+      const inlineSvg = tryInlineMarkdownSvg({
+        src: srcAttr,
+        alt: altAttr,
+        title: titleValue,
+        assetBasePath,
+      });
+      if (inlineSvg) return inlineSvg;
+      const titleAttr = titleValue ? ` title="${titleValue}"` : "";
+      const normalizedSrc = srcAttr.split(/[?#]/)[0];
+      const isDialogScreenshot = normalizedSrc.toLowerCase().endsWith('_dialog.png');
+      const widthAttr = explicitWidth
+        ? ` width="${explicitWidth}"`
+        : (isDialogScreenshot ? ' width="280"' : '');
+      return `<img src="${srcAttr}" alt="${altAttr}"${titleAttr}${widthAttr} loading="lazy" />`;
+    });
+    // links [text](url)
+    out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, t, u) => `<a href="${u}">${t}</a>`);
+    // auto-link naked URLs (https:// and http://)
+    out = out.replace(/(^|[^">=\])])((https?:\/\/[^\s<>"'`\])}]+))/g, (match, prefix, url) => {
+      return `${prefix}<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+    });
+    // code `x`
+    out = out.replace(/`([^`]+)`/g, (_m, t) => `<code>${t}</code>`);
+    // bold **x**
+    out = out.replace(/\*\*([^*]+)\*\*/g, (_m, t) => `<strong>${t}</strong>`);
+    // italic *x*
+    out = out.replace(/(^|\W)\*([^*]+)\*(?=\W|$)/g, (m, pre, t) => `${pre}<em>${t}</em>`);
+    return out;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const line = raw.trimEnd();
+    const trimmedLine = line.trim();
+    if (!line.trim()) {
+      if (inTable) {
+        flushTable();
+      }
+      if (inList) { html += `</${listType}>`; inList = false; listType = null; }
+      flushPara();
+      continue;
+    }
+
+    // fenced code placeholder (restored after markdown block parsing)
+    if (/^§§CODE\d+§§$/.test(trimmedLine)) {
+      if (inTable) { flushTable(); }
+      if (inList) { html += `</${listType}>`; inList = false; listType = null; }
+      flushPara();
+      html += trimmedLine;
+      continue;
+    }
+
+    // Check for potential table line (contains |)
+    const isTableLine = line.includes('|');
+
+    if (isTableLine && !inTable) {
+      // Start of potential table
+      if (inList) { html += `</${listType}>`; inList = false; listType = null; }
+      flushPara();
+      inTable = true;
+      tableLines = [line];
+      continue;
+    } else if (isTableLine && inTable) {
+      // Continue table
+      tableLines.push(line);
+      continue;
+    } else if (inTable && !isTableLine) {
+      // End of table
+      flushTable();
+    }
+
+    // headings #..######
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) {
+      if (inList) { html += `</${listType}>`; inList = false; listType = null; }
+      if (inTable) { flushTable(); }
+      flushPara();
+      const level = h[1].length;
+      html += `<h${level}>${inline(h[2].trim())}</h${level}>`;
+      continue;
+    }
+
+    // numbered list items
+    const numberedLi = line.match(/^(\d+)\.\s+(.*)$/);
+    if (numberedLi) {
+      if (inTable) { flushTable(); }
+      flushPara();
+      if (!inList || listType !== 'ol') {
+        if (inList) { html += `</${listType}>`; }
+        html += `<ol>`;
+        inList = true;
+        listType = 'ol';
+      }
+      html += `<li>${inline(numberedLi[2].trim())}</li>`;
+      continue;
+    }
+
+    // bullet list items
+    const bulletLi = line.match(/^[-*]\s+(.*)$/);
+    if (bulletLi) {
+      if (inTable) { flushTable(); }
+      flushPara();
+      if (!inList || listType !== 'ul') {
+        if (inList) { html += `</${listType}>`; }
+        html += `<ul>`;
+        inList = true;
+        listType = 'ul';
+      }
+      html += `<li>${inline(bulletLi[1].trim())}</li>`;
+      continue;
+    }
+
+    // normal paragraph line (accumulate)
+    para.push(line.trim());
+  }
+  if (inTable) flushTable();
+  if (inList) html += `</${listType}>`;
+  flushPara();
+
+  // restore fenced code blocks
+  html = html.replace(/§§CODE(\d+)§§/g, (_m, i) => codeBlocks[Number(i)] ?? "");
+  return html;
+}
+
+const toPosix = (p) => p.split(path.sep).join("/");
+
+const isExternalLink = (href = "") =>
+  /^[a-z]+:/i.test(href) || href.startsWith("//");
+
+const flattenPath = (p = "") => {
+  const normalized = toPosix(p).replace(/^(\.\/)+/, "");
+  return normalized.split("/").filter(Boolean).join("__");
+};
+
+const getDocHrefFromSourcePath = (sourcePath = "") => `${flattenPath(sourcePath)}.html`;
+
+const resolveRelativePath = (href = "", baseDir = "") => {
+  const base = toPosix(baseDir || "");
+  const cleanHref = toPosix(href || "");
+  if (!base) return cleanHref.replace(/^(\.\/)+/, "");
+  return path.posix.normalize(path.posix.join(base, cleanHref)).replace(/^(\.\/)+/, "");
+};
+
+const flattenHrefWithBase = (href = "", baseDir = "") => {
+  if (!href) return href;
+  if (isExternalLink(href)) return href;
+  if (href.startsWith("#")) return href;
+  if (href.startsWith("/")) return href;
+  const hashIndex = href.indexOf("#");
+  const hash = hashIndex >= 0 ? href.slice(hashIndex) : "";
+  const preHash = hashIndex >= 0 ? href.slice(0, hashIndex) : href;
+  const queryIndex = preHash.indexOf("?");
+  const query = queryIndex >= 0 ? preHash.slice(queryIndex) : "";
+  const pathOnly = queryIndex >= 0 ? preHash.slice(0, queryIndex) : preHash;
+  const resolved = resolveRelativePath(pathOnly, baseDir);
+  // Keep links that intentionally point outside docs/ (for example ../apiExamples/*)
+  // instead of flattening them into help-page names.
+  if (resolved.startsWith("../")) {
+    return `${resolved}${query}${hash}`;
+  }
+  const flatPath = flattenPath(resolved);
+  return `${flatPath}${query}${hash}`;
+};
+
+const flattenDocResources = (html = "", baseDir = "") =>
+  html
+    .replace(/href="([^"]+)"/g, (_m, href) => `href="${flattenHrefWithBase(href, baseDir)}"`)
+    .replace(/src="([^"]+)"/g, (_m, src) => `src="${flattenHrefWithBase(src, baseDir)}"`);
+
+const convertMarkdownLinks = (html) =>
+  html.replace(/href="([^"#]+?)\.md(#[^"]*)?"/g, (match, base, hash = "") => {
+    const fullPath = `${base}.md`;
+    if (/^[a-z]+:/i.test(fullPath)) return match;
+    const next = `${base}.html${hash}`;
+    return `href="${next}"`;
+  });
+
+const convertReadmeLinks = (html) =>
+  html.replace(/href="([^"#]+?)\.md(#[^"]*)?"/g, (match, base, hash = "") => {
+    const fullPath = `${base}.md`;
+    if (/^[a-z]+:/i.test(fullPath)) return match;
+    // Remove 'docs/' prefix for README since we're now in the help root
+    const cleanBase = base.startsWith('docs/') ? base.substring(5) : base;
+    const next = `${cleanBase}.html${hash}`;
+    return `href="${next}"`;
+  }).replace(/src="docs\//g, 'src="');
+
+const decodeEntities = (text = "") =>
+  text
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+
+const htmlToSearchText = (html = "") => {
+  const withoutTags = html
+    .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ");
+  return decodeEntities(withoutTags).replace(/\s+/g, " ").trim();
+};
+
+const summarizeText = (text = "", max = 240) => {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max).trim()}...`;
+};
+
+const stripInlineMarkdown = (text = "") =>
+  String(text)
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/[*~]+/g, "")
+    .trim();
+
+const addSearchEntry = (entries, { title, href, html }) => {
+  if (!href) return;
+  const normalizedHref = toPosix(href);
+  const textContent = htmlToSearchText(html ?? "");
+  entries.push({
+    title: title || normalizedHref,
+    href: normalizedHref,
+    summary: summarizeText(textContent),
+    content: textContent,
+  });
+};
+
+const extractTitle = (mdText, fallback) => {
+  const heading = mdText.match(/^#\s+(.+)$/m);
+  return heading ? stripInlineMarkdown(heading[1]) : stripInlineMarkdown(fallback);
+};
+
+const toBreadcrumbLabel = (value = "") =>
+  String(value)
+    .split(/[-_]+/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
+const resolveSectionIndexPath = (dirPath = "", pageMetaBySourcePath = new Map()) => {
+  const normalizedDir = toPosix(dirPath || "").replace(/^(\.\/)+/, "").replace(/\/+$/g, "");
+  if (!normalizedDir) return null;
+  const nestedIndex = `${normalizedDir}/index`;
+  if (pageMetaBySourcePath.has(nestedIndex)) return nestedIndex;
+  if (!normalizedDir.includes("/")) {
+    const legacyIndex = `${normalizedDir}-index`;
+    if (pageMetaBySourcePath.has(legacyIndex)) return legacyIndex;
+  }
+  return null;
+};
+
+const buildBreadcrumbs = ({ sourcePath = "", title = "", pageMetaBySourcePath = new Map() } = {}) => {
+  const normalizedSource = toPosix(sourcePath || "").replace(/^(\.\/)+/, "");
+  if (!normalizedSource) return "";
+  const segments = normalizedSource.split("/").filter(Boolean);
+  const isIndexPage = segments[segments.length - 1] === "index";
+  const dirSegments = isIndexPage ? segments.slice(0, -2) : segments.slice(0, -1);
+  const crumbs = [];
+
+  let accumulated = "";
+  for (const segment of dirSegments) {
+    accumulated = accumulated ? `${accumulated}/${segment}` : segment;
+    const sectionIndexPath = resolveSectionIndexPath(accumulated, pageMetaBySourcePath);
+    if (sectionIndexPath) {
+      const meta = pageMetaBySourcePath.get(sectionIndexPath);
+      crumbs.push({
+        label: meta?.title || toBreadcrumbLabel(segment),
+        href: meta?.href || getDocHrefFromSourcePath(sectionIndexPath),
+      });
+      continue;
+    }
+    crumbs.push({ label: toBreadcrumbLabel(segment), href: "" });
+  }
+
+  crumbs.push({ label: title || toBreadcrumbLabel(segments[segments.length - 1] || ""), href: "" });
+
+  return crumbs
+    .map((crumb, index) => {
+      const node = crumb.href ? `<a href="${escapeHTML(crumb.href)}">${escapeHTML(crumb.label)}</a>` : `<span>${escapeHTML(crumb.label)}</span>`;
+      if (index === 0) return node;
+      return `<span class="doc-breadcrumb-sep">/</span>${node}`;
+    })
+    .join("");
+};
+
+const buildSidebarTree = (pageMetaBySourcePath = new Map()) => {
+  const root = { segment: "", path: "", children: new Map(), page: null, indexPage: null };
+
+  const ensureChild = (node, segment, childPath) => {
+    if (!node.children.has(segment)) {
+      node.children.set(segment, { segment, path: childPath, children: new Map(), page: null, indexPage: null });
+    }
+    return node.children.get(segment);
+  };
+
+  for (const meta of pageMetaBySourcePath.values()) {
+    const sourcePath = toPosix(meta?.sourcePath || "").replace(/^(\.\/)+/, "");
+    if (!sourcePath || sourcePath === "index") continue;
+    const parts = sourcePath.split("/").filter(Boolean);
+
+    if (parts.length === 1 && parts[0].endsWith("-index")) {
+      const segment = parts[0].slice(0, -6);
+      const child = ensureChild(root, segment, segment);
+      child.indexPage = meta;
+      continue;
+    }
+
+    let node = root;
+    let currentPath = "";
+    for (let i = 0; i < parts.length; i += 1) {
+      const part = parts[i];
+      const isLast = i === parts.length - 1;
+      if (isLast && part === "index") {
+        node.indexPage = meta;
+        continue;
+      }
+      currentPath = currentPath ? `${currentPath}/${part}` : part;
+      const child = ensureChild(node, part, currentPath);
+      if (isLast) {
+        child.page = meta;
+      }
+      node = child;
+    }
+  }
+
+  return root;
+};
+
+const isTreeNodeAncestor = (node, currentSourcePath = "") => {
+  const current = toPosix(currentSourcePath || "").replace(/^(\.\/)+/, "");
+  if (!current || !node?.path) return false;
+  if (node.indexPage?.sourcePath === current) return true;
+  if (node.page?.sourcePath === current) return true;
+  return current.startsWith(`${node.path}/`);
+};
+
+const sidebarRootSectionOrder = new Map([
+  ["workbenches", 0],
+  ["modes", 1],
+  ["features", 2],
+  ["assembly-constraints", 3],
+  ["pmi-annotations", 4],
+  ["developer", 5],
+  ["api", 6],
+]);
+
+const compareTreeNodes = (a, b, parentNode = null) => {
+  const aIsSection = Boolean(a?.children?.size || a?.indexPage);
+  const bIsSection = Boolean(b?.children?.size || b?.indexPage);
+  if (aIsSection !== bIsSection) return aIsSection ? -1 : 1;
+  if (parentNode?.path === "" && aIsSection && bIsSection) {
+    const aOrder = sidebarRootSectionOrder.get(a?.segment || "");
+    const bOrder = sidebarRootSectionOrder.get(b?.segment || "");
+    if (aOrder != null || bOrder != null) {
+      if (aOrder == null) return 1;
+      if (bOrder == null) return -1;
+      if (aOrder !== bOrder) return aOrder - bOrder;
+    }
+  }
+  const aLabel = (a?.indexPage?.title || a?.page?.title || toBreadcrumbLabel(a?.segment || "")).toLowerCase();
+  const bLabel = (b?.indexPage?.title || b?.page?.title || toBreadcrumbLabel(b?.segment || "")).toLowerCase();
+  return aLabel.localeCompare(bLabel);
+};
+
+const renderSidebarTreeNodes = (node, currentSourcePath = "") => {
+  const children = (Array.from(node?.children?.values?.() || []) as any[]).sort((a, b) => compareTreeNodes(a, b, node));
+  if (!children.length) return "";
+  const items = children.map((child) => {
+    const isCurrent = child?.indexPage?.sourcePath === currentSourcePath || child?.page?.sourcePath === currentSourcePath;
+    const isAncestor = !isCurrent && isTreeNodeAncestor(child, currentSourcePath);
+    const hasChildren = child?.children?.size > 0;
+    const shouldOpen = hasChildren && (isCurrent || isAncestor);
+    const label = child?.indexPage?.title || child?.page?.title || toBreadcrumbLabel(child?.segment || "");
+    const href = hasChildren ? child?.indexPage?.href : (child?.page?.href || child?.indexPage?.href || "");
+    const stateClass = `${hasChildren ? " is-section" : ""}${isCurrent ? " is-current" : ""}${isAncestor ? " is-ancestor" : ""}`;
+    const nodeLabel = href
+      ? `<a class="doc-tree-link" href="${escapeHTML(href)}">${escapeHTML(label)}</a>`
+      : `<span class="doc-tree-label">${escapeHTML(label)}</span>`;
+    if (hasChildren) {
+      const childTree = renderSidebarTreeNodes(child, currentSourcePath);
+      return `<li class="doc-tree-item${stateClass}">
+        <details class="doc-tree-details"${shouldOpen ? " open" : ""}>
+          <summary class="doc-tree-summary"><span class="doc-tree-toggle" aria-hidden="true">▶</span>${nodeLabel}</summary>
+          ${childTree}
+        </details>
+      </li>`;
+    }
+    return `<li class="doc-tree-item${stateClass}">${nodeLabel}</li>`;
+  }).join("");
+  return `<ul>${items}</ul>`;
+};
+
+const buildDocsSidebar = ({ currentSourcePath = "", pageMetaBySourcePath = new Map(), homeMeta = null } = {}) => {
+  const treeRoot = buildSidebarTree(pageMetaBySourcePath);
+  const homeTitle = homeMeta?.title || "Help Home";
+  const homeHref = homeMeta?.href || "index.html";
+  const homeClass = currentSourcePath === "index" ? " is-current" : "";
+  return `<aside class="doc-sidebar">
+  <section class="card doc-sidebar-card">
+    <h2 class="doc-sidebar-title">Docs Tree</h2>
+    <a class="doc-sidebar-home${homeClass}" href="${escapeHTML(homeHref)}">${escapeHTML(homeTitle)}</a>
+    <nav aria-label="Documentation tree">
+      <div class="doc-tree">
+        ${renderSidebarTreeNodes(treeRoot, currentSourcePath)}
+      </div>
+    </nav>
+  </section>
+</aside>`;
+};
+
+const docTemplate = (title, content, { relativeRoot = ".", showTitle = false, breadcrumbs = "", sidebar = "" } = {}) => {
+  const normalizedRoot = !relativeRoot || relativeRoot === "" ? "." : relativeRoot;
+  const navRoot = normalizedRoot.replace(/\\+/g, "/");
+  const indexHref = navRoot === "." ? "index.html" : `${navRoot}/index.html`;
+  const header = showTitle ? `<h1>${escapeHTML(title)}</h1>` : "";
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>${escapeHTML(title)} - BREP</title>
+<style>${css}</style>
+</head>
+<body>
+<main>
+  <nav class="doc-nav">
+    <div class="doc-nav-links">
+      <a href="${indexHref}">Help Home</a><span>&middot;</span><a href="/help/table-of-contents.html">Table of Contents</a><span>&middot;</span><a href="https://github.com/mmiscool/BREP" target="_blank" rel="noopener noreferrer">GitHub</a>
+    </div>
+    <div class="nav-search">
+      <div class="search-input-row">
+        <input type="search" id="doc-search" class="search-input" placeholder="Search docs... Type at least 2 characters to search" autocomplete="off" spellcheck="false" />
+        <button type="button" class="search-clear" id="doc-search-clear">Clear</button>
+      </div>
+      <div class="search-status" id="doc-search-status"></div>
+      <div class="search-results" id="doc-search-results" hidden>
+        <ul id="doc-search-list"></ul>
+      </div>
+    </div>
+  </nav>
+  <div class="doc-layout">
+    ${sidebar}
+    <div class="doc-main">
+      ${breadcrumbs ? `<nav class="doc-breadcrumbs" aria-label="Breadcrumb">${breadcrumbs}</nav>` : ""}
+      <section class="card doc-card doc-page-card">
+        ${header}
+        <div class="prose">
+${content}
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+<script>
+(() => {
+  const searchInput = document.getElementById("doc-search");
+  const resultsBox = document.getElementById("doc-search-results");
+  const resultsList = document.getElementById("doc-search-list");
+  const statusEl = document.getElementById("doc-search-status");
+  const clearBtn = document.getElementById("doc-search-clear");
+  if (!searchInput || !resultsBox || !resultsList || !statusEl || !clearBtn) return;
+  const indexUrl = "${navRoot}/search-index.json";
+  let indexPromise = null;
+  let cachedEntries = null;
+
+  const escapeHtml = (text = "") =>
+    text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
+  const escapeRegExp = (text = "") => text.replace(/[.*+?^{}()|[\\]$]/g, "\\$&");
+
+  const highlight = (text, terms) => {
+    if (!terms.length) return escapeHtml(text);
+    const pattern = terms.map(escapeRegExp).join("|");
+    const regex = new RegExp(\`(\${pattern})\`, "gi");
+    return escapeHtml(text).replace(regex, "<mark>$1</mark>");
+  };
+
+  const buildSnippet = (entry, terms) => {
+    const source = entry.content || entry.summary || "";
+    if (!source) return { plain: "", highlighted: "" };
+    let hit = source.length;
+    for (const term of terms) {
+      const idx = entry.contentLower.indexOf(term);
+      if (idx !== -1 && idx < hit) hit = idx;
+    }
+    if (!Number.isFinite(hit) || hit === source.length) hit = 0;
+    const start = Math.max(0, hit - 60);
+    const end = Math.min(source.length, hit + 140);
+    const snippet = source.slice(start, end);
+    return { plain: snippet, highlighted: highlight(snippet, terms) };
+  };
+
+  const updateStatus = (message) => {
+    statusEl.textContent = message;
+  };
+
+  const loadIndex = async () => {
+    if (cachedEntries) return cachedEntries;
+    if (!indexPromise) {
+      indexPromise = fetch(indexUrl, { cache: "no-store" })
+        .then((res) => {
+          if (!res.ok) throw new Error("Failed to load search index");
+          return res.json();
+        })
+        .then((json) => {
+          cachedEntries = Array.isArray(json)
+            ? json.map((entry) => ({
+                ...entry,
+                contentLower: (entry.content || "").toLowerCase(),
+                titleLower: (entry.title || "").toLowerCase(),
+              }))
+            : [];
+          return cachedEntries;
+        })
+        .catch((err) => {
+          console.error("Search index load failed", err);
+          cachedEntries = [];
+          throw err;
+        });
+    }
+    return indexPromise;
+  };
+
+  const renderResults = (entries, terms) => {
+    if (!terms.length) {
+      resultsBox.hidden = true;
+      return;
+    }
+    if (!entries.length) {
+      resultsList.innerHTML = '<li class="search-item"><div class="search-snippet">No matches found.</div></li>';
+      resultsBox.hidden = false;
+      return;
+    }
+    const rendered = entries
+      .slice(0, 30)
+      .map((entry) => {
+        const snippet = buildSnippet(entry, terms);
+        const title = highlight(entry.title || entry.href, terms);
+        const hasFragment = snippet.plain && snippet.plain.trim().length > 0;
+        const fragment = hasFragment ? \`#:~:text=\${encodeURIComponent(snippet.plain.trim())}\` : "";
+        const hrefWithFragment = hasFragment
+          ? (entry.href.includes("#") ? \`\${entry.href}&:~:text=\${encodeURIComponent(snippet.plain.trim())}\` : \`\${entry.href}\${fragment}\`)
+          : entry.href;
+        const snippetHtml = snippet.highlighted ? \`<div class="search-snippet">\${snippet.highlighted}</div>\` : "";
+        return \`<li class="search-item"><a href="\${hrefWithFragment}">\${title}</a>\${snippetHtml}</li>\`;
+      })
+      .join("");
+    resultsList.innerHTML = rendered;
+    resultsBox.hidden = false;
+  };
+
+  const performSearch = async () => {
+    const rawQuery = searchInput.value.trim();
+    if (rawQuery.length < 2) {
+      updateStatus("Type at least 2 characters to search.");
+      resultsBox.hidden = true;
+      return;
+    }
+    const terms = rawQuery.toLowerCase().split(/\\s+/).filter(Boolean);
+    updateStatus("Searching...");
+    try {
+      const entries = await loadIndex();
+      const matches = entries.filter((entry) =>
+        terms.every((term) => entry.contentLower.includes(term) || entry.titleLower.includes(term))
+      );
+      renderResults(matches, terms);
+      updateStatus(matches.length ? \`\${matches.length} result\${matches.length === 1 ? "" : "s"} for "\${rawQuery}"\` : "No matches found.");
+    } catch (err) {
+      updateStatus("Search unavailable (could not load index).");
+    }
+  };
+
+  searchInput.addEventListener("input", performSearch);
+
+  searchInput.addEventListener("focus", () => {
+    if (!cachedEntries) {
+      loadIndex().catch(() => updateStatus("Search unavailable (could not load index)."));
+    }
+  });
+
+  clearBtn.addEventListener("click", () => {
+    searchInput.value = "";
+    resultsBox.hidden = true;
+    updateStatus("Type at least 2 characters to search.");
+    searchInput.focus();
+  });
+
+  document.addEventListener("keydown", (evt) => {
+    if (evt.key === "Escape" && document.activeElement === searchInput) {
+      searchInput.value = "";
+      resultsBox.hidden = true;
+      updateStatus("Type at least 2 characters to search.");
+    }
+  });
+
+  const initCodeCopyButtons = () => {
+    const copyButtons = Array.from(document.querySelectorAll("[data-copy-code]"));
+    if (!copyButtons.length) return;
+
+    const copyText = async (value) => {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        return true;
+      }
+      const ta = document.createElement("textarea");
+      ta.value = value;
+      ta.setAttribute("readonly", "readonly");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      ta.style.pointerEvents = "none";
+      document.body.appendChild(ta);
+      ta.select();
+      let copied = false;
+      try {
+        copied = document.execCommand("copy");
+      } catch {
+        copied = false;
+      }
+      document.body.removeChild(ta);
+      return copied;
+    };
+
+    copyButtons.forEach((button) => {
+      button.addEventListener("click", async () => {
+        const wrapper = button.closest(".doc-codeblock");
+        const codeEl = wrapper?.querySelector("code");
+        const text = codeEl?.textContent || "";
+        if (!text.trim()) return;
+        let didCopy = false;
+        try {
+          didCopy = await copyText(text);
+        } catch {
+          didCopy = false;
+        }
+        if (!didCopy) return;
+        button.classList.add("is-copied");
+        button.setAttribute("aria-label", "Copied");
+        button.setAttribute("title", "Copied");
+        window.setTimeout(() => {
+          button.classList.remove("is-copied");
+          button.setAttribute("aria-label", "Copy code");
+          button.setAttribute("title", "Copy code");
+        }, 1200);
+      });
+    });
+  };
+
+  const initSidebarCurrentItem = () => {
+    document.querySelectorAll(".doc-sidebar .doc-tree-summary a").forEach((link) => {
+      link.addEventListener("click", (evt) => {
+        evt.stopPropagation();
+      });
+    });
+    const currentItem = document.querySelector(".doc-sidebar .doc-tree-item.is-current .doc-tree-link, .doc-sidebar .doc-tree-item.is-current .doc-tree-label");
+    if (!currentItem || typeof currentItem.scrollIntoView !== "function") return;
+    window.requestAnimationFrame(() => {
+      currentItem.scrollIntoView({ behavior: "auto", block: "center", inline: "nearest" });
+    });
+  };
+
+  const initImageGallery = () => {
+    const proseRoot = document.querySelector(".prose");
+    if (!proseRoot) return;
+
+    const galleryImages = Array.from(proseRoot.querySelectorAll("img"))
+      .filter((img) => {
+        const src = img.getAttribute("src") || img.src;
+        return !!src;
+      });
+    if (!galleryImages.length) return;
+
+    const triggerImages = galleryImages.filter((img) => !img.closest("a"));
+    if (!triggerImages.length) return;
+
+    const imageIndexMap = new Map();
+    galleryImages.forEach((img, index) => imageIndexMap.set(img, index));
+
+    const modal = document.createElement("div");
+    modal.className = "doc-image-modal";
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.setAttribute("aria-label", "Image gallery");
+    modal.setAttribute("aria-hidden", "true");
+    modal.hidden = true;
+
+    const backdrop = document.createElement("button");
+    backdrop.type = "button";
+    backdrop.className = "doc-image-backdrop";
+    backdrop.setAttribute("aria-label", "Close image gallery");
+
+    const stage = document.createElement("div");
+    stage.className = "doc-image-stage";
+
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "doc-image-close";
+    closeBtn.setAttribute("aria-label", "Close gallery");
+    closeBtn.textContent = "x";
+
+    const prevBtn = document.createElement("button");
+    prevBtn.type = "button";
+    prevBtn.className = "doc-image-nav doc-image-prev";
+    prevBtn.setAttribute("aria-label", "Previous image");
+    prevBtn.textContent = "<";
+
+    const nextBtn = document.createElement("button");
+    nextBtn.type = "button";
+    nextBtn.className = "doc-image-nav doc-image-next";
+    nextBtn.setAttribute("aria-label", "Next image");
+    nextBtn.textContent = ">";
+
+    const viewer = document.createElement("img");
+    viewer.className = "doc-image-view";
+    viewer.alt = "";
+
+    const meta = document.createElement("div");
+    meta.className = "doc-image-meta";
+
+    const caption = document.createElement("div");
+    caption.className = "doc-image-caption";
+
+    const counter = document.createElement("div");
+    counter.className = "doc-image-counter";
+
+    const thumbsBar = document.createElement("div");
+    thumbsBar.className = "doc-image-thumbs";
+
+    const thumbsList = document.createElement("div");
+    thumbsList.className = "doc-image-thumbs-list";
+    thumbsBar.appendChild(thumbsList);
+
+    meta.append(caption, counter);
+    stage.append(closeBtn, prevBtn, nextBtn, viewer, meta, thumbsBar);
+    modal.append(backdrop, stage);
+    document.body.appendChild(modal);
+
+    let activeIndex = -1;
+    let lastFocusedElement = null;
+
+    const getImageUrl = (img) => img?.currentSrc || img?.src || img?.getAttribute("src") || "";
+
+    const thumbButtons = galleryImages.map((sourceImg, index) => {
+      const thumbButton = document.createElement("button");
+      thumbButton.type = "button";
+      thumbButton.className = "doc-image-thumb";
+      thumbButton.setAttribute("aria-label", "Show image " + String(index + 1));
+
+      const thumbImage = document.createElement("img");
+      thumbImage.className = "doc-image-thumb-img";
+      thumbImage.alt = sourceImg.getAttribute("alt") || ("Image " + String(index + 1));
+      thumbImage.loading = "lazy";
+      thumbImage.src = getImageUrl(sourceImg);
+
+      thumbButton.appendChild(thumbImage);
+      thumbsList.appendChild(thumbButton);
+      return thumbButton;
+    });
+
+    const clearActiveSource = () => {
+      galleryImages.forEach((img) => img.classList.remove("doc-gallery-source-active"));
+    };
+
+    const markActiveSource = () => {
+      clearActiveSource();
+      const source = galleryImages[activeIndex];
+      if (source) source.classList.add("doc-gallery-source-active");
+    };
+
+    const scrollSourceIntoView = () => {
+      const source = galleryImages[activeIndex];
+      if (!source) return;
+      source.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    };
+
+    const renderActiveImage = () => {
+      const source = galleryImages[activeIndex];
+      if (!source) return;
+      const sourceUrl = getImageUrl(source);
+      const sourceAlt = source.getAttribute("alt") || "";
+      viewer.src = sourceUrl;
+      viewer.alt = sourceAlt;
+      caption.textContent = sourceAlt || "Image";
+      counter.textContent = String(activeIndex + 1) + " / " + String(galleryImages.length);
+      const canFlip = galleryImages.length > 1;
+      prevBtn.disabled = !canFlip;
+      nextBtn.disabled = !canFlip;
+      thumbButtons.forEach((thumb, index) => {
+        const isActive = index === activeIndex;
+        thumb.classList.toggle("is-active", isActive);
+        if (isActive) {
+          thumb.setAttribute("aria-current", "true");
+          thumb.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+        } else {
+          thumb.removeAttribute("aria-current");
+        }
+      });
+      markActiveSource();
+      scrollSourceIntoView();
+    };
+
+    const openAtIndex = (index, triggerElement = null) => {
+      if (!Number.isInteger(index) || index < 0 || index >= galleryImages.length) return;
+      activeIndex = index;
+      lastFocusedElement = triggerElement || document.activeElement;
+      modal.hidden = false;
+      modal.setAttribute("aria-hidden", "false");
+      renderActiveImage();
+      closeBtn.focus();
+    };
+
+    const closeModal = () => {
+      if (activeIndex < 0) return;
+      activeIndex = -1;
+      modal.hidden = true;
+      modal.setAttribute("aria-hidden", "true");
+      viewer.removeAttribute("src");
+      viewer.alt = "";
+      caption.textContent = "";
+      counter.textContent = "";
+      thumbButtons.forEach((thumb) => {
+        thumb.classList.remove("is-active");
+        thumb.removeAttribute("aria-current");
+      });
+      clearActiveSource();
+      if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
+        lastFocusedElement.focus();
+      }
+    };
+
+    const stepImage = (direction) => {
+      if (activeIndex < 0 || galleryImages.length < 2) return;
+      const max = galleryImages.length;
+      activeIndex = (activeIndex + direction + max) % max;
+      renderActiveImage();
+    };
+
+    triggerImages.forEach((img) => {
+      const imageIndex = imageIndexMap.get(img);
+      if (!Number.isInteger(imageIndex)) return;
+      img.classList.add("doc-gallery-trigger");
+      if (!img.hasAttribute("tabindex")) img.setAttribute("tabindex", "0");
+      if (!img.hasAttribute("role")) img.setAttribute("role", "button");
+      img.addEventListener("click", (evt) => {
+        evt.preventDefault();
+        openAtIndex(imageIndex, img);
+      });
+      img.addEventListener("keydown", (evt) => {
+        if (evt.key !== "Enter" && evt.key !== " ") return;
+        evt.preventDefault();
+        openAtIndex(imageIndex, img);
+      });
+    });
+
+    thumbButtons.forEach((thumb, index) => {
+      thumb.addEventListener("click", (evt) => {
+        evt.preventDefault();
+        if (activeIndex < 0) {
+          openAtIndex(index, thumb);
+          return;
+        }
+        if (activeIndex !== index) {
+          activeIndex = index;
+          renderActiveImage();
+        }
+      });
+    });
+
+    backdrop.addEventListener("click", closeModal);
+    closeBtn.addEventListener("click", closeModal);
+    prevBtn.addEventListener("click", () => stepImage(-1));
+    nextBtn.addEventListener("click", () => stepImage(1));
+
+    document.addEventListener("keydown", (evt) => {
+      if (activeIndex < 0) return;
+      if (evt.key === "Escape") {
+        evt.preventDefault();
+        closeModal();
+        return;
+      }
+      if (evt.key === "ArrowLeft") {
+        evt.preventDefault();
+        stepImage(-1);
+        return;
+      }
+      if (evt.key === "ArrowRight") {
+        evt.preventDefault();
+        stepImage(1);
+      }
+    });
+  };
+
+  initCodeCopyButtons();
+  initImageGallery();
+  initSidebarCurrentItem();
+})();
+</script>
+</body>
+</html>`;
+};
+
+function generateTableOfContents(pages, outputDir) {
+  // Create a tree structure from the pages
+  const tree: any = {};
+
+  // Add files in subdirectories
+  pages.forEach(page => {
+    const parts = page.href.split('/');
+    if (parts.length === 1) {
+      // Root level file
+      if (!tree._root) tree._root = [];
+      tree._root.push(page);
+    } else {
+      // File in subdirectory
+      const dir = parts[0];
+      if (!tree[dir]) tree[dir] = [];
+      tree[dir].push({
+        ...page,
+        href: page.href,
+        name: parts[parts.length - 1].replace('.html', '')
+      });
+    }
+  });
+
+  // Sort everything
+  if (tree._root) {
+    tree._root.sort((a, b) => a.title.localeCompare(b.title));
+  }
+  Object.keys(tree).forEach(key => {
+    if (key !== '_root') {
+      tree[key].sort((a, b) => a.title.localeCompare(b.title));
+    }
+  });
+
+  // Generate HTML
+  let tocContent = '<h1>Table of Contents</h1>\n<p>Complete documentation structure with all available pages.</p>\n\n';
+
+  // Root level files
+  if (tree._root && tree._root.length > 0) {
+    tocContent += '<h2>Main Documentation</h2>\n<ul class="doc-list">\n';
+    tree._root.forEach(page => {
+      tocContent += `<li><a href="./${escapeHTML(page.href)}">${escapeHTML(page.title)}</a></li>\n`;
+    });
+    tocContent += '</ul>\n\n';
+  }
+
+  // Subdirectories
+  const sortedDirs = Object.keys(tree).filter(k => k !== '_root').sort();
+  sortedDirs.forEach(dir => {
+    tocContent += `<h2>${escapeHTML(dir.charAt(0).toUpperCase() + dir.slice(1))}</h2>\n<ul class="doc-list">\n`;
+    tree[dir].forEach(page => {
+      tocContent += `<li><a href="./${escapeHTML(page.href)}">${escapeHTML(page.title)}</a></li>\n`;
+    });
+    tocContent += '</ul>\n\n';
+  });
+
+  const tocHtml = docTemplate("Table of Contents", tocContent, { relativeRoot: ".", showTitle: false });
+  writeFileSync(path.join(outputDir, "table-of-contents.html"), tocHtml, "utf-8");
+  return { html: tocHtml, href: "table-of-contents.html" };
+}
+
+function generateDocsSite() {
+  if (!existsSync(docsSourceDir)) {
+    console.warn("docs directory not found; skipping docs HTML generation");
+    return;
+  }
+
+  mkdirSync(path.join(rootDir, "public"), { recursive: true });
+  rmSync(docsOutputDir, { recursive: true, force: true });
+  mkdirSync(docsOutputDir, { recursive: true });
+
+  const pages = [];
+  const searchEntries = [];
+  const docFiles = [];
+  const pageMetaBySourcePath = new Map();
+  const readmePath = path.join(rootDir, "README.md");
+  const readmeMeta = existsSync(readmePath)
+    ? {
+        sourcePath: "index",
+        href: "index.html",
+        title: extractTitle(readFileSync(readmePath, "utf-8"), "BREP"),
+      }
+    : { sourcePath: "index", href: "index.html", title: "Help Home" };
+
+  pageMetaBySourcePath.set(readmeMeta.sourcePath, readmeMeta);
+
+  const collectDocFiles = (srcDir) => {
+    const entries = readdirSync(srcDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const srcPath = path.join(srcDir, entry.name);
+      if (entry.isDirectory()) {
+        collectDocFiles(srcPath);
+        continue;
+      }
+
+      if (!entry.isFile()) continue;
+
+      const relFromDocs = path.relative(docsSourceDir, srcPath);
+      const ext = path.extname(entry.name).toLowerCase();
+      if (ext === ".md") {
+        const md = readFileSync(srcPath, "utf-8");
+        const sourcePath = relFromDocs.replace(/\.md$/i, "");
+        const flatName = getDocHrefFromSourcePath(sourcePath);
+        const pageTitle = extractTitle(md, path.basename(relFromDocs, ext));
+        docFiles.push({ srcPath, relFromDocs, sourcePath, flatName, md, pageTitle });
+        pageMetaBySourcePath.set(sourcePath, { title: pageTitle, href: flatName, sourcePath });
+        continue;
+      }
+
+      const destAsset = path.join(docsOutputDir, flattenPath(relFromDocs));
+      copyFileSync(srcPath, destAsset);
+    }
+  };
+
+  collectDocFiles(docsSourceDir);
+
+  const existingRootMdFiles = rootMdFiles.filter((fileName) => existsSync(path.join(rootDir, fileName)));
+  for (const fileName of existingRootMdFiles) {
+    const srcPath = path.join(rootDir, fileName);
+    const baseName = path.basename(fileName, ".md");
+    const pageTitle = extractTitle(readFileSync(srcPath, "utf-8"), baseName);
+    pageMetaBySourcePath.set(baseName, { title: pageTitle, href: `${baseName}.html`, sourcePath: baseName });
+  }
+
+  for (const docFile of docFiles) {
+    const { srcPath, relFromDocs, sourcePath, flatName, md, pageTitle } = docFile;
+    const destPath = path.join(docsOutputDir, flatName);
+    let body = renderMarkdown(md, { assetBasePath: path.dirname(srcPath) });
+    const baseDir = path.posix ? path.posix.dirname(relFromDocs) : path.dirname(relFromDocs);
+    body = convertMarkdownLinks(body);
+    body = flattenDocResources(body, baseDir);
+    const breadcrumbs = buildBreadcrumbs({ sourcePath, title: pageTitle, pageMetaBySourcePath });
+    const sidebar = buildDocsSidebar({ currentSourcePath: sourcePath, pageMetaBySourcePath, homeMeta: readmeMeta });
+    const htmlPage = docTemplate(pageTitle, body, { relativeRoot: ".", showTitle: false, breadcrumbs, sidebar });
+    writeFileSync(destPath, htmlPage, "utf-8");
+    pages.push({ title: pageTitle, href: flatName });
+    addSearchEntry(searchEntries, { title: pageTitle, href: flatName, html: body });
+  }
+
+  // Also process LICENSE.md and CONTRIBUTING.md from root directory
+  for (const fileName of existingRootMdFiles) {
+    const srcPath = path.join(rootDir, fileName);
+    const baseName = path.basename(fileName, '.md');
+    const destPath = path.join(docsOutputDir, `${baseName}.html`);
+    const md = readFileSync(srcPath, "utf-8");
+    const pageTitle = extractTitle(md, baseName);
+    let body = renderMarkdown(md, { assetBasePath: path.dirname(srcPath) });
+    const baseDir = ".";
+    body = convertMarkdownLinks(body);
+    body = flattenDocResources(body, baseDir);
+    const relRoot = path.relative(path.dirname(destPath), docsOutputDir) || ".";
+    const breadcrumbs = buildBreadcrumbs({
+      sourcePath: baseName,
+      title: pageTitle,
+      pageMetaBySourcePath,
+    });
+    const sidebar = buildDocsSidebar({ currentSourcePath: baseName, pageMetaBySourcePath, homeMeta: readmeMeta });
+    const htmlPage = docTemplate(pageTitle, body, { relativeRoot: relRoot, showTitle: false, breadcrumbs, sidebar });
+    writeFileSync(destPath, htmlPage, "utf-8");
+    const relativeHref = toPosix(path.relative(docsOutputDir, destPath));
+    pages.push({ title: pageTitle, href: relativeHref });
+    addSearchEntry(searchEntries, { title: pageTitle, href: relativeHref, html: body });
+  }
+
+  // Sort pages for consistent ordering
+  const sortedPages = pages.sort((a, b) => a.href.localeCompare(b.href));
+
+  // Create README as index.html
+  if (existsSync(readmePath)) {
+    const readmeMd = readFileSync(readmePath, "utf-8");
+    const readmeTitle = readmeMeta.title;
+    let readmeBody = renderMarkdown(readmeMd, { assetBasePath: path.dirname(readmePath) });
+    const baseDir = ".";
+    readmeBody = convertReadmeLinks(readmeBody);
+    readmeBody = flattenDocResources(readmeBody, baseDir);
+
+    // Add navigation to other docs at the end of README
+    if (sortedPages.length > 0) {
+      const listItems = sortedPages
+        .map((page) => `<li><a href="./${escapeHTML(page.href)}">${escapeHTML(page.title)}</a></li>`)
+        .join("\n");
+      readmeBody += `\n\n<h2>Documentation</h2>\n<ul class="doc-list">${listItems}</ul>`;
+    }
+
+    // Add license information sections inside the same scrollable doc page card.
+    readmeBody += `\n\n<section class="license">
+    <h1>This project's license</h1>
+    <div style="white-space: pre-wrap;">${escapeHTML(licenseText)}</div>
+  </section>
+
+  <h1>Licenses Report of libraries used in this package</h1>
+  <div class="summary">${countPackages} packages • ${licenseKeys.length} license types</div>
+`;
+
+    // Add all the license sections
+    for (const lic of licenseKeys) {
+      const list = Array.isArray(data[lic]) ? data[lic] : [];
+      list.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+      readmeBody += `<section class="license">
+    <h2>${escapeHTML(lic)} <span class="chip">${list.length} package${list.length === 1 ? "" : "s"}</span></h2>
+  `;
+
+      for (const p of list) {
+        const name = escapeHTML(p.name ?? "");
+        const author =
+          p.author && typeof p.author === "object"
+            ? escapeHTML(p.author.name ?? "")
+            : escapeHTML(p.author ?? "");
+        const homepage = p.homepage ? String(p.homepage) : "";
+        const desc = escapeHTML(p.description ?? "");
+        const versionsCount = Array.isArray(p.versions) ? new Set(p.versions).size : 0;
+
+        readmeBody += `<div class="pkg">
+      <div>
+        <div class="name">${name}${versionsCount ? ` <span class="chip">${versionsCount} version${versionsCount === 1 ? "" : "s"}</span>` : ""}</div>
+        ${desc ? `<div class="desc">${desc}</div>` : ""}
+        ${author ? `<div class="desc">Author: ${escapeHTML(author)}</div>` : ""}
+      </div>
+      <div class="meta">
+        ${homepage ? `<a class="chip" href="${escapeHTML(homepage)}" target="_blank" rel="noopener noreferrer">Repo / Homepage</a>` : ""}
+      </div>
+    </div>`;
+      }
+
+      readmeBody += `</section>`;
+    }
+
+    readmeBody += `
+  <section class="card doc-card">
+    <h2>Font Licenses</h2>
+    <div class="summary">Bundled fonts are licensed separately from npm packages.</div>
+    <div class="doc-nav-links"><a href="./fonts-licenses.html">Font license details</a></div>
+  </section>
+`;
+
+    readmeBody += `<div class="footer">${dependencySourceHtml}</div>`;
+
+    const readmeSidebar = buildDocsSidebar({ currentSourcePath: "index", pageMetaBySourcePath, homeMeta: readmeMeta });
+    const indexHtml = docTemplate(readmeTitle, readmeBody, { relativeRoot: ".", showTitle: false, sidebar: readmeSidebar });
+    writeFileSync(path.join(docsOutputDir, "index.html"), indexHtml, "utf-8");
+    addSearchEntry(searchEntries, { title: readmeTitle, href: "index.html", html: readmeBody });
+  }
+
+  // Generate table of contents
+  const tocPage = generateTableOfContents(sortedPages, docsOutputDir);
+  if (tocPage?.html) {
+    addSearchEntry(searchEntries, { title: "Table of Contents", href: tocPage.href, html: tocPage.html });
+  }
+
+  // Build a lightweight search index for client-side search
+  const searchByHref = new Map();
+  for (const entry of searchEntries) {
+    if (!entry?.href) continue;
+    const normalizedHref = toPosix(entry.href);
+    searchByHref.set(normalizedHref, {
+      title: entry.title || normalizedHref,
+      href: normalizedHref,
+      summary: summarizeText(entry.summary || entry.content || ""),
+      content: entry.content || "",
+    });
+  }
+  const searchIndex = Array.from(searchByHref.values()).sort((a, b) => a.href.localeCompare(b.href));
+  writeFileSync(path.join(docsOutputDir, "search-index.json"), JSON.stringify(searchIndex, null, 2), "utf-8");
+
+  console.log(`✔ Generated ${sortedPages.length + 2} documentation page${sortedPages.length === -1 ? "" : "s"} in public/help`);
+}
+
+const readmeHTML = flattenDocResources(
+  convertMarkdownLinks(renderMarkdown(readmeText, { assetBasePath: rootDir })),
+  ".",
+);
+
+mkdirSync(docsSourceDir, { recursive: true });
+const fontLicenseDocPath = path.join(docsSourceDir, "fonts-licenses.md");
+writeFileSync(fontLicenseDocPath, fontLicenseMarkdown, "utf-8");
+
+generateDocsSite();
+
+
+
+
+
+
+
+let html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>About BREP</title>
+<style>${css}</style>
+</head>
+<body>
+<main>
+  <section class="card readme">
+    <div class="header"><h1>Project Overview</h1></div>
+    <div class="content prose">${readmeHTML}</div>
+  </section>
+
+  <section class="card">
+    <h1>This project's license</h1>
+    <div style="white-space: pre-wrap;">${escapeHTML(licenseText)}</div>
+  </section>
+
+  <h1>Licenses Report of libraries used in this package</h1>
+  <div class="summary">${countPackages} packages • ${licenseKeys.length} license types</div>
+`;
+
+for (const lic of licenseKeys) {
+  const list = Array.isArray(data[lic]) ? data[lic] : [];
+  // sort packages by name for stable output
+  list.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+  html += `<section class="license">
+    <h2>${escapeHTML(lic)} <span class="chip">${list.length} package${list.length === 1 ? "" : "s"}</span></h2>
+  `;
+
+  for (const p of list) {
+    const name = escapeHTML(p.name ?? "");
+    const author =
+      p.author && typeof p.author === "object"
+        ? escapeHTML(p.author.name ?? "")
+        : escapeHTML(p.author ?? "");
+    const homepage = p.homepage ? String(p.homepage) : "";
+    const desc = escapeHTML(p.description ?? "");
+    // versions can be very long; show unique versions count as a chip
+    const versionsCount = Array.isArray(p.versions) ? new Set(p.versions).size : 0;
+
+    html += `<div class="pkg">
+      <div>
+        <div class="name">${name}${versionsCount ? ` <span class="chip">${versionsCount} version${versionsCount === 1 ? "" : "s"}</span>` : ""}</div>
+        ${desc ? `<div class="desc">${desc}</div>` : ""}
+        ${author ? `<div class="desc">Author: ${escapeHTML(author)}</div>` : ""}
+      </div>
+      <div class="meta">
+        ${homepage ? `<a class="chip" href="${escapeHTML(homepage)}" target="_blank" rel="noopener noreferrer">Repo / Homepage</a>` : ""}
+      </div>
+    </div>`;
+  }
+
+  html += `</section>`;
+}
+
+html += `
+  ${fontLicenseHtml}
+  <div class="footer">${dependencySourceHtml}</div>
+</main>
+</body>
+</html>`;
+
+writeFileSync("about.html", html, "utf-8");
+console.log("✔ about.html generated");

@@ -20,4 +20,12 @@ The Surfacing workbench collects surface creation, cleanup, and surface-heavy ed
 - [Collapse Edge](../features/collapse-edge.md)
 - [Edge Smooth](../features/edge-smooth.md)
 - [Overlap Cleanup](../features/overlap-cleanup.md)
+- [Self Intersection Cleanup](../features/self-intersection-cleanup.md)
 - [Offset Shell](../features/offset-shell.md)
+- [Thicken](../features/thicken.md)
+
+## Panels
+- [Feature History](../panels/feature-history.md)
+- [PMI Views](../panels/pmi-views.md)
+- [2D Sheets](../panels/sheets-2d.md)
+- [Plugins](../panels/plugins.md)

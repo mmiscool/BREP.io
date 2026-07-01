@@ -20,7 +20,7 @@ Image Heightmap Solid samples a grayscale (or RGB) image and extrudes the pixels
 - `boolean.operation` / `boolean.targets` – Optional boolean with existing solids.
 
 ## Shared Image Editor
-This feature uses the shared editor documented at [Image Editor (Shared)](image-editor.md).
+This feature uses the shared editor documented at [Image Editor (Shared)](./image-editor.md).
 
 Relevant editor functions for Heightmap:
 - Paint/erase/fill the source image used for height sampling.

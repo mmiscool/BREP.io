@@ -1,0 +1,700 @@
+// ES6, no frameworks. Dark-mode UI. Full class, ready to paste.
+// Tree UI for Solid → Face/Edge/Loop with per-object (non-recursive) visibility + selection sync.
+import { SelectionFilter } from './SelectionFilter.js';
+
+const SCENE_MEMBERSHIP_SYNC_MS = 200;
+const SCENE_ATTRIBUTES_SYNC_MS = 75;
+const SCENE_TREE_INDENT_STEP_PX = 20;
+
+export class SceneListing {
+    [key: string]: any;
+
+    /**
+     * @param {THREE.Scene} scene
+     * @param {{autoStart?: boolean, onSelection?: (obj: any) => void, onRender?: () => void}} [options]
+     */
+    constructor(scene: any, { autoStart = true, onSelection = null, onRender = null }: any = {}) {
+        if (!scene) throw new Error("SceneListing requires a THREE.Scene.");
+        this.scene = scene;
+        this._onSelection = (typeof onSelection === 'function') ? onSelection : null;
+        this._onRender = (typeof onRender === 'function') ? onRender : null;
+
+        // --- UI root ----------------------------------------------------------------
+        this.uiElement = document.createElement("div");
+        this.uiElement.className = "scene-tree";
+        this.uiElement.setAttribute("role", "region");
+        this.uiElement.setAttribute("aria-label", "Scene");
+
+        // Toolbar (minimal)
+        this.toolbar = document.createElement("div");
+        this.toolbar.className = "scene-tree__toolbar";
+        this.uiElement.appendChild(this.toolbar);
+
+        // Tree container
+        this.treeRoot = document.createElement("ul");
+        this.treeRoot.className = "scene-tree__list";
+        this.uiElement.appendChild(this.treeRoot);
+
+        this.#ensureStyles();
+
+        // --- State ------------------------------------------------------------------
+        this._showAllObjects = false;
+        /** @type {Map<string, {obj: any, li: HTMLLIElement, chk: HTMLInputElement, nameEl: HTMLButtonElement, caret: HTMLButtonElement, childrenUL?: HTMLUListElement, depth: number, lastSelected?: boolean}>} */
+        this.nodes = new Map();
+        // Remember per-solid expand/collapse state across scene rebuilds (keyed by solid name)
+        this._expandedByName = new Map(); // name -> boolean
+        // Remember expand/collapse state for non-solid nodes when showing all objects
+        this._expandedByUuid = new Map(); // uuid -> boolean
+        this._hoveredUuids = new Set();
+        this._running = false;
+        this._raf = 0;
+        this._lastMembershipSyncAt = -Infinity;
+        this._lastAttributesSyncAt = -Infinity;
+
+        this.#attachTypeVisibilityButtons();
+        this.#attachDisplayModeToggle();
+        this._hoverListener = (ev) => this.#syncHoverFromScene(ev);
+        window.addEventListener('hover-changed', this._hoverListener);
+
+        // Wire toolbar
+        // this.toolbar.querySelector(".st-expand").addEventListener("click", () => this.#setAllOpen(true));
+        // this.toolbar.querySelector(".st-collapse").addEventListener("click", () => this.#setAllOpen(false));
+
+        // Initial build
+        this.refresh();
+        if (autoStart) this.start();
+    }
+
+
+
+    setScene(scene) {
+        if (!scene) throw new Error("setScene(scene) requires a THREE.Scene.");
+        this.stop();
+        this.scene = scene;
+        this.clear();
+        this.refresh();
+        this.start();
+    }
+
+    refresh() {
+        // Rebuild membership (solids and children)
+        this.#syncMembership();
+        // Then ensure attributes (visibility / selection) reflect scene
+        this.#syncAttributes();
+        const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+            ? performance.now()
+            : Date.now();
+        this._lastMembershipSyncAt = now;
+        this._lastAttributesSyncAt = now;
+    }
+
+    start() {
+        if (this._running) return;
+        this._running = true;
+        const tick = () => {
+            if (!this._running) return;
+            const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+                ? performance.now()
+                : Date.now();
+            let didMembershipSync = false;
+            if ((now - this._lastMembershipSyncAt) >= SCENE_MEMBERSHIP_SYNC_MS) {
+                this.#syncMembership();
+                this._lastMembershipSyncAt = now;
+                didMembershipSync = true;
+            }
+            if (didMembershipSync || (now - this._lastAttributesSyncAt) >= SCENE_ATTRIBUTES_SYNC_MS) {
+                this.#syncAttributes();
+                this._lastAttributesSyncAt = now;
+            }
+            this._raf = requestAnimationFrame(tick);
+        };
+        this._raf = requestAnimationFrame(tick);
+    }
+
+    stop() {
+        this._running = false;
+        if (this._raf) cancelAnimationFrame(this._raf);
+        this._raf = 0;
+    }
+
+    // Helpers ------------------------------------------------------------------
+
+    clear() {
+        this.nodes.clear();
+        this.treeRoot.innerHTML = "";
+    }
+
+    dispose() {
+        this.stop();
+        this.clear();
+        if (this._hoverListener) {
+            try { window.removeEventListener('hover-changed', this._hoverListener); } catch { /* ignore scene listing fallback failures */ }
+            this._hoverListener = null;
+        }
+        this.uiElement.remove();
+    }
+
+    // Internal -----------------------------------------------------------------
+
+    #isSolid(obj) {
+        // Treat SOLID, COMPONENT, SKETCH, DATUM, and HELIX groups as top-level items in the tree
+        return obj && obj.isObject3D && (obj.type === "SOLID" || obj.type === "COMPONENT" || obj.type === "SKETCH" || obj.type === "DATUM" || obj.type === "HELIX");
+    }
+    #isFace(obj) { return obj && obj.type === "FACE"; }
+    #isEdge(obj) { return obj && obj.type === "EDGE"; }
+    #isLoop(obj) { return obj && obj.type === "LOOP"; }
+    #isVertex(obj) { return obj && obj.type === "VERTEX"; }
+    #isPlane(obj) { return obj && obj.type === "PLANE"; }
+    #isDatum(obj) { return obj && obj.type === "DATUM"; }
+    #isSketch(obj) { return obj && obj.type === "SKETCH"; }
+    #isComponent(obj) { return obj && obj.type === "COMPONENT"; }
+    #canExpand(obj) {
+        if (!obj || !obj.isObject3D) return false;
+        if (this._showAllObjects) return !!(obj.children && obj.children.length);
+        return this.#isSolid(obj);
+    }
+    #isCenterlineEdge(obj) {
+        if (!obj || obj.type !== "EDGE") return false;
+        const ud = obj.userData || {};
+        if (ud.centerline) return true;
+        const name = obj.name || "";
+        return /centerline/i.test(name);
+    }
+    #isRegularEdge(obj) { return this.#isEdge(obj) && !this.#isCenterlineEdge(obj); }
+
+    #syncMembership() {
+        const present = new Set();
+
+        if (this._showAllObjects) {
+            // Show every Object3D in the scene (recursive)
+            const stack = [...this.scene.children];
+            while (stack.length) {
+                const o = stack.pop();
+                if (!o || !o.isObject3D) continue;
+                present.add(o.uuid);
+                const parentObj = (o.parent && o.parent.isObject3D && o.parent !== this.scene) ? o.parent : null;
+                this.#ensureNodeFor(o, parentObj);
+                if (o.children && o.children.length) stack.push(...o.children);
+            }
+        } else {
+            // Find solids at any depth (simple stack)
+            const stack = [...this.scene.children];
+            while (stack.length) {
+                const o = stack.pop();
+                if (!o || !o.isObject3D) continue;
+                if (this.#isSolid(o)) {
+                    const parentSolid = (o.parent && this.#isSolid(o.parent)) ? o.parent : null;
+                    // Ensure node for Solid (or component) with awareness of parent containers
+                    present.add(o.uuid);
+                    this.#ensureNodeFor(o, parentSolid);
+                    // Ensure children nodes for faces/edges/loops/vertices/planes (direct children of Solid/Sketch/Datum)
+                    for (const child of o.children) {
+                        if (!child || !child.isObject3D) continue;
+                        if (this.#isFace(child) || this.#isEdge(child) || this.#isLoop(child) || this.#isVertex(child) || this.#isPlane(child)) {
+                            present.add(child.uuid);
+                            this.#ensureNodeFor(child, o);
+                        }
+                    }
+                }
+                // continue traversal
+                if (o.children && o.children.length) stack.push(...o.children);
+            }
+        }
+
+        // Remove nodes whose objects are gone
+        for (const [uuid] of [...this.nodes]) {
+            if (!present.has(uuid)) this.#removeNode(uuid);
+        }
+    }
+
+    #ensureNodeFor(obj, parentSolid /* may be null for Solid itself */) {
+        // Parent UL: solids go at root; others under their owning solid node
+        let parentUL = this.treeRoot;
+        let depth = 0;
+        if (parentSolid) {
+            const pInfo = this.nodes.get(parentSolid.uuid) || this.#ensureNodeFor(parentSolid, null);
+            if (!pInfo.childrenUL) {
+                pInfo.childrenUL = document.createElement("ul");
+                pInfo.childrenUL.className = "scene-tree__list scene-tree__list--child";
+                pInfo.li.appendChild(pInfo.childrenUL);
+                pInfo.li.classList.add("is-parent");
+            }
+            parentUL = pInfo.childrenUL;
+            depth = ((typeof pInfo.depth === "number") ? pInfo.depth : 0) + 1;
+        }
+
+        const existing = this.nodes.get(obj.uuid);
+        if (existing) {
+            // Keep structure and indent coherent even if parentage changes between sync passes.
+            if (existing.li.parentElement !== parentUL) parentUL.appendChild(existing.li);
+            if (existing.depth !== depth) {
+                existing.depth = depth;
+                existing.li.style.setProperty("--st-indent", `${depth * SCENE_TREE_INDENT_STEP_PX}px`);
+            }
+            return existing;
+        }
+
+        const li = document.createElement("li");
+        li.className = "scene-tree__item";
+        li.dataset.uuid = obj.uuid;
+        li.style.setProperty("--st-indent", `${depth * SCENE_TREE_INDENT_STEP_PX}px`);
+
+        // Row content: [▸][☑][name (button)]
+        const row = document.createElement("div");
+        row.className = "scene-tree__row";
+
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "st-caret";
+        toggle.addEventListener("click", (e) => {
+            e.stopPropagation();
+            if (!this.#canExpand(obj)) return;
+            const open = !li.classList.contains("open");
+            this.#setOpen(li, open);
+        });
+
+        const chk = document.createElement("input");
+        chk.type = "checkbox";
+        chk.className = "st-chk";
+        chk.title = "Toggle visibility";
+
+        const nameBtn = document.createElement("button");
+        nameBtn.type = "button";
+        nameBtn.className = "st-name";
+        nameBtn.textContent = this.#labelFor(obj);
+        nameBtn.title = nameBtn.textContent;
+
+        // Visibility: checkbox -> set ONLY this object's visibility (no recursion)
+        chk.addEventListener("change", (e) => {
+            const on = chk.checked;
+            if (typeof obj.visible !== "undefined") obj.visible = on;
+            // Immediate reflect
+            this.#syncAttributes();
+            this.#requestRender();
+            e.stopPropagation();
+        });
+
+        const hoverOn = () => {
+            try { SelectionFilter.setHoverObject(obj, { ignoreFilter: true }); } catch (_) { /* ignore scene listing fallback failures */ }
+        };
+        const hoverOff = () => {
+            try { SelectionFilter.clearHover(); } catch (_) { /* ignore scene listing fallback failures */ }
+        };
+
+        // Selection: name click -> recursive toggle selection (unchanged)
+        nameBtn.addEventListener("click", (e) => {
+            this.#syncAttributes();
+
+            try { obj.onClick(); } catch { /* ignore scene listing fallback failures */ }
+            this.#notifySelection(obj);
+            // Scroll highlight
+            //li.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            e.stopPropagation();
+        });
+
+        // Hover highlight for the full row (ignore selection filter)
+        row.addEventListener('pointerenter', hoverOn);
+        row.addEventListener('pointerleave', hoverOff);
+
+        // Row assembly
+        row.appendChild(toggle);
+        row.appendChild(chk);
+        row.appendChild(nameBtn);
+        li.appendChild(row);
+        parentUL.appendChild(li);
+
+        const info = {
+            obj,
+            li,
+            chk,
+            nameEl: nameBtn,
+            caret: toggle,
+            depth,
+            childrenUL: null,
+            lastSelected: undefined
+        };
+        this.nodes.set(obj.uuid, info);
+
+        // Initial state: solids collapsed by default; restore remembered open state by name
+        if (this.#canExpand(obj)) this.#setOpen(li, this.#wantOpen(obj));
+        this.#syncCaret(info);
+        this.#applyTypeClass(li, obj);
+        return info;
+    }
+
+    #removeNode(uuid) {
+        const info = this.nodes.get(uuid);
+        if (!info) return;
+        info.li.remove();
+        this.nodes.delete(uuid);
+    }
+
+    #syncAttributes() {
+        // Reflect plain per-object visibility & selection back into UI
+        for (const info of this.nodes.values()) {
+            const obj = info.obj;
+            this.#syncCaret(info);
+
+            // Checkbox: reflect ONLY obj.visible
+            const desiredChecked = !!obj.visible;
+            if (info.chk.checked !== desiredChecked) info.chk.checked = desiredChecked;
+            if (info.chk.indeterminate) info.chk.indeterminate = false;
+
+            // Selection highlight
+            const sel = !!obj.selected;
+            if (sel !== info.lastSelected) {
+                info.lastSelected = sel;
+                info.li.classList.toggle("is-selected", sel);
+            }
+            const hovered = this._hoveredUuids.has(obj.uuid);
+            info.li.classList.toggle("is-hovered", hovered);
+
+            // Keep label fresh (names may change externally)
+            const wantLabel = this.#labelFor(obj);
+            if (info.nameEl.textContent !== wantLabel) {
+                info.nameEl.textContent = wantLabel;
+                info.nameEl.title = wantLabel;
+            }
+        }
+    }
+
+    #syncHoverFromScene(ev) {
+        const detail = ev?.detail || {};
+        let uuids = [];
+        if (Array.isArray(detail.uuids) && detail.uuids.length) {
+            uuids = detail.uuids;
+        } else if (Array.isArray(detail.objects)) {
+            uuids = detail.objects.map((obj) => obj?.uuid).filter(Boolean);
+        }
+        const next = new Set(uuids);
+        for (const uuid of this._hoveredUuids) {
+            if (next.has(uuid)) continue;
+            const info = this.nodes.get(uuid);
+            if (info) info.li.classList.remove('is-hovered');
+        }
+        for (const uuid of next) {
+            if (this._hoveredUuids.has(uuid)) continue;
+            const info = this.nodes.get(uuid);
+            if (info) info.li.classList.add('is-hovered');
+        }
+        this._hoveredUuids = next;
+    }
+
+    // ---- Actions --------------------------------------------------------------
+
+    #setSelectedRecursive(obj, sel) {
+        if ("selected" in obj) {
+            try { obj.selected = sel; } catch (_) { /* ignore scene listing fallback failures */ }
+        }
+        if (obj.children && obj.children.length) {
+            for (const c of obj.children) this.#setSelectedRecursive(c, sel);
+        }
+    }
+
+    #anyRecursive(obj, predicate) {
+        if (predicate(obj)) return true;
+        if (obj.children) {
+            for (const c of obj.children) if (this.#anyRecursive(c, predicate)) return true;
+        }
+        return false;
+    }
+
+    // ---- UI helpers -----------------------------------------------------------
+
+    #attachDisplayModeToggle() {
+        const wrap = document.createElement("label");
+        wrap.className = "st-toggle";
+        wrap.title = "Show all scene objects (recursive)";
+
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.className = "st-toggle__input";
+        input.checked = !!this._showAllObjects;
+
+        const text = document.createElement("span");
+        text.className = "st-toggle__label";
+        text.textContent = "All Objects";
+
+        wrap.appendChild(input);
+        wrap.appendChild(text);
+
+        input.addEventListener("change", (e) => {
+            e.stopPropagation();
+            this._showAllObjects = input.checked;
+            this.refresh();
+        });
+
+        this.toolbar.appendChild(wrap);
+    }
+
+    #attachTypeVisibilityButtons() {
+        const makeTypeButton = (label, title, predicate) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "st-btn st-btn--type";
+            btn.textContent = label;
+            btn.title = title;
+            btn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this.#toggleVisibility(predicate);
+            });
+            return btn;
+        };
+
+        const isSolid = (obj) => obj && obj.type === "SOLID";
+        const isComponent = (obj) => this.#isComponent(obj);
+        const isFace = (obj) => this.#isFace(obj);
+        const isEdge = (obj) => this.#isRegularEdge(obj);
+        const isVertex = (obj) => this.#isVertex(obj);
+        const isCenterline = (obj) => this.#isCenterlineEdge(obj);
+        const isDatumOrPlane = (obj) => this.#isDatum(obj) || this.#isPlane(obj);
+        const isSketchOrChild = (obj) => this.#isSketch(obj) || (obj && obj.parent && this.#isSketch(obj.parent));
+
+        this.toolbar.appendChild(makeTypeButton("Solid", "Toggle visibility of all Solids", isSolid));
+        this.toolbar.appendChild(makeTypeButton("Component", "Toggle visibility of all Components", isComponent));
+        this.toolbar.appendChild(makeTypeButton("Face", "Toggle visibility of all Faces", isFace));
+        this.toolbar.appendChild(makeTypeButton("Edge", "Toggle visibility of all Edges (excluding centerlines)", isEdge));
+        this.toolbar.appendChild(makeTypeButton("Centerline", "Toggle visibility of all Centerlines", isCenterline));
+        this.toolbar.appendChild(makeTypeButton("Point", "Toggle visibility of all Points", isVertex));
+        this.toolbar.appendChild(makeTypeButton("Datium", "Toggle visibility of all Datiums (including planes)", isDatumOrPlane));
+        this.toolbar.appendChild(makeTypeButton("Sketch", "Toggle visibility of all Sketches", isSketchOrChild));
+    }
+
+    #toggleVisibility(predicate) {
+        // Decide target: if any matching obj is visible, hide all; otherwise show all.
+        let anyVisible = false;
+        for (const info of this.nodes.values()) {
+            const obj = info.obj;
+            if (predicate(obj) && obj && obj.visible !== false) {
+                anyVisible = true;
+                break;
+            }
+        }
+        const target = !anyVisible;
+        for (const info of this.nodes.values()) {
+            const obj = info.obj;
+            if (predicate(obj) && obj) {
+                if (typeof obj.visible !== "undefined") obj.visible = target;
+            }
+        }
+        this.#syncAttributes();
+        this.#requestRender();
+    }
+
+    #labelFor(obj) {
+        const base =
+            this.#isSolid(obj) ? (obj.name || "Solid") :
+                this.#isFace(obj) ? (obj.name || "Face") :
+                    this.#isEdge(obj) ? (obj.name || "Edge") :
+                        this.#isLoop(obj) ? (obj.name || "Loop") :
+                            this.#isVertex(obj) ? (obj.name || "Vertex") :
+                            (obj.name || obj.type || "Item");
+        return base;
+    }
+
+    #notifySelection(obj) {
+        if (!this._onSelection) return;
+        try { this._onSelection(obj); } catch { /* ignore scene listing fallback failures */ }
+    }
+
+    #requestRender() {
+        if (!this._onRender) return;
+        try { this._onRender(); } catch { /* ignore scene listing fallback failures */ }
+    }
+
+    #applyTypeClass(li, obj) {
+        if (this.#isSolid(obj)) li.classList.add("t-solid");
+        else if (this.#isFace(obj)) li.classList.add("t-face");
+        else if (this.#isEdge(obj)) li.classList.add("t-edge");
+        else if (this.#isLoop(obj)) li.classList.add("t-loop");
+        else if (this.#isVertex(obj)) li.classList.add("t-vertex");
+        else if (this.#isPlane(obj)) li.classList.add("t-plane");
+    }
+
+    #setOpen(li, open) {
+        if (!li) return;
+        const caret = li.querySelector(".st-caret");
+        if (open) {
+            li.classList.add("open");
+            if (caret) caret.textContent = "▾";
+        } else {
+            li.classList.remove("open");
+            if (caret) caret.textContent = "▸";
+        }
+        // Persist state for solids by name (and by uuid for other nodes when enabled)
+        try {
+            const uuid = li?.dataset?.uuid;
+            const info = uuid ? this.nodes.get(uuid) : null;
+            const obj = info ? info.obj : null;
+            if (obj) this.#rememberOpenState(obj, open);
+        } catch (_) { /* ignore scene listing fallback failures */ }
+    }
+
+    #rememberOpenState(obj, open) {
+        if (!obj) return;
+        const solidKey = this.#solidOpenKey(obj);
+        if (solidKey) {
+            this._expandedByName.set(solidKey, !!open);
+            return;
+        }
+        if (this._showAllObjects && obj.uuid) {
+            this._expandedByUuid.set(obj.uuid, !!open);
+        }
+    }
+
+    #solidOpenKey(obj) {
+        if (!obj || !this.#isSolid(obj)) return null;
+        const key = (obj.name && String(obj.name).length) ? String(obj.name) : null;
+        return key;
+    }
+
+    #syncCaret(info) {
+        if (!info || !info.caret) return;
+        const obj = info.obj;
+        const canExpand = this.#canExpand(obj);
+        if (canExpand) {
+            if (info.caret.classList.contains("is-leaf")) info.caret.classList.remove("is-leaf");
+            if (info.caret.disabled) info.caret.disabled = false;
+            if (info.caret.title !== "Expand/Collapse") info.caret.title = "Expand/Collapse";
+            const open = info.li.classList.contains("open");
+            const symbol = open ? "▾" : "▸";
+            if (info.caret.textContent !== symbol) info.caret.textContent = symbol;
+        } else {
+            if (!info.caret.classList.contains("is-leaf")) info.caret.classList.add("is-leaf");
+            if (!info.caret.disabled) info.caret.disabled = true;
+            if (info.caret.textContent !== "•") info.caret.textContent = "•";
+            if (info.caret.title) info.caret.title = "";
+        }
+    }
+
+    // Remembered open state for solids (by name), default collapsed when unknown/unnamed
+    #wantOpen(obj) {
+        try {
+            const solidKey = this.#solidOpenKey(obj);
+            if (solidKey) return !!this._expandedByName.get(solidKey);
+            if (this._showAllObjects && obj && obj.uuid) return !!this._expandedByUuid.get(obj.uuid);
+            return false;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    #ensureStyles() {
+        const ID = "scene-tree-styles";
+        let style = document.getElementById(ID);
+        if (!style) {
+            style = document.createElement("style");
+            style.id = ID;
+            document.head.appendChild(style);
+        }
+        style.textContent = `
+/* Dark, minimalist tree for CAD scene - Expand/Collapse fix included */
+.scene-tree{
+  color-scheme: dark;
+  --bg:#0a0f14;
+  --row:#0e141b;
+  --row2:#0b1016;
+  --hover:#111826;
+  --sel:#1e2a3a;
+  --muted:#8b98a9;
+  --fg:#e6edf3;
+  --accent:#4aa3ff;
+  --border:#17202b;
+  background:var(--bg);
+  color:var(--fg);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:3px;
+  overflow:auto;
+}
+.scene-tree__toolbar{
+  display:flex; gap:6px; margin-bottom:6px; flex-wrap:wrap;
+}
+.st-toggle{
+  display:flex; align-items:center; gap:6px;
+  background:#0f1722; color:var(--fg); border:1px solid var(--border);
+  padding:2px 8px; border-radius:8px; font-size:11px; cursor:pointer;
+}
+.st-toggle__input{
+  margin:0; accent-color: var(--accent); cursor:pointer;
+}
+.st-toggle__label{
+  cursor:pointer;
+}
+.st-toggle:hover{ background:var(--hover); }
+.st-btn{
+  background:#0f1722; color:var(--fg); border:1px solid var(--border);
+  padding:4px; border-radius:8px; cursor:pointer;
+}
+.st-btn--type{
+  font-size:11px;
+  padding:2px 8px;
+}
+.st-btn:hover{ background:var(--hover); }
+.scene-tree__list{
+  list-style:none; margin:0; padding:0;
+}
+.scene-tree__item{
+  border-bottom:1px solid #0f1620;
+}
+.scene-tree__row{
+  display:grid;
+  grid-template-columns: var(--st-indent, 0px) 20px 14px minmax(0, 1fr);
+  align-items:center;
+  column-gap:2px;
+  padding:2px;
+  background:var(--row);
+}
+.scene-tree__item:nth-child(even) > .scene-tree__row{ background:var(--row2); }
+.scene-tree__item.is-selected > .scene-tree__row{
+  background: var(--sel);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.scene-tree__item.is-hovered > .scene-tree__row{
+  background: #142033;
+  box-shadow: inset 0 0 0 1px rgba(74,163,255,.45);
+}
+.scene-tree__item.is-parent.open > .scene-tree__row{ border-bottom:1px solid #111a26; }
+.st-caret{
+  grid-column:2;
+  width:20px; height:20px; border:0; background:transparent; color:var(--muted);
+  cursor:pointer; line-height:1; padding:0;
+  display:flex; align-items:center; justify-content:center;
+}
+.st-caret.is-leaf{ opacity:.35; cursor:default; }
+.st-chk{
+  grid-column:3;
+  width:14px; height:14px; accent-color: var(--accent);
+  cursor:pointer;
+  margin:0;
+}
+.st-name{
+  grid-column:4;
+  background:transparent; border:0; color:var(--fg); cursor:pointer; padding:0;
+  font:inherit; text-align:left;
+  min-width:0;
+  width:auto;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.st-name:hover{ text-decoration: underline; }
+.scene-tree__list--child{
+  margin:0; padding-left:0;
+}
+
+/* ▼▼ Expand/Collapse behavior (fix): hide child UL when parent isn't open */
+.scene-tree__item.is-parent > .scene-tree__list--child { display: none; }
+.scene-tree__item.is-parent.open > .scene-tree__list--child { display: block; }
+/* ▲▲ */
+
+/* Type tint (subtle) */
+.t-face  .st-name{ color:#c7e0ff; }
+.t-edge  .st-name{ color:#bfe4d0; }
+.t-loop  .st-name{ color:#e7ced6; }
+.t-vertex .st-name{ color:#ffe6a6; }
+.t-plane .st-name{ color:#c7ffcf; }
+
+`;
+    }
+}

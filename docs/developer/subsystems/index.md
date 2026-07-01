@@ -14,9 +14,8 @@ Use this section for application subsystems outside the core kernel and embed AP
 
 ## Inspector and Debugging
 
-- [Inspector](../../inspector.md)
-- [Inspector Improvements](../../inspector-improvements.md)
-- [Dialog Screenshots](../../dialog-screenshots.md)
+- [Inspector Tool](../../tools/inspector.md)
+- [Dialog Screenshots](./dialog-screenshots.md)
 
 ## PMI and Annotation Systems
 
@@ -31,5 +30,5 @@ Use this section for application subsystems outside the core kernel and embed AP
 
 ## Extension and Platform Topics
 
-- [Plugins and Examples](../../plugins.md)
+- [Plugins and Examples](./plugins.md)
 - [Font Licenses](../../fonts-licenses.md)

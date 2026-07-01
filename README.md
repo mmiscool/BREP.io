@@ -24,9 +24,9 @@ This project is in active development and APIs may continue to evolve.
 ## Screenshots
 
 ![Home @280](docs/HOME.png)
-[![Modeling Mode @280](docs/MODELING.png)](docs/modes/modeling.md)
-[![Sketch Mode @280](docs/SKETCH.png)](docs/modes/sketch.md)
-[![PMI Mode @280](docs/PMI.png)](docs/modes/pmi.md)
+[![Modeling Mode @280](docs/MODELING.png)](docs/workbenches/modeling.md)
+[![Sketch Mode @280](docs/SKETCH.png)](docs/features/sketch.md)
+[![PMI Mode @280](docs/PMI.png)](docs/workbenches/pmi.md)
 [![2D Sheets Mode @280](docs/SHEETS.png)](docs/modes/sheets.md)
 [![Image to Face 2D @280](docs/features/image-to-face-2D_dialog.png)](docs/features/image-to-face.md)
 [![Image to Face 3D @280](docs/features/image-to-face-3D_dialog.png)](docs/features/image-to-face.md)
@@ -35,14 +35,12 @@ This project is in active development and APIs may continue to evolve.
 ## Documentation Index
 
 General:
-- [Developer Docs Index](docs/developer-index.md)
-- [Highlights](docs/highlights.md)
-- [What's New](docs/whats-new.md)
+- [Developer Docs Index](docs/developer/index.md)
 
-Mode guides:
-- [Modeling Mode](docs/modes/modeling.md)
-- [Sketch Mode](docs/modes/sketch.md)
-- [PMI Mode](docs/modes/pmi.md)
+Workbench and mode guides:
+- [Modeling Workbench](docs/workbenches/modeling.md)
+- [Sketch Feature and Mode](docs/features/sketch.md)
+- [PMI Workbench](docs/workbenches/pmi.md)
 - [2D Sheets Mode](docs/modes/sheets.md)
 
 ## Modeling Feature Docs
@@ -58,7 +56,6 @@ Primitives and setup:
 - [Primitive Torus](docs/features/primitive-torus.md)
 - [Primitive Pyramid](docs/features/primitive-pyramid.md)
 - [Plane](docs/features/plane.md)
-- [Datum](docs/features/datum.md)
 - [Datium](docs/features/datium.md)
 - [Sketch](docs/features/sketch.md)
 - [Spline](docs/features/spline.md)
@@ -82,9 +79,7 @@ Solid operations:
 - [Transform](docs/features/transform.md)
 
 Pattern, import, and generation:
-- [Pattern (Legacy Combined)](docs/features/pattern.md)
-- [Pattern Linear](docs/features/pattern-linear.md)
-- [Pattern Radial](docs/features/pattern-radial.md)
+- [Pattern](docs/features/pattern.md)
 - [Import 3D Model](docs/features/import-3d-model.md)
 - [Image Heightmap Solid](docs/features/image-heightmap-solid.md)
 - [Image to Face](docs/features/image-to-face.md)
@@ -150,7 +145,7 @@ Then open the Vite URL shown in your terminal.
 | `pnpm use:manifold:npm` | Switches runtime/builds to the published `manifold-3d` npm package. |
 | `pnpm use:manifold:local` | Switches runtime/builds to the locally compiled manifold bundle. |
 | `pnpm which:manifold` | Prints the currently selected manifold source. |
-| `pnpm test` | Runs the Node test suite (`src/tests/tests.js`), writing artifacts to `tests/results/`. |
+| `pnpm test` | Runs the Node test suite (`src/tests/tests.ts`), writing artifacts to `tests/results/`. |
 | `pnpm test -- test_primitiveCube` | Runs one registered test by exact test function name. |
 | `pnpm liveTesting` | Watches `src/` and `tests/` and reruns tests on change. |
 | `pnpm capture` | Captures docs/dialog screenshots. |
@@ -195,9 +190,7 @@ import {
   BREP,
   PartHistory,
   AssemblyConstraintHistory,
-  AssemblyConstraintRegistry,
-  CadEmbed,
-  Sketcher2DEmbed
+  AssemblyConstraintRegistry
 } from "brep-io-kernel";
 ```
 

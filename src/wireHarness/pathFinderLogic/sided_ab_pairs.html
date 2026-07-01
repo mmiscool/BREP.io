@@ -3,18 +3,7 @@
 <head>
   <title>Sided-A/B Path Demo</title>
   <link rel="stylesheet" type="text/css" href="demo.css">
-  <script type="module">
-    import {parseJsonAndPrintError, sidedAdPairsResolve} from "./demo.js"
-
-    async function doAnalyse() {
-      const segments = parseJsonAndPrintError(document.querySelector("#segments").value, "error");
-      const pairs = parseJsonAndPrintError(document.querySelector("#pairs").value, "error");
-      const report = await sidedAdPairsResolve(segments, pairs, false, "error", "timing");
-      document.querySelector("#results").value = report;
-    }
-
-    document.querySelector("#doAnalyse").onclick = doAnalyse;
-  </script>
+  <script type="module" src="./sided_ab_pairs.ts"></script>
 </head>
 
 <body>

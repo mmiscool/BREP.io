@@ -1,26 +1,51 @@
 {
+  "entry": [
+    "bin/brep-io-kernel.ts",
+    "src/index.ts",
+    "src/CAD.ts",
+    "src/Sketcher2D.ts",
+    "src/Sketcher2DUtils.ts",
+    "src/SketchSolver2D.ts",
+    "src/main.ts",
+    "src/main-cad.ts",
+    "test.ts",
+    "src/tools/assemblyConstraintDialogCapturePage.ts",
+    "src/tools/dialogCapturePageFactory.ts",
+    "src/tools/featureDialogCapturePage.ts",
+    "src/tools/fontAuditPage.ts",
+    "src/tools/pmiAnnotationDialogCapturePage.ts",
+    "src/wireHarness/pathFinderLogic/demo.ts",
+    "src/wireHarness/pathFinderLogic/js/digraphs/digraph_simple_builder.ts",
+    "src/wireHarness/pathFinderLogic/js/digraphs/spt_html.ts",
+    "src/wireHarness/pathFinderLogic/js/heap/test_heap.ts",
+    "src/wireHarness/pathFinderLogic/js/test_digraph_builders.ts",
+    "src/wireHarness/pathFinderLogic/sided_ab_demo.ts",
+    "src/wireHarness/pathFinderLogic/sided_ab_pairs.ts",
+    "src/wireHarness/pathFinderLogic/sided_ab_pairs_grid.ts",
+    "src/wireHarness/pathFinderLogic/simple_demo.ts"
+  ],
   "ignorePatterns": [
     "vendor/**",
     "**/samples/**",
     "apiExamples/**",
     "brep-io-kernel-examples/**",
-    "src/UI/sketcher/handDrawToVectors/demo.js",
+    "src/UI/sketcher/handDrawToVectors/demo.ts",
     "src/UI/sketcher/handDrawToVectors/style.css",
-    "src/features/textToFace/fontUrlLoaders.vite.js",
-    "src/main-cad.js",
-    "src/tools/*CapturePage.js",
-    "src/tools/dialogCapturePageFactory.js",
-    "src/tools/fontAuditPage.js",
+    "src/features/textToFace/fontUrlLoaders.vite.ts",
+    "src/main-cad.ts",
+    "src/tools/*CapturePage.ts",
+    "src/tools/dialogCapturePageFactory.ts",
+    "src/tools/fontAuditPage.ts",
     "src/wireHarness/pathFinderLogic/demo.css",
-    "src/wireHarness/pathFinderLogic/demo.js",
-    "src/wireHarness/pathFinderLogic/js/digraphs/digraph_simple_builder.js",
-    "src/wireHarness/pathFinderLogic/js/digraphs/spt_html.js",
-    "src/wireHarness/pathFinderLogic/js/test_digraph_builders.js",
+    "src/wireHarness/pathFinderLogic/demo.ts",
+    "src/wireHarness/pathFinderLogic/js/digraphs/digraph_simple_builder.ts",
+    "src/wireHarness/pathFinderLogic/js/digraphs/spt_html.ts",
+    "src/wireHarness/pathFinderLogic/js/test_digraph_builders.ts",
     "**/docs/**"
   ],
   "ignoreExports": [
     {
-      "file": "src/UI/sketcher/handDrawToVectors/fuzzydraw.js",
+      "file": "src/UI/sketcher/handDrawToVectors/fuzzydraw.ts",
       "exports": [
         "defaultOptions",
         "loadPNGToImageData",
@@ -28,15 +53,15 @@
       ]
     },
     {
-      "file": "src/UI/assembly/constraintSelectionUtils.js",
+      "file": "src/UI/assembly/constraintSelectionUtils.ts",
       "exports": ["*"]
     },
     {
-      "file": "src/features/selectionUtils.js",
+      "file": "src/features/selectionUtils.ts",
       "exports": ["*"]
     },
     {
-      "file": "src/utils/selectionResolver.js",
+      "file": "src/utils/selectionResolver.ts",
       "exports": ["*"]
     }
   ]

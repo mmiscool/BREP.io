@@ -5,9 +5,9 @@ Status: Implemented
 The assembly constraint solver manages constraint instances attached to an assembly and iteratively applies translations or rotations until every constraint reports that it is satisfied (or until the iteration budget is exhausted). It lives alongside the constraint implementations in `src/assemblyConstraints` and mirrors the documentation pattern already used for PMI annotations.
 
 ## Key Files
-- `src/assemblyConstraints/AssemblyConstraintHistory.js` – orchestrates constraint storage, scheduling, and the iterative solve loop.
-- `src/assemblyConstraints/AssemblyConstraintRegistry.js` – registers built-in constraint classes and resolves aliases.
-- `src/assemblyConstraints/BaseAssemblyConstraint.js` – base class that exposes shared helpers and metadata conventions for concrete constraints.
+- `src/assemblyConstraints/AssemblyConstraintHistory.ts` – orchestrates constraint storage, scheduling, and the iterative solve loop.
+- `src/assemblyConstraints/AssemblyConstraintRegistry.ts` – registers built-in constraint classes and resolves aliases.
+- `src/assemblyConstraints/BaseAssemblyConstraint.ts` – base class that exposes shared helpers and metadata conventions for concrete constraints.
 
 ## Runtime Flow
 - Every constraint entry carries a `type`, `inputParams`, and `persistentData`. Defaults come from the constraint's `inputParamsSchema`, and each entry receives an auto-generated `id` (for example `COIN12`).
@@ -34,12 +34,12 @@ Each constraint receives the same runtime context object. The most frequently us
 
 ## Constraint Catalog
 Built-in constraints are registered in the registry and documented individually:
-- [Angle Constraint](angle-constraint.md)
-- [Coincident Constraint](coincident-constraint.md)
-- [Distance Constraint](distance-constraint.md)
-- [Fixed Constraint](fixed-constraint.md)
-- [Parallel Constraint](parallel-constraint.md)
-- [Touch Align Constraint](touch-align-constraint.md)
+- [Angle Constraint](./angle-constraint.md)
+- [Coincident Constraint](./coincident-constraint.md)
+- [Distance Constraint](./distance-constraint.md)
+- [Fixed Constraint](./fixed-constraint.md)
+- [Parallel Constraint](./parallel-constraint.md)
+- [Touch Align Constraint](./touch-align-constraint.md)
 
 ## Adding Components for Constraints
 Assembly constraints operate on `AssemblyComponent` instances, not ad-hoc solids. Add every part to the assembly using the [Assembly Component](../features/assembly-component.md) feature first; this inserts the 3MF-backed component into the assembly graph, preserves face/body naming for selections, and exposes the transform that constraints manipulate. Solids added by other modeling features won’t participate in the constraint solver until they’re brought in as assembly components.

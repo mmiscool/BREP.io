@@ -1,0 +1,252 @@
+import { ALL_WORKBENCH } from './allWorkbench.js';
+import { ASSEMBLIES_WORKBENCH } from './assembliesWorkbench.js';
+import { IMPORT_WORKBENCH } from './importWorkbench.js';
+import { MODELING_WORKBENCH } from './modelingWorkbench.js';
+import { PMI_WORKBENCH } from './pmiWorkbench.js';
+import { SHEET_METAL_WORKBENCH } from './sheetMetalWorkbench.js';
+import { SIMULATION_WORKBENCH } from './simulationWorkbench.js';
+import { SURFACING_WORKBENCH } from './surfacingWorkbench.js';
+import { WIRE_HARNESS_WORKBENCH } from './wireHarnessWorkbench.js';
+
+export type WorkbenchId =
+  | 'MODELING'
+  | 'IMPORT'
+  | 'SURFACING'
+  | 'SHEET_METAL'
+  | 'SIMULATION'
+  | 'ASSEMBLIES'
+  | 'WIRE_HARNESS'
+  | 'PMI'
+  | 'ALL';
+
+export type WorkbenchList = Array<WorkbenchId | '*'>;
+
+export type WorkbenchDefinition = {
+  id: WorkbenchId;
+  label: string;
+  featureTypes: string[] | '*';
+  contextFamilies: Record<string, boolean>;
+  sidePanels: Record<string, boolean>;
+  toolbarButtons: string[] | '*';
+};
+
+type FeatureWorkbenchOptions = {
+  workbenches?: unknown;
+};
+
+type FeatureClassLike = {
+  shortName?: string;
+  featureShortName?: string;
+  type?: string;
+  name?: string;
+};
+
+type ViewerLike = {
+  partHistory?: PartHistoryLike | null;
+  _getActiveWorkbenchId?: () => unknown;
+};
+
+type PartHistoryLike = {
+  activeWorkbench?: unknown;
+  featureRegistry?: { features?: FeatureClassLike[] } | null;
+};
+
+type WorkbenchScopedRecord = {
+  id?: string;
+  source?: string;
+  global?: boolean;
+  workbenches?: unknown;
+};
+
+export const WORKBENCH_IDS = {
+  MODELING: 'MODELING',
+  IMPORT: 'IMPORT',
+  SURFACING: 'SURFACING',
+  SHEET_METAL: 'SHEET_METAL',
+  SIMULATION: 'SIMULATION',
+  ASSEMBLIES: 'ASSEMBLIES',
+  WIRE_HARNESS: 'WIRE_HARNESS',
+  PMI: 'PMI',
+  ALL: 'ALL',
+} as const satisfies Record<WorkbenchId, WorkbenchId>;
+
+export const WORKBENCH_LIST: WorkbenchDefinition[] = [
+  MODELING_WORKBENCH,
+  IMPORT_WORKBENCH,
+  SURFACING_WORKBENCH,
+  SHEET_METAL_WORKBENCH,
+  SIMULATION_WORKBENCH,
+  ASSEMBLIES_WORKBENCH,
+  WIRE_HARNESS_WORKBENCH,
+  PMI_WORKBENCH,
+  ALL_WORKBENCH,
+];
+
+const WORKBENCH_MAP = new Map(WORKBENCH_LIST.map((definition) => [definition.id, definition]));
+const FEATURE_WORKBENCH_METADATA = new WeakMap<object, WorkbenchList>();
+
+export function getDefaultWorkbenchForNewPart() {
+  return WORKBENCH_IDS.MODELING;
+}
+
+export function getLegacyLoadWorkbenchDefault() {
+  return WORKBENCH_IDS.ALL;
+}
+
+export function normalizeWorkbenchId<T extends WorkbenchId | '' = WorkbenchId>(
+  value: unknown,
+  fallback?: T,
+): T extends '' ? WorkbenchId | '' : WorkbenchId {
+  const raw = String(value || '').trim().toUpperCase();
+  if (WORKBENCH_MAP.has(raw as WorkbenchId)) {
+    return raw as T extends '' ? WorkbenchId | '' : WorkbenchId;
+  }
+  return (fallback ?? WORKBENCH_IDS.ALL) as T extends '' ? WorkbenchId | '' : WorkbenchId;
+}
+
+export function listWorkbenchDefinitions() {
+  return WORKBENCH_LIST.slice();
+}
+
+export function getWorkbenchDefinition(workbenchId: unknown) {
+  return WORKBENCH_MAP.get(normalizeWorkbenchId(workbenchId, WORKBENCH_IDS.ALL)) || ALL_WORKBENCH;
+}
+
+export function getActiveWorkbench(partHistory: PartHistoryLike | null | undefined) {
+  return normalizeWorkbenchId(partHistory?.activeWorkbench, getLegacyLoadWorkbenchDefault());
+}
+
+export function setActiveWorkbench(partHistory: PartHistoryLike | null | undefined, workbenchId: unknown) {
+  if (!partHistory) return getLegacyLoadWorkbenchDefault();
+  const normalized = normalizeWorkbenchId(workbenchId, getDefaultWorkbenchForNewPart());
+  partHistory.activeWorkbench = normalized;
+  return normalized;
+}
+
+export function registerFeatureWorkbenchMetadata(FeatureClass: object | null | undefined, options: FeatureWorkbenchOptions = {}) {
+  if (!FeatureClass) return;
+  const workbenches = normalizeWorkbenchList(options?.workbenches);
+  if (workbenches == null) {
+    FEATURE_WORKBENCH_METADATA.delete(FeatureClass);
+    return;
+  }
+  FEATURE_WORKBENCH_METADATA.set(FeatureClass, workbenches);
+}
+
+export function getFeatureWorkbenchMetadata(FeatureClass: object | null | undefined) {
+  if (!FeatureClass) return null;
+  return FEATURE_WORKBENCH_METADATA.get(FeatureClass) || null;
+}
+
+export function normalizeWorkbenchList(value: unknown): WorkbenchList | null {
+  if (value == null || value === false) return null;
+  if (value === '*' || value === true) return ['*'];
+  if (typeof value === 'string') {
+    const normalized = normalizeWorkbenchId(value, '');
+    return normalized ? [normalized] : null;
+  }
+  if (!Array.isArray(value)) return null;
+  const out: WorkbenchId[] = [];
+  for (const item of value) {
+    const normalized = normalizeWorkbenchId(item, '');
+    if (normalized && !out.includes(normalized)) out.push(normalized);
+  }
+  return out.length ? out : null;
+}
+
+export function getFeatureCanonicalId(FeatureClass: FeatureClassLike | null | undefined) {
+  if (!FeatureClass) return '';
+  return String(
+    FeatureClass.shortName
+    || FeatureClass.featureShortName
+    || FeatureClass.type
+    || FeatureClass.name
+    || '',
+  ).trim().toUpperCase();
+}
+
+export function isFeatureAllowedInWorkbench(FeatureClass: FeatureClassLike | null | undefined, workbenchId: unknown) {
+  const activeWorkbench = normalizeWorkbenchId(workbenchId, getLegacyLoadWorkbenchDefault());
+  if (activeWorkbench === WORKBENCH_IDS.ALL) return true;
+  const declared = getFeatureWorkbenchMetadata(FeatureClass);
+  if (declared) {
+    if (declared.includes('*')) return true;
+    return declared.includes(activeWorkbench);
+  }
+  const definition = getWorkbenchDefinition(activeWorkbench);
+  const featureTypes = definition?.featureTypes;
+  if (featureTypes === '*') return true;
+  if (!Array.isArray(featureTypes)) return false;
+  const canonicalId = getFeatureCanonicalId(FeatureClass);
+  return featureTypes.includes(canonicalId);
+}
+
+export function getAllowedFeatureClasses(subject: ViewerLike | PartHistoryLike | null | undefined) {
+  const viewer = (subject as ViewerLike)?.partHistory ? subject as ViewerLike : null;
+  const partHistory = (viewer?.partHistory || subject || null) as PartHistoryLike | null;
+  const registry = partHistory?.featureRegistry || null;
+  const features = Array.isArray(registry?.features) ? registry.features : [];
+  const workbenchId = viewer?._getActiveWorkbenchId?.() || getActiveWorkbench(partHistory);
+  const allowed = features.filter((FeatureClass) => isFeatureAllowedInWorkbench(FeatureClass, workbenchId));
+  if (workbenchId === WORKBENCH_IDS.ALL) return allowed;
+  const featureTypes = getWorkbenchDefinition(workbenchId)?.featureTypes;
+  if (!Array.isArray(featureTypes) || featureTypes.length === 0) return allowed;
+
+  const orderIndex = new Map(featureTypes.map((featureType, index) => [String(featureType).trim().toUpperCase(), index]));
+  return allowed
+    .map((FeatureClass, registryIndex) => ({
+      FeatureClass,
+      registryIndex,
+      order: orderIndex.get(getFeatureCanonicalId(FeatureClass)),
+    }))
+    .sort((a, b) => {
+      const aOrdered = Number.isInteger(a.order);
+      const bOrdered = Number.isInteger(b.order);
+      if (aOrdered && bOrdered) return a.order - b.order;
+      if (aOrdered) return -1;
+      if (bOrdered) return 1;
+      return a.registryIndex - b.registryIndex;
+    })
+    .map(({ FeatureClass }) => FeatureClass);
+}
+
+export function isContextFamilyEnabled(family: string, workbenchId: unknown) {
+  const activeWorkbench = normalizeWorkbenchId(workbenchId, getLegacyLoadWorkbenchDefault());
+  if (activeWorkbench === WORKBENCH_IDS.ALL) return true;
+  const definition = getWorkbenchDefinition(activeWorkbench);
+  return !!definition?.contextFamilies?.[family];
+}
+
+export function isToolbarButtonAllowed(record: WorkbenchScopedRecord | null | undefined, workbenchId: unknown) {
+  const activeWorkbench = normalizeWorkbenchId(workbenchId, getLegacyLoadWorkbenchDefault());
+  if (activeWorkbench === WORKBENCH_IDS.ALL) return true;
+  if (!record) return false;
+  if (record.global === true) return true;
+  const declared = normalizeWorkbenchList(record.workbenches);
+  if (declared) {
+    if (declared.includes('*')) return true;
+    return declared.includes(activeWorkbench);
+  }
+  if (record.source === 'builtin' && record.id) {
+    const toolbarButtons = getWorkbenchDefinition(activeWorkbench)?.toolbarButtons;
+    if (toolbarButtons === '*') return true;
+    return Array.isArray(toolbarButtons) && toolbarButtons.includes(String(record.id));
+  }
+  return false;
+}
+
+export function isSidePanelAllowed(record: WorkbenchScopedRecord | null | undefined, workbenchId: unknown) {
+  const activeWorkbench = normalizeWorkbenchId(workbenchId, getLegacyLoadWorkbenchDefault());
+  if (activeWorkbench === WORKBENCH_IDS.ALL) return true;
+  if (!record) return false;
+  if (record.global === true) return true;
+  const declared = normalizeWorkbenchList(record.workbenches);
+  if (declared) {
+    if (declared.includes('*')) return true;
+    return declared.includes(activeWorkbench);
+  }
+  if (record.source === 'builtin' && record.id) {
+    return !!getWorkbenchDefinition(activeWorkbench)?.sidePanels?.[record.id];
+  }
+  return false;
+}
