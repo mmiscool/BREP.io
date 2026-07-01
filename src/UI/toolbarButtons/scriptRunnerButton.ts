@@ -232,7 +232,7 @@ class ScriptRunnerPanel {
 
     const scriptRow = document.createElement('div');
     scriptRow.style.display = 'grid';
-    scriptRow.style.gridTemplateColumns = 'minmax(120px, 1fr) minmax(120px, 1fr) auto auto auto';
+    scriptRow.style.gridTemplateColumns = 'auto auto auto minmax(120px, 1fr) minmax(120px, 1fr)';
     scriptRow.style.gap = '6px';
     scriptRow.style.alignItems = 'center';
 
@@ -260,20 +260,29 @@ class ScriptRunnerPanel {
 
     const btnSave = document.createElement('button');
     btnSave.className = 'fw-btn';
-    btnSave.textContent = 'Save';
+    btnSave.textContent = '💾';
+    btnSave.title = 'Save script';
+    btnSave.setAttribute('aria-label', 'Save script');
+    this._styleScriptFileButton(btnSave);
     btnSave.addEventListener('click', () => this._saveCurrentScript());
 
     const btnNew = document.createElement('button');
     btnNew.className = 'fw-btn';
-    btnNew.textContent = 'New';
+    btnNew.textContent = '📄';
+    btnNew.title = 'New script';
+    btnNew.setAttribute('aria-label', 'New script');
+    this._styleScriptFileButton(btnNew);
     btnNew.addEventListener('click', () => this._newScript());
 
     const btnDelete = document.createElement('button');
     btnDelete.className = 'fw-btn';
-    btnDelete.textContent = 'Delete';
+    btnDelete.textContent = '🗑';
+    btnDelete.title = 'Delete script';
+    btnDelete.setAttribute('aria-label', 'Delete script');
+    this._styleScriptFileButton(btnDelete);
     btnDelete.addEventListener('click', () => this._deleteCurrentScript());
 
-    scriptRow.append(scriptSelect, scriptName, btnSave, btnNew, btnDelete);
+    scriptRow.append(btnSave, btnNew, btnDelete, scriptSelect, scriptName);
 
     const editorWrap = document.createElement('div');
     editorWrap.style.display = 'flex';
@@ -391,6 +400,18 @@ class ScriptRunnerPanel {
     const active = this._scripts.find((script) => script.id === lastId) || this._scripts[0];
     this._applyScriptList(active.id);
     this._setEditorScript(active);
+  }
+
+  _styleScriptFileButton(button: HTMLButtonElement) {
+    button.style.width = '28px';
+    button.style.minWidth = '28px';
+    button.style.maxWidth = '28px';
+    button.style.height = '28px';
+    button.style.minHeight = '28px';
+    button.style.maxHeight = '28px';
+    button.style.padding = '0';
+    button.style.lineHeight = '1';
+    button.style.fontSize = '14px';
   }
 
   _applyScriptList(activeId = this._scriptId) {
