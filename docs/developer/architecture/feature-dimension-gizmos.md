@@ -29,7 +29,7 @@ This document covers the shared draggable dimension gizmo infrastructure used by
 
 ## Supported Feature Keys
 
-`FeatureDimensionOverlay.#isSupportedFeatureKey()` currently supports:
+The feature dimension registry currently supports:
 
 - `P.CU` (Primitive Cube)
 - `P.CY` (Primitive Cylinder)
@@ -51,7 +51,7 @@ This document covers the shared draggable dimension gizmo infrastructure used by
 - `P.T`: `majorRadius`, `tubeRadius` (linear), `arc` (angle)
 - `E`: `distance`, `distanceBack` (linear)
 - `R`: `angle` (angle)
-- `PATTERN`: `linearDistance` (linear), `totalAngleDeg` (angle)
+- `PATTERN`: `linearDistance` (linear vector-distance mode only), `totalAngleDeg` (circular angle)
 
 ## Annotation Types
 
@@ -144,8 +144,8 @@ After pointer-up, hover behavior returns to normal.
 
 ## Extending to a New Feature
 
-1. Add the feature key to `#isSupportedFeatureKey(...)`.
-2. Add a builder path in `#buildAnnotations(...)`.
+1. Register a feature descriptor in `FeatureDimensionRegistry`.
+2. Add a builder method in `FeatureDimensionAnnotationBuilder`.
 3. Build linear and/or angle annotations with field keys matching `inputParams`.
 4. If the feature depends on selected references, prefer snapshot-first resolution.
 5. Verify drag, negative values, commit behavior, and throttle responsiveness.

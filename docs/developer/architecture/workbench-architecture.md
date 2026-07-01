@@ -1,8 +1,10 @@
-# Workbench Implementation Plan
+# Workbench Architecture
+
+This page records the implemented workbench architecture and the design rules that guided it.
 
 ## Goal
 
-Introduce persistent CAD workbenches that reduce UI clutter by limiting what the user sees in:
+Persistent CAD workbenches reduce UI clutter by limiting what the user sees in:
 
 - the `+` menu under feature history
 - the selection context toolbar
@@ -13,17 +15,18 @@ Workbenches do **not** change the underlying model structure and do **not** hide
 
 ## Core User Experience
 
-At the top of the History panel, add a workbench dropdown.
+At the top of the History panel, the workbench dropdown selects the current workbench for the part. That selection is saved with the part.
 
-The dropdown selects the current workbench for the part. That selection is saved with the part.
-
-Supported built-in workbenches should include at least:
+Supported built-in workbenches are:
 
 - `MODELING`
+- `IMPORT`
 - `SURFACING`
 - `SHEET_METAL`
 - `ASSEMBLIES`
+- `WIRE_HARNESS`
 - `PMI`
+- `SIMULATION`
 - `ALL`
 
 `ALL` means the current behavior: every eligible feature/tool is visible regardless of workbench grouping.
@@ -59,7 +62,7 @@ Behavior on load:
 - Older files with no saved workbench default to `ALL`.
 - Files with an explicit saved workbench restore that value.
 
-Because the active workbench is part-level state, it should be included in save/load and in feature-history undo/redo snapshots if the implementation continues to snapshot the full serialized part state.
+Because the active workbench is part-level state, it is included in save/load and feature-history undo/redo snapshots with the rest of the serialized part state.
 
 ## Workbench Scope
 
@@ -76,17 +79,13 @@ History entries remain visible and editable regardless of active workbench.
 
 ### Assembly Constraints Panel
 
-The Assembly Constraints panel should be visible only when the active workbench is `ASSEMBLIES`.
-
-This is a change from the current behavior where assembly UI is shown based on the presence of assembly components in the model.
+The Assembly Constraints panel is visible in `ASSEMBLIES`, `WIRE_HARNESS`, and `ALL`.
 
 ### PMI Views Panel
 
-The PMI Views panel should always remain visible.
+The PMI Views panel is visible in authoring workbenches and `ALL`; it is hidden in `SIMULATION`.
 
-The PMI panel is not gated by workbench.
-
-Clicking a PMI view should be allowed from any workbench.
+Clicking a PMI view can temporarily enter PMI mode from other authoring workbenches.
 
 ## PMI Temporary Override Behavior
 
@@ -104,12 +103,12 @@ When PMI editing finishes:
 
 - if PMI was entered from another workbench via view click, return to that previously selected workbench
 
-This return behavior should apply on:
+This return behavior applies on:
 
 - `Finish`
 - `Cancel`
 
-Recommended implementation detail:
+Implementation detail:
 
 - persisted part state: `activeWorkbench`
 - transient viewer state: something like `workbenchReturnTarget`
@@ -118,33 +117,36 @@ Recommended implementation detail:
 
 ## Workbench Definitions
 
-Workbench definitions should live in separate declarative JavaScript files.
+Workbench definitions live in separate declarative TypeScript files.
 
-Recommended structure:
+Current structure:
 
 - `src/workbenches/modelingWorkbench.ts`
+- `src/workbenches/importWorkbench.ts`
 - `src/workbenches/surfacingWorkbench.ts`
 - `src/workbenches/sheetMetalWorkbench.ts`
 - `src/workbenches/assembliesWorkbench.ts`
+- `src/workbenches/wireHarnessWorkbench.ts`
 - `src/workbenches/pmiWorkbench.ts`
+- `src/workbenches/simulationWorkbench.ts`
 - `src/workbenches/allWorkbench.ts`
 - `src/workbenches/index.ts`
 
-Each file should export a plain object. Keep them declarative. Avoid putting UI logic in the config files.
+Each file exports a plain object. Keep them declarative. Avoid putting UI logic in the config files.
 
-Recommended shape:
+Example shape:
 
-```js
+```ts
 export const MODELING_WORKBENCH = {
   id: 'MODELING',
   label: 'Modeling',
   featureTypes: [
-    'Sketch',
-    'Datium',
-    'Plane',
-    'Extrude',
-    'Revolve',
-    'Boolean',
+    'D',
+    'P',
+    'S',
+    'E',
+    'R',
+    'B',
   ],
   contextFamilies: {
     features: true,
@@ -156,30 +158,31 @@ export const MODELING_WORKBENCH = {
     pmiViews: true,
   },
   toolbarButtons: [
-    'home',
     'new',
     'save',
+    'saveAs',
     'zoomToFit',
     'wireframe',
     'import',
     'export',
     'share',
     'sheetEditor',
+    'about',
     'undo',
     'redo',
   ],
-};
+} satisfies WorkbenchDefinition;
 ```
 
 Notes:
 
-- `featureTypes` should use canonical feature short names.
-- Shared features such as `Sketch`, `Datium`, and `Plane` can appear in multiple workbenches.
-- `ALL` should behave as an unrestricted pass-through.
+- `featureTypes` use canonical feature short names.
+- Shared features such as `D`, `P`, and `S` can appear in multiple workbenches.
+- `ALL` behaves as an unrestricted pass-through.
 
 ## Canonical Identity Rules
 
-Workbench configs should filter by resolved canonical identifiers, not by arbitrary strings from old files.
+Workbench configs filter by resolved canonical identifiers, not by arbitrary strings from old files.
 
 For built-in features, use `FeatureClass.shortName`.
 
@@ -187,35 +190,31 @@ Do not rely on raw serialized `feature.type` strings alone because aliases and l
 
 The same principle applies to plugin-defined features and toolbar buttons.
 
-## UI Integration Plan
+## UI Integration
 
 ### 1. History Panel Header
 
-Add a header section above the history list in the History widget containing:
+The History widget renders a header above the history list containing:
 
 - workbench label
 - dropdown select
 
-Changing the dropdown should:
+Changing the dropdown:
 
 - update the active workbench in part state
 - trigger history add-menu refresh
 - trigger selection context action refresh
 - trigger side panel visibility refresh
 - trigger main toolbar visibility refresh
-- queue/save a history snapshot if workbench changes are part of undo/redo
+- queues a history snapshot
 
 ### 2. `+` Menu Filtering
 
-The current `+` menu uses all registered feature classes.
+The `+` menu uses `getAllowedFeatureClasses(viewer)` to return feature classes allowed for the active workbench. This helper:
 
-Replace that direct iteration with a helper that returns the feature classes allowed for the active workbench.
-
-This helper should:
-
-- resolve built-in features
-- include plugin features
-- treat `ALL` as unfiltered
+- resolves built-in features
+- includes plugin features
+- treats `ALL` as unfiltered
 
 ### 3. Context Toolbar Filtering
 
@@ -227,23 +226,21 @@ The current selection context toolbar draws from multiple registries:
 
 Workbench filtering must be able to control those families independently.
 
-Recommended rule:
+Current rule:
 
 - outside PMI mode, use the active workbench to decide whether feature context actions and assembly constraint context actions are visible
 - inside PMI mode, PMI annotation actions remain available as needed by PMI mode
 
 ### 4. Side Panel Visibility
 
-Add a central viewer method that refreshes workbench-scoped panel visibility.
+Workbench-scoped panel visibility is refreshed centrally by viewer workbench methods. Do not scatter workbench checks throughout individual panel widgets.
 
-Do not scatter workbench checks throughout individual panel widgets.
-
-Recommended viewer-level refresh targets:
+Viewer-level refresh targets include:
 
 - assembly constraints section visibility
-- any future harness or discipline-specific sections
-
-PMI Views remains always visible.
+- wire harness section visibility
+- simulation section visibility
+- plugin side-panel visibility
 
 ### 5. Main Toolbar Filtering
 
@@ -253,15 +250,9 @@ Example:
 
 - sheet metal flat pattern export belongs to `SHEET_METAL`
 
-The current toolbar registration is append-only at startup. That should be refactored to a registry-based approach so the toolbar can be rebuilt or refreshed when the active workbench changes.
+Toolbar buttons register with stable IDs, source metadata, and optional workbench/global visibility. `MainToolbar.refreshWorkbenchVisibility()` toggles registered buttons when the active workbench changes.
 
-Recommended model:
-
-- every toolbar button gets a stable `id`
-- buttons declare default visibility or workbench eligibility
-- viewer rebuilds or toggles buttons when workbench changes
-
-Buttons that are global should remain visible in all workbenches.
+Buttons that are global remain visible in all workbenches.
 
 ## Plugin Requirements
 
@@ -284,11 +275,11 @@ If a plugin does not specify workbench information:
 
 This avoids silently cluttering discipline-specific workbenches with unknown plugin tools.
 
-### Recommended Plugin API Extensions
+### Plugin API Extensions
 
-Extend the plugin app surface so plugins can optionally provide workbench metadata.
+Plugins can optionally provide workbench metadata when registering features, toolbar buttons, or side panels.
 
-Recommended patterns:
+Supported patterns:
 
 ```js
 app.registerFeature(MyFeature, {
@@ -315,13 +306,13 @@ app.addSidePanel({
 });
 ```
 
-The plugin API can remain backward compatible by still supporting the old positional signatures, but internally everything should normalize to structured records with IDs and workbench metadata.
+The plugin API normalizes structured records with IDs and workbench metadata into the runtime registries.
 
 ### Plugin Metadata Storage
 
-Workbench metadata for plugin contributions should be stored in runtime registries, not in the plugin feature class source itself unless convenient.
+Workbench metadata for plugin contributions is stored in runtime registries, not in the plugin feature class source itself unless convenient.
 
-Recommended registries:
+Current registries:
 
 - feature workbench registry
 - toolbar button registry
@@ -351,7 +342,7 @@ If omitted, they should default to:
 - visible in `ALL`
 - otherwise hidden unless the plugin explicitly opts into a specific workbench or global visibility
 
-Consider also supporting:
+Supported global forms:
 
 ```js
 workbenches: 'ALL'
@@ -376,39 +367,42 @@ If omitted, default them to:
 
 This keeps built-in workbench UX clean.
 
-## Suggested Internal Helpers
+## Internal Helpers
 
-Add a central workbench service or helper module that can answer:
+The central workbench module answers:
 
 - `getActiveWorkbench(partHistory)`
 - `setActiveWorkbench(partHistory, workbenchId)`
 - `getWorkbenchDefinition(workbenchId)`
 - `getAllowedFeatureClasses(viewer)`
 - `isFeatureAllowedInWorkbench(featureClass, workbenchId)`
-- `isToolbarButtonAllowed(buttonId, workbenchId)`
-- `isSidePanelAllowed(panelId, workbenchId)`
+- `isToolbarButtonAllowed(record, workbenchId)`
+- `isSidePanelAllowed(record, workbenchId)`
 - `isContextFamilyEnabled(family, workbenchId)`
 
 Keeping this logic centralized is important. Do not duplicate workbench filtering logic in multiple widgets.
 
 ## Built-In Toolbar Button IDs
 
-As part of the refactor, give built-in buttons stable IDs.
+Built-in buttons use stable IDs.
 
-Examples:
+Current built-in IDs:
 
-- `home`
 - `new`
 - `save`
+- `saveAs`
 - `zoomToFit`
 - `wireframe`
+- `solidOverlapDiagnostics`
 - `import`
 - `export`
 - `share`
+- `settings`
 - `sheetEditor`
 - `sheetMetalFlatExport`
 - `sheetMetalDebug`
 - `about`
+- `guidedTour`
 - `tests`
 - `historyTestSnippet`
 - `scriptRunner`
@@ -416,7 +410,7 @@ Examples:
 - `undo`
 - `redo`
 
-These IDs should be what workbench definitions and plugins reference.
+These IDs are what workbench definitions and plugins reference.
 
 ## Backward Compatibility
 
@@ -425,31 +419,17 @@ These IDs should be what workbench definitions and plugins reference.
 - Missing plugin features should continue to show as unavailable but remain in history.
 - Existing plugin APIs should continue to work unless explicitly upgraded to workbench-aware structured forms.
 
-## Recommended Implementation Order
-
-1. Add persisted `activeWorkbench` state to part save/load with defaulting rules.
-2. Add workbench definition files and central helper/service.
-3. Add History dropdown UI.
-4. Filter the `+` menu by workbench.
-5. Filter selection context actions by workbench.
-6. Replace assembly panel auto-visibility with workbench-driven visibility.
-7. Refactor main toolbar registration to use stable button IDs and refreshable visibility.
-8. Add PMI temporary override and return-to-previous-workbench behavior.
-9. Extend plugin APIs and registries for workbench-scoped features, buttons, and side panels.
-10. Document plugin usage and examples.
-
-## Acceptance Criteria
+## Implemented Flow
 
 - New parts start in `MODELING`.
 - Old parts with no saved workbench load in `ALL`.
 - Switching workbenches changes the `+` menu contents.
 - Switching workbenches changes non-PMI selection context creation actions.
 - Existing history entries remain visible and editable in every workbench.
-- Assembly Constraints panel is visible only in `ASSEMBLIES`.
-- PMI Views panel is always visible.
+- Assembly Constraints panel is visible in `ASSEMBLIES`, `WIRE_HARNESS`, and `ALL`.
+- PMI Views panel is visible in authoring workbenches and `ALL`; it is hidden in `SIMULATION`.
 - Clicking a PMI view from another workbench switches into `PMI`.
 - Finishing or canceling that PMI session returns to the previous workbench.
 - Sheet-metal-specific main toolbar actions can be restricted to `SHEET_METAL`.
 - Plugins can optionally declare workbench membership for features, toolbar buttons, and side panels.
 - Plugins without workbench metadata remain usable and visible in `ALL`.
-

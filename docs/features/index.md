@@ -50,4 +50,4 @@ Reference docs for the built-in modeling features.
 - [Transform](./transform.md)
 - [Tube](./tube.md)
 
-`Datum` remains as a legacy alias page; `Datium` is the canonical feature doc.
+`Datium` is the canonical feature name used by the current registry and UI.

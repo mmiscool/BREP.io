@@ -13,7 +13,7 @@ Use this section for application structure, history replay, expressions, and UI 
 
 - [Expressions and Configurator Panel](../../panels/expressions.md)
 - [Feature Dimension Gizmos](./feature-dimension-gizmos.md)
-- [Workbench Implementation Plan](./workbench-implementation-plan.md)
+- [Workbench Architecture](./workbench-architecture.md)
 
 ## Related References
 
