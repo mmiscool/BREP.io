@@ -8,6 +8,7 @@ import {
 } from '../utils/browserStorage.js';
 
 type AnyRecord = Record<string, any>;
+const FACE_FLAT_SHADING_SETTING_KEY = '__FACE_FLAT_SHADING__';
 
 // CADmaterials for each entity type
 
@@ -19,7 +20,7 @@ export const CADmaterials = {
             side: THREE.DoubleSide,
             transparent: true,
             opacity: .5,
-            flatShading: true,
+            //flatShading: true,
             metalness: 0.05,
             roughness: 0.85,
             depthTest: true,
@@ -32,7 +33,7 @@ export const CADmaterials = {
             side: THREE.DoubleSide,
             transparent: true,
             opacity: .5,
-            flatShading: true,
+            //flatShading: true,
             metalness: 0.05,
             roughness: 0.85,
             depthTest: true,
@@ -117,7 +118,7 @@ export const CADmaterials = {
             side: THREE.FrontSide,
             transparent: false,
             opacity: 1,
-            flatShading: true,
+            flatShading: false,
             metalness: 0.05,
             roughness: 0.85,
             depthTest: true,
@@ -301,6 +302,27 @@ export class CADmaterialWidget {
         this._rendererSelect = rendererSelect;
         try { this.viewer?.setRendererMode?.(initialMode); } catch { /* ignore */ }
 
+        const flatShadingEnabled = this._getFaceFlatShadingEnabled();
+        this._applyFaceFlatShading(flatShadingEnabled, { updateInput: false, requestRender: false });
+        const flatShadingRow = makeRightSpan();
+        const flatShadingLabel = document.createElement('label');
+        flatShadingLabel.className = 'cmw-label';
+        flatShadingLabel.textContent = 'Flat Shading';
+        flatShadingRow.appendChild(flatShadingLabel);
+        const flatShadingInput = document.createElement('input');
+        flatShadingInput.type = 'checkbox';
+        flatShadingInput.className = 'cmw-check';
+        flatShadingInput.checked = flatShadingEnabled;
+        flatShadingInput.addEventListener('change', (event) => {
+            const enabled = !!event.target.checked;
+            this._settings[FACE_FLAT_SHADING_SETTING_KEY] = enabled;
+            this._applyFaceFlatShading(enabled);
+            this._saveAllSettings();
+        });
+        flatShadingRow.appendChild(flatShadingInput);
+        this.uiElement.appendChild(flatShadingRow);
+        this._flatShadingInput = flatShadingInput;
+
         const resetRow = makeRightSpan();
         const resetLabel = document.createElement('label');
         resetLabel.className = 'cmw-label';
@@ -412,6 +434,52 @@ export class CADmaterialWidget {
             try { ud.__selectedColor = color; } catch { /* ignore */ }
             try { ud.__selectedLinewidth = linewidth; } catch { /* ignore */ }
         });
+    }
+    _getFaceFlatShadingEnabled() {
+        const value = this._settings?.[FACE_FLAT_SHADING_SETTING_KEY];
+        return value === true || value === 'true' || value === 1 || value === '1';
+    }
+    _applyFaceFlatShading(enabled, { updateInput = true, requestRender = true } = {}) {
+        const isFlat = !!enabled;
+        const seen = new Set();
+        const applyToMaterial = (material) => {
+            if (!material) return;
+            if (Array.isArray(material)) {
+                material.forEach(applyToMaterial);
+                return;
+            }
+            if (seen.has(material)) return;
+            seen.add(material);
+            if (!('flatShading' in material)) return;
+            try {
+                material.flatShading = isFlat;
+                material.needsUpdate = true;
+            } catch { /* ignore material update failures */ }
+        };
+
+        applyToMaterial(CADmaterials.FACE?.BASE);
+        applyToMaterial(CADmaterials.FACE?.SELECTED);
+
+        const scene = this.viewer?.scene || this.viewer?.partHistory?.scene || null;
+        try {
+            scene?.traverse?.((obj) => {
+                if (!obj || obj.type !== 'FACE') return;
+                applyToMaterial(obj.material);
+                const ud = obj.userData || {};
+                applyToMaterial(ud.__defaultMaterial);
+                applyToMaterial(ud.__baseMaterial);
+                applyToMaterial(ud.__metadataMaterial);
+                applyToMaterial(ud.__selectedMat);
+                applyToMaterial(ud.__hoverMat);
+                applyToMaterial(ud.__hoverOrigMat);
+                applyToMaterial(ud.__hoverMaterial);
+            });
+        } catch { /* ignore scene traversal failures */ }
+
+        if (updateInput && this._flatShadingInput) {
+            this._flatShadingInput.checked = isFlat;
+        }
+        if (requestRender) this._requestViewerRender();
     }
     _isMaterial(m) {
         return m && (m.isMaterial === true || m instanceof THREE.Material);
@@ -654,6 +722,7 @@ export class CADmaterialWidget {
             this._markMaterialChanged(material);
             this._syncMaterialControls(labelText, material);
         }
+        this._applyFaceFlatShading(false);
         this._requestViewerRender();
     }
     _getMatKey(labelText) {
