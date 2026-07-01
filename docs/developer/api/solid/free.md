@@ -8,4 +8,18 @@ Disposes the cached Manifold instance so wasm memory can be reclaimed. The `Soli
 solid.free();
 ```
 
+## Signature
+
+```js
+solid.free()
+```
+
+## Parameters
+
+None.
+
+## Returns
+
+`Solid` - The same solid.
+
 Call this after expensive operations if you want to release cached native resources early.

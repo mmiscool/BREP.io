@@ -21,6 +21,26 @@ const records = solid.minGapToPoint([10, 0, 0], 5);
 // ]
 ```
 
+## Signature
+
+```js
+solid.minGapToPoint(point, searchLength = Infinity, options = {})
+```
+
+## Parameters
+
+- `point` (`[number, number, number] | { x, y, z }`) - Query point.
+- `searchLength` (`number`, default `Infinity`) - Non-negative proximity radius. Triangles farther than this are ignored.
+- `options` (`object`, optional) - Query behavior.
+
+## Options
+
+- `nearestOnly` (`boolean`, default `false`) - Return only the nearest triangle record within `searchLength`.
+
+## Returns
+
+`Array<{ inside: boolean, distance: number, directionVector: { x: number, y: number, z: number } }>` - Sorted nearest first unless `nearestOnly` is enabled.
+
 `point` may be `[x, y, z]` or `{ x, y, z }`.
 
 Use `searchLength` as the proximity radius. If no triangles are within that

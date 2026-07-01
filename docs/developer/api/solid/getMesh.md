@@ -10,4 +10,18 @@ const mesh = solid.getMesh();
 mesh.delete?.();
 ```
 
+## Signature
+
+```js
+solid.getMesh()
+```
+
+## Parameters
+
+None.
+
+## Returns
+
+`ManifoldMesh` - Fresh native mesh snapshot with `vertProperties`, `triVerts`, and face ID data when available.
+
 Delete the returned mesh when you are finished with it.

@@ -8,4 +8,18 @@ Uses centroid ray tests to classify and remove interior triangles without requir
 solid.removeInternalTrianglesByRaycast();
 ```
 
+## Signature
+
+```js
+solid.removeInternalTrianglesByRaycast()
+```
+
+## Parameters
+
+None.
+
+## Returns
+
+`number` - Count of triangles removed.
+
 This is a slower fallback for problematic geometry.

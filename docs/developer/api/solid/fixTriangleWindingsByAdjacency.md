@@ -8,4 +8,18 @@ Reorients authored triangles so shared edges are used with opposite directions a
 solid.fixTriangleWindingsByAdjacency();
 ```
 
+## Signature
+
+```js
+solid.fixTriangleWindingsByAdjacency()
+```
+
+## Parameters
+
+None.
+
+## Returns
+
+`Solid` - The same solid, for chaining.
+
 Run this when importing or building triangles manually and winding consistency is uncertain.

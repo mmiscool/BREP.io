@@ -8,4 +8,18 @@ Internal helper that maps a face label to a persistent Manifold face ID, creatin
 const faceID = solid._getOrCreateID('SIDE');
 ```
 
+## Signature
+
+```js
+solid._getOrCreateID(faceName)
+```
+
+## Parameters
+
+- `faceName` (`string`) - Face label to resolve.
+
+## Returns
+
+`number` - Manifold face ID for the label.
+
 This keeps face provenance stable across mesh rebuilds and booleans.
