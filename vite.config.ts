@@ -6,6 +6,8 @@ import wasm from 'vite-plugin-wasm';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = __dirname; // adjust if your html files live elsewhere
+const wasmPath = resolve(root, 'manifold-plus/dist/manifold.wasm');
+const wasmBase64 = fs.readFileSync(wasmPath, 'base64');
 
 function collectHtmlEntriesFromDir(dirPath: string, keyPrefix: string): Record<string, string> {
   if (!fs.existsSync(dirPath)) return {};
@@ -85,6 +87,9 @@ export default defineConfig(() => {
         input,
       },
       chunkSizeWarningLimit: 20000, // increase chunk size warning limit to 2MB
+    },
+    define: {
+      __MANIFOLD_WASM_BASE64__: JSON.stringify(wasmBase64),
     },
   };
 });

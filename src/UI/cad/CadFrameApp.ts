@@ -1022,3 +1022,9 @@ export function bootCadFrame(config: any = {}) {
 }
 
 export const bootCADFrame = bootCadFrame;
+
+try {
+  if (typeof window !== "undefined") {
+    window.__BREP_bootCadFrame = bootCadFrame;
+  }
+} catch { /* ignore global boot registration failure */ }

@@ -2,6 +2,7 @@ import { defineConfig, type Plugin } from 'vite';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
+import wasm from 'vite-plugin-wasm';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const wasmPath = resolve(__dirname, 'manifold-plus/dist/manifold.wasm');
@@ -28,7 +29,7 @@ function patchManifoldNodeImports(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [patchManifoldNodeImports()],
+  plugins: [patchManifoldNodeImports(), wasm()],
   resolve: {
     conditions: ['browser', 'import', 'module', 'default'],
     alias: {

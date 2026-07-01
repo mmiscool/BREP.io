@@ -52,8 +52,7 @@ const loadModule = async () => {
     return mod?.default ?? mod;
   }
 
-  const browserModulePath = '../../manifold-plus/dist/manifold.js?embindfix=2';
-  const mod = await import(browserModulePath);
+  const mod = await import('../../manifold-plus/dist/manifold.js?embindfix=2');
   return mod?.default ?? mod;
 };
 

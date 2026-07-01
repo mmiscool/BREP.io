@@ -717,3 +717,9 @@ export function bootSketcher2DFrame(config: AnyRecord = {}) {
   app.boot();
   return app;
 }
+
+try {
+  if (typeof window !== "undefined") {
+    window.__BREP_bootSketcher2DFrame = bootSketcher2DFrame;
+  }
+} catch { }
