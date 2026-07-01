@@ -13,6 +13,13 @@ declare global {
 
 const PANEL_KEY = Symbol('ScriptRunnerPanel');
 const CONSOLE_TREE_CHILD_LIMIT = 300;
+const SCRIPT_DB_NAME = 'brep-script-runner';
+const SCRIPT_DB_VERSION = 1;
+const SCRIPT_STORE_NAME = 'scripts';
+const SCRIPT_META_STORE_NAME = 'meta';
+const LAST_SCRIPT_KEY = 'lastScriptId';
+const DEFAULT_SCRIPT_ID = 'default';
+const DEFAULT_SCRIPT_NAME = 'Scratch';
 const DEFAULT_SNIPPET = `
 // Access the app environment via the global "env" object.
 console.log('env keys', Object.keys(env || {}));
@@ -23,6 +30,85 @@ console.log('active history', viewer?.partHistory);
 
 
 `;
+
+type StoredScript = {
+  id: string;
+  name: string;
+  code: string;
+  updatedAt: number;
+};
+
+function openScriptDb(): Promise<IDBDatabase | null> {
+  if (typeof indexedDB === 'undefined' || !indexedDB.open) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const req = indexedDB.open(SCRIPT_DB_NAME, SCRIPT_DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(SCRIPT_STORE_NAME)) {
+        db.createObjectStore(SCRIPT_STORE_NAME, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(SCRIPT_META_STORE_NAME)) {
+        db.createObjectStore(SCRIPT_META_STORE_NAME);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => resolve(null);
+    req.onblocked = () => resolve(null);
+  });
+}
+
+async function withScriptStore<T>(
+  storeName: string,
+  mode: IDBTransactionMode,
+  fn: (store: IDBObjectStore) => IDBRequest<T>,
+): Promise<T | null> {
+  const db = await openScriptDb();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    const tx = db.transaction(storeName, mode);
+    const req = fn(tx.objectStore(storeName));
+    req.onsuccess = () => resolve(req.result ?? null);
+    req.onerror = () => resolve(null);
+    tx.oncomplete = () => db.close();
+    tx.onerror = () => {
+      try { db.close(); } catch { /* ignore close failure */ }
+    };
+  });
+}
+
+async function listStoredScripts(): Promise<StoredScript[]> {
+  const scripts = await withScriptStore<StoredScript[]>(SCRIPT_STORE_NAME, 'readonly', (store) => store.getAll());
+  return Array.isArray(scripts)
+    ? scripts.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+    : [];
+}
+
+async function getStoredScript(id: string): Promise<StoredScript | null> {
+  return await withScriptStore<StoredScript>(SCRIPT_STORE_NAME, 'readonly', (store) => store.get(id));
+}
+
+async function saveStoredScript(script: StoredScript): Promise<boolean> {
+  const result = await withScriptStore<IDBValidKey>(SCRIPT_STORE_NAME, 'readwrite', (store) => store.put(script));
+  return result !== null;
+}
+
+async function deleteStoredScript(id: string): Promise<boolean> {
+  const result = await withScriptStore<undefined>(SCRIPT_STORE_NAME, 'readwrite', (store) => store.delete(id));
+  return result !== null;
+}
+
+async function getLastScriptId(): Promise<string | null> {
+  const id = await withScriptStore<string>(SCRIPT_META_STORE_NAME, 'readonly', (store) => store.get(LAST_SCRIPT_KEY));
+  return typeof id === 'string' && id ? id : null;
+}
+
+async function setLastScriptId(id: string): Promise<void> {
+  await withScriptStore<IDBValidKey>(SCRIPT_META_STORE_NAME, 'readwrite', (store) => store.put(id, LAST_SCRIPT_KEY));
+}
+
+function makeScriptId() {
+  return `script-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 class ScriptRunnerPanel {
   viewer: AnyRecord | null;
@@ -35,11 +121,17 @@ class ScriptRunnerPanel {
   splitterEl: HTMLElement | null;
   contentRoot: HTMLElement | null;
   introEl: HTMLElement | null;
+  scriptRowEl: HTMLElement | null;
   statusEl: HTMLElement | null;
+  scriptSelectEl: HTMLSelectElement | null;
+  scriptNameEl: HTMLInputElement | null;
   _initializedValue: boolean;
   _consoleHeight: number;
   _lastContentRect: any;
   _isRunning: boolean;
+  _scriptId: string;
+  _scripts: StoredScript[];
+  _saveTimer: number | null;
 
   constructor(viewer) {
     this.viewer = viewer;
@@ -52,11 +144,17 @@ class ScriptRunnerPanel {
     this.splitterEl = null;
     this.contentRoot = null;
     this.introEl = null;
+    this.scriptRowEl = null;
     this.statusEl = null;
+    this.scriptSelectEl = null;
+    this.scriptNameEl = null;
     this._initializedValue = false;
     this._consoleHeight = 180;
     this._lastContentRect = null;
     this._isRunning = false;
+    this._scriptId = DEFAULT_SCRIPT_ID;
+    this._scripts = [];
+    this._saveTimer = null;
   }
 
   toggle() {
@@ -132,6 +230,51 @@ class ScriptRunnerPanel {
     intro.style.opacity = '0.9';
     this.introEl = intro;
 
+    const scriptRow = document.createElement('div');
+    scriptRow.style.display = 'grid';
+    scriptRow.style.gridTemplateColumns = 'minmax(120px, 1fr) minmax(120px, 1fr) auto auto auto';
+    scriptRow.style.gap = '6px';
+    scriptRow.style.alignItems = 'center';
+
+    const scriptSelect = document.createElement('select');
+    scriptSelect.style.minWidth = '0';
+    scriptSelect.style.height = '28px';
+    scriptSelect.style.background = '#111827';
+    scriptSelect.style.color = '#f9fafb';
+    scriptSelect.style.border = '1px solid #374151';
+    scriptSelect.style.borderRadius = '8px';
+    scriptSelect.style.padding = '0 8px';
+    scriptSelect.addEventListener('change', () => this._loadSelectedScript());
+
+    const scriptName = document.createElement('input');
+    scriptName.type = 'text';
+    scriptName.placeholder = 'Script name';
+    scriptName.value = DEFAULT_SCRIPT_NAME;
+    scriptName.style.minWidth = '0';
+    scriptName.style.height = '28px';
+    scriptName.style.background = '#111827';
+    scriptName.style.color = '#f9fafb';
+    scriptName.style.border = '1px solid #374151';
+    scriptName.style.borderRadius = '8px';
+    scriptName.style.padding = '0 8px';
+
+    const btnSave = document.createElement('button');
+    btnSave.className = 'fw-btn';
+    btnSave.textContent = 'Save';
+    btnSave.addEventListener('click', () => this._saveCurrentScript());
+
+    const btnNew = document.createElement('button');
+    btnNew.className = 'fw-btn';
+    btnNew.textContent = 'New';
+    btnNew.addEventListener('click', () => this._newScript());
+
+    const btnDelete = document.createElement('button');
+    btnDelete.className = 'fw-btn';
+    btnDelete.textContent = 'Delete';
+    btnDelete.addEventListener('click', () => this._deleteCurrentScript());
+
+    scriptRow.append(scriptSelect, scriptName, btnSave, btnNew, btnDelete);
+
     const editorWrap = document.createElement('div');
     editorWrap.style.display = 'flex';
     editorWrap.style.flexDirection = 'column';
@@ -148,6 +291,7 @@ class ScriptRunnerPanel {
       editor.value = DEFAULT_SNIPPET;
       this._initializedValue = true;
     }
+    editor.addEventListener('change', () => this._scheduleAutoSave());
 
     const splitter = document.createElement('div');
     splitter.style.flex = '0 0 10px';
@@ -201,6 +345,7 @@ class ScriptRunnerPanel {
     statusRow.appendChild(btnClear);
 
     content.appendChild(intro);
+    content.appendChild(scriptRow);
     editorWrap.appendChild(editor);
     content.appendChild(editorWrap);
     content.appendChild(splitter);
@@ -217,11 +362,127 @@ class ScriptRunnerPanel {
     this.outputEl = output;
     this.consoleWrap = consoleWrap;
     this.splitterEl = splitter;
+    this.scriptRowEl = scriptRow;
     this.statusEl = status;
+    this.scriptSelectEl = scriptSelect;
+    this.scriptNameEl = scriptName;
     try { this.root.style.display = 'none'; } catch {
       // best effort
     }
     requestAnimationFrame(() => this._applySplitHeights());
+    this._loadScriptsFromStorage();
+  }
+
+  async _loadScriptsFromStorage() {
+    this._scripts = await listStoredScripts();
+    if (!this._scripts.length) {
+      const defaultScript = {
+        id: DEFAULT_SCRIPT_ID,
+        name: DEFAULT_SCRIPT_NAME,
+        code: DEFAULT_SNIPPET,
+        updatedAt: Date.now(),
+      };
+      await saveStoredScript(defaultScript);
+      this._scripts = [defaultScript];
+      await setLastScriptId(DEFAULT_SCRIPT_ID);
+    }
+
+    const lastId = await getLastScriptId();
+    const active = this._scripts.find((script) => script.id === lastId) || this._scripts[0];
+    this._applyScriptList(active.id);
+    this._setEditorScript(active);
+  }
+
+  _applyScriptList(activeId = this._scriptId) {
+    if (!this.scriptSelectEl) return;
+    this.scriptSelectEl.innerHTML = '';
+    for (const script of this._scripts) {
+      const option = document.createElement('option');
+      option.value = script.id;
+      option.textContent = script.name || 'Untitled';
+      this.scriptSelectEl.appendChild(option);
+    }
+    this.scriptSelectEl.value = activeId;
+  }
+
+  _setEditorScript(script: StoredScript) {
+    this._scriptId = script.id;
+    if (this.scriptNameEl) this.scriptNameEl.value = script.name || DEFAULT_SCRIPT_NAME;
+    if (this.scriptSelectEl) this.scriptSelectEl.value = script.id;
+    if (this.editorEl) this.editorEl.value = script.code || '';
+    this._initializedValue = true;
+    this._setStatus(`Loaded ${script.name || 'script'}`);
+  }
+
+  async _loadSelectedScript() {
+    const id = this.scriptSelectEl?.value || '';
+    const script = this._scripts.find((item) => item.id === id) || await getStoredScript(id);
+    if (!script) return;
+    this._setEditorScript(script);
+    await setLastScriptId(script.id);
+  }
+
+  async _saveCurrentScript() {
+    const name = String(this.scriptNameEl?.value || '').trim() || DEFAULT_SCRIPT_NAME;
+    const script = {
+      id: this._scriptId || makeScriptId(),
+      name,
+      code: this.editorEl?.value || '',
+      updatedAt: Date.now(),
+    };
+    const ok = await saveStoredScript(script);
+    if (!ok) {
+      this._setStatus('Unable to save script');
+      return;
+    }
+    await setLastScriptId(script.id);
+    this._scriptId = script.id;
+    this._scripts = await listStoredScripts();
+    this._applyScriptList(script.id);
+    this._setStatus(`Saved ${name}`);
+  }
+
+  _scheduleAutoSave() {
+    if (this._saveTimer !== null) {
+      window.clearTimeout(this._saveTimer);
+    }
+    this._saveTimer = window.setTimeout(() => {
+      this._saveTimer = null;
+      this._saveCurrentScript();
+    }, 250);
+  }
+
+  async _newScript() {
+    const script = {
+      id: makeScriptId(),
+      name: 'Untitled',
+      code: '',
+      updatedAt: Date.now(),
+    };
+    this._scripts = this._scripts.concat(script);
+    this._applyScriptList(script.id);
+    this._setEditorScript(script);
+    await setLastScriptId(script.id);
+  }
+
+  async _deleteCurrentScript() {
+    if (!this._scriptId) return;
+    await deleteStoredScript(this._scriptId);
+    this._scripts = await listStoredScripts();
+    if (!this._scripts.length) {
+      const script = {
+        id: DEFAULT_SCRIPT_ID,
+        name: DEFAULT_SCRIPT_NAME,
+        code: DEFAULT_SNIPPET,
+        updatedAt: Date.now(),
+      };
+      await saveStoredScript(script);
+      this._scripts = [script];
+    }
+    const next = this._scripts[0];
+    this._applyScriptList(next.id);
+    this._setEditorScript(next);
+    await setLastScriptId(next.id);
   }
 
   async _runCode() {
@@ -764,8 +1025,9 @@ class ScriptRunnerPanel {
     const rect = this.contentRoot.getBoundingClientRect?.();
     const contentH = rect?.height || 0;
     const introH = this.introEl?.offsetHeight || 0;
+    const scriptRowH = this.scriptRowEl?.offsetHeight || 0;
     const splitterH = this.splitterEl?.offsetHeight || 10;
-    const available = Math.max(0, contentH - introH - splitterH - 8); // account for gap/margins
+    const available = Math.max(0, contentH - introH - scriptRowH - splitterH - 16); // account for gaps/margins
     if (available <= 0) return;
     const maxConsole = Math.max(minConsole, available - minEditor);
     const clamped = Math.min(Math.max(px, minConsole), maxConsole);

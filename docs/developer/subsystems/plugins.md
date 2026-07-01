@@ -16,4 +16,6 @@ When adding dialogs for a plugin feature, follow the shared [Input Params Schema
 
 The `</>` Script Runner floating window is available for ad-hoc JavaScript automation against `window.env` and the current viewer.
 
+Scripts are saved automatically after editor changes and stored in the browser's IndexedDB database for the current site. The runner restores the last active script when reopened in a later browser session, and the window includes simple controls for selecting, naming, creating, saving, and deleting scripts.
+
 ![Script Runner floating window](../../floating-windows/script-runner.png)
