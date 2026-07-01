@@ -1,4 +1,4 @@
-# Settings
+# `⚙` Settings
 
 Opens the Display Settings window.
 

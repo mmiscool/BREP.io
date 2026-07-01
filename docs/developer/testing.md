@@ -33,6 +33,6 @@ Each Node test run also writes `tests/test-run.log`. This log is intentionally s
 
 ## Browser Repro Snippets
 
-The generated test snippet window captures the current feature history as a browser-ready repro function for bug reports and regression tests.
+The `🪲` History Test Snippet window captures the current feature history as a browser-ready repro function for bug reports and regression tests.
 
 ![Generated Test Snippet floating window](../floating-windows/history-test-snippet.png)

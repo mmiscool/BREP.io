@@ -384,31 +384,31 @@ Keeping this logic centralized is important. Do not duplicate workbench filterin
 
 ## Built-In Toolbar Button IDs
 
-Built-in buttons use stable IDs.
+Built-in buttons use stable IDs and visible labels.
 
 Current built-in IDs:
 
-- `new`
-- `save`
-- `saveAs`
-- `zoomToFit`
-- `wireframe`
-- `solidOverlapDiagnostics`
-- `import`
-- `export`
-- `share`
-- `settings`
-- `sheetEditor`
-- `sheetMetalFlatExport`
-- `sheetMetalDebug`
-- `about`
-- `guidedTour`
-- `tests`
-- `historyTestSnippet`
-- `scriptRunner`
-- `selectionState`
-- `undo`
-- `redo`
+- `new` - `📄` New
+- `save` - `💾` Save
+- `saveAs` - `💾+` Save As
+- `zoomToFit` - `⛶` Zoom To Fit
+- `wireframe` - `🕸️` Wireframe
+- `solidOverlapDiagnostics` - `Solid diag` Solid Overlap Diagnostics
+- `import` - `📥` Import
+- `export` - `📤` Export
+- `share` - `⠪` Share
+- `settings` - `⚙` Settings
+- `sheetEditor` - `🧾` 2D Sheet Editor
+- `sheetMetalFlatExport` - `FP` Sheet Metal Flat Pattern Export
+- `sheetMetalDebug` - `SMDBG` Sheet Metal Debug JSON
+- `about` - `ℹ️` About
+- `guidedTour` - `tour` Guided Tour
+- `tests` - `tests` Browser Tests
+- `historyTestSnippet` - `🪲` History Test Snippet
+- `scriptRunner` - `</>` Script Runner
+- `selectionState` - `Sel` Selection State
+- `undo` - `↶` Undo
+- `redo` - `↷` Redo
 
 These IDs are what workbench definitions and plugins reference.
 

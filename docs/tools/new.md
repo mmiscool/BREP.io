@@ -1,4 +1,4 @@
-# New
+# `📄` New
 
 Creates a new empty model in the current browser session.
 

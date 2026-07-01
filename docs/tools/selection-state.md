@@ -1,4 +1,4 @@
-# Selection State
+# `Sel` Selection State
 
 Opens the Selection State window for inspecting the active selection and jumping to related metadata or properties.
 

@@ -12,4 +12,4 @@ Available in Modeling, Surfacing, and All.
 
 ## Related
 - [Overlap Cleanup](./overlap-cleanup.md)
-- [Solid Overlap Diagnostics](../tools/solid-overlap-diagnostics.md)
+- `Solid diag` [Solid Overlap Diagnostics](../tools/solid-overlap-diagnostics.md)

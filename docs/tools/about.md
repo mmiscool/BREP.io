@@ -1,4 +1,4 @@
-# About
+# `ℹ️` About
 
 Opens the generated about and license page.
 

@@ -1,4 +1,4 @@
-# Save
+# `💾` Save
 
 Saves the current model to the active storage location.
 

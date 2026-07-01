@@ -1,8 +1,8 @@
-# Redo
+# `↷` Redo
 
 Reapplies the most recently undone feature-history change.
 
-Use this after [Undo](./undo.md) when you want to restore the next redo step in the history stack.
+Use this after `↶` [Undo](./undo.md) when you want to restore the next redo step in the history stack.
 
 ## Workbench Availability
 

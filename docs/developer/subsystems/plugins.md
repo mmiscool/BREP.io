@@ -12,8 +12,8 @@ Use the plugin system to extend BREP with custom features, toolbar buttons, or a
 
 When adding dialogs for a plugin feature, follow the shared [Input Params Schema](../architecture/input-params-schema.md) for field types, defaults, and reference-selection rules.
 
-## Script Runner
+## `</>` Script Runner
 
-The Script Runner floating window is available for ad-hoc JavaScript automation against `window.env` and the current viewer.
+The `</>` Script Runner floating window is available for ad-hoc JavaScript automation against `window.env` and the current viewer.
 
 ![Script Runner floating window](../../floating-windows/script-runner.png)

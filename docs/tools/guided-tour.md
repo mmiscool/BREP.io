@@ -1,4 +1,4 @@
-# Guided Tour
+# `tour` Guided Tour
 
 Starts the guided startup tour.
 

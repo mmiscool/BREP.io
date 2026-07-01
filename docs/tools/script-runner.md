@@ -1,4 +1,4 @@
-# Script Runner
+# `</>` Script Runner
 
 Opens a JavaScript runner with access to the current app environment.
 

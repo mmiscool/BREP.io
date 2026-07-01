@@ -145,7 +145,7 @@ The sketch sidebar exposes solver settings for iteration count, tolerance, and d
 ## Linking External Geometry
 Sketch Mode can link to edges that live outside the current sketch so profiles stay tied to upstream solids:
 
-1. Switch to the sketch and pick `Link external edge` on the top toolbar.
+1. Switch to the sketch and pick `🔗` Link external edge on the top toolbar.
 2. Click scene edges or face boundaries; each pick projects both endpoints into sketch UV space and adds them as fixed points.
 3. The viewer lists every linked edge; selecting a row reselects its projected points, and `Unlink` removes the pair and their auto-created ground constraints.
 

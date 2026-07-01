@@ -1,4 +1,4 @@
-# Solid Overlap Diagnostics
+# `Solid diag` Solid Overlap Diagnostics
 
 Opens the Solid Overlap Diagnostics window for inspecting overlapping coplanar faces inside one solid or between two selected solids.
 
@@ -9,4 +9,4 @@ Opens the Solid Overlap Diagnostics window for inspecting overlapping coplanar f
 Available in All.
 
 ## Related
-- [Inspector](./inspector.md)
+- `🕵️` [Inspector](./inspector.md)

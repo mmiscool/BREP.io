@@ -1,4 +1,4 @@
-# Sheet Metal Debug JSON
+# `SMDBG` Sheet Metal Debug JSON
 
 Opens a JSON payload containing sheet-metal feature history and sheet-metal tree data.
 

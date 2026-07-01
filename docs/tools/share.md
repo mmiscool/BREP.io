@@ -1,4 +1,4 @@
-# Share
+# `⠪` Share
 
 Opens the Share Model window for generating links and iframe markup for models stored in public GitHub locations.
 

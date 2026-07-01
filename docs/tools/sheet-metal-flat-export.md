@@ -1,4 +1,4 @@
-# Sheet Metal Flat Pattern Export
+# `FP` Sheet Metal Flat Pattern Export
 
 Opens the Export Flat Pattern window for sheet-metal DXF or SVG output.
 

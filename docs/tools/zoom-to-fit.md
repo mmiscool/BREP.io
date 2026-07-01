@@ -1,4 +1,4 @@
-# Zoom To Fit
+# `⛶` Zoom To Fit
 
 Frames visible model geometry in the viewport without changing the active workbench.
 

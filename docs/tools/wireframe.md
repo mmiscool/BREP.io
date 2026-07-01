@@ -1,4 +1,4 @@
-# Wireframe
+# `🕸️` Wireframe
 
 Toggles wireframe rendering for visible model geometry.
 

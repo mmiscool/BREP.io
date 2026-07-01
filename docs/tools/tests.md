@@ -1,4 +1,4 @@
-# Browser Tests
+# `tests` Browser Tests
 
 Opens the Browser Testing window.
 

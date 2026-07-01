@@ -9,4 +9,4 @@ The Simulation workbench switches the sidebar and contextual selection tools int
 - [Simulation](../panels/simulation.md)
 
 ## Context Tools
-- Simulation Transform appears when a single solid is selected in the Simulation workbench.
+- `Sim Xform` Simulation Transform appears when a single solid is selected in the Simulation workbench.

@@ -1,10 +1,10 @@
-# Inspector
+# `🕵️` Inspector
 
 The Inspector is a diagnostic window for answering *“What exactly did I just click?”*. It is meant for troubleshooting mesh issues, confirming the owning feature of a face, or exporting precise coordinates for support requests.
 
 ![Inspector floating window](../floating-windows/inspector.png)
 
-- The `🕵️` selection-context action appears when something is selected and toggles the panel. The window floats near the lower-left corner, can be dragged or resized, and stays on top of the viewport so you can keep modeling.
+- The `🕵️` Inspector selection-context action appears when something is selected and toggles the panel. The window floats near the lower-left corner, can be dragged or resized, and stays on top of the viewport so you can keep modeling.
 - When the panel opens it shows a placeholder message. Click any entity in the scene (face, edge, or solid) and the Inspector immediately refreshes with the latest selection.
 - The header contains `Download JSON` for a full dump of the current payload (including data that is truncated in the UI) and `Hide` to close the window without clearing the cached selection.
 

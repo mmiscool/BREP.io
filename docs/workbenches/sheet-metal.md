@@ -6,11 +6,11 @@ Sheet-metal features build and update a stored `SheetMetalTree`. The folded 3D m
 
 ![Sheet Metal workbench showing a tab, flanges, and rounded edges](../SHEET_METAL.png)
 
-## Tools
-- [Sheet Metal Flat Pattern Export](../tools/sheet-metal-flat-export.md)
-- [Sheet Metal Debug JSON](../tools/sheet-metal-debug.md) - localhost only
+## Main Toolbar
+Sheet Metal includes the shared main toolbar buttons plus these workbench-specific buttons:
 
-![Sheet Metal Flat Pattern export floating window](../floating-windows/sheet-metal-flat-export.png)
+- `FP` [Sheet Metal Flat Pattern Export](../tools/sheet-metal-flat-export.md) exports visible sheet-metal flat patterns as DXF or SVG.
+- `SMDBG` [Sheet Metal Debug JSON](../tools/sheet-metal-debug.md) is a localhost-only diagnostic export for sheet-metal history and tree data.
 
 ## Features
 - Setup geometry: [Datium](../features/datium.md), [Plane](../features/plane.md), [Sketch](../features/sketch.md)
@@ -40,10 +40,8 @@ The context toolbar does not show assembly constraints or PMI annotations in She
 2. Select generated sheet-metal side faces or edge overlays to add Flange or Hem features.
 3. Add Cutout features from sketches, faces, or external solid tools when material needs to be removed.
 4. Use the PMI Views and 2D Sheets panels when the model needs manufacturing views or sheet documentation.
-5. Use Flat Pattern Export for DXF/SVG output after the tree evaluates successfully.
+5. Use `FP` Sheet Metal Flat Pattern Export for DXF/SVG output after the tree evaluates successfully.
 
 ## Diagnostics
 
-The Sheet Metal Debug JSON window packages the current feature history and sheet-metal tree so a failing flat pattern or geometry case can be reproduced.
-
-![Sheet Metal Debug JSON floating window](../floating-windows/sheet-metal-debug.png)
+The `SMDBG` Sheet Metal Debug JSON window packages the current feature history and sheet-metal tree so a failing flat pattern or geometry case can be reproduced.

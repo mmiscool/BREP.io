@@ -1,4 +1,4 @@
-# Export
+# `📤` Export
 
 Opens the Export window for writing the current model to a file format such as 3MF, STL, OBJ, STEP, or BREP JSON.
 

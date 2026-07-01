@@ -1,4 +1,4 @@
-# 2D Sheet Editor
+# `🧾` 2D Sheet Editor
 
 Opens 2D Sheets Mode for creating drawing-style sheets from the current model.
 

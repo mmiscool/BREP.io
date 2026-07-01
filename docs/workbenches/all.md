@@ -2,28 +2,28 @@
 
 The All workbench is the unfiltered mode. It exposes the full built-in feature set, all built-in toolbar buttons, and all registered built-in workbench panels.
 
-## Tools
-- [New](../tools/new.md)
-- [Save](../tools/save.md)
-- [Save As](../tools/save-as.md)
-- [Zoom To Fit](../tools/zoom-to-fit.md)
-- [Wireframe](../tools/wireframe.md)
-- [Solid Overlap Diagnostics](../tools/solid-overlap-diagnostics.md)
-- [Import](../tools/import.md)
-- [Export](../tools/export.md)
-- [Share](../tools/share.md)
-- [Settings](../tools/settings.md)
-- [2D Sheet Editor](../tools/sheet-editor.md)
-- [Sheet Metal Flat Pattern Export](../tools/sheet-metal-flat-export.md)
-- [Sheet Metal Debug JSON](../tools/sheet-metal-debug.md) - localhost only
-- [About](../tools/about.md)
-- [Guided Tour](../tools/guided-tour.md) - localhost only
-- [Browser Tests](../tools/tests.md) - localhost only
-- [History Test Snippet](../tools/history-test-snippet.md)
-- [Script Runner](../tools/script-runner.md)
-- [Selection State](../tools/selection-state.md) - localhost only
-- [Undo](../tools/undo.md)
-- [Redo](../tools/redo.md)
+## Main Toolbar
+- `📄` [New](../tools/new.md)
+- `💾` [Save](../tools/save.md)
+- `💾+` [Save As](../tools/save-as.md)
+- `⛶` [Zoom To Fit](../tools/zoom-to-fit.md)
+- `🕸️` [Wireframe](../tools/wireframe.md)
+- `Solid diag` [Solid Overlap Diagnostics](../tools/solid-overlap-diagnostics.md)
+- `📥` [Import](../tools/import.md)
+- `📤` [Export](../tools/export.md)
+- `⠪` [Share](../tools/share.md)
+- `⚙` [Settings](../tools/settings.md)
+- `🧾` [2D Sheet Editor](../tools/sheet-editor.md)
+- `FP` [Sheet Metal Flat Pattern Export](../tools/sheet-metal-flat-export.md)
+- `SMDBG` [Sheet Metal Debug JSON](../tools/sheet-metal-debug.md) - localhost only
+- `ℹ️` [About](../tools/about.md)
+- `tour` [Guided Tour](../tools/guided-tour.md) - localhost only
+- `tests` [Browser Tests](../tools/tests.md) - localhost only
+- `🪲` [History Test Snippet](../tools/history-test-snippet.md)
+- `</>` [Script Runner](../tools/script-runner.md)
+- `Sel` [Selection State](../tools/selection-state.md) - localhost only
+- `↶` [Undo](../tools/undo.md)
+- `↷` [Redo](../tools/redo.md)
 
 ## Features
 - The All workbench exposes every built-in feature. See the [Features Index](../features/index.md).

@@ -1,4 +1,4 @@
-# History Test Snippet
+# `🪲` History Test Snippet
 
 Generates a test snippet from the current feature history.
 

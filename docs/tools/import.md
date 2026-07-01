@@ -1,4 +1,4 @@
-# Import
+# `📥` Import
 
 Opens the browser file picker for supported model inputs.
 

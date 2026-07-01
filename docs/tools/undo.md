@@ -1,4 +1,4 @@
-# Undo
+# `↶` Undo
 
 Undoes the most recent feature-history change.
 

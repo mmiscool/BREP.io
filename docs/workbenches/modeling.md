@@ -24,7 +24,7 @@ It combines the feature history tree, 3D viewport, expressions/configurator work
 ## Workspace Notes
 - The History panel creates, edits, and reorders feature-history entries.
 - The Expressions panel stores shared variables such as `width = 20;` and configurator widgets whose values are available as `configurator.fieldName`.
-- The Inspector floating window reports per-face and per-edge metrics such as area, length, and owning feature.
+- The `🕵️` Inspector floating window reports per-face and per-edge metrics such as area, length, and owning feature.
 
 ## Related
 - [All Workbench](./all.md)

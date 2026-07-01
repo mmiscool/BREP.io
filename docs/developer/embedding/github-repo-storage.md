@@ -5,7 +5,7 @@ This app can store models and settings directly in a GitHub repository using a p
 ![Display Settings floating window](../../floating-windows/display-settings.png)
 
 ## How It Works
-- You provide a GitHub token and select a repo in the **Display Settings** panel.
+- You provide a GitHub token and select a repo in the `⚙` **Display Settings** panel.
 - When both are set, the app switches to GitHub storage for models and settings.
 - Storage lives inside a folder named `brep-storage` at the repo root.
 
@@ -13,12 +13,12 @@ This app can store models and settings directly in a GitHub repository using a p
 1. Create a fine‑grained token at `https://github.com/settings/personal-access-tokens`.
 1. Grant access to the target repository.
 1. Enable **Contents: Read and Write** permissions.
-1. In the app, open **Display Settings → Storage (GitHub)**.
+1. In the app, open `⚙` **Display Settings → Storage (GitHub)**.
 1. Paste the token, click **Load Repos**, then select a repository.
 
 ## Repository Layout
 - `brep-storage/__BREP_DATA__/` contains saved models.
-- `brep-storage/settings/` contains app settings (e.g. Display Settings).
+- `brep-storage/settings/` contains app settings (for example, `⚙` Display Settings).
 
 Each saved model is stored as:
 - `name.3mf` (real 3MF file containing geometry + embedded history metadata)
