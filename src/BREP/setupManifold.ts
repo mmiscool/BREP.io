@@ -5,6 +5,7 @@ import {
 } from "../generated/manifoldSource.js";
 
 declare const __MANIFOLD_WASM_BASE64__: string | undefined;
+declare const __MANIFOLD_JS_BASE64__: string | undefined;
 
 const COMPILED_INLINE_WASM_BASE64 =
   typeof __MANIFOLD_WASM_BASE64__ !== 'undefined'
@@ -15,6 +16,15 @@ const INLINE_WASM_BASE64 =
   || (typeof globalThis !== 'undefined'
     && typeof (globalThis as any).__MANIFOLD_WASM_BASE64__ !== 'undefined'
     && (globalThis as any).__MANIFOLD_WASM_BASE64__);
+const COMPILED_INLINE_MANIFOLD_JS_BASE64 =
+  typeof __MANIFOLD_JS_BASE64__ !== 'undefined'
+    ? __MANIFOLD_JS_BASE64__
+    : '';
+const INLINE_MANIFOLD_JS_BASE64 =
+  COMPILED_INLINE_MANIFOLD_JS_BASE64
+  || (typeof globalThis !== 'undefined'
+    && typeof (globalThis as any).__MANIFOLD_JS_BASE64__ !== 'undefined'
+    && (globalThis as any).__MANIFOLD_JS_BASE64__);
 
 const isNode =
   typeof window === 'undefined' ||
@@ -45,10 +55,26 @@ const patchFileURLToPathForDataUrl = async () => {
   }
 };
 
+const normalizeBase64Payload = (base64) => {
+  if (!base64) return '';
+  return String(base64).includes('base64,')
+    ? String(base64).slice(String(base64).indexOf('base64,') + 7)
+    : String(base64);
+};
+
+const makeDataUrl = (mimeType, base64) => (
+  `data:${mimeType};base64,${normalizeBase64Payload(base64)}`
+);
+
 const loadModule = async () => {
   if (isNode) {
     await patchFileURLToPathForDataUrl();
     const mod = await import('../../manifold-plus/dist/manifold.js');
+    return mod?.default ?? mod;
+  }
+
+  if (INLINE_MANIFOLD_JS_BASE64) {
+    const mod = await import(/* @vite-ignore */ makeDataUrl('text/javascript', INLINE_MANIFOLD_JS_BASE64));
     return mod?.default ?? mod;
   }
 
@@ -58,9 +84,7 @@ const loadModule = async () => {
 
 const decodeBase64ToUint8Array = (base64) => {
   if (!base64) return null;
-  const normalized = base64.includes('base64,')
-    ? base64.slice(base64.indexOf('base64,') + 7)
-    : base64;
+  const normalized = normalizeBase64Payload(base64);
 
   if (typeof globalThis.Buffer !== 'undefined') {
     return new Uint8Array(globalThis.Buffer.from(normalized, 'base64'));
@@ -78,7 +102,12 @@ const decodeBase64ToUint8Array = (base64) => {
 
 const initWasm = async (opts: any = undefined) => {
   const Module = await loadModule();
-  const wasm = await Module(opts);
+  const moduleOpts = opts && typeof opts === 'object' ? { ...opts } : {};
+  if (!isNode && INLINE_WASM_BASE64 && typeof moduleOpts.locateFile !== 'function') {
+    const wasmDataUrl = makeDataUrl('application/octet-stream', INLINE_WASM_BASE64);
+    moduleOpts.locateFile = () => wasmDataUrl;
+  }
+  const wasm = await Module(moduleOpts);
   if (typeof wasm.setup === 'function') await wasm.setup();
   return wasm;
 };

@@ -6,7 +6,9 @@ import { Buffer } from 'node:buffer';
 import wasm from 'vite-plugin-wasm';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const manifoldJsPath = resolve(__dirname, 'manifold-plus/dist/manifold.js');
 const wasmPath = resolve(__dirname, 'manifold-plus/dist/manifold.wasm');
+const manifoldJsBase64 = fs.readFileSync(manifoldJsPath, 'base64');
 const wasmBase64 = fs.readFileSync(wasmPath, 'base64');
 
 function patchManifoldNodeImports(): Plugin {
@@ -157,6 +159,7 @@ export default defineConfig({
     },
   },
   define: {
+    __MANIFOLD_JS_BASE64__: JSON.stringify(manifoldJsBase64),
     __MANIFOLD_WASM_BASE64__: JSON.stringify(wasmBase64),
   },
 });
