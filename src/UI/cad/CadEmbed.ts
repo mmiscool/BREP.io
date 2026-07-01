@@ -1,6 +1,5 @@
 import { deepClone } from "../../utils/deepClone.js";
 export { bootCadFrame, bootCADFrame } from "./CadFrameApp.js";
-import cadCssText from "../../styles/cad.css?raw";
 
 const DEFAULT_CHANNEL = "brep:cad";
 const DEFAULT_TIMEOUT_MS = 20000;
@@ -77,10 +76,6 @@ function normalizePathRequest(pathOrRequest: any, options: any = {}) {
   return {
     ...(options && typeof options === "object" ? options : {}),
   };
-}
-
-function sanitizeInlineStyleText(cssText: any) {
-  return String(cssText || "").replace(/<\/style/gi, "<\\/style");
 }
 
 export class CadEmbed {
@@ -395,20 +390,18 @@ export class CadEmbed {
       frameModuleUrl: this._frameModuleUrl,
       backgroundColor: this._options.backgroundColor || null,
     });
-    const frameCss = sanitizeInlineStyleText(cadCssText);
     const inlineBodyBackground = this._options.backgroundColor
       ? `body { background: ${JSON.stringify(String(this._options.backgroundColor))}; }`
       : "";
 
     return `<!doctype html>
-<html lang="en">
+<html lang="en" data-brep-cad-frame="true">
   <head>
     <meta charset="UTF-8" />
     <title>BREP CAD</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
     <style>
-${frameCss}
       html, body { width: 100%; height: 100%; overflow: hidden; overscroll-behavior: none; }
       ${inlineBodyBackground}
     </style>

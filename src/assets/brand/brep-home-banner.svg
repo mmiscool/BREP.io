@@ -38,7 +38,7 @@
         letter-spacing:0.28em;
       }
       .wordMain{
-        fill:#ecf4ff;
+        fill:white;
         stroke:#0c1b3d;
         stroke-opacity:0.88;
         stroke-width:4;
@@ -57,7 +57,7 @@
       }
       @media (prefers-color-scheme: light) {
         .wordMain{
-          fill:#17325f;
+          fill:black;
           stroke:#f3f8ff;
           stroke-opacity:0.90;
         }
