@@ -8,6 +8,7 @@ This document covers the iframe-based `CadEmbed` API for embedding the full BREP
 - Repo demo page: [apiExamples/Embeded_CAD.html](../../../apiExamples/Embeded_CAD.html)
 - Source on GitHub: [apiExamples/Embeded_CAD.html](https://github.com/mmiscool/BREP/blob/master/apiExamples/Embeded_CAD.html)
 - Hosted CDN demo: [https://BREP.io/apiExamples/Embeded_CAD_CDN.html](https://BREP.io/apiExamples/Embeded_CAD_CDN.html)
+- CDN JSFiddle: [https://jsfiddle.net/sx216mtk/](https://jsfiddle.net/sx216mtk/)
 - Repo CDN demo page: [apiExamples/Embeded_CAD_CDN.html](../../../apiExamples/Embeded_CAD_CDN.html)
 - CDN source on GitHub: [apiExamples/Embeded_CAD_CDN.html](https://github.com/mmiscool/BREP/blob/master/apiExamples/Embeded_CAD_CDN.html)
 - Hosted integration test: [https://BREP.io/apiExamples/Embeded_CAD_Integration_Test.html](https://BREP.io/apiExamples/Embeded_CAD_Integration_Test.html)

@@ -35,6 +35,7 @@ This page links the live `.html` demos under `/apiExamples/`.
 
 ## Embedded CAD (CDN)
 - Demo: [https://BREP.io/apiExamples/Embeded_CAD_CDN.html](https://BREP.io/apiExamples/Embeded_CAD_CDN.html)
+- JSFiddle: [https://jsfiddle.net/sx216mtk/](https://jsfiddle.net/sx216mtk/)
 - Source: [apiExamples/Embeded_CAD_CDN.html](https://github.com/mmiscool/BREP/blob/master/apiExamples/Embeded_CAD_CDN.html)
 - Uses direct jsDelivr import:
   `import { CadEmbed } from "https://cdn.jsdelivr.net/npm/brep-io-kernel@latest/dist-kernel/CAD.js";`

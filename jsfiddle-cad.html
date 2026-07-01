@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BREP CAD CDN</title>
+    <style>
+      html, body { margin: 0; height: 100%; font: 14px system-ui, sans-serif; }
+      #bar { padding: 8px 10px; border-bottom: 1px solid #ddd; }
+      #cad { height: calc(100vh - 38px); }
+    </style>
+  </head>
+  <body>
+    <div id="bar">Loading CAD...</div>
+    <div id="cad"></div>
+
+    <script type="module">
+      import { CadEmbed } from "https://cdn.jsdelivr.net/npm/brep-io-kernel@latest/dist-kernel/CAD.js";
+
+      const bar = document.getElementById("bar");
+      const cad = new CadEmbed({
+        mountTo: document.getElementById("cad"),
+        sidebarExpanded: true,
+        onReady: (state) => {
+          bar.textContent = `CAD ready. Features: ${state?.featureCount ?? 0}`;
+        },
+      });
+
+      cad.mount().catch((error) => {
+        console.error(error);
+        bar.textContent = `CAD failed to load: ${error?.message || error}`;
+      });
+    </script>
+  </body>
+</html>
