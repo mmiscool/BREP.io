@@ -55,22 +55,7 @@
         fill:#cfdef8;
         fill-opacity:0.86;
       }
-      @media (prefers-color-scheme: light) {
-        .wordMain{
-          fill:black;
-          stroke:#f3f8ff;
-          stroke-opacity:0.90;
-        }
-        .wordIo{
-          fill:#0a6bff;
-          stroke:#d9ebff;
-          stroke-opacity:0.75;
-        }
-        .wordSub{
-          fill:#274676;
-          fill-opacity:0.82;
-        }
-      }
+
     </style>
   </defs>
 

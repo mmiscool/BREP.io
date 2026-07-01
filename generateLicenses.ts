@@ -203,6 +203,18 @@ h1{margin:0 0 18px;font-size:22px;color:var(--accent);font-weight:700}
 .pkg .name{font-weight:600}
 .pkg .desc{color:var(--muted);margin-top:2px}
 .desc{color:var(--muted);margin-top:6px}
+.font-license-list{display:flex;flex-direction:column;gap:8px;margin:0 0 12px}
+.font-license-details{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.font-license-summary{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 10px;cursor:pointer;list-style:none}
+.font-license-summary::-webkit-details-marker{display:none}
+.font-license-summary::marker{content:""}
+.font-license-summary:hover{background:rgba(92,200,255,0.08)}
+.font-license-name{font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.font-license-meta{margin-top:3px;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.font-license-body{border-top:1px solid var(--border);padding:10px}
+.font-license-body h3{margin:0 0 6px;font-size:14px;color:var(--accent)}
+.font-license-text{white-space:pre-wrap;margin:0 0 12px;color:var(--text);font-size:12px;line-height:1.45}
+.font-license-text:last-child{margin-bottom:0}
 a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
 .chip{background:var(--chip);border:1px solid var(--border);border-radius:999px;padding:2px 8px;font-size:12px;color:var(--muted)}
 .footer{margin-top:26px;color:var(--muted);font-size:12px}
@@ -408,24 +420,35 @@ const renderFontLicenseHtml = ({ families, licenseIds }) => {
     licenseIds.length
   } license type${licenseIds.length === 1 ? "" : "s"}`;
   let html = `<h1>Font Licenses (Bundled Assets)</h1>
-  <div class="summary">${escapeHTML(summary)}</div>`;
+  <div class="summary">${escapeHTML(summary)}</div>
+  <div class="font-license-list">`;
   for (const family of families) {
     const licenseLabel = family.licenseIds.length ? family.licenseIds.join(", ") : "Unknown";
     const fontList = family.fontFiles.length ? family.fontFiles.join(", ") : "None found";
     const licenseFileList = family.licenseFiles.length
       ? family.licenseFiles.map((file) => `${family.relDir}/${file}`).join(", ")
       : "None found";
-    html += `<section class="license">
-    <h2>${escapeHTML(family.name)} <span class="chip">${escapeHTML(licenseLabel)}</span></h2>
-    <div class="desc">Fonts: ${escapeHTML(fontList)}</div>
-    <div class="desc">License files: ${escapeHTML(licenseFileList)}</div>
+    html += `<details class="font-license-details">
+    <summary class="font-license-summary">
+      <span>
+        <span class="font-license-name">${escapeHTML(family.name)}</span>
+        <span class="font-license-meta">Fonts: ${escapeHTML(fontList)} · License files: ${escapeHTML(licenseFileList)}</span>
+      </span>
+      <span class="chip">${escapeHTML(licenseLabel)}</span>
+    </summary>
+    <div class="font-license-body">
   `;
     for (const lic of family.licenseTexts) {
       html += `<h3>${escapeHTML(lic.file)}</h3>
-    <div style="white-space: pre-wrap;">${escapeHTML(lic.text)}</div>`;
+    <div class="font-license-text">${escapeHTML(lic.text)}</div>`;
     }
-    html += `</section>`;
+    if (!family.licenseTexts.length) {
+      html += `<div class="font-license-text">No license text found.</div>`;
+    }
+    html += `</div>
+  </details>`;
   }
+  html += `</div>`;
   return html;
 };
 
@@ -1786,6 +1809,75 @@ function generateDocsSite() {
   // Sort pages for consistent ordering
   const sortedPages = pages.sort((a, b) => a.href.localeCompare(b.href));
 
+  const buildLicensePageBody = () => {
+    let body = `<section class="license">
+    <h1>This project's license</h1>
+    <div style="white-space: pre-wrap;">${escapeHTML(licenseText)}</div>
+  </section>
+
+  <h1>Licenses Report of libraries used in this package</h1>
+  <div class="summary">${countPackages} packages • ${licenseKeys.length} license types</div>
+`;
+
+    for (const lic of licenseKeys) {
+      const list = Array.isArray(data[lic]) ? data[lic] : [];
+      list.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+      body += `<section class="license">
+    <h2>${escapeHTML(lic)} <span class="chip">${list.length} package${list.length === 1 ? "" : "s"}</span></h2>
+  `;
+
+      for (const p of list) {
+        const name = escapeHTML(p.name ?? "");
+        const author =
+          p.author && typeof p.author === "object"
+            ? escapeHTML(p.author.name ?? "")
+            : escapeHTML(p.author ?? "");
+        const homepage = p.homepage ? String(p.homepage) : "";
+        const desc = escapeHTML(p.description ?? "");
+        const versionsCount = Array.isArray(p.versions) ? new Set(p.versions).size : 0;
+
+        body += `<div class="pkg">
+      <div>
+        <div class="name">${name}${versionsCount ? ` <span class="chip">${versionsCount} version${versionsCount === 1 ? "" : "s"}</span>` : ""}</div>
+        ${desc ? `<div class="desc">${desc}</div>` : ""}
+        ${author ? `<div class="desc">Author: ${escapeHTML(author)}</div>` : ""}
+      </div>
+      <div class="meta">
+        ${homepage ? `<a class="chip" href="${escapeHTML(homepage)}" target="_blank" rel="noopener noreferrer">Repo / Homepage</a>` : ""}
+      </div>
+    </div>`;
+      }
+
+      body += `</section>`;
+    }
+
+    body += `
+  ${fontLicenseHtml}
+  <div class="footer">${dependencySourceHtml}</div>`;
+
+    return body;
+  };
+
+  const writeLicensePageOverride = () => {
+    const licenseBody = buildLicensePageBody();
+    const licenseSidebar = buildDocsSidebar({ currentSourcePath: "LICENSE", pageMetaBySourcePath, homeMeta: readmeMeta });
+    const licenseHtml = docTemplate("Licenses", licenseBody, { relativeRoot: ".", showTitle: false, sidebar: licenseSidebar });
+    writeFileSync(path.join(docsOutputDir, "LICENSE.html"), licenseHtml, "utf-8");
+    addSearchEntry(searchEntries, { title: "Licenses", href: "LICENSE.html", html: licenseBody });
+  };
+
+  const writeFontLicensePageOverride = () => {
+    const fontLicenseSidebar = buildDocsSidebar({ currentSourcePath: "fonts-licenses", pageMetaBySourcePath, homeMeta: readmeMeta });
+    const fontLicensePageHtml = docTemplate("Font Licenses", fontLicenseHtml, {
+      relativeRoot: ".",
+      showTitle: false,
+      sidebar: fontLicenseSidebar,
+    });
+    writeFileSync(path.join(docsOutputDir, "fonts-licenses.html"), fontLicensePageHtml, "utf-8");
+    addSearchEntry(searchEntries, { title: "Font Licenses", href: "fonts-licenses.html", html: fontLicenseHtml });
+  };
+
   // Create README as index.html
   if (existsSync(readmePath)) {
     const readmeMd = readFileSync(readmePath, "utf-8");
@@ -1862,6 +1954,9 @@ function generateDocsSite() {
     writeFileSync(path.join(docsOutputDir, "index.html"), indexHtml, "utf-8");
     addSearchEntry(searchEntries, { title: readmeTitle, href: "index.html", html: readmeBody });
   }
+
+  writeLicensePageOverride();
+  writeFontLicensePageOverride();
 
   // Generate table of contents
   const tocPage = generateTableOfContents(sortedPages, docsOutputDir);
