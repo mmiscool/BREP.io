@@ -29,16 +29,7 @@ import {
 const DEFAULT_TYPE = CAM_OPERATION_TYPE_3_AXIS;
 export const CAM_GENERATED_DATA_VERSION = 2;
 const RESERVED_INPUT_KEYS = new Set(['type', 'persistentData', '__open']);
-const INTERNAL_OPERATION_INPUT_KEYS = new Set([
-  'enableLineFilter',
-  'enablePathOrdering',
-  'maxDepth',
-  'minSampling',
-  'simplificationTolerance',
-  'sampling',
-  'preserveSimulationSamples',
-  'waterlineSampling',
-]);
+const INTERNAL_OPERATION_INPUT_KEYS = new Set<string>();
 const UNSERIALIZABLE_WORKER_PARAM = Symbol('UNSERIALIZABLE_WORKER_PARAM');
 
 type CamEntity = any;

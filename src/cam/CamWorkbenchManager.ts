@@ -1,7 +1,5 @@
 import * as THREE from 'three';
 import { markSceneOverlayObject } from '../UI/sceneOverlayUtils.js';
-import { createCamCutterProfile } from './CamCutterProfile.js';
-import { buildCutterProfileSweepMesh } from './camToolpath.js';
 import type { CamToolpathPath, CamToolpathResult } from './camToolpath.js';
 
 type Point3 = [number, number, number];
@@ -48,9 +46,9 @@ function setVisualKey(object: THREE.Object3D, key: keyof CamPreviewVisibilityOpt
   return object;
 }
 
-function cutterProfileTotalLength(profile: ReturnType<typeof createCamCutterProfile>, fallbackLength: number, fallbackRadius: number) {
-  const cuttingLength = Math.max(0, Number(profile.cuttingLength) || 0);
-  const shaftLength = Math.max(0, Number(profile.shaftLength) || 0);
+function cutterProfileTotalLength(profile: any, fallbackLength: number, fallbackRadius: number) {
+  const cuttingLength = Math.max(0, Number(profile?.cuttingLength) || 0);
+  const shaftLength = Math.max(0, Number(profile?.shaftLength) || 0);
   return Math.max(
     Math.max(0.0001, Number(fallbackRadius) || 0) * 2,
     cuttingLength + shaftLength,
@@ -58,12 +56,28 @@ function cutterProfileTotalLength(profile: ReturnType<typeof createCamCutterProf
   );
 }
 
+function cutterRadiusAtHeight(profile: any, height: number, fallbackRadius: number) {
+  const radius = Math.max(0.0001, Number(profile?.radius) || fallbackRadius);
+  const kind = String(profile?.kind || 'flat');
+  if (kind === 'ball') {
+    if (height <= 0) return 0;
+    if (height >= radius) return radius;
+    return Math.sqrt(Math.max(0, radius * radius - (radius - height) * (radius - height)));
+  }
+  if (kind === 'vbit') {
+    const angle = Math.max(1, Math.min(179, Number(profile?.includedAngleDeg) || 90));
+    return Math.min(radius, Math.max(0, height * Math.tan((angle * Math.PI / 180) * 0.5)));
+  }
+  return radius;
+}
+
 function createRevolvedCutterGeometry(cutterProfile: any, fallbackRadius: number, fallbackLength: number) {
-  const profile = createCamCutterProfile(cutterProfile || {
+  const profile = cutterProfile || {
     kind: 'flat',
     diameter: fallbackRadius * 2,
+    radius: fallbackRadius,
     cuttingLength: fallbackLength,
-  });
+  };
   const radius = Math.max(0.0001, Number(profile.radius) || fallbackRadius);
   const length = cutterProfileTotalLength(profile, fallbackLength, radius);
   const radialSegments = 32;
@@ -76,10 +90,10 @@ function createRevolvedCutterGeometry(cutterProfile: any, fallbackRadius: number
     rings.push(next);
   };
 
-  rememberRing(0, Number(profile.radiusAtHeight(0)) || 0);
+  rememberRing(0, cutterRadiusAtHeight(profile, 0, radius));
   for (let index = 1; index <= heightSegments; index += 1) {
     const z = (length * index) / heightSegments;
-    rememberRing(z, Number(profile.radiusAtHeight(z)) || radius);
+    rememberRing(z, cutterRadiusAtHeight(profile, z, radius));
   }
   if (rings[rings.length - 1]?.z < length - 1e-6) rememberRing(length, radius);
 
@@ -129,9 +143,10 @@ function createToolMesh(planOrDiameter: CamToolpathResult | number, maybeToolLen
   const toolDiameter = plan ? plan.toolDiameter : Number(planOrDiameter);
   const radius = Math.max(0.05, toolDiameter * 0.5);
   const fallbackToolLength = Math.max(radius * 2, Number(plan ? plan.toolLength : maybeToolLength) || radius * 2);
-  const profile = plan ? createCamCutterProfile(plan.cutterProfile || {
+  const profile = plan ? (plan.cutterProfile || {
     kind: plan.toolShape || 'flat',
     diameter: toolDiameter,
+    radius,
     cuttingLength: fallbackToolLength,
   }) : null;
   const length = profile
@@ -168,16 +183,27 @@ function createCutterProfileSweepGeometry(
   b: THREE.Vector3,
   radius: number,
   toolLength: number,
-  cutterProfile: any,
+  _cutterProfile: any,
 ) {
-  const mesh = buildCutterProfileSweepMesh(
-    [a.x, a.y, a.z],
-    [b.x, b.y, b.z],
-    cutterProfile || { kind: 'flat', diameter: radius * 2, cuttingLength: toolLength },
-    radius,
-    toolLength,
-  );
-  return createIndexedGeometry(mesh.positions, mesh.indices);
+  const minX = Math.min(a.x, b.x) - radius;
+  const minY = Math.min(a.y, b.y) - radius;
+  const minZ = Math.min(a.z, b.z);
+  const maxX = Math.max(a.x, b.x) + radius;
+  const maxY = Math.max(a.y, b.y) + radius;
+  const maxZ = Math.max(a.z, b.z) + Math.max(radius * 2, toolLength);
+  const positions = [
+    minX, minY, minZ, maxX, minY, minZ, maxX, maxY, minZ, minX, maxY, minZ,
+    minX, minY, maxZ, maxX, minY, maxZ, maxX, maxY, maxZ, minX, maxY, maxZ,
+  ];
+  const indices = [
+    0, 2, 1, 0, 3, 2,
+    4, 5, 6, 4, 6, 7,
+    0, 1, 5, 0, 5, 4,
+    1, 2, 6, 1, 6, 5,
+    2, 3, 7, 2, 7, 6,
+    3, 0, 4, 3, 4, 7,
+  ];
+  return createIndexedGeometry(positions, indices);
 }
 
 function createIndexedGeometry(positions: number[], indices: number[]) {

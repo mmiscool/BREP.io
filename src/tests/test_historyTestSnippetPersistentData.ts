@@ -175,7 +175,8 @@ export async function test_history_test_snippet_toolbar_snapshot_compacts_cam_to
                 id: 'CAM_TOOLBAR',
                 name: 'Toolbar CAM',
                 targetSolids: ['P.CU1'],
-                strategy: 'waterline-contour',
+                toolShape: 'flat',
+                stepover: 1.5,
                 __open: true,
               },
               persistentData: {
@@ -260,8 +261,8 @@ export function test_history_test_snippet_includes_cam_operations() {
             id: 'CAM_SNIP',
             name: 'Snippet CAM',
             targetSolids: ['P_CU1'],
-            strategy: 'waterline-contour',
-            cutRegion: 'outside',
+            toolShape: 'vbit',
+            includedAngleDeg: 60,
             toolDiameter: 3.175,
             __open: true,
           },
@@ -282,7 +283,8 @@ export function test_history_test_snippet_includes_cam_operations() {
   assertIncludes(snippet, '"CAM_SNIP"', 'CAM operation id');
   assertIncludes(snippet, '"stockProfile"', 'CAM stock profile');
   assertIncludes(snippet, '"targetSolids": [', 'CAM target solid references');
-  assertIncludes(snippet, '"waterline-contour"', 'CAM strategy');
+  assertIncludes(snippet, '"vbit"', 'CAM cutter shape');
+  assertIncludes(snippet, '"includedAngleDeg": 60', 'CAM V-bit angle');
   assertExcludes(snippet, '"gcode"', 'generated CAM G-code');
   assertExcludes(snippet, '"summary"', 'generated CAM summary');
   assertExcludes(snippet, '"toolpath"', 'generated CAM toolpath payload');
