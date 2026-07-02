@@ -452,8 +452,19 @@ export const workbenchMethods = {
             const title = String(record.title || '');
             if (!title) continue;
             const visible = isSidePanelAllowed(record, workbenchId);
-            if (visible) this.accordion.showSection?.(title);
-            else this.accordion.hideSection?.(title);
+            const visibilityChanged = record._visible !== visible;
+            if (visible) {
+                if (visibilityChanged) {
+                    this.accordion.showSection?.(title);
+                    if (record.defaultExpanded === false) {
+                        void this.accordion.collapseSection?.(title);
+                    } else if (record.defaultExpanded === true) {
+                        void this.accordion.expandSection?.(title);
+                    }
+                }
+            } else if (visibilityChanged) {
+                this.accordion.hideSection?.(title);
+            }
             if (record._visible !== visible) {
                 record._visible = visible;
                 if (typeof record.onVisibilityChange === 'function') {

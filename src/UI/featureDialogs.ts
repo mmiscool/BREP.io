@@ -575,6 +575,7 @@ export class SchemaForm {
 
         this._widgets.clear();
         this._skipDefaultRefresh.clear();
+        const groupedFields = new Map();
 
         // Build field rows
         for (const key in this.schema) {
@@ -647,12 +648,56 @@ export class SchemaForm {
             }
 
             row.appendChild(controlWrap);
-            this._fieldsWrap.appendChild(row);
             if (inputRegistered && inputEl instanceof HTMLElement) {
                 this._inputs.set(key, inputEl);
             }
             this._attachExpressionToggle({ key, def, row, controlWrap });
+            const groupInfo = this._normalizeFieldGroup(def);
+            if (groupInfo) {
+                let group = groupedFields.get(groupInfo.key);
+                if (!group) {
+                    const details = document.createElement('details');
+                    details.className = `field-group field-group-${groupInfo.key}`;
+                    details.dataset.groupKey = groupInfo.key;
+                    details.open = groupInfo.open === true;
+                    const summary = document.createElement('summary');
+                    summary.textContent = groupInfo.label;
+                    const body = document.createElement('div');
+                    body.className = 'field-group-body';
+                    details.append(summary, body);
+                    group = { details, body };
+                    groupedFields.set(groupInfo.key, group);
+                }
+                group.body.appendChild(row);
+            } else {
+                this._fieldsWrap.appendChild(row);
+            }
         }
+
+        for (const group of groupedFields.values()) {
+            if (group?.body?.children?.length) {
+                this._fieldsWrap.appendChild(group.details);
+            }
+        }
+    }
+
+    _normalizeFieldGroup(def) {
+        if (!def || typeof def !== 'object') return null;
+        const source = def.uiGroup ?? def.group ?? (def.advanced === true ? 'advanced' : null);
+        if (source == null || source === false) return null;
+        let key = 'advanced';
+        let label = 'Advanced';
+        let open = false;
+        if (typeof source === 'string') {
+            key = source.trim() || 'advanced';
+            label = key === 'advanced' ? 'Advanced' : this._prettyLabel(key);
+        } else if (typeof source === 'object') {
+            key = String(source.key ?? source.id ?? source.name ?? 'advanced').trim() || 'advanced';
+            label = String(source.label ?? source.title ?? (key === 'advanced' ? 'Advanced' : this._prettyLabel(key)));
+            open = source.open === true || source.defaultOpen === true;
+        }
+        key = key.replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'advanced';
+        return { key, label, open };
     }
 
     activateField(key) {
@@ -2975,6 +3020,29 @@ export class SchemaForm {
         display: flex;
         flex-direction: column;
         gap: 12px;
+      }
+
+      .field-group {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 0;
+        overflow: hidden;
+        background: rgba(15, 23, 42, 0.18);
+      }
+
+      .field-group summary {
+        cursor: pointer;
+        color: var(--text);
+        font-weight: 700;
+        padding: 9px 10px;
+        user-select: none;
+      }
+
+      .field-group-body {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 0 10px 10px;
       }
 
       .field-row {

@@ -43,6 +43,7 @@ workerScope.onmessage = (event) => {
         const params: Record<string, any> = {
           ...operationParams,
           machineProfile: job.machineProfile || operationParams.machineProfile,
+          stockProfile: job.stockProfile || operationParams.stockProfile,
         };
         const operationName = operationNameFor(params, index);
 

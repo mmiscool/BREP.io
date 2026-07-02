@@ -10,7 +10,9 @@ export const CAM_WORKBENCH = {
     pmiAnnotations: false,
   },
   sidePanels: {
-    camOperations: true,
+    camHistory: true,
+    camMachineConfiguration: true,
+    camGcode: true,
   },
   toolbarButtons: [
     'new',

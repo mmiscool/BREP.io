@@ -32,6 +32,13 @@ function sanitizeFileName(raw: any, fallback = 'brep-cam.nc') {
   return cleaned || fallback;
 }
 
+export function gcodeDownloadFileName(raw: any) {
+  const cleaned = sanitizeFileName(raw || 'brep-cam', 'brep-cam');
+  if (/\.(nc|gcode|tap)$/i.test(cleaned)) return cleaned;
+  const stem = cleaned.replace(/\.(brep|json|step|stp|iges|igs|stl|obj|3mf|glb|gltf)$/i, '') || 'brep-cam';
+  return `${stem}.nc`;
+}
+
 function downloadTextFile(filename: string, text: string, mime = 'text/plain;charset=utf-8') {
   const blob = new Blob([text || ''], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -48,10 +55,29 @@ function downloadTextFile(filename: string, text: string, mime = 'text/plain;cha
   }
 }
 
+function formatElapsedDuration(ms: number) {
+  const totalSeconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+  }
+  const tenths = Math.max(0, Math.floor((Number(ms) || 0) / 100) / 10);
+  return `${tenths.toFixed(1)}s`;
+}
+
 export class CamHistoryWidget {
   viewer: any;
   uiElement: HTMLDivElement;
+  machineConfigEl!: HTMLDivElement;
+  gcodeEl!: HTMLDivElement;
+  historyEl!: HTMLDivElement;
   machineEl!: HTMLDivElement;
+  stockEl!: HTMLDivElement;
   controlsEl!: HTMLDivElement;
   simulationEl!: HTMLDivElement;
   visualEl!: HTMLDivElement;
@@ -62,6 +88,7 @@ export class CamHistoryWidget {
   _runtime: any = null;
   _runtimePromise: Promise<any> | null = null;
   _runtimeSimulationUnsubscribe: (() => void) | null = null;
+  _generationAbortController: AbortController | null = null;
   _generating = false;
   _generationProgress: AnyRecord | null = null;
   _visualOptions: AnyRecord = {
@@ -90,6 +117,7 @@ export class CamHistoryWidget {
     try { this._runtimeSimulationUnsubscribe?.(); } catch { /* ignore listener cleanup */ }
     this._runtimeSimulationUnsubscribe = null;
     this._runtime = null;
+    this._cancelGeneration();
     this._closeGenerationProgress();
     try { this.historyWidget?.dispose?.(); } catch { /* ignore widget cleanup */ }
     this.historyWidget = null;
@@ -101,6 +129,7 @@ export class CamHistoryWidget {
 
   refresh(): void {
     this._renderMachineSettings();
+    this._renderStockSettings();
     this._renderControls();
     this._renderSimulationControls();
     this._renderVisualizationControls();
@@ -117,8 +146,20 @@ export class CamHistoryWidget {
     const manager = this.viewer?.partHistory?.camPlanManager || null;
     if (!manager?.addListener) return;
     this._camListener = manager.addListener((payload: AnyRecord = {}) => {
+      if (
+        payload.reason === 'invalidate'
+        || payload.reason === 'machine-profile'
+        || payload.reason === 'stock-profile'
+        || payload.reason === 'load'
+        || payload.reason === 'clear'
+      ) {
+        try { this._runtime?.clearPreview?.(); } catch { /* ignore stale preview cleanup */ }
+      }
       if (payload.reason === 'machine-profile' || payload.reason === 'load' || payload.reason === 'clear') {
         this._renderMachineSettings();
+      }
+      if (payload.reason === 'stock-profile' || payload.reason === 'load' || payload.reason === 'clear') {
+        this._renderStockSettings();
       }
       this._renderStatus();
       this._renderProgram();
@@ -127,29 +168,42 @@ export class CamHistoryWidget {
   }
 
   _buildUI(): void {
+    this.machineConfigEl = document.createElement('div');
+    this.machineConfigEl.className = 'cam-machine-config-panel';
+
     this.machineEl = document.createElement('div');
     this.machineEl.className = 'cam-machine-panel';
-    this.uiElement.appendChild(this.machineEl);
+    this.machineConfigEl.appendChild(this.machineEl);
+
+    this.stockEl = document.createElement('div');
+    this.stockEl.className = 'cam-stock-panel';
+    this.machineConfigEl.appendChild(this.stockEl);
+
+    this.gcodeEl = document.createElement('div');
+    this.gcodeEl.className = 'cam-gcode-panel';
+
+    this.historyEl = document.createElement('div');
+    this.historyEl.className = 'cam-history-panel';
 
     this.controlsEl = document.createElement('div');
     this.controlsEl.className = 'cam-history-controls';
-    this.uiElement.appendChild(this.controlsEl);
+    this.historyEl.appendChild(this.controlsEl);
 
     this.simulationEl = document.createElement('div');
     this.simulationEl.className = 'cam-simulation-panel';
-    this.uiElement.appendChild(this.simulationEl);
+    this.historyEl.appendChild(this.simulationEl);
 
     this.visualEl = document.createElement('div');
     this.visualEl.className = 'cam-visual-panel';
-    this.uiElement.appendChild(this.visualEl);
+    this.historyEl.appendChild(this.visualEl);
 
     this.statusEl = document.createElement('div');
     this.statusEl.className = 'cam-history-status';
-    this.uiElement.appendChild(this.statusEl);
+    this.historyEl.appendChild(this.statusEl);
 
     this.programEl = document.createElement('div');
     this.programEl.className = 'cam-program-panel';
-    this.uiElement.appendChild(this.programEl);
+    this.gcodeEl.appendChild(this.programEl);
 
     const manager = this.viewer?.partHistory?.camPlanManager || null;
     this.historyWidget = new HistoryCollectionWidget({
@@ -172,12 +226,40 @@ export class CamHistoryWidget {
         this._renderSimulationControls();
         this._renderStatus();
       },
+      entryToggle: {
+        isEnabled: ({ entry }: AnyRecord = {}) => entry?.inputParams?.enabled !== false,
+        setEnabled: ({ entry }: AnyRecord = {}, enabled: boolean) => {
+          if (!entry) return;
+          if (typeof entry.mergeParams === 'function') {
+            entry.mergeParams({ enabled });
+          } else {
+            entry.inputParams = { ...(entry.inputParams || {}), enabled };
+          }
+          manager?.invalidateOperation?.(entry, 'field:enabled');
+          this.viewer?.partHistory?.queueHistorySnapshot?.({ debounceMs: 0, reason: 'cam-operation' });
+          this._renderControls();
+          this._renderSimulationControls();
+          this._renderStatus();
+          this._renderProgram();
+        },
+        getTitle: ({ entry }: AnyRecord = {}) => (
+          entry?.inputParams?.enabled === false ? 'Enable CAM operation' : 'Disable CAM operation'
+        ),
+        className: 'cam-operation-enabled-toggle',
+      },
     });
-    this.uiElement.appendChild(this.historyWidget.uiElement);
+    this.historyEl.appendChild(this.historyWidget.uiElement);
+    this.uiElement.appendChild(this.historyEl);
+    this.uiElement.appendChild(this.machineConfigEl);
+    this.uiElement.appendChild(this.gcodeEl);
   }
 
   _queueMachineSnapshot(): void {
     this.viewer?.partHistory?.queueHistorySnapshot?.({ debounceMs: 0, reason: 'cam-machine-profile' });
+  }
+
+  _queueStockSnapshot(): void {
+    this.viewer?.partHistory?.queueHistorySnapshot?.({ debounceMs: 0, reason: 'cam-stock-profile' });
   }
 
   _renderMachineSettings(): void {
@@ -260,9 +342,16 @@ export class CamHistoryWidget {
     addNumber('Rapid', profile.defaultRapidRate, (value) => update({ defaultRapidRate: value }));
     addNumber('Park Z', profile.safeParkZ, (value) => update({ safeParkZ: value }));
 
+    const advanced = document.createElement('details');
+    advanced.className = 'cam-machine-advanced';
+    const advancedSummary = document.createElement('summary');
+    advancedSummary.textContent = 'Postprocessor';
+    advanced.appendChild(advancedSummary);
+    this.machineEl.appendChild(advanced);
+
     const toggles = document.createElement('div');
     toggles.className = 'cam-machine-toggles';
-    this.machineEl.appendChild(toggles);
+    advanced.appendChild(toggles);
 
     const addToggle = (labelText: string, checked: boolean, onChange: (value: boolean) => void) => {
       const label = document.createElement('label');
@@ -283,7 +372,7 @@ export class CamHistoryWidget {
 
     const macros = document.createElement('div');
     macros.className = 'cam-machine-macros';
-    this.machineEl.appendChild(macros);
+    advanced.appendChild(macros);
 
     const addMacro = (labelText: string, value: any, onChange: (value: string) => void) => {
       const label = document.createElement('label');
@@ -301,6 +390,103 @@ export class CamHistoryWidget {
 
     addMacro('Header', profile.header, (value) => update({ header: value }));
     addMacro('Footer', profile.footer, (value) => update({ footer: value }));
+  }
+
+  _renderStockSettings(): void {
+    if (!this.stockEl) return;
+    const manager = this.viewer?.partHistory?.camPlanManager || null;
+    this.stockEl.textContent = '';
+    if (!manager) {
+      this.stockEl.hidden = true;
+      return;
+    }
+    this.stockEl.hidden = false;
+    const profile = manager.getStockProfile?.() || manager.stockProfile || {};
+    const fixed = profile.mode === 'fixed';
+
+    const header = document.createElement('div');
+    header.className = 'cam-stock-header';
+    header.textContent = 'Stock';
+    this.stockEl.appendChild(header);
+
+    const grid = document.createElement('div');
+    grid.className = 'cam-stock-grid';
+    this.stockEl.appendChild(grid);
+
+    const update = (patch: AnyRecord) => {
+      manager.updateStockProfile?.(patch);
+      this._queueStockSnapshot();
+      this._renderStatus();
+    };
+
+    const addSelect = (labelText: string, value: any, options: Array<[string, string]>, onChange: (value: string) => void) => {
+      const label = document.createElement('label');
+      label.className = 'cam-stock-field';
+      const span = document.createElement('span');
+      span.textContent = labelText;
+      const select = document.createElement('select');
+      for (const [optionValue, optionText] of options) {
+        const option = document.createElement('option');
+        option.value = optionValue;
+        option.textContent = optionText;
+        if (value === optionValue) option.selected = true;
+        select.appendChild(option);
+      }
+      select.addEventListener('change', () => onChange(select.value));
+      label.appendChild(span);
+      label.appendChild(select);
+      grid.appendChild(label);
+      return select;
+    };
+
+    const addNumber = (
+      labelText: string,
+      value: any,
+      onChange: (value: number | null) => void,
+      options: { disabled?: boolean; nullable?: boolean; placeholder?: string } = {},
+    ) => {
+      const label = document.createElement('label');
+      label.className = 'cam-stock-field';
+      const span = document.createElement('span');
+      span.textContent = labelText;
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.step = '0.1';
+      input.disabled = options.disabled === true;
+      input.placeholder = options.placeholder || '';
+      const hasNullableValue = options.nullable && (value == null || value === '');
+      const numericValue = Number(value);
+      input.value = (hasNullableValue || (options.nullable && !Number.isFinite(numericValue)))
+        ? ''
+        : String(Number.isFinite(numericValue) ? numericValue : 0);
+      input.addEventListener('change', () => {
+        const trimmed = input.value.trim();
+        const next = Number(trimmed);
+        if (options.nullable && (trimmed === '' || !Number.isFinite(next))) {
+          onChange(null);
+          return;
+        }
+        onChange(next);
+      });
+      label.appendChild(span);
+      label.appendChild(input);
+      grid.appendChild(label);
+      return input;
+    };
+
+    addSelect('Mode', profile.mode, [
+      ['auto', 'Auto fit'],
+      ['fixed', 'Fixed size'],
+    ], (value) => update({ mode: value }));
+    addNumber('Margin', profile.margin, (value) => update({ margin: value ?? 0 }));
+    if (fixed) {
+      addNumber('Size X', profile.sizeX, (value) => update({ sizeX: value }), { nullable: true, placeholder: 'Auto' });
+      addNumber('Size Y', profile.sizeY, (value) => update({ sizeY: value }), { nullable: true, placeholder: 'Auto' });
+      addNumber('Size Z', profile.sizeZ, (value) => update({ sizeZ: value }), { nullable: true, placeholder: 'Auto' });
+      addNumber('Offset X', profile.offsetX, (value) => update({ offsetX: value ?? 0 }));
+      addNumber('Offset Y', profile.offsetY, (value) => update({ offsetY: value ?? 0 }));
+      addNumber('Offset Z', profile.offsetZ, (value) => update({ offsetZ: value ?? 0 }));
+    }
   }
 
   async _ensureRuntime() {
@@ -346,8 +532,10 @@ export class CamHistoryWidget {
     const manager = this.viewer?.partHistory?.camPlanManager || null;
     if (!manager || this._generating) return;
     this._generating = true;
+    const abortController = new AbortController();
+    this._generationAbortController = abortController;
     this._renderControls();
-    const progress = this._openGenerationProgress();
+    const progress = this._openGenerationProgress(() => this._cancelGeneration());
     progress.update({
       phase: 'start',
       message: 'Starting CAM generation',
@@ -360,10 +548,12 @@ export class CamHistoryWidget {
       const progressOptions = {
         onProgress: (event: AnyRecord = {}) => progress.update(event),
         progressYield: waitForProgressPaint,
+        signal: abortController.signal,
       };
       const plan = typeof manager.generateAllAsync === 'function'
         ? await manager.generateAllAsync(this.viewer, progressOptions)
         : manager.generateAll(this.viewer);
+      if (abortController.signal.aborted) throw this._generationAbortError(abortController.signal);
       const pathCount = Number(plan?.summary?.pathCount) || 0;
       progress.update({
         phase: 'history',
@@ -411,6 +601,20 @@ export class CamHistoryWidget {
       this._closeGenerationProgress(900);
     } catch (error: any) {
       const message = String(error?.message || error || 'Unknown CAM generation error');
+      if (this._isGenerationAbort(error) || abortController.signal.aborted) {
+        progress.update({
+          phase: 'canceled',
+          message: 'CAM generation stopped',
+          detail: 'Toolpath generation was interrupted before saving a new program.',
+          current: 100,
+          total: 100,
+          tone: 'warn',
+        });
+        progress.setComplete?.();
+        this._setStatus('CAM generation stopped before saving a new program.', 'warn');
+        this._closeGenerationProgress(4000);
+        return;
+      }
       progress.update({
         phase: 'error',
         message: 'CAM generation failed',
@@ -423,12 +627,36 @@ export class CamHistoryWidget {
       try { console.error(error); } catch { /* ignore console failures */ }
       this._closeGenerationProgress(5000);
     } finally {
+      if (this._generationAbortController === abortController) this._generationAbortController = null;
       this._generating = false;
       this._renderControls();
     }
   }
 
-  _openGenerationProgress(): AnyRecord {
+  _generationAbortError(signal: AbortSignal) {
+    const reason = signal.reason;
+    const error = new Error(String(reason?.message || reason || 'CAM generation canceled'));
+    error.name = 'AbortError';
+    return error;
+  }
+
+  _isGenerationAbort(error: any) {
+    return error?.name === 'AbortError'
+      || String(error?.message || error || '').toLowerCase().includes('generation canceled');
+  }
+
+  _cancelGeneration(): void {
+    const controller = this._generationAbortController;
+    if (!controller || controller.signal.aborted) return;
+    this._generationProgress?.setCanceling?.();
+    try {
+      controller.abort(new Error('CAM generation canceled'));
+    } catch {
+      controller.abort();
+    }
+  }
+
+  _openGenerationProgress(onCancel: (() => void) | null = null): AnyRecord {
     this._closeGenerationProgress();
     const panel = document.createElement('section');
     panel.className = 'cam-generation-progress';
@@ -441,6 +669,11 @@ export class CamHistoryWidget {
     const detail = document.createElement('div');
     detail.className = 'cam-generation-progress-detail';
     panel.appendChild(detail);
+
+    const runtime = document.createElement('div');
+    runtime.className = 'cam-generation-progress-runtime';
+    runtime.textContent = 'Elapsed 0.0s';
+    panel.appendChild(runtime);
 
     const meterRow = document.createElement('div');
     meterRow.className = 'cam-generation-progress-meter-row';
@@ -463,12 +696,28 @@ export class CamHistoryWidget {
     log.className = 'cam-generation-progress-log';
     panel.appendChild(log);
 
+    const actions = document.createElement('div');
+    actions.className = 'cam-generation-progress-actions';
+    const stopButton = document.createElement('button');
+    stopButton.type = 'button';
+    stopButton.className = 'cam-generation-progress-stop';
+    stopButton.textContent = 'Stop';
+    stopButton.title = 'Stop toolpath generation';
+    stopButton.setAttribute('aria-label', 'Stop toolpath generation');
+    stopButton.addEventListener('click', () => {
+      stopButton.disabled = true;
+      stopButton.textContent = 'Stopping...';
+      try { onCancel?.(); } catch { /* ignore progress cancel callback */ }
+    });
+    actions.appendChild(stopButton);
+    panel.appendChild(actions);
+
     const floating = new FloatingWindow({
       title: 'Generating Toolpaths',
       width: 440,
-      height: 245,
+      height: 285,
       minWidth: 320,
-      minHeight: 190,
+      minHeight: 220,
       right: 24,
       top: 82,
       zIndex: 50000,
@@ -479,6 +728,30 @@ export class CamHistoryWidget {
 
     let lastMessage = '';
     let closeTimer: number | null = null;
+    const nowMs = () => (typeof performance !== 'undefined' && typeof performance.now === 'function')
+      ? performance.now()
+      : Date.now();
+    const startedAt = nowMs();
+    let elapsedTimer: number | null = null;
+    const updateElapsed = () => {
+      runtime.textContent = `Elapsed ${formatElapsedDuration(nowMs() - startedAt)}`;
+    };
+    const stopElapsedTimer = () => {
+      if (elapsedTimer != null && typeof window !== 'undefined') {
+        window.clearInterval(elapsedTimer);
+        elapsedTimer = null;
+      }
+      updateElapsed();
+    };
+    updateElapsed();
+    if (typeof window !== 'undefined') {
+      elapsedTimer = window.setInterval(updateElapsed, 250);
+    }
+    const markComplete = () => {
+      stopElapsedTimer();
+      stopButton.disabled = true;
+      stopButton.textContent = 'Stop';
+    };
     const handle: AnyRecord = {
       update: (event: AnyRecord = {}) => {
         const total = Math.max(1, Number(event.total) || 100);
@@ -494,6 +767,9 @@ export class CamHistoryWidget {
         meter.setAttribute('aria-valuenow', String(Math.round(value)));
         fill.style.width = `${value}%`;
         percent.textContent = `${Math.round(value)}%`;
+        if (event.phase === 'complete' || event.phase === 'error' || event.phase === 'empty' || event.phase === 'canceled') {
+          markComplete();
+        }
         if (message && message !== lastMessage) {
           lastMessage = message;
           const line = document.createElement('div');
@@ -504,11 +780,21 @@ export class CamHistoryWidget {
           log.scrollTop = log.scrollHeight;
         }
       },
+      setCanceling: () => {
+        stopButton.disabled = true;
+        stopButton.textContent = 'Stopping...';
+        status.textContent = 'Stopping CAM generation';
+        status.dataset.tone = 'warn';
+        detail.textContent = 'Waiting for the active CAM operation to yield.';
+        detail.hidden = false;
+      },
+      setComplete: markComplete,
       close: () => {
         if (closeTimer != null) {
           window.clearTimeout(closeTimer);
           closeTimer = null;
         }
+        stopElapsedTimer();
         try { floating.destroy?.(); } catch { /* ignore progress cleanup */ }
         if (this._generationProgress === handle) this._generationProgress = null;
       },
@@ -607,9 +893,7 @@ export class CamHistoryWidget {
       this._setStatus('No CAM G-code has been generated yet.', 'warn');
       return;
     }
-    const base = sanitizeFileName(this.viewer?.fileManagerWidget?.currentName || 'brep-cam');
-    const stem = base.toLowerCase().endsWith('.nc') ? base : `${base}.nc`;
-    downloadTextFile(stem, gcode, 'text/x-gcode;charset=utf-8');
+    downloadTextFile(gcodeDownloadFileName(this.viewer?.fileManagerWidget?.currentName), gcode, 'text/x-gcode;charset=utf-8');
   }
 
   _renderControls(): void {
@@ -644,9 +928,12 @@ export class CamHistoryWidget {
     if (!this.simulationEl) return;
     const manager = this.viewer?.partHistory?.camPlanManager || null;
     const plan = manager?.getCombinedPlan?.();
-    const pointCount = Array.isArray(plan?.simulation?.motionPolyline)
+    const runtimeState = this._runtime?.getSimulationState?.() || {};
+    const runtimeCount = Math.max(0, Math.round(Number(runtimeState.count) || 0));
+    const planPointCount = Array.isArray(plan?.simulation?.motionPolyline)
       ? plan.simulation.motionPolyline.length
       : 0;
+    const pointCount = runtimeCount > 1 ? runtimeCount : planPointCount;
     if (!plan?.paths?.length || pointCount < 2) {
       this.simulationEl.hidden = true;
       this.simulationEl.textContent = '';
@@ -669,7 +956,6 @@ export class CamHistoryWidget {
     input.min = '0';
     input.max = String(Math.max(0, pointCount - 1));
     input.step = '1';
-    const runtimeState = this._runtime?.getSimulationState?.() || {};
     const index = Math.max(0, Math.min(pointCount - 1, Math.round(Number(runtimeState.index) || 0)));
     input.value = String(index);
     input.addEventListener('input', () => void this._setSimulationFrame(Number(input.value)));
@@ -757,14 +1043,30 @@ export class CamHistoryWidget {
     const title = document.createElement('div');
     title.textContent = 'Program';
     header.appendChild(title);
+
+    const actions = document.createElement('div');
+    actions.className = 'cam-program-actions';
     const copy = document.createElement('button');
     copy.type = 'button';
-    copy.className = 'cam-program-copy';
+    copy.className = 'cam-program-action';
     copy.textContent = 'Copy';
     copy.title = 'Copy generated G-code';
     copy.setAttribute('aria-label', 'Copy generated G-code');
+    copy.disabled = !gcode.trim();
     copy.addEventListener('click', () => void this._copyGcode(gcode));
-    header.appendChild(copy);
+    actions.appendChild(copy);
+
+    const exportButton = document.createElement('button');
+    exportButton.type = 'button';
+    exportButton.className = 'cam-program-action';
+    exportButton.textContent = 'Export';
+    exportButton.title = 'Download generated G-code';
+    exportButton.setAttribute('aria-label', 'Download generated G-code');
+    exportButton.disabled = !gcode.trim();
+    exportButton.addEventListener('click', () => this._exportGcode());
+    actions.appendChild(exportButton);
+
+    header.appendChild(actions);
     this.programEl.appendChild(header);
 
     if (!summary.pathCount) {
@@ -858,6 +1160,16 @@ export class CamHistoryWidget {
         gap: 10px;
         padding: 10px;
       }
+      .cam-machine-config-panel,
+      .cam-gcode-panel,
+      .cam-history-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 0;
+        padding: 10px;
+        box-sizing: border-box;
+      }
       .cam-machine-panel {
         display: flex;
         flex-direction: column;
@@ -865,7 +1177,23 @@ export class CamHistoryWidget {
         padding-bottom: 10px;
         border-bottom: 1px solid rgba(148, 163, 184, 0.18);
       }
+      .cam-stock-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+      }
+      .cam-machine-config-panel .cam-stock-panel {
+        padding-bottom: 0;
+        border-bottom: 0;
+      }
       .cam-machine-header {
+        color: #e2e8f0;
+        font: 700 12px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        text-transform: uppercase;
+      }
+      .cam-stock-header {
         color: #e2e8f0;
         font: 700 12px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         text-transform: uppercase;
@@ -875,8 +1203,14 @@ export class CamHistoryWidget {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
       }
+      .cam-stock-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
       .cam-machine-field,
-      .cam-machine-macro {
+      .cam-machine-macro,
+      .cam-stock-field {
         display: flex;
         flex-direction: column;
         gap: 4px;
@@ -886,7 +1220,9 @@ export class CamHistoryWidget {
       }
       .cam-machine-field input,
       .cam-machine-field select,
-      .cam-machine-macro textarea {
+      .cam-machine-macro textarea,
+      .cam-stock-field input,
+      .cam-stock-field select {
         box-sizing: border-box;
         width: 100%;
         min-width: 0;
@@ -897,9 +1233,34 @@ export class CamHistoryWidget {
         padding: 7px 8px;
         font: 12px/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       }
+      .cam-stock-field input:disabled {
+        color: #64748b;
+        background: rgba(15, 23, 42, 0.46);
+      }
       .cam-machine-macro textarea {
         resize: vertical;
         min-height: 46px;
+      }
+      .cam-machine-advanced {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+        border-top: 1px solid rgba(148, 163, 184, 0.14);
+        padding-top: 8px;
+      }
+      .cam-machine-advanced summary {
+        cursor: pointer;
+        color: #cbd5e1;
+        font: 700 11px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        list-style-position: inside;
+      }
+      .cam-machine-advanced:not([open]) {
+        gap: 0;
+      }
+      .cam-machine-advanced:not([open]) .cam-machine-toggles,
+      .cam-machine-advanced:not([open]) .cam-machine-macros {
+        display: none;
       }
       .cam-machine-toggles {
         display: flex;
@@ -1023,6 +1384,10 @@ export class CamHistoryWidget {
       .cam-generation-progress-detail[hidden] {
         display: none;
       }
+      .cam-generation-progress-runtime {
+        color: #bfdbfe;
+        font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
       .cam-generation-progress-meter-row {
         display: grid;
         grid-template-columns: minmax(0, 1fr) 44px;
@@ -1065,6 +1430,31 @@ export class CamHistoryWidget {
       }
       .cam-generation-progress-line + .cam-generation-progress-line {
         margin-top: 5px;
+      }
+      .cam-generation-progress-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      .cam-generation-progress-stop {
+        appearance: none;
+        border-radius: 7px;
+        border: 1px solid rgba(248, 113, 113, 0.42);
+        background: rgba(127, 29, 29, 0.72);
+        color: #fee2e2;
+        min-height: 32px;
+        padding: 0 12px;
+        cursor: pointer;
+        font: 700 12px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
+      .cam-generation-progress-stop:hover:not(:disabled) {
+        border-color: rgba(252, 165, 165, 0.72);
+        background: rgba(153, 27, 27, 0.86);
+      }
+      .cam-generation-progress-stop:disabled {
+        cursor: wait;
+        color: #fecaca;
+        opacity: 0.72;
       }
       .cam-simulation-panel {
         display: flex;
@@ -1129,7 +1519,13 @@ export class CamHistoryWidget {
         font: 700 12px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         text-transform: uppercase;
       }
-      .cam-program-copy {
+      .cam-program-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex: 0 0 auto;
+      }
+      .cam-program-action {
         appearance: none;
         border-radius: 7px;
         border: 1px solid rgba(148, 163, 184, 0.28);
@@ -1140,9 +1536,15 @@ export class CamHistoryWidget {
         cursor: pointer;
         font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       }
-      .cam-program-copy:hover {
+      .cam-program-action:hover:not(:disabled) {
         border-color: rgba(34, 211, 238, 0.65);
         background: rgba(8, 47, 73, 0.92);
+      }
+      .cam-program-action:disabled {
+        cursor: not-allowed;
+        color: #64748b;
+        border-color: rgba(100, 116, 139, 0.18);
+        background: rgba(15, 23, 42, 0.62);
       }
       .cam-program-stats {
         display: grid;

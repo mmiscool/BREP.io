@@ -80,7 +80,7 @@ export class AccordionWidget {
       .accordion {
         border: 1px solid #1f2937;
         border-radius: 8px;
-        overflow: scfroll;
+        overflow: auto;
         background: #0b0f13; /* dark */
         color: #e5e7eb;      /* light text */
       }
@@ -209,6 +209,19 @@ export class AccordionWidget {
     const contentEl = document.getElementById(`accordion-content-${title}`);
     if (!contentEl) return false;
     await contentEl.classList.remove("collapsed");
+    await _flushAfterPaint();
+    return true;
+  }
+
+  /**
+   * Collapse a specific section by title. Returns true if found & collapsed.
+   * @param {string} title
+   */
+  async collapseSection(title: string): Promise<boolean> {
+    const titleEl = this._findTitleEl(title);
+    const contentEl = this._findContentEl(title, titleEl);
+    if (!contentEl) return false;
+    contentEl.classList.add("collapsed");
     await _flushAfterPaint();
     return true;
   }

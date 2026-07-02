@@ -3,12 +3,22 @@ export function renderOptionsField({ ui, key, def, id }) {
     inputEl.id = id;
     inputEl.className = 'select';
 
+    const normalizeOption = (option) => {
+        if (option && typeof option === 'object') {
+            const value = option.value ?? option.id ?? option.key ?? option.label ?? '';
+            const label = option.label ?? option.name ?? value;
+            return { value: String(value), label: String(label) };
+        }
+        const value = String(option);
+        return { value, label: value };
+    };
+
     const opts = Array.isArray(def.options) ? def.options : [];
     for (let i = 0; i < opts.length; i++) {
-        const opt = opts[i];
+        const opt = normalizeOption(opts[i]);
         const o = document.createElement('option');
-        o.value = String(opt);
-        o.textContent = String(opt);
+        o.value = opt.value;
+        o.textContent = opt.label;
         inputEl.appendChild(o);
     }
 

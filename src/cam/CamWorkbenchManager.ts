@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { markSceneOverlayObject } from '../UI/sceneOverlayUtils.js';
+import { createCamCutterProfile } from './CamCutterProfile.js';
+import { buildCutterProfileSweepMesh } from './camToolpath.js';
 import type { CamToolpathPath, CamToolpathResult } from './camToolpath.js';
 
 type Point3 = [number, number, number];
@@ -46,9 +48,95 @@ function setVisualKey(object: THREE.Object3D, key: keyof CamPreviewVisibilityOpt
   return object;
 }
 
-function createToolMesh(toolDiameter: number, toolLength: number) {
+function cutterProfileTotalLength(profile: ReturnType<typeof createCamCutterProfile>, fallbackLength: number, fallbackRadius: number) {
+  const cuttingLength = Math.max(0, Number(profile.cuttingLength) || 0);
+  const shaftLength = Math.max(0, Number(profile.shaftLength) || 0);
+  return Math.max(
+    Math.max(0.0001, Number(fallbackRadius) || 0) * 2,
+    cuttingLength + shaftLength,
+    Number(fallbackLength) || 0,
+  );
+}
+
+function createRevolvedCutterGeometry(cutterProfile: any, fallbackRadius: number, fallbackLength: number) {
+  const profile = createCamCutterProfile(cutterProfile || {
+    kind: 'flat',
+    diameter: fallbackRadius * 2,
+    cuttingLength: fallbackLength,
+  });
+  const radius = Math.max(0.0001, Number(profile.radius) || fallbackRadius);
+  const length = cutterProfileTotalLength(profile, fallbackLength, radius);
+  const radialSegments = 32;
+  const heightSegments = 32;
+  const rings: Array<{ z: number; radius: number }> = [];
+  const rememberRing = (z: number, r: number) => {
+    const next = { z: Math.max(0, Math.min(length, z)), radius: Math.max(0, r) };
+    const previous = rings[rings.length - 1];
+    if (previous && Math.abs(previous.z - next.z) < 1e-6 && Math.abs(previous.radius - next.radius) < 1e-6) return;
+    rings.push(next);
+  };
+
+  rememberRing(0, Number(profile.radiusAtHeight(0)) || 0);
+  for (let index = 1; index <= heightSegments; index += 1) {
+    const z = (length * index) / heightSegments;
+    rememberRing(z, Number(profile.radiusAtHeight(z)) || radius);
+  }
+  if (rings[rings.length - 1]?.z < length - 1e-6) rememberRing(length, radius);
+
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const appendVertex = (x: number, y: number, z: number) => {
+    positions.push(x, y, z);
+    return positions.length / 3 - 1;
+  };
+  const ringIndices: number[][] = [];
+  for (const ring of rings) {
+    const row: number[] = [];
+    for (let radial = 0; radial < radialSegments; radial += 1) {
+      const angle = (Math.PI * 2 * radial) / radialSegments;
+      row.push(appendVertex(Math.cos(angle) * ring.radius, Math.sin(angle) * ring.radius, ring.z));
+    }
+    ringIndices.push(row);
+  }
+
+  for (let ring = 0; ring + 1 < ringIndices.length; ring += 1) {
+    const current = ringIndices[ring];
+    const next = ringIndices[ring + 1];
+    for (let radial = 0; radial < radialSegments; radial += 1) {
+      const nextRadial = (radial + 1) % radialSegments;
+      indices.push(current[radial], current[nextRadial], next[nextRadial]);
+      indices.push(current[radial], next[nextRadial], next[radial]);
+    }
+  }
+
+  if (rings.length) {
+    const bottom = ringIndices[0];
+    const top = ringIndices[ringIndices.length - 1];
+    const bottomCenter = appendVertex(0, 0, rings[0].z);
+    const topCenter = appendVertex(0, 0, rings[rings.length - 1].z);
+    for (let radial = 0; radial < radialSegments; radial += 1) {
+      const nextRadial = (radial + 1) % radialSegments;
+      indices.push(bottomCenter, bottom[radial], bottom[nextRadial]);
+      indices.push(topCenter, top[nextRadial], top[radial]);
+    }
+  }
+
+  return createIndexedGeometry(positions, indices);
+}
+
+function createToolMesh(planOrDiameter: CamToolpathResult | number, maybeToolLength?: number) {
+  const plan = typeof planOrDiameter === 'object' ? planOrDiameter : null;
+  const toolDiameter = plan ? plan.toolDiameter : Number(planOrDiameter);
   const radius = Math.max(0.05, toolDiameter * 0.5);
-  const length = Math.max(radius * 2, toolLength);
+  const fallbackToolLength = Math.max(radius * 2, Number(plan ? plan.toolLength : maybeToolLength) || radius * 2);
+  const profile = plan ? createCamCutterProfile(plan.cutterProfile || {
+    kind: plan.toolShape || 'flat',
+    diameter: toolDiameter,
+    cuttingLength: fallbackToolLength,
+  }) : null;
+  const length = profile
+    ? cutterProfileTotalLength(profile, fallbackToolLength, radius)
+    : Math.max(radius * 2, fallbackToolLength);
   const group = new THREE.Group();
   group.name = 'CAM Toolhead';
 
@@ -62,9 +150,11 @@ function createToolMesh(toolDiameter: number, toolLength: number) {
     metalness: 0.25,
     roughness: 0.5,
   });
-  const cutter = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, length, 24), cutterMat);
-  cutter.position.z = length * 0.5;
-  cutter.rotation.x = Math.PI / 2;
+  const cutterGeometry = createRevolvedCutterGeometry(profile || plan?.cutterProfile, radius, length)
+    || new THREE.CylinderGeometry(radius, radius, length, 24);
+  const cutter = new THREE.Mesh(cutterGeometry, cutterMat);
+  cutter.name = `CAM Cutter ${plan?.toolShape || 'flat'}`;
+  cutter.userData.camCutterProfile = plan?.cutterProfile || null;
   const shank = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.55, radius * 0.55, length * 0.85, 18), shankMat);
   shank.position.z = length * 1.15;
   shank.rotation.x = Math.PI / 2;
@@ -73,63 +163,21 @@ function createToolMesh(toolDiameter: number, toolLength: number) {
   return setVisualKey(group, 'tool') as THREE.Group;
 }
 
-function createFlatEndmillSweepGeometry(a: THREE.Vector3, b: THREE.Vector3, radius: number, toolLength: number) {
-  const r = Math.max(0.0001, Number(radius) || 0);
-  const height = Math.max(r * 2, Math.max(0.0001, Number(toolLength) || 0));
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const xyLength = Math.hypot(dx, dy);
-  const bottomZ = Math.min(a.z, b.z);
-  const topZ = Math.max(a.z, b.z) + height;
-  const radialSegments = 16;
-  const boundary: Array<{ x: number; y: number }> = [];
-
-  if (xyLength <= 1e-7) {
-    for (let i = 0; i < radialSegments; i += 1) {
-      const angle = (Math.PI * 2 * i) / radialSegments;
-      boundary.push({ x: a.x + Math.cos(angle) * r, y: a.y + Math.sin(angle) * r });
-    }
-  } else {
-    const ux = dx / xyLength;
-    const uy = dy / xyLength;
-    const leftAngle = Math.atan2(uy, ux) + Math.PI / 2;
-    const rightAngle = Math.atan2(uy, ux) - Math.PI / 2;
-    const capSteps = Math.max(4, radialSegments / 2);
-    boundary.push({ x: a.x + Math.cos(leftAngle) * r, y: a.y + Math.sin(leftAngle) * r });
-    for (let i = 0; i <= capSteps; i += 1) {
-      const angle = leftAngle + ((rightAngle - leftAngle) * i) / capSteps;
-      boundary.push({ x: b.x + Math.cos(angle) * r, y: b.y + Math.sin(angle) * r });
-    }
-    boundary.push({ x: a.x + Math.cos(rightAngle) * r, y: a.y + Math.sin(rightAngle) * r });
-    for (let i = 0; i <= capSteps; i += 1) {
-      const angle = rightAngle - (Math.PI * i) / capSteps;
-      boundary.push({ x: a.x + Math.cos(angle) * r, y: a.y + Math.sin(angle) * r });
-    }
-  }
-
-  const positions: number[] = [];
-  const indices: number[] = [];
-  const appendVertex = (x: number, y: number, z: number) => {
-    positions.push(x, y, z);
-    return positions.length / 3 - 1;
-  };
-  const bottom: number[] = [];
-  const top: number[] = [];
-  for (const point of boundary) {
-    bottom.push(appendVertex(point.x, point.y, bottomZ));
-    top.push(appendVertex(point.x, point.y, topZ));
-  }
-  const centerX = boundary.reduce((sum, point) => sum + point.x, 0) / Math.max(1, boundary.length);
-  const centerY = boundary.reduce((sum, point) => sum + point.y, 0) / Math.max(1, boundary.length);
-  const bottomCenter = appendVertex(centerX, centerY, bottomZ);
-  const topCenter = appendVertex(centerX, centerY, topZ);
-  for (let i = 0; i < boundary.length; i += 1) {
-    const next = (i + 1) % boundary.length;
-    indices.push(bottom[i], bottom[next], top[next], bottom[i], top[next], top[i]);
-    indices.push(bottomCenter, bottom[next], bottom[i]);
-    indices.push(topCenter, top[i], top[next]);
-  }
-  return createIndexedGeometry(positions, indices);
+function createCutterProfileSweepGeometry(
+  a: THREE.Vector3,
+  b: THREE.Vector3,
+  radius: number,
+  toolLength: number,
+  cutterProfile: any,
+) {
+  const mesh = buildCutterProfileSweepMesh(
+    [a.x, a.y, a.z],
+    [b.x, b.y, b.z],
+    cutterProfile || { kind: 'flat', diameter: radius * 2, cuttingLength: toolLength },
+    radius,
+    toolLength,
+  );
+  return createIndexedGeometry(mesh.positions, mesh.indices);
 }
 
 function createIndexedGeometry(positions: number[], indices: number[]) {
@@ -154,6 +202,38 @@ function buildCutPathSamples(paths: CamToolpathPath[]) {
   return { samples, totalDistance: total };
 }
 
+function buildPathDenseSampleIndices(path: CamToolpathPath) {
+  const dense = Array.isArray(path.simulationSamples) ? path.simulationSamples : [];
+  const points = Array.isArray(path.points) ? path.points : [];
+  if (dense.length <= points.length || points.length < 2) return null;
+  const sourceIndices: number[] = [];
+  let cursor = 0;
+  for (const point of points) {
+    let found = -1;
+    for (let index = cursor; index < dense.length; index += 1) {
+      if (distance(dense[index], point) <= 1e-6) {
+        found = index;
+        cursor = index;
+        break;
+      }
+    }
+    if (found < 0) return null;
+    sourceIndices.push(found);
+  }
+  return { dense, sourceIndices };
+}
+
+function buildDenseSampleLookup(paths: CamToolpathPath[]) {
+  const lookup = new Map<string, ReturnType<typeof buildPathDenseSampleIndices>>();
+  for (const path of paths || []) {
+    const id = String(path?.id || '');
+    if (!id) continue;
+    const indexed = buildPathDenseSampleIndices(path);
+    if (indexed) lookup.set(id, indexed);
+  }
+  return lookup;
+}
+
 function buildMotionSamples(plan: CamToolpathResult) {
   const motionSegments = Array.isArray(plan.simulation?.motionSegments)
     ? plan.simulation.motionSegments
@@ -161,10 +241,31 @@ function buildMotionSamples(plan: CamToolpathResult) {
   const rapidRate = Number(plan.machine?.defaultRapidRate) || 2500;
   const samples: Array<{ point: Point3; distance: number; feedRate: number }> = [];
   let total = 0;
-  const appendSample = (point: Point3, feedRate: number) => {
+  const denseLookup = buildDenseSampleLookup(plan.paths || []);
+  const appendSample = (point: Point3, feedRate: number, distanceAt = total) => {
     const last = samples[samples.length - 1]?.point || null;
     if (last && distance(last, point) <= 1e-7) return;
-    samples.push({ point, distance: total, feedRate });
+    samples.push({ point, distance: distanceAt, feedRate });
+  };
+  const appendDenseSegmentSamples = (
+    segment: any,
+    segmentStartDistance: number,
+    segmentLength: number,
+    feedRate: number,
+  ) => {
+    const pathId = String(segment?.sourcePathId || '');
+    const segmentIndex = Math.round(Number(segment?.sourceSegmentIndex));
+    if (!pathId || !Number.isInteger(segmentIndex) || segmentIndex < 0 || segmentLength <= 1e-7) return;
+    const indexed = denseLookup.get(pathId);
+    const startIndex = indexed?.sourceIndices?.[segmentIndex];
+    const endIndex = indexed?.sourceIndices?.[segmentIndex + 1];
+    if (!indexed || !Number.isInteger(startIndex) || !Number.isInteger(endIndex) || endIndex <= startIndex + 1) return;
+    for (let index = startIndex + 1; index < endIndex; index += 1) {
+      const point = indexed.dense[index];
+      const t = distance(segment.start, point) / segmentLength;
+      if (!Number.isFinite(t) || t <= 1e-7 || t >= 1 - 1e-7) continue;
+      appendSample(point, feedRate, segmentStartDistance + segmentLength * Math.max(0, Math.min(1, t)));
+    }
   };
   if (motionSegments.length) {
     for (const segment of motionSegments) {
@@ -172,13 +273,21 @@ function buildMotionSamples(plan: CamToolpathResult) {
       const end = segment.end;
       if (!start || !end) continue;
       const kind = String(segment.kind || 'cut');
-      const feedRate = kind === 'rapid' || kind === 'retract'
+      const explicitFeedRate = Number(segment.feedRate);
+      const feedRate = Number.isFinite(explicitFeedRate) && explicitFeedRate > 0
+        ? explicitFeedRate
+        : kind === 'rapid' || kind === 'link' || kind === 'retract'
         ? rapidRate
         : kind === 'plunge'
         ? Number(plan.paths?.[0]?.plungeRate) || 200
         : Number(plan.paths?.[0]?.feedRate) || 800;
       appendSample(start, feedRate);
-      total += distance(start, end);
+      const segmentStartDistance = total;
+      const segmentLength = distance(start, end);
+      if (kind === 'cut' || kind === 'link') {
+        appendDenseSegmentSamples(segment, segmentStartDistance, segmentLength, feedRate);
+      }
+      total += segmentLength;
       appendSample(end, feedRate);
     }
     return { samples, totalDistance: total };
@@ -196,6 +305,14 @@ function buildMotionSamples(plan: CamToolpathResult) {
     return { samples, totalDistance: total };
   }
   return buildCutPathSamples(plan.paths || []);
+}
+
+function pathSegmentVisualKind(path: CamToolpathPath, segmentIndex: number) {
+  const rawKind = Array.isArray(path.segmentKinds) ? path.segmentKinds[segmentIndex] : null;
+  const kind = String(rawKind || 'cut');
+  return kind === 'plunge' || kind === 'link' || kind === 'rapid' || kind === 'retract'
+    ? kind
+    : 'cut';
 }
 
 function interpolateSamples(samples: Array<{ point: Point3; distance: number }>, targetDistance: number) {
@@ -315,11 +432,12 @@ export class CamWorkbenchManager {
     markSceneOverlayObject(group, { overlayType: 'camPreview', deep: true });
 
     this.#addStockBox(group, plan);
-    this.#addToolpathPolyline(group, plan);
-    this.#addToolpathLines(group, plan.paths);
+    if (!this.#addToolpathPolyline(group, plan)) {
+      this.#addToolpathLines(group, plan.paths);
+    }
     this.#addSweptCutterHulls(group, plan);
 
-    this.tool = createToolMesh(plan.toolDiameter || 3.175, plan.toolLength || 25);
+    this.tool = createToolMesh(plan);
     markSceneOverlayObject(this.tool, { overlayType: 'camToolhead', deep: true });
     group.add(this.tool);
 
@@ -495,13 +613,24 @@ export class CamWorkbenchManager {
   }
 
   #addToolpathLines(group: THREE.Group, paths: CamToolpathPath[]) {
-    const material = new THREE.LineBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.9 });
+    const material = new THREE.LineBasicMaterial({
+      color: 0x22d3ee,
+      transparent: true,
+      opacity: 0.9,
+      depthTest: true,
+    });
     for (const path of paths) {
-      const points = (path.points || []).map(toVector);
+      const pathPoints = Array.isArray(path.points) ? path.points : [];
+      const points: THREE.Vector3[] = [];
+      for (let index = 1; index < pathPoints.length; index += 1) {
+        const kind = pathSegmentVisualKind(path, index - 1);
+        if (kind !== 'cut' && kind !== 'plunge') continue;
+        points.push(toVector(pathPoints[index - 1]), toVector(pathPoints[index]));
+      }
       if (points.length < 2) continue;
       const geometry = new THREE.BufferGeometry().setFromPoints(points);
-      const line = new THREE.Line(geometry, material);
-      line.name = `CAM Path ${path.id}`;
+      const line = new THREE.LineSegments(geometry, material);
+      line.name = `CAM Cut Path ${path.id}`;
       setVisualKey(line, 'toolpath');
       markSceneOverlayObject(line, { overlayType: 'camToolpath' });
       group.add(line);
@@ -509,24 +638,61 @@ export class CamWorkbenchManager {
   }
 
   #addToolpathPolyline(group: THREE.Group, plan: CamToolpathResult) {
-    const polyline = Array.isArray(plan.simulation?.motionPolyline)
-      ? plan.simulation.motionPolyline
+    const trace = new THREE.Group();
+    trace.name = 'CAM Toolpath Polyline';
+    setVisualKey(trace, 'toolpath');
+    markSceneOverlayObject(trace, { overlayType: 'camToolpathPolyline', deep: true });
+
+    const addSegments = (
+      name: string,
+      segments: Array<{ start: Point3; end: Point3 }>,
+      color: number,
+      opacity: number,
+    ) => {
+      const points: THREE.Vector3[] = [];
+      for (const segment of segments) {
+        const start = toVector(segment.start);
+        const end = toVector(segment.end);
+        if (
+          !Number.isFinite(start.x) || !Number.isFinite(start.y) || !Number.isFinite(start.z)
+          || !Number.isFinite(end.x) || !Number.isFinite(end.y) || !Number.isFinite(end.z)
+        ) continue;
+        points.push(start, end);
+      }
+      if (points.length < 2) return;
+      const geometry = new THREE.BufferGeometry().setFromPoints(points);
+      const material = new THREE.LineBasicMaterial({
+        color,
+        transparent: opacity < 1,
+        opacity,
+        depthTest: true,
+      });
+      const line = new THREE.LineSegments(geometry, material);
+      line.name = name;
+      setVisualKey(line, 'toolpath');
+      markSceneOverlayObject(line, { overlayType: 'camToolpathPolyline' });
+      trace.add(line);
+    };
+
+    const motionSegments = Array.isArray(plan.simulation?.motionSegments)
+      ? plan.simulation.motionSegments
       : [];
-    const points = polyline.map(toVector).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z));
-    if (points.length < 2) return;
-    const geometry = new THREE.BufferGeometry().setFromPoints(points);
-    const material = new THREE.LineBasicMaterial({
-      color: 0xf8fafc,
-      transparent: true,
-      opacity: 0.95,
-      depthTest: false,
-    });
-    const line = new THREE.Line(geometry, material);
-    line.name = 'CAM Toolpath Polyline';
-    setVisualKey(line, 'toolpath');
-    line.renderOrder = 20;
-    markSceneOverlayObject(line, { overlayType: 'camToolpathPolyline' });
-    group.add(line);
+    if (motionSegments.length) {
+      const cuts = motionSegments.filter((segment) => segment.kind === 'cut');
+      const plunges = motionSegments.filter((segment) => segment.kind === 'plunge');
+      const links = motionSegments.filter((segment) => segment.kind === 'link');
+      const rapids = motionSegments.filter((segment) => (
+        segment.kind === 'rapid' || segment.kind === 'retract'
+      ));
+      addSegments('CAM Cut Motion', cuts, 0x22d3ee, 0.95);
+      addSegments('CAM Plunge Motion', plunges, 0xfacc15, 0.85);
+      addSegments('CAM Link Motion', links, 0x94a3b8, 0.5);
+      addSegments('CAM Rapid Motion', rapids, 0x64748b, 0.35);
+    }
+
+    if (!trace.children.length) return false;
+    group.add(trace);
+    return true;
   }
 
   #addSweptCutterHulls(group: THREE.Group, plan: CamToolpathResult) {
@@ -570,6 +736,7 @@ export class CamWorkbenchManager {
       toolLength: number;
       positions?: number[];
       indices?: number[];
+      cutterProfile?: any;
       startDistance?: number;
       endDistance?: number;
     }> = planHulls.length
@@ -580,6 +747,7 @@ export class CamWorkbenchManager {
         toolLength: Math.max(radius * 2, Number(hull.toolLength) || toolLength),
         positions: Array.isArray(hull.positions) ? hull.positions : undefined,
         indices: Array.isArray(hull.indices) ? hull.indices : undefined,
+        cutterProfile: hull.cutterProfile || plan.cutterProfile,
         startDistance: cutMotionDistances[index]?.startDistance,
         endDistance: cutMotionDistances[index]?.endDistance,
       }))
@@ -589,17 +757,19 @@ export class CamWorkbenchManager {
         end: toVector(segment.end),
         radius: Math.max(0.05, Number(segment.radius) || radius),
         toolLength,
+        cutterProfile: segment.cutterProfile || plan.cutterProfile,
         startDistance: cutMotionDistances[index]?.startDistance,
         endDistance: cutMotionDistances[index]?.endDistance,
       }))
       : (plan.paths || []).flatMap((path) => {
-        const out: Array<{ start: THREE.Vector3; end: THREE.Vector3; radius: number; toolLength: number }> = [];
+        const out: Array<{ start: THREE.Vector3; end: THREE.Vector3; radius: number; toolLength: number; cutterProfile?: any }> = [];
         for (let i = 1; i < path.points.length; i += 1) {
           out.push({
             start: toVector(path.points[i - 1]),
             end: toVector(path.points[i]),
             radius,
             toolLength,
+            cutterProfile: plan.cutterProfile,
           });
         }
         return out;
@@ -609,7 +779,7 @@ export class CamWorkbenchManager {
       const segment = allSegments[i];
       const geometry = segment.positions?.length
         ? createIndexedGeometry(segment.positions, segment.indices || [])
-        : createFlatEndmillSweepGeometry(segment.start, segment.end, segment.radius, segment.toolLength);
+        : createCutterProfileSweepGeometry(segment.start, segment.end, segment.radius, segment.toolLength, segment.cutterProfile);
       if (!geometry) continue;
       const mesh = new THREE.Mesh(geometry, material);
       if (!mesh) continue;

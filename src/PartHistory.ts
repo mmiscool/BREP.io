@@ -521,6 +521,9 @@ export class PartHistory {
   markModelChanged(reason = 'update') {
     const nextRevision = this.getModelRevision() + 1;
     this._modelRevision = nextRevision;
+    if (reason === 'runHistory') {
+      try { this.camPlanManager?.invalidateGeneratedOperations?.('model-history'); } catch { /* ignore CAM invalidation failures */ }
+    }
     if (!this._modelChangeListeners || this._modelChangeListeners.size === 0) return nextRevision;
     const detail = { reason, partHistory: this, revision: nextRevision };
     for (const listener of Array.from(this._modelChangeListeners) as any[]) {
@@ -1763,7 +1766,7 @@ export class PartHistory {
 
   // methods to store and retrieve feature history to JSON strings
   // We will store the features, idCounter, expressions, and optionally PMI views
-  async toJSON() {
+  async toJSON(options: any = {}) {
     try {
       this.syncAssemblyComponentTransforms?.();
     } catch (error) {
@@ -1781,7 +1784,10 @@ export class PartHistory {
     }));
     const pmiViews = this.pmiViewsManager.toSerializable();
     const simulation = this.simulationStateManager.toSerializable();
-    const cam = this.camPlanManager.toSerializable();
+    const cam = this.camPlanManager.toSerializable({
+      includeGeneratedData: options?.includeCamGeneratedData !== false,
+      includeGeneratedToolpaths: options?.includeCamGeneratedToolpaths !== false,
+    });
     const sheets2D = this.sheet2DManager.toSerializable();
     const wireHarness = this.wireHarnessManager.toSerializable();
 
@@ -1943,7 +1949,7 @@ export class PartHistory {
     }
     state.captureInFlight = true;
     try {
-      const json = await this.toJSON();
+      const json = await this.toJSON({ includeCamGeneratedData: false });
       if (!json) return;
       if (!force && state.lastSignature === json) return;
       const snapshot = {
@@ -2411,7 +2417,13 @@ export class PartHistory {
             sanitized[key] = Boolean(Object.prototype.hasOwnProperty.call(inputParams, key) ? inputParams[key] : schema[key].default_value);
           }
         } else if (schema[key].type === "options") {
-          const options = Array.isArray(schema[key].options) ? schema[key].options.map((option) => String(option)) : [];
+          const optionValue = (option) => {
+            if (option && typeof option === 'object') {
+              return String(option.value ?? option.id ?? option.key ?? option.label ?? '');
+            }
+            return String(option);
+          };
+          const options = Array.isArray(schema[key].options) ? schema[key].options.map(optionValue) : [];
           const defaultValue = Object.prototype.hasOwnProperty.call(schema[key], 'default_value')
             ? schema[key].default_value
             : (options[0] ?? '');

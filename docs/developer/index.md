@@ -16,6 +16,7 @@ Top-level hub for developer-facing documentation.
 - [Embedding and Integration Docs](./embedding/index.md) - `CadEmbed`, `Sketcher2DEmbed`, package usage, and demos
 - [Application Architecture Docs](./architecture/index.md) - `PartHistory`, history execution, expressions, UI structure, and implementation notes
 - [Application Subsystems Docs](./subsystems/index.md) - assembly constraints, inspector, PMI annotations, plugins, and related subsystems
+- [CAM Developer Docs](./cam/index.md) - CAM strategy selection and implementation specs
 
 ## Most Used Pages
 

@@ -1,4 +1,4 @@
-import { buildTestSnippet } from '../UI/toolbarButtons/historyTestSnippetButton.js';
+import { buildTestSnippet, loadSerializableHistory } from '../UI/toolbarButtons/historyTestSnippetButton.js';
 
 function assertIncludes(source, text, label) {
   if (!String(source || '').includes(text)) {
@@ -9,6 +9,15 @@ function assertIncludes(source, text, label) {
 function assertExcludes(source, text, label) {
   if (String(source || '').includes(text)) {
     throw new Error(`[history_test_snippet_persistent_data] Unexpected ${label || text}`);
+  }
+}
+
+function assertParsesAsJavaScript(source, label) {
+  try {
+    // Parse only; do not execute the generated snippet.
+    new Function('env', String(source || ''));
+  } catch (error: any) {
+    throw new Error(`[history_test_snippet_persistent_data] ${label || 'Snippet'} should parse as JavaScript: ${error?.message || error}`);
   }
 }
 
@@ -139,6 +148,86 @@ export function test_history_test_snippet_persistent_data_allowlist() {
   assertExcludes(snippet, 'miterSummary', 'derived fillet summary');
 }
 
+export async function test_history_test_snippet_toolbar_snapshot_compacts_cam_toolpaths() {
+  let receivedOptions: any = null;
+  const snapshot = await loadSerializableHistory({
+    toJSON(options: any = {}) {
+      receivedOptions = options;
+      return JSON.stringify({
+        features: [],
+        expressions: '',
+        configurator: null,
+        cam: {
+          machineProfile: {
+            name: 'Toolbar CNC Mill',
+          },
+          stockProfile: {
+            mode: 'fixed',
+            sizeX: 40,
+            sizeY: 30,
+            sizeZ: 12,
+          },
+          operations: [
+            {
+              type: 'cam3axis',
+              __open: true,
+              inputParams: {
+                id: 'CAM_TOOLBAR',
+                name: 'Toolbar CAM',
+                targetSolids: ['P.CU1'],
+                strategy: 'waterline-contour',
+                __open: true,
+              },
+              persistentData: {
+                generatorVersion: 2,
+                summary: { pathCount: 2 },
+                gcode: 'G21\nG0 Z5\n',
+                toolpath: {
+                  paths: [{ id: 'heavy-path', points: [[0, 0, 0], [1, 0, 0]] }],
+                  simulation: {
+                    sweptHulls: [
+                      {
+                        positions: Array.from({ length: 64 }, (_, index) => index),
+                        indices: Array.from({ length: 64 }, (_, index) => index),
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+        },
+      });
+    },
+  });
+
+  const snippet = buildTestSnippet({
+    functionName: 'test_history_test_snippet_toolbar_cam_generated',
+    features: snapshot.features,
+    expressions: snapshot.expressions,
+    configurator: snapshot.configurator,
+    cam: snapshot.cam,
+  });
+
+  if (receivedOptions?.includeCamGeneratedToolpaths !== false) {
+    throw new Error('[history_test_snippet_persistent_data] Toolbar snapshot should request compact CAM serialization.');
+  }
+
+  assertIncludes(snippet, '// CAM operation count: 1', 'CAM operation count comment');
+  assertIncludes(snippet, '"Toolbar CNC Mill"', 'toolbar CAM machine profile');
+  assertIncludes(snippet, '"stockProfile"', 'toolbar CAM stock profile');
+  assertIncludes(snippet, '"CAM_TOOLBAR"', 'toolbar CAM operation id');
+  assertExcludes(snippet, '"gcode"', 'generated CAM G-code');
+  assertExcludes(snippet, '"summary"', 'generated CAM summary');
+  assertExcludes(snippet, '"generatorVersion"', 'generated CAM version metadata');
+  assertExcludes(snippet, '"generatedAt"', 'generated CAM timestamp');
+  assertExcludes(snippet, '"warnings"', 'generated CAM warnings');
+  assertExcludes(snippet, '"toolpath"', 'heavy generated CAM toolpath payload');
+  assertExcludes(snippet, 'sweptHulls', 'heavy generated CAM swept hull data');
+  assertExcludes(snippet, 'heavy-path', 'heavy generated CAM path data');
+  assertExcludes(snippet, '__open', 'CAM UI-only open state');
+}
+
 export function test_history_test_snippet_includes_cam_operations() {
   const snippet = buildTestSnippet({
     functionName: 'test_history_test_snippet_cam_generated',
@@ -157,9 +246,16 @@ export function test_history_test_snippet_includes_cam_operations() {
         controller: 'linuxcnc',
         maxSpindleRPM: 9000,
       },
+      stockProfile: {
+        mode: 'fixed',
+        sizeX: 20,
+        sizeY: 24,
+        sizeZ: 8,
+      },
       operations: [
         {
           type: 'cam3axis',
+          __open: true,
           inputParams: {
             id: 'CAM_SNIP',
             name: 'Snippet CAM',
@@ -167,10 +263,12 @@ export function test_history_test_snippet_includes_cam_operations() {
             strategy: 'waterline-contour',
             cutRegion: 'outside',
             toolDiameter: 3.175,
+            __open: true,
           },
           persistentData: {
             summary: { pathCount: 4 },
             gcode: 'G21\n',
+            toolpath: { paths: [{ id: 'omitted-toolpath' }] },
           },
         },
       ],
@@ -182,9 +280,15 @@ export function test_history_test_snippet_includes_cam_operations() {
   assertIncludes(snippet, 'partHistory.camPlanManager.loadSerializable(camState);', 'CAM restore call');
   assertIncludes(snippet, '"Snippet CNC Mill"', 'CAM machine profile');
   assertIncludes(snippet, '"CAM_SNIP"', 'CAM operation id');
+  assertIncludes(snippet, '"stockProfile"', 'CAM stock profile');
   assertIncludes(snippet, '"targetSolids": [', 'CAM target solid references');
   assertIncludes(snippet, '"waterline-contour"', 'CAM strategy');
-  assertIncludes(snippet, '"gcode": "G21\\n"', 'generated CAM persistent data');
+  assertExcludes(snippet, '"gcode"', 'generated CAM G-code');
+  assertExcludes(snippet, '"summary"', 'generated CAM summary');
+  assertExcludes(snippet, '"toolpath"', 'generated CAM toolpath payload');
+  assertExcludes(snippet, 'omitted-toolpath', 'generated CAM path data');
+  assertExcludes(snippet, '__open', 'CAM UI-only open state');
+  assertParsesAsJavaScript(snippet, 'CAM operation snippet');
 }
 
 export function test_history_test_snippet_omits_empty_cam_state() {
@@ -194,11 +298,62 @@ export function test_history_test_snippet_omits_empty_cam_state() {
     configurator: null,
     features: [],
     cam: {
-      machineProfile: { name: 'Unused Mill' },
+      machineProfile: {
+        name: 'Generic 3 Axis Mill',
+        controller: 'grbl',
+        units: 'mm',
+        maxSpindleRPM: 24000,
+        defaultRapidRate: 2500,
+        safeParkZ: 15,
+        tokenSpacer: true,
+        stripComments: false,
+        header: '',
+        footer: '',
+      },
+      stockProfile: {
+        mode: 'auto',
+        margin: 6.35,
+        sizeX: null,
+        sizeY: null,
+        sizeZ: null,
+        offsetX: 0,
+        offsetY: 0,
+        offsetZ: 0,
+      },
       operations: [],
     },
   });
 
   assertExcludes(snippet, 'camState', 'empty CAM state literal');
-  assertExcludes(snippet, 'Unused Mill', 'machine profile without operations');
+  assertExcludes(snippet, 'Generic 3 Axis Mill', 'default machine profile without operations');
+}
+
+export function test_history_test_snippet_includes_global_cam_state_without_operations() {
+  const snippet = buildTestSnippet({
+    functionName: 'test_history_test_snippet_global_cam_generated',
+    expressions: '',
+    configurator: null,
+    features: [],
+    cam: {
+      machineProfile: {
+        name: 'Setup CNC Mill',
+        controller: 'linuxcnc',
+        maxSpindleRPM: 9000,
+      },
+      stockProfile: {
+        mode: 'fixed',
+        sizeX: 40,
+        sizeY: 30,
+        sizeZ: 12,
+      },
+      operations: [],
+    },
+  });
+
+  assertIncludes(snippet, 'const camState =', 'global CAM state literal');
+  assertIncludes(snippet, 'partHistory.camPlanManager.loadSerializable(camState);', 'global CAM restore call');
+  assertIncludes(snippet, '"Setup CNC Mill"', 'global machine profile without operations');
+  assertIncludes(snippet, '"stockProfile"', 'global stock profile without operations');
+  assertIncludes(snippet, '"sizeX": 40', 'global stock size without operations');
+  assertExcludes(snippet, '// CAM operation count:', 'CAM operation count for global-only state');
 }

@@ -1,4 +1,12 @@
 import { FloatingWindow } from '../FloatingWindow.js';
+import {
+  DEFAULT_CAM_MACHINE_PROFILE,
+  normalizeCamMachineProfile,
+} from '../../cam/CamMachineProfile.js';
+import {
+  DEFAULT_CAM_STOCK_PROFILE,
+  normalizeCamStockProfile,
+} from '../../cam/CamStockProfile.js';
 
 type AnyRecord = Record<string, any>;
 
@@ -37,6 +45,16 @@ const FEATURE_PERSISTENT_DATA_KEY_ALLOWLIST = new Map([
   ['ASSY COMPONENT', ['componentData']],
   ['ASSEMBLY COMPONENT', ['componentData']],
   ['ASSEMBLYCOMPONENTFEATURE', ['componentData']],
+]);
+const CAM_GENERATED_PERSISTENT_DATA_KEYS = new Set([
+  'toolpath',
+  'gcode',
+  'generatedAt',
+  'summary',
+  'warnings',
+  'generatorVersion',
+  'invalidatedAt',
+  'invalidatedReason',
 ]);
 
 function sanitizeFunctionName(rawName) {
@@ -92,18 +110,70 @@ function extractSnippetPersistentData(featureType, persistentData) {
   return Object.keys(output).length ? output : null;
 }
 
+function sanitizeSnippetObject(source, excludedKeys = new Set()) {
+  const input = (source && typeof source === 'object' && !Array.isArray(source))
+    ? source
+    : {};
+  const out: AnyRecord = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (excludedKeys.has(key)) continue;
+    if (UI_ONLY_INPUT_PARAM_KEYS.has(key)) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+function sanitizeSnippetCamOperation(rawOperation) {
+  const source = (rawOperation && typeof rawOperation === 'object' && !Array.isArray(rawOperation))
+    ? rawOperation
+    : null;
+  if (!source) return null;
+  const out: AnyRecord = {};
+  if (source.type != null) out.type = source.type;
+  const inputParams = sanitizeSnippetObject(source.inputParams || {}, new Set(['persistentData', '__entityRef']));
+  if (Object.keys(inputParams).length) out.inputParams = inputParams;
+  const persistentData = sanitizeSnippetObject(source.persistentData || {}, CAM_GENERATED_PERSISTENT_DATA_KEYS);
+  if (Object.keys(persistentData).length) out.persistentData = persistentData;
+  return Object.keys(out).length ? out : null;
+}
+
+function normalizedValueDiffers(a: any, b: any) {
+  return JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
+}
+
+function objectDiffersFromDefault(source: AnyRecord | null, defaults: AnyRecord) {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return false;
+  const keys = new Set([...Object.keys(source), ...Object.keys(defaults || {})]);
+  for (const key of keys) {
+    if (normalizedValueDiffers(source[key], defaults[key])) return true;
+  }
+  return false;
+}
+
 function normalizeSnippetCamState(rawCam) {
   const source = (rawCam && typeof rawCam === 'object' && !Array.isArray(rawCam))
     ? rawCam
     : null;
   if (!source) return null;
   const operations = Array.isArray(source.operations)
-    ? source.operations.filter((operation) => operation && typeof operation === 'object')
+    ? source.operations.map(sanitizeSnippetCamOperation).filter(Boolean)
     : [];
-  if (!operations.length) return null;
-  const out: AnyRecord = { operations };
-  if (source.machineProfile && typeof source.machineProfile === 'object' && !Array.isArray(source.machineProfile)) {
-    out.machineProfile = source.machineProfile;
+  const machineProfile = (source.machineProfile && typeof source.machineProfile === 'object' && !Array.isArray(source.machineProfile))
+    ? normalizeCamMachineProfile(source.machineProfile)
+    : null;
+  const stockProfile = (source.stockProfile && typeof source.stockProfile === 'object' && !Array.isArray(source.stockProfile))
+    ? normalizeCamStockProfile(source.stockProfile)
+    : null;
+  const hasCustomMachineProfile = objectDiffersFromDefault(machineProfile, DEFAULT_CAM_MACHINE_PROFILE);
+  const hasCustomStockProfile = objectDiffersFromDefault(stockProfile, DEFAULT_CAM_STOCK_PROFILE);
+  if (!operations.length && !hasCustomMachineProfile && !hasCustomStockProfile) return null;
+  const out: AnyRecord = {};
+  if (operations.length) out.operations = operations;
+  if (machineProfile && (operations.length || hasCustomMachineProfile)) {
+    out.machineProfile = machineProfile;
+  }
+  if (stockProfile && (operations.length || hasCustomStockProfile)) {
+    out.stockProfile = stockProfile;
   }
   return out;
 }
@@ -121,7 +191,7 @@ async function loadSerializableHistory(partHistory) {
   if (!partHistory || typeof partHistory.toJSON !== 'function') {
     return { features: [], expressions: '', configurator: null, cam: null };
   }
-  const json = await partHistory.toJSON();
+  const json = await partHistory.toJSON({ includeCamGeneratedToolpaths: false });
   const parsed = JSON.parse(json || '{}');
   const features = Array.isArray(parsed?.features) ? parsed.features : [];
   const expressions = typeof parsed?.expressions === 'string' ? parsed.expressions : '';
@@ -351,4 +421,5 @@ export function createHistoryTestSnippetButton(viewer) {
 
 export {
   buildTestSnippet,
+  loadSerializableHistory,
 };

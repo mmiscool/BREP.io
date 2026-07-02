@@ -486,15 +486,38 @@ export const sidebarMethods = {
         });
 
         this.camHistoryWidget = new CamHistoryWidget(this);
-        const camSection = await this.accordion.addSection('CAM');
-        camSection.uiElement.appendChild(this.camHistoryWidget.uiElement);
+        const camHistorySection = await this.accordion.addSection('CAM History');
+        camHistorySection.uiElement.appendChild(this.camHistoryWidget.historyEl);
         this._registerWorkbenchPanel({
-            id: 'camOperations',
-            title: 'CAM',
-            section: camSection,
+            id: 'camHistory',
+            title: 'CAM History',
+            section: camHistorySection,
             source: 'builtin',
             workbenches: ['CAM'],
+            defaultExpanded: true,
             onVisibilityChange: (visible) => this.camHistoryWidget?.setPanelVisible?.(visible),
+        });
+
+        const camMachineSection = await this.accordion.addSection('Machine Configuration');
+        camMachineSection.uiElement.appendChild(this.camHistoryWidget.machineConfigEl);
+        this._registerWorkbenchPanel({
+            id: 'camMachineConfiguration',
+            title: 'Machine Configuration',
+            section: camMachineSection,
+            source: 'builtin',
+            workbenches: ['CAM'],
+            defaultExpanded: false,
+        });
+
+        const camGcodeSection = await this.accordion.addSection('G-code');
+        camGcodeSection.uiElement.appendChild(this.camHistoryWidget.gcodeEl);
+        this._registerWorkbenchPanel({
+            id: 'camGcode',
+            title: 'G-code',
+            section: camGcodeSection,
+            source: 'builtin',
+            workbenches: ['CAM'],
+            defaultExpanded: false,
         });
 
         // CADmaterials (Settings dialog)
