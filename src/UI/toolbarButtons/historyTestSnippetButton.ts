@@ -92,6 +92,22 @@ function extractSnippetPersistentData(featureType, persistentData) {
   return Object.keys(output).length ? output : null;
 }
 
+function normalizeSnippetCamState(rawCam) {
+  const source = (rawCam && typeof rawCam === 'object' && !Array.isArray(rawCam))
+    ? rawCam
+    : null;
+  if (!source) return null;
+  const operations = Array.isArray(source.operations)
+    ? source.operations.filter((operation) => operation && typeof operation === 'object')
+    : [];
+  if (!operations.length) return null;
+  const out: AnyRecord = { operations };
+  if (source.machineProfile && typeof source.machineProfile === 'object' && !Array.isArray(source.machineProfile)) {
+    out.machineProfile = source.machineProfile;
+  }
+  return out;
+}
+
 function stringifyAsCodeLiteral(value, indent = 4) {
   const json = JSON.stringify(value, null, 2);
   if (json == null) return ' null';
@@ -103,7 +119,7 @@ function stringifyAsCodeLiteral(value, indent = 4) {
 
 async function loadSerializableHistory(partHistory) {
   if (!partHistory || typeof partHistory.toJSON !== 'function') {
-    return { features: [], expressions: '', configurator: null };
+    return { features: [], expressions: '', configurator: null, cam: null };
   }
   const json = await partHistory.toJSON();
   const parsed = JSON.parse(json || '{}');
@@ -112,16 +128,22 @@ async function loadSerializableHistory(partHistory) {
   const configurator = (parsed?.configurator && typeof parsed.configurator === 'object' && !Array.isArray(parsed.configurator))
     ? parsed.configurator
     : null;
-  return { features, expressions, configurator };
+  const cam = normalizeSnippetCamState(parsed?.cam);
+  return { features, expressions, configurator, cam };
 }
 
-function buildTestSnippet({ functionName, features, expressions, configurator }) {
+function buildTestSnippet({ functionName, features, expressions, configurator, cam = null }) {
   const safeFunctionName = sanitizeFunctionName(functionName) || 'test_generated_history';
   const list = Array.isArray(features) ? features : [];
+  const camState = normalizeSnippetCamState(cam);
+  const camOperationCount = Array.isArray(camState?.operations) ? camState.operations.length : 0;
   const lines = [];
 
   lines.push(`// Generated from current part history on ${new Date().toISOString()}`);
   lines.push(`// Feature count: ${list.length}`);
+  if (camOperationCount > 0) {
+    lines.push(`// CAM operation count: ${camOperationCount}`);
+  }
   lines.push(`async function ${safeFunctionName}(partHistory = env.partHistory) {`);
 
   if (typeof expressions === 'string' && expressions.trim().length > 0 && expressions !== DEFAULT_EXPRESSIONS) {
@@ -133,32 +155,34 @@ function buildTestSnippet({ functionName, features, expressions, configurator })
 
   if (!list.length) {
     lines.push('  // No features were found in the current history.');
-    lines.push('  await partHistory.runHistory();');
-    lines.push('  return partHistory;');
-    lines.push('}');
-    lines.push('');
-    lines.push(`${safeFunctionName}()`);
-    return lines.join('\n');
+  } else {
+    for (let index = 0; index < list.length; index += 1) {
+      const feature = list[index] || {};
+      const variableName = `feature${index + 1}`;
+      const featureType = String(feature?.type || '');
+      const inputParams = sanitizeInputParamsForSnippet(feature?.inputParams);
+      const persistentData = feature?.persistentData;
+      const snippetPersistentData = extractSnippetPersistentData(featureType, persistentData);
+
+      lines.push('');
+      lines.push(`  const ${variableName} = await partHistory.newFeature(${JSON.stringify(featureType)});`);
+
+      if (Object.keys(inputParams).length > 0) {
+        lines.push(`  Object.assign(${variableName}.inputParams,${stringifyAsCodeLiteral(inputParams, 4)});`);
+      }
+
+      if (snippetPersistentData) {
+        lines.push(`  ${variableName}.persistentData =${stringifyAsCodeLiteral(snippetPersistentData, 4)};`);
+      }
+    }
   }
 
-  for (let index = 0; index < list.length; index += 1) {
-    const feature = list[index] || {};
-    const variableName = `feature${index + 1}`;
-    const featureType = String(feature?.type || '');
-    const inputParams = sanitizeInputParamsForSnippet(feature?.inputParams);
-    const persistentData = feature?.persistentData;
-    const snippetPersistentData = extractSnippetPersistentData(featureType, persistentData);
-
+  if (camState) {
     lines.push('');
-    lines.push(`  const ${variableName} = await partHistory.newFeature(${JSON.stringify(featureType)});`);
-
-    if (Object.keys(inputParams).length > 0) {
-      lines.push(`  Object.assign(${variableName}.inputParams,${stringifyAsCodeLiteral(inputParams, 4)});`);
-    }
-
-    if (snippetPersistentData) {
-      lines.push(`  ${variableName}.persistentData =${stringifyAsCodeLiteral(snippetPersistentData, 4)};`);
-    }
+    lines.push(`  const camState =${stringifyAsCodeLiteral(camState, 4)};`);
+    lines.push('  if (partHistory.camPlanManager?.loadSerializable) {');
+    lines.push('    partHistory.camPlanManager.loadSerializable(camState);');
+    lines.push('  }');
   }
 
   lines.push('');
@@ -305,6 +329,7 @@ export function createHistoryTestSnippetButton(viewer) {
           features: snapshot.features,
           expressions: snapshot.expressions,
           configurator: snapshot.configurator,
+          cam: snapshot.cam,
         });
         const copied = await copyTextToClipboard(snippet);
         try { window.__generatedHistoryTestSnippet = snippet; } catch {

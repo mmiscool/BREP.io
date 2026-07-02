@@ -48,6 +48,7 @@ export class HistoryCollectionWidget {
     this._globalRefreshHandler = null;
     this._contextSuppressKey = `hc-${Math.random().toString(36).slice(2, 9)}`;
     this._contextSuppressActive = false;
+    this._contextSuppressionEnabled = true;
     this._selectionFilterSnapshot = null;
 
     this.uiElement = document.createElement('div');
@@ -109,6 +110,7 @@ export class HistoryCollectionWidget {
   }
 
   dispose() {
+    this._contextSuppressionEnabled = false;
     this._setContextSuppression(false);
     if (typeof this._listenerUnsub === 'function') {
       try { this._listenerUnsub(); } catch (_) { /* ignore */ }
@@ -726,8 +728,15 @@ export class HistoryCollectionWidget {
     } catch (_) { /* ignore toggle hook errors */ }
   }
 
+  setContextSuppressionEnabled(enabled = true) {
+    const next = enabled !== false;
+    if (this._contextSuppressionEnabled === next) return;
+    this._contextSuppressionEnabled = next;
+    this._setContextSuppression(!!this._expandedId);
+  }
+
   _setContextSuppression(isOpen) {
-    const next = !!isOpen;
+    const next = !!isOpen && this._contextSuppressionEnabled !== false;
     if (this._contextSuppressActive === next) return;
     this._contextSuppressActive = next;
     if (next) {

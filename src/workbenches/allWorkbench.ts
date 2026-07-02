@@ -12,6 +12,7 @@ export const ALL_WORKBENCH = {
   sidePanels: {
     assemblyConstraints: true,
     pmiViews: true,
+    camOperations: true,
   },
   toolbarButtons: '*',
 } satisfies WorkbenchDefinition;

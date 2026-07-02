@@ -3,6 +3,7 @@ import { loadSavedPlugins } from '../../plugins/pluginManager.js';
 
 import { AccordionWidget } from '../AccordionWidget.js';
 import { AssemblyConstraintsWidget } from '../assembly/AssemblyConstraintsWidget.js';
+import { CamHistoryWidget } from '../cam/CamHistoryWidget.js';
 import { CADmaterialWidget } from '../CADmaterials.js';
 import { expressionsManager } from '../expressionsManager.js';
 import { SchemaForm } from '../featureDialogs.js';
@@ -399,6 +400,7 @@ export const sidebarMethods = {
             section: historySection,
             source: 'builtin',
             workbenches: ['MODELING', 'IMPORT', 'SURFACING', 'SHEET_METAL', 'ASSEMBLIES', 'WIRE_HARNESS', 'PMI', 'ALL'],
+            onVisibilityChange: (visible) => this.historyWidget?.setContextSuppressionEnabled?.(visible),
         });
 
         this.assemblyConstraintsWidget = new AssemblyConstraintsWidget(this);
@@ -415,6 +417,13 @@ export const sidebarMethods = {
         this.expressionsManager = await new expressionsManager(this);
         const expressionsSection = await this.accordion.addSection("Expressions");
         await expressionsSection.uiElement.appendChild(await this.expressionsManager.uiElement);
+        this._registerWorkbenchPanel({
+            id: 'expressions',
+            title: 'Expressions',
+            section: expressionsSection,
+            source: 'builtin',
+            workbenches: ['MODELING', 'IMPORT', 'SURFACING', 'SHEET_METAL', 'SIMULATION', 'ASSEMBLIES', 'WIRE_HARNESS', 'PMI', 'ALL'],
+        });
 
         // Setup sceneManagerUi
         this.sceneManagerUi = await new SceneListing(this.scene, {
@@ -423,6 +432,13 @@ export const sidebarMethods = {
         });
         const sceneSection = await this.accordion.addSection("Scene Manager");
         await sceneSection.uiElement.appendChild(this.sceneManagerUi.uiElement);
+        this._registerWorkbenchPanel({
+            id: 'sceneManager',
+            title: 'Scene Manager',
+            section: sceneSection,
+            source: 'builtin',
+            workbenches: ['MODELING', 'IMPORT', 'SURFACING', 'SHEET_METAL', 'SIMULATION', 'ASSEMBLIES', 'WIRE_HARNESS', 'PMI', 'ALL'],
+        });
 
         // PMI Views (saved camera snapshots)
         this.pmiViewsWidget = new PMIViewsWidget(this);
@@ -466,6 +482,19 @@ export const sidebarMethods = {
             section: simulationSection,
             source: 'builtin',
             workbenches: ['SIMULATION'],
+            onVisibilityChange: (visible) => this.simulationHistoryWidget?.setPanelVisible?.(visible),
+        });
+
+        this.camHistoryWidget = new CamHistoryWidget(this);
+        const camSection = await this.accordion.addSection('CAM');
+        camSection.uiElement.appendChild(this.camHistoryWidget.uiElement);
+        this._registerWorkbenchPanel({
+            id: 'camOperations',
+            title: 'CAM',
+            section: camSection,
+            source: 'builtin',
+            workbenches: ['CAM'],
+            onVisibilityChange: (visible) => this.camHistoryWidget?.setPanelVisible?.(visible),
         });
 
         // CADmaterials (Settings dialog)

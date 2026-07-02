@@ -27,6 +27,10 @@ export class SimulationHistoryWidget {
     this.historyWidget = null;
   }
 
+  setPanelVisible(visible: boolean): void {
+    try { this.historyWidget?.setContextSuppressionEnabled?.(visible !== false); } catch { /* ignore visibility sync */ }
+  }
+
   refresh(): void {
     this._renderTransport();
     try { this.historyWidget?.render?.(); } catch { /* ignore render errors */ }

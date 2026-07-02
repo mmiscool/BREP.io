@@ -138,3 +138,67 @@ export function test_history_test_snippet_persistent_data_allowlist() {
   assertExcludes(snippet, 'referenceSnapshots', 'reference snapshots');
   assertExcludes(snippet, 'miterSummary', 'derived fillet summary');
 }
+
+export function test_history_test_snippet_includes_cam_operations() {
+  const snippet = buildTestSnippet({
+    functionName: 'test_history_test_snippet_cam_generated',
+    expressions: '',
+    configurator: null,
+    features: [
+      {
+        type: 'P.CU',
+        inputParams: { id: 'P_CU1', sizeX: 10, sizeY: 10, sizeZ: 10 },
+        persistentData: {},
+      },
+    ],
+    cam: {
+      machineProfile: {
+        name: 'Snippet CNC Mill',
+        controller: 'linuxcnc',
+        maxSpindleRPM: 9000,
+      },
+      operations: [
+        {
+          type: 'cam3axis',
+          inputParams: {
+            id: 'CAM_SNIP',
+            name: 'Snippet CAM',
+            targetSolids: ['P_CU1'],
+            strategy: 'waterline-contour',
+            cutRegion: 'outside',
+            toolDiameter: 3.175,
+          },
+          persistentData: {
+            summary: { pathCount: 4 },
+            gcode: 'G21\n',
+          },
+        },
+      ],
+    },
+  });
+
+  assertIncludes(snippet, '// CAM operation count: 1', 'CAM operation count comment');
+  assertIncludes(snippet, 'const camState =', 'CAM state literal');
+  assertIncludes(snippet, 'partHistory.camPlanManager.loadSerializable(camState);', 'CAM restore call');
+  assertIncludes(snippet, '"Snippet CNC Mill"', 'CAM machine profile');
+  assertIncludes(snippet, '"CAM_SNIP"', 'CAM operation id');
+  assertIncludes(snippet, '"targetSolids": [', 'CAM target solid references');
+  assertIncludes(snippet, '"waterline-contour"', 'CAM strategy');
+  assertIncludes(snippet, '"gcode": "G21\\n"', 'generated CAM persistent data');
+}
+
+export function test_history_test_snippet_omits_empty_cam_state() {
+  const snippet = buildTestSnippet({
+    functionName: 'test_history_test_snippet_empty_cam_generated',
+    expressions: '',
+    configurator: null,
+    features: [],
+    cam: {
+      machineProfile: { name: 'Unused Mill' },
+      operations: [],
+    },
+  });
+
+  assertExcludes(snippet, 'camState', 'empty CAM state literal');
+  assertExcludes(snippet, 'Unused Mill', 'machine profile without operations');
+}

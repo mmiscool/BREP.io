@@ -24,7 +24,15 @@ export const workbenchMethods = {
         } else if (previous === 'SIMULATION' && next !== 'SIMULATION') {
             this._simulationWorkbenchReturnTarget = null;
         }
+        if (next === 'CAM' && previous !== 'CAM') {
+            this._camWorkbenchReturnTarget = previous || 'MODELING';
+        } else if (previous === 'CAM' && next !== 'CAM') {
+            this._camWorkbenchReturnTarget = null;
+        }
         if (next === 'SIMULATION') {
+            try { SelectionFilter.SetSelectionTypes([SelectionFilter.SOLID]); } catch { /* ignore */ }
+        }
+        if (next === 'CAM') {
             try { SelectionFilter.SetSelectionTypes([SelectionFilter.SOLID]); } catch { /* ignore */ }
         }
         if (next !== 'PMI') {
@@ -58,10 +66,22 @@ export const workbenchMethods = {
         return this.setActiveWorkbench(target, { queueHistorySnapshot: true });
     },
 
+    finishCamWorkbench() {
+        const target = this._camWorkbenchReturnTarget || 'MODELING';
+        this._camWorkbenchReturnTarget = null;
+        return this.setActiveWorkbench(target, { queueHistorySnapshot: true });
+    },
+
     _syncSimulationFinishUi() {
         const active = this._getActiveWorkbenchId() === 'SIMULATION';
         if (active) return this._mountSimulationFinishUi();
         return this._removeSimulationFinishUi();
+    },
+
+    _syncCamFinishUi() {
+        const active = this._getActiveWorkbenchId() === 'CAM';
+        if (active) return this._mountCamFinishUi();
+        return this._removeCamFinishUi();
     },
 
     _mountSimulationFinishUi() {
@@ -130,6 +150,72 @@ export const workbenchMethods = {
         return null;
     },
 
+    _mountCamFinishUi() {
+        if (this._camFinishUi?.isConnected) return this._camFinishUi;
+        const host = this.container || document.body || null;
+        if (!host) return null;
+        if (!document.getElementById('cam-finish-ui-styles')) {
+            const style = document.createElement('style');
+            style.id = 'cam-finish-ui-styles';
+            style.textContent = `
+                .cam-top-right {
+                    position: absolute;
+                    top: 8px;
+                    right: 8px;
+                    display: flex;
+                    gap: 8px;
+                    z-index: 1000;
+                }
+                .cam-top-right-btn {
+                    appearance: none;
+                    border: 1px solid #3c3424;
+                    border-radius: 8px;
+                    padding: 6px 10px;
+                    cursor: pointer;
+                    color: #fff7ed;
+                    background: linear-gradient(180deg, rgba(234, 137, 51, .28), rgba(234, 137, 51, .16));
+                }
+            `;
+            document.head.appendChild(style);
+        }
+        try {
+            const pos = (typeof window !== 'undefined' && window.getComputedStyle)
+                ? window.getComputedStyle(host).position
+                : host.style.position;
+            if (!pos || pos === 'static') host.style.position = 'relative';
+        } catch {
+            if (!host.style.position) host.style.position = 'relative';
+        }
+        const wrap = document.createElement('div');
+        wrap.className = 'cam-top-right';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'cam-top-right-btn';
+        btn.textContent = 'Finish';
+        btn.title = 'Finish CAM';
+        btn.addEventListener('click', () => {
+            try { this.finishCamWorkbench(); } catch { /* ignore */ }
+        });
+        wrap.appendChild(btn);
+        host.appendChild(wrap);
+        this._camFinishUi = wrap;
+        try {
+            this.mainToolbar?.reserveRightSpaceForElement?.(
+                this._camFinishReserveKey,
+                wrap,
+                { extraPx: 16, minPx: 84 },
+            );
+        } catch { /* ignore */ }
+        return wrap;
+    },
+
+    _removeCamFinishUi() {
+        try { this._camFinishUi?.remove?.(); } catch { /* ignore */ }
+        this._camFinishUi = null;
+        try { this.mainToolbar?.clearRightReserve?.(this._camFinishReserveKey); } catch { /* ignore */ }
+        return null;
+    },
+
     async _ensureSimulationWorkbenchManager() {
         if (this.simulationWorkbenchManager) return this.simulationWorkbenchManager;
         if (this._simulationWorkbenchManagerPromise) return this._simulationWorkbenchManagerPromise;
@@ -153,9 +239,33 @@ export const workbenchMethods = {
         return this._simulationWorkbenchManagerPromise;
     },
 
+    async _ensureCamWorkbenchManager() {
+        if (this.camWorkbenchManager) return this.camWorkbenchManager;
+        if (this._camWorkbenchManagerPromise) return this._camWorkbenchManagerPromise;
+
+        this._camWorkbenchManagerPromise = (async () => {
+            try {
+                const { CamWorkbenchManager } = await import('../../cam/CamWorkbenchManager.js');
+                if (this._disposed) return null;
+                if (!this.camWorkbenchManager) {
+                    this.camWorkbenchManager = new CamWorkbenchManager(this);
+                }
+                return this.camWorkbenchManager;
+            } catch (error) {
+                try { console.warn('[Viewer] Failed to load CAM workbench manager', error); } catch { /* ignore */ }
+                return null;
+            } finally {
+                this._camWorkbenchManagerPromise = null;
+            }
+        })();
+
+        return this._camWorkbenchManagerPromise;
+    },
+
     refreshWorkbenchUi() {
         if (this._viewerOnlyMode) return;
         const isSimulationWorkbench = this._getActiveWorkbenchId() === 'SIMULATION';
+        const isCamWorkbench = this._getActiveWorkbenchId() === 'CAM';
         if (isSimulationWorkbench) {
             void this._ensureSimulationWorkbenchManager().then((manager) => {
                 try { manager?.setActive?.(this._getActiveWorkbenchId() === 'SIMULATION'); } catch { /* ignore */ }
@@ -163,11 +273,19 @@ export const workbenchMethods = {
         } else {
             try { this.simulationWorkbenchManager?.setActive?.(false); } catch { /* ignore */ }
         }
+        if (isCamWorkbench) {
+            void this._ensureCamWorkbenchManager().then((manager) => {
+                try { manager?.setActive?.(this._getActiveWorkbenchId() === 'CAM'); } catch { /* ignore */ }
+            });
+        } else {
+            try { this.camWorkbenchManager?.setActive?.(false); } catch { /* ignore */ }
+        }
         try { this.historyWidget?.refreshWorkbenchUi?.(); } catch { /* ignore */ }
         try { SelectionFilter.refreshSelectionActions?.(); } catch { /* ignore */ }
         try { this._refreshWorkbenchPanelVisibility(); } catch { /* ignore */ }
         try { this.mainToolbar?.refreshButtons?.(); } catch { /* ignore */ }
         try { this._syncSimulationFinishUi(); } catch { /* ignore */ }
+        try { this._syncCamFinishUi(); } catch { /* ignore */ }
     },
 
     _normalizeToolbarButtonInput(labelOrSpec, title, onClick, fallbackSource = 'plugin') {
@@ -220,6 +338,9 @@ export const workbenchMethods = {
         } catch { /* ignore */ }
         try {
             this.simulationHistoryWidget?.refreshFromHistory?.();
+        } catch { /* ignore */ }
+        try {
+            this.camHistoryWidget?.refreshFromHistory?.();
         } catch { /* ignore */ }
         try {
             if (this.wireHarnessConnectionsWidget) {
@@ -333,6 +454,12 @@ export const workbenchMethods = {
             const visible = isSidePanelAllowed(record, workbenchId);
             if (visible) this.accordion.showSection?.(title);
             else this.accordion.hideSection?.(title);
+            if (record._visible !== visible) {
+                record._visible = visible;
+                if (typeof record.onVisibilityChange === 'function') {
+                    try { record.onVisibilityChange(visible, record, workbenchId); } catch { /* ignore panel visibility hooks */ }
+                }
+            }
         }
     },
 

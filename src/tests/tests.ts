@@ -24,6 +24,30 @@ import {
     test_boolean_overlap_conditioning_union_can_be_disabled,
     test_boolean_overlap_conditioning_union_enabled_by_default,
 } from './test_boolean_overlap_conditioning.js';
+import {
+    test_cam_combined_gcode_posts_multiple_operations_as_single_program,
+    test_cam_async_swept_hulls_report_segment_progress,
+    test_cam_default_roughing_cuts_stock_outside_target_silhouette,
+    test_cam_history_reports_empty_generation_feedback,
+    test_cam_history_generates_only_on_request_and_slider_snaps_to_toolpath_points,
+    test_cam_history_uses_option_selectors_for_operation_modes,
+    test_cam_low_hop_contour_links_passes_before_next_depth,
+    test_cam_machine_profile_controls_posted_gcode_and_serialization,
+    test_cam_primitive_cube_outside_contour_protects_target_material,
+    test_cam_uses_scene_y_as_machine_z_cut_axis,
+    test_cam_workbench_disables_modeling_context_toolbar_until_finished,
+    test_cam_workbench_finish_returns_to_previous_workbench,
+    test_cam_workbench_hiding_panel_releases_context_toolbar_suppression,
+    test_cam_plan_manager_invalidates_generated_operation_after_param_edit,
+    test_cam_plan_manager_serializes_generated_operations,
+    test_cam_preview_renders_actual_toolpath_polyline,
+    test_cam_three_axis_raster_generates_gcode_from_cube_mesh,
+    test_cam_workbench_registers_and_persists_part_history_state,
+    test_cam_workbench_side_panel_visibility_is_cam_only,
+    test_cam_waterline_raster_protects_higher_cross_sections,
+    test_cam_waterline_raster_respects_sloped_target_surfaces,
+    test_cam_waterline_contour_offsets_cross_section_loops,
+} from './test_camWorkbench.js';
 import { test_Chamfer } from './test_chamfer.js';
 import {
     test_cppChamfer_auto_direction_uses_native_classifier,
@@ -147,7 +171,11 @@ import {
 import { afterRun_Fillet_NonClosed, test_Fillet_NonClosed } from './test_fillet_nonClosed.js';
 import { test_fillets_more_dificult } from './test_filletsMoreDifficult.js';
 import { afterRun_history_expand_does_not_dirty, test_history_expand_does_not_dirty } from './test_history_expand_does_not_dirty.js';
-import { test_history_test_snippet_persistent_data_allowlist } from './test_historyTestSnippetPersistentData.js';
+import {
+    test_history_test_snippet_includes_cam_operations,
+    test_history_test_snippet_omits_empty_cam_state,
+    test_history_test_snippet_persistent_data_allowlist,
+} from './test_historyTestSnippetPersistentData.js';
 import { afterRun_history_features_basic, test_history_features_basic } from './test_history_features_basic.js';
 import {
     afterRun_hole_counterbore,
@@ -1525,6 +1553,8 @@ export const testFunctions: any[] = [
     { test: test_history_features_basic, afterRun: afterRun_history_features_basic, printArtifacts: false, exportFaces: true, exportSolids: true, resetHistory: true },
     { test: test_history_expand_does_not_dirty, afterRun: afterRun_history_expand_does_not_dirty, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_history_test_snippet_persistent_data_allowlist, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_history_test_snippet_includes_cam_operations, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_history_test_snippet_omits_empty_cam_state, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_selection_owning_feature_resolution, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_selection_line2_resolution_repair, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_selection_hover_material_restores_before_dispose, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -1541,6 +1571,49 @@ export const testFunctions: any[] = [
     { test: test_boolean_overlap_conditioning_subtract_can_be_disabled, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_boolean_overlap_conditioning_direct_api_enabled_by_default, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_boolean_overlap_conditioning_direct_api_can_be_disabled, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_three_axis_raster_generates_gcode_from_cube_mesh, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_async_swept_hulls_report_segment_progress, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_uses_scene_y_as_machine_z_cut_axis, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_default_roughing_cuts_stock_outside_target_silhouette, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_waterline_raster_respects_sloped_target_surfaces, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_waterline_raster_protects_higher_cross_sections, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_waterline_contour_offsets_cross_section_loops, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_primitive_cube_outside_contour_protects_target_material, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_low_hop_contour_links_passes_before_next_depth, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    {
+        test: test_cam_history_reports_empty_generation_feedback,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+        skip: ({ runtime }) => runtime === 'node' ? 'Requires browser DOM.' : '',
+    },
+    {
+        test: test_cam_history_uses_option_selectors_for_operation_modes,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+        skip: ({ runtime }) => runtime === 'node' ? 'Requires browser DOM.' : '',
+    },
+    {
+        test: test_cam_history_generates_only_on_request_and_slider_snaps_to_toolpath_points,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+        skip: ({ runtime }) => runtime === 'node' ? 'Requires browser DOM.' : '',
+    },
+    { test: test_cam_plan_manager_serializes_generated_operations, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_workbench_registers_and_persists_part_history_state, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_workbench_disables_modeling_context_toolbar_until_finished, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_workbench_side_panel_visibility_is_cam_only, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_workbench_finish_returns_to_previous_workbench, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_workbench_hiding_panel_releases_context_toolbar_suppression, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_plan_manager_invalidates_generated_operation_after_param_edit, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_machine_profile_controls_posted_gcode_and_serialization, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_combined_gcode_posts_multiple_operations_as_single_program, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_preview_renders_actual_toolpath_polyline, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_visibility_hidden_state_persistence, afterRun: afterRun_visibility_hidden_state_persistence, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_feature_scene_visibility, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_textToFace, afterRun: afterRun_textToFace, printArtifacts: false, exportFaces: true, exportSolids: false, resetHistory: true },

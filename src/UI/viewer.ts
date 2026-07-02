@@ -86,6 +86,9 @@ export class Viewer {
         this._workbenchPanelRecords = new Map();
         this.simulationWorkbenchManager = null;
         this._simulationWorkbenchManagerPromise = null;
+        this._camWorkbenchReturnTarget = null;
+        this.camWorkbenchManager = null;
+        this._camWorkbenchManagerPromise = null;
 
 
 
@@ -152,6 +155,8 @@ export class Viewer {
         this._rendererMode = 'webgl';
         this._simulationFinishUi = null;
         this._simulationFinishReserveKey = 'simulation-workbench-finish';
+        this._camFinishUi = null;
+        this._camFinishReserveKey = 'cam-workbench-finish';
         this._svgRenderer = null;
         this._webglRenderer = null;
         this._webglComposer = null;

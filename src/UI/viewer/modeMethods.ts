@@ -12,6 +12,9 @@ export const modeMethods = {
         if (this._disposed) return;
         this._disposed = true;
         try { this.simulationWorkbenchManager?.dispose?.(); } catch { /* ignore */ }
+        try { this.camWorkbenchManager?.clearPreview?.(); } catch { /* ignore */ }
+        try { this._removeSimulationFinishUi?.(); } catch { /* ignore */ }
+        try { this._removeCamFinishUi?.(); } catch { /* ignore */ }
         cancelAnimationFrame(this._raf);
         if (this._hoverRefreshRaf != null) {
             cancelAnimationFrame(this._hoverRefreshRaf);
@@ -21,6 +24,7 @@ export const modeMethods = {
         try { this._stopComponentTransformSession(); } catch { /* ignore */ }
         try { this.sheet2DWidget?.dispose?.(); } catch { /* ignore */ }
         try { this.wireHarnessConnectionsWidget?.dispose?.(); } catch { /* ignore */ }
+        try { this.camHistoryWidget?.dispose?.(); } catch { /* ignore */ }
         try { this._sheet2DEditorWindow?.dispose?.(); } catch { /* ignore */ }
         this._sheet2DEditorWindow = null;
         safe(() => this._sidebarDockController?.dispose());
