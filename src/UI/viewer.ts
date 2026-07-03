@@ -87,8 +87,6 @@ export class Viewer {
         this.simulationWorkbenchManager = null;
         this._simulationWorkbenchManagerPromise = null;
         this._camWorkbenchReturnTarget = null;
-        this.camWorkbenchManager = null;
-        this._camWorkbenchManagerPromise = null;
 
 
 

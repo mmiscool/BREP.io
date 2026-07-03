@@ -148,7 +148,7 @@ export function test_history_test_snippet_persistent_data_allowlist() {
   assertExcludes(snippet, 'miterSummary', 'derived fillet summary');
 }
 
-export async function test_history_test_snippet_toolbar_snapshot_compacts_cam_toolpaths() {
+export async function test_history_test_snippet_toolbar_snapshot_compacts_cam_generated_data() {
   let receivedOptions: any = null;
   const snapshot = await loadSerializableHistory({
     toJSON(options: any = {}) {
@@ -169,14 +169,15 @@ export async function test_history_test_snippet_toolbar_snapshot_compacts_cam_to
           },
           operations: [
             {
-              type: 'cam3axis',
+              type: 'shadow-cutter',
               __open: true,
               inputParams: {
-                id: 'CAM_TOOLBAR',
-                name: 'Toolbar CAM',
+                id: 'SC_TOOLBAR',
+                name: 'Toolbar Shadow Cutter',
                 targetSolids: ['P.CU1'],
-                toolShape: 'flat',
-                stepover: 1.5,
+                toolDiameter: 3.175,
+                stockAllowance: 0.25,
+                stepDown: 1,
                 __open: true,
               },
               persistentData: {
@@ -210,14 +211,14 @@ export async function test_history_test_snippet_toolbar_snapshot_compacts_cam_to
     cam: snapshot.cam,
   });
 
-  if (receivedOptions?.includeCamGeneratedToolpaths !== false) {
+  if (receivedOptions?.includeCamGeneratedData !== false) {
     throw new Error('[history_test_snippet_persistent_data] Toolbar snapshot should request compact CAM serialization.');
   }
 
   assertIncludes(snippet, '// CAM operation count: 1', 'CAM operation count comment');
   assertIncludes(snippet, '"Toolbar CNC Mill"', 'toolbar CAM machine profile');
   assertIncludes(snippet, '"stockProfile"', 'toolbar CAM stock profile');
-  assertIncludes(snippet, '"CAM_TOOLBAR"', 'toolbar CAM operation id');
+  assertIncludes(snippet, '"SC_TOOLBAR"', 'toolbar CAM operation id');
   assertExcludes(snippet, '"gcode"', 'generated CAM G-code');
   assertExcludes(snippet, '"summary"', 'generated CAM summary');
   assertExcludes(snippet, '"generatorVersion"', 'generated CAM version metadata');
@@ -255,15 +256,15 @@ export function test_history_test_snippet_includes_cam_operations() {
       },
       operations: [
         {
-          type: 'cam3axis',
+          type: 'shadow-cutter',
           __open: true,
           inputParams: {
             id: 'CAM_SNIP',
-            name: 'Snippet CAM',
+            name: 'Snippet Shadow Cutter',
             targetSolids: ['P_CU1'],
-            toolShape: 'vbit',
-            includedAngleDeg: 60,
             toolDiameter: 3.175,
+            stockAllowance: 0.5,
+            stepDown: 1,
             __open: true,
           },
           persistentData: {
@@ -283,8 +284,8 @@ export function test_history_test_snippet_includes_cam_operations() {
   assertIncludes(snippet, '"CAM_SNIP"', 'CAM operation id');
   assertIncludes(snippet, '"stockProfile"', 'CAM stock profile');
   assertIncludes(snippet, '"targetSolids": [', 'CAM target solid references');
-  assertIncludes(snippet, '"vbit"', 'CAM cutter shape');
-  assertIncludes(snippet, '"includedAngleDeg": 60', 'CAM V-bit angle');
+  assertIncludes(snippet, '"shadow-cutter"', 'Shadow Cutter operation type');
+  assertIncludes(snippet, '"stockAllowance": 0.5', 'Shadow Cutter stock allowance');
   assertExcludes(snippet, '"gcode"', 'generated CAM G-code');
   assertExcludes(snippet, '"summary"', 'generated CAM summary');
   assertExcludes(snippet, '"toolpath"', 'generated CAM toolpath payload');

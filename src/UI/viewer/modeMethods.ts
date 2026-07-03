@@ -12,7 +12,6 @@ export const modeMethods = {
         if (this._disposed) return;
         this._disposed = true;
         try { this.simulationWorkbenchManager?.dispose?.(); } catch { /* ignore */ }
-        try { this.camWorkbenchManager?.clearPreview?.(); } catch { /* ignore */ }
         try { this._removeSimulationFinishUi?.(); } catch { /* ignore */ }
         try { this._removeCamFinishUi?.(); } catch { /* ignore */ }
         cancelAnimationFrame(this._raf);

@@ -1,22 +1,25 @@
-import * as THREE from 'three';
 import { PartHistory } from '../PartHistory.js';
-import { CamOperationEntity } from '../cam/CamOperationEntity.js';
-import { CAM_GENERATED_DATA_VERSION, CamPlanManager } from '../cam/CamPlanManager.js';
-import { CamWorkbenchManager } from '../cam/CamWorkbenchManager.js';
+import { CamPlanManager } from '../cam/CamPlanManager.js';
+import { CAM_TOOLPATH_SIMULATOR_GROUP_NAME, CAM_TOOLPATH_TOOL_HEAD_NAME, CamToolpathSimulator } from '../cam/CamToolpathSimulator.js';
 import {
-  combineCamToolpathResults,
-  generateThreeAxisToolpath,
-  generateThreeAxisToolpathAsync,
-} from '../cam/camToolpath.js';
-import { gcodeDownloadFileName } from '../UI/cam/CamHistoryWidget.js';
+  CAM_TOOLPATH_SCHEMA_VERSION,
+  buildLinearToolpathPath,
+  generateGcodeForCamToolpathProgram,
+  makeFlatEndMillCutter,
+  normalizeCamOrientation,
+  summarizeCamToolpathProgram,
+  type CamToolpathProgram,
+} from '../cam/CamToolpathDefinition.js';
+import { CAM_OPERATION_TYPE_SHADOW_CUTTER, ShadowCutterEntity } from '../cam/ShadowCutterEntity.js';
 import { getWorkbenchDefinition } from '../workbenches/index.js';
+import * as THREE from 'three';
 
 function assert(condition: any, message: string) {
   if (!condition) throw new Error(message);
 }
 
 function makeBoxMeshSolid(sizeX = 10, sizeY = 10, sizeZ = 10) {
-  const vertProperties = Float32Array.from([
+  const vertProperties = [
     0, 0, 0,
     sizeX, 0, 0,
     sizeX, sizeY, 0,
@@ -25,49 +28,155 @@ function makeBoxMeshSolid(sizeX = 10, sizeY = 10, sizeZ = 10) {
     sizeX, 0, sizeZ,
     sizeX, sizeY, sizeZ,
     0, sizeY, sizeZ,
-  ]);
-  const triVerts = Uint32Array.from([
+  ];
+  const triVerts = [
     0, 2, 1, 0, 3, 2,
     4, 5, 6, 4, 6, 7,
     0, 1, 5, 0, 5, 4,
     1, 2, 6, 1, 6, 5,
     2, 3, 7, 2, 7, 6,
     3, 0, 4, 3, 4, 7,
-  ]);
-  const solid: any = new THREE.Object3D();
-  solid.name = 'cam-test-cube';
-  solid.type = 'SOLID';
-  solid.visible = true;
-  solid.getMesh = () => {
+  ];
+  return {
+    name: 'cam-test-cube',
+    type: 'SOLID',
+    visible: true,
+    getMesh() {
       return {
         vertProperties,
         triVerts,
         delete() {},
       };
+    },
   };
-  return solid;
+}
+
+function makeRingMeshSolid({
+  outerRadius = 5,
+  innerRadius = 2,
+  height = 10,
+  segments = 32,
+} = {}) {
+  const vertProperties: number[] = [];
+  const triVerts: number[] = [];
+  const pushVertex = (x: number, y: number, z: number) => {
+    const index = vertProperties.length / 3;
+    vertProperties.push(x, y, z);
+    return index;
+  };
+  const topOuter: number[] = [];
+  const topInner: number[] = [];
+  const bottomOuter: number[] = [];
+  const bottomInner: number[] = [];
+  for (let index = 0; index < segments; index += 1) {
+    const theta = (index / segments) * Math.PI * 2;
+    const cos = Math.cos(theta);
+    const sin = Math.sin(theta);
+    topOuter.push(pushVertex(outerRadius * cos, height, outerRadius * sin));
+    topInner.push(pushVertex(innerRadius * cos, height, innerRadius * sin));
+    bottomOuter.push(pushVertex(outerRadius * cos, 0, outerRadius * sin));
+    bottomInner.push(pushVertex(innerRadius * cos, 0, innerRadius * sin));
+  }
+  const tri = (...indices: number[]) => triVerts.push(...indices);
+  for (let index = 0; index < segments; index += 1) {
+    const next = (index + 1) % segments;
+    tri(topOuter[index], topOuter[next], topInner[index]);
+    tri(topInner[index], topOuter[next], topInner[next]);
+    tri(bottomOuter[next], bottomOuter[index], bottomInner[index]);
+    tri(bottomOuter[next], bottomInner[index], bottomInner[next]);
+    tri(bottomOuter[index], bottomOuter[next], topOuter[index]);
+    tri(topOuter[index], bottomOuter[next], topOuter[next]);
+    tri(bottomInner[next], bottomInner[index], topInner[index]);
+    tri(bottomInner[next], topInner[index], topInner[next]);
+  }
+  return {
+    name: 'cam-test-ring',
+    type: 'SOLID',
+    visible: true,
+    getMesh() {
+      return {
+        vertProperties,
+        triVerts,
+        delete() {},
+      };
+    },
+  };
+}
+
+function makeCylinderMeshSolid({
+  name = 'cam-test-cylinder',
+  radius = 1,
+  height = 4,
+  centerX = 0,
+  centerZ = 0,
+  bottomY = 10,
+  segments = 32,
+} = {}) {
+  const vertProperties: number[] = [];
+  const triVerts: number[] = [];
+  const pushVertex = (x: number, y: number, z: number) => {
+    const index = vertProperties.length / 3;
+    vertProperties.push(x, y, z);
+    return index;
+  };
+  const topCenter = pushVertex(centerX, bottomY + height, centerZ);
+  const bottomCenter = pushVertex(centerX, bottomY, centerZ);
+  const topRing: number[] = [];
+  const bottomRing: number[] = [];
+  for (let index = 0; index < segments; index += 1) {
+    const theta = (index / segments) * Math.PI * 2;
+    const x = centerX + radius * Math.cos(theta);
+    const z = centerZ + radius * Math.sin(theta);
+    topRing.push(pushVertex(x, bottomY + height, z));
+    bottomRing.push(pushVertex(x, bottomY, z));
+  }
+  const tri = (...indices: number[]) => triVerts.push(...indices);
+  for (let index = 0; index < segments; index += 1) {
+    const next = (index + 1) % segments;
+    tri(topCenter, topRing[index], topRing[next]);
+    tri(bottomCenter, bottomRing[next], bottomRing[index]);
+    tri(bottomRing[index], bottomRing[next], topRing[index]);
+    tri(topRing[index], bottomRing[next], topRing[next]);
+  }
+  return {
+    name,
+    type: 'SOLID',
+    visible: true,
+    getMesh() {
+      return {
+        vertProperties,
+        triVerts,
+        delete() {},
+      };
+    },
+  };
+}
+
+function makeViewerWithSolids(solids: any[]) {
+  return {
+    scene: {
+      children: solids,
+      getObjectByName(name: string) {
+        return this.children.find((child: any) => child?.name === name) || null;
+      },
+    },
+  };
 }
 
 function makeViewerWithSolid(solid = makeBoxMeshSolid()) {
-  const scene = new THREE.Scene();
-  scene.add(solid as any);
-  return {
-    scene,
-    partHistory: { scene },
-    render() {},
-  };
+  return makeViewerWithSolids([solid]);
 }
 
 function defaultCamParams(patch: Record<string, any> = {}) {
   return {
-    id: 'CAM1',
-    name: 'PNG Raster',
+    id: 'SC1',
+    name: 'Shadow Cutter',
     targetSolids: ['cam-test-cube'],
     toolDiameter: 2,
-    toolLength: 20,
-    stepover: 2,
+    toolLength: 30,
+    stockAllowance: 0.25,
     stepDown: 2,
-    sampleSpacing: 1,
+    extraDepth: 0.5,
     safeHeight: 3,
     feedRate: 600,
     plungeRate: 120,
@@ -77,211 +186,268 @@ function defaultCamParams(patch: Record<string, any> = {}) {
   };
 }
 
-function countLines(gcode: string, pattern: RegExp) {
-  return (gcode.match(pattern) || []).length;
-}
-
-export async function test_cam_three_axis_raster_generates_gcode_from_cube_mesh() {
-  const result = generateThreeAxisToolpath(makeViewerWithSolid(), defaultCamParams());
-  assert(result.paths.length > 0, 'pngcam-backed CAM should generate raster toolpaths for a cube mesh');
-  assert(result.summary.triangleCount === 12, 'CAM should extract all cube triangles');
-  assert(result.summary.heightmapSampleCount && result.summary.heightmapSampleCount > 0, 'CAM summary should report heightmap sampling');
-  assert(result.gcode.includes('G21'), 'G-code should set metric units');
-  assert(result.gcode.includes('M3 S9000'), 'G-code should start the spindle with the requested RPM');
-  assert(result.gcode.includes('G1 X'), 'G-code should emit cutting moves');
-  assert(result.simulation.motionSegments.some((segment) => segment.kind === 'rapid'), 'Simulation should include rapid positioning moves');
-  assert(result.simulation.sweptSegments.length > 0, 'Simulation should retain swept cutter segments for preview');
-}
-
-export async function test_cam_tool_shape_selection_persists_cutter_profile_metadata() {
-  const shapes = [
-    { toolShape: 'flat', expected: 'flat' },
-    { toolShape: 'ball', expected: 'ball' },
-    { toolShape: 'vbit', expected: 'vbit', includedAngleDeg: 60 },
-  ];
-  for (const shape of shapes) {
-    const result = generateThreeAxisToolpath(makeViewerWithSolid(), defaultCamParams(shape));
-    assert(result.paths.length > 0, `${shape.expected} cutter should generate toolpaths`);
-    assert(result.cutterProfile.kind === shape.expected, `${shape.expected} cutter metadata should be persisted`);
-    if (shape.expected === 'vbit') {
-      assert(result.cutterProfile.includedAngleDeg === 60, 'V-bit included angle should be persisted');
-    }
-  }
-
-  const toolShapeOptions = CamOperationEntity.inputParamsSchema.toolShape.options.map((option: any) => option.value);
-  assert(toolShapeOptions.join('|') === 'flat|ball|vbit', 'CAM operation UI should expose all pngcam cutter shapes');
-  assert(CamOperationEntity.uiFieldsTest({ params: { toolShape: 'flat' } }).exclude.includes('includedAngleDeg'), 'Flat cutters should hide V-bit angle');
-  assert(!CamOperationEntity.uiFieldsTest({ params: { toolShape: 'vbit' } }).exclude.includes('includedAngleDeg'), 'V-bit cutters should show included angle');
-}
-
-export async function test_cam_invalid_stepdown_reports_feedback_without_paths() {
-  const result = generateThreeAxisToolpath(makeViewerWithSolid(), defaultCamParams({ stepDown: 0 }));
-  assert(result.paths.length === 0, 'Invalid step-down should not generate paths');
-  assert(result.warnings.some((warning) => warning.includes('Step-down')), 'Invalid step-down should report feedback');
-}
-
-export async function test_cam_invalid_machine_profile_reports_feedback_without_paths() {
-  const result = generateThreeAxisToolpath(makeViewerWithSolid(), defaultCamParams({
-    machineProfile: { maxSpindleRPM: 0 },
-  }));
-  assert(result.paths.length === 0, 'Invalid machine profile should not generate paths');
-  assert(result.warnings.some((warning) => warning.includes('spindle')), 'Invalid machine profile should report feedback');
-}
-
-export async function test_cam_serialized_mesh_rejects_non_finite_triangle_coordinates() {
-  const result = generateThreeAxisToolpath(null, defaultCamParams({
-    targetMeshes: [{ triangles: [0, 0, 0, Number.NaN, 0, 0, 0, 1, 0] }],
-  }));
-  assert(result.paths.length === 0, 'Non-finite serialized mesh triangles should be rejected');
-  assert(result.summary.triangleCount === 0, 'Rejected serialized triangles should not count as CAM input');
-}
-
-export async function test_cam_plan_manager_async_progress_events_are_bounded() {
+export async function test_cam_plan_manager_preserves_operations_and_profiles() {
   const manager = new CamPlanManager(null);
-  manager.setStockProfile({ mode: 'auto', margin: 1 });
-  manager.createOperation('cam3axis', defaultCamParams({ targetSolids: ['cam-test-cube'] }));
-  const events: any[] = [];
-  const result = await manager.generateAllAsync(makeViewerWithSolid(), {
-    useWorker: false,
-    onProgress: (event) => events.push(event),
-  });
-  assert(result.paths.length > 0, 'Async CAM plan generation should produce paths');
-  assert(events.length > 0, 'Async CAM plan generation should report progress');
-  assert(events.every((event) => event.current >= 0 && event.current <= event.total), 'Progress events should stay bounded');
-}
-
-export async function test_cam_async_generation_can_be_aborted() {
-  const controller = new AbortController();
-  controller.abort('stop');
-  let aborted = false;
-  try {
-    await generateThreeAxisToolpathAsync(makeViewerWithSolid(), {
-      ...defaultCamParams(),
-      signal: controller.signal,
-    });
-  } catch (error: any) {
-    aborted = error?.name === 'AbortError';
-  }
-  assert(aborted, 'Async CAM generation should honor AbortSignal cancellation');
-}
-
-export function test_cam_gcode_export_filename_uses_machine_file_extension() {
-  assert(gcodeDownloadFileName(null) === 'brep-cam.nc', 'Default CAM filename should use .nc');
-  assert(gcodeDownloadFileName('fixture bracket.brep') === 'fixture_bracket.nc', 'BREP document names should become NC filenames');
-  assert(gcodeDownloadFileName('part program.tap') === 'part_program.tap', 'Existing machine-code extensions should be preserved');
-}
-
-export async function test_cam_plan_manager_serializes_generated_operations() {
-  const manager = new CamPlanManager(null);
-  manager.setStockProfile({ mode: 'auto', margin: 1 });
-  const operation = manager.createOperation('cam3axis', defaultCamParams({ targetSolids: ['cam-test-cube'] }));
-  const result = manager.generateAll(makeViewerWithSolid());
-  assert(result.paths.length > 0, 'CAM manager should generate toolpaths');
-  assert(operation?.persistentData?.generatorVersion === CAM_GENERATED_DATA_VERSION, 'Generated CAM data should be versioned');
-
-  const serialized = manager.toSerializable();
-  assert(serialized.operations[0]?.persistentData?.toolpath?.paths?.length > 0, 'Default serialization should keep generated toolpaths');
-
-  const compact = manager.toSerializable({ includeGeneratedToolpaths: false });
-  assert(!Object.prototype.hasOwnProperty.call(compact.operations[0]?.persistentData || {}, 'toolpath'), 'Compact serialization should omit generated toolpaths');
-  assert(compact.operations[0]?.persistentData?.gcode?.includes('G21'), 'Compact serialization should retain generated G-code');
-
-  const lean = manager.toSerializable({ includeGeneratedData: false });
-  assert(!Object.prototype.hasOwnProperty.call(lean.operations[0]?.persistentData || {}, 'gcode'), 'Lean serialization should omit generated G-code');
-}
-
-export async function test_cam_plan_manager_uses_global_stock_profile_for_generated_bounds() {
-  const manager = new CamPlanManager(null);
-  manager.setStockProfile({ mode: 'auto', margin: 2 });
-  manager.createOperation('cam3axis', defaultCamParams({ targetSolids: ['cam-test-cube'] }));
-  const plan = manager.generateAll(makeViewerWithSolid());
-  assert(plan.bounds?.min[0] === -2 && plan.bounds?.max[0] === 12, 'Global stock margin should drive generated stock bounds');
-}
-
-export async function test_cam_plan_manager_invalidates_stale_generated_payload_versions() {
-  const manager = new CamPlanManager(null);
-  manager.loadSerializable({
-    operations: [{
-      type: 'cam3axis',
-      inputParams: defaultCamParams(),
-      persistentData: {
-        generatorVersion: CAM_GENERATED_DATA_VERSION - 1,
-        gcode: 'G21\n',
-        toolpath: { paths: [{ id: 'stale' }] },
-      },
-    }],
-  });
-  const operation = manager.getOperations()[0];
-  assert(!operation?.persistentData?.toolpath, 'Loading stale generated CAM data should drop stale toolpaths');
-  assert(operation?.persistentData?.invalidatedReason === 'cam-generator-version', 'Stale generated CAM data should record invalidation reason');
-}
-
-export async function test_cam_plan_manager_invalidates_generated_operation_after_param_edit() {
-  const manager = new CamPlanManager(null);
-  manager.setStockProfile({ mode: 'auto', margin: 1 });
-  const operation = manager.createOperation('cam3axis', defaultCamParams({ targetSolids: ['cam-test-cube'] }));
-  manager.generateAll(makeViewerWithSolid());
-  assert(operation?.persistentData?.toolpath, 'Generated CAM data should be cached before edit');
-  operation?.mergeParams({ toolDiameter: 3 });
-  manager.invalidateOperation(operation, 'operation-edit');
-  assert(!operation?.persistentData?.toolpath, 'CAM invalidation should clear stale generated toolpaths');
-}
-
-export async function test_cam_machine_profile_controls_posted_gcode_and_serialization() {
-  const machineProfile = {
-    name: 'Tiny Mill',
-    controller: 'grbl',
-    maxSpindleRPM: 5000,
-    defaultRapidRate: 1800,
-    safeParkZ: 20,
+  manager.setMachineProfile({
+    name: 'Fixture Mill',
+    controller: 'linuxcnc',
+    units: 'mm',
+    maxSpindleRPM: 12000,
+    defaultRapidRate: 3000,
+    safeParkZ: 25,
     tokenSpacer: false,
     stripComments: true,
     header: 'G54',
     footer: 'G0 X0 Y0',
-  };
-  const plan = generateThreeAxisToolpath(makeViewerWithSolid(), defaultCamParams({
-    machineProfile,
-    spindleRPM: 12000,
+  });
+  manager.setStockProfile({ mode: 'fixed', margin: 2, sizeX: 30, sizeY: 20, sizeZ: 10, offsetX: 1 });
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_SHADOW_CUTTER, defaultCamParams({ stockAllowance: 0.75 }));
+
+  const serialized = manager.toSerializable();
+  assert(serialized.operations.length === 1, 'CAM operation should serialize');
+  assert(serialized.machineProfile.name === 'Fixture Mill', 'Machine profile should serialize');
+  assert(serialized.stockProfile.mode === 'fixed', 'Stock profile should serialize');
+  assert(serialized.operations[0]?.type === CAM_OPERATION_TYPE_SHADOW_CUTTER, 'Shadow Cutter type should serialize');
+  assert(serialized.operations[0]?.inputParams?.id === operation?.inputParams?.id, 'Operation id should serialize');
+  assert(serialized.operations[0]?.inputParams?.stockAllowance === 0.75, 'Shadow Cutter stock allowance should serialize');
+  assert(serialized.operations[0]?.inputParams?.toolDiameter === 2, 'Shadow Cutter tool diameter should serialize');
+  assert(serialized.operations[0]?.inputParams?.toolLength === 30, 'Shadow Cutter tool length should serialize');
+}
+
+export async function test_cam_plan_manager_strips_legacy_generated_data() {
+  const manager = new CamPlanManager(null);
+  manager.loadSerializable({
+    operations: [
+      {
+        type: CAM_OPERATION_TYPE_SHADOW_CUTTER,
+        inputParams: defaultCamParams({ id: 'CAM_LEGACY' }),
+        persistentData: {
+          toolpath: { paths: [{ id: 'old-path' }] },
+          gcode: 'G21\n',
+          generatedAt: '2026-07-01T00:00:00.000Z',
+          summary: { pathCount: 1 },
+          warnings: ['old warning'],
+          generatorVersion: 2,
+        },
+      },
+    ],
+  });
+  const operation = manager.getOperations()[0];
+  assert(operation?.type === CAM_OPERATION_TYPE_SHADOW_CUTTER, 'CAM operation should hydrate as Shadow Cutter');
+  assert(operation?.persistentData?.invalidatedReason === 'cam-generation-removed', 'Legacy generated CAM data should be marked removed');
+  assert(!operation?.persistentData?.toolpath, 'Legacy generated toolpaths should be stripped');
+  assert(!operation?.persistentData?.gcode, 'Legacy generated G-code should be stripped');
+  assert(manager.getGeneratedResults().length === 0, 'No generated CAM results should be available in the shell');
+}
+
+export async function test_cam_shadow_cutter_history_item_generates_toolpath() {
+  const manager = new CamPlanManager(null);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_SHADOW_CUTTER, defaultCamParams());
+  const direct = operation.run({
+    viewer: makeViewerWithSolid(),
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  assert(direct.schemaVersion === CAM_TOOLPATH_SCHEMA_VERSION, 'Shadow Cutter should return the shared CAM toolpath schema');
+  assert(direct.paths.length > 0, 'Shadow Cutter history item should return toolpaths from run()');
+  assert(direct.paths[0].points.length > 0, 'Shadow Cutter paths should contain standard path points');
+  assert(direct.paths[0].segments.length === direct.paths[0].points.length - 1, 'Shadow Cutter paths should contain standard path segments');
+  assert(direct.paths[0].cutter.kind === 'flat-endmill', 'Shadow Cutter paths should describe cutter shape');
+  assert(direct.paths[0].cutter.diameter === 2, 'Shadow Cutter paths should describe cutter size');
+  assert(direct.paths[0].segments[0].orientation.toolAxis.join(',') === '0,0,-1', 'Shadow Cutter segments should describe cutter orientation');
+  assert(direct.paths[0].segments[0].cutter?.diameter === 2, 'Shadow Cutter segments should carry cutter metadata');
+  const plunge = direct.paths[0].segments.find((segment) => segment.kind === 'plunge');
+  const retract = direct.paths[0].segments.find((segment) => segment.kind === 'retract');
+  assert(plunge && retract, 'Shadow Cutter paths should include explicit plunge and retract moves for simulation');
+  assert(direct.paths[0].points[plunge.startIndex].position[2] === direct.safeZ, 'Plunge should start at safe Z');
+  assert(direct.paths[0].points[plunge.endIndex].position[2] !== direct.safeZ, 'Plunge should end at cutting Z');
+  assert(direct.summary.triangleCount === 12, 'Shadow Cutter should collect target mesh triangles');
+  assert(direct.bounds.min[0] === -1.25 && direct.bounds.max[0] === 11.25, 'Shadow Cutter should offset the projected outline by tool radius plus stock allowance');
+  assert(direct.gcode.includes('G21'), 'Shadow Cutter should return posted G-code with the toolpath');
+
+  const combined = manager.generateAll(makeViewerWithSolid());
+  assert(combined.paths.length === direct.paths.length, 'CAM manager should delegate generation to the operation history item');
+  assert(manager.getGeneratedResults().length === 1, 'CAM manager should retain runtime results returned by operation history items');
+  assert(manager.getCombinedGcode().includes('G21'), 'CAM manager should expose G-code posted from operation toolpath results');
+}
+
+export async function test_cam_shadow_cutter_generates_clear_hole_loop() {
+  const manager = new CamPlanManager(null);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_SHADOW_CUTTER, defaultCamParams({
+    targetSolids: ['cam-test-ring'],
+    toolDiameter: 1,
+    stockAllowance: 0,
+    stepDown: 20,
+    extraDepth: 0,
   }));
-  assert(plan.gcode.includes('G54'), 'Machine header should be posted');
-  assert(plan.gcode.includes('G0Z20'), 'Machine safe park Z should be posted using compact tokens');
-  assert(plan.gcode.includes('M3S5000'), 'Spindle RPM should clamp to machine maximum');
-  assert(plan.gcode.includes('G0 X0 Y0'), 'Machine footer should be posted');
-  assert(!plan.gcode.includes(';'), 'Comments should be stripped when the machine profile requests it');
+  const direct = operation.run({
+    viewer: makeViewerWithSolid(makeRingMeshSolid()),
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  const holePaths = direct.paths.filter((path) => path.metadata?.loopRole === 'hole');
+  const outerPaths = direct.paths.filter((path) => path.metadata?.loopRole === 'outer');
+  assert(outerPaths.length === 1, 'Shadow Cutter should generate one outer loop for a single-depth ring fixture');
+  assert(holePaths.length === 1, 'Shadow Cutter should generate a second clear-hole loop for a through-hole');
+  assert(direct.metadata?.holeLoopCount === 1, 'Shadow Cutter metadata should report detected hole loops');
+  assert(holePaths[0].segments.some((segment) => segment.kind === 'cut'), 'Hole loop should contain cut moves');
+  assert(holePaths[0].segments.some((segment) => segment.kind === 'plunge'), 'Hole loop should contain a plunge move');
+  assert(direct.gcode.includes('SC1-H'), 'Posted G-code should include the hole-loop path');
 }
 
-export async function test_cam_combined_gcode_posts_multiple_operations_as_single_program() {
-  const first = generateThreeAxisToolpath(makeViewerWithSolid(), defaultCamParams({ id: 'CAM1', name: 'First', spindleRPM: 5000 }));
-  const second = generateThreeAxisToolpath(makeViewerWithSolid(), defaultCamParams({ id: 'CAM2', name: 'Second', spindleRPM: 8000, toolShape: 'ball' }));
-  const combined = combineCamToolpathResults([first, second]);
-  assert(combined.paths.length === first.paths.length + second.paths.length, 'Combined plan should retain all paths');
-  assert(countLines(combined.gcode, /^M2\b/gm) === 1, 'Combined G-code should end the program once');
-  assert(countLines(combined.gcode, /^M5\b/gm) === 1, 'Combined G-code should stop the spindle once');
-  assert(combined.gcode.includes('Operation 1: First'), 'Combined G-code should label the first operation');
-  assert(combined.gcode.includes('Operation 2: Second'), 'Combined G-code should label the second operation');
+export async function test_cam_shadow_cutter_cuts_each_loop_to_depth_before_next_loop() {
+  const manager = new CamPlanManager(null);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_SHADOW_CUTTER, defaultCamParams({
+    targetSolids: ['cam-test-ring'],
+    toolDiameter: 1,
+    stockAllowance: 0,
+    stepDown: 4,
+    extraDepth: 0,
+  }));
+  const direct = operation.run({
+    viewer: makeViewerWithSolid(makeRingMeshSolid()),
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  assert(direct.paths.length === 2, 'Shadow Cutter should emit one stepped path per loop');
+  assert(direct.paths[0].metadata?.loopRole === 'outer', 'Outer loop should be cut before hole loops');
+  assert(direct.paths[1].metadata?.loopRole === 'hole', 'Hole loop should be cut after the outer loop completes');
+  assert(direct.summary.levelCount === 3, 'Fixture should require three depth levels');
+  for (const path of direct.paths) {
+    const zLevels = path.metadata?.zLevels || [];
+    assert(Array.isArray(zLevels) && zLevels.length === direct.summary.levelCount, 'Each loop path should carry all depth levels');
+    assert(path.segments.filter((segment) => segment.kind === 'plunge').length === direct.summary.levelCount, 'Each loop should plunge once per depth level');
+    assert(path.segments.filter((segment) => segment.kind === 'retract').length === 1, 'Each loop should retract only after its final depth pass');
+    const retractIndex = path.segments.findIndex((segment) => segment.kind === 'retract');
+    assert(retractIndex === path.segments.length - 1, 'Loop retract should be the last segment before moving to the next loop');
+    const cutLevels = path.segments
+      .filter((segment) => segment.kind === 'cut')
+      .map((segment) => segment.metadata?.level)
+      .join(',');
+    assert(cutLevels.includes('1') && cutLevels.includes('2') && cutLevels.includes('3'), 'Each loop should cut every depth level before the next loop starts');
+  }
 }
 
-export async function test_cam_preview_renders_actual_toolpath_polyline() {
-  const viewer = makeViewerWithSolid();
-  const plan = generateThreeAxisToolpath(viewer, defaultCamParams());
-  const runtime = new CamWorkbenchManager(viewer);
-  runtime.setActive(true);
-  const group = runtime.preview(plan);
-  assert(group, 'CAM preview should create a scene group');
-  assert(Boolean(group?.getObjectByName?.('CAM Toolpath Polyline')), 'CAM preview should render the actual toolpath polyline');
-  assert(Boolean(group?.getObjectByName?.('CAM Toolhead')), 'CAM preview should render the selected tool');
+export async function test_cam_shadow_cutter_ignores_raised_cap_loops_as_holes() {
+  const manager = new CamPlanManager(null);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_SHADOW_CUTTER, defaultCamParams({
+    targetSolids: ['cam-test-ring', 'cam-test-boss'],
+    toolDiameter: 1,
+    stockAllowance: 0,
+    stepDown: 20,
+    extraDepth: 0,
+  }));
+  const direct = operation.run({
+    viewer: makeViewerWithSolids([
+      makeRingMeshSolid(),
+      makeCylinderMeshSolid({
+        name: 'cam-test-boss',
+        radius: 0.75,
+        centerX: 0,
+        centerZ: 3.6,
+        bottomY: 10,
+        height: 4,
+      }),
+    ]),
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  const holePaths = direct.paths.filter((path) => path.metadata?.loopRole === 'hole');
+  const outerPaths = direct.paths.filter((path) => path.metadata?.loopRole === 'outer');
+  assert(direct.paths.length === 2, 'Raised caps inside the shadow should not generate extra loop paths');
+  assert(outerPaths.length === 1, 'Fixture should keep one outer loop');
+  assert(holePaths.length === 1, 'Fixture should keep only the clear through-hole loop');
+  assert(direct.metadata?.holeLoopCount === 1, 'Raised cap loops should not be classified as holes');
+}
+
+export async function test_cam_shadow_cutter_is_the_only_registered_operation() {
+  const manager = new CamPlanManager(null);
+  const available = Array.from(manager.registry.entityClasses.values());
+  assert(available.length === 1, 'Only one CAM operation should be registered');
+  assert(available[0] === ShadowCutterEntity, 'Shadow Cutter should be the registered CAM operation');
+  assert(ShadowCutterEntity.longName === 'Shadow Cutter', 'Shadow Cutter should be the add-menu label');
+  assert(!Object.prototype.hasOwnProperty.call(ShadowCutterEntity.inputParamsSchema, 'toolShape'), 'Old generic cutter shape field should be removed');
+  assert(!Object.prototype.hasOwnProperty.call(ShadowCutterEntity.inputParamsSchema, 'stepover'), 'Old raster stepover field should be removed');
 }
 
 export async function test_cam_workbench_registers_and_persists_part_history_state() {
-  const workbench = getWorkbenchDefinition('cam');
+  const workbench = getWorkbenchDefinition('CAM');
   assert(workbench, 'CAM workbench should be registered');
-  const camPanels = workbench?.sidePanels || {};
+  const camPanels = workbench.sidePanels || {};
   assert(Object.keys(camPanels).filter((key) => key.startsWith('cam')).join('|') === 'camHistory|camMachineConfiguration|camGcode', 'CAM workbench should list CAM History before the other CAM panels');
 
-  const history = new PartHistory();
-  history.camPlanManager.setStockProfile({ mode: 'auto', margin: 1 });
-  history.camPlanManager.createOperation('cam3axis', defaultCamParams());
-  const raw = await history.toJSON();
-  const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  const partHistory = new PartHistory();
+  partHistory.camPlanManager.createOperation(CAM_OPERATION_TYPE_SHADOW_CUTTER, defaultCamParams({ id: 'SC_SAVE' }));
+  const serializable = partHistory.toSerializable();
+  const parsed = typeof serializable === 'string' ? JSON.parse(serializable) : serializable;
   assert(parsed.cam?.operations?.length === 1, 'Part history JSON should persist CAM operations');
+  assert(parsed.cam.operations[0]?.type === CAM_OPERATION_TYPE_SHADOW_CUTTER, 'Part history JSON should persist Shadow Cutter type');
+  assert(parsed.cam.operations[0]?.inputParams?.id === 'SC_SAVE', 'Part history JSON should persist CAM operation inputs');
+}
+
+export async function test_cam_toolpath_simulator_visualizes_program_and_moves_head() {
+  const cutter = makeFlatEndMillCutter({ diameter: 2, cuttingLength: 10, overallLength: 12 });
+  const orientation = normalizeCamOrientation({ toolAxis: [0, 0, -1], forward: [1, 0, 0] });
+  const path = buildLinearToolpathPath({
+    id: 'SIM-P1',
+    operationId: 'SIM',
+    operationName: 'Simulator Fixture',
+    positions: [
+      [0, 0, 0],
+      [10, 0, 0],
+      [10, 10, 0],
+    ],
+    cutter,
+    orientation,
+    feedRate: 600,
+    plungeRate: 120,
+    spindleRPM: 9000,
+  });
+  const base: Omit<CamToolpathProgram, 'gcode'> = {
+    schemaVersion: CAM_TOOLPATH_SCHEMA_VERSION,
+    operationId: 'SIM',
+    operationName: 'Simulator Fixture',
+    units: 'mm' as const,
+    coordinateSystem: 'machine' as const,
+    generatedAt: '2026-07-03T00:00:00.000Z',
+    machine: new CamPlanManager(null).getMachineProfile(),
+    bounds: { min: [0, 0, 0] as [number, number, number], max: [10, 10, 0] as [number, number, number] },
+    targetBounds: null,
+    safeZ: 15,
+    cutter,
+    spindleRPM: 9000,
+    paths: [path],
+    summary: summarizeCamToolpathProgram({ paths: [path], targetCount: 1, triangleCount: 0, levelCount: 1 }),
+    warnings: [],
+  };
+  const program: CamToolpathProgram = { ...base, gcode: generateGcodeForCamToolpathProgram(base) };
+  const scene = new THREE.Scene();
+  let renderCount = 0;
+  const simulator = new CamToolpathSimulator({
+    scene,
+    viewer: {
+      scene,
+      render() {
+        renderCount += 1;
+      },
+    },
+  });
+
+  simulator.setProgram(program);
+  const group = scene.getObjectByName(CAM_TOOLPATH_SIMULATOR_GROUP_NAME);
+  assert(group, 'Simulator should add a CAM toolpath overlay group');
+  assert(group?.userData?.sceneOverlay === true, 'Simulator overlay should be marked as scene overlay');
+  assert(group?.userData?.preventRemove === true, 'Simulator overlay should be protected from history scene cleanup');
+  assert(simulator.getState().totalSteps === 2, 'Simulator should flatten path segments into simulation steps');
+
+  simulator.setProgress(0.5);
+  const toolHead = scene.getObjectByName(CAM_TOOLPATH_TOOL_HEAD_NAME);
+  assert(toolHead, 'Simulator should render a moving tool head');
+  assert(Math.abs((toolHead as THREE.Object3D).position.x - 10) < 1e-6, 'Tool head should move to halfway X position');
+  assert(Math.abs((toolHead as THREE.Object3D).position.y - 0) < 1e-6, 'Tool head scene Y should map from machine Z');
+  assert(Math.abs((toolHead as THREE.Object3D).position.z - 0) < 1e-6, 'Tool head scene Z should map from machine Y');
+  assert(renderCount > 0, 'Simulator should request viewer renders when it updates');
+
+  simulator.dispose();
+  assert(!scene.getObjectByName(CAM_TOOLPATH_SIMULATOR_GROUP_NAME), 'Simulator dispose should remove its overlay group');
 }

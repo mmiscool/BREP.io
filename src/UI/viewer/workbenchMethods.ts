@@ -239,46 +239,15 @@ export const workbenchMethods = {
         return this._simulationWorkbenchManagerPromise;
     },
 
-    async _ensureCamWorkbenchManager() {
-        if (this.camWorkbenchManager) return this.camWorkbenchManager;
-        if (this._camWorkbenchManagerPromise) return this._camWorkbenchManagerPromise;
-
-        this._camWorkbenchManagerPromise = (async () => {
-            try {
-                const { CamWorkbenchManager } = await import('../../cam/CamWorkbenchManager.js');
-                if (this._disposed) return null;
-                if (!this.camWorkbenchManager) {
-                    this.camWorkbenchManager = new CamWorkbenchManager(this);
-                }
-                return this.camWorkbenchManager;
-            } catch (error) {
-                try { console.warn('[Viewer] Failed to load CAM workbench manager', error); } catch { /* ignore */ }
-                return null;
-            } finally {
-                this._camWorkbenchManagerPromise = null;
-            }
-        })();
-
-        return this._camWorkbenchManagerPromise;
-    },
-
     refreshWorkbenchUi() {
         if (this._viewerOnlyMode) return;
         const isSimulationWorkbench = this._getActiveWorkbenchId() === 'SIMULATION';
-        const isCamWorkbench = this._getActiveWorkbenchId() === 'CAM';
         if (isSimulationWorkbench) {
             void this._ensureSimulationWorkbenchManager().then((manager) => {
                 try { manager?.setActive?.(this._getActiveWorkbenchId() === 'SIMULATION'); } catch { /* ignore */ }
             });
         } else {
             try { this.simulationWorkbenchManager?.setActive?.(false); } catch { /* ignore */ }
-        }
-        if (isCamWorkbench) {
-            void this._ensureCamWorkbenchManager().then((manager) => {
-                try { manager?.setActive?.(this._getActiveWorkbenchId() === 'CAM'); } catch { /* ignore */ }
-            });
-        } else {
-            try { this.camWorkbenchManager?.setActive?.(false); } catch { /* ignore */ }
         }
         try { this.historyWidget?.refreshWorkbenchUi?.(); } catch { /* ignore */ }
         try { SelectionFilter.refreshSelectionActions?.(); } catch { /* ignore */ }

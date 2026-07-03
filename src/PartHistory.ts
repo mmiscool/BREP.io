@@ -1786,7 +1786,6 @@ export class PartHistory {
     const simulation = this.simulationStateManager.toSerializable();
     const cam = this.camPlanManager.toSerializable({
       includeGeneratedData: options?.includeCamGeneratedData !== false,
-      includeGeneratedToolpaths: options?.includeCamGeneratedToolpaths !== false,
     });
     const sheets2D = this.sheet2DManager.toSerializable();
     const wireHarness = this.wireHarnessManager.toSerializable();

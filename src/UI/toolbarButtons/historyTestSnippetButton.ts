@@ -191,7 +191,7 @@ async function loadSerializableHistory(partHistory) {
   if (!partHistory || typeof partHistory.toJSON !== 'function') {
     return { features: [], expressions: '', configurator: null, cam: null };
   }
-  const json = await partHistory.toJSON({ includeCamGeneratedToolpaths: false });
+  const json = await partHistory.toJSON({ includeCamGeneratedData: false });
   const parsed = JSON.parse(json || '{}');
   const features = Array.isArray(parsed?.features) ? parsed.features : [];
   const expressions = typeof parsed?.expressions === 'string' ? parsed.expressions : '';
