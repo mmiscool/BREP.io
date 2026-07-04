@@ -55,6 +55,7 @@
   "dependencies": {
     "@dimforge/rapier3d": "^0.19.3",
     "@tarikjabiri/dxf": "^2.8.9",
+    "clipper-lib": "6.4.2",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.0",
     "jszip": "^3.10.1",

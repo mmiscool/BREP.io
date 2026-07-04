@@ -1,3 +1,5 @@
+import Tess2 from 'tess2';
+import ClipperLib from 'clipper-lib';
 import { ListEntityBase } from '../core/entities/ListEntityBase.js';
 import { normalizeCamMachineProfile, type CamMachineProfile } from './CamMachineProfile.js';
 import {
@@ -32,6 +34,7 @@ type ShadowLoop = {
 };
 
 const EPS = 1e-7;
+const CLIPPER_SCALE = 10000;
 
 const inputParamsSchema = {
   id: {
@@ -168,9 +171,9 @@ export class ShadowCutterEntity extends ListEntityBase {
       });
     }
 
-    const projectedPoints = uniqueProjectedPoints(triangles);
+    const projectedLoops = projectedShadowLoopsFromTriangles(triangles);
     const capLoops = projectedBoundaryLoopsFromBottomFaces(triangles, targetBounds.min[2]);
-    const shadowLoops = buildShadowLoops(projectedPoints, capLoops);
+    const shadowLoops = buildShadowLoops(projectedLoops, capLoops);
     if (!shadowLoops.length) {
       return makeEmptyShadowResult({
         operationId,
@@ -183,10 +186,12 @@ export class ShadowCutterEntity extends ListEntityBase {
         warnings: ['Projected part shadow does not have enough area to cut.'],
       });
     }
-    const offsetLoops = shadowLoops.map((loop) => ({
-      role: loop.role,
-      points: offsetPolygon(loop.points, loop.role === 'hole' ? -offsetDistance : offsetDistance),
-    })).filter((loop) => loop.points.length >= 3);
+    const rawOffsetLoops = shadowLoops.flatMap((loop) => {
+      const distance = loop.role === 'hole' ? -offsetDistance : offsetDistance;
+      return offsetPolygon(loop.points, distance)
+        .map((points) => ({ role: loop.role, points }));
+    }).filter((loop) => loop.points.length >= 3);
+    const offsetLoops = mergeOuterOffsetLoops(rawOffsetLoops);
     if (!offsetLoops.length) {
       return makeEmptyShadowResult({
         operationId,
@@ -374,22 +379,6 @@ function triangleBounds(triangles: Triangle[]): CamBounds | null {
   return { min: toRoundedPoint3(min), max: toRoundedPoint3(max) };
 }
 
-function uniqueProjectedPoints(triangles: Triangle[]) {
-  const seen = new Set<string>();
-  const out: CamPoint2[] = [];
-  for (const triangle of triangles) {
-    for (const point of triangle) {
-      const x = roundCoord(point[0]);
-      const y = roundCoord(point[1]);
-      const key = `${x},${y}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push([x, y]);
-    }
-  }
-  return out;
-}
-
 function triangleNormal(triangle: Triangle): CamPoint3 {
   const a = triangle[0];
   const b = triangle[1];
@@ -496,14 +485,109 @@ function loopsFromEdges(edges: Array<{ a: CamPoint2; b: CamPoint2 }>) {
       current = next;
     }
     if (current !== start || loopKeys.length < 3) continue;
-    const loop = loopKeys.map((key) => pointsByKey.get(key)).filter(Boolean) as CamPoint2[];
+    const loop = simplifyLoop(loopKeys.map((key) => pointsByKey.get(key)).filter(Boolean) as CamPoint2[]);
     if (Math.abs(polygonArea(loop)) > EPS) loops.push(ensureCounterClockwise(loop));
   }
   return loops;
 }
 
+function projectedShadowLoopsFromTriangles(triangles: Triangle[]) {
+  const contours: number[][] = [];
+  for (const triangle of triangles) {
+    let loop: CamPoint2[] = triangle.map((point) => [roundCoord(point[0]), roundCoord(point[1])] as CamPoint2);
+    loop = simplifyLoop(loop);
+    if (loop.length < 3 || Math.abs(polygonArea(loop)) <= EPS) continue;
+    if (polygonArea(loop) < 0) loop = loop.slice().reverse();
+    contours.push(loop.flatMap((point) => [point[0], point[1]]));
+  }
+  if (!contours.length) return [];
+  try {
+    const result = Tess2.tesselate({
+      contours,
+      windingRule: Tess2.WINDING_NONZERO,
+      elementType: Tess2.POLYGONS,
+      polySize: 3,
+      vertexSize: 2,
+    });
+    return projectedLoopsFromTessellation(result);
+  } catch {
+    return [];
+  }
+}
+
+function projectedLoopsFromTessellation(result: any) {
+  const vertices = Array.isArray(result?.vertices) || ArrayBuffer.isView(result?.vertices)
+    ? result.vertices
+    : [];
+  const elements = Array.isArray(result?.elements) || ArrayBuffer.isView(result?.elements)
+    ? result.elements
+    : [];
+  const edgeMap = new Map<string, { a: CamPoint2; b: CamPoint2; count: number }>();
+  const vertexAt = (index: number): CamPoint2 | null => {
+    const base = index * 2;
+    const x = Number(vertices[base]);
+    const y = Number(vertices[base + 1]);
+    return Number.isFinite(x) && Number.isFinite(y) ? [roundCoord(x), roundCoord(y)] : null;
+  };
+  for (let i = 0; i + 2 < elements.length; i += 3) {
+    const indices = [Number(elements[i]), Number(elements[i + 1]), Number(elements[i + 2])];
+    if (indices.some((index) => !Number.isFinite(index) || index < 0)) continue;
+    const points = indices.map(vertexAt);
+    if (points.some((point) => !point)) continue;
+    const triangle = simplifyLoop(points as CamPoint2[]);
+    if (triangle.length < 3 || Math.abs(polygonArea(triangle)) <= EPS) continue;
+    for (let edgeIndex = 0; edgeIndex < 3; edgeIndex += 1) {
+      const a = triangle[edgeIndex];
+      const b = triangle[(edgeIndex + 1) % triangle.length];
+      if (point2Key(a) === point2Key(b)) continue;
+      const key = undirectedEdgeKey(a, b);
+      const entry = edgeMap.get(key);
+      if (entry) entry.count += 1;
+      else edgeMap.set(key, { a, b, count: 1 });
+    }
+  }
+  const boundaryEdges = Array.from(edgeMap.values())
+    .filter((edge) => edge.count === 1)
+    .map((edge) => ({ a: edge.a, b: edge.b }));
+  return loopsFromEdges(boundaryEdges);
+}
+
 function ensureCounterClockwise(points: CamPoint2[]) {
   return polygonArea(points) < 0 ? points.slice().reverse() : points.slice();
+}
+
+function simplifyLoop(points: CamPoint2[], tol = EPS) {
+  let out: CamPoint2[] = [];
+  for (const point of points) {
+    const next: CamPoint2 = [roundCoord(point[0]), roundCoord(point[1])];
+    const previous = out[out.length - 1];
+    if (!previous || Math.hypot(next[0] - previous[0], next[1] - previous[1]) > tol) out.push(next);
+  }
+  if (out.length > 1) {
+    const first = out[0];
+    const last = out[out.length - 1];
+    if (Math.hypot(first[0] - last[0], first[1] - last[1]) <= tol) out = out.slice(0, -1);
+  }
+  let changed = true;
+  let guard = 0;
+  while (changed && out.length >= 3 && guard < 64) {
+    changed = false;
+    guard += 1;
+    const next: CamPoint2[] = [];
+    for (let index = 0; index < out.length; index += 1) {
+      const prev = out[(index - 1 + out.length) % out.length];
+      const point = out[index];
+      const after = out[(index + 1) % out.length];
+      const edgeLen = Math.min(Math.hypot(point[0] - prev[0], point[1] - prev[1]), Math.hypot(after[0] - point[0], after[1] - point[1]));
+      if (edgeLen <= tol || Math.abs(cross2(prev, point, after)) <= Math.max(tol, edgeLen * 1e-7)) {
+        changed = true;
+        continue;
+      }
+      next.push(point);
+    }
+    out = next;
+  }
+  return out;
 }
 
 function pointInPolygon(point: CamPoint2, polygon: CamPoint2[]) {
@@ -523,49 +607,40 @@ function loopInsideLoop(loop: CamPoint2[], container: CamPoint2[]) {
   return loop.every((point) => pointInPolygon(point, container));
 }
 
-function buildShadowLoops(projectedPoints: CamPoint2[], capLoops: CamPoint2[][]): ShadowLoop[] {
-  const outer = ensureCounterClockwise(convexHull(projectedPoints));
-  if (outer.length < 3) return [];
-  const capLoopRecords = capLoops
-    .map((points) => ensureCounterClockwise(points))
+function buildShadowLoops(projectedLoops: CamPoint2[][], capLoops: CamPoint2[][]): ShadowLoop[] {
+  const projectedLoopRecords = projectedLoops
+    .map((points) => ensureCounterClockwise(simplifyLoop(points)))
     .filter((points) => points.length >= 3 && Math.abs(polygonArea(points)) > EPS)
     .map((points) => ({ points, area: Math.abs(polygonArea(points)) }));
-  const holeLoops = capLoopRecords.filter((candidate, candidateIndex) => {
-    return capLoopRecords.some((container, containerIndex) => (
+  const outerLoops = projectedLoopRecords.filter((candidate, candidateIndex) => {
+    return !projectedLoopRecords.some((container, containerIndex) => (
       containerIndex !== candidateIndex
       && container.area > candidate.area + EPS
       && loopInsideLoop(candidate.points, container.points)
     ));
   });
+  if (!outerLoops.length) return [];
+  const capLoopRecords = capLoops
+    .map((points) => ensureCounterClockwise(simplifyLoop(points)))
+    .filter((points) => points.length >= 3 && Math.abs(polygonArea(points)) > EPS)
+    .map((points) => ({ points, area: Math.abs(polygonArea(points)) }));
+  const holeLoops = capLoopRecords.filter((candidate, candidateIndex) => {
+    const isBottomNestedLoop = capLoopRecords.some((container, containerIndex) => (
+      containerIndex !== candidateIndex
+      && container.area > candidate.area + EPS
+      && loopInsideLoop(candidate.points, container.points)
+    ));
+    return isBottomNestedLoop
+      && outerLoops.some((outer) => loopInsideLoop(candidate.points, outer.points));
+  });
   return [
-    { role: 'outer', points: outer },
+    ...outerLoops.map((loop) => ({ role: 'outer' as const, points: loop.points })),
     ...holeLoops.map((loop) => ({ role: 'hole' as const, points: loop.points })),
   ];
 }
 
 function cross2(origin: CamPoint2, a: CamPoint2, b: CamPoint2) {
   return ((a[0] - origin[0]) * (b[1] - origin[1])) - ((a[1] - origin[1]) * (b[0] - origin[0]));
-}
-
-function convexHull(points: CamPoint2[]) {
-  const sorted = points
-    .slice()
-    .sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
-  if (sorted.length <= 1) return sorted;
-  const lower: CamPoint2[] = [];
-  for (const point of sorted) {
-    while (lower.length >= 2 && cross2(lower[lower.length - 2], lower[lower.length - 1], point) <= EPS) lower.pop();
-    lower.push(point);
-  }
-  const upper: CamPoint2[] = [];
-  for (let i = sorted.length - 1; i >= 0; i -= 1) {
-    const point = sorted[i];
-    while (upper.length >= 2 && cross2(upper[upper.length - 2], upper[upper.length - 1], point) <= EPS) upper.pop();
-    upper.push(point);
-  }
-  lower.pop();
-  upper.pop();
-  return lower.concat(upper);
 }
 
 function polygonArea(points: CamPoint2[]) {
@@ -578,47 +653,108 @@ function polygonArea(points: CamPoint2[]) {
   return area * 0.5;
 }
 
-function lineIntersection(p: CamPoint2, r: CamPoint2, q: CamPoint2, s: CamPoint2): CamPoint2 | null {
-  const denom = (r[0] * s[1]) - (r[1] * s[0]);
-  if (Math.abs(denom) <= EPS) return null;
-  const qmp: CamPoint2 = [q[0] - p[0], q[1] - p[1]];
-  const t = ((qmp[0] * s[1]) - (qmp[1] * s[0])) / denom;
-  return [p[0] + (r[0] * t), p[1] + (r[1] * t)];
+function mergeOuterOffsetLoops(loops: ShadowLoop[]): ShadowLoop[] {
+  const outerLoops = loops.filter((loop) => loop.role === 'outer');
+  const holeLoops = loops.filter((loop) => loop.role === 'hole');
+  if (outerLoops.length <= 1) return loops;
+  const contours = outerLoops
+    .map((loop) => ensureCounterClockwise(simplifyLoop(loop.points)))
+    .filter((points) => points.length >= 3 && Math.abs(polygonArea(points)) > EPS)
+    .map((points) => points.flatMap((point) => [point[0], point[1]]));
+  if (contours.length <= 1) return loops;
+  try {
+    const result = Tess2.tesselate({
+      contours,
+      windingRule: Tess2.WINDING_NONZERO,
+      elementType: Tess2.POLYGONS,
+      polySize: 3,
+      vertexSize: 2,
+    });
+    const mergedOuterLoops = projectedLoopsFromTessellation(result)
+      .map((points) => ensureCounterClockwise(simplifyLoop(points)))
+      .filter((points) => points.length >= 3 && Math.abs(polygonArea(points)) > EPS)
+      .sort((a, b) => Math.abs(polygonArea(b)) - Math.abs(polygonArea(a)))
+      .map((points) => ({ role: 'outer' as const, points }));
+    return mergedOuterLoops.length ? [...mergedOuterLoops, ...holeLoops] : loops;
+  } catch {
+    return loops;
+  }
 }
 
-function offsetPolygon(points: CamPoint2[], distance: number) {
-  if (points.length < 3) return [];
-  if (Math.abs(distance) <= EPS) return points.map((point) => [roundCoord(point[0]), roundCoord(point[1])] as CamPoint2);
-  const out: CamPoint2[] = [];
-  const edgeData = points.map((point, index) => {
-    const next = points[(index + 1) % points.length];
-    const dx = next[0] - point[0];
-    const dy = next[1] - point[1];
-    const len = Math.max(EPS, Math.hypot(dx, dy));
-    const dir: CamPoint2 = [dx / len, dy / len];
-    const normal: CamPoint2 = [dir[1], -dir[0]];
-    return {
-      point: [point[0] + normal[0] * distance, point[1] + normal[1] * distance] as CamPoint2,
-      dir,
-      normal,
-    };
-  });
-  for (let i = 0; i < points.length; i += 1) {
-    const prev = edgeData[(i - 1 + points.length) % points.length];
-    const next = edgeData[i];
-    const intersection = lineIntersection(prev.point, prev.dir, next.point, next.dir);
-    if (intersection) {
-      out.push([roundCoord(intersection[0]), roundCoord(intersection[1])]);
-      continue;
+function offsetPolygon(points: CamPoint2[], distance: number): CamPoint2[][] {
+  const loop = ensureCounterClockwise(simplifyLoop(points));
+  if (loop.length < 3) return [];
+  if (Math.abs(distance) <= EPS) return [loop];
+  return offsetPolygonWithClipper(loop, distance)
+    .filter((loop) => offsetLoopIsValid(loop, points, distance))
+    .sort((a, b) => Math.abs(polygonArea(b)) - Math.abs(polygonArea(a)));
+}
+
+function offsetPolygonWithClipper(points: CamPoint2[], distance: number): CamPoint2[][] {
+  const path = points.map((point) => ({
+    X: Math.round(point[0] * CLIPPER_SCALE),
+    Y: Math.round(point[1] * CLIPPER_SCALE),
+  }));
+  const solution: Array<Array<{ X: number; Y: number }>> = [];
+  const offsetter = new ClipperLib.ClipperOffset(2, 0.25 * CLIPPER_SCALE);
+  offsetter.AddPath(path, ClipperLib.JoinType.jtMiter, ClipperLib.EndType.etClosedPolygon);
+  offsetter.Execute(solution, distance * CLIPPER_SCALE);
+  return solution
+    .map((pathPoints) => pathPoints.map((point) => [
+      roundCoord(point.X / CLIPPER_SCALE),
+      roundCoord(point.Y / CLIPPER_SCALE),
+    ] as CamPoint2))
+    .map((loop) => ensureCounterClockwise(simplifyLoop(loop)))
+    .filter((loop) => loop.length >= 3 && Math.abs(polygonArea(loop)) > EPS);
+}
+
+function offsetLoopIsValid(loop: CamPoint2[], sourceLoop: CamPoint2[], distance: number) {
+  if (loop.length < 3 || Math.abs(polygonArea(loop)) <= EPS) return false;
+  const radius = Math.abs(distance);
+  const tolerance = Math.max(1e-3, radius * 1e-4);
+  for (let index = 0; index < loop.length; index += 1) {
+    const a = loop[index];
+    const b = loop[(index + 1) % loop.length];
+    for (const t of [0, 0.25, 0.5, 0.75]) {
+      const point: CamPoint2 = [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+      ];
+      const inside = pointInPolygon(point, sourceLoop);
+      if (distance > 0 && inside) return false;
+      if (distance < 0 && !inside && !pointNearPolygonBoundary(point, sourceLoop, tolerance)) return false;
+      const finiteDistance = distanceToPolygonSegments(point, sourceLoop).distance;
+      if (finiteDistance < radius - tolerance) return false;
     }
-    const normal: CamPoint2 = [prev.normal[0] + next.normal[0], prev.normal[1] + next.normal[1]];
-    const len = Math.max(EPS, Math.hypot(normal[0], normal[1]));
-    out.push([
-      roundCoord(points[i][0] + (normal[0] / len) * distance),
-      roundCoord(points[i][1] + (normal[1] / len) * distance),
-    ]);
   }
-  return out;
+  return true;
+}
+
+function pointNearPolygonBoundary(point: CamPoint2, polygon: CamPoint2[], tolerance: number) {
+  return distanceToPolygonSegments(point, polygon).distance <= tolerance;
+}
+
+function distanceToPolygonSegments(point: CamPoint2, polygon: CamPoint2[]) {
+  let best = Infinity;
+  let bestIndex = -1;
+  let bestT = 0;
+  for (let index = 0; index < polygon.length; index += 1) {
+    const a = polygon[index];
+    const b = polygon[(index + 1) % polygon.length];
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const lenSq = (dx * dx) + (dy * dy);
+    const rawT = lenSq > EPS ? (((point[0] - a[0]) * dx) + ((point[1] - a[1]) * dy)) / lenSq : 0;
+    const t = Math.min(1, Math.max(0, rawT));
+    const closest: CamPoint2 = [a[0] + dx * t, a[1] + dy * t];
+    const distanceValue = Math.hypot(point[0] - closest[0], point[1] - closest[1]);
+    if (distanceValue < best) {
+      best = distanceValue;
+      bestIndex = index;
+      bestT = t;
+    }
+  }
+  return { distance: best, index: bestIndex, t: bestT };
 }
 
 function buildDepthLevels(topZ: number, bottomZ: number, stepDown: number) {

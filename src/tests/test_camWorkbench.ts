@@ -18,16 +18,28 @@ function assert(condition: any, message: string) {
   if (!condition) throw new Error(message);
 }
 
-function makeBoxMeshSolid(sizeX = 10, sizeY = 10, sizeZ = 10) {
+function makeBoxMeshSolid(
+  sizeX = 10,
+  sizeY = 10,
+  sizeZ = 10,
+  options: { name?: string; offsetX?: number; offsetY?: number; offsetZ?: number } = {},
+) {
+  const name = options.name || 'cam-test-cube';
+  const x0 = options.offsetX || 0;
+  const y0 = options.offsetY || 0;
+  const z0 = options.offsetZ || 0;
+  const x1 = x0 + sizeX;
+  const y1 = y0 + sizeY;
+  const z1 = z0 + sizeZ;
   const vertProperties = [
-    0, 0, 0,
-    sizeX, 0, 0,
-    sizeX, sizeY, 0,
-    0, sizeY, 0,
-    0, 0, sizeZ,
-    sizeX, 0, sizeZ,
-    sizeX, sizeY, sizeZ,
-    0, sizeY, sizeZ,
+    x0, y0, z0,
+    x1, y0, z0,
+    x1, y1, z0,
+    x0, y1, z0,
+    x0, y0, z1,
+    x1, y0, z1,
+    x1, y1, z1,
+    x0, y1, z1,
   ];
   const triVerts = [
     0, 2, 1, 0, 3, 2,
@@ -38,7 +50,7 @@ function makeBoxMeshSolid(sizeX = 10, sizeY = 10, sizeZ = 10) {
     3, 0, 4, 3, 4, 7,
   ];
   return {
-    name: 'cam-test-cube',
+    name,
     type: 'SOLID',
     visible: true,
     getMesh() {
@@ -293,6 +305,43 @@ export async function test_cam_shadow_cutter_generates_clear_hole_loop() {
   assert(holePaths[0].segments.some((segment) => segment.kind === 'cut'), 'Hole loop should contain cut moves');
   assert(holePaths[0].segments.some((segment) => segment.kind === 'plunge'), 'Hole loop should contain a plunge move');
   assert(direct.gcode.includes('SC1-H'), 'Posted G-code should include the hole-loop path');
+  for (const point of cutPoints2d(holePaths[0], direct.safeZ)) {
+    const radius = Math.hypot(point[0], point[1]);
+    assert(radius <= 1.505, 'Hole centerline should stay inside the clear hole by the cutter radius');
+    assert(radius >= 1.495, 'Hole centerline should be offset from the hole wall by the cutter radius');
+  }
+}
+
+export async function test_cam_shadow_cutter_generates_outer_and_hole_for_nonconvex_profile() {
+  const manager = new CamPlanManager(null);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_SHADOW_CUTTER, defaultCamParams({
+    targetSolids: ['cam-test-ring', 'cam-test-side-lobe'],
+    toolDiameter: 1,
+    stockAllowance: 0,
+    stepDown: 20,
+    extraDepth: 0,
+  }));
+  const direct = operation.run({
+    viewer: makeViewerWithSolids([
+      makeRingMeshSolid(),
+      makeCylinderMeshSolid({
+        name: 'cam-test-side-lobe',
+        radius: 2.5,
+        centerX: 5,
+        centerZ: 0,
+        bottomY: 0,
+        height: 10,
+      }),
+    ]),
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  const outerPaths = direct.paths.filter((path) => path.metadata?.loopRole === 'outer');
+  const holePaths = direct.paths.filter((path) => path.metadata?.loopRole === 'hole');
+  assert(outerPaths.length === 1, 'Non-convex through-hole fixture should retain the outside Shadow Cutter loop');
+  assert(holePaths.length === 1, 'Non-convex through-hole fixture should retain the clear-hole Shadow Cutter loop');
+  assert(direct.paths.length === 2, 'Non-convex through-hole fixture should generate exactly one outer path and one hole path');
+  assert((outerPaths[0].metadata?.loopPointCount || 0) > (holePaths[0].metadata?.loopPointCount || 0), 'Outside loop should describe the larger projected profile');
 }
 
 export async function test_cam_shadow_cutter_cuts_each_loop_to_depth_before_next_loop() {
@@ -360,6 +409,114 @@ export async function test_cam_shadow_cutter_ignores_raised_cap_loops_as_holes()
   assert(direct.metadata?.holeLoopCount === 1, 'Raised cap loops should not be classified as holes');
 }
 
+export async function test_cam_shadow_cutter_uses_projected_outline_not_convex_hull() {
+  const manager = new CamPlanManager(null);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_SHADOW_CUTTER, defaultCamParams({
+    targetSolids: ['cam-test-l-horizontal', 'cam-test-l-vertical'],
+    toolDiameter: 0,
+    stockAllowance: 0,
+    stepDown: 20,
+    extraDepth: 0,
+  }));
+  const direct = operation.run({
+    viewer: makeViewerWithSolids([
+      makeBoxMeshSolid(10, 10, 4, { name: 'cam-test-l-horizontal' }),
+      makeBoxMeshSolid(4, 10, 10, { name: 'cam-test-l-vertical' }),
+    ]),
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  const outerPaths = direct.paths.filter((path) => path.metadata?.loopRole === 'outer');
+  assert(outerPaths.length === 1, 'Overlapping L fixture should generate a single outside loop');
+  assert((outerPaths[0].metadata?.loopPointCount || 0) >= 6, 'Projected outside loop should preserve the L-shape concave corner');
+  const hasInsideCorner = outerPaths[0].points.some((point) => (
+    Math.abs(point.position[0] - 4) < 1e-4
+    && Math.abs(point.position[1] - 4) < 1e-4
+    && point.position[2] !== direct.safeZ
+  ));
+  assert(hasInsideCorner, 'Projected outside loop should include the concave inside corner instead of cutting a convex hull diagonal');
+}
+
+export async function test_cam_shadow_cutter_offset_stays_outside_concave_shadow() {
+  const manager = new CamPlanManager(null);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_SHADOW_CUTTER, defaultCamParams({
+    targetSolids: ['cam-test-union-rect', 'cam-test-union-lobe'],
+    toolDiameter: 2,
+    stockAllowance: 0,
+    stepDown: 20,
+    extraDepth: 0,
+  }));
+  const direct = operation.run({
+    viewer: makeViewerWithSolids([
+      makeBoxMeshSolid(10, 10, 6, { name: 'cam-test-union-rect' }),
+      makeCylinderMeshSolid({
+        name: 'cam-test-union-lobe',
+        radius: 3,
+        centerX: 0,
+        centerZ: 3,
+        bottomY: 0,
+        height: 10,
+      }),
+    ]),
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  const outerPaths = direct.paths.filter((path) => path.metadata?.loopRole === 'outer');
+  assert(outerPaths.length === 1, 'Rectangle plus circular lobe should produce one outside offset loop');
+  const pointInsideOriginalShadow = (x: number, y: number) => {
+    const boundaryTol = 0.05;
+    const insideRect = x > boundaryTol && x < 10 - boundaryTol && y > boundaryTol && y < 6 - boundaryTol;
+    const insideCircle = Math.hypot(x, y - 3) < 3 - boundaryTol;
+    return insideRect || insideCircle;
+  };
+  const distanceToOriginalShadow = (x: number, y: number) => Math.min(
+    distanceToRect(x, y, 0, 0, 10, 6),
+    Math.max(0, Math.hypot(x, y - 3) - 3),
+  );
+  for (const path of outerPaths) {
+    for (const segment of path.segments) {
+      if (segment.kind !== 'cut') continue;
+      const start = path.points[segment.startIndex]?.position;
+      const end = path.points[segment.endIndex]?.position;
+      assert(start && end, 'Offset regression fixture should have segment endpoints');
+      for (let sample = 0; sample <= 8; sample += 1) {
+        const t = sample / 8;
+        const x = start[0] + (end[0] - start[0]) * t;
+        const y = start[1] + (end[1] - start[1]) * t;
+        assert(!pointInsideOriginalShadow(x, y), 'Outside offset centerline should not cut through the original projected stock');
+        assert(distanceToOriginalShadow(x, y) >= 0.95, 'Outside offset centerline should stay at least one cutter radius from the original projected stock');
+      }
+    }
+  }
+}
+
+export async function test_cam_shadow_cutter_offset_keeps_l_shape_inside_corner_clear() {
+  const manager = new CamPlanManager(null);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_SHADOW_CUTTER, defaultCamParams({
+    targetSolids: ['cam-test-l-horizontal', 'cam-test-l-vertical'],
+    toolDiameter: 2,
+    stockAllowance: 0,
+    stepDown: 20,
+    extraDepth: 0,
+  }));
+  const direct = operation.run({
+    viewer: makeViewerWithSolids([
+      makeBoxMeshSolid(10, 10, 4, { name: 'cam-test-l-horizontal' }),
+      makeBoxMeshSolid(4, 10, 10, { name: 'cam-test-l-vertical' }),
+    ]),
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  const outerPaths = direct.paths.filter((path) => path.metadata?.loopRole === 'outer');
+  assert(outerPaths.length === 1, 'L fixture should produce one outside offset loop');
+  const cutPoints = cutPoints2d(outerPaths[0], direct.safeZ);
+  assert(cutPoints.some((point) => Math.abs(point[0] - 5) < 1e-4 && Math.abs(point[1] - 5) < 1e-4), 'L offset should preserve the inside-corner clearance instead of bridging across it');
+  for (const point of cutPoints) {
+    assert(!pointInsideLFixture(point[0], point[1]), 'L offset centerline should not enter the original projected stock');
+    assert(distanceToLFixture(point[0], point[1]) >= 0.999, 'L offset centerline should stay at least one cutter radius from the L fixture');
+  }
+}
+
 export async function test_cam_shadow_cutter_is_the_only_registered_operation() {
   const manager = new CamPlanManager(null);
   const available = Array.from(manager.registry.entityClasses.values());
@@ -368,6 +525,33 @@ export async function test_cam_shadow_cutter_is_the_only_registered_operation() 
   assert(ShadowCutterEntity.longName === 'Shadow Cutter', 'Shadow Cutter should be the add-menu label');
   assert(!Object.prototype.hasOwnProperty.call(ShadowCutterEntity.inputParamsSchema, 'toolShape'), 'Old generic cutter shape field should be removed');
   assert(!Object.prototype.hasOwnProperty.call(ShadowCutterEntity.inputParamsSchema, 'stepover'), 'Old raster stepover field should be removed');
+}
+
+function cutPoints2d(path: any, safeZ: number) {
+  return path.points
+    .filter((point: any) => Math.abs(point.position[2] - safeZ) > 1e-4)
+    .map((point: any) => [point.position[0], point.position[1]] as [number, number]);
+}
+
+function distanceToRect(x: number, y: number, minX: number, minY: number, maxX: number, maxY: number) {
+  const dx = Math.max(minX - x, 0, x - maxX);
+  const dy = Math.max(minY - y, 0, y - maxY);
+  return Math.hypot(dx, dy);
+}
+
+function pointInsideLFixture(x: number, y: number) {
+  const tol = 1e-4;
+  return (
+    (x > tol && x < 10 - tol && y > tol && y < 4 - tol)
+    || (x > tol && x < 4 - tol && y > tol && y < 10 - tol)
+  );
+}
+
+function distanceToLFixture(x: number, y: number) {
+  return Math.min(
+    distanceToRect(x, y, 0, 0, 10, 4),
+    distanceToRect(x, y, 0, 0, 4, 10),
+  );
 }
 
 export async function test_cam_workbench_registers_and_persists_part_history_state() {

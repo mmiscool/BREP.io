@@ -29,12 +29,19 @@ import {
     test_cam_plan_manager_strips_legacy_generated_data,
     test_cam_shadow_cutter_cuts_each_loop_to_depth_before_next_loop,
     test_cam_shadow_cutter_generates_clear_hole_loop,
+    test_cam_shadow_cutter_generates_outer_and_hole_for_nonconvex_profile,
     test_cam_shadow_cutter_history_item_generates_toolpath,
     test_cam_shadow_cutter_ignores_raised_cap_loops_as_holes,
+    test_cam_shadow_cutter_offset_keeps_l_shape_inside_corner_clear,
+    test_cam_shadow_cutter_offset_stays_outside_concave_shadow,
     test_cam_shadow_cutter_is_the_only_registered_operation,
     test_cam_toolpath_simulator_visualizes_program_and_moves_head,
+    test_cam_shadow_cutter_uses_projected_outline_not_convex_hull,
     test_cam_workbench_registers_and_persists_part_history_state,
 } from './test_camWorkbench.js';
+import {
+    test_cam_shadow_cutter_generated_history_20260704000935_keeps_outer_loop,
+} from './test_cam_shadow_cutter_generated_history.js';
 import { test_Chamfer } from './test_chamfer.js';
 import {
     test_cppChamfer_auto_direction_uses_native_classifier,
@@ -1564,12 +1571,17 @@ export const testFunctions: any[] = [
     { test: test_boolean_overlap_conditioning_direct_api_can_be_disabled, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_plan_manager_preserves_operations_and_profiles, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_plan_manager_strips_legacy_generated_data, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_shadow_cutter_generated_history_20260704000935_keeps_outer_loop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_shadow_cutter_cuts_each_loop_to_depth_before_next_loop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_shadow_cutter_generates_clear_hole_loop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_shadow_cutter_generates_outer_and_hole_for_nonconvex_profile, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_shadow_cutter_history_item_generates_toolpath, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_shadow_cutter_ignores_raised_cap_loops_as_holes, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_shadow_cutter_offset_keeps_l_shape_inside_corner_clear, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_shadow_cutter_offset_stays_outside_concave_shadow, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_shadow_cutter_is_the_only_registered_operation, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_toolpath_simulator_visualizes_program_and_moves_head, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_shadow_cutter_uses_projected_outline_not_convex_hull, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_workbench_registers_and_persists_part_history_state, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_visibility_hidden_state_persistence, afterRun: afterRun_visibility_hidden_state_persistence, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_feature_scene_visibility, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
