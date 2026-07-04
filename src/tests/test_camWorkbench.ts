@@ -283,6 +283,32 @@ export async function test_cam_shadow_cutter_history_item_generates_toolpath() {
   assert(manager.getCombinedGcode().includes('G21'), 'CAM manager should expose G-code posted from operation toolpath results');
 }
 
+export async function test_cam_shadow_cutter_single_solid_does_not_require_target_selection() {
+  const singleViewer = makeViewerWithSolid();
+  const singleFieldResult = ShadowCutterEntity.uiFieldsTest({ viewer: singleViewer });
+  assert(singleFieldResult.exclude.includes('targetSolids'), 'Single-solid Shadow Cutter UI should hide target selection');
+
+  const manager = new CamPlanManager(null);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_SHADOW_CUTTER, defaultCamParams({
+    targetSolids: [],
+  }));
+  const direct = operation.run({
+    viewer: singleViewer,
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  assert(direct.paths.length > 0, 'Single-solid Shadow Cutter should generate without an explicit target selection');
+  assert(direct.summary?.targetCount === 1, 'Single-solid Shadow Cutter should use the one visible solid as the target');
+
+  const multiFieldResult = ShadowCutterEntity.uiFieldsTest({
+    viewer: makeViewerWithSolids([
+      makeBoxMeshSolid(10, 10, 10, { name: 'cam-test-a' }),
+      makeBoxMeshSolid(10, 10, 10, { name: 'cam-test-b', offsetX: 20 }),
+    ]),
+  });
+  assert(!multiFieldResult.exclude.includes('targetSolids'), 'Multi-solid Shadow Cutter UI should keep target selection visible');
+}
+
 export async function test_cam_shadow_cutter_generates_clear_hole_loop() {
   const manager = new CamPlanManager(null);
   const operation = manager.createOperation(CAM_OPERATION_TYPE_SHADOW_CUTTER, defaultCamParams({

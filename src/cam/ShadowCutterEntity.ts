@@ -112,8 +112,10 @@ export class ShadowCutterEntity extends ListEntityBase {
   static longName = 'Shadow Cutter';
   static inputParamsSchema = inputParamsSchema;
 
-  static uiFieldsTest() {
-    return { exclude: ['enabled'] };
+  static uiFieldsTest(context: AnyRecord = {}) {
+    const exclude = ['enabled'];
+    if (countVisibleSolidsFromContext(context) === 1) exclude.push('targetSolids');
+    return { exclude };
   }
 
   run(context: AnyRecord = {}) {
@@ -343,10 +345,20 @@ function collectVisibleSolids(root: any, out: any[] = []) {
   return out;
 }
 
+function resolveSceneFromContext(context: AnyRecord = {}) {
+  const viewer = context.viewer || context.partHistory?.viewer || context.entry?.history?.partHistory?.viewer || null;
+  const partHistory = context.partHistory || viewer?.partHistory || context.history?.partHistory || context.entry?.history?.partHistory || null;
+  return viewer?.scene || partHistory?.scene || null;
+}
+
+function countVisibleSolidsFromContext(context: AnyRecord = {}) {
+  return collectVisibleSolids(resolveSceneFromContext(context), []).length;
+}
+
 function resolveTargetSolids(context: AnyRecord, selection: any = null) {
   const viewer = context.viewer || null;
   const partHistory = context.partHistory || viewer?.partHistory || null;
-  const scene = viewer?.scene || partHistory?.scene || null;
+  const scene = resolveSceneFromContext({ viewer, partHistory });
   const list = Array.isArray(selection) ? selection : (selection ? [selection] : []);
   if (!list.length) return collectVisibleSolids(scene);
   const out: any[] = [];
