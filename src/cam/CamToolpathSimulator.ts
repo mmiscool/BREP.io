@@ -14,6 +14,7 @@ export const CAM_TOOLPATH_TOOL_HEAD_NAME = '__CAM_TOOLPATH_TOOL_HEAD__';
 type AnyRecord = Record<string, any>;
 
 type SimSegment = {
+  index: number;
   pathId: string;
   segmentId: string;
   kind: string;
@@ -41,6 +42,12 @@ export type CamToolpathSimulatorState = {
   totalSteps: number;
   totalLength: number;
   currentPosition: CamPoint3 | null;
+  currentSegment: {
+    index: number;
+    pathId: string;
+    segmentId: string;
+    kind: string;
+  } | null;
 };
 
 function finiteNumber(value: any, fallback = 0) {
@@ -104,6 +111,7 @@ export function flattenCamToolpathProgram(program: CamToolpathProgram | null | u
       const length = pointDistance(start, end);
       if (!(length > 1e-9)) continue;
       out.push({
+        index: out.length,
         pathId: String(path.id || ''),
         segmentId: String(segment.id || ''),
         kind: String(segment.kind || 'cut'),
@@ -280,6 +288,7 @@ export class CamToolpathSimulator {
 
   getState(): CamToolpathSimulatorState {
     const index = this._segmentIndexForDistance(this.distance);
+    const segment = index >= 0 ? this.segments[index] : null;
     return {
       hasProgram: this.segments.length > 0,
       playing: this.playing,
@@ -288,6 +297,12 @@ export class CamToolpathSimulator {
       totalSteps: this.segments.length,
       totalLength: this.totalLength,
       currentPosition: this._currentPosition ? [...this._currentPosition] as CamPoint3 : null,
+      currentSegment: segment ? {
+        index: segment.index,
+        pathId: segment.pathId,
+        segmentId: segment.segmentId,
+        kind: segment.kind,
+      } : null,
     };
   }
 

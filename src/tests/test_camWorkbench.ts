@@ -2572,8 +2572,10 @@ export async function test_cam_toolpath_simulator_visualizes_program_and_moves_h
   assert(simulator.getState().totalSteps === 2, 'Simulator should flatten path segments into simulation steps');
 
   simulator.setProgress(0.5);
+  const midState = simulator.getState();
   const toolHead = scene.getObjectByName(CAM_TOOLPATH_TOOL_HEAD_NAME);
   assert(toolHead, 'Simulator should render a moving tool head');
+  assert(midState.currentSegment?.segmentId === 'SIM-P1-S1', 'Simulator state should expose the active segment for G-code synchronization');
   assert(Math.abs((toolHead as THREE.Object3D).position.x - 10) < 1e-6, 'Tool head should move to halfway X position');
   assert(Math.abs((toolHead as THREE.Object3D).position.y - 0) < 1e-6, 'Tool head scene Y should map from machine Z');
   assert(Math.abs((toolHead as THREE.Object3D).position.z - 0) < 1e-6, 'Tool head scene Z should map from machine Y');

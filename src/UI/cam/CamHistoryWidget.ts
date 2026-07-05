@@ -1,6 +1,9 @@
 import { HistoryCollectionWidget } from '../history/HistoryCollectionWidget.js';
 import { CamToolpathSimulator, type CamToolpathSimulatorState } from '../../cam/CamToolpathSimulator.js';
 import type { CamGenerationProgressEvent } from '../../cam/CamPlanManager.js';
+import { splitMachineMacroLines } from '../../cam/CamMachineProfile.js';
+import type { CamToolpathProgram } from '../../cam/CamToolpathDefinition.js';
+import { FloatingWindow } from '../FloatingWindow.js';
 
 type AnyRecord = Record<string, any>;
 
@@ -38,12 +41,16 @@ export class CamHistoryWidget {
   simReadoutEl: HTMLDivElement | null = null;
   _camListener: (() => void) | null = null;
   _isGenerating = false;
-  _generationOverlayEl: HTMLDivElement | null = null;
+  _generationWindow: FloatingWindow | null = null;
+  _generationPanelEl: HTMLDivElement | null = null;
   _generationMessageEl: HTMLDivElement | null = null;
   _generationDetailEl: HTMLDivElement | null = null;
   _generationStepEl: HTMLDivElement | null = null;
   _generationPercentEl: HTMLDivElement | null = null;
   _generationProgressFillEl: HTMLDivElement | null = null;
+  _gcodeTextareaEl: HTMLTextAreaElement | null = null;
+  _gcodeLineMap = new Map<string, number>();
+  _lastGcodeScrollSegmentId = '';
 
   constructor(viewer: any) {
     this.viewer = viewer || null;
@@ -470,14 +477,24 @@ export class CamHistoryWidget {
 
   _showGenerationProgress() {
     this._hideGenerationProgress();
-    const overlay = document.createElement('div');
-    overlay.className = 'cam-generation-overlay';
-    overlay.setAttribute('role', 'status');
-    overlay.setAttribute('aria-live', 'polite');
-
+    const win = new FloatingWindow({
+      title: 'Generating toolpaths',
+      width: 380,
+      height: 190,
+      minWidth: 320,
+      minHeight: 160,
+      right: 18,
+      top: 48,
+      closable: false,
+      modal: false,
+      actionPlacement: 'header',
+      zIndex: 1000,
+    });
     const panel = document.createElement('div');
-    panel.className = 'cam-generation-window';
-    overlay.appendChild(panel);
+    panel.className = 'cam-generation-window-content';
+    panel.setAttribute('role', 'status');
+    panel.setAttribute('aria-live', 'polite');
+    win.content.appendChild(panel);
 
     const header = document.createElement('div');
     header.className = 'cam-generation-header';
@@ -513,8 +530,8 @@ export class CamHistoryWidget {
     step.textContent = '';
     panel.appendChild(step);
 
-    document.body.appendChild(overlay);
-    this._generationOverlayEl = overlay;
+    this._generationWindow = win;
+    this._generationPanelEl = panel;
     this._generationMessageEl = message;
     this._generationDetailEl = detail;
     this._generationStepEl = step;
@@ -523,7 +540,7 @@ export class CamHistoryWidget {
   }
 
   _updateGenerationProgress(event: CamGenerationProgressEvent = {}) {
-    if (!this._generationOverlayEl) this._showGenerationProgress();
+    if (!this._generationWindow) this._showGenerationProgress();
     const total = Math.max(1, Number(event.total) || 100);
     const current = Math.max(0, Math.min(total, Number(event.current) || 0));
     const percent = Math.max(0, Math.min(100, Math.round((current / total) * 100)));
@@ -548,8 +565,9 @@ export class CamHistoryWidget {
   }
 
   _hideGenerationProgress() {
-    try { this._generationOverlayEl?.remove?.(); } catch { /* ignore progress overlay cleanup */ }
-    this._generationOverlayEl = null;
+    try { this._generationWindow?.destroy?.(); } catch { /* ignore progress window cleanup */ }
+    this._generationWindow = null;
+    this._generationPanelEl = null;
     this._generationMessageEl = null;
     this._generationDetailEl = null;
     this._generationStepEl = null;
@@ -618,6 +636,7 @@ export class CamHistoryWidget {
       totalSteps: 0,
       totalLength: 0,
       currentPosition: null,
+      currentSegment: null,
     };
     if (this.playButtonEl) {
       this.playButtonEl.textContent = nextState.playing ? 'Pause' : 'Play';
@@ -637,6 +656,7 @@ export class CamHistoryWidget {
         ? `${nextState.step} / ${nextState.totalSteps}  ${pct}%`
         : '0 / 0  0%';
     }
+    this._scrollGcodeToSimulatorSegment(nextState);
   }
 
   _renderControls(): void {
@@ -704,27 +724,152 @@ export class CamHistoryWidget {
     this.statusEl.hidden = !message;
   }
 
+  _exportGcode() {
+    const manager = this.viewer?.partHistory?.camPlanManager || null;
+    const plan = manager?.getCombinedPlan?.() || null;
+    const gcode = String(plan?.gcode || manager?.getCombinedGcode?.() || '');
+    if (!gcode.trim()) {
+      this._setStatus('Generate CAM G-code before exporting.', 'warn');
+      return;
+    }
+    const rawName = String(plan?.operationId || plan?.operationName || 'cam-program')
+      .trim()
+      .replace(/[^a-z0-9._-]+/gi, '-')
+      .replace(/^-+|-+$/g, '') || 'cam-program';
+    const filename = rawName.toLowerCase().endsWith('.nc') ? rawName : `${rawName}.nc`;
+    try {
+      const blob = new Blob([gcode], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        try { URL.revokeObjectURL(url); } catch { /* ignore object URL cleanup */ }
+        try { link.remove(); } catch { /* ignore link cleanup */ }
+      }, 0);
+      this._setStatus(`Exported ${filename}.`, 'info');
+    } catch (error: any) {
+      this._setStatus(String(error?.message || error || 'Failed to export CAM G-code.'), 'warn');
+    }
+  }
+
+  _buildGcodeLineMap(program: CamToolpathProgram | null | undefined) {
+    const map = new Map<string, number>();
+    const paths = Array.isArray(program?.paths) ? program.paths : [];
+    let line = 0;
+    const machine: AnyRecord = program?.machine || {};
+    const commentsEnabled = !machine.stripComments;
+    const addLine = () => { line += 1; };
+    if (commentsEnabled) line += 3;
+    line += splitMachineMacroLines(machine.header).length;
+    line += 4;
+    let activeSpindleRPM = 0;
+    if (Number(program?.spindleRPM) > 0) {
+      activeSpindleRPM = Number(program?.spindleRPM);
+      addLine();
+    }
+    for (const path of paths) {
+      if (!Array.isArray(path?.points) || !path.points.length) continue;
+      const pathSpindleRPM = Number(path.spindleRPM);
+      if (Number.isFinite(pathSpindleRPM) && pathSpindleRPM > 0 && Math.abs(pathSpindleRPM - activeSpindleRPM) > 1e-7) {
+        activeSpindleRPM = pathSpindleRPM;
+        addLine();
+      }
+      if (commentsEnabled) addLine();
+      addLine(); // G0 Z safe
+      addLine(); // G0 X/Y to path start
+      const first = path.points[0]?.position;
+      if (Array.isArray(first) && Math.abs(first[2] - Number(program?.safeZ)) > 1e-7) addLine();
+      let activeFeed: number | null = null;
+      for (const segment of Array.isArray(path.segments) ? path.segments : []) {
+        const point = path.points[segment.endIndex]?.position;
+        if (!point) continue;
+        if (segment.kind === 'rapid' || segment.kind === 'retract') {
+          map.set(String(segment.id || ''), line);
+          addLine();
+          continue;
+        }
+        const defaultFeed = segment.kind === 'plunge' ? path.plungeRate : path.feedRate;
+        const feed = Number(segment.feedRate);
+        const nextFeed = Number.isFinite(feed) && feed > 0 ? feed : defaultFeed;
+        if (
+          Number.isFinite(nextFeed)
+          && nextFeed > 0
+          && (activeFeed === null || Math.abs(nextFeed - activeFeed) > 1e-7)
+        ) {
+          activeFeed = nextFeed;
+          addLine();
+        }
+        map.set(String(segment.id || ''), line);
+        addLine();
+      }
+    }
+    addLine(); // final G0 Z safe
+    if (activeSpindleRPM > 0) addLine();
+    line += splitMachineMacroLines(machine.footer).length;
+    addLine(); // M2
+    return map;
+  }
+
+  _scrollGcodeToSimulatorSegment(state: CamToolpathSimulatorState | null | undefined) {
+    const segmentId = String(state?.currentSegment?.segmentId || '');
+    if (!segmentId || segmentId === this._lastGcodeScrollSegmentId || !this._gcodeTextareaEl) return;
+    const lineIndex = this._gcodeLineMap.get(segmentId);
+    if (!Number.isFinite(lineIndex)) return;
+    const textarea = this._gcodeTextareaEl;
+    const style = window.getComputedStyle?.(textarea);
+    const lineHeight = parseFloat(style?.lineHeight || '') || ((parseFloat(style?.fontSize || '') || 12) * 1.45);
+    const target = Math.max(0, (Number(lineIndex) * lineHeight) - (textarea.clientHeight * 0.45));
+    textarea.scrollTop = target;
+    this._lastGcodeScrollSegmentId = segmentId;
+  }
+
   _renderProgram(): void {
     if (!this.programEl) return;
     const manager = this.viewer?.partHistory?.camPlanManager || null;
     const operations = Array.isArray(manager?.getOperations?.()) ? manager.getOperations() : [];
+    const plan = manager?.getCombinedPlan?.() || null;
+    const gcode = String(manager?.getCombinedGcode?.() || '');
+    this._gcodeTextareaEl = null;
+    this._gcodeLineMap = new Map();
+    this._lastGcodeScrollSegmentId = '';
     this.programEl.textContent = '';
     const header = document.createElement('div');
     header.className = 'cam-program-header';
     const title = document.createElement('div');
     title.textContent = 'Program';
     header.appendChild(title);
+    const actions = document.createElement('div');
+    actions.className = 'cam-program-actions';
+    const exportButton = document.createElement('button');
+    exportButton.type = 'button';
+    exportButton.className = 'cam-history-btn cam-program-export-btn';
+    exportButton.textContent = 'Export';
+    exportButton.title = 'Export CAM G-code';
+    exportButton.setAttribute('aria-label', 'Export CAM G-code');
+    exportButton.disabled = !gcode.trim();
+    exportButton.addEventListener('click', () => this._exportGcode());
+    actions.appendChild(exportButton);
+    header.appendChild(actions);
     this.programEl.appendChild(header);
 
-    const message = document.createElement('div');
-    message.className = 'cam-program-placeholder';
-    const gcode = String(manager?.getCombinedGcode?.() || '');
     if (gcode.trim()) {
-      message.textContent = gcode;
-      message.classList.add('cam-program-code');
-      this.programEl.appendChild(message);
+      const textarea = document.createElement('textarea');
+      textarea.className = 'cam-program-code';
+      textarea.readOnly = true;
+      textarea.spellcheck = false;
+      textarea.value = gcode;
+      textarea.setAttribute('aria-label', 'Generated CAM G-code');
+      this.programEl.appendChild(textarea);
+      this._gcodeTextareaEl = textarea;
+      this._gcodeLineMap = this._buildGcodeLineMap(plan as any);
       return;
     }
+    const message = document.createElement('div');
+    message.className = 'cam-program-placeholder';
     message.textContent = operations.length
       ? 'Generate to create CAM G-code.'
       : 'No CAM operations configured.';
@@ -942,6 +1087,16 @@ export class CamHistoryWidget {
         font: 700 12px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         text-transform: uppercase;
       }
+      .cam-program-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .cam-program-export-btn {
+        min-height: 28px;
+        padding: 0 9px;
+        font-size: 11px;
+      }
       .cam-program-placeholder {
         border: 1px solid rgba(148, 163, 184, 0.18);
         border-radius: 8px;
@@ -951,33 +1106,28 @@ export class CamHistoryWidget {
         font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       }
       .cam-program-code {
+        box-sizing: border-box;
+        width: 100%;
+        min-width: 0;
+        min-height: 360px;
+        max-height: 360px;
+        resize: vertical;
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        border-radius: 8px;
+        background: rgba(15, 23, 42, 0.45);
+        color: #cbd5e1;
+        padding: 10px;
         white-space: pre;
         overflow: auto;
-        max-height: 360px;
+        tab-size: 2;
+        font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       }
-      .cam-generation-overlay {
-        position: fixed;
-        inset: 0;
-        z-index: 100000;
-        pointer-events: none;
-        display: flex;
-        align-items: flex-start;
-        justify-content: flex-end;
-        padding: 18px;
-        box-sizing: border-box;
-      }
-      .cam-generation-window {
-        width: min(380px, calc(100vw - 36px));
-        border-radius: 8px;
-        border: 1px solid rgba(94, 234, 212, 0.38);
-        background: rgba(15, 23, 42, 0.96);
-        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.42);
-        color: #e2e8f0;
-        padding: 14px;
-        box-sizing: border-box;
+      .cam-generation-window-content {
         display: flex;
         flex-direction: column;
         gap: 9px;
+        min-width: 0;
+        color: #e2e8f0;
       }
       .cam-generation-header {
         display: flex;
