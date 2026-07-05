@@ -74,6 +74,10 @@ function makeRingMeshSolid({
   innerRadius = 2,
   height = 10,
   segments = 32,
+  name = 'cam-test-ring',
+  centerX = 0,
+  centerZ = 0,
+  bottomY = 0,
 } = {}) {
   const vertProperties: number[] = [];
   const triVerts: number[] = [];
@@ -90,10 +94,10 @@ function makeRingMeshSolid({
     const theta = (index / segments) * Math.PI * 2;
     const cos = Math.cos(theta);
     const sin = Math.sin(theta);
-    topOuter.push(pushVertex(outerRadius * cos, height, outerRadius * sin));
-    topInner.push(pushVertex(innerRadius * cos, height, innerRadius * sin));
-    bottomOuter.push(pushVertex(outerRadius * cos, 0, outerRadius * sin));
-    bottomInner.push(pushVertex(innerRadius * cos, 0, innerRadius * sin));
+    topOuter.push(pushVertex(centerX + outerRadius * cos, bottomY + height, centerZ + outerRadius * sin));
+    topInner.push(pushVertex(centerX + innerRadius * cos, bottomY + height, centerZ + innerRadius * sin));
+    bottomOuter.push(pushVertex(centerX + outerRadius * cos, bottomY, centerZ + outerRadius * sin));
+    bottomInner.push(pushVertex(centerX + innerRadius * cos, bottomY, centerZ + innerRadius * sin));
   }
   const tri = (...indices: number[]) => triVerts.push(...indices);
   for (let index = 0; index < segments; index += 1) {
@@ -108,7 +112,7 @@ function makeRingMeshSolid({
     tri(bottomInner[next], topInner[index], topInner[next]);
   }
   return {
-    name: 'cam-test-ring',
+    name,
     type: 'SOLID',
     visible: true,
     getMesh() {
@@ -473,6 +477,43 @@ export async function test_cam_shadow_cutter_generates_outer_and_hole_for_noncon
   assert((outerPaths[0].metadata?.loopPointCount || 0) > (holePaths[0].metadata?.loopPointCount || 0), 'Outside loop should describe the larger projected profile');
 }
 
+export async function test_cam_shadow_cutter_finds_holes_in_epsilon_offset_coplanar_bottoms() {
+  // Regression: after a boolean union, one solid's bottom face can sit a few
+  // 1e-4 units above the part's global bottom plane. Hole detection must not
+  // depend on exact bottom-plane membership.
+  const manager = new CamPlanManager(null);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_SHADOW_CUTTER, defaultCamParams({
+    targetSolids: ['cam-test-ring', 'cam-test-ring-offset'],
+    toolDiameter: 1,
+    stockAllowance: 0,
+    stepDown: 20,
+    extraDepth: 0,
+  }));
+  const direct = operation.run({
+    viewer: makeViewerWithSolids([
+      makeRingMeshSolid(),
+      makeRingMeshSolid({
+        name: 'cam-test-ring-offset',
+        centerX: 9,
+        bottomY: 0.0002,
+      }),
+    ]),
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  const holePaths = direct.paths.filter((path) => path.metadata?.loopRole === 'hole');
+  const outerPaths = direct.paths.filter((path) => path.metadata?.loopRole === 'outer');
+  assert(outerPaths.length === 1, 'Overlapping rings should merge into one outer loop');
+  assert(holePaths.length === 2, `Both ring through-holes should generate clear-hole loops, got ${holePaths.length}`);
+  const holeCenters = holePaths.map((path) => {
+    const cutPoints = cutPoints2d(path, direct.safeZ);
+    const xs = cutPoints.map((point) => point[0]);
+    return (Math.min(...xs) + Math.max(...xs)) / 2;
+  }).sort((a, b) => a - b);
+  assert(Math.abs(holeCenters[0]) < 0.1, 'First clear-hole loop should stay centered on the base ring');
+  assert(Math.abs(holeCenters[1] - 9) < 0.1, 'Second clear-hole loop should stay centered on the offset ring');
+}
+
 export async function test_cam_shadow_cutter_cuts_each_loop_to_depth_before_next_loop() {
   const manager = new CamPlanManager(null);
   const operation = manager.createOperation(CAM_OPERATION_TYPE_SHADOW_CUTTER, defaultCamParams({
@@ -742,6 +783,50 @@ export async function test_cam_roughing_unions_curved_slice_shadow_before_pathin
   assert(direct.paths.length === 1, 'Cylinder roughing should emit one chained path');
   assert(roughingPath.metadata?.passCount === 2, 'Curved slice shadows should be unioned before pathing instead of producing one pass per triangle');
   assert(roughingPath.segments.filter((segment) => segment.kind === 'retract').length === 1, 'Curved roughing should not retract between identical slice loops');
+}
+
+export async function test_cam_roughing_generates_hole_loops_in_every_slice() {
+  const manager = new CamPlanManager(null);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_ROUGHING, {
+    id: 'RG_RING',
+    targetSolids: ['cam-test-ring'],
+    toolDiameter: 1,
+    stockAllowance: 0,
+    stepDown: 4,
+    extraDepth: 0,
+    safeHeight: 3,
+    feedRate: 600,
+    plungeRate: 120,
+    spindleRPM: 9000,
+  });
+  const direct = operation.run({
+    viewer: makeViewerWithSolid(makeRingMeshSolid()),
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  assert(direct.summary.levelCount === 3, 'Ring roughing should produce three slices for a 10-unit part at 4-unit stepdown');
+  const roughingPath = direct.paths[0];
+  assert(roughingPath, 'Ring roughing should produce a toolpath');
+  assert((roughingPath.metadata?.loopRoles || []).includes('hole'), 'Ring roughing should include clear-hole loops');
+  const passIdsBySlice = new Map<number, Set<string>>();
+  for (const point of roughingPath.points) {
+    const sliceIndex = point.metadata?.sliceIndex;
+    const passId = point.metadata?.passId;
+    if (!Number.isFinite(sliceIndex) || !passId) continue;
+    if (!passIdsBySlice.has(sliceIndex)) passIdsBySlice.set(sliceIndex, new Set());
+    passIdsBySlice.get(sliceIndex)!.add(passId);
+  }
+  for (const sliceIndex of [1, 2, 3]) {
+    const passIds = Array.from(passIdsBySlice.get(sliceIndex) || []);
+    assert(passIds.some((id) => id.includes('-O')), `Roughing slice ${sliceIndex} should cut the outer loop`);
+    assert(passIds.some((id) => id.includes('-H')), `Roughing slice ${sliceIndex} should cut the internal hole loop`);
+    assert(passIds.length === 2, `Roughing slice ${sliceIndex} should cut exactly one outer and one hole loop, got ${passIds.join(', ')}`);
+  }
+  for (const point of roughingPath.points) {
+    if (point.metadata?.loopRole !== 'hole' || point.metadata?.safe) continue;
+    const radius = Math.hypot(point.position[0], point.position[1]);
+    assert(radius <= 1.505, 'Hole roughing centerline should stay inside the clear hole by the cutter radius');
+  }
 }
 
 export async function test_cam_roughing_vertical_wall_slice_matches_shadow_cutter_loop() {

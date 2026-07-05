@@ -1,4 +1,3 @@
-import Tess2 from 'tess2';
 import ClipperLib from 'clipper-lib';
 import { ListEntityBase } from '../core/entities/ListEntityBase.js';
 import { normalizeCamMachineProfile, type CamMachineProfile } from './CamMachineProfile.js';
@@ -174,8 +173,7 @@ export class ShadowCutterEntity extends ListEntityBase {
     }
 
     const projectedLoops = projectedShadowLoopsFromTriangles(triangles);
-    const capLoops = projectedBoundaryLoopsFromBottomFaces(triangles, targetBounds.min[2]);
-    const shadowLoops = buildShadowLoops(projectedLoops, capLoops);
+    const shadowLoops = buildShadowLoops(projectedLoops);
     if (!shadowLoops.length) {
       return makeEmptyShadowResult({
         operationId,
@@ -391,66 +389,8 @@ export function triangleBounds(triangles: Triangle[]): CamBounds | null {
   return { min: toRoundedPoint3(min), max: toRoundedPoint3(max) };
 }
 
-function triangleNormal(triangle: Triangle): CamPoint3 {
-  const a = triangle[0];
-  const b = triangle[1];
-  const c = triangle[2];
-  const ux = b[0] - a[0];
-  const uy = b[1] - a[1];
-  const uz = b[2] - a[2];
-  const vx = c[0] - a[0];
-  const vy = c[1] - a[1];
-  const vz = c[2] - a[2];
-  return [
-    (uy * vz) - (uz * vy),
-    (uz * vx) - (ux * vz),
-    (ux * vy) - (uy * vx),
-  ];
-}
-
 function point2Key(point: CamPoint2) {
   return `${roundCoord(point[0])},${roundCoord(point[1])}`;
-}
-
-function undirectedEdgeKey(a: CamPoint2, b: CamPoint2) {
-  const ak = point2Key(a);
-  const bk = point2Key(b);
-  return ak < bk ? `${ak}|${bk}` : `${bk}|${ak}`;
-}
-
-function projectedBoundaryLoopsFromBottomFaces(triangles: Triangle[], bottomZ: number) {
-  const planeEdges = new Map<string, Map<string, { a: CamPoint2; b: CamPoint2; count: number }>>();
-  for (const triangle of triangles) {
-    const normal = triangleNormal(triangle);
-    const normalLength = Math.hypot(normal[0], normal[1], normal[2]);
-    if (!(normalLength > EPS) || Math.abs(normal[2] / normalLength) < 0.7) continue;
-    const planeKey = String(roundCoord((triangle[0][2] + triangle[1][2] + triangle[2][2]) / 3));
-    if (Math.abs(Number(planeKey) - bottomZ) > 1e-4) continue;
-    let edgeMap = planeEdges.get(planeKey);
-    if (!edgeMap) {
-      edgeMap = new Map();
-      planeEdges.set(planeKey, edgeMap);
-    }
-    for (let index = 0; index < 3; index += 1) {
-      const nextIndex = (index + 1) % 3;
-      const a: CamPoint2 = [roundCoord(triangle[index][0]), roundCoord(triangle[index][1])];
-      const b: CamPoint2 = [roundCoord(triangle[nextIndex][0]), roundCoord(triangle[nextIndex][1])];
-      if (point2Key(a) === point2Key(b)) continue;
-      const key = undirectedEdgeKey(a, b);
-      const entry = edgeMap.get(key);
-      if (entry) entry.count += 1;
-      else edgeMap.set(key, { a, b, count: 1 });
-    }
-  }
-
-  const uniqueEdges = new Map<string, { a: CamPoint2; b: CamPoint2 }>();
-  for (const edgeMap of planeEdges.values()) {
-    for (const edge of edgeMap.values()) {
-      if (edge.count !== 1) continue;
-      uniqueEdges.set(undirectedEdgeKey(edge.a, edge.b), { a: edge.a, b: edge.b });
-    }
-  }
-  return loopsFromEdges(Array.from(uniqueEdges.values()));
 }
 
 export function loopsFromEdges(edges: Array<{ a: CamPoint2; b: CamPoint2 }>) {
@@ -504,64 +444,45 @@ export function loopsFromEdges(edges: Array<{ a: CamPoint2; b: CamPoint2 }>) {
 }
 
 export function projectedShadowLoopsFromTriangles(triangles: Triangle[]) {
-  const contours: number[][] = [];
+  const contours: CamPoint2[][] = [];
   for (const triangle of triangles) {
     let loop: CamPoint2[] = triangle.map((point) => [roundCoord(point[0]), roundCoord(point[1])] as CamPoint2);
     loop = simplifyLoop(loop);
     if (loop.length < 3 || Math.abs(polygonArea(loop)) <= EPS) continue;
     if (polygonArea(loop) < 0) loop = loop.slice().reverse();
-    contours.push(loop.flatMap((point) => [point[0], point[1]]));
+    contours.push(loop);
   }
-  if (!contours.length) return [];
+  return unionContoursWithClipper(contours);
+}
+
+function unionContoursWithClipper(contours: CamPoint2[][]): CamPoint2[][] {
+  const subject = contours
+    .map((points) => points.map((point) => ({
+      X: Math.round(point[0] * CLIPPER_SCALE),
+      Y: Math.round(point[1] * CLIPPER_SCALE),
+    })))
+    .filter((path) => path.length >= 3);
+  if (!subject.length) return [];
   try {
-    const result = Tess2.tesselate({
-      contours,
-      windingRule: Tess2.WINDING_NONZERO,
-      elementType: Tess2.POLYGONS,
-      polySize: 3,
-      vertexSize: 2,
-    });
-    return projectedLoopsFromTessellation(result);
+    const clipper = new ClipperLib.Clipper();
+    clipper.AddPaths(subject, ClipperLib.PolyType.ptSubject, true);
+    const solution: Array<Array<{ X: number; Y: number }>> = [];
+    const succeeded = clipper.Execute(
+      ClipperLib.ClipType.ctUnion,
+      solution,
+      ClipperLib.PolyFillType.pftNonZero,
+      ClipperLib.PolyFillType.pftNonZero,
+    );
+    if (!succeeded) return [];
+    return solution
+      .map((path) => simplifyLoop(path.map((point) => [
+        roundCoord(point.X / CLIPPER_SCALE),
+        roundCoord(point.Y / CLIPPER_SCALE),
+      ] as CamPoint2)))
+      .filter((loop) => loop.length >= 3 && Math.abs(polygonArea(loop)) > EPS);
   } catch {
     return [];
   }
-}
-
-export function projectedLoopsFromTessellation(result: any) {
-  const vertices = Array.isArray(result?.vertices) || ArrayBuffer.isView(result?.vertices)
-    ? result.vertices
-    : [];
-  const elements = Array.isArray(result?.elements) || ArrayBuffer.isView(result?.elements)
-    ? result.elements
-    : [];
-  const edgeMap = new Map<string, { a: CamPoint2; b: CamPoint2; count: number }>();
-  const vertexAt = (index: number): CamPoint2 | null => {
-    const base = index * 2;
-    const x = Number(vertices[base]);
-    const y = Number(vertices[base + 1]);
-    return Number.isFinite(x) && Number.isFinite(y) ? [roundCoord(x), roundCoord(y)] : null;
-  };
-  for (let i = 0; i + 2 < elements.length; i += 3) {
-    const indices = [Number(elements[i]), Number(elements[i + 1]), Number(elements[i + 2])];
-    if (indices.some((index) => !Number.isFinite(index) || index < 0)) continue;
-    const points = indices.map(vertexAt);
-    if (points.some((point) => !point)) continue;
-    const triangle = simplifyLoop(points as CamPoint2[]);
-    if (triangle.length < 3 || Math.abs(polygonArea(triangle)) <= EPS) continue;
-    for (let edgeIndex = 0; edgeIndex < 3; edgeIndex += 1) {
-      const a = triangle[edgeIndex];
-      const b = triangle[(edgeIndex + 1) % triangle.length];
-      if (point2Key(a) === point2Key(b)) continue;
-      const key = undirectedEdgeKey(a, b);
-      const entry = edgeMap.get(key);
-      if (entry) entry.count += 1;
-      else edgeMap.set(key, { a, b, count: 1 });
-    }
-  }
-  const boundaryEdges = Array.from(edgeMap.values())
-    .filter((edge) => edge.count === 1)
-    .map((edge) => ({ a: edge.a, b: edge.b }));
-  return loopsFromEdges(boundaryEdges);
 }
 
 export function ensureCounterClockwise(points: CamPoint2[]) {
@@ -619,36 +540,31 @@ export function loopInsideLoop(loop: CamPoint2[], container: CamPoint2[]) {
   return loop.every((point) => pointInPolygon(point, container));
 }
 
-export function buildShadowLoops(projectedLoops: CamPoint2[][], capLoops: CamPoint2[][]): ShadowLoop[] {
-  const projectedLoopRecords = projectedLoops
+export function buildShadowLoops(projectedLoops: CamPoint2[][]): ShadowLoop[] {
+  // The silhouette union already yields nested loops for regions with no
+  // material at any height — exactly the machinable through-holes. Classify
+  // by nesting parity: even depth = outer boundary, odd depth = hole.
+  const records = projectedLoops
     .map((points) => ensureCounterClockwise(simplifyLoop(points)))
     .filter((points) => points.length >= 3 && Math.abs(polygonArea(points)) > EPS)
     .map((points) => ({ points, area: Math.abs(polygonArea(points)) }));
-  const outerLoops = projectedLoopRecords.filter((candidate, candidateIndex) => {
-    return !projectedLoopRecords.some((container, containerIndex) => (
-      containerIndex !== candidateIndex
-      && container.area > candidate.area + EPS
+  const loops = records.map((candidate) => {
+    const nestingDepth = records.filter((container) => (
+      container.area > candidate.area + EPS
       && loopInsideLoop(candidate.points, container.points)
-    ));
+    )).length;
+    return {
+      role: nestingDepth % 2 === 0 ? 'outer' as const : 'hole' as const,
+      points: candidate.points,
+      area: candidate.area,
+    };
   });
-  if (!outerLoops.length) return [];
-  const capLoopRecords = capLoops
-    .map((points) => ensureCounterClockwise(simplifyLoop(points)))
-    .filter((points) => points.length >= 3 && Math.abs(polygonArea(points)) > EPS)
-    .map((points) => ({ points, area: Math.abs(polygonArea(points)) }));
-  const holeLoops = capLoopRecords.filter((candidate, candidateIndex) => {
-    const isBottomNestedLoop = capLoopRecords.some((container, containerIndex) => (
-      containerIndex !== candidateIndex
-      && container.area > candidate.area + EPS
-      && loopInsideLoop(candidate.points, container.points)
-    ));
-    return isBottomNestedLoop
-      && outerLoops.some((outer) => loopInsideLoop(candidate.points, outer.points));
-  });
-  return [
-    ...outerLoops.map((loop) => ({ role: 'outer' as const, points: loop.points })),
-    ...holeLoops.map((loop) => ({ role: 'hole' as const, points: loop.points })),
-  ];
+  return loops
+    .sort((a, b) => {
+      if (a.role !== b.role) return a.role === 'outer' ? -1 : 1;
+      return b.area - a.area;
+    })
+    .map((loop) => ({ role: loop.role, points: loop.points }));
 }
 
 export function unionProjectedShadowLoops(loops: ShadowLoop[]) {
@@ -658,21 +574,8 @@ export function unionProjectedShadowLoops(loops: ShadowLoop[]) {
       if (loop.role === 'hole') points = points.slice().reverse();
       return points;
     })
-    .filter((points) => points.length >= 3 && Math.abs(polygonArea(points)) > EPS)
-    .map((points) => points.flatMap((point) => [point[0], point[1]]));
-  if (!contours.length) return [];
-  try {
-    const result = Tess2.tesselate({
-      contours,
-      windingRule: Tess2.WINDING_NONZERO,
-      elementType: Tess2.POLYGONS,
-      polySize: 3,
-      vertexSize: 2,
-    });
-    return projectedLoopsFromTessellation(result);
-  } catch {
-    return [];
-  }
+    .filter((points) => points.length >= 3 && Math.abs(polygonArea(points)) > EPS);
+  return unionContoursWithClipper(contours);
 }
 
 function cross2(origin: CamPoint2, a: CamPoint2, b: CamPoint2) {
@@ -695,26 +598,14 @@ export function mergeOuterOffsetLoops(loops: ShadowLoop[]): ShadowLoop[] {
   if (outerLoops.length <= 1) return loops;
   const contours = outerLoops
     .map((loop) => ensureCounterClockwise(simplifyLoop(loop.points)))
-    .filter((points) => points.length >= 3 && Math.abs(polygonArea(points)) > EPS)
-    .map((points) => points.flatMap((point) => [point[0], point[1]]));
+    .filter((points) => points.length >= 3 && Math.abs(polygonArea(points)) > EPS);
   if (contours.length <= 1) return loops;
-  try {
-    const result = Tess2.tesselate({
-      contours,
-      windingRule: Tess2.WINDING_NONZERO,
-      elementType: Tess2.POLYGONS,
-      polySize: 3,
-      vertexSize: 2,
-    });
-    const mergedOuterLoops = projectedLoopsFromTessellation(result)
-      .map((points) => ensureCounterClockwise(simplifyLoop(points)))
-      .filter((points) => points.length >= 3 && Math.abs(polygonArea(points)) > EPS)
-      .sort((a, b) => Math.abs(polygonArea(b)) - Math.abs(polygonArea(a)))
-      .map((points) => ({ role: 'outer' as const, points }));
-    return mergedOuterLoops.length ? [...mergedOuterLoops, ...holeLoops] : loops;
-  } catch {
-    return loops;
-  }
+  const mergedOuterLoops = unionContoursWithClipper(contours)
+    .map((points) => ensureCounterClockwise(simplifyLoop(points)))
+    .filter((points) => points.length >= 3 && Math.abs(polygonArea(points)) > EPS)
+    .sort((a, b) => Math.abs(polygonArea(b)) - Math.abs(polygonArea(a)))
+    .map((points) => ({ role: 'outer' as const, points }));
+  return mergedOuterLoops.length ? [...mergedOuterLoops, ...holeLoops] : loops;
 }
 
 export function offsetPolygon(points: CamPoint2[], distance: number): CamPoint2[][] {

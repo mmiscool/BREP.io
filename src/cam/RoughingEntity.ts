@@ -334,8 +334,12 @@ function buildRoughingSlices(topZ: number, bottomZ: number, stepDown: number): R
   return slices;
 }
 
-function buildSliceShadowLoops(triangles: Triangle[], slice: RoughingSlice): ShadowLoop[] {
-  const clippedProjectionLoops = projectedLoopsFromClippedSlab(triangles, slice.bottomZ, slice.topZ);
+export function buildSliceShadowLoops(triangles: Triangle[], slice: RoughingSlice): ShadowLoop[] {
+  // Inset the bottom clip plane so faces lying exactly at the slice bottom
+  // (e.g. a pocket floor this slice cuts down to) do not fill their region.
+  const sliceHeight = Math.max(0, slice.topZ - slice.bottomZ);
+  const bottomInset = Math.min(sliceHeight * 1e-4, 1e-4);
+  const clippedProjectionLoops = projectedLoopsFromClippedSlab(triangles, slice.bottomZ + bottomInset, slice.topZ);
   const classifiedSources: ShadowLoop[] = [
     ...classifyProjectedLoops(clippedProjectionLoops),
   ];
@@ -618,6 +622,14 @@ function clipPolygonToZPlane(points: CamPoint3[], planeZ: number, keepAbove: boo
 }
 
 function intersectEdgeAtZ(a: CamPoint3, b: CamPoint3, z: number): CamPoint3 {
+  // Canonical endpoint order so triangles sharing this edge compute the exact
+  // same floating-point intersection; otherwise rounding can split the shared
+  // vertex into two keys and break loop reconstruction.
+  if (b[2] < a[2] || (b[2] === a[2] && (b[0] < a[0] || (b[0] === a[0] && b[1] < a[1])))) {
+    const swap = a;
+    a = b;
+    b = swap;
+  }
   const dz = b[2] - a[2];
   const t = Math.abs(dz) > EPS ? (z - a[2]) / dz : 0;
   return roundCamPoint([
@@ -670,7 +682,7 @@ function trianglePlaneSegment(triangle: Triangle, z: number): { a: CamPoint2; b:
 function classifyProjectedLoops(loops: CamPoint2[][]): ShadowLoop[] {
   const records = uniquePointLoops(loops)
     .map((points) => simplifyLoop(points))
-    .filter((points) => points.length >= 3 && Math.abs(polygonArea(points)) > EPS)
+    .filter((points) => points.length >= 3 && Math.abs(polygonArea(points)) > EPS && !isSliverLoop(points))
     .map((points) => ({ points, area: Math.abs(polygonArea(points)) }))
     .sort((a, b) => b.area - a.area);
   const out: ShadowLoop[] = [];
@@ -688,6 +700,20 @@ function classifyProjectedLoops(loops: CamPoint2[][]): ShadowLoop[] {
     if (a.role !== b.role) return a.role === 'outer' ? -1 : 1;
     return Math.abs(polygonArea(b.points)) - Math.abs(polygonArea(a.points));
   });
+}
+
+function isSliverLoop(points: CamPoint2[]) {
+  let perimeter = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const a = points[index];
+    const b = points[(index + 1) % points.length];
+    perimeter += Math.hypot(b[0] - a[0], b[1] - a[1]);
+  }
+  if (!(perimeter > EPS)) return true;
+  // Coordinates are quantized at 1e-4, so unions of nearly coincident section
+  // polygons can leave hairline loops; drop anything thinner than 1e-3.
+  const meanWidth = (2 * Math.abs(polygonArea(points))) / perimeter;
+  return meanWidth < 1e-3;
 }
 
 function pointInsideLoop(point: CamPoint2, loop: CamPoint2[]) {
