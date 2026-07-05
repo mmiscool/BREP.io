@@ -1,4 +1,10 @@
-import { normalizeReferenceList, normalizeReferenceName } from './utils.js';
+import {
+    normalizeReferenceList,
+    normalizeReferenceName,
+    normalizeReferenceSelectionList,
+    normalizeReferenceSelectionValue,
+    referenceSelectionKey,
+} from './utils.js';
 
 type AnyRecord = Record<string, any>;
 type ReferenceInputElement = HTMLInputElement & AnyRecord;
@@ -151,13 +157,36 @@ export function renderReferenceSelectionField({ ui, key, def, id, controlWrap, v
             // best effort
         }
     };
+    const normalizeMetadataSelectionValue = (value) => {
+        const normalized = normalizeReferenceName(value);
+        if (!normalized) return null;
+        let raw = value;
+        if (value && typeof value === 'object') {
+            raw = { ...value, name: normalized };
+            if (Array.isArray(raw.pickPoint) && raw.pickPoint.length >= 3) {
+                raw.pickPoint = [
+                    Number(raw.pickPoint[0]) || 0,
+                    Number(raw.pickPoint[1]) || 0,
+                    Number(raw.pickPoint[2]) || 0,
+                ];
+            } else {
+                delete raw.pickPoint;
+            }
+            if (Number.isFinite(raw.faceIndex) && Number(raw.faceIndex) >= 0) {
+                raw.faceIndex = Math.floor(Number(raw.faceIndex));
+            } else {
+                delete raw.faceIndex;
+            }
+        }
+        return normalizeReferenceSelectionValue(raw);
+    };
 
     if (isMulti) {
         inputEl.__getSelectionList = () => {
             try {
                 const raw = readRawValue();
                 if (!Array.isArray(raw)) return [];
-                return normalizeReferenceList(raw);
+                return normalizeReferenceSelectionList(raw);
             } catch (_) {
                 return [];
             }
@@ -171,7 +200,7 @@ export function renderReferenceSelectionField({ ui, key, def, id, controlWrap, v
         refWrap.appendChild(chipsWrap);
         try {
             const initial = readRawValue();
-            const current = normalizeReferenceList(Array.isArray(initial) ? initial : []);
+            const current = normalizeReferenceSelectionList(Array.isArray(initial) ? initial : []);
             writeRawValue(current);
             ui._renderChips(chipsWrap, key, current);
             updateSelectionMetadata(current);
@@ -321,14 +350,28 @@ export function renderReferenceSelectionField({ ui, key, def, id, controlWrap, v
             if (!parsedArray && raw != null && String(raw).trim() !== '') incoming = [String(raw).trim()];
 
             const existingRaw = readRawValue();
-            const current = Array.isArray(existingRaw) ? existingRaw : [];
+            const current = normalizeReferenceSelectionList(Array.isArray(existingRaw) ? existingRaw : []);
             const next = current.slice();
-            for (const name of incoming) {
-                const normalized = normalizeReferenceName(name);
+            const seen = new Set(next.map((item) => referenceSelectionKey(item)));
+            for (const rawName of incoming) {
+                const normalized = normalizeReferenceName(rawName);
                 if (!normalized) continue;
-                if (!next.includes(normalized)) next.push(normalized);
+                let candidate: any = rawName;
+                try {
+                    const meta = inputEl.__lastReferenceSelectionMeta;
+                    const metaName = normalizeReferenceName(meta);
+                    if (meta && typeof meta === 'object' && metaName && metaName === normalized) {
+                        candidate = { ...meta, name: metaName };
+                    }
+                } catch (_) { /* ignore metadata conversion errors */ }
+                const normalizedValue = normalizeMetadataSelectionValue(candidate);
+                const dedupeKey = referenceSelectionKey(normalizedValue);
+                if (!normalizedValue || !dedupeKey || seen.has(dedupeKey)) continue;
+                seen.add(dedupeKey);
+                next.push(normalizedValue);
             }
-            const normalizedList = normalizeReferenceList(next);
+            try { inputEl.__lastReferenceSelectionMeta = null; } catch (_) { /* ignore */ }
+            const normalizedList = normalizeReferenceSelectionList(next);
             if (isMulti && maxSelections !== null && normalizedList.length > maxSelections) {
                 normalizedList.length = maxSelections;
             }
@@ -342,8 +385,17 @@ export function renderReferenceSelectionField({ ui, key, def, id, controlWrap, v
         } else {
             const normalized = normalizeReferenceName(raw);
             inputEl.value = normalized ?? '';
-            writeRawValue(normalized);
-            emitChange(normalized);
+            let nextValue: any = normalized;
+            try {
+                const meta = inputEl.__lastReferenceSelectionMeta;
+                const metaName = normalizeReferenceName(meta);
+                if (meta && typeof meta === 'object' && metaName && metaName === normalized) {
+                    nextValue = normalizeMetadataSelectionValue({ ...meta, name: metaName });
+                }
+                inputEl.__lastReferenceSelectionMeta = null;
+            } catch (_) { /* ignore metadata conversion errors */ }
+            writeRawValue(nextValue);
+            emitChange(nextValue);
             try {
                 ui._syncActiveReferenceSelectionHighlight(inputEl, def);
             } catch (_) {
@@ -362,7 +414,7 @@ export function renderReferenceSelectionField({ ui, key, def, id, controlWrap, v
         activate,
         readValue() {
             const value = readRawValue();
-            if (Array.isArray(value)) return normalizeReferenceList(value);
+            if (Array.isArray(value)) return normalizeReferenceSelectionList(value);
             return normalizeReferenceName(value);
         },
     };

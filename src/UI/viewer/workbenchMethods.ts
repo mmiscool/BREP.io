@@ -28,6 +28,7 @@ export const workbenchMethods = {
             this._camWorkbenchReturnTarget = previous || 'MODELING';
         } else if (previous === 'CAM' && next !== 'CAM') {
             this._camWorkbenchReturnTarget = null;
+            try { this._clearCamWorkbenchSceneArtifacts?.(); } catch { /* ignore CAM scene cleanup */ }
         }
         if (next === 'SIMULATION') {
             try { SelectionFilter.SetSelectionTypes([SelectionFilter.SOLID]); } catch { /* ignore */ }
@@ -214,6 +215,21 @@ export const workbenchMethods = {
         this._camFinishUi = null;
         try { this.mainToolbar?.clearRightReserve?.(this._camFinishReserveKey); } catch { /* ignore */ }
         return null;
+    },
+
+    _clearCamWorkbenchSceneArtifacts() {
+        let changed = false;
+        try {
+            changed = this.camHistoryWidget?.clearSceneArtifacts?.() === true || changed;
+        } catch { /* ignore CAM widget cleanup */ }
+        try {
+            const removed = this.partHistory?.camPlanManager?.clearSceneArtifacts?.(this);
+            changed = Number(removed) > 0 || changed;
+        } catch { /* ignore CAM manager cleanup */ }
+        if (changed) {
+            try { this.render?.(); } catch { /* ignore render refresh */ }
+        }
+        return changed;
     },
 
     async _ensureSimulationWorkbenchManager() {

@@ -1766,7 +1766,7 @@ export class PartHistory {
 
   // methods to store and retrieve feature history to JSON strings
   // We will store the features, idCounter, expressions, and optionally PMI views
-  async toJSON(options: any = {}) {
+  toSerializable(options: any = {}) {
     try {
       this.syncAssemblyComponentTransforms?.();
     } catch (error) {
@@ -1790,7 +1790,7 @@ export class PartHistory {
     const sheets2D = this.sheet2DManager.toSerializable();
     const wireHarness = this.wireHarnessManager.toSerializable();
 
-    return JSON.stringify({
+    return {
       features,
       idCounter: this.idCounter,
       expressions: this.expressions,
@@ -1804,7 +1804,11 @@ export class PartHistory {
       metadata: this.metadataManager.metadata,
       assemblyConstraints: constraintsSnapshot.constraints,
       assemblyConstraintIdCounter: constraintsSnapshot.idCounter,
-    }, null, 2);
+    };
+  }
+
+  async toJSON(options: any = {}) {
+    return JSON.stringify(this.toSerializable(options), null, 2);
   }
 
   _sanitizePersistentDataForExport(raw) {

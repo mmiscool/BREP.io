@@ -303,6 +303,31 @@ function applyMatrix4(point: CamPoint3, matrix: any): CamPoint3 {
   ];
 }
 
+function hasMatrix4Elements(matrix: any) {
+  const e = Array.isArray(matrix?.elements) || ArrayBuffer.isView(matrix?.elements) ? matrix.elements : null;
+  return Boolean(e && e.length >= 16);
+}
+
+function isIdentityMatrix4(matrix: any) {
+  const e = Array.isArray(matrix?.elements) || ArrayBuffer.isView(matrix?.elements) ? matrix.elements : null;
+  if (!e || e.length < 16) return false;
+  const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  for (let index = 0; index < 16; index += 1) {
+    if (Math.abs(Number(e[index]) - identity[index]) > 1e-12) return false;
+  }
+  return true;
+}
+
+function resolveFaceMatrix(face: any) {
+  const own = hasMatrix4Elements(face?.matrixWorld) ? face.matrixWorld : null;
+  if (own && !isIdentityMatrix4(own)) return own;
+  const solid = hasMatrix4Elements(face?.solid?.matrixWorld) ? face.solid.matrixWorld : null;
+  if (solid && !isIdentityMatrix4(solid)) return solid;
+  const parent = hasMatrix4Elements(face?.parent?.matrixWorld) ? face.parent.matrixWorld : null;
+  if (parent && !isIdentityMatrix4(parent)) return parent;
+  return own || solid || parent || null;
+}
+
 export function extractTrianglesFromSolid(solid: any): Triangle[] {
   if (!solid) return [];
   const mesh = typeof solid.getMesh === 'function' ? solid.getMesh() : solid.mesh || null;
@@ -337,13 +362,33 @@ export function extractTrianglesFromSolid(solid: any): Triangle[] {
 
 export function extractTrianglesFromFace(face: any): Triangle[] {
   if (!face) return [];
+  const faceTriangles = Array.isArray(face.camFaceTriangles)
+    ? face.camFaceTriangles
+    : (Array.isArray(face.triangles) ? face.triangles : null);
+  if (faceTriangles) {
+    const matrix = resolveFaceMatrix(face);
+    const pointFrom = (point: any): CamPoint3 | null => {
+      if (!Array.isArray(point) || point.length < 3) return null;
+      const scenePoint: CamPoint3 = [Number(point[0]), Number(point[1]), Number(point[2])];
+      if (!scenePoint.every(Number.isFinite)) return null;
+      return scenePointToMachine(applyMatrix4(scenePoint, matrix));
+    };
+    const out: Triangle[] = [];
+    for (const triangle of faceTriangles) {
+      const a = pointFrom(triangle?.p1 || triangle?.[0]);
+      const b = pointFrom(triangle?.p2 || triangle?.[1]);
+      const c = pointFrom(triangle?.p3 || triangle?.[2]);
+      if (a && b && c) out.push([a, b, c]);
+    }
+    return out;
+  }
   const geometry = face.geometry || null;
   const position = typeof geometry?.getAttribute === 'function'
     ? geometry.getAttribute('position')
     : geometry?.attributes?.position || null;
   if (!position || position.itemSize !== 3 || position.count < 3) return [];
   const index = typeof geometry?.getIndex === 'function' ? geometry.getIndex() : geometry?.index || null;
-  const matrix = face.matrixWorld || null;
+  const matrix = resolveFaceMatrix(face);
   const vertexAt = (vertexIndex: number): CamPoint3 => {
     const scenePoint: CamPoint3 = [
       Number(position.getX(vertexIndex)),

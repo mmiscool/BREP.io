@@ -526,7 +526,24 @@ export class SelectionFilter {
             const hit = hits[0];
             if (!hit) return null;
 
-            const meta: any = { name: targetObj?.name || null };
+            const meta: any = {
+                type,
+                name: targetObj?.name || null,
+            };
+            const userData = targetObj?.userData && typeof targetObj.userData === 'object'
+                ? targetObj.userData
+                : null;
+            const faceName = userData?.faceName || targetObj?.faceName || targetObj?.name || null;
+            const solidName = userData?.solidName
+                || targetObj?.solidName
+                || targetObj?.solid?.name
+                || targetObj?.parent?.name
+                || null;
+            if (faceName || solidName) {
+                meta.userData = {};
+                if (faceName) meta.userData.faceName = String(faceName);
+                if (solidName) meta.userData.solidName = String(solidName);
+            }
             const fi = Number(hit.faceIndex);
             if (Number.isFinite(fi) && fi >= 0) meta.faceIndex = Math.floor(fi);
             const p = hit.point;

@@ -45,6 +45,22 @@ export class CamHistoryWidget {
 
   setPanelVisible(visible: boolean): void {
     try { this.historyWidget?.setContextSuppressionEnabled?.(visible !== false); } catch { /* ignore visibility sync */ }
+    if (visible === false) this.clearSceneArtifacts();
+  }
+
+  clearSceneArtifacts(): boolean {
+    let changed = false;
+    const hadSimulatorOverlay = Boolean(this.simulator?.group?.parent);
+    try { this.simulator?.clear?.(); } catch { /* ignore simulator cleanup */ }
+    changed = changed || hadSimulatorOverlay;
+    try {
+      const removed = this.viewer?.partHistory?.camPlanManager?.clearSceneArtifacts?.(this.viewer);
+      changed = changed || Number(removed) > 0;
+    } catch { /* ignore CAM artifact cleanup */ }
+    if (changed) {
+      try { this.viewer?.render?.(); } catch { /* ignore render refresh */ }
+    }
+    return changed;
   }
 
   refresh(): void {

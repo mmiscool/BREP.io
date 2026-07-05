@@ -64,6 +64,8 @@ export type CamToolpathSummary = {
   levelCount: number;
   pathCount: number;
   pointCount: number;
+  contactPointCount?: number;
+  safePointCount?: number;
   segmentCount: number;
   moveCount: number;
   motionSegmentCount: number;
@@ -302,6 +304,10 @@ export function summarizeCamToolpathProgram({
     }, 0);
   }, 0);
   const pointCount = paths.reduce((sum, path) => sum + path.points.length, 0);
+  const safePointCount = paths.reduce((sum, path) => (
+    sum + path.points.filter((point) => point.metadata?.safe === true).length
+  ), 0);
+  const hasSafePointMetadata = paths.some((path) => path.points.some((point) => point.metadata?.safe === true));
   const segmentCount = paths.reduce((sum, path) => sum + path.segments.length, 0);
   const summary: CamToolpathSummary = {
     targetCount,
@@ -316,6 +322,10 @@ export function summarizeCamToolpathProgram({
     estimatedRapidLength: roundCamCoord(rapidLength),
     warningCount,
   };
+  if (hasSafePointMetadata) {
+    summary.safePointCount = safePointCount;
+    summary.contactPointCount = pointCount - safePointCount;
+  }
   if (outlinePointCount != null) summary.outlinePointCount = outlinePointCount;
   if (offsetDistance != null) summary.offsetDistance = roundCamCoord(offsetDistance);
   return summary;
@@ -332,17 +342,29 @@ export function generateGcodeForCamToolpathProgram(program: Omit<CamToolpathProg
   lines.push(gcodeJoin(machine, ['G90', machine.stripComments ? '' : '; absolute coordinates'].filter(Boolean)));
   lines.push(gcodeJoin(machine, ['G17', machine.stripComments ? '' : '; XY plane'].filter(Boolean)));
   lines.push(gcodeJoin(machine, ['G0', formatWord('Z', program.safeZ)]));
-  if (program.spindleRPM > 0) lines.push(gcodeJoin(machine, ['M3', formatWord('S', program.spindleRPM, 0)]));
+  let activeSpindleRPM = 0;
+  if (program.spindleRPM > 0) {
+    activeSpindleRPM = program.spindleRPM;
+    lines.push(gcodeJoin(machine, ['M3', formatWord('S', activeSpindleRPM, 0)]));
+  }
   for (const path of program.paths) {
     if (!path.points.length) continue;
+    const pathSpindleRPM = Number(path.spindleRPM);
+    if (Number.isFinite(pathSpindleRPM) && pathSpindleRPM > 0 && Math.abs(pathSpindleRPM - activeSpindleRPM) > 1e-7) {
+      activeSpindleRPM = pathSpindleRPM;
+      lines.push(gcodeJoin(machine, ['M3', formatWord('S', activeSpindleRPM, 0)]));
+    }
     const first = path.points[0].position;
     pushComment(lines, machine, path.id);
     lines.push(gcodeJoin(machine, ['G0', formatWord('Z', program.safeZ)]));
     lines.push(gcodeJoin(machine, ['G0', formatWord('X', first[0]), formatWord('Y', first[1])]));
     if (Math.abs(first[2] - program.safeZ) > 1e-7) {
-      lines.push(gcodeJoin(machine, ['G1', formatWord('Z', first[2]), formatWord('F', path.plungeRate, 0)]));
+      const firstIsSafe = path.points[0].metadata?.safe === true;
+      lines.push(firstIsSafe
+        ? gcodeJoin(machine, ['G0', formatWord('Z', first[2])])
+        : gcodeJoin(machine, ['G1', formatWord('Z', first[2]), formatWord('F', path.plungeRate, 0)]));
     }
-    let activeFeed = path.feedRate;
+    let activeFeed: number | null = null;
     for (const segment of path.segments) {
       const point = path.points[segment.endIndex]?.position;
       if (!point) continue;
@@ -353,7 +375,11 @@ export function generateGcodeForCamToolpathProgram(program: Omit<CamToolpathProg
       const defaultFeed = segment.kind === 'plunge' ? path.plungeRate : path.feedRate;
       const feed = Number(segment.feedRate);
       const nextFeed = Number.isFinite(feed) && feed > 0 ? feed : defaultFeed;
-      if (Number.isFinite(nextFeed) && nextFeed > 0 && Math.abs(nextFeed - activeFeed) > 1e-7) {
+      if (
+        Number.isFinite(nextFeed)
+        && nextFeed > 0
+        && (activeFeed === null || Math.abs(nextFeed - activeFeed) > 1e-7)
+      ) {
         activeFeed = nextFeed;
         lines.push(gcodeJoin(machine, ['G1', formatWord('F', activeFeed, 0)]));
       }
@@ -361,7 +387,7 @@ export function generateGcodeForCamToolpathProgram(program: Omit<CamToolpathProg
     }
   }
   lines.push(gcodeJoin(machine, ['G0', formatWord('Z', program.safeZ)]));
-  if (program.spindleRPM > 0) lines.push('M5');
+  if (activeSpindleRPM > 0) lines.push('M5');
   for (const macro of splitMachineMacroLines(machine.footer)) lines.push(macro);
   lines.push('M2');
   return `${lines.join('\n')}\n`;
@@ -380,6 +406,11 @@ export function combineCamToolpathPrograms({
   const normalizedMachine = normalizeCamMachineProfile(machine);
   const warnings = valid.flatMap((program) => Array.isArray(program.warnings) ? program.warnings : []);
   const paths = valid.flatMap((program) => Array.isArray(program.paths) ? program.paths : []);
+  const safePointCount = paths.reduce((sum, path) => (
+    sum + path.points.filter((point) => point.metadata?.safe === true).length
+  ), 0);
+  const hasSafePointMetadata = paths.some((path) => path.points.some((point) => point.metadata?.safe === true));
+  const pointCount = paths.reduce((sum, path) => sum + path.points.length, 0);
   const debugSlices = valid.flatMap((program) => (
     Array.isArray(program.metadata?.debugSlices) ? program.metadata.debugSlices : []
   ));
@@ -402,7 +433,11 @@ export function combineCamToolpathPrograms({
       triangleCount: valid.reduce((sum, program) => sum + (program.summary?.triangleCount || 0), 0),
       levelCount: valid.reduce((sum, program) => sum + (program.summary?.levelCount || 0), 0),
       pathCount: paths.length,
-      pointCount: paths.reduce((sum, path) => sum + path.points.length, 0),
+      pointCount,
+      ...(hasSafePointMetadata ? {
+        contactPointCount: pointCount - safePointCount,
+        safePointCount,
+      } : {}),
       segmentCount: paths.reduce((sum, path) => sum + path.segments.length, 0),
       moveCount: valid.reduce((sum, program) => sum + (program.summary?.moveCount || 0), 0),
       motionSegmentCount: valid.reduce((sum, program) => sum + (program.summary?.motionSegmentCount || 0), 0),
@@ -416,7 +451,7 @@ export function combineCamToolpathPrograms({
       debugSliceCount: debugSlices.length,
     } : undefined,
   };
-  return { ...combined, gcode: valid.map((program) => String(program.gcode || '').trim()).filter(Boolean).join('\n') };
+  return { ...combined, gcode: generateGcodeForCamToolpathProgram(combined) };
 }
 
 export function unionCamBounds(boundsList: CamBounds[]) {

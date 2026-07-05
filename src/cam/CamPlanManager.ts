@@ -22,6 +22,9 @@ import {
   syncCamDebugSliceSolids,
 } from './CamDebugSliceSolids.js';
 import {
+  clearCamToolpathSimulatorOverlay,
+} from './CamToolpathSimulator.js';
+import {
   mergeCamMachineProfile,
   normalizeCamMachineProfile,
   type CamMachineProfile,
@@ -302,6 +305,13 @@ export class CamPlanManager extends HistoryCollectionBase {
     return this.getCombinedPlan()?.gcode || '';
   }
 
+  clearSceneArtifacts(viewer: any = null) {
+    const scene = this._resolveScene(viewer);
+    const removedDebugSolids = this._clearDebugSliceSolids(viewer);
+    const removedSimulatorOverlay = clearCamToolpathSimulatorOverlay(scene) ? 1 : 0;
+    return removedDebugSolids + removedSimulatorOverlay;
+  }
+
   loadSerializable(rawState: any) {
     this.entries = [];
     this._idCounter = 0;
@@ -399,12 +409,14 @@ export class CamPlanManager extends HistoryCollectionBase {
   }
 
   _operationRunContext(viewer: any = null) {
-    const resolvedViewer = viewer || this.partHistory?.viewer || null;
+    const source = viewer && typeof viewer === 'object' ? viewer : {};
+    const resolvedViewer = source.viewer || (source.scene ? source : viewer) || this.partHistory?.viewer || null;
+    const partHistory = source.partHistory || resolvedViewer?.partHistory || this.partHistory || null;
     return {
       viewer: resolvedViewer,
-      partHistory: this.partHistory,
-      machineProfile: this.getMachineProfile(),
-      stockProfile: this.getStockProfile(),
+      partHistory,
+      machineProfile: normalizeCamMachineProfile(source.machineProfile || this.getMachineProfile()),
+      stockProfile: normalizeCamStockProfile(source.stockProfile || this.getStockProfile()),
       manager: this,
     };
   }

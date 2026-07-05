@@ -137,11 +137,50 @@ function disposeObjectTree(object: any) {
   }
 }
 
-function disposeExistingSimulatorGroup(scene: THREE.Scene | null | undefined) {
+export function clearCamToolpathSimulatorOverlay(scene: THREE.Scene | null | undefined) {
   const existing = scene?.getObjectByName?.(CAM_TOOLPATH_SIMULATOR_GROUP_NAME);
-  if (!existing) return;
+  if (!existing) return false;
   allowSceneOverlayRemoval(existing as any, { deep: true });
   disposeObjectTree(existing);
+  return true;
+}
+
+function makeBallNoseProfileGeometry(radius: number) {
+  const positions: number[] = [];
+  const appendSegment = (a: THREE.Vector3, b: THREE.Vector3) => {
+    positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
+  };
+  const appendPolyline = (points: THREE.Vector3[], closed = false) => {
+    for (let index = 0; index + 1 < points.length; index += 1) appendSegment(points[index], points[index + 1]);
+    if (closed && points.length > 1) appendSegment(points[points.length - 1], points[0]);
+  };
+  const steps = 48;
+  const xMeridian: THREE.Vector3[] = [];
+  const zMeridian: THREE.Vector3[] = [];
+  for (let step = 0; step <= steps; step += 1) {
+    const angle = Math.PI + ((Math.PI * step) / steps);
+    const radial = radius * Math.cos(angle);
+    const y = radius + (radius * Math.sin(angle));
+    xMeridian.push(new THREE.Vector3(radial, y, 0));
+    zMeridian.push(new THREE.Vector3(0, y, radial));
+  }
+  appendPolyline(xMeridian);
+  appendPolyline(zMeridian);
+
+  for (const y of [radius, radius * 0.5]) {
+    const dy = y - radius;
+    const ringRadius = Math.sqrt(Math.max(0, (radius * radius) - (dy * dy)));
+    const ring: THREE.Vector3[] = [];
+    for (let step = 0; step < steps; step += 1) {
+      const angle = (Math.PI * 2 * step) / steps;
+      ring.push(new THREE.Vector3(ringRadius * Math.cos(angle), y, ringRadius * Math.sin(angle)));
+    }
+    appendPolyline(ring, true);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  return geometry;
 }
 
 export class CamToolpathSimulator {
@@ -283,7 +322,7 @@ export class CamToolpathSimulator {
 
   _buildOverlay() {
     if (!this.scene) return;
-    disposeExistingSimulatorGroup(this.scene);
+    clearCamToolpathSimulatorOverlay(this.scene);
     const group = new THREE.Group();
     group.name = CAM_TOOLPATH_SIMULATOR_GROUP_NAME;
     group.renderOrder = 6000;
@@ -351,7 +390,7 @@ export class CamToolpathSimulator {
   }
 
   _clearOverlay() {
-    if (this.scene) disposeExistingSimulatorGroup(this.scene);
+    if (this.scene) clearCamToolpathSimulatorOverlay(this.scene);
     this.group = null;
     this.toolHead = null;
     this.fullLine = null;
@@ -438,29 +477,66 @@ export class CamToolpathSimulator {
       opacity: 0.95,
       depthTest: false,
       depthWrite: false,
+      side: THREE.DoubleSide,
     });
 
     let bodyGeometry: THREE.BufferGeometry;
+    let tipGeometry: THREE.BufferGeometry;
     if (kind === 'v-bit') {
       bodyGeometry = new THREE.ConeGeometry(radius, length, 32, 1);
       bodyGeometry.rotateX(Math.PI);
       bodyGeometry.translate(0, length * 0.5, 0);
+      tipGeometry = new THREE.SphereGeometry(Math.max(radius * 0.38, 0.04), 16, 8);
+    } else if (kind === 'ball-endmill') {
+      const bodyLength = Math.max(radius, length - radius);
+      bodyGeometry = new THREE.CylinderGeometry(radius, radius, bodyLength, 32, 1, true);
+      bodyGeometry.translate(0, radius + (bodyLength * 0.5), 0);
+      tipGeometry = new THREE.SphereGeometry(radius, 32, 16, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
+      tipGeometry.translate(0, radius, 0);
     } else {
       bodyGeometry = new THREE.CylinderGeometry(radius, radius, length, 32, 1);
       bodyGeometry.translate(0, length * 0.5, 0);
+      tipGeometry = new THREE.SphereGeometry(Math.max(radius * 0.38, 0.04), 16, 8);
     }
     const body = new THREE.Mesh(bodyGeometry, toolMaterial);
     body.name = '__CAM_TOOLPATH_TOOL_BODY__';
     body.renderOrder = 6004;
     this.toolHead.add(body);
 
-    const tipGeometry = kind === 'ball-endmill'
-      ? new THREE.SphereGeometry(radius, 24, 12)
-      : new THREE.SphereGeometry(Math.max(radius * 0.38, 0.04), 16, 8);
     const tip = new THREE.Mesh(tipGeometry, tipMaterial);
     tip.name = '__CAM_TOOLPATH_TOOL_TIP__';
     tip.renderOrder = 6005;
     this.toolHead.add(tip);
+
+    if (kind === 'ball-endmill') {
+      const tipOutline = new THREE.LineSegments(
+        new THREE.WireframeGeometry(tipGeometry),
+        new THREE.LineBasicMaterial({
+          color: 0x2b6f88,
+          transparent: true,
+          opacity: 0.55,
+          depthTest: false,
+          depthWrite: false,
+        }),
+      );
+      tipOutline.name = '__CAM_TOOLPATH_TOOL_TIP_OUTLINE__';
+      tipOutline.renderOrder = 6006;
+      this.toolHead.add(tipOutline);
+
+      const tipProfile = new THREE.LineSegments(
+        makeBallNoseProfileGeometry(radius),
+        new THREE.LineBasicMaterial({
+          color: 0xe8f7ff,
+          transparent: true,
+          opacity: 0.85,
+          depthTest: false,
+          depthWrite: false,
+        }),
+      );
+      tipProfile.name = '__CAM_TOOLPATH_TOOL_TIP_PROFILE__';
+      tipProfile.renderOrder = 6007;
+      this.toolHead.add(tipProfile);
+    }
 
     markSceneOverlayObject(this.toolHead as any, {
       preserve: true,

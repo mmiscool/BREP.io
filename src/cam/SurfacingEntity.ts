@@ -16,6 +16,7 @@ import {
   type CamToolpathSegment,
 } from './CamToolpathDefinition.js';
 import {
+  collectVisibleSolids,
   EPS,
   extractTrianglesFromFace,
   extractTrianglesFromSolid,
@@ -36,12 +37,21 @@ type ScanlineRun = {
   points: Array<[number, number, number]>;
   rawPointCount?: number;
   filteredPointCount?: number;
+  adaptiveAcceptedIntervalCount?: number;
+  adaptiveDroppedPointCount?: number;
+  adaptiveSubdivisionCount?: number;
+  adaptiveMaxDepth?: number;
+  adaptiveMaxDepthHit?: boolean;
 };
 
 type ScanlineInterval = {
   start: number;
   end: number;
 };
+
+type ScanlinePiece = Omit<ScanlineRun, 'scanline' | 'filteredPointCount'>;
+
+const SURFACING_SAFETY_SAMPLE_SPACING_MAX = 0.05;
 
 const inputParamsSchema = {
   id: {
@@ -95,6 +105,21 @@ const inputParamsSchema = {
     type: 'number',
     default_value: 0.01,
     hint: 'Maximum 3D deviation allowed when removing redundant surfacing samples. Set to 0 to preserve all samples.',
+  },
+  sampleSpacing: {
+    type: 'number',
+    default_value: 0,
+    hint: 'Maximum XY distance between adaptive drop-cutter samples. Use 0 for automatic spacing from tool size and stepover.',
+  },
+  minSampleSpacing: {
+    type: 'number',
+    default_value: 0.05,
+    hint: 'Smallest XY interval adaptive surfacing may subdivide to on curved or steep geometry.',
+  },
+  flatnessCosLimit: {
+    type: 'number',
+    default_value: 0.999,
+    hint: 'Adaptive surfacing flatness threshold. Values closer to 1 keep more points on curved paths.',
   },
   rasterDirection: {
     type: 'options',
@@ -210,17 +235,41 @@ export class SurfacingEntity extends ListEntityBase {
     }
 
     const footprint = new TriangleFootprint(faceTriangles);
-    const dropCutter = new DropCutterIndex(obstacleTriangles, contactRadius);
-    const sampleStep = Math.max(0.02, Math.min(stepover, toolRadius * 0.5));
-    const runs = buildSurfacingRuns({
-      footprint,
-      dropCutter,
-      rasterDirection,
-      stepover,
+    const surfaceDropCutter = new DropCutterIndex(faceTriangles, contactRadius);
+    const obstacleDropCutter = new DropCutterIndex(obstacleTriangles, contactRadius);
+    const automaticSampleStep = Math.max(0.02, Math.min(stepover, toolRadius * 0.5));
+    const sampleStep = Math.max(0.02, optionalPositiveNumber(params.sampleSpacing, automaticSampleStep, EPS));
+    const minSampleSpacing = Math.max(EPS, Math.min(
       sampleStep,
-      toolRadius,
-      pathTolerance,
-    });
+      positiveNumber(params.minSampleSpacing, SURFACING_SAFETY_SAMPLE_SPACING_MAX, EPS),
+      SURFACING_SAFETY_SAMPLE_SPACING_MAX,
+    ));
+    const flatnessCosLimit = Math.max(-1, Math.min(1, finiteNumber(params.flatnessCosLimit, 0.999)));
+    let runs: ScanlineRun[];
+    try {
+      runs = buildSurfacingRuns({
+        footprint,
+        surfaceDropCutter,
+        obstacleDropCutter,
+        rasterDirection,
+        stepover,
+        sampleStep,
+        minSampleSpacing,
+        flatnessCosLimit,
+        toolRadius,
+        pathTolerance,
+      });
+    } catch (error: any) {
+      return makeEmptySurfacingResult({
+        operationId,
+        operationName,
+        machine,
+        targetBounds,
+        cutter,
+        spindleRPM,
+        warnings: [String(error?.message || error || 'Surfacing toolpath generation failed.')],
+      });
+    }
     if (!runs.length) {
       return makeEmptySurfacingResult({
         operationId,
@@ -235,7 +284,10 @@ export class SurfacingEntity extends ListEntityBase {
 
     const topZ = targetBounds.max[2];
     const safeHeight = Math.max(0, finiteNumber(params.safeHeight, 5));
-    const safeZ = roundCoord(Math.max(Number(machine.safeParkZ) || 0, topZ + safeHeight));
+    const safeZ = roundCoord(Math.max(
+      Number(machine.safeParkZ) || 0,
+      topZ + Math.max(safeHeight, stockAllowance + linkClearance),
+    ));
     const orientation = normalizeCamOrientation({ toolAxis: [0, 0, -1], forward: [1, 0, 0] });
     const path = makeSurfacingPath({
       id: `${operationId}-SURF`,
@@ -243,9 +295,11 @@ export class SurfacingEntity extends ListEntityBase {
       operationName,
       runs,
       footprint,
-      dropCutter,
+      surfaceDropCutter,
+      obstacleDropCutter,
       toolRadius,
       sampleStep,
+      minSampleSpacing,
       stepover,
       safeZ,
       linkClearance,
@@ -257,7 +311,8 @@ export class SurfacingEntity extends ListEntityBase {
       spindleRPM,
     });
     const paths = [path];
-    const bounds = boundsFromSurfacingPath(path, targetBounds);
+    const bounds = boundsFromSurfacingPath(path);
+    const scanlineCount = new Set(runs.map((run) => run.scanline)).size;
     const resultBase: Omit<CamToolpathProgram, 'gcode'> = {
       schemaVersion: CAM_TOOLPATH_SCHEMA_VERSION,
       operationId,
@@ -276,7 +331,7 @@ export class SurfacingEntity extends ListEntityBase {
         paths,
         targetCount: faces.length,
         triangleCount: obstacleTriangles.length,
-        levelCount: runs.length,
+        levelCount: scanlineCount,
         warningCount: warnings.length,
       }),
       warnings,
@@ -285,9 +340,12 @@ export class SurfacingEntity extends ListEntityBase {
         faceCount: faces.length,
         faceNames: faces.map((face) => String(face?.name || '')).filter(Boolean),
         runCount: runs.length,
+        scanlineCount,
         rasterDirection,
         stepover: roundCoord(stepover),
         sampleStep: roundCoord(sampleStep),
+        minSampleSpacing: roundCoord(minSampleSpacing),
+        flatnessCosLimit: roundCoord(flatnessCosLimit),
         stockAllowance: roundCoord(stockAllowance),
         linkClearance: roundCoord(linkClearance),
         pathTolerance: roundCoord(pathTolerance),
@@ -310,21 +368,211 @@ function resolveTargetFaces(context: AnyRecord, selection: any = null) {
   const list = Array.isArray(selection) ? selection : (selection ? [selection] : []);
   const out: any[] = [];
   const seen = new Set<any>();
-  for (const item of list) {
-    let face: any = null;
-    if (item && typeof item === 'object' && String(item.type || '').toUpperCase() === 'FACE') {
-      face = item;
-    } else {
-      const name = String(item?.name || item?.id || item || '');
-      if (!name) continue;
-      const resolved = scene?.getObjectByName?.(name) || partHistory?.getObjectByName?.(name) || null;
-      if (resolved && String(resolved.type || '').toUpperCase() === 'FACE') face = resolved;
-    }
-    if (!face || seen.has(face)) continue;
-    seen.add(face);
+  const visibleSolids = collectVisibleSolids(scene);
+  const addFace = (face: any, key: any = face) => {
+    if (!face || seen.has(key)) return;
+    seen.add(key);
     out.push(face);
+  };
+  const addSolidBackedFaces = (solidCandidates: any[], faceNames: string[]) => {
+    let count = 0;
+    for (const faceName of faceNames) {
+      for (const solid of solidCandidates) {
+        const solidFace = makeSolidBackedFaceRecord(solid, faceName);
+        if (solidFace) {
+          addFace(solidFace, `${solid?.uuid || solid?.name || 'solid'}:${faceName}`);
+          count += 1;
+        }
+      }
+    }
+    return count;
+  };
+  for (const item of list) {
+    const directFaceGeometry = resolveDirectFaceGeometry(item);
+    if (directFaceGeometry) {
+      addFace(directFaceGeometry);
+      continue;
+    }
+
+    const hasOwnerHint = hasSolidOwnerHint(item);
+    const solidCandidates = resolveSolidCandidatesForFaceReference(
+      { scene, partHistory, visibleSolids },
+      item,
+      { allowVisibleFallback: !hasOwnerHint },
+    );
+    const ownerFaceNames = ownerFaceNameCandidatesFromSelection(item);
+    if (hasOwnerHint && addSolidBackedFaces(solidCandidates, ownerFaceNames) > 0) continue;
+    if (hasOwnerHint) continue;
+
+    const directFace = resolveDirectFaceObjectByName({ scene, partHistory }, item);
+    if (directFace) {
+      addFace(directFace);
+      continue;
+    }
+
+    if (!hasOwnerHint) addSolidBackedFaces(solidCandidates, faceNameCandidatesFromSelection(item));
   }
   return out;
+}
+
+function resolveDirectFaceGeometry(item: any) {
+  if (item && typeof item === 'object' && String(item.type || '').toUpperCase() === 'FACE') {
+    if (item.geometry || Array.isArray(item.camFaceTriangles) || Array.isArray(item.triangles)) return item;
+  }
+  return null;
+}
+
+function resolveDirectFaceObjectByName(context: AnyRecord, item: any) {
+  for (const name of faceNameCandidatesFromSelection(item)) {
+    const resolved = resolveObjectByName(context, name);
+    if (resolved && String(resolved.type || '').toUpperCase() === 'FACE') return resolved;
+  }
+  return null;
+}
+
+function hasSolidOwnerHint(item: any) {
+  if (!item || typeof item !== 'object') return false;
+  return Boolean(
+    item.parent
+    || item.solid
+    || item.solidName
+    || item.targetSolid
+    || item.targetSolidName
+    || item.objectName
+    || item.parentName
+    || item.target
+    || item.reference
+    || item.userData?.parent
+    || item.userData?.solid
+    || item.userData?.solidName
+    || item.userData?.targetSolid
+    || item.userData?.targetSolidName
+    || item.userData?.objectName
+    || item.userData?.parentName
+    || item.userData?.target
+    || item.userData?.reference
+  );
+}
+
+function ownerFaceNameCandidatesFromSelection(item: any): string[] {
+  if (!item || typeof item !== 'object') return faceNameCandidatesFromSelection(item);
+  const out: string[] = [];
+  const add = (value: any) => {
+    const text = String(value || '').trim();
+    if (text && !out.includes(text)) out.push(text);
+  };
+  add(item.faceName);
+  add(item.userData?.faceName);
+  add(item.selectionName);
+  if (out.length) return out;
+  return faceNameCandidatesFromSelection(item);
+}
+
+function faceNameCandidatesFromSelection(item: any): string[] {
+  const out: string[] = [];
+  const add = (value: any) => {
+    const text = String(value || '').trim();
+    if (text && !out.includes(text)) out.push(text);
+  };
+  if (typeof item === 'string') {
+    add(item);
+  } else if (item && typeof item === 'object') {
+    add(item.faceName);
+    add(item.userData?.faceName);
+    add(item.selectionName);
+    add(item.name);
+    add(item.id);
+    if (Array.isArray(item.path)) {
+      for (let index = item.path.length - 1; index >= 0; index -= 1) add(item.path[index]);
+    }
+  }
+  return out;
+}
+
+function resolveSolidCandidatesForFaceReference({
+  scene,
+  partHistory,
+  visibleSolids,
+}: {
+  scene: any;
+  partHistory: any;
+  visibleSolids: any[];
+}, item: any, options: { allowVisibleFallback?: boolean } = {}) {
+  const out: any[] = [];
+  const seen = new Set<any>();
+  const add = (solid: any) => {
+    if (!solid || seen.has(solid)) return;
+    if (String(solid.type || '').toUpperCase() !== 'SOLID' && typeof solid.getFace !== 'function') return;
+    seen.add(solid);
+    out.push(solid);
+  };
+  if (item && typeof item === 'object') {
+    add(item.parent);
+    add(item.solid);
+    add(item.userData?.parent);
+    add(item.userData?.solid);
+    add(resolveObjectByName(
+      { scene, partHistory },
+      item.solidName
+        || item.targetSolid
+        || item.targetSolidName
+        || item.objectName
+        || item.parentName
+        || item.userData?.solidName
+        || item.userData?.targetSolid
+        || item.userData?.targetSolidName
+        || item.userData?.objectName
+        || item.userData?.parentName,
+    ));
+    add(resolveObjectByName({ scene, partHistory }, item.target));
+    add(resolveObjectByName({ scene, partHistory }, item.reference));
+    add(resolveObjectByName({ scene, partHistory }, item.userData?.target));
+    add(resolveObjectByName({ scene, partHistory }, item.userData?.reference));
+  }
+  if (!out.length && options.allowVisibleFallback !== false) visibleSolids.forEach(add);
+  return out;
+}
+
+function resolveObjectByName(context: AnyRecord, value: any) {
+  if (!value) return null;
+  if (value && typeof value === 'object' && (value.isObject3D || value.type || typeof value.getMesh === 'function' || typeof value.getFace === 'function')) return value;
+  const name = String(value || '').trim();
+  if (!name) return null;
+  const scene = context.scene || null;
+  const partHistory = context.partHistory || null;
+  return scene?.getObjectByName?.(name) || partHistory?.getObjectByName?.(name) || findObjectByNameInTree(scene, name);
+}
+
+function findObjectByNameInTree(root: any, name: string) {
+  if (!root || !name) return null;
+  if (root.name === name) return root;
+  const children = Array.isArray(root.children) ? root.children : [];
+  for (const child of children) {
+    const found = findObjectByNameInTree(child, name);
+    if (found) return found;
+  }
+  return null;
+}
+
+function makeSolidBackedFaceRecord(solid: any, faceName: string) {
+  if (!solid || !faceName || typeof solid.getFace !== 'function') return null;
+  let triangles: any[] = [];
+  try { triangles = solid.getFace(faceName) || []; } catch { triangles = []; }
+  if (!Array.isArray(triangles) || triangles.length === 0) return null;
+  return {
+    type: 'FACE',
+    name: faceName,
+    userData: { faceName },
+    parent: solid,
+    solid,
+    camFaceTriangles: triangles,
+  };
+}
+
+function optionalPositiveNumber(value: any, fallback: number, min = EPS) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || Math.abs(num) <= min) return Math.max(min, fallback);
+  return Math.max(min, Math.abs(num));
 }
 
 // 2D spatial hash over triangle XY footprints for point-in-footprint tests.
@@ -616,18 +864,24 @@ function sphereCenterZOnTriangle(px: number, py: number, radius: number, triangl
 
 function buildSurfacingRuns({
   footprint,
-  dropCutter,
+  surfaceDropCutter,
+  obstacleDropCutter,
   rasterDirection,
   stepover,
   sampleStep,
+  minSampleSpacing,
+  flatnessCosLimit,
   toolRadius,
   pathTolerance,
 }: {
   footprint: TriangleFootprint;
-  dropCutter: DropCutterIndex;
+  surfaceDropCutter: DropCutterIndex;
+  obstacleDropCutter: DropCutterIndex;
   rasterDirection: 'X' | 'Y';
   stepover: number;
   sampleStep: number;
+  minSampleSpacing: number;
+  flatnessCosLimit: number;
   toolRadius: number;
   pathTolerance: number;
 }): ScanlineRun[] {
@@ -638,7 +892,7 @@ function buildSurfacingRuns({
   const travelMax = alongX ? footprint.maxX : footprint.maxY;
   if (!(lineMax >= lineMin) || !(travelMax >= travelMin)) return [];
   const lineSteps = Math.max(0, Math.ceil((lineMax - lineMin) / stepover));
-  const maxSampleSteps = Math.max(1, Math.ceil((travelMax - travelMin) / sampleStep));
+  const maxSampleSteps = Math.max(1, Math.ceil((travelMax - travelMin) / Math.max(minSampleSpacing, EPS)));
   if ((lineSteps + 1) * (maxSampleSteps + 1) > 4_000_000) {
     throw new Error('Surfacing raster is too dense; increase stepover or reduce the selected area.');
   }
@@ -647,35 +901,244 @@ function buildSurfacingRuns({
     const lineCoord = lineIndex === lineSteps ? lineMax : Math.min(lineMax, lineMin + (lineIndex * stepover));
     const intervals = footprint.scanlineIntervals(rasterDirection, lineCoord);
     for (const interval of intervals) {
-      let current: ScanlineRun | null = null;
-      const sampleSteps = Math.max(1, Math.ceil((interval.end - interval.start) / sampleStep));
-      for (let sampleIndex = 0; sampleIndex <= sampleSteps; sampleIndex += 1) {
-        const travelCoord = sampleIndex === sampleSteps
-          ? interval.end
-          : Math.min(interval.end, interval.start + (sampleIndex * sampleStep));
-        const px = alongX ? travelCoord : lineCoord;
-        const py = alongX ? lineCoord : travelCoord;
-        // Center is held contactRadius (= radius + allowance) off the part;
-        // the real ball tip sits one tool radius below the center.
-        const centerZ = dropCutter.centerZ(px, py);
-        const tipZ = centerZ === null ? null : centerZ - toolRadius;
-        if (tipZ === null) {
-          finalizeSurfacingRun(runs, current, pathTolerance);
-          current = null;
-          continue;
-        }
-        if (!current) current = { scanline: lineIndex + 1, points: [] };
-        current.points.push([roundCoord(px), roundCoord(py), roundCoord(tipZ)]);
+      const pieces = buildAdaptiveScanlinePieces({
+        interval,
+        alongX,
+        lineCoord,
+        surfaceDropCutter,
+        obstacleDropCutter,
+        toolRadius,
+        sampleStep,
+        minSampleSpacing,
+        flatnessCosLimit,
+      }) || buildUniformScanlinePieces({
+        interval,
+        alongX,
+        lineCoord,
+        surfaceDropCutter,
+        obstacleDropCutter,
+        toolRadius,
+        sampleStep: minSampleSpacing,
+      });
+      for (const piece of pieces) {
+        finalizeSurfacingRun(runs, {
+          scanline: lineIndex + 1,
+          ...piece,
+        }, pathTolerance);
       }
-      finalizeSurfacingRun(runs, current, pathTolerance);
     }
   }
   return runs;
 }
 
+function buildUniformScanlinePieces({
+  interval,
+  alongX,
+  lineCoord,
+  surfaceDropCutter,
+  obstacleDropCutter,
+  toolRadius,
+  sampleStep,
+}: {
+  interval: ScanlineInterval;
+  alongX: boolean;
+  lineCoord: number;
+  surfaceDropCutter: DropCutterIndex;
+  obstacleDropCutter: DropCutterIndex;
+  toolRadius: number;
+  sampleStep: number;
+}): ScanlinePiece[] {
+  const pieces: ScanlinePiece[] = [];
+  let current: ScanlinePiece | null = null;
+  const sampleSteps = Math.max(1, Math.ceil((interval.end - interval.start) / sampleStep));
+  for (let sampleIndex = 0; sampleIndex <= sampleSteps; sampleIndex += 1) {
+    const travelCoord = sampleIndex === sampleSteps
+      ? interval.end
+      : Math.min(interval.end, interval.start + (sampleIndex * sampleStep));
+    const point = dropSurfacingPoint({ alongX, lineCoord, travelCoord, surfaceDropCutter, obstacleDropCutter, toolRadius });
+    if (!point) {
+      if (current && current.points.length >= 2) pieces.push(current);
+      current = null;
+      continue;
+    }
+    if (!current) current = { points: [], adaptiveDroppedPointCount: 0 };
+    current.points.push(point);
+    current.adaptiveDroppedPointCount = (current.adaptiveDroppedPointCount || 0) + 1;
+  }
+  if (current && current.points.length >= 2) pieces.push(current);
+  return pieces;
+}
+
+function buildAdaptiveScanlinePieces({
+  interval,
+  alongX,
+  lineCoord,
+  surfaceDropCutter,
+  obstacleDropCutter,
+  toolRadius,
+  sampleStep,
+  minSampleSpacing,
+  flatnessCosLimit,
+}: {
+  interval: ScanlineInterval;
+  alongX: boolean;
+  lineCoord: number;
+  surfaceDropCutter: DropCutterIndex;
+  obstacleDropCutter: DropCutterIndex;
+  toolRadius: number;
+  sampleStep: number;
+  minSampleSpacing: number;
+  flatnessCosLimit: number;
+}): ScanlinePiece[] | null {
+  const span = interval.end - interval.start;
+  if (!(span > EPS)) return null;
+  const cache = new Map<string, [number, number, number] | null>();
+  let droppedPointCount = 0;
+  const pointAt = (t: number) => {
+    const clamped = Math.max(0, Math.min(1, t));
+    const key = clamped.toFixed(12);
+    if (cache.has(key)) return cache.get(key) || null;
+    droppedPointCount += 1;
+    const travelCoord = interval.start + (span * clamped);
+    const point = dropSurfacingPoint({ alongX, lineCoord, travelCoord, surfaceDropCutter, obstacleDropCutter, toolRadius });
+    cache.set(key, point);
+    return point;
+  };
+  const p0 = pointAt(0);
+  const p1 = pointAt(1);
+  if (!p0 || !p1) return null;
+
+  const maxDepth = 18;
+  let acceptedIntervalCount = 0;
+  let subdivisionCount = 0;
+  let maxObservedDepth = 0;
+  let maxDepthHit = false;
+  const points: Array<[number, number, number]> = [p0];
+  const stack: Array<{
+    t0: number;
+    t1: number;
+    p0: [number, number, number];
+    p1: [number, number, number];
+    depth: number;
+  }> = [{ t0: 0, t1: 1, p0, p1, depth: 0 }];
+
+  while (stack.length) {
+    const intervalState = stack.pop();
+    if (!intervalState) continue;
+    const { t0, t1, p0: start, p1: end, depth } = intervalState;
+    const tm = (t0 + t1) * 0.5;
+    const mid = pointAt(tm);
+    if (!mid) return null;
+    const sourceLength = Math.abs(span * (t1 - t0));
+    const chordLength = distance3D(start, end);
+    const needsSpacing = chordLength > sampleStep + EPS || sourceLength > minSampleSpacing + EPS;
+    const needsFlatness = !isFlatProjectedInterval(start, mid, end, flatnessCosLimit)
+      && Math.max(chordLength, sourceLength) > minSampleSpacing + EPS;
+    const shouldSubdivide = needsSpacing || needsFlatness;
+    if (shouldSubdivide && sourceLength > minSampleSpacing + EPS && depth < maxDepth) {
+      subdivisionCount += 1;
+      maxObservedDepth = Math.max(maxObservedDepth, depth + 1);
+      stack.push({ t0: tm, t1, p0: mid, p1: end, depth: depth + 1 });
+      stack.push({ t0, t1: tm, p0: start, p1: mid, depth: depth + 1 });
+      continue;
+    }
+    if (shouldSubdivide && depth >= maxDepth) maxDepthHit = true;
+    acceptedIntervalCount += 1;
+    if (!samePoint3(points[points.length - 1], end)) points.push(end);
+  }
+
+  const rawPointCount = points.length;
+  const emittedPoints = coarsenStraightAdaptiveSamples(points, sampleStep);
+  return [{
+    points: emittedPoints,
+    rawPointCount,
+    adaptiveAcceptedIntervalCount: acceptedIntervalCount,
+    adaptiveDroppedPointCount: droppedPointCount,
+    adaptiveSubdivisionCount: subdivisionCount,
+    adaptiveMaxDepth: maxObservedDepth,
+    adaptiveMaxDepthHit: maxDepthHit,
+  }];
+}
+
+function dropSurfacingPoint({
+  alongX,
+  lineCoord,
+  travelCoord,
+  surfaceDropCutter,
+  obstacleDropCutter,
+  toolRadius,
+}: {
+  alongX: boolean;
+  lineCoord: number;
+  travelCoord: number;
+  surfaceDropCutter: DropCutterIndex;
+  obstacleDropCutter: DropCutterIndex;
+  toolRadius: number;
+}) {
+  const px = alongX ? travelCoord : lineCoord;
+  const py = alongX ? lineCoord : travelCoord;
+  // Center is held contactRadius (= radius + allowance) off the part;
+  // the real ball tip sits one tool radius below the center.
+  const surfaceCenterZ = surfaceDropCutter.centerZ(px, py);
+  if (surfaceCenterZ === null) return null;
+  const obstacleCenterZ = obstacleDropCutter.centerZ(px, py);
+  if (obstacleCenterZ !== null && obstacleCenterZ > surfaceCenterZ + EPS) return null;
+  return [roundCoord(px), roundCoord(py), roundCoord(surfaceCenterZ - toolRadius)] as [number, number, number];
+}
+
+function isFlatProjectedInterval(
+  start: [number, number, number],
+  mid: [number, number, number],
+  end: [number, number, number],
+  flatnessCosLimit: number,
+) {
+  const ax = mid[0] - start[0];
+  const ay = mid[1] - start[1];
+  const az = mid[2] - start[2];
+  const bx = end[0] - mid[0];
+  const by = end[1] - mid[1];
+  const bz = end[2] - mid[2];
+  const al = Math.hypot(ax, ay, az);
+  const bl = Math.hypot(bx, by, bz);
+  if (al <= EPS || bl <= EPS) return distance3D(start, end) <= EPS;
+  return (((ax * bx) + (ay * by) + (az * bz)) / (al * bl)) >= flatnessCosLimit;
+}
+
+function distance3D(a: [number, number, number], b: [number, number, number]) {
+  return Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+}
+
+function distanceXY(a: [number, number, number], b: [number, number, number]) {
+  return Math.hypot(b[0] - a[0], b[1] - a[1]);
+}
+
+function coarsenStraightAdaptiveSamples(points: Array<[number, number, number]>, sampleStep: number) {
+  if (!Array.isArray(points) || points.length < 3 || !(sampleStep > EPS)) return points.slice();
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (distanceXY(first, last) <= EPS) return points.slice();
+  const straightTolerance = 1e-4;
+  for (let index = 1; index < points.length - 1; index += 1) {
+    if (distancePointToSegment3D(points[index], first, last) > straightTolerance) return points.slice();
+  }
+  const distance = distanceXY(first, last);
+  const stepCount = Math.max(1, Math.ceil(distance / sampleStep));
+  const out: Array<[number, number, number]> = [];
+  for (let step = 0; step <= stepCount; step += 1) {
+    const t = step / stepCount;
+    const point: [number, number, number] = [
+      roundCoord(first[0] + ((last[0] - first[0]) * t)),
+      roundCoord(first[1] + ((last[1] - first[1]) * t)),
+      roundCoord(first[2] + ((last[2] - first[2]) * t)),
+    ];
+    if (!samePoint3(out[out.length - 1], point)) out.push(point);
+  }
+  return out;
+}
+
 function finalizeSurfacingRun(runs: ScanlineRun[], run: ScanlineRun | null, pathTolerance: number) {
   if (!run || run.points.length < 2) return;
-  const rawPointCount = run.points.length;
+  const rawPointCount = run.rawPointCount || run.points.length;
   const points = filterCutterLocationLine(run.points, pathTolerance);
   if (points.length < 2) return;
   runs.push({
@@ -692,9 +1155,11 @@ function makeSurfacingPath({
   operationName,
   runs,
   footprint,
-  dropCutter,
+  surfaceDropCutter,
+  obstacleDropCutter,
   toolRadius,
   sampleStep,
+  minSampleSpacing,
   stepover,
   safeZ,
   linkClearance,
@@ -710,9 +1175,11 @@ function makeSurfacingPath({
   operationName: string;
   runs: ScanlineRun[];
   footprint: TriangleFootprint;
-  dropCutter: DropCutterIndex;
+  surfaceDropCutter: DropCutterIndex;
+  obstacleDropCutter: DropCutterIndex;
   toolRadius: number;
   sampleStep: number;
+  minSampleSpacing: number;
   stepover: number;
   safeZ: number;
   linkClearance: number;
@@ -723,16 +1190,14 @@ function makeSurfacingPath({
   plungeRate: number;
   spindleRPM: number;
 }): CamToolpathPath {
-  // Serpentine ordering: reverse every other run so passes flow back and forth.
-  const ordered = runs.map((run, index) => (
-    index % 2 === 1 ? { ...run, points: run.points.slice().reverse() } : run
-  ));
+  const ordered = orderSurfacingRunsSerpentine(runs);
   const first = ordered[0]?.points[0] || [0, 0, 0];
   const points: CamToolpathPoint[] = [{
     position: [first[0], first[1], roundCoord(safeZ)],
     orientation,
     metadata: { strategy: 'surfacing', safe: true },
   }];
+  const linkSampleStep = Math.min(sampleStep, Math.max(minSampleSpacing, EPS));
   const segments: CamToolpathSegment[] = [];
   let currentIndex = 0;
   let segmentNumber = 1;
@@ -772,9 +1237,10 @@ function makeSurfacingPath({
         from: points[currentIndex].position,
         to: start,
         footprint,
-        dropCutter,
+        surfaceDropCutter,
+        obstacleDropCutter,
         toolRadius,
-        sampleStep,
+        sampleStep: linkSampleStep,
         stepover,
         addMove,
         scanline: run.scanline,
@@ -785,19 +1251,19 @@ function makeSurfacingPath({
       ? tryClearanceLinkRuns({
         from: points[currentIndex].position,
         to: start,
-        dropCutter,
+        dropCutter: obstacleDropCutter,
         toolRadius,
-        sampleStep,
+        sampleStep: linkSampleStep,
         safeZ,
         linkClearance,
         addMove,
         scanline: run.scanline,
       })
       : false;
-    if (!linked && !clearanceLinked) {
-      if (previousRun) {
-        addMove('retract', [points[currentIndex].position[0], points[currentIndex].position[1], roundCoord(safeZ)], { safe: true, scanline: previousRun.scanline });
-      }
+    if (!previousRun) {
+      addMove('plunge', start, { scanline: run.scanline });
+    } else if (!linked && !clearanceLinked) {
+      addMove('retract', [points[currentIndex].position[0], points[currentIndex].position[1], roundCoord(safeZ)], { safe: true, scanline: previousRun.scanline });
       addMove('rapid', [start[0], start[1], roundCoord(safeZ)], { safe: true, scanline: run.scanline });
       addMove('plunge', start, { scanline: run.scanline });
     }
@@ -824,11 +1290,43 @@ function makeSurfacingPath({
       runCount: runs.length,
       scanlineCount: new Set(runs.map((run) => run.scanline)).size,
       pointCount: points.length,
+      contactPointCount: points.filter((point) => point.metadata?.safe !== true).length,
+      safePointCount: points.filter((point) => point.metadata?.safe === true).length,
       rawCutPointCount: runs.reduce((sum, run) => sum + (run.rawPointCount || run.points.length), 0),
       filteredCutPointCount: runs.reduce((sum, run) => sum + (run.filteredPointCount || 0), 0),
-      clearanceLinkCount: segments.filter((segment) => segment.metadata?.clearanceLink).length,
+      linkSampleStep: roundCoord(linkSampleStep),
+      adaptiveAcceptedIntervalCount: runs.reduce((sum, run) => sum + (run.adaptiveAcceptedIntervalCount || 0), 0),
+      adaptiveDroppedPointCount: runs.reduce((sum, run) => sum + (run.adaptiveDroppedPointCount || 0), 0),
+      adaptiveSubdivisionCount: runs.reduce((sum, run) => sum + (run.adaptiveSubdivisionCount || 0), 0),
+      adaptiveMaxDepth: runs.reduce((max, run) => Math.max(max, run.adaptiveMaxDepth || 0), 0),
+      adaptiveMaxDepthHit: runs.some((run) => run.adaptiveMaxDepthHit === true),
+      clearanceLinkCount: segments.filter((segment) => segment.kind === 'rapid' && segment.metadata?.clearanceLink).length,
     },
   };
+}
+
+function orderSurfacingRunsSerpentine(runs: ScanlineRun[]) {
+  const ordered: ScanlineRun[] = [];
+  let index = 0;
+  let scanlineGroupIndex = 0;
+  while (index < runs.length) {
+    const scanline = runs[index].scanline;
+    const group: ScanlineRun[] = [];
+    while (index < runs.length && runs[index].scanline === scanline) {
+      group.push(runs[index]);
+      index += 1;
+    }
+    if (scanlineGroupIndex % 2 === 0) {
+      ordered.push(...group);
+    } else {
+      for (let groupIndex = group.length - 1; groupIndex >= 0; groupIndex -= 1) {
+        const run = group[groupIndex];
+        ordered.push({ ...run, points: run.points.slice().reverse() });
+      }
+    }
+    scanlineGroupIndex += 1;
+  }
+  return ordered;
 }
 
 // Try to travel between adjacent runs while staying on the surface: sample the
@@ -838,7 +1336,8 @@ function tryLinkRuns({
   from,
   to,
   footprint,
-  dropCutter,
+  surfaceDropCutter,
+  obstacleDropCutter,
   toolRadius,
   sampleStep,
   stepover,
@@ -849,7 +1348,8 @@ function tryLinkRuns({
   from: [number, number, number];
   to: [number, number, number];
   footprint: TriangleFootprint;
-  dropCutter: DropCutterIndex;
+  surfaceDropCutter: DropCutterIndex;
+  obstacleDropCutter: DropCutterIndex;
   toolRadius: number;
   sampleStep: number;
   stepover: number;
@@ -866,9 +1366,11 @@ function tryLinkRuns({
     const px = from[0] + ((to[0] - from[0]) * t);
     const py = from[1] + ((to[1] - from[1]) * t);
     if (!footprint.contains(px, py)) return false;
-    const centerZ = dropCutter.centerZ(px, py);
-    if (centerZ === null) return false;
-    linkPoints.push([roundCoord(px), roundCoord(py), roundCoord(centerZ - toolRadius)]);
+    const surfaceCenterZ = surfaceDropCutter.centerZ(px, py);
+    if (surfaceCenterZ === null) return false;
+    const obstacleCenterZ = obstacleDropCutter.centerZ(px, py);
+    if (obstacleCenterZ !== null && obstacleCenterZ > surfaceCenterZ + EPS) return false;
+    linkPoints.push([roundCoord(px), roundCoord(py), roundCoord(surfaceCenterZ - toolRadius)]);
   }
   const filtered = filterCutterLocationLine([from, ...linkPoints], pathTolerance);
   for (let index = 1; index < filtered.length; index += 1) {
@@ -901,9 +1403,20 @@ function lineFilterCanRemoveIntermediate(points: Array<[number, number, number]>
   const anchor = points[anchorIndex];
   const candidate = points[candidateIndex];
   for (let index = anchorIndex + 1; index < candidateIndex; index += 1) {
-    if (distancePointToSegment3D(points[index], anchor, candidate) > tolerance) return false;
+    const point = points[index];
+    if (segmentZAtPointXY(point, anchor, candidate) < point[2] - EPS) return false;
+    if (distancePointToSegment3D(point, anchor, candidate) > tolerance) return false;
   }
   return true;
+}
+
+function segmentZAtPointXY(point: [number, number, number], a: [number, number, number], b: [number, number, number]) {
+  const abx = b[0] - a[0];
+  const aby = b[1] - a[1];
+  const lenSq = (abx * abx) + (aby * aby);
+  if (lenSq <= EPS * EPS) return Math.max(a[2], b[2]);
+  const t = Math.max(0, Math.min(1, (((point[0] - a[0]) * abx) + ((point[1] - a[1]) * aby)) / lenSq));
+  return a[2] + ((b[2] - a[2]) * t);
 }
 
 function distancePointToSegment3D(point: [number, number, number], a: [number, number, number], b: [number, number, number]) {
@@ -960,6 +1473,7 @@ function tryClearanceLinkRuns({
   }
   if (!Number.isFinite(requiredZ)) return false;
   const linkZ = roundCoord(Math.min(Math.max(requiredZ, from[2], to[2]), safeZ));
+  if (linkZ >= safeZ - EPS) return false;
   const metadata = { safe: true, scanline, clearanceLink: true };
   addMove('retract', [from[0], from[1], linkZ], metadata);
   addMove('rapid', [to[0], to[1], linkZ], metadata);
@@ -967,12 +1481,12 @@ function tryClearanceLinkRuns({
   return true;
 }
 
-function boundsFromSurfacingPath(path: CamToolpathPath, targetBounds: CamBounds): CamBounds {
+function boundsFromSurfacingPath(path: CamToolpathPath): CamBounds {
   const xs = path.points.map((point) => point.position[0]);
   const ys = path.points.map((point) => point.position[1]);
   const zs = path.points.map((point) => point.position[2]);
   return {
-    min: [roundCoord(Math.min(...xs)), roundCoord(Math.min(...ys)), roundCoord(Math.min(...zs, targetBounds.min[2]))],
+    min: [roundCoord(Math.min(...xs)), roundCoord(Math.min(...ys)), roundCoord(Math.min(...zs))],
     max: [roundCoord(Math.max(...xs)), roundCoord(Math.max(...ys)), roundCoord(Math.max(...zs))],
   };
 }

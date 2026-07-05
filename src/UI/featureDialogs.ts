@@ -25,7 +25,12 @@ import {
 // Use hybrid translate+rotate gizmo used by the Viewer
 import { CombinedTransformControls } from './controls/CombinedTransformControls.js';
 import { getWidgetRenderer } from './featureDialogWidgets/index.js';
-import { normalizeReferenceList, normalizeReferenceName } from './featureDialogWidgets/utils.js';
+import {
+    normalizeReferenceList,
+    normalizeReferenceName,
+    normalizeReferenceSelectionList,
+    referenceSelectionKey,
+} from './featureDialogWidgets/utils.js';
 import {
     resolveTransformReferenceBase,
     sanitizeTransformValue,
@@ -2425,7 +2430,8 @@ export class SchemaForm {
     _renderChips(chipsWrap, key, values, options: any = {}) {
         chipsWrap.textContent = '';
         const arr = Array.isArray(values) ? values : [];
-        const normalizedValues = normalizeReferenceList(arr);
+        const normalizedItems = normalizeReferenceSelectionList(arr);
+        const normalizedValues = normalizeReferenceList(normalizedItems);
         const skipWrite = options && options.skipWrite === true;
         let inputEl = (this._inputs && typeof this._inputs.get === 'function') ? this._inputs.get(key) : null;
         const resolveInput = () => {
@@ -2471,12 +2477,14 @@ export class SchemaForm {
         }
         if (!skipWrite) {
             if (Array.isArray(this.params[key])) {
-                this.params[key] = normalizedValues;
+                this.params[key] = normalizedItems;
             } else if (this.params[key] && typeof this.params[key] === 'object' && Array.isArray(this.params[key].targets)) {
-                this.params[key].targets = normalizedValues;
+                this.params[key].targets = normalizedItems;
             }
         }
-        for (const name of normalizedValues) {
+        for (const item of normalizedItems) {
+            const name = normalizeReferenceName(item);
+            if (!name) continue;
             const chip = document.createElement('span');
             chip.className = 'ref-chip';
             chip.title = name;
@@ -2530,7 +2538,8 @@ export class SchemaForm {
                     this.params[key] = [];
                     currentArrayRef = this.params[key];
                 }
-                const idx = currentArrayRef.indexOf(name);
+                const removeKey = referenceSelectionKey(item);
+                const idx = currentArrayRef.findIndex((candidate) => referenceSelectionKey(candidate) === removeKey);
                 if (idx >= 0) currentArrayRef.splice(idx, 1);
                 this._renderChips(chipsWrap, key, currentArrayRef);
                 this._emitParamsChange(key, this.params[key]);
