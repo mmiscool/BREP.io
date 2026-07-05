@@ -26,6 +26,7 @@ import {
 } from './test_boolean_overlap_conditioning.js';
 import {
     test_cam_plan_manager_preserves_operations_and_profiles,
+    test_cam_plan_manager_async_generation_reports_progress_steps,
     test_cam_plan_manager_strips_legacy_generated_data,
     test_cam_shadow_cutter_cuts_each_loop_to_depth_before_next_loop,
     test_cam_shadow_cutter_generates_clear_hole_loop,
@@ -44,6 +45,7 @@ import {
     test_cam_roughing_vertical_wall_slice_matches_shadow_cutter_loop,
     test_cam_surfacing_adaptive_sampling_inserts_points_on_curved_face,
     test_cam_surfacing_applies_parent_transform_to_direct_face_geometry,
+    test_cam_surfacing_both_raster_directions_emit_x_and_y_paths,
     test_cam_surfacing_clearance_link_samples_narrow_preserved_geometry,
     test_cam_surfacing_combined_gcode_posts_single_runnable_program,
     test_cam_surfacing_combined_gcode_reissues_feed_after_roughing,
@@ -1606,6 +1608,7 @@ export const testFunctions: any[] = [
     { test: test_boolean_overlap_conditioning_direct_api_enabled_by_default, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_boolean_overlap_conditioning_direct_api_can_be_disabled, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_plan_manager_preserves_operations_and_profiles, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_plan_manager_async_generation_reports_progress_steps, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_plan_manager_strips_legacy_generated_data, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_shadow_cutter_generated_history_20260704000935_keeps_outer_loop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_shadow_cutter_cuts_each_loop_to_depth_before_next_loop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -1625,6 +1628,7 @@ export const testFunctions: any[] = [
     { test: test_cam_roughing_vertical_wall_slice_matches_shadow_cutter_loop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_surfacing_adaptive_sampling_inserts_points_on_curved_face, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_surfacing_applies_parent_transform_to_direct_face_geometry, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_surfacing_both_raster_directions_emit_x_and_y_paths, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_surfacing_clearance_link_samples_narrow_preserved_geometry, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_surfacing_combined_gcode_posts_single_runnable_program, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_surfacing_combined_gcode_reissues_feed_after_roughing, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

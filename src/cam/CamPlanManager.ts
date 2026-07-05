@@ -64,6 +64,9 @@ export type CamGenerationProgressEvent = {
   operationIndex?: number;
   operationCount?: number;
 };
+type CamGenerationProgressOptions = {
+  onProgress?: (event: CamGenerationProgressEvent) => void;
+};
 
 function schemaOptionValue(option: unknown) {
   if (option && typeof option === 'object') {
@@ -102,6 +105,26 @@ function serializableValuesEqual(left: any, right: any): boolean {
     return plainRecordsEqual(left, right);
   }
   return false;
+}
+
+function operationProgressPercent(operationIndex: number, operationFraction: number, operationCount: number) {
+  const count = Math.max(1, operationCount);
+  const clamped = Math.max(0, Math.min(1, operationFraction));
+  return Math.round(5 + (((operationIndex + clamped) / count) * 85));
+}
+
+function yieldToProgressObservers() {
+  return new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      try {
+        requestAnimationFrame(() => resolve());
+        return;
+      } catch {
+        /* fall back to timer */
+      }
+    }
+    setTimeout(resolve, 0);
+  });
 }
 
 export class CamPlanManager extends HistoryCollectionBase {
@@ -214,7 +237,7 @@ export class CamPlanManager extends HistoryCollectionBase {
     }
   }
 
-  async generateOperationAsync(entity: CamEntity, viewer: any = null) {
+  async generateOperationAsync(entity: CamEntity, viewer: any = null, options: CamGenerationProgressOptions = {}) {
     const resolved = this._resolveEntry(entity);
     if (!resolved) return this._makeEmptyPlan(['No CAM operation was selected.']);
     if (resolved?.inputParams?.enabled === false) return this._makeEmptyPlan();
@@ -222,7 +245,10 @@ export class CamPlanManager extends HistoryCollectionBase {
       return this._makeEmptyPlan([`CAM operation ${resolved?.inputParams?.id || resolved?.id || ''} cannot generate a toolpath.`]);
     }
     try {
-      return await resolved.run(this._operationRunContext(viewer));
+      const context: Record<string, any> = this._operationRunContext(viewer);
+      context.onProgress = (event: CamGenerationProgressEvent = {}) => this._emitProgress(options, event);
+      if (typeof resolved.runAsync === 'function') return await resolved.runAsync(context);
+      return await resolved.run(context);
     } catch (error: any) {
       return this._makeEmptyPlan([String(error?.message || error || 'CAM operation failed.')]);
     }
@@ -242,35 +268,86 @@ export class CamPlanManager extends HistoryCollectionBase {
     return this._lastCombinedPlan;
   }
 
-  async generateAllAsync(viewer: any = null, options: { onProgress?: (event: CamGenerationProgressEvent) => void } = {}) {
+  async generateAllAsync(viewer: any = null, options: CamGenerationProgressOptions = {}) {
     this._clearDebugSliceSolids(viewer);
     const enabled = this.entries.filter((entity) => entity?.inputParams?.enabled !== false);
     this._emitProgress(options, {
-      phase: 'generate',
-      message: 'Generating CAM operations',
+      phase: 'prepare',
+      message: 'Preparing CAM generation',
       detail: `${enabled.length} enabled operation${enabled.length === 1 ? '' : 's'}.`,
       current: 0,
       total: 100,
     });
+    await yieldToProgressObservers();
     const results: CamToolpathProgram[] = [];
     for (let index = 0; index < enabled.length; index += 1) {
       const entity = enabled[index];
-      results.push(await this.generateOperationAsync(entity, viewer));
+      const operationId = String(entity?.inputParams?.id || entity?.id || '');
+      const operationName = String(entity?.inputParams?.name || entity?.type || '');
       this._emitProgress(options, {
-        phase: 'generate',
-        message: 'Generating CAM operations',
-        current: Math.round(((index + 1) / Math.max(1, enabled.length)) * 100),
+        phase: 'operation',
+        message: `Generating ${operationName || 'CAM operation'}`,
+        detail: operationId ? `Operation ${index + 1} of ${enabled.length}: ${operationId}` : `Operation ${index + 1} of ${enabled.length}`,
+        current: operationProgressPercent(index, 0, enabled.length),
         total: 100,
-        operationId: String(entity?.inputParams?.id || entity?.id || ''),
-        operationName: String(entity?.inputParams?.name || entity?.type || ''),
+        operationId,
+        operationName,
+        operationIndex: index,
+        operationCount: enabled.length,
+      });
+      await yieldToProgressObservers();
+      results.push(await this.generateOperationAsync(entity, viewer, {
+        onProgress: (event) => {
+          const childTotal = Math.max(1, Number(event.total) || 100);
+          const childCurrent = Number.isFinite(Number(event.current)) ? Number(event.current) : 0;
+          this._emitProgress(options, {
+            ...event,
+            current: operationProgressPercent(index, Math.max(0, Math.min(childTotal, childCurrent)) / childTotal, enabled.length),
+            total: 100,
+            operationId,
+            operationName,
+            operationIndex: index,
+            operationCount: enabled.length,
+          });
+        },
+      }));
+      this._emitProgress(options, {
+        phase: 'operation',
+        message: `${operationName || 'CAM operation'} complete`,
+        current: operationProgressPercent(index, 1, enabled.length),
+        total: 100,
+        operationId,
+        operationName,
         operationIndex: index,
         operationCount: enabled.length,
       });
     }
+    this._emitProgress(options, {
+      phase: 'combine',
+      message: 'Combining generated toolpaths',
+      detail: `${results.length} operation result${results.length === 1 ? '' : 's'}.`,
+      current: 90,
+      total: 100,
+    });
+    await yieldToProgressObservers();
     this._lastResults = results;
     this._lastCombinedPlan = this._combineOperationResults(results);
+    this._emitProgress(options, {
+      phase: 'scene',
+      message: 'Updating CAM scene overlays',
+      current: 96,
+      total: 100,
+    });
+    await yieldToProgressObservers();
     this._syncDebugSliceSolids(viewer, this._lastCombinedPlan);
     this.notifyListeners({ reason: 'generate-all', history: this, result: this._lastCombinedPlan, results });
+    this._emitProgress(options, {
+      phase: 'done',
+      message: 'Toolpath generation complete',
+      detail: `${Number(this._lastCombinedPlan?.summary?.pathCount ?? this._lastCombinedPlan?.paths?.length ?? 0) || 0} path${(Number(this._lastCombinedPlan?.summary?.pathCount ?? this._lastCombinedPlan?.paths?.length ?? 0) || 0) === 1 ? '' : 's'} generated.`,
+      current: 100,
+      total: 100,
+    });
     return this._lastCombinedPlan;
   }
 

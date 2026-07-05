@@ -7,6 +7,7 @@ import {
   makeEmptyCamToolpathProgram,
   normalizeCamOrientation,
   summarizeCamToolpathProgram,
+  unionCamBounds,
   type CamBounds,
   type CamCutterDefinition,
   type CamCutterOrientation,
@@ -50,6 +51,13 @@ type ScanlineInterval = {
 };
 
 type ScanlinePiece = Omit<ScanlineRun, 'scanline' | 'filteredPointCount'>;
+type SurfacingProgressEvent = {
+  phase?: string;
+  message?: string;
+  detail?: string;
+  current?: number;
+  total?: number;
+};
 
 const SURFACING_SAFETY_SAMPLE_SPACING_MAX = 0.05;
 
@@ -123,9 +131,9 @@ const inputParamsSchema = {
   },
   rasterDirection: {
     type: 'options',
-    options: ['X', 'Y'],
+    options: ['X', 'Y', 'Both'],
     default_value: 'X',
-    hint: 'Direction the surfacing passes travel.',
+    hint: 'Direction the surfacing passes travel. Use Both to generate X and Y rasters in one operation.',
   },
   safeHeight: {
     type: 'number',
@@ -163,6 +171,10 @@ export class SurfacingEntity extends ListEntityBase {
     return this.generateToolpath(context);
   }
 
+  async runAsync(context: AnyRecord = {}) {
+    return this.generateToolpathAsync(context);
+  }
+
   generateToolpath(context: AnyRecord = {}): CamToolpathProgram {
     const params = this.inputParams || {};
     const machine = normalizeCamMachineProfile(context.machineProfile);
@@ -185,7 +197,8 @@ export class SurfacingEntity extends ListEntityBase {
     const stepover = positiveNumber(params.stepover, 0.8, EPS);
     const feedRate = positiveNumber(params.feedRate, 800, 1);
     const plungeRate = positiveNumber(params.plungeRate, 200, 1);
-    const rasterDirection = String(params.rasterDirection || 'X').toUpperCase() === 'Y' ? 'Y' : 'X';
+    const rasterDirections = normalizeSurfacingRasterDirections(params.rasterDirection);
+    const rasterDirection = rasterDirections.length > 1 ? 'Both' : rasterDirections[0];
     const spindleRPM = Math.min(
       positiveNumber(params.spindleRPM, 12000, 1),
       Math.max(1, Number(machine.maxSpindleRPM) || 1),
@@ -245,20 +258,33 @@ export class SurfacingEntity extends ListEntityBase {
       SURFACING_SAFETY_SAMPLE_SPACING_MAX,
     ));
     const flatnessCosLimit = Math.max(-1, Math.min(1, finiteNumber(params.flatnessCosLimit, 0.999)));
-    let runs: ScanlineRun[];
+    const pathInputs: Array<{
+      rasterDirection: 'X' | 'Y';
+      runs: ScanlineRun[];
+      scanlineCount: number;
+    }> = [];
     try {
-      runs = buildSurfacingRuns({
-        footprint,
-        surfaceDropCutter,
-        obstacleDropCutter,
-        rasterDirection,
-        stepover,
-        sampleStep,
-        minSampleSpacing,
-        flatnessCosLimit,
-        toolRadius,
-        pathTolerance,
-      });
+      for (const direction of rasterDirections) {
+        const runs = buildSurfacingRuns({
+          footprint,
+          surfaceDropCutter,
+          obstacleDropCutter,
+          rasterDirection: direction,
+          stepover,
+          sampleStep,
+          minSampleSpacing,
+          flatnessCosLimit,
+          toolRadius,
+          pathTolerance,
+        });
+        if (runs.length) {
+          pathInputs.push({
+            rasterDirection: direction,
+            runs,
+            scanlineCount: new Set(runs.map((run) => run.scanline)).size,
+          });
+        }
+      }
     } catch (error: any) {
       return makeEmptySurfacingResult({
         operationId,
@@ -270,7 +296,7 @@ export class SurfacingEntity extends ListEntityBase {
         warnings: [String(error?.message || error || 'Surfacing toolpath generation failed.')],
       });
     }
-    if (!runs.length) {
+    if (!pathInputs.length) {
       return makeEmptySurfacingResult({
         operationId,
         operationName,
@@ -289,11 +315,12 @@ export class SurfacingEntity extends ListEntityBase {
       topZ + Math.max(safeHeight, stockAllowance + linkClearance),
     ));
     const orientation = normalizeCamOrientation({ toolAxis: [0, 0, -1], forward: [1, 0, 0] });
-    const path = makeSurfacingPath({
-      id: `${operationId}-SURF`,
+    const paths = pathInputs.map((input) => makeSurfacingPath({
+      id: pathInputs.length > 1 ? `${operationId}-SURF-${input.rasterDirection}` : `${operationId}-SURF`,
       operationId,
       operationName,
-      runs,
+      rasterDirection: input.rasterDirection,
+      runs: input.runs,
       footprint,
       surfaceDropCutter,
       obstacleDropCutter,
@@ -309,10 +336,10 @@ export class SurfacingEntity extends ListEntityBase {
       feedRate,
       plungeRate,
       spindleRPM,
-    });
-    const paths = [path];
-    const bounds = boundsFromSurfacingPath(path);
-    const scanlineCount = new Set(runs.map((run) => run.scanline)).size;
+    }));
+    const bounds = unionCamBounds(paths.map((path) => boundsFromSurfacingPath(path)).filter(Boolean) as CamBounds[]);
+    const runCount = pathInputs.reduce((sum, input) => sum + input.runs.length, 0);
+    const scanlineCount = pathInputs.reduce((sum, input) => sum + input.scanlineCount, 0);
     const resultBase: Omit<CamToolpathProgram, 'gcode'> = {
       schemaVersion: CAM_TOOLPATH_SCHEMA_VERSION,
       operationId,
@@ -339,9 +366,10 @@ export class SurfacingEntity extends ListEntityBase {
         strategy: 'surfacing',
         faceCount: faces.length,
         faceNames: faces.map((face) => String(face?.name || '')).filter(Boolean),
-        runCount: runs.length,
+        runCount,
         scanlineCount,
         rasterDirection,
+        rasterDirections,
         stepover: roundCoord(stepover),
         sampleStep: roundCoord(sampleStep),
         minSampleSpacing: roundCoord(minSampleSpacing),
@@ -352,6 +380,289 @@ export class SurfacingEntity extends ListEntityBase {
       },
     };
     return { ...resultBase, gcode: generateGcodeForCamToolpathProgram(resultBase) };
+  }
+
+  async generateToolpathAsync(context: AnyRecord = {}): Promise<CamToolpathProgram> {
+    emitCamGenerationProgress(context, {
+      phase: 'surfacing-prepare',
+      message: 'Preparing surfacing operation',
+      current: 0,
+      total: 100,
+    });
+    await yieldToCamGenerationUi();
+
+    const params = this.inputParams || {};
+    const machine = normalizeCamMachineProfile(context.machineProfile);
+    const operationId = String(params.id || this.id || 'SF');
+    const operationName = String(params.name || 'Surfacing');
+    const warnings: string[] = [];
+    const toolDiameter = positiveNumber(params.toolDiameter, 3.175);
+    const toolLength = positiveNumber(params.toolLength, 25);
+    const cutter = makeBallEndMillCutter({
+      id: `${operationId}-CUTTER`,
+      diameter: toolDiameter,
+      cuttingLength: toolLength,
+      overallLength: toolLength,
+    });
+    const toolRadius = toolDiameter * 0.5;
+    const stockAllowance = Math.max(0, finiteNumber(params.stockAllowance, 0));
+    const contactRadius = toolRadius + stockAllowance;
+    const linkClearance = Math.max(0, finiteNumber(params.linkClearance, 0.5));
+    const pathTolerance = Math.max(0, finiteNumber(params.pathTolerance, 0.01));
+    const stepover = positiveNumber(params.stepover, 0.8, EPS);
+    const feedRate = positiveNumber(params.feedRate, 800, 1);
+    const plungeRate = positiveNumber(params.plungeRate, 200, 1);
+    const rasterDirections = normalizeSurfacingRasterDirections(params.rasterDirection);
+    const rasterDirection = rasterDirections.length > 1 ? 'Both' : rasterDirections[0];
+    const spindleRPM = Math.min(
+      positiveNumber(params.spindleRPM, 12000, 1),
+      Math.max(1, Number(machine.maxSpindleRPM) || 1),
+    );
+
+    const viewer = context.viewer || context.partHistory?.viewer || this.history?.partHistory?.viewer || null;
+    const partHistory = context.partHistory || viewer?.partHistory || this.history?.partHistory || null;
+    emitCamGenerationProgress(context, {
+      phase: 'surfacing-selection',
+      message: 'Resolving selected surfacing faces',
+      current: 6,
+      total: 100,
+    });
+    await yieldToCamGenerationUi();
+    const faces = resolveTargetFaces({ viewer, partHistory }, params.targetFaces);
+    if (!faces.length) {
+      return makeEmptySurfacingResult({
+        operationId,
+        operationName,
+        machine,
+        cutter,
+        spindleRPM,
+        warnings: ['Select one or more faces to surface.'],
+      });
+    }
+
+    emitCamGenerationProgress(context, {
+      phase: 'surfacing-face-mesh',
+      message: 'Extracting selected face triangles',
+      detail: `${faces.length} selected face${faces.length === 1 ? '' : 's'}.`,
+      current: 12,
+      total: 100,
+    });
+    await yieldToCamGenerationUi();
+    const faceTriangles: Triangle[] = [];
+    for (const face of faces) faceTriangles.push(...extractTrianglesFromFace(face));
+    if (!faceTriangles.length) {
+      return makeEmptySurfacingResult({
+        operationId,
+        operationName,
+        machine,
+        cutter,
+        spindleRPM,
+        warnings: ['Selected faces do not contain any mesh triangles.'],
+      });
+    }
+
+    emitCamGenerationProgress(context, {
+      phase: 'surfacing-obstacles',
+      message: 'Collecting protected model geometry',
+      detail: `${faceTriangles.length} selected-face triangle${faceTriangles.length === 1 ? '' : 's'}.`,
+      current: 18,
+      total: 100,
+    });
+    await yieldToCamGenerationUi();
+    const obstacleSolids = resolveTargetSolids({ viewer, partHistory }, []);
+    const obstacleTriangles: Triangle[] = [];
+    for (const solid of obstacleSolids) obstacleTriangles.push(...extractTrianglesFromSolid(solid));
+    if (!obstacleTriangles.length) obstacleTriangles.push(...faceTriangles);
+    const targetBounds = triangleBounds(obstacleTriangles);
+    if (!targetBounds) {
+      return makeEmptySurfacingResult({
+        operationId,
+        operationName,
+        machine,
+        cutter,
+        spindleRPM,
+        warnings: ['No target geometry is available for Surfacing generation.'],
+      });
+    }
+
+    emitCamGenerationProgress(context, {
+      phase: 'surfacing-index',
+      message: 'Building surfacing footprint and drop-cutter index',
+      detail: `${obstacleTriangles.length} protected triangle${obstacleTriangles.length === 1 ? '' : 's'}.`,
+      current: 26,
+      total: 100,
+    });
+    await yieldToCamGenerationUi();
+    const footprint = new TriangleFootprint(faceTriangles);
+    const surfaceDropCutter = new DropCutterIndex(faceTriangles, contactRadius);
+    const obstacleDropCutter = new DropCutterIndex(obstacleTriangles, contactRadius);
+    const automaticSampleStep = Math.max(0.02, Math.min(stepover, toolRadius * 0.5));
+    const sampleStep = Math.max(0.02, optionalPositiveNumber(params.sampleSpacing, automaticSampleStep, EPS));
+    const minSampleSpacing = Math.max(EPS, Math.min(
+      sampleStep,
+      positiveNumber(params.minSampleSpacing, SURFACING_SAFETY_SAMPLE_SPACING_MAX, EPS),
+      SURFACING_SAFETY_SAMPLE_SPACING_MAX,
+    ));
+    const flatnessCosLimit = Math.max(-1, Math.min(1, finiteNumber(params.flatnessCosLimit, 0.999)));
+    const pathInputs: Array<{
+      rasterDirection: 'X' | 'Y';
+      runs: ScanlineRun[];
+      scanlineCount: number;
+    }> = [];
+    try {
+      const span = 46 / Math.max(1, rasterDirections.length);
+      for (let directionIndex = 0; directionIndex < rasterDirections.length; directionIndex += 1) {
+        const direction = rasterDirections[directionIndex];
+        const start = 32 + (span * directionIndex);
+        const runs = await buildSurfacingRunsAsync({
+          footprint,
+          surfaceDropCutter,
+          obstacleDropCutter,
+          rasterDirection: direction,
+          stepover,
+          sampleStep,
+          minSampleSpacing,
+          flatnessCosLimit,
+          toolRadius,
+          pathTolerance,
+          onProgress: (event) => {
+            const localTotal = Math.max(1, Number(event.total) || 1);
+            const localCurrent = Math.max(0, Math.min(localTotal, Number(event.current) || 0));
+            emitCamGenerationProgress(context, {
+              phase: 'surfacing-raster',
+              message: `Sampling ${direction}-direction surfacing raster`,
+              detail: event.detail,
+              current: Math.round(start + ((localCurrent / localTotal) * span)),
+              total: 100,
+            });
+          },
+        });
+        if (runs.length) {
+          pathInputs.push({
+            rasterDirection: direction,
+            runs,
+            scanlineCount: new Set(runs.map((run) => run.scanline)).size,
+          });
+        }
+      }
+    } catch (error: any) {
+      return makeEmptySurfacingResult({
+        operationId,
+        operationName,
+        machine,
+        targetBounds,
+        cutter,
+        spindleRPM,
+        warnings: [String(error?.message || error || 'Surfacing toolpath generation failed.')],
+      });
+    }
+    if (!pathInputs.length) {
+      return makeEmptySurfacingResult({
+        operationId,
+        operationName,
+        machine,
+        targetBounds,
+        cutter,
+        spindleRPM,
+        warnings: ['Selected faces have no projected area to surface. Vertical faces cannot be surfaced top-down.'],
+      });
+    }
+
+    emitCamGenerationProgress(context, {
+      phase: 'surfacing-link',
+      message: 'Linking surfacing raster passes',
+      detail: `${pathInputs.reduce((sum, input) => sum + input.runs.length, 0)} cutting run${pathInputs.reduce((sum, input) => sum + input.runs.length, 0) === 1 ? '' : 's'}.`,
+      current: 82,
+      total: 100,
+    });
+    await yieldToCamGenerationUi();
+    const topZ = targetBounds.max[2];
+    const safeHeight = Math.max(0, finiteNumber(params.safeHeight, 5));
+    const safeZ = roundCoord(Math.max(
+      Number(machine.safeParkZ) || 0,
+      topZ + Math.max(safeHeight, stockAllowance + linkClearance),
+    ));
+    const orientation = normalizeCamOrientation({ toolAxis: [0, 0, -1], forward: [1, 0, 0] });
+    const paths = pathInputs.map((input) => makeSurfacingPath({
+      id: pathInputs.length > 1 ? `${operationId}-SURF-${input.rasterDirection}` : `${operationId}-SURF`,
+      operationId,
+      operationName,
+      rasterDirection: input.rasterDirection,
+      runs: input.runs,
+      footprint,
+      surfaceDropCutter,
+      obstacleDropCutter,
+      toolRadius,
+      sampleStep,
+      minSampleSpacing,
+      stepover,
+      safeZ,
+      linkClearance,
+      pathTolerance,
+      cutter,
+      orientation,
+      feedRate,
+      plungeRate,
+      spindleRPM,
+    }));
+    const bounds = unionCamBounds(paths.map((path) => boundsFromSurfacingPath(path)).filter(Boolean) as CamBounds[]);
+    const runCount = pathInputs.reduce((sum, input) => sum + input.runs.length, 0);
+    const scanlineCount = pathInputs.reduce((sum, input) => sum + input.scanlineCount, 0);
+    const resultBase: Omit<CamToolpathProgram, 'gcode'> = {
+      schemaVersion: CAM_TOOLPATH_SCHEMA_VERSION,
+      operationId,
+      operationName,
+      units: 'mm',
+      coordinateSystem: 'machine',
+      generatedAt: new Date().toISOString(),
+      machine,
+      bounds,
+      targetBounds,
+      safeZ,
+      cutter,
+      spindleRPM,
+      paths,
+      summary: summarizeCamToolpathProgram({
+        paths,
+        targetCount: faces.length,
+        triangleCount: obstacleTriangles.length,
+        levelCount: scanlineCount,
+        warningCount: warnings.length,
+      }),
+      warnings,
+      metadata: {
+        strategy: 'surfacing',
+        faceCount: faces.length,
+        faceNames: faces.map((face) => String(face?.name || '')).filter(Boolean),
+        runCount,
+        scanlineCount,
+        rasterDirection,
+        rasterDirections,
+        stepover: roundCoord(stepover),
+        sampleStep: roundCoord(sampleStep),
+        minSampleSpacing: roundCoord(minSampleSpacing),
+        flatnessCosLimit: roundCoord(flatnessCosLimit),
+        stockAllowance: roundCoord(stockAllowance),
+        linkClearance: roundCoord(linkClearance),
+        pathTolerance: roundCoord(pathTolerance),
+      },
+    };
+    emitCamGenerationProgress(context, {
+      phase: 'surfacing-post',
+      message: 'Posting surfacing G-code',
+      detail: `${paths.length} surfacing path${paths.length === 1 ? '' : 's'}.`,
+      current: 94,
+      total: 100,
+    });
+    await yieldToCamGenerationUi();
+    const result = { ...resultBase, gcode: generateGcodeForCamToolpathProgram(resultBase) };
+    emitCamGenerationProgress(context, {
+      phase: 'surfacing-done',
+      message: 'Surfacing operation complete',
+      current: 100,
+      total: 100,
+    });
+    return result;
   }
 
   onIdChanged() {}
@@ -573,6 +884,33 @@ function optionalPositiveNumber(value: any, fallback: number, min = EPS) {
   const num = Number(value);
   if (!Number.isFinite(num) || Math.abs(num) <= min) return Math.max(min, fallback);
   return Math.max(min, Math.abs(num));
+}
+
+function normalizeSurfacingRasterDirections(value: any): Array<'X' | 'Y'> {
+  const text = String(value || 'X').trim().toUpperCase().replace(/\s+/g, '');
+  if (text === 'Y') return ['Y'];
+  if (text === 'BOTH' || text === 'XY' || text === 'YX' || text === 'X+Y' || text === 'Y+X') return ['X', 'Y'];
+  return ['X'];
+}
+
+function emitCamGenerationProgress(context: AnyRecord, event: SurfacingProgressEvent) {
+  const callback = context?.onProgress;
+  if (typeof callback !== 'function') return;
+  try { callback(event); } catch { /* progress observers should not affect toolpath generation */ }
+}
+
+function yieldToCamGenerationUi() {
+  return new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      try {
+        requestAnimationFrame(() => resolve());
+        return;
+      } catch {
+        /* fall back to timer */
+      }
+    }
+    setTimeout(resolve, 0);
+  });
 }
 
 // 2D spatial hash over triangle XY footprints for point-in-footprint tests.
@@ -931,6 +1269,94 @@ function buildSurfacingRuns({
   return runs;
 }
 
+async function buildSurfacingRunsAsync({
+  footprint,
+  surfaceDropCutter,
+  obstacleDropCutter,
+  rasterDirection,
+  stepover,
+  sampleStep,
+  minSampleSpacing,
+  flatnessCosLimit,
+  toolRadius,
+  pathTolerance,
+  onProgress,
+}: {
+  footprint: TriangleFootprint;
+  surfaceDropCutter: DropCutterIndex;
+  obstacleDropCutter: DropCutterIndex;
+  rasterDirection: 'X' | 'Y';
+  stepover: number;
+  sampleStep: number;
+  minSampleSpacing: number;
+  flatnessCosLimit: number;
+  toolRadius: number;
+  pathTolerance: number;
+  onProgress?: (event: SurfacingProgressEvent) => void;
+}): Promise<ScanlineRun[]> {
+  const alongX = rasterDirection === 'X';
+  const lineMin = alongX ? footprint.minY : footprint.minX;
+  const lineMax = alongX ? footprint.maxY : footprint.maxX;
+  const travelMin = alongX ? footprint.minX : footprint.minY;
+  const travelMax = alongX ? footprint.maxX : footprint.maxY;
+  if (!(lineMax >= lineMin) || !(travelMax >= travelMin)) return [];
+  const lineSteps = Math.max(0, Math.ceil((lineMax - lineMin) / stepover));
+  const maxSampleSteps = Math.max(1, Math.ceil((travelMax - travelMin) / Math.max(minSampleSpacing, EPS)));
+  if ((lineSteps + 1) * (maxSampleSteps + 1) > 4_000_000) {
+    throw new Error('Surfacing raster is too dense; increase stepover or reduce the selected area.');
+  }
+  const totalLines = lineSteps + 1;
+  const runs: ScanlineRun[] = [];
+  let lastYieldAt = Date.now();
+  onProgress?.({
+    current: 0,
+    total: totalLines,
+    detail: `${totalLines} ${rasterDirection}-direction raster line${totalLines === 1 ? '' : 's'}.`,
+  });
+  for (let lineIndex = 0; lineIndex <= lineSteps; lineIndex += 1) {
+    const lineCoord = lineIndex === lineSteps ? lineMax : Math.min(lineMax, lineMin + (lineIndex * stepover));
+    const intervals = footprint.scanlineIntervals(rasterDirection, lineCoord);
+    for (const interval of intervals) {
+      const pieces = buildAdaptiveScanlinePieces({
+        interval,
+        alongX,
+        lineCoord,
+        surfaceDropCutter,
+        obstacleDropCutter,
+        toolRadius,
+        sampleStep,
+        minSampleSpacing,
+        flatnessCosLimit,
+      }) || buildUniformScanlinePieces({
+        interval,
+        alongX,
+        lineCoord,
+        surfaceDropCutter,
+        obstacleDropCutter,
+        toolRadius,
+        sampleStep: minSampleSpacing,
+      });
+      for (const piece of pieces) {
+        finalizeSurfacingRun(runs, {
+          scanline: lineIndex + 1,
+          ...piece,
+        }, pathTolerance);
+      }
+    }
+    const now = Date.now();
+    if (lineIndex === lineSteps || lineIndex % 4 === 0 || now - lastYieldAt > 60) {
+      onProgress?.({
+        current: lineIndex + 1,
+        total: totalLines,
+        detail: `Line ${lineIndex + 1} of ${totalLines}; ${runs.length} cutting run${runs.length === 1 ? '' : 's'} found.`,
+      });
+      lastYieldAt = now;
+      await yieldToCamGenerationUi();
+    }
+  }
+  return runs;
+}
+
 function buildUniformScanlinePieces({
   interval,
   alongX,
@@ -1153,6 +1579,7 @@ function makeSurfacingPath({
   id,
   operationId,
   operationName,
+  rasterDirection,
   runs,
   footprint,
   surfaceDropCutter,
@@ -1173,6 +1600,7 @@ function makeSurfacingPath({
   id: string;
   operationId: string;
   operationName: string;
+  rasterDirection: 'X' | 'Y';
   runs: ScanlineRun[];
   footprint: TriangleFootprint;
   surfaceDropCutter: DropCutterIndex;
@@ -1287,6 +1715,7 @@ function makeSurfacingPath({
     spindleRPM,
     metadata: {
       strategy: 'surfacing',
+      rasterDirection,
       runCount: runs.length,
       scanlineCount: new Set(runs.map((run) => run.scanline)).size,
       pointCount: points.length,

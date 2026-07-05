@@ -1,7 +1,22 @@
 import { HistoryCollectionWidget } from '../history/HistoryCollectionWidget.js';
 import { CamToolpathSimulator, type CamToolpathSimulatorState } from '../../cam/CamToolpathSimulator.js';
+import type { CamGenerationProgressEvent } from '../../cam/CamPlanManager.js';
 
 type AnyRecord = Record<string, any>;
+
+function nextCamUiFrame() {
+  return new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      try {
+        requestAnimationFrame(() => resolve());
+        return;
+      } catch {
+        /* fall back to timer */
+      }
+    }
+    setTimeout(resolve, 0);
+  });
+}
 
 export class CamHistoryWidget {
   viewer: any;
@@ -17,10 +32,18 @@ export class CamHistoryWidget {
   historyWidget: any = null;
   simulator: CamToolpathSimulator | null = null;
   playButtonEl: HTMLButtonElement | null = null;
+  generateButtonEl: HTMLButtonElement | null = null;
   stopButtonEl: HTMLButtonElement | null = null;
   scrubberEl: HTMLInputElement | null = null;
   simReadoutEl: HTMLDivElement | null = null;
   _camListener: (() => void) | null = null;
+  _isGenerating = false;
+  _generationOverlayEl: HTMLDivElement | null = null;
+  _generationMessageEl: HTMLDivElement | null = null;
+  _generationDetailEl: HTMLDivElement | null = null;
+  _generationStepEl: HTMLDivElement | null = null;
+  _generationPercentEl: HTMLDivElement | null = null;
+  _generationProgressFillEl: HTMLDivElement | null = null;
 
   constructor(viewer: any) {
     this.viewer = viewer || null;
@@ -39,6 +62,7 @@ export class CamHistoryWidget {
     this._camListener = null;
     try { this.simulator?.dispose?.(); } catch { /* ignore simulator cleanup */ }
     this.simulator = null;
+    this._hideGenerationProgress();
     try { this.historyWidget?.dispose?.(); } catch { /* ignore widget cleanup */ }
     this.historyWidget = null;
   }
@@ -405,18 +429,132 @@ export class CamHistoryWidget {
     }
   }
 
-  _generateCam() {
+  async _generateCam({ autoPlay = true } = {}) {
     const manager = this.viewer?.partHistory?.camPlanManager || null;
-    const result = manager?.generateAll?.(this.viewer) || null;
-    const pathCount = Number(result?.summary?.pathCount ?? result?.paths?.length ?? 0) || 0;
-    const warningCount = Number(result?.warnings?.length ?? 0) || 0;
-    if (pathCount > 0) {
-      this._setStatus(`${pathCount} CAM path${pathCount === 1 ? '' : 's'} generated.`, warningCount ? 'warn' : 'info');
-    } else {
-      this._setStatus(result?.warnings?.[0] || 'No CAM paths generated.', 'warn');
+    if (!manager || this._isGenerating) return null;
+    this._isGenerating = true;
+    if (this.generateButtonEl) this.generateButtonEl.disabled = true;
+    this._showGenerationProgress();
+    this._updateGenerationProgress({
+      phase: 'prepare',
+      message: 'Preparing CAM generation',
+      current: 0,
+      total: 100,
+    });
+    await nextCamUiFrame();
+    let result: AnyRecord | null = null;
+    try {
+      result = typeof manager.generateAllAsync === 'function'
+        ? await manager.generateAllAsync(this.viewer, { onProgress: (event: CamGenerationProgressEvent) => this._updateGenerationProgress(event) })
+        : manager.generateAll?.(this.viewer) || null;
+      const pathCount = Number(result?.summary?.pathCount ?? result?.paths?.length ?? 0) || 0;
+      const warningCount = Number(result?.warnings?.length ?? 0) || 0;
+      if (pathCount > 0) {
+        this._setStatus(`${pathCount} CAM path${pathCount === 1 ? '' : 's'} generated.`, warningCount ? 'warn' : 'info');
+      } else {
+        this._setStatus(result?.warnings?.[0] || 'No CAM paths generated.', 'warn');
+      }
+      this._setSimulatorProgram(result, { autoPlay: autoPlay && pathCount > 0 });
+      this._renderProgram();
+      return result;
+    } catch (error: any) {
+      const message = String(error?.message || error || 'CAM toolpath generation failed.');
+      this._setStatus(message, 'warn');
+      return null;
+    } finally {
+      this._isGenerating = false;
+      if (this.generateButtonEl) this.generateButtonEl.disabled = false;
+      this._hideGenerationProgress();
     }
-    this._setSimulatorProgram(result, { autoPlay: pathCount > 0 });
-    this._renderProgram();
+  }
+
+  _showGenerationProgress() {
+    this._hideGenerationProgress();
+    const overlay = document.createElement('div');
+    overlay.className = 'cam-generation-overlay';
+    overlay.setAttribute('role', 'status');
+    overlay.setAttribute('aria-live', 'polite');
+
+    const panel = document.createElement('div');
+    panel.className = 'cam-generation-window';
+    overlay.appendChild(panel);
+
+    const header = document.createElement('div');
+    header.className = 'cam-generation-header';
+    const title = document.createElement('div');
+    title.className = 'cam-generation-title';
+    title.textContent = 'Generating toolpaths';
+    const percent = document.createElement('div');
+    percent.className = 'cam-generation-percent';
+    percent.textContent = '0%';
+    header.appendChild(title);
+    header.appendChild(percent);
+    panel.appendChild(header);
+
+    const message = document.createElement('div');
+    message.className = 'cam-generation-message';
+    message.textContent = 'Preparing CAM generation';
+    panel.appendChild(message);
+
+    const detail = document.createElement('div');
+    detail.className = 'cam-generation-detail';
+    detail.textContent = '';
+    panel.appendChild(detail);
+
+    const track = document.createElement('div');
+    track.className = 'cam-generation-progress-track';
+    const fill = document.createElement('div');
+    fill.className = 'cam-generation-progress-fill';
+    track.appendChild(fill);
+    panel.appendChild(track);
+
+    const step = document.createElement('div');
+    step.className = 'cam-generation-step';
+    step.textContent = '';
+    panel.appendChild(step);
+
+    document.body.appendChild(overlay);
+    this._generationOverlayEl = overlay;
+    this._generationMessageEl = message;
+    this._generationDetailEl = detail;
+    this._generationStepEl = step;
+    this._generationPercentEl = percent;
+    this._generationProgressFillEl = fill;
+  }
+
+  _updateGenerationProgress(event: CamGenerationProgressEvent = {}) {
+    if (!this._generationOverlayEl) this._showGenerationProgress();
+    const total = Math.max(1, Number(event.total) || 100);
+    const current = Math.max(0, Math.min(total, Number(event.current) || 0));
+    const percent = Math.max(0, Math.min(100, Math.round((current / total) * 100)));
+    if (this._generationMessageEl) this._generationMessageEl.textContent = String(event.message || 'Generating CAM toolpaths');
+    if (this._generationDetailEl) {
+      const detail = String(event.detail || '').trim();
+      this._generationDetailEl.textContent = detail;
+      this._generationDetailEl.hidden = !detail;
+    }
+    if (this._generationPercentEl) this._generationPercentEl.textContent = `${percent}%`;
+    if (this._generationProgressFillEl) this._generationProgressFillEl.style.width = `${percent}%`;
+    if (this._generationStepEl) {
+      const count = Number(event.operationCount) || 0;
+      const index = Number(event.operationIndex);
+      const operationLabel = count > 0 && Number.isFinite(index)
+        ? `Operation ${Math.max(1, index + 1)} of ${count}`
+        : '';
+      const name = String(event.operationName || event.operationId || '').trim();
+      this._generationStepEl.textContent = [operationLabel, name].filter(Boolean).join(' - ');
+      this._generationStepEl.hidden = !this._generationStepEl.textContent;
+    }
+  }
+
+  _hideGenerationProgress() {
+    try { this._generationOverlayEl?.remove?.(); } catch { /* ignore progress overlay cleanup */ }
+    this._generationOverlayEl = null;
+    this._generationMessageEl = null;
+    this._generationDetailEl = null;
+    this._generationStepEl = null;
+    this._generationPercentEl = null;
+    this._generationProgressFillEl = null;
   }
 
   _ensureSimulator(): CamToolpathSimulator {
@@ -441,7 +579,7 @@ export class CamHistoryWidget {
     this._syncSimulatorControls(this.simulator?.getState?.());
   }
 
-  _toggleSimulationPlayback() {
+  async _toggleSimulationPlayback() {
     const manager = this.viewer?.partHistory?.camPlanManager || null;
     const sim = this._ensureSimulator();
     let state = sim.getState();
@@ -451,8 +589,8 @@ export class CamHistoryWidget {
         sim.setProgram(plan);
         state = sim.getState();
       } else {
-        const result = manager?.generateAll?.(this.viewer) || null;
-        sim.setProgram(result);
+        const result = await this._generateCam({ autoPlay: false });
+        sim.setProgram(result as any);
         state = sim.getState();
       }
     }
@@ -510,8 +648,10 @@ export class CamHistoryWidget {
     generateButton.textContent = 'Generate';
     generateButton.title = 'Generate CAM toolpaths';
     generateButton.setAttribute('aria-label', 'Generate CAM toolpaths');
-    generateButton.addEventListener('click', () => this._generateCam());
+    generateButton.disabled = this._isGenerating;
+    generateButton.addEventListener('click', () => { void this._generateCam(); });
     this.controlsEl.appendChild(generateButton);
+    this.generateButtonEl = generateButton;
 
     const playButton = document.createElement('button');
     playButton.type = 'button';
@@ -519,7 +659,7 @@ export class CamHistoryWidget {
     playButton.textContent = 'Play';
     playButton.title = 'Play toolpath simulation';
     playButton.setAttribute('aria-label', 'Play toolpath simulation');
-    playButton.addEventListener('click', () => this._toggleSimulationPlayback());
+    playButton.addEventListener('click', () => { void this._toggleSimulationPlayback(); });
     this.controlsEl.appendChild(playButton);
     this.playButtonEl = playButton;
 
@@ -755,6 +895,10 @@ export class CamHistoryWidget {
         background: rgba(15, 118, 110, 0.92);
         border-color: rgba(45, 212, 191, 0.42);
       }
+      .cam-history-btn:disabled {
+        cursor: progress;
+        opacity: 0.58;
+      }
       .cam-sim-strip {
         display: grid;
         grid-template-columns: minmax(120px, 1fr) auto;
@@ -810,6 +954,69 @@ export class CamHistoryWidget {
         white-space: pre;
         overflow: auto;
         max-height: 360px;
+      }
+      .cam-generation-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 100000;
+        pointer-events: none;
+        display: flex;
+        align-items: flex-start;
+        justify-content: flex-end;
+        padding: 18px;
+        box-sizing: border-box;
+      }
+      .cam-generation-window {
+        width: min(380px, calc(100vw - 36px));
+        border-radius: 8px;
+        border: 1px solid rgba(94, 234, 212, 0.38);
+        background: rgba(15, 23, 42, 0.96);
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.42);
+        color: #e2e8f0;
+        padding: 14px;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+      }
+      .cam-generation-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .cam-generation-title {
+        font: 800 12px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        text-transform: uppercase;
+        color: #f8fafc;
+      }
+      .cam-generation-percent {
+        min-width: 44px;
+        text-align: right;
+        color: #99f6e4;
+        font: 800 12px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
+      .cam-generation-message {
+        color: #e2e8f0;
+        font: 700 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
+      .cam-generation-detail,
+      .cam-generation-step {
+        color: #94a3b8;
+        font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
+      .cam-generation-progress-track {
+        height: 8px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: rgba(51, 65, 85, 0.82);
+      }
+      .cam-generation-progress-fill {
+        width: 0%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #22c55e, #06b6d4);
+        transition: width 120ms ease;
       }
     `;
     document.head.appendChild(style);

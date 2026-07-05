@@ -512,6 +512,38 @@ export async function test_cam_plan_manager_strips_legacy_generated_data() {
   assert(manager.getGeneratedResults().length === 0, 'No generated CAM results should be available in the shell');
 }
 
+export async function test_cam_plan_manager_async_generation_reports_progress_steps() {
+  const manager = new CamPlanManager(null);
+  const viewer = makeViewerWithSolids([
+    makeBoxMeshSolid(10, 10, 8, { name: 'cam-test-progress-surfacing-block' }),
+    makeTopRectFace({ name: 'cam-test-progress-surfacing-face', width: 10, depth: 8, y: 10 }),
+  ]);
+  manager.createOperation(CAM_OPERATION_TYPE_SURFACING, {
+    id: 'SF_PROGRESS',
+    targetFaces: ['cam-test-progress-surfacing-face'],
+    toolDiameter: 2,
+    toolLength: 20,
+    stockAllowance: 0,
+    stepover: 3,
+    rasterDirection: 'Both',
+    safeHeight: 2,
+    feedRate: 700,
+    plungeRate: 150,
+    spindleRPM: 10000,
+  });
+  const events: any[] = [];
+  const result = await manager.generateAllAsync(viewer, { onProgress: (event) => events.push(event) });
+  assert(result.paths.length === 2, 'Async CAM generation should return the generated Surfacing paths');
+  const phases = new Set(events.map((event) => event.phase));
+  for (const phase of ['prepare', 'operation', 'surfacing-index', 'surfacing-raster', 'surfacing-link', 'surfacing-post', 'combine', 'scene', 'done']) {
+    assert(phases.has(phase), `Async CAM generation should report ${phase} progress`);
+  }
+  assert(events[0]?.current === 0, 'Async CAM generation should start progress at zero');
+  assert(events[events.length - 1]?.current === 100, 'Async CAM generation should finish progress at 100 percent');
+  assert(events.every((event) => event.current >= 0 && event.current <= event.total), 'Async CAM progress events should stay within their progress range');
+  assert(events.some((event) => String(event.detail || '').includes('Line')), 'Async Surfacing progress should report raster line sampling detail');
+}
+
 export async function test_cam_shadow_cutter_history_item_generates_toolpath() {
   const manager = new CamPlanManager(null);
   const operation = manager.createOperation(CAM_OPERATION_TYPE_SHADOW_CUTTER, defaultCamParams());
@@ -1266,6 +1298,54 @@ export async function test_cam_surfacing_y_raster_reaches_selected_face_edges() 
   assert(Math.min(...xs) === 0 && Math.max(...xs) === 10, 'Y-raster Surfacing should cover both selected face X boundaries');
   assert(Math.min(...ys) === 0 && Math.max(...ys) === 8, 'Y-raster Surfacing should run all the way to the selected face Y edges');
   assert(zs.every((z: number) => Math.abs(z - 10) < 1e-4), 'Y-raster flat-face Surfacing should keep the ball tip on the top plane');
+}
+
+export async function test_cam_surfacing_both_raster_directions_emit_x_and_y_paths() {
+  const manager = new CamPlanManager(null);
+  const viewer = makeViewerWithSolids([
+    makeBoxMeshSolid(10, 10, 8, { name: 'cam-test-both-raster-block' }),
+    makeTopRectFace({ name: 'cam-test-both-raster-top-face', width: 10, depth: 8, y: 10 }),
+  ]);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_SURFACING, {
+    id: 'SF_BOTH_RASTER',
+    targetFaces: ['cam-test-both-raster-top-face'],
+    toolDiameter: 2,
+    toolLength: 20,
+    stockAllowance: 0,
+    stepover: 3,
+    rasterDirection: 'Both',
+    safeHeight: 2,
+    feedRate: 700,
+    plungeRate: 150,
+    spindleRPM: 10000,
+  });
+  const direct = operation.run({
+    viewer,
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  assert(direct.paths.length === 2, 'Both-raster Surfacing should emit separate X and Y raster paths from one operation');
+  assert(direct.paths[0].id === 'SF_BOTH_RASTER-SURF-X', 'Both-raster Surfacing should label the X path');
+  assert(direct.paths[1].id === 'SF_BOTH_RASTER-SURF-Y', 'Both-raster Surfacing should label the Y path');
+  assert(direct.metadata?.rasterDirection === 'Both', 'Both-raster Surfacing should record the combined raster mode');
+  assert(direct.metadata?.rasterDirections?.join(',') === 'X,Y', 'Both-raster Surfacing should record both generated directions');
+  assert(direct.paths.map((path: any) => path.metadata?.rasterDirection).join(',') === 'X,Y', 'Each Both-raster path should record its own direction');
+  assert(direct.summary.levelCount === 9, 'Both-raster Surfacing should aggregate X and Y raster pass counts');
+  assert(direct.metadata?.runCount === direct.paths.reduce((sum: number, path: any) => sum + path.metadata.runCount, 0), 'Both-raster Surfacing should aggregate run counts');
+  assert(direct.metadata?.scanlineCount === direct.paths.reduce((sum: number, path: any) => sum + path.metadata.scanlineCount, 0), 'Both-raster Surfacing should aggregate scanline counts');
+  const firstCutDelta = (path: any) => {
+    const segment = path.segments.find((entry: any) => entry.kind === 'cut');
+    const start = path.points[segment.startIndex]?.position;
+    const end = path.points[segment.endIndex]?.position;
+    return [Math.abs(end[0] - start[0]), Math.abs(end[1] - start[1])] as [number, number];
+  };
+  const xDelta = firstCutDelta(direct.paths[0]);
+  const yDelta = firstCutDelta(direct.paths[1]);
+  assert(xDelta[0] > xDelta[1], 'Both-raster X path should cut primarily along machine X');
+  assert(yDelta[1] > yDelta[0], 'Both-raster Y path should cut primarily along machine Y');
+  assert(direct.gcode.includes('SF_BOTH_RASTER-SURF-X') && direct.gcode.includes('SF_BOTH_RASTER-SURF-Y'), 'Both-raster G-code should post both paths');
+  const combined = manager.generateAll(viewer);
+  assert(combined.paths.length === 2, 'CAM manager should include both generated Surfacing raster paths');
 }
 
 export async function test_cam_surfacing_stops_before_higher_adjacent_preserved_face() {
@@ -2291,6 +2371,7 @@ export async function test_cam_workbench_registers_shadow_cutter_and_roughing_op
   assert(RoughingEntity.inputParamsSchema.debugSlices?.type === 'boolean', 'Roughing should expose a debug slice checkbox');
   assert(SurfacingEntity.inputParamsSchema.targetFaces?.selectionFilter?.includes('FACE'), 'Surfacing should select target faces');
   assert(SurfacingEntity.inputParamsSchema.rasterDirection?.options?.includes('Y'), 'Surfacing should expose raster direction choices');
+  assert(SurfacingEntity.inputParamsSchema.rasterDirection?.options?.includes('Both'), 'Surfacing should expose a combined X/Y raster direction choice');
   assert(SurfacingEntity.inputParamsSchema.pathTolerance?.type === 'number', 'Surfacing should expose cutter-location simplification tolerance');
   assert(SurfacingEntity.inputParamsSchema.sampleSpacing?.type === 'number', 'Surfacing should expose adaptive sample spacing');
   assert(SurfacingEntity.inputParamsSchema.minSampleSpacing?.type === 'number', 'Surfacing should expose adaptive minimum sample spacing');
