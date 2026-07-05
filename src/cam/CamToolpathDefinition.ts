@@ -357,6 +357,9 @@ export function combineCamToolpathPrograms({
   const normalizedMachine = normalizeCamMachineProfile(machine);
   const warnings = valid.flatMap((program) => Array.isArray(program.warnings) ? program.warnings : []);
   const paths = valid.flatMap((program) => Array.isArray(program.paths) ? program.paths : []);
+  const debugSlices = valid.flatMap((program) => (
+    Array.isArray(program.metadata?.debugSlices) ? program.metadata.debugSlices : []
+  ));
   const combined: Omit<CamToolpathProgram, 'gcode'> = {
     schemaVersion: CAM_TOOLPATH_SCHEMA_VERSION,
     operationId: 'CAM-PROGRAM',
@@ -385,6 +388,10 @@ export function combineCamToolpathPrograms({
       warningCount: warnings.length,
     },
     warnings,
+    metadata: debugSlices.length ? {
+      debugSlices,
+      debugSliceCount: debugSlices.length,
+    } : undefined,
   };
   return { ...combined, gcode: valid.map((program) => String(program.gcode || '').trim()).filter(Boolean).join('\n') };
 }

@@ -23,17 +23,17 @@ import {
 
 export const CAM_OPERATION_TYPE_SHADOW_CUTTER = 'shadow-cutter';
 
-type AnyRecord = Record<string, any>;
+export type AnyRecord = Record<string, any>;
 export type CamPoint2 = [number, number];
 
-type Triangle = [CamPoint3, CamPoint3, CamPoint3];
-type ShadowLoopRole = 'outer' | 'hole';
-type ShadowLoop = {
+export type Triangle = [CamPoint3, CamPoint3, CamPoint3];
+export type ShadowLoopRole = 'outer' | 'hole';
+export type ShadowLoop = {
   role: ShadowLoopRole;
   points: CamPoint2[];
 };
 
-const EPS = 1e-7;
+export const EPS = 1e-7;
 const CLIPPER_SCALE = 10000;
 
 const inputParamsSchema = {
@@ -269,16 +269,16 @@ export class ShadowCutterEntity extends ListEntityBase {
   onPersistentDataChanged() {}
 }
 
-function finiteNumber(value: any, fallback: number) {
+export function finiteNumber(value: any, fallback: number) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
 }
 
-function positiveNumber(value: any, fallback: number, min = EPS) {
+export function positiveNumber(value: any, fallback: number, min = EPS) {
   return Math.max(min, Math.abs(finiteNumber(value, fallback)));
 }
 
-function roundCoord(value: number) {
+export function roundCoord(value: number) {
   return roundCamCoord(value);
 }
 
@@ -305,7 +305,7 @@ function applyMatrix4(point: CamPoint3, matrix: any): CamPoint3 {
   ];
 }
 
-function extractTrianglesFromSolid(solid: any): Triangle[] {
+export function extractTrianglesFromSolid(solid: any): Triangle[] {
   if (!solid) return [];
   const mesh = typeof solid.getMesh === 'function' ? solid.getMesh() : solid.mesh || null;
   if (!mesh) return [];
@@ -337,7 +337,7 @@ function extractTrianglesFromSolid(solid: any): Triangle[] {
   }
 }
 
-function collectVisibleSolids(root: any, out: any[] = []) {
+export function collectVisibleSolids(root: any, out: any[] = []) {
   if (!root) return out;
   if ((root.type === 'SOLID' || typeof root.getMesh === 'function') && root.visible !== false) out.push(root);
   const children = Array.isArray(root.children) ? root.children : [];
@@ -345,17 +345,17 @@ function collectVisibleSolids(root: any, out: any[] = []) {
   return out;
 }
 
-function resolveSceneFromContext(context: AnyRecord = {}) {
+export function resolveSceneFromContext(context: AnyRecord = {}) {
   const viewer = context.viewer || context.partHistory?.viewer || context.entry?.history?.partHistory?.viewer || null;
   const partHistory = context.partHistory || viewer?.partHistory || context.history?.partHistory || context.entry?.history?.partHistory || null;
   return viewer?.scene || partHistory?.scene || null;
 }
 
-function countVisibleSolidsFromContext(context: AnyRecord = {}) {
+export function countVisibleSolidsFromContext(context: AnyRecord = {}) {
   return collectVisibleSolids(resolveSceneFromContext(context), []).length;
 }
 
-function resolveTargetSolids(context: AnyRecord, selection: any = null) {
+export function resolveTargetSolids(context: AnyRecord, selection: any = null) {
   const viewer = context.viewer || null;
   const partHistory = context.partHistory || viewer?.partHistory || null;
   const scene = resolveSceneFromContext({ viewer, partHistory });
@@ -374,7 +374,7 @@ function resolveTargetSolids(context: AnyRecord, selection: any = null) {
   return out;
 }
 
-function triangleBounds(triangles: Triangle[]): CamBounds | null {
+export function triangleBounds(triangles: Triangle[]): CamBounds | null {
   if (!triangles.length) return null;
   const min: CamPoint3 = [Infinity, Infinity, Infinity];
   const max: CamPoint3 = [-Infinity, -Infinity, -Infinity];
@@ -453,7 +453,7 @@ function projectedBoundaryLoopsFromBottomFaces(triangles: Triangle[], bottomZ: n
   return loopsFromEdges(Array.from(uniqueEdges.values()));
 }
 
-function loopsFromEdges(edges: Array<{ a: CamPoint2; b: CamPoint2 }>) {
+export function loopsFromEdges(edges: Array<{ a: CamPoint2; b: CamPoint2 }>) {
   const pointsByKey = new Map<string, CamPoint2>();
   const adjacency = new Map<string, Set<string>>();
   const edgeKeys = new Set<string>();
@@ -503,7 +503,7 @@ function loopsFromEdges(edges: Array<{ a: CamPoint2; b: CamPoint2 }>) {
   return loops;
 }
 
-function projectedShadowLoopsFromTriangles(triangles: Triangle[]) {
+export function projectedShadowLoopsFromTriangles(triangles: Triangle[]) {
   const contours: number[][] = [];
   for (const triangle of triangles) {
     let loop: CamPoint2[] = triangle.map((point) => [roundCoord(point[0]), roundCoord(point[1])] as CamPoint2);
@@ -527,7 +527,7 @@ function projectedShadowLoopsFromTriangles(triangles: Triangle[]) {
   }
 }
 
-function projectedLoopsFromTessellation(result: any) {
+export function projectedLoopsFromTessellation(result: any) {
   const vertices = Array.isArray(result?.vertices) || ArrayBuffer.isView(result?.vertices)
     ? result.vertices
     : [];
@@ -564,11 +564,11 @@ function projectedLoopsFromTessellation(result: any) {
   return loopsFromEdges(boundaryEdges);
 }
 
-function ensureCounterClockwise(points: CamPoint2[]) {
+export function ensureCounterClockwise(points: CamPoint2[]) {
   return polygonArea(points) < 0 ? points.slice().reverse() : points.slice();
 }
 
-function simplifyLoop(points: CamPoint2[], tol = EPS) {
+export function simplifyLoop(points: CamPoint2[], tol = EPS) {
   let out: CamPoint2[] = [];
   for (const point of points) {
     const next: CamPoint2 = [roundCoord(point[0]), roundCoord(point[1])];
@@ -602,7 +602,7 @@ function simplifyLoop(points: CamPoint2[], tol = EPS) {
   return out;
 }
 
-function pointInPolygon(point: CamPoint2, polygon: CamPoint2[]) {
+export function pointInPolygon(point: CamPoint2, polygon: CamPoint2[]) {
   let inside = false;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
     const pi = polygon[i];
@@ -614,12 +614,12 @@ function pointInPolygon(point: CamPoint2, polygon: CamPoint2[]) {
   return inside;
 }
 
-function loopInsideLoop(loop: CamPoint2[], container: CamPoint2[]) {
+export function loopInsideLoop(loop: CamPoint2[], container: CamPoint2[]) {
   if (loop.length < 3 || container.length < 3) return false;
   return loop.every((point) => pointInPolygon(point, container));
 }
 
-function buildShadowLoops(projectedLoops: CamPoint2[][], capLoops: CamPoint2[][]): ShadowLoop[] {
+export function buildShadowLoops(projectedLoops: CamPoint2[][], capLoops: CamPoint2[][]): ShadowLoop[] {
   const projectedLoopRecords = projectedLoops
     .map((points) => ensureCounterClockwise(simplifyLoop(points)))
     .filter((points) => points.length >= 3 && Math.abs(polygonArea(points)) > EPS)
@@ -651,11 +651,35 @@ function buildShadowLoops(projectedLoops: CamPoint2[][], capLoops: CamPoint2[][]
   ];
 }
 
+export function unionProjectedShadowLoops(loops: ShadowLoop[]) {
+  const contours = loops
+    .map((loop) => {
+      let points = ensureCounterClockwise(simplifyLoop(loop.points));
+      if (loop.role === 'hole') points = points.slice().reverse();
+      return points;
+    })
+    .filter((points) => points.length >= 3 && Math.abs(polygonArea(points)) > EPS)
+    .map((points) => points.flatMap((point) => [point[0], point[1]]));
+  if (!contours.length) return [];
+  try {
+    const result = Tess2.tesselate({
+      contours,
+      windingRule: Tess2.WINDING_NONZERO,
+      elementType: Tess2.POLYGONS,
+      polySize: 3,
+      vertexSize: 2,
+    });
+    return projectedLoopsFromTessellation(result);
+  } catch {
+    return [];
+  }
+}
+
 function cross2(origin: CamPoint2, a: CamPoint2, b: CamPoint2) {
   return ((a[0] - origin[0]) * (b[1] - origin[1])) - ((a[1] - origin[1]) * (b[0] - origin[0]));
 }
 
-function polygonArea(points: CamPoint2[]) {
+export function polygonArea(points: CamPoint2[]) {
   let area = 0;
   for (let i = 0; i < points.length; i += 1) {
     const a = points[i];
@@ -665,7 +689,7 @@ function polygonArea(points: CamPoint2[]) {
   return area * 0.5;
 }
 
-function mergeOuterOffsetLoops(loops: ShadowLoop[]): ShadowLoop[] {
+export function mergeOuterOffsetLoops(loops: ShadowLoop[]): ShadowLoop[] {
   const outerLoops = loops.filter((loop) => loop.role === 'outer');
   const holeLoops = loops.filter((loop) => loop.role === 'hole');
   if (outerLoops.length <= 1) return loops;
@@ -693,7 +717,7 @@ function mergeOuterOffsetLoops(loops: ShadowLoop[]): ShadowLoop[] {
   }
 }
 
-function offsetPolygon(points: CamPoint2[], distance: number): CamPoint2[][] {
+export function offsetPolygon(points: CamPoint2[], distance: number): CamPoint2[][] {
   const loop = ensureCounterClockwise(simplifyLoop(points));
   if (loop.length < 3) return [];
   if (Math.abs(distance) <= EPS) return [loop];
@@ -769,7 +793,7 @@ function distanceToPolygonSegments(point: CamPoint2, polygon: CamPoint2[]) {
   return { distance: best, index: bestIndex, t: bestT };
 }
 
-function buildDepthLevels(topZ: number, bottomZ: number, stepDown: number) {
+export function buildDepthLevels(topZ: number, bottomZ: number, stepDown: number) {
   const levels: number[] = [];
   let current = topZ;
   while (current > bottomZ + EPS) {
@@ -779,7 +803,7 @@ function buildDepthLevels(topZ: number, bottomZ: number, stepDown: number) {
   return levels.length ? levels : [roundCoord(bottomZ)];
 }
 
-function makeSteppedLoopPath({
+export function makeSteppedLoopPath({
   id,
   operationId,
   operationName,
@@ -889,7 +913,7 @@ function makeSteppedLoopPath({
   };
 }
 
-function boundsFromLoopsAndZ(loops: ShadowLoop[], topZ: number, bottomZ: number): CamBounds {
+export function boundsFromLoopsAndZ(loops: ShadowLoop[], topZ: number, bottomZ: number): CamBounds {
   const allPoints = loops.flatMap((loop) => loop.points);
   const xs = allPoints.map((point) => point[0]);
   const ys = allPoints.map((point) => point[1]);
@@ -899,7 +923,7 @@ function boundsFromLoopsAndZ(loops: ShadowLoop[], topZ: number, bottomZ: number)
   };
 }
 
-function makeEmptyShadowResult({
+export function makeEmptyShadowResult({
   operationId,
   operationName,
   machine,

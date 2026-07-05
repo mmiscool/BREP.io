@@ -437,7 +437,7 @@ export const sidebarMethods = {
             title: 'Scene Manager',
             section: sceneSection,
             source: 'builtin',
-            workbenches: ['MODELING', 'IMPORT', 'SURFACING', 'SHEET_METAL', 'SIMULATION', 'ASSEMBLIES', 'WIRE_HARNESS', 'PMI', 'ALL'],
+            workbenches: ['MODELING', 'IMPORT', 'SURFACING', 'SHEET_METAL', 'SIMULATION', 'CAM', 'ASSEMBLIES', 'WIRE_HARNESS', 'PMI', 'ALL'],
         });
 
         // PMI Views (saved camera snapshots)

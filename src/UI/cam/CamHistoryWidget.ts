@@ -395,9 +395,9 @@ export class CamHistoryWidget {
     const pathCount = Number(result?.summary?.pathCount ?? result?.paths?.length ?? 0) || 0;
     const warningCount = Number(result?.warnings?.length ?? 0) || 0;
     if (pathCount > 0) {
-      this._setStatus(`${pathCount} Shadow Cutter path${pathCount === 1 ? '' : 's'} generated.`, warningCount ? 'warn' : 'info');
+      this._setStatus(`${pathCount} CAM path${pathCount === 1 ? '' : 's'} generated.`, warningCount ? 'warn' : 'info');
     } else {
-      this._setStatus(result?.warnings?.[0] || 'No Shadow Cutter paths generated.', 'warn');
+      this._setStatus(result?.warnings?.[0] || 'No CAM paths generated.', 'warn');
     }
     this._setSimulatorProgram(result, { autoPlay: pathCount > 0 });
     this._renderProgram();
@@ -441,7 +441,7 @@ export class CamHistoryWidget {
       }
     }
     if (!state.hasProgram) {
-      this._setStatus('Generate a Shadow Cutter path before simulation.', 'warn');
+      this._setStatus('Generate CAM paths before simulation.', 'warn');
       return;
     }
     if (state.playing) sim.pause();
@@ -492,8 +492,8 @@ export class CamHistoryWidget {
     generateButton.type = 'button';
     generateButton.className = 'cam-history-btn cam-history-btn-primary';
     generateButton.textContent = 'Generate';
-    generateButton.title = 'Generate Shadow Cutter toolpaths';
-    generateButton.setAttribute('aria-label', 'Generate Shadow Cutter toolpaths');
+    generateButton.title = 'Generate CAM toolpaths';
+    generateButton.setAttribute('aria-label', 'Generate CAM toolpaths');
     generateButton.addEventListener('click', () => this._generateCam());
     this.controlsEl.appendChild(generateButton);
 
@@ -570,8 +570,8 @@ export class CamHistoryWidget {
       return;
     }
     message.textContent = operations.length
-      ? 'Generate to create Shadow Cutter G-code.'
-      : 'No Shadow Cutters configured.';
+      ? 'Generate to create CAM G-code.'
+      : 'No CAM operations configured.';
     this.programEl.appendChild(message);
   }
 
@@ -579,16 +579,16 @@ export class CamHistoryWidget {
     const manager = this.viewer?.partHistory?.camPlanManager || null;
     const operations = Array.isArray(manager?.getOperations?.()) ? manager.getOperations() : [];
     if (!operations.length) {
-      this._setStatus('Add a Shadow Cutter to begin.', 'info');
+      this._setStatus('Add a CAM operation to begin.', 'info');
       return;
     }
     const generated = manager?.getGeneratedResults?.() || [];
     if (generated.length) {
       const pathCount = generated.reduce((sum: number, result: AnyRecord) => sum + (Number(result?.summary?.pathCount ?? result?.paths?.length ?? 0) || 0), 0);
-      this._setStatus(`${pathCount} Shadow Cutter path${pathCount === 1 ? '' : 's'} ready.`, 'info');
+      this._setStatus(`${pathCount} CAM path${pathCount === 1 ? '' : 's'} ready.`, 'info');
       return;
     }
-    this._setStatus(`${operations.length} Shadow Cutter${operations.length === 1 ? '' : 's'} configured.`, 'info');
+    this._setStatus(`${operations.length} CAM operation${operations.length === 1 ? '' : 's'} configured.`, 'info');
   }
 
   _ensureStyles(): void {

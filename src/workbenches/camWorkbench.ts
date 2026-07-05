@@ -10,6 +10,7 @@ export const CAM_WORKBENCH = {
     pmiAnnotations: false,
   },
   sidePanels: {
+    sceneManager: true,
     camHistory: true,
     camMachineConfiguration: true,
     camGcode: true,

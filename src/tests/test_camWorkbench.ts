@@ -1,6 +1,11 @@
 import { PartHistory } from '../PartHistory.js';
 import { CamPlanManager } from '../cam/CamPlanManager.js';
-import { CAM_TOOLPATH_SIMULATOR_GROUP_NAME, CAM_TOOLPATH_TOOL_HEAD_NAME, CamToolpathSimulator } from '../cam/CamToolpathSimulator.js';
+import {
+  CAM_TOOLPATH_SIMULATOR_GROUP_NAME,
+  CAM_TOOLPATH_TOOL_HEAD_NAME,
+  CamToolpathSimulator,
+} from '../cam/CamToolpathSimulator.js';
+import { CAM_DEBUG_SLICE_SOLID_KIND } from '../cam/CamDebugSliceSolids.js';
 import {
   CAM_TOOLPATH_SCHEMA_VERSION,
   buildLinearToolpathPath,
@@ -11,6 +16,7 @@ import {
   type CamToolpathProgram,
 } from '../cam/CamToolpathDefinition.js';
 import { CAM_OPERATION_TYPE_SHADOW_CUTTER, ShadowCutterEntity } from '../cam/ShadowCutterEntity.js';
+import { CAM_OPERATION_TYPE_ROUGHING, RoughingEntity } from '../cam/RoughingEntity.js';
 import { getWorkbenchDefinition } from '../workbenches/index.js';
 import * as THREE from 'three';
 
@@ -162,6 +168,103 @@ function makeCylinderMeshSolid({
       };
     },
   };
+}
+
+function makeZCylinderMeshSolid({
+  name = 'cam-test-z-cylinder',
+  radius = 1,
+  height = 4,
+  centerX = 0,
+  centerY = 0,
+  bottomZ = 0,
+  segments = 32,
+} = {}) {
+  const vertProperties: number[] = [];
+  const triVerts: number[] = [];
+  const pushVertex = (x: number, y: number, z: number) => {
+    const index = vertProperties.length / 3;
+    vertProperties.push(x, y, z);
+    return index;
+  };
+  const topCenter = pushVertex(centerX, centerY, bottomZ + height);
+  const bottomCenter = pushVertex(centerX, centerY, bottomZ);
+  const topRing: number[] = [];
+  const bottomRing: number[] = [];
+  for (let index = 0; index < segments; index += 1) {
+    const theta = (index / segments) * Math.PI * 2;
+    const x = centerX + radius * Math.cos(theta);
+    const y = centerY + radius * Math.sin(theta);
+    topRing.push(pushVertex(x, y, bottomZ + height));
+    bottomRing.push(pushVertex(x, y, bottomZ));
+  }
+  const tri = (...indices: number[]) => triVerts.push(...indices);
+  for (let index = 0; index < segments; index += 1) {
+    const next = (index + 1) % segments;
+    tri(topCenter, topRing[index], topRing[next]);
+    tri(bottomCenter, bottomRing[next], bottomRing[index]);
+    tri(bottomRing[index], bottomRing[next], topRing[index]);
+    tri(topRing[index], bottomRing[next], topRing[next]);
+  }
+  return {
+    name,
+    type: 'SOLID',
+    visible: true,
+    getMesh() {
+      return {
+        vertProperties,
+        triVerts,
+        delete() {},
+      };
+    },
+  };
+}
+
+function makeSlopedBlockMeshSolid({
+  name = 'cam-test-sloped-block',
+  width = 10,
+  depth = 8,
+  leftHeight = 10,
+  rightHeight = 4,
+} = {}) {
+  const vertProperties = [
+    0, 0, 0,
+    width, 0, 0,
+    width, 0, depth,
+    0, 0, depth,
+    0, leftHeight, 0,
+    width, rightHeight, 0,
+    width, rightHeight, depth,
+    0, leftHeight, depth,
+  ];
+  const triVerts = [
+    0, 2, 1, 0, 3, 2,
+    4, 5, 6, 4, 6, 7,
+    0, 1, 5, 0, 5, 4,
+    1, 2, 6, 1, 6, 5,
+    2, 3, 7, 2, 7, 6,
+    3, 0, 4, 3, 4, 7,
+  ];
+  return {
+    name,
+    type: 'SOLID',
+    visible: true,
+    getMesh() {
+      return {
+        vertProperties,
+        triVerts,
+        delete() {},
+      };
+    },
+  };
+}
+
+function makeObject3DSolid(rawSolid: any) {
+  const solid = new THREE.Group() as any;
+  solid.name = rawSolid.name;
+  solid.type = 'SOLID';
+  solid.visible = rawSolid.visible !== false;
+  solid.getMesh = rawSolid.getMesh;
+  return solid;
 }
 
 function makeViewerWithSolids(solids: any[]) {
@@ -543,12 +646,278 @@ export async function test_cam_shadow_cutter_offset_keeps_l_shape_inside_corner_
   }
 }
 
-export async function test_cam_shadow_cutter_is_the_only_registered_operation() {
+export async function test_cam_roughing_history_item_generates_sliced_toolpaths() {
+  const manager = new CamPlanManager(null);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_ROUGHING, {
+    id: 'RG1',
+    targetSolids: ['cam-test-cube'],
+    toolDiameter: 2,
+    stockAllowance: 0,
+    stepDown: 4,
+    extraDepth: 0,
+    safeHeight: 3,
+    feedRate: 600,
+    plungeRate: 120,
+    spindleRPM: 9000,
+  });
+  const direct = operation.run({
+    viewer: makeViewerWithSolid(),
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  assert(direct.schemaVersion === CAM_TOOLPATH_SCHEMA_VERSION, 'Roughing should return the shared CAM toolpath schema');
+  assert(direct.operationName === 'Roughing', 'Roughing should name generated programs');
+  assert(direct.metadata?.strategy === 'roughing', 'Roughing should mark generated program strategy metadata');
+  assert(direct.summary.levelCount === 3, 'A 10-unit part roughed at 4-unit stepdown should produce three slices');
+  assert(direct.paths.length === 1, 'Box roughing should chain slices into a single continuous path');
+  const roughingPath = direct.paths[0];
+  assert(roughingPath.metadata?.strategy === 'roughing', 'The Roughing path should carry roughing metadata');
+  assert(roughingPath.metadata?.sliceCount === 3, 'The Roughing path should record all generated slices');
+  assert(roughingPath.segments.filter((segment) => segment.kind === 'retract').length === 1, 'Box roughing should retract only after the final slice');
+  const plungeZs = roughingPath.segments
+    .filter((segment) => segment.kind === 'plunge')
+    .map((segment) => roughingPath.points[segment.endIndex]?.position[2])
+    .join(',');
+  assert(plungeZs === '6,2,0', 'Box roughing should plunge through slices from top to bottom');
+  assert(direct.gcode.includes('Operation: Roughing'), 'Posted G-code should identify the Roughing operation');
+}
+
+export async function test_cam_roughing_uses_each_slice_shadow() {
+  const manager = new CamPlanManager(null);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_ROUGHING, {
+    id: 'RG2',
+    targetSolids: ['cam-test-column', 'cam-test-base'],
+    toolDiameter: 2,
+    stockAllowance: 0,
+    stepDown: 5,
+    extraDepth: 0,
+    safeHeight: 3,
+    feedRate: 600,
+    plungeRate: 120,
+    spindleRPM: 9000,
+  });
+  const direct = operation.run({
+    viewer: makeViewerWithSolids([
+      makeBoxMeshSolid(4, 10, 4, { name: 'cam-test-column' }),
+      makeBoxMeshSolid(10, 4, 10, { name: 'cam-test-base' }),
+    ]),
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  assert(direct.summary.levelCount === 2, 'Two 5-unit roughing slices should cover a 10-unit target');
+  assert(direct.paths.length === 1, 'Merged roughing shadows should be chained into a single path');
+  const firstSliceMaxX = Math.max(...cutPoints2dForSlice(direct.paths[0], 1).map((point) => point[0]));
+  const secondSliceMaxX = Math.max(...cutPoints2dForSlice(direct.paths[0], 2).map((point) => point[0]));
+  assert(firstSliceMaxX <= 5.01, 'Top roughing slice should follow the narrow column shadow');
+  assert(secondSliceMaxX >= 10.99, 'Lower roughing slice should expand to the wider base shadow');
+}
+
+export async function test_cam_roughing_unions_curved_slice_shadow_before_pathing() {
+  const manager = new CamPlanManager(null);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_ROUGHING, {
+    id: 'RG3',
+    targetSolids: ['cam-test-cylinder'],
+    toolDiameter: 1,
+    stockAllowance: 0,
+    stepDown: 5,
+    extraDepth: 0,
+    safeHeight: 3,
+    feedRate: 600,
+    plungeRate: 120,
+    spindleRPM: 9000,
+  });
+  const direct = operation.run({
+    viewer: makeViewerWithSolid(makeCylinderMeshSolid({
+      name: 'cam-test-cylinder',
+      radius: 5,
+      height: 10,
+      bottomY: 0,
+      segments: 48,
+    })),
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  const roughingPath = direct.paths[0];
+  assert(direct.summary.levelCount === 2, 'Cylinder roughing should produce two slices for a 10-unit part at 5-unit stepdown');
+  assert(direct.paths.length === 1, 'Cylinder roughing should emit one chained path');
+  assert(roughingPath.metadata?.passCount === 2, 'Curved slice shadows should be unioned before pathing instead of producing one pass per triangle');
+  assert(roughingPath.segments.filter((segment) => segment.kind === 'retract').length === 1, 'Curved roughing should not retract between identical slice loops');
+}
+
+export async function test_cam_roughing_vertical_wall_slice_matches_shadow_cutter_loop() {
+  const manager = new CamPlanManager(null);
+  const solid = makeZCylinderMeshSolid({
+    name: 'cam-test-z-cylinder',
+    radius: 5,
+    height: 10,
+    bottomZ: 0,
+    segments: 48,
+  });
+  const context = {
+    viewer: makeViewerWithSolid(solid),
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  };
+  const sharedParams = {
+    targetSolids: ['cam-test-z-cylinder'],
+    toolDiameter: 2,
+    stockAllowance: 0,
+    stepDown: 5,
+    extraDepth: 0,
+    safeHeight: 3,
+    feedRate: 600,
+    plungeRate: 120,
+    spindleRPM: 9000,
+  };
+  const shadow = manager.createOperation(CAM_OPERATION_TYPE_SHADOW_CUTTER, {
+    id: 'SC_Z',
+    name: 'Shadow Cutter',
+    ...sharedParams,
+  }).run(context);
+  const roughing = manager.createOperation(CAM_OPERATION_TYPE_ROUGHING, {
+    id: 'RG_Z',
+    name: 'Roughing',
+    ...sharedParams,
+  }).run(context);
+  const shadowOuter = shadow.paths.find((path) => path.metadata?.loopRole === 'outer');
+  assert(shadowOuter, 'Shadow Cutter should produce an outer loop for the vertical cylinder');
+  assert(roughing.paths.length === 1, 'Roughing should chain vertical cylinder slices into one path');
+  const shadowLoop = pointKeySet(points2dForMetadata(shadowOuter, (point: any) => point.metadata?.level === 1 && !point.metadata?.safe));
+  const roughingLoop = pointKeySet(points2dForMetadata(roughing.paths[0], (point: any) => point.metadata?.sliceIndex === 1 && !point.metadata?.safe));
+  assertSamePointSet(shadowLoop, roughingLoop, 'Roughing vertical-wall slice should reuse the same projected offset loop as Shadow Cutter');
+}
+
+export async function test_cam_roughing_debug_slices_emit_layer_solids() {
+  const manager = new CamPlanManager(null);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_ROUGHING, {
+    id: 'RG_DEBUG',
+    targetSolids: ['cam-test-cube'],
+    toolDiameter: 2,
+    stockAllowance: 0,
+    stepDown: 4,
+    extraDepth: 0,
+    safeHeight: 3,
+    feedRate: 600,
+    plungeRate: 120,
+    spindleRPM: 9000,
+    debugSlices: true,
+  });
+  const direct = operation.run({
+    viewer: makeViewerWithSolid(),
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  const debugSlices = direct.metadata?.debugSlices || [];
+  assert(Array.isArray(debugSlices), 'Roughing debug slices should be stored in program metadata');
+  assert(debugSlices.length === direct.summary.levelCount, 'Roughing debug slices should include one solid layer per step');
+  assert(debugSlices[0]?.topZ === 10 && debugSlices[0]?.bottomZ === 6, 'First roughing debug layer should preserve slice top and bottom Z');
+  assert(debugSlices[0]?.loops?.some((loop: any) => loop.role === 'outer' && loop.points?.length >= 3), 'Debug layer should include outer slice loops');
+}
+
+export async function test_cam_roughing_debug_slices_survive_combined_cam_plan() {
+  const manager = new CamPlanManager(null);
+  manager.createOperation(CAM_OPERATION_TYPE_SHADOW_CUTTER, defaultCamParams({
+    id: 'SC_DEBUG_COMBINED',
+    targetSolids: ['cam-test-cube'],
+    toolDiameter: 2,
+    stepDown: 4,
+    extraDepth: 0,
+  }));
+  manager.createOperation(CAM_OPERATION_TYPE_ROUGHING, {
+    id: 'RG_DEBUG_COMBINED',
+    targetSolids: ['cam-test-cube'],
+    toolDiameter: 2,
+    stockAllowance: 0,
+    stepDown: 4,
+    extraDepth: 0,
+    safeHeight: 3,
+    feedRate: 600,
+    plungeRate: 120,
+    spindleRPM: 9000,
+    debugSlices: true,
+  });
+  const combined = manager.generateAll({
+    viewer: makeViewerWithSolid(),
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  assert(combined.paths.length > 1, 'Combined CAM fixture should include multiple operations');
+  assert(Array.isArray(combined.metadata?.debugSlices), 'Combined CAM plan should preserve operation debug slices');
+  assert(combined.metadata?.debugSlices?.length === 3, 'Combined CAM plan should preserve one debug slice per roughing step');
+}
+
+export async function test_cam_roughing_debug_slices_create_real_scene_solids() {
+  const scene = new THREE.Scene();
+  scene.add(makeObject3DSolid(makeBoxMeshSolid()));
+  const manager = new CamPlanManager({ scene });
+  manager.createOperation(CAM_OPERATION_TYPE_ROUGHING, {
+    id: 'RG_DEBUG_SCENE',
+    targetSolids: [],
+    toolDiameter: 2,
+    stockAllowance: 0,
+    stepDown: 4,
+    extraDepth: 0,
+    safeHeight: 3,
+    feedRate: 600,
+    plungeRate: 120,
+    spindleRPM: 9000,
+    debugSlices: true,
+  });
+  const combined = manager.generateAll({ scene });
+  assert(combined.summary.targetCount === 1, 'Implicit Roughing target selection should start from the original scene solid');
+  const findDebugSolids = () => {
+    const out: any[] = [];
+    scene.traverse((object: any) => {
+      if (object?.userData?.camDebugKind === CAM_DEBUG_SLICE_SOLID_KIND) out.push(object);
+    });
+    return out;
+  };
+  const debugSolids = findDebugSolids();
+  assert(debugSolids.length === combined.metadata?.debugSliceCount, 'Generated Roughing debug layers should be added to the scene');
+  assert(debugSolids.every((solid) => solid.type === 'SOLID'), 'Generated Roughing debug layers should be real scene solids');
+  assert(scene.getObjectByName('RG_DEBUG_SCENE Debug Slice 1'), 'Debug solids should be named from the Roughing operation');
+  const regenerated = manager.generateAll({ scene });
+  assert(regenerated.summary.targetCount === 1, 'Regenerating CAM should ignore previous debug slice solids as machining targets');
+  assert(findDebugSolids().length === debugSolids.length, 'Regenerating CAM should replace debug solids instead of duplicating them');
+  manager.reset();
+  assert(findDebugSolids().length === 0, 'Resetting CAM should remove generated debug solids from the scene');
+}
+
+export async function test_cam_roughing_sloped_slab_generates_each_step() {
+  const manager = new CamPlanManager(null);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_ROUGHING, {
+    id: 'RG_SLOPED',
+    targetSolids: ['cam-test-sloped-block'],
+    toolDiameter: 2,
+    stockAllowance: 0,
+    stepDown: 2,
+    extraDepth: 0,
+    safeHeight: 3,
+    feedRate: 600,
+    plungeRate: 120,
+    spindleRPM: 9000,
+    debugSlices: true,
+  });
+  const direct = operation.run({
+    viewer: makeViewerWithSolid(makeSlopedBlockMeshSolid()),
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  assert(direct.summary.levelCount === 5, 'Sloped fixture should produce five roughing levels');
+  assert(direct.metadata?.activeSliceCount === 5, 'Roughing should keep every slab that intersects a sloped part');
+  assert(direct.metadata?.debugSlices?.length === 5, 'Roughing debug solids should include every sloped slab');
+  const zLevels = direct.paths[0]?.metadata?.zLevels || [];
+  assert(zLevels.length === 5, 'Roughing toolpath should include a cut level for every sloped slab');
+}
+
+export async function test_cam_workbench_registers_shadow_cutter_and_roughing_operations() {
   const manager = new CamPlanManager(null);
   const available = Array.from(manager.registry.entityClasses.values());
-  assert(available.length === 1, 'Only one CAM operation should be registered');
-  assert(available[0] === ShadowCutterEntity, 'Shadow Cutter should be the registered CAM operation');
+  assert(available.includes(ShadowCutterEntity), 'Shadow Cutter should be a registered CAM operation');
+  assert(available.includes(RoughingEntity), 'Roughing should be a registered CAM operation');
   assert(ShadowCutterEntity.longName === 'Shadow Cutter', 'Shadow Cutter should be the add-menu label');
+  assert(RoughingEntity.longName === 'Roughing', 'Roughing should be the add-menu label');
+  assert(RoughingEntity.inputParamsSchema.debugSlices?.type === 'boolean', 'Roughing should expose a debug slice checkbox');
   assert(!Object.prototype.hasOwnProperty.call(ShadowCutterEntity.inputParamsSchema, 'toolShape'), 'Old generic cutter shape field should be removed');
   assert(!Object.prototype.hasOwnProperty.call(ShadowCutterEntity.inputParamsSchema, 'stepover'), 'Old raster stepover field should be removed');
 }
@@ -557,6 +926,28 @@ function cutPoints2d(path: any, safeZ: number) {
   return path.points
     .filter((point: any) => Math.abs(point.position[2] - safeZ) > 1e-4)
     .map((point: any) => [point.position[0], point.position[1]] as [number, number]);
+}
+
+function cutPoints2dForSlice(path: any, sliceIndex: number) {
+  return path.points
+    .filter((point: any) => point.metadata?.sliceIndex === sliceIndex && !point.metadata?.safe)
+    .map((point: any) => [point.position[0], point.position[1]] as [number, number]);
+}
+
+function points2dForMetadata(path: any, predicate: (point: any) => boolean) {
+  return path.points
+    .filter(predicate)
+    .map((point: any) => [point.position[0], point.position[1]] as [number, number]);
+}
+
+function pointKeySet(points: Array<[number, number]>) {
+  return new Set(points.map((point) => `${point[0].toFixed(4)},${point[1].toFixed(4)}`));
+}
+
+function assertSamePointSet(left: Set<string>, right: Set<string>, message: string) {
+  const missing = Array.from(left).filter((key) => !right.has(key));
+  const extra = Array.from(right).filter((key) => !left.has(key));
+  assert(!missing.length && !extra.length, `${message}: missing ${missing.slice(0, 4).join(' ')} extra ${extra.slice(0, 4).join(' ')}`);
 }
 
 function distanceToRect(x: number, y: number, minX: number, minY: number, maxX: number, maxY: number) {
@@ -583,8 +974,9 @@ function distanceToLFixture(x: number, y: number) {
 export async function test_cam_workbench_registers_and_persists_part_history_state() {
   const workbench = getWorkbenchDefinition('CAM');
   assert(workbench, 'CAM workbench should be registered');
-  const camPanels = workbench.sidePanels || {};
+  const camPanels: Record<string, any> = workbench.sidePanels || {};
   assert(Object.keys(camPanels).filter((key) => key.startsWith('cam')).join('|') === 'camHistory|camMachineConfiguration|camGcode', 'CAM workbench should list CAM History before the other CAM panels');
+  assert(camPanels.sceneManager === true, 'CAM workbench should keep the Scene Manager panel visible');
 
   const partHistory = new PartHistory();
   partHistory.camPlanManager.createOperation(CAM_OPERATION_TYPE_SHADOW_CUTTER, defaultCamParams({ id: 'SC_SAVE' }));

@@ -5,10 +5,18 @@ import {
   ShadowCutterEntity,
 } from './ShadowCutterEntity.js';
 import {
+  CAM_OPERATION_TYPE_ROUGHING,
+  RoughingEntity,
+} from './RoughingEntity.js';
+import {
   combineCamToolpathPrograms,
   makeEmptyCamToolpathProgram,
   type CamToolpathProgram,
 } from './CamToolpathDefinition.js';
+import {
+  clearCamDebugSliceSolids,
+  syncCamDebugSliceSolids,
+} from './CamDebugSliceSolids.js';
 import {
   mergeCamMachineProfile,
   normalizeCamMachineProfile,
@@ -21,6 +29,7 @@ import {
 } from './CamStockProfile.js';
 
 const DEFAULT_TYPE = CAM_OPERATION_TYPE_SHADOW_CUTTER;
+const CAM_ENTITY_CLASSES = [ShadowCutterEntity, RoughingEntity];
 export const CAM_GENERATED_DATA_VERSION = 0;
 const RESERVED_INPUT_KEYS = new Set(['type', 'persistentData', '__open']);
 
@@ -213,6 +222,7 @@ export class CamPlanManager extends HistoryCollectionBase {
   }
 
   generateAll(viewer: any = null) {
+    this._clearDebugSliceSolids(viewer);
     const results: CamToolpathProgram[] = [];
     for (const entity of this.entries) {
       if (entity?.inputParams?.enabled === false) continue;
@@ -220,11 +230,13 @@ export class CamPlanManager extends HistoryCollectionBase {
     }
     this._lastResults = results;
     this._lastCombinedPlan = this._combineOperationResults(results);
+    this._syncDebugSliceSolids(viewer, this._lastCombinedPlan);
     this.notifyListeners({ reason: 'generate-all', history: this, result: this._lastCombinedPlan, results });
     return this._lastCombinedPlan;
   }
 
   async generateAllAsync(viewer: any = null, options: { onProgress?: (event: CamGenerationProgressEvent) => void } = {}) {
+    this._clearDebugSliceSolids(viewer);
     const enabled = this.entries.filter((entity) => entity?.inputParams?.enabled !== false);
     this._emitProgress(options, {
       phase: 'generate',
@@ -250,6 +262,7 @@ export class CamPlanManager extends HistoryCollectionBase {
     }
     this._lastResults = results;
     this._lastCombinedPlan = this._combineOperationResults(results);
+    this._syncDebugSliceSolids(viewer, this._lastCombinedPlan);
     this.notifyListeners({ reason: 'generate-all', history: this, result: this._lastCombinedPlan, results });
     return this._lastCombinedPlan;
   }
@@ -267,6 +280,7 @@ export class CamPlanManager extends HistoryCollectionBase {
     entity.setPersistentData(data);
     this._lastCombinedPlan = null;
     this._lastResults = [];
+    this._clearDebugSliceSolids();
     this.notifyListeners({ reason: 'invalidate', entry: entity, history: this, hadGeneratedData });
     return true;
   }
@@ -289,6 +303,7 @@ export class CamPlanManager extends HistoryCollectionBase {
     this._idCounter = 0;
     this._lastCombinedPlan = null;
     this._lastResults = [];
+    this._clearDebugSliceSolids();
     const state = (rawState && typeof rawState === 'object' && !Array.isArray(rawState))
       ? rawState
       : { operations: rawState };
@@ -333,6 +348,7 @@ export class CamPlanManager extends HistoryCollectionBase {
     this._idCounter = 0;
     this._lastCombinedPlan = null;
     this._lastResults = [];
+    this._clearDebugSliceSolids();
     this.machineProfile = normalizeCamMachineProfile(null);
     this.stockProfile = normalizeCamStockProfile(null);
     this.notifyListeners({ reason: 'clear', history: this });
@@ -387,6 +403,23 @@ export class CamPlanManager extends HistoryCollectionBase {
       stockProfile: this.getStockProfile(),
       manager: this,
     };
+  }
+
+  _resolveScene(viewer: any = null) {
+    const resolvedViewer = viewer?.viewer || viewer || this.partHistory?.viewer || null;
+    return resolvedViewer?.partHistory?.scene || resolvedViewer?.scene || this.partHistory?.scene || null;
+  }
+
+  _syncDebugSliceSolids(viewer: any = null, program: CamToolpathProgram | null = null) {
+    return syncCamDebugSliceSolids({
+      program,
+      scene: this._resolveScene(viewer),
+      partHistory: this.partHistory,
+    });
+  }
+
+  _clearDebugSliceSolids(viewer: any = null) {
+    return clearCamDebugSliceSolids(this._resolveScene(viewer), this.partHistory);
   }
 
   _makeEmptyPlan(warnings: string[] = []): CamToolpathProgram {
@@ -460,14 +493,18 @@ export class CamPlanManager extends HistoryCollectionBase {
   }
 
   _registerAvailableEntries() {
-    try { this.registry.register(ShadowCutterEntity); } catch { /* ignore duplicate registrations */ }
+    for (const EntityClass of CAM_ENTITY_CLASSES) {
+      try { this.registry.register(EntityClass); } catch { /* ignore duplicate registrations */ }
+    }
   }
 
   _resolveHandler(type: unknown): CamEntityConstructor {
     const normalized = String(type || '').trim();
-    if (!normalized || normalized === DEFAULT_TYPE || normalized === ShadowCutterEntity.shortName) {
-      return ShadowCutterEntity;
-    }
+    if (!normalized) return ShadowCutterEntity;
+    if (normalized === CAM_OPERATION_TYPE_ROUGHING || normalized === RoughingEntity.shortName) return RoughingEntity;
+    if (normalized === DEFAULT_TYPE || normalized === ShadowCutterEntity.shortName) return ShadowCutterEntity;
+    const resolved = this.registry?.resolve?.(normalized);
+    if (resolved) return resolved;
     return ShadowCutterEntity;
   }
 
