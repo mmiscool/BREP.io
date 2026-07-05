@@ -17,6 +17,7 @@ import {
 } from '../cam/CamToolpathDefinition.js';
 import { CAM_OPERATION_TYPE_SHADOW_CUTTER, ShadowCutterEntity } from '../cam/ShadowCutterEntity.js';
 import { CAM_OPERATION_TYPE_ROUGHING, RoughingEntity } from '../cam/RoughingEntity.js';
+import { CAM_OPERATION_TYPE_SURFACING, SurfacingEntity } from '../cam/SurfacingEntity.js';
 import { getWorkbenchDefinition } from '../workbenches/index.js';
 import * as THREE from 'three';
 
@@ -260,6 +261,63 @@ function makeSlopedBlockMeshSolid({
       };
     },
   };
+}
+
+function makeFaceMeshObject(name: string, vertices: number[], indices: number[]) {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(vertices), 3));
+  geometry.setIndex(indices);
+  const face = new THREE.Mesh(geometry) as any;
+  face.name = name;
+  face.type = 'FACE';
+  face.visible = true;
+  face.updateMatrixWorld?.(true);
+  return face;
+}
+
+function makeTopRectFace({
+  name = 'cam-test-top-face',
+  width = 10,
+  depth = 8,
+  y = 10,
+  x = 0,
+  z = 0,
+} = {}) {
+  return makeFaceMeshObject(name, [
+    x, y, z,
+    x + width, y, z,
+    x + width, y, z + depth,
+    x, y, z + depth,
+  ], [0, 1, 2, 0, 2, 3]);
+}
+
+function makeSlopedTopFace({
+  name = 'cam-test-sloped-top-face',
+  width = 10,
+  depth = 8,
+  leftHeight = 10,
+  rightHeight = 4,
+} = {}) {
+  return makeFaceMeshObject(name, [
+    0, leftHeight, 0,
+    width, rightHeight, 0,
+    width, rightHeight, depth,
+    0, leftHeight, depth,
+  ], [0, 1, 2, 0, 2, 3]);
+}
+
+function makeVerticalSideFace({
+  name = 'cam-test-vertical-side-face',
+  depth = 8,
+  height = 10,
+  x = 0,
+} = {}) {
+  return makeFaceMeshObject(name, [
+    x, 0, 0,
+    x, height, 0,
+    x, height, depth,
+    x, 0, depth,
+  ], [0, 1, 2, 0, 2, 3]);
 }
 
 function makeObject3DSolid(rawSolid: any) {
@@ -995,14 +1053,177 @@ export async function test_cam_roughing_sloped_slab_generates_each_step() {
   assert(zLevels.length === 5, 'Roughing toolpath should include a cut level for every sloped slab');
 }
 
+export async function test_cam_surfacing_history_item_generates_ball_endmill_raster() {
+  const manager = new CamPlanManager(null);
+  const viewer = makeViewerWithSolids([
+    makeBoxMeshSolid(10, 10, 8, { name: 'cam-test-surfacing-block' }),
+    makeTopRectFace({ name: 'cam-test-top-face', width: 10, depth: 8, y: 10 }),
+  ]);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_SURFACING, {
+    id: 'SF1',
+    targetFaces: ['cam-test-top-face'],
+    toolDiameter: 2,
+    toolLength: 20,
+    stockAllowance: 0,
+    stepover: 3,
+    rasterDirection: 'X',
+    safeHeight: 2,
+    feedRate: 700,
+    plungeRate: 150,
+    spindleRPM: 10000,
+  });
+  const direct = operation.run({
+    viewer,
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  assert(direct.schemaVersion === CAM_TOOLPATH_SCHEMA_VERSION, 'Surfacing should return the shared CAM toolpath schema');
+  assert(direct.operationName === 'Surfacing', 'Surfacing should name generated programs');
+  assert(direct.metadata?.strategy === 'surfacing', 'Surfacing should mark generated program strategy metadata');
+  assert(direct.paths.length === 1, 'Surfacing should emit one serpentine raster path');
+  assert(direct.cutter?.kind === 'ball-endmill', 'Surfacing should use a ball end mill cutter');
+  assert(direct.paths[0].cutter.kind === 'ball-endmill', 'Surfacing paths should describe the ball end mill cutter');
+  assert(direct.paths[0].segments.some((segment) => segment.kind === 'plunge'), 'Surfacing should include an explicit plunge move');
+  assert(direct.paths[0].segments.some((segment) => segment.kind === 'retract'), 'Surfacing should include an explicit retract move');
+  assert(direct.paths[0].segments[0].orientation.toolAxis.join(',') === '0,0,-1', 'Surfacing segments should describe cutter orientation');
+  assert(direct.summary.targetCount === 1, 'Surfacing should report selected face count');
+  assert(direct.summary.triangleCount === 12, 'Surfacing should use the whole visible solid mesh for gouge checks');
+  assert(direct.summary.levelCount === 4, 'Surfacing should include the final boundary pass when stepover does not divide the face depth');
+  assert(direct.paths[0].metadata?.runCount === 4, 'Surfacing path metadata should record every raster run');
+  assert(direct.paths[0].metadata?.filteredCutPointCount > 0, 'Surfacing should filter redundant flat-face cutter-location samples');
+  assert(direct.paths[0].metadata?.rawCutPointCount > direct.paths[0].metadata?.pointCount, 'Surfacing metadata should expose sample reduction');
+  const cutPoints = direct.paths[0].points.filter((point: any) => !point.metadata?.safe);
+  const ys = cutPoints.map((point: any) => point.position[1]);
+  const xs = cutPoints.map((point: any) => point.position[0]);
+  const zs = cutPoints.map((point: any) => point.position[2]);
+  assert(Math.min(...xs) === 0 && Math.max(...xs) === 10, 'Surfacing raster should run all the way to the selected face edge');
+  assert(Math.min(...ys) === 0 && Math.max(...ys) === 8, 'Surfacing raster should cover both selected face boundaries');
+  assert(zs.every((z: number) => Math.abs(z - 10) < 1e-4), 'Flat-face surfacing should keep the ball tip on the top plane');
+  assert(direct.gcode.includes('Operation: Surfacing'), 'Posted G-code should identify the Surfacing operation');
+
+  const combined = manager.generateAll(viewer);
+  assert(combined.paths.length === direct.paths.length, 'CAM manager should include Surfacing output in combined generation');
+  assert(manager.getGeneratedResults()[0]?.operationId === 'SF1', 'CAM manager should retain Surfacing runtime results');
+}
+
+export async function test_cam_surfacing_follows_sloped_face_with_drop_cutter() {
+  const manager = new CamPlanManager(null);
+  const viewer = makeViewerWithSolids([
+    makeSlopedBlockMeshSolid({ name: 'cam-test-sloped-surfacing-block' }),
+    makeSlopedTopFace({ name: 'cam-test-sloped-top-face' }),
+  ]);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_SURFACING, {
+    id: 'SF_SLOPED',
+    targetFaces: ['cam-test-sloped-top-face'],
+    toolDiameter: 2,
+    toolLength: 20,
+    stockAllowance: 0,
+    stepover: 5,
+    rasterDirection: 'Y',
+    safeHeight: 2,
+    feedRate: 700,
+    plungeRate: 150,
+    spindleRPM: 10000,
+  });
+  const direct = operation.run({
+    viewer,
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  assert(direct.paths.length === 1, 'Sloped Surfacing should generate a toolpath');
+  assert(direct.warnings.length === 0, 'Sloped Surfacing should not produce generation warnings');
+  const cutPoints = direct.paths[0].points.filter((point: any) => !point.metadata?.safe);
+  const highSide = cutPoints.filter((point: any) => Math.abs(point.position[0]) < 1e-4).map((point: any) => point.position[2]);
+  const lowSide = cutPoints.filter((point: any) => Math.abs(point.position[0] - 10) < 1e-4).map((point: any) => point.position[2]);
+  assert(highSide.length > 0 && lowSide.length > 0, 'Sloped Surfacing should sample both high and low face boundaries');
+  const highAvg = highSide.reduce((sum: number, value: number) => sum + value, 0) / highSide.length;
+  const lowAvg = lowSide.reduce((sum: number, value: number) => sum + value, 0) / lowSide.length;
+  assert(highAvg - lowAvg > 5.5, 'Sloped Surfacing should follow the selected surface height instead of cutting at one Z level');
+  assert(direct.bounds && direct.bounds.max[2] > direct.bounds.min[2], 'Sloped Surfacing bounds should reflect varying cutter heights');
+}
+
+export async function test_cam_surfacing_uses_low_clearance_links_between_separate_face_spans() {
+  const manager = new CamPlanManager(null);
+  const viewer = makeViewerWithSolids([
+    makeBoxMeshSolid(12, 10, 8, { name: 'cam-test-surfacing-block' }),
+    makeTopRectFace({ name: 'cam-test-left-top-face', width: 4, depth: 8, y: 10, x: 0, z: 0 }),
+    makeTopRectFace({ name: 'cam-test-right-top-face', width: 4, depth: 8, y: 10, x: 8, z: 0 }),
+  ]);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_SURFACING, {
+    id: 'SF_LINK',
+    targetFaces: ['cam-test-left-top-face', 'cam-test-right-top-face'],
+    toolDiameter: 2,
+    stockAllowance: 0,
+    linkClearance: 0.5,
+    stepover: 8,
+    rasterDirection: 'X',
+    safeHeight: 5,
+    feedRate: 700,
+    plungeRate: 150,
+    spindleRPM: 10000,
+  });
+  const direct = operation.run({
+    viewer,
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  const path = direct.paths[0];
+  assert(path, 'Separate-span Surfacing should generate a toolpath');
+  const clearanceSegments = path.segments.filter((segment: any) => segment.metadata?.clearanceLink);
+  assert(clearanceSegments.some((segment: any) => segment.kind === 'rapid'), 'Separate spans should be joined with a non-cutting clearance link');
+  const clearanceZs = clearanceSegments
+    .map((segment: any) => path.points[segment.endIndex]?.position?.[2])
+    .filter((z: number) => Number.isFinite(z));
+  assert(clearanceZs.some((z: number) => z > 10 && z < direct.safeZ), 'Clearance links should lift locally instead of returning to full safe Z');
+  const interiorSafeRetracts = path.segments.filter((segment: any, index: number) => (
+    index < path.segments.length - 1
+    && segment.kind === 'retract'
+    && Math.abs((path.points[segment.endIndex]?.position?.[2] || 0) - direct.safeZ) < 1e-4
+  ));
+  assert(interiorSafeRetracts.length === 0, 'Surfacing should avoid full safe-Z retracts between reachable raster spans');
+}
+
+export async function test_cam_surfacing_rejects_vertical_face_without_projected_area() {
+  const manager = new CamPlanManager(null);
+  const viewer = makeViewerWithSolids([
+    makeBoxMeshSolid(10, 10, 8, { name: 'cam-test-surfacing-block' }),
+    makeVerticalSideFace({ name: 'cam-test-vertical-side-face', depth: 8, height: 10, x: 0 }),
+  ]);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_SURFACING, {
+    id: 'SF_VERTICAL',
+    targetFaces: ['cam-test-vertical-side-face'],
+    toolDiameter: 2,
+    stockAllowance: 0,
+    stepover: 1,
+    rasterDirection: 'X',
+    safeHeight: 2,
+    feedRate: 700,
+    plungeRate: 150,
+    spindleRPM: 10000,
+  });
+  const direct = operation.run({
+    viewer,
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  assert(direct.paths.length === 0, 'Vertical Surfacing should not emit a top-down raster path');
+  assert(direct.warnings.some((warning: string) => warning.includes('Vertical faces cannot be surfaced top-down')), 'Vertical Surfacing should explain the missing projected area');
+  assert(direct.cutter?.kind === 'ball-endmill', 'Empty Surfacing results should still describe the selected ball end mill');
+}
+
 export async function test_cam_workbench_registers_shadow_cutter_and_roughing_operations() {
   const manager = new CamPlanManager(null);
   const available = Array.from(manager.registry.entityClasses.values());
   assert(available.includes(ShadowCutterEntity), 'Shadow Cutter should be a registered CAM operation');
   assert(available.includes(RoughingEntity), 'Roughing should be a registered CAM operation');
+  assert(available.includes(SurfacingEntity), 'Surfacing should be a registered CAM operation');
   assert(ShadowCutterEntity.longName === 'Shadow Cutter', 'Shadow Cutter should be the add-menu label');
   assert(RoughingEntity.longName === 'Roughing', 'Roughing should be the add-menu label');
+  assert(SurfacingEntity.longName === 'Surfacing', 'Surfacing should be the add-menu label');
   assert(RoughingEntity.inputParamsSchema.debugSlices?.type === 'boolean', 'Roughing should expose a debug slice checkbox');
+  assert(SurfacingEntity.inputParamsSchema.targetFaces?.selectionFilter?.includes('FACE'), 'Surfacing should select target faces');
+  assert(SurfacingEntity.inputParamsSchema.rasterDirection?.options?.includes('Y'), 'Surfacing should expose raster direction choices');
+  assert(SurfacingEntity.inputParamsSchema.pathTolerance?.type === 'number', 'Surfacing should expose cutter-location simplification tolerance');
   assert(!Object.prototype.hasOwnProperty.call(ShadowCutterEntity.inputParamsSchema, 'toolShape'), 'Old generic cutter shape field should be removed');
   assert(!Object.prototype.hasOwnProperty.call(ShadowCutterEntity.inputParamsSchema, 'stepover'), 'Old raster stepover field should be removed');
 }

@@ -335,6 +335,35 @@ export function extractTrianglesFromSolid(solid: any): Triangle[] {
   }
 }
 
+export function extractTrianglesFromFace(face: any): Triangle[] {
+  if (!face) return [];
+  const geometry = face.geometry || null;
+  const position = typeof geometry?.getAttribute === 'function'
+    ? geometry.getAttribute('position')
+    : geometry?.attributes?.position || null;
+  if (!position || position.itemSize !== 3 || position.count < 3) return [];
+  const index = typeof geometry?.getIndex === 'function' ? geometry.getIndex() : geometry?.index || null;
+  const matrix = face.matrixWorld || null;
+  const vertexAt = (vertexIndex: number): CamPoint3 => {
+    const scenePoint: CamPoint3 = [
+      Number(position.getX(vertexIndex)),
+      Number(position.getY(vertexIndex)),
+      Number(position.getZ(vertexIndex)),
+    ];
+    return scenePointToMachine(applyMatrix4(scenePoint, matrix));
+  };
+  const out: Triangle[] = [];
+  const triangleCount = index ? Math.floor(index.count / 3) : Math.floor(position.count / 3);
+  for (let triangleIndex = 0; triangleIndex < triangleCount; triangleIndex += 1) {
+    const base = triangleIndex * 3;
+    const tri: Triangle = index
+      ? [vertexAt(index.getX(base)), vertexAt(index.getX(base + 1)), vertexAt(index.getX(base + 2))]
+      : [vertexAt(base), vertexAt(base + 1), vertexAt(base + 2)];
+    if (tri.every((point) => point.every(Number.isFinite))) out.push(tri);
+  }
+  return out;
+}
+
 export function collectVisibleSolids(root: any, out: any[] = []) {
   if (!root) return out;
   if ((root.type === 'SOLID' || typeof root.getMesh === 'function') && root.visible !== false) out.push(root);

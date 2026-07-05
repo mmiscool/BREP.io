@@ -9,6 +9,10 @@ import {
   RoughingEntity,
 } from './RoughingEntity.js';
 import {
+  CAM_OPERATION_TYPE_SURFACING,
+  SurfacingEntity,
+} from './SurfacingEntity.js';
+import {
   combineCamToolpathPrograms,
   makeEmptyCamToolpathProgram,
   type CamToolpathProgram,
@@ -29,7 +33,7 @@ import {
 } from './CamStockProfile.js';
 
 const DEFAULT_TYPE = CAM_OPERATION_TYPE_SHADOW_CUTTER;
-const CAM_ENTITY_CLASSES = [ShadowCutterEntity, RoughingEntity];
+const CAM_ENTITY_CLASSES = [ShadowCutterEntity, RoughingEntity, SurfacingEntity];
 export const CAM_GENERATED_DATA_VERSION = 0;
 const RESERVED_INPUT_KEYS = new Set(['type', 'persistentData', '__open']);
 
@@ -502,6 +506,7 @@ export class CamPlanManager extends HistoryCollectionBase {
     const normalized = String(type || '').trim();
     if (!normalized) return ShadowCutterEntity;
     if (normalized === CAM_OPERATION_TYPE_ROUGHING || normalized === RoughingEntity.shortName) return RoughingEntity;
+    if (normalized === CAM_OPERATION_TYPE_SURFACING || normalized === SurfacingEntity.shortName) return SurfacingEntity;
     if (normalized === DEFAULT_TYPE || normalized === ShadowCutterEntity.shortName) return ShadowCutterEntity;
     const resolved = this.registry?.resolve?.(normalized);
     if (resolved) return resolved;

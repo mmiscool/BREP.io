@@ -158,6 +158,29 @@ export function makeFlatEndMillCutter({
   return out;
 }
 
+export function makeBallEndMillCutter({
+  diameter,
+  cuttingLength,
+  overallLength,
+  id,
+}: {
+  diameter: number;
+  cuttingLength?: number;
+  overallLength?: number;
+  id?: string;
+}): CamCutterDefinition {
+  const safeDiameter = Math.max(1e-7, Math.abs(Number(diameter) || 0));
+  const out: CamCutterDefinition = {
+    id,
+    kind: 'ball-endmill',
+    diameter: roundCamCoord(safeDiameter),
+    radius: roundCamCoord(safeDiameter * 0.5),
+  };
+  if (Number.isFinite(Number(cuttingLength))) out.cuttingLength = roundCamCoord(Number(cuttingLength));
+  if (Number.isFinite(Number(overallLength))) out.overallLength = roundCamCoord(Number(overallLength));
+  return out;
+}
+
 export function buildLinearToolpathPath(options: BuildLinearToolpathPathOptions): CamToolpathPath {
   const orientation = normalizeCamOrientation(options.orientation);
   const points = (options.positions || []).map((position) => ({
