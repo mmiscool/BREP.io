@@ -56,3 +56,4 @@ build.ninja
 *.pem
 *.p12
 *.crt
+/referenceMaterial/**

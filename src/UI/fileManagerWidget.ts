@@ -28,6 +28,7 @@ import {
   readBrowserStorageValue,
   writeBrowserStorageValue,
 } from '../utils/browserStorage.js';
+import { replaceCurrentCadModelUrl } from '../utils/cadModelUrl.js';
 import { CADmaterials } from './CADmaterials.js';
 import { FloatingWindow } from './FloatingWindow.js';
 import { HISTORY_COLLECTION_REFRESH_EVENT } from './history/HistoryCollectionWidget.js';
@@ -243,6 +244,15 @@ export class FileManagerWidget {
     const repo = String(repoFull || '').trim();
     const scope = repo ? `${repo}::${n}` : n;
     return src ? `${src}::${scope}` : scope;
+  }
+  _syncSavedModelUrl(modelPath, source = 'local', repoFull = '', branch = '') {
+    const normalizedSource = this._normalizeSource(source) || 'local';
+    replaceCurrentCadModelUrl({
+      source: normalizedSource,
+      path: modelPath,
+      repoFull: normalizedSource === 'local' ? '' : repoFull,
+      branch: normalizedSource === 'github' ? branch : '',
+    });
   }
   async _importDroppedFilesIntoWorkspace(files = [], target: any = {}, { branch = '' }: any = {}) {
     const list = Array.isArray(files) ? files.filter(Boolean) : [];
@@ -1127,7 +1137,9 @@ export class FileManagerWidget {
     if (!modelPath) return { saved: false, reason: 'invalid_target' };
     const targetSource = this._normalizeSource(target.source || currentSource || 'local') || 'local';
     const targetRepo = String(target.repoFull || '').trim();
-    const targetBranch = String(target.branch || currentBranch || '').trim();
+    const targetBranch = targetSource === 'github'
+      ? String(target.branch || currentBranch || '').trim()
+      : '';
     const targetOptions = {
       ...this._buildScopeOptions(targetSource, targetRepo, targetBranch),
       path: modelPath,
@@ -1352,6 +1364,7 @@ export class FileManagerWidget {
       this.currentBranch = targetBranch;
       this._forceSaveTargetDialog = false;
       this.nameInput.value = modelPath;
+      this._syncSavedModelUrl(modelPath, targetSource, targetRepo, targetBranch);
       const savedSnapshot = await this._refreshSavedHistorySnapshot();
       if (savedSnapshot === null) this._markSavedHistorySnapshot(jsonString || null);
       this._logSaveProgress('Refreshing list...');

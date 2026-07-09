@@ -30,6 +30,11 @@ import {
   removeBrowserStorageValue,
   writeBrowserStorageValue,
 } from './utils/browserStorage.js';
+import {
+  buildCadModelUrl,
+  encodeCadPathForUrl as encodePathForUrl,
+  encodeCadRefForUrl as encodeRefForUrl,
+} from './utils/cadModelUrl.js';
 
 const MODEL_FILE_EXTENSION = '.3mf';
 const MANUAL_WORKSPACE_REPOS_KEY = '__BREP_WORKSPACE_MANUAL_REPOS__';
@@ -236,27 +241,7 @@ function setHomeThemeInverted(enabled, {
 }
 
 function buildCadUrl(options: AnyRecord = {}) {
-  const url = new URL('cad.html', window.location.href);
-  const source = normalizeStorageSource(options?.source);
-  const modelPath = normalizePath(options?.path || '');
-  if (modelPath) {
-    if (source === 'github') {
-      const repoPath = encodeRefForUrl(options?.repoFull || '');
-      const modelUrlPath = encodePathForUrl(modelPath);
-      const scopedPath = repoPath ? `github/${repoPath}/${modelUrlPath}` : `github/${modelUrlPath}`;
-      url.searchParams.set('path', scopedPath);
-    } else if (source === 'mounted') {
-      const mountId = encodeRefForUrl(options?.repoFull || options?.mountId || '');
-      const modelUrlPath = encodePathForUrl(modelPath);
-      const scopedPath = mountId ? `mounted/${mountId}/${modelUrlPath}` : `mounted/${modelUrlPath}`;
-      url.searchParams.set('path', scopedPath);
-    } else {
-      url.searchParams.set('path', modelPath);
-    }
-  }
-  const branch = options?.branch;
-  if (branch) url.searchParams.set('branch', String(branch));
-  return url.toString();
+  return (buildCadModelUrl(options, window.location.href) || new URL('cad.html', window.location.href)).toString();
 }
 
 function goCad(options = {}) {
@@ -1726,23 +1711,6 @@ function getEntryFullPathTooltip(entry) {
   parts.push(getStorageRootLabel(source, repoFull));
   if (browserPath) parts.push(browserPath);
   return parts.join(' / ');
-}
-
-function encodePathForUrl(value) {
-  return normalizePath(value)
-    .split('/')
-    .filter(Boolean)
-    .map((part) => encodeURIComponent(part))
-    .join('/');
-}
-
-function encodeRefForUrl(ref) {
-  return String(ref || '')
-    .trim()
-    .split('/')
-    .filter(Boolean)
-    .map((part) => encodeURIComponent(part))
-    .join('/');
 }
 
 function isCommitShaLikeRef(ref) {
