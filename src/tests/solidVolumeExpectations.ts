@@ -1,6 +1,14 @@
 // Captured expected final scene solid volumes for tests that leave SOLID objects.
 // Numeric values are compared with the default tolerance in solidVolumeTestUtils.js.
 export const solidVolumeExpectations = Object.freeze({
+    test_generated_history_20260709065543: {
+        solids: [
+            {
+                name: "HEIGHTMAP1",
+                volume: 354861.4611679972
+            }
+        ]
+    },
     import_part_badBoolean: {
         solids: [
             {

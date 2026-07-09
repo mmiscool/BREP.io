@@ -156,47 +156,48 @@ export class ImageHeightmapSolidFeature {
       console.warn('[HEIGHTMAP] Sampling produced insufficient grid resolution');
       return { added: [], removed: [] };
     }
-    const idx = (x, y) => y * gridWidth + x;
-    const topVerts = new Array(gridWidth * gridHeight);
-    const bottomVerts = new Array(gridWidth * gridHeight);
+    const gridCount = gridWidth * gridHeight;
 
-    let minX = Infinity, minY = Infinity, minZ = Infinity;
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-    const updateBounds = (p) => {
-      if (!p) return;
-      if (p[0] < minX) minX = p[0];
-      if (p[1] < minY) minY = p[1];
-      if (p[2] < minZ) minZ = p[2];
-      if (p[0] > maxX) maxX = p[0];
-      if (p[1] > maxY) maxY = p[1];
-      if (p[2] > maxZ) maxZ = p[2];
-    };
-
+    // Precompute world XY per grid column/row and heights per grid cell.
+    const pxArr = new Float64Array(gridWidth);
+    for (let gx = 0; gx < gridWidth; gx++) pxArr[gx] = (sampleXs[gx] - offsetX) * scaleXY;
+    const pyArr = new Float64Array(gridHeight);
     for (let gy = 0; gy < gridHeight; gy++) {
       const sy = sampleYs[gy];
+      pyArr[gy] = (centerXY ? (offsetY - sy) : -sy) * scaleXY;
+    }
+
+    const heights = new Float64Array(gridCount);
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (let gy = 0; gy < gridHeight; gy++) {
+      const sy = sampleYs[gy];
+      const rowBase = gy * gridWidth;
       for (let gx = 0; gx < gridWidth; gx++) {
         const sx = sampleXs[gx];
-        const i = idx(gx, gy);
         const si = (sy * width + sx) * 4;
         const r = src[si] | 0;
         const g = src[si + 1] | 0;
         const b = src[si + 2] | 0;
         const a = src[si + 3] | 0;
         const gray = (r * 0.2126 + g * 0.7152 + b * 0.0722) / 255;
-        const alphaMask = (a >= 16) ? 1 : 0;
-        let value = invert ? (1 - gray) : gray;
-        if (alphaMask === 0) value = 0;
+        let value = (a >= 16) ? (invert ? (1 - gray) : gray) : 0;
         value = Math.max(0, Math.min(1, value));
         const h = base + value * scaleZ;
-        const px = (sx - offsetX) * scaleXY;
-        const py = ((centerXY ? (offsetY - sy) : -sy)) * scaleXY;
-        const top = [px, py, h];
-        const bottom = [px, py, base];
-        topVerts[i] = top;
-        bottomVerts[i] = bottom;
-        updateBounds(top);
-        updateBounds(bottom);
+        heights[rowBase + gx] = h;
+        if (h < minZ) minZ = h;
+        if (h > maxZ) maxZ = h;
       }
+    }
+    if (base < minZ) minZ = base;
+    if (base > maxZ) maxZ = base;
+    for (let gx = 0; gx < gridWidth; gx++) {
+      if (pxArr[gx] < minX) minX = pxArr[gx];
+      if (pxArr[gx] > maxX) maxX = pxArr[gx];
+    }
+    for (let gy = 0; gy < gridHeight; gy++) {
+      if (pyArr[gy] < minY) minY = pyArr[gy];
+      if (pyArr[gy] > maxY) maxY = pyArr[gy];
     }
 
     if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minZ) || !Number.isFinite(maxZ)) {
@@ -209,103 +210,172 @@ export class ImageHeightmapSolidFeature {
       return { added: [], removed: [] };
     }
 
-    const centerVec = [
-      (minX + maxX) * 0.5,
-      (minY + maxY) * 0.5,
-      (minZ + maxZ) * 0.5,
-    ];
+    // Relieve zero-thickness pinches: a grid edge whose endpoints both sit
+    // exactly on the base plane but whose two flanking triangles both carry
+    // material would be shared by four triangles once top vertices merge
+    // into their base vertices — a non-manifold line where the solid touches
+    // itself. Lift such endpoints a hair off the base so the two regions
+    // fuse through a thin wall instead. Lifting can expose new pinches one
+    // ring further out, so repeat until stable.
+    const pinchLift = base + Math.sign(scaleZ || 1) * Math.max(Math.abs(scaleZ) * 1e-5, 1e-9);
+    const liftPinch = (iA, iB, iC1, iC2) => {
+      if (heights[iA] === base && heights[iB] === base
+        && heights[iC1] !== base && heights[iC2] !== base) {
+        heights[iA] = pinchLift;
+        heights[iB] = pinchLift;
+        return 1;
+      }
+      return 0;
+    };
+    for (let pass = 0; pass < gridCount; pass++) {
+      let lifted = 0;
+      for (let y = 0; y < gridHeight - 1; y++) {
+        const row = y * gridWidth;
+        for (let x = 0; x < gridWidth - 1; x++) {
+          const i00 = row + x;
+          const i10 = i00 + 1;
+          const i01 = i00 + gridWidth;
+          const i11 = i01 + 1;
+          lifted += liftPinch(i00, i11, i10, i01);
+          if (y > 0) lifted += liftPinch(i00, i10, i11, i00 - gridWidth);
+          if (x > 0) lifted += liftPinch(i00, i01, i11, i00 - 1);
+        }
+      }
+      if (!lifted) break;
+    }
 
     const solid = new BREP.Solid();
     const featureName = this.inputParams.featureID || 'HEIGHTMAP_SOLID';
     solid.name = featureName;
 
-    const addTriangleFacingOutward = (faceName, p0, p1, p2) => {
-      if (!p0 || !p1 || !p2) return;
-      const ax = p1[0] - p0[0];
-      const ay = p1[1] - p0[1];
-      const az = p1[2] - p0[2];
-      const bx = p2[0] - p0[0];
-      const by = p2[1] - p0[1];
-      const bz = p2[2] - p0[2];
-      const nx = ay * bz - az * by;
-      const ny = az * bx - ax * bz;
-      const nz = ax * by - ay * bx;
-      const lenSq = nx * nx + ny * ny + nz * nz;
-      if (!(lenSq > 1e-24)) return;
-      const cx = (p0[0] + p1[0] + p2[0]) / 3;
-      const cy = (p0[1] + p1[1] + p2[1]) / 3;
-      const cz = (p0[2] + p1[2] + p2[2]) / 3;
-      const vx = centerVec[0] - cx;
-      const vy = centerVec[1] - cy;
-      const vz = centerVec[2] - cz;
-      const dot = nx * vx + ny * vy + nz * vz;
-      if (dot > 0) {
-        solid.addTriangle(faceName, p0, p2, p1);
-      } else {
-        solid.addTriangle(faceName, p0, p1, p2);
+    // Bulk mesh construction. The grid structure makes vertex indices
+    // deterministic, so we bypass Solid.addTriangle's string-keyed vertex
+    // dedup entirely. Bottom vertices occupy indices [0, gridCount); a top
+    // vertex gets its own index only where its height differs from the base
+    // (matching the exact-coordinate merge addTriangle used to perform).
+    const vertProperties = new Array(gridCount * 3 * 2);
+    for (let i = 0, gy = 0; gy < gridHeight; gy++) {
+      const py = pyArr[gy];
+      for (let gx = 0; gx < gridWidth; gx++, i++) {
+        const o = i * 3;
+        vertProperties[o] = pxArr[gx];
+        vertProperties[o + 1] = py;
+        vertProperties[o + 2] = base;
       }
+    }
+    const topIndex = new Int32Array(gridCount);
+    let vertCount = gridCount;
+    for (let i = 0; i < gridCount; i++) {
+      const h = heights[i];
+      if (h === base) {
+        topIndex[i] = i;
+      } else {
+        const o = vertCount * 3;
+        const bo = i * 3;
+        vertProperties[o] = vertProperties[bo];
+        vertProperties[o + 1] = vertProperties[bo + 1];
+        vertProperties[o + 2] = h;
+        topIndex[i] = vertCount++;
+      }
+    }
+    vertProperties.length = vertCount * 3;
+
+    const triVerts = [];
+    const triIDs = [];
+    // Windings below are exact for the grid layout (x increases with gx,
+    // y decreases with gy, heights on one side of the base plane), so no
+    // per-triangle orientation heuristic is needed. Triangles that collapse
+    // because a top vertex merged into its base vertex share indices and
+    // are skipped; no other degenerate triangles can occur on the grid.
+    const emit = (id, i0, i1, i2) => {
+      if (i0 === i1 || i1 === i2 || i2 === i0) return;
+      triVerts.push(i0, i1, i2);
+      triIDs.push(id);
     };
 
     const faceBase = featureName ? `${featureName}` : 'HEIGHTMAP';
-    const topFace = `${faceBase}:TOP`;
-    const bottomFace = `${faceBase}:BOTTOM`;
-    const sidePosY = `${faceBase}:SIDE_POS_Y`;
-    const sideNegY = `${faceBase}:SIDE_NEG_Y`;
-    const sideNegX = `${faceBase}:SIDE_NEG_X`;
-    const sidePosX = `${faceBase}:SIDE_POS_X`;
+    const topID = solid._getOrCreateID(`${faceBase}:TOP`);
+    const bottomID = solid._getOrCreateID(`${faceBase}:BOTTOM`);
+    const sidePosYID = solid._getOrCreateID(`${faceBase}:SIDE_POS_Y`);
+    const sideNegYID = solid._getOrCreateID(`${faceBase}:SIDE_NEG_Y`);
+    const sideNegXID = solid._getOrCreateID(`${faceBase}:SIDE_NEG_X`);
+    const sidePosXID = solid._getOrCreateID(`${faceBase}:SIDE_POS_X`);
 
     for (let y = 0; y < gridHeight - 1; y++) {
+      const row = y * gridWidth;
       for (let x = 0; x < gridWidth - 1; x++) {
-        const i00 = idx(x, y);
-        const i10 = idx(x + 1, y);
-        const i01 = idx(x, y + 1);
-        const i11 = idx(x + 1, y + 1);
-        const v00 = topVerts[i00];
-        const v10 = topVerts[i10];
-        const v01 = topVerts[i01];
-        const v11 = topVerts[i11];
-        addTriangleFacingOutward(topFace, v00, v11, v10);
-        addTriangleFacingOutward(topFace, v00, v01, v11);
-
-        const b00 = bottomVerts[i00];
-        const b10 = bottomVerts[i10];
-        const b01 = bottomVerts[i01];
-        const b11 = bottomVerts[i11];
-        addTriangleFacingOutward(bottomFace, b00, b10, b11);
-        addTriangleFacingOutward(bottomFace, b00, b11, b01);
+        const i00 = row + x;
+        const i10 = i00 + 1;
+        const i01 = i00 + gridWidth;
+        const i11 = i01 + 1;
+        const t00 = topIndex[i00];
+        const t10 = topIndex[i10];
+        const t01 = topIndex[i01];
+        const t11 = topIndex[i11];
+        // A triangle whose three corners all sit at the base plane has zero
+        // thickness: its top copy would coincide with its bottom copy and
+        // create a non-manifold membrane, so both copies are dropped. The
+        // surface stays closed because top vertices merge into their base
+        // vertices along the boundary of such regions.
+        if (!(t00 === i00 && t11 === i11 && t10 === i10)) {
+          emit(topID, t00, t11, t10);
+          emit(bottomID, i00, i10, i11);
+        }
+        if (!(t00 === i00 && t01 === i01 && t11 === i11)) {
+          emit(topID, t00, t01, t11);
+          emit(bottomID, i00, i11, i01);
+        }
       }
     }
 
-    const addSideQuad = (faceName, topA, topB, bottomB, bottomA) => {
-      addTriangleFacingOutward(faceName, topA, topB, bottomB);
-      addTriangleFacingOutward(faceName, topA, bottomB, bottomA);
+    // The quad pattern (topA, topB, bottomB) + (topA, bottomB, bottomA)
+    // faces +Y on the gy=0 wall and +X on walls swept along increasing gy;
+    // the opposite walls take the reversed winding.
+    const addSideQuad = (id, iA, iB, flip) => {
+      if (flip) {
+        emit(id, topIndex[iA], iB, topIndex[iB]);
+        emit(id, topIndex[iA], iA, iB);
+      } else {
+        emit(id, topIndex[iA], topIndex[iB], iB);
+        emit(id, topIndex[iA], iB, iA);
+      }
     };
 
     for (let x = 0; x < gridWidth - 1; x++) {
-      const iA = idx(x, 0);
-      const iB = idx(x + 1, 0);
-      addSideQuad(sidePosY, topVerts[iA], topVerts[iB], bottomVerts[iB], bottomVerts[iA]);
+      addSideQuad(sidePosYID, x, x + 1, false);
     }
 
     for (let x = 0; x < gridWidth - 1; x++) {
-      const row = gridHeight - 1;
-      const iA = idx(x, row);
-      const iB = idx(x + 1, row);
-      addSideQuad(sideNegY, topVerts[iA], topVerts[iB], bottomVerts[iB], bottomVerts[iA]);
+      const iA = (gridHeight - 1) * gridWidth + x;
+      addSideQuad(sideNegYID, iA, iA + 1, true);
     }
 
     for (let y = 0; y < gridHeight - 1; y++) {
-      const iA = idx(0, y);
-      const iB = idx(0, y + 1);
-      addSideQuad(sideNegX, topVerts[iA], topVerts[iB], bottomVerts[iB], bottomVerts[iA]);
+      addSideQuad(sideNegXID, y * gridWidth, (y + 1) * gridWidth, true);
     }
 
     for (let y = 0; y < gridHeight - 1; y++) {
       const col = gridWidth - 1;
-      const iA = idx(col, y);
-      const iB = idx(col, y + 1);
-      addSideQuad(sidePosX, topVerts[iA], topVerts[iB], bottomVerts[iB], bottomVerts[iA]);
+      addSideQuad(sidePosXID, y * gridWidth + col, (y + 1) * gridWidth + col, false);
     }
+
+    // Heights sit on a single side of the base plane (value ∈ [0,1] times a
+    // fixed-sign heightScale), so a negative heightScale inverts the whole
+    // solid at once. Detect via signed volume and flip every triangle.
+    if (signedVolume(vertProperties, triVerts) < 0) {
+      for (let t = 0; t < triVerts.length; t += 3) {
+        const tmp = triVerts[t + 1];
+        triVerts[t + 1] = triVerts[t + 2];
+        triVerts[t + 2] = tmp;
+      }
+    }
+
+    solid._vertProperties = vertProperties;
+    solid._triVerts = triVerts;
+    solid._triIDs = triIDs;
+    solid._vertKeyToIndex = new Map(); // rebuilt lazily by _getPointIndex if ever needed
+    solid._dirty = true;
+    solid._faceIndex = null;
 
     const basis = getPlacementBasis(this.inputParams?.placementPlane, partHistory);
     const origin = new THREE.Vector3().fromArray(basis.origin);
@@ -313,7 +383,7 @@ export class ImageHeightmapSolidFeature {
     const yAxis = new THREE.Vector3().fromArray(basis.y);
     const zAxis = new THREE.Vector3().fromArray(basis.z);
     const placement = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis).setPosition(origin);
-    solid.bakeTransform(placement);
+    if (!isIdentityMatrix(placement)) solid.bakeTransform(placement);
 
     solid.userData = solid.userData || {};
     solid.userData.heightmap = {
@@ -399,6 +469,26 @@ async function decodeToImageData(raw) {
     console.warn('[HEIGHTMAP] Failed to decode input as image data', e);
   }
   return null;
+}
+
+function signedVolume(vp, tv) {
+  let vol = 0;
+  for (let t = 0; t < tv.length; t += 3) {
+    const o0 = tv[t] * 3, o1 = tv[t + 1] * 3, o2 = tv[t + 2] * 3;
+    const ax = vp[o0], ay = vp[o0 + 1], az = vp[o0 + 2];
+    const bx = vp[o1], by = vp[o1 + 1], bz = vp[o1 + 2];
+    const cx = vp[o2], cy = vp[o2 + 1], cz = vp[o2 + 2];
+    vol += ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx);
+  }
+  return vol / 6;
+}
+
+function isIdentityMatrix(m) {
+  const e = m.elements;
+  for (let i = 0; i < 16; i++) {
+    if (e[i] !== (i % 5 === 0 ? 1 : 0)) return false;
+  }
+  return true;
 }
 
 function buildSampleIndices(count, stride) {

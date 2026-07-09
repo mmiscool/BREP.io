@@ -31,6 +31,8 @@ Brush shapes:
 - `Square`
 - `Diamond`
 
+The brush **Size** and bucket **Tolerance** fields display as compact number inputs; clicking (focusing) a field turns it into a range slider for dragging, and it reverts to a number input when you click away.
+
 ## View Controls
 - Mouse wheel zooms at cursor.
 - Two-finger pinch zooms and pans on touch devices.

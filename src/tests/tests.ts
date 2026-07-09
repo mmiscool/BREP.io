@@ -113,6 +113,10 @@ import {
     test_extrude_solid_face_uses_boundary_edge_sidewalls,
 } from './test_extrudeFace.js';
 import {
+    afterRun_generated_history_20260709065543,
+    test_generated_history_20260709065543,
+} from './test_generated_history_20260709065543.js';
+import {
     test_extrude_rectangle_profile_has_one_sidewall_per_sketch_edge,
     test_feature_edge_name_resolution_prefers_boolean_result_over_raw_tool,
     test_generated_history_20260609165436_six_edge_profile_has_six_sidewalls,
@@ -1399,6 +1403,14 @@ export const testFunctions: any[] = [
     {
         test: test_fillet_generated_history_20260321144106,
         afterRun: afterRun_fillet_generated_history_20260321144106,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_generated_history_20260709065543,
+        afterRun: afterRun_generated_history_20260709065543,
         printArtifacts: false,
         exportFaces: false,
         exportSolids: false,

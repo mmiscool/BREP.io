@@ -184,9 +184,9 @@ export class ImageEditorUI {
         .img-editor-group{display:flex;align-items:center;flex-wrap:wrap;gap:6px;border-right:1px dashed var(--ie-border);padding-right:10px;margin-right:8px;}
         .img-editor-label{font-size:12px;color:var(--ie-muted);}
         .img-editor-color{width:32px;height:28px;border:1px solid var(--ie-border);border-radius:4px;padding:0;background:var(--ie-bg-3)}
-        .img-editor-range{width:120px;max-width:40vw;height:28px;box-sizing:border-box;vertical-align:middle;}
-        /* Slider fields rest as a compact number input and expand to a slider while focused */
-        input[type="number"].img-editor-range{width:64px;border:1px solid var(--ie-border);border-radius:4px;background:var(--ie-bg-3);color:var(--ie-fg);padding:0 6px;}
+        .img-editor-range{width:96px;max-width:40vw;height:28px;box-sizing:border-box;vertical-align:middle;}
+        /* Slider fields rest as a number input and become a range slider while focused (same width, no reflow) */
+        input[type="number"].img-editor-range{border:1px solid var(--ie-border);border-radius:4px;background:var(--ie-bg-3);color:var(--ie-fg);padding:0 6px;}
         .img-editor-select{height:28px;border:1px solid var(--ie-border);border-radius:4px;background:var(--ie-bg-3);color:var(--ie-fg);}
 
         /* Params drawer (right) */
@@ -418,6 +418,10 @@ export class ImageEditorUI {
         bound.onCancel = () => this._cancel();
         bound.onShape = (e) => { const v = String(e.target.value || 'round'); this.brushShape = (v === 'square' || v === 'diamond') ? v : 'round'; this._render(); };
         bound.onBucketTol = (e) => { this.bucketTolerance = Math.max(0, Math.min(255, Number(e.target.value) || 0)); };
+        // Slider fields display as a compact number input, becoming a range
+        // slider while focused and reverting to a number input on blur.
+        bound.onSliderFieldFocus = (e) => { const el = e.target; if (el && el.type === 'number') el.type = 'range'; };
+        bound.onSliderFieldBlur = (e) => { const el = e.target; if (el && el.type === 'range') el.type = 'number'; };
         bound.onEnter = () => { this.isHovering = true; };
         bound.onLeave = () => { this.isHovering = false; this._render(); };
         bound.onContextMenu = (e) => { e.preventDefault(); };
@@ -453,6 +457,11 @@ export class ImageEditorUI {
         this.cancelBtn.addEventListener('click', bound.onCancel);
         this.shapeSelect.addEventListener('change', bound.onShape);
         this.bucketTolInput.addEventListener('input', bound.onBucketTol);
+        for (const el of [this.sizeInput, this.bucketTolInput]) {
+            if (!el) continue;
+            el.addEventListener('focus', bound.onSliderFieldFocus);
+            el.addEventListener('blur', bound.onSliderFieldBlur);
+        }
 
         this._resizeCanvasToViewport();
         this._updateButtons();
@@ -489,6 +498,11 @@ export class ImageEditorUI {
         if (this.cancelBtn) this.cancelBtn.removeEventListener('click', b.onCancel);
         if (this.shapeSelect) this.shapeSelect.removeEventListener('change', b.onShape);
         if (this.bucketTolInput) this.bucketTolInput.removeEventListener('input', b.onBucketTol);
+        for (const el of [this.sizeInput, this.bucketTolInput]) {
+            if (!el) continue;
+            el.removeEventListener('focus', b.onSliderFieldFocus);
+            el.removeEventListener('blur', b.onSliderFieldBlur);
+        }
     }
 
     _resizeCanvasToViewport() {
