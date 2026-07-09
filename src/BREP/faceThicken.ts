@@ -372,49 +372,6 @@ function pointToPolylineDistanceSq(point, polyline) {
   return best;
 }
 
-function pointToTriangleDistanceSq(point, a, b, c) {
-  const ab = new THREE.Vector3().subVectors(b, a);
-  const ac = new THREE.Vector3().subVectors(c, a);
-  const ap = new THREE.Vector3().subVectors(point, a);
-  const d1 = ab.dot(ap);
-  const d2 = ac.dot(ap);
-  if (d1 <= 0 && d2 <= 0) return point.distanceToSquared(a);
-
-  const bp = new THREE.Vector3().subVectors(point, b);
-  const d3 = ab.dot(bp);
-  const d4 = ac.dot(bp);
-  if (d3 >= 0 && d4 <= d3) return point.distanceToSquared(b);
-
-  const vc = (d1 * d4) - (d3 * d2);
-  if (vc <= 0 && d1 >= 0 && d3 <= 0) {
-    const v = d1 / (d1 - d3);
-    return point.distanceToSquared(a.clone().add(ab.multiplyScalar(v)));
-  }
-
-  const cp = new THREE.Vector3().subVectors(point, c);
-  const d5 = ab.dot(cp);
-  const d6 = ac.dot(cp);
-  if (d6 >= 0 && d5 <= d6) return point.distanceToSquared(c);
-
-  const vb = (d5 * d2) - (d1 * d6);
-  if (vb <= 0 && d2 >= 0 && d6 <= 0) {
-    const w = d2 / (d2 - d6);
-    return point.distanceToSquared(a.clone().add(ac.multiplyScalar(w)));
-  }
-
-  const va = (d3 * d6) - (d5 * d4);
-  if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
-    const bc = new THREE.Vector3().subVectors(c, b);
-    const w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
-    return point.distanceToSquared(b.clone().add(bc.multiplyScalar(w)));
-  }
-
-  const denom = 1 / (va + vb + vc);
-  const v = vb * denom;
-  const w = vc * denom;
-  return point.distanceToSquared(a.clone().add(ab.multiplyScalar(v)).add(ac.multiplyScalar(w)));
-}
-
 function getSourceEdgePolylines(face) {
   const edges = Array.isArray(face?.edges) ? face.edges : [];
   if (!edges.length) return [];
@@ -640,6 +597,112 @@ function addSmoothAdjacentBoundaryNormals(face, surface, options: any = {}) {
     return true;
   };
 
+  const currentStats = () => ({
+    candidateEdges,
+    acceptedEdges,
+    contributionCount,
+    contributedVertexCount: contributedVertices.size,
+  });
+  const getParentPoint = (index) => {
+    const vertexIndex = index >>> 0;
+    let point = parentPointCache.get(vertexIndex);
+    if (point) return point;
+    const base = vertexIndex * 3;
+    point = new THREE.Vector3(
+      Number(vertProperties[base + 0]) || 0,
+      Number(vertProperties[base + 1]) || 0,
+      Number(vertProperties[base + 2]) || 0,
+    ).applyMatrix4(parentMatrix);
+    parentPointCache.set(vertexIndex, point);
+    return point;
+  };
+  const getParentPointKey = (index) => {
+    const vertexIndex = index >>> 0;
+    let key = parentKeyCache.get(vertexIndex);
+    if (key) return key;
+    key = pointKey(getParentPoint(vertexIndex), weldTolerance);
+    parentKeyCache.set(vertexIndex, key);
+    return key;
+  };
+  const addContribution = (parentVertexIndex, alignedUnit, normalLength) => {
+    return addContributionForPointKey(getParentPointKey(parentVertexIndex), alignedUnit, normalLength);
+  };
+
+  const canUseRawAuthoringFaces = () => {
+    if (triCount === 0 || triIDs.length < triCount || vertProperties.length < 9 || !idToFaceName.size) return false;
+    const availableFaceNames = new Set<any>();
+    for (let triIndex = 0; triIndex < triCount; triIndex++) {
+      const faceName = String(idToFaceName.get(triIDs[triIndex]) || '').trim();
+      if (faceName) availableFaceNames.add(faceName);
+    }
+    if (!availableFaceNames.has(selectedFaceName)) return false;
+    if (adjacentFaceFilter) {
+      for (const faceName of adjacentFaceFilter) {
+        if (!availableFaceNames.has(faceName)) return false;
+      }
+    }
+    return true;
+  };
+
+  const triangle = new THREE.Vector3();
+  const triangleEdge = new THREE.Vector3();
+  const processRawAuthoringTriangle = (i0, i1, i2) => {
+    const key0 = getParentPointKey(i0);
+    const key1 = getParentPointKey(i1);
+    const key2 = getParentPointKey(i2);
+    if (
+      !boundaryEdgeByPointPair.has(unorderedPointPairKey(key0, key1))
+      && !boundaryEdgeByPointPair.has(unorderedPointPairKey(key1, key2))
+      && !boundaryEdgeByPointPair.has(unorderedPointPairKey(key2, key0))
+    ) {
+      return;
+    }
+    candidateEdges += 1;
+
+    const p0 = getParentPoint(i0);
+    const p1 = getParentPoint(i1);
+    const p2 = getParentPoint(i2);
+    triangle.subVectors(p1, p0).cross(triangleEdge.subVectors(p2, p0));
+    const normalLength = triangle.length();
+    if (!(normalLength > TRI_EPS)) return;
+    const unit = triangle.multiplyScalar(1 / normalLength);
+
+    const maybeContribute = (vertexIndex) => {
+      const selectedIndex = boundaryVertexByPointKey.get(getParentPointKey(vertexIndex));
+      if (selectedIndex == null) return false;
+      const base = vertexNormals[selectedIndex]?.clone?.() || null;
+      if (!base || base.lengthSq() <= TRI_EPS) return false;
+      base.normalize();
+      const dot = unit.dot(base);
+      let aligned = null;
+      if (dot >= smoothDotThreshold) aligned = unit;
+      else if (-dot >= smoothDotThreshold) aligned = unit.clone().multiplyScalar(-1);
+      return !!aligned && addContribution(vertexIndex, aligned, normalLength);
+    };
+
+    let acceptedThisTriangle = false;
+    if (maybeContribute(i0)) acceptedThisTriangle = true;
+    if (maybeContribute(i1)) acceptedThisTriangle = true;
+    if (maybeContribute(i2)) acceptedThisTriangle = true;
+    if (acceptedThisTriangle) acceptedEdges += 1;
+  };
+
+  if (canUseRawAuthoringFaces()) {
+    for (let triIndex = 0; triIndex < triCount; triIndex++) {
+      const faceName = String(idToFaceName.get(triIDs[triIndex]) || '').trim();
+      if (faceName === selectedFaceName) continue;
+      if (adjacentFaceFilter && !adjacentFaceFilter.has(faceName)) continue;
+
+      const base = triIndex * 3;
+      processRawAuthoringTriangle(
+        triVerts[base + 0] >>> 0,
+        triVerts[base + 1] >>> 0,
+        triVerts[base + 2] >>> 0,
+      );
+    }
+    return finalizeStats(currentStats());
+  }
+
   const processAdjacentTriangle = (points) => {
     if (!Array.isArray(points) || points.length !== 3) return;
     const keys = points.map((point) => pointKey(point, weldTolerance));
@@ -693,105 +756,12 @@ function addSmoothAdjacentBoundaryNormals(face, surface, options: any = {}) {
           ]);
         }
       }
-      if (candidateEdges > 0 || triCount === 0 || triIDs.length < triCount || vertProperties.length < 9) {
-        return finalizeStats({
-          candidateEdges,
-          acceptedEdges,
-          contributionCount,
-          contributedVertexCount: contributedVertices.size,
-        });
-      }
     }
   } catch {
-    // Fall back to raw authoring arrays below.
+    // Keep stats from any triangles already scanned.
   }
 
-  if (triCount === 0 || triIDs.length < triCount || vertProperties.length < 9) {
-    return finalizeStats({
-      candidateEdges,
-      acceptedEdges,
-      contributionCount,
-      contributedVertexCount: contributedVertices.size,
-    });
-  }
-
-  const getParentPoint = (index) => {
-    const vertexIndex = index >>> 0;
-    let point = parentPointCache.get(vertexIndex);
-    if (point) return point;
-    const base = vertexIndex * 3;
-    point = new THREE.Vector3(
-      Number(vertProperties[base + 0]) || 0,
-      Number(vertProperties[base + 1]) || 0,
-      Number(vertProperties[base + 2]) || 0,
-    ).applyMatrix4(parentMatrix);
-    parentPointCache.set(vertexIndex, point);
-    return point;
-  };
-  const getParentPointKey = (index) => {
-    const vertexIndex = index >>> 0;
-    let key = parentKeyCache.get(vertexIndex);
-    if (key) return key;
-    key = pointKey(getParentPoint(vertexIndex), weldTolerance);
-    parentKeyCache.set(vertexIndex, key);
-    return key;
-  };
-  const addContribution = (parentVertexIndex, alignedUnit, normalLength) => {
-    return addContributionForPointKey(getParentPointKey(parentVertexIndex), alignedUnit, normalLength);
-  };
-
-  const triangle = new THREE.Vector3();
-  for (let triIndex = 0; triIndex < triCount; triIndex++) {
-    const faceName = String(idToFaceName.get(triIDs[triIndex]) || '').trim();
-    if (faceName === selectedFaceName) continue;
-    if (adjacentFaceFilter && !adjacentFaceFilter.has(faceName)) continue;
-
-    const i0 = triVerts[(triIndex * 3) + 0] >>> 0;
-    const i1 = triVerts[(triIndex * 3) + 1] >>> 0;
-    const i2 = triVerts[(triIndex * 3) + 2] >>> 0;
-    const parentEdges = [[i0, i1], [i1, i2], [i2, i0]];
-    let touchesBoundaryEdge = false;
-    for (const [u, v] of parentEdges) {
-      const uKey = getParentPointKey(u);
-      const vKey = getParentPointKey(v);
-      if (!boundaryEdgeByPointPair.has(unorderedPointPairKey(uKey, vKey))) continue;
-      touchesBoundaryEdge = true;
-      candidateEdges += 1;
-      break;
-    }
-    if (!touchesBoundaryEdge) continue;
-
-    const p0 = getParentPoint(i0);
-    const p1 = getParentPoint(i1);
-    const p2 = getParentPoint(i2);
-    triangle.copy(triangleNormal(p0, p1, p2));
-    const normalLength = triangle.length();
-    if (!(normalLength > TRI_EPS)) continue;
-    const unit = triangle.multiplyScalar(1 / normalLength);
-
-    let acceptedThisTriangle = false;
-    for (const vertexIndex of [i0, i1, i2]) {
-      const selectedIndex = boundaryVertexByPointKey.get(getParentPointKey(vertexIndex));
-      if (selectedIndex == null) continue;
-      const base = vertexNormals[selectedIndex]?.clone?.() || null;
-      if (!base || base.lengthSq() <= TRI_EPS) continue;
-      base.normalize();
-      const dot = unit.dot(base);
-      let aligned = null;
-      if (dot >= smoothDotThreshold) aligned = unit;
-      else if (-dot >= smoothDotThreshold) aligned = unit.clone().multiplyScalar(-1);
-      if (!aligned) continue;
-      if (addContribution(vertexIndex, aligned, normalLength)) acceptedThisTriangle = true;
-    }
-    if (acceptedThisTriangle) acceptedEdges += 1;
-  }
-
-  return finalizeStats({
-    candidateEdges,
-    acceptedEdges,
-    contributionCount,
-    contributedVertexCount: contributedVertices.size,
-  });
+  return finalizeStats(currentStats());
 }
 
 function analyzeMeshTopology(solid) {
@@ -2846,57 +2816,149 @@ function reclassifyThickenCapTrianglesByGeometry(solid, surface, distance, class
 
   const tol = Math.max(Number(tolerance) || 0, 1e-7);
   const toleranceSq = tol * tol;
-  const point = new THREE.Vector3();
-  const pointDistanceToSurfaceSq = (p, refs) => {
-    let best = Infinity;
-    for (const [a, b, c] of refs) {
-      const distSq = pointToTriangleDistanceSq(p, a, b, c);
-      if (distSq < best) {
-        best = distSq;
-        if (best <= toleranceSq) break;
+
+  // A triangle is assigned to the first face group (map insertion order) whose
+  // reference surface is within tolerance of all three corners, so only the
+  // within-tolerance predicate matters. A uniform hash grid over each group's
+  // triangles (cells sized to cover any triangle inflated by the tolerance)
+  // bounds each corner query to one cell's candidates.
+  const buildGroupIndex = (refsByFaceID) => {
+    const groups = [];
+    for (const [faceID, refs] of refsByFaceID.entries()) {
+      const count = refs.length;
+      const coords = new Float64Array(count * 9);
+      let maxExtent = 0;
+      for (let i = 0; i < count; i++) {
+        const [a, b, c] = refs[i];
+        const o = i * 9;
+        coords[o + 0] = a.x; coords[o + 1] = a.y; coords[o + 2] = a.z;
+        coords[o + 3] = b.x; coords[o + 4] = b.y; coords[o + 5] = b.z;
+        coords[o + 6] = c.x; coords[o + 7] = c.y; coords[o + 8] = c.z;
+        const ext = Math.max(
+          Math.max(a.x, b.x, c.x) - Math.min(a.x, b.x, c.x),
+          Math.max(a.y, b.y, c.y) - Math.min(a.y, b.y, c.y),
+          Math.max(a.z, b.z, c.z) - Math.min(a.z, b.z, c.z),
+        );
+        if (ext > maxExtent) maxExtent = ext;
       }
+      const cellSize = Math.max(tol * 4, maxExtent, 1e-12);
+      const inv = 1 / cellSize;
+      const grid = new Map<number, number[]>();
+      for (let i = 0; i < count; i++) {
+        const o = i * 9;
+        const ix0 = Math.floor((Math.min(coords[o], coords[o + 3], coords[o + 6]) - tol) * inv);
+        const ix1 = Math.floor((Math.max(coords[o], coords[o + 3], coords[o + 6]) + tol) * inv);
+        const iy0 = Math.floor((Math.min(coords[o + 1], coords[o + 4], coords[o + 7]) - tol) * inv);
+        const iy1 = Math.floor((Math.max(coords[o + 1], coords[o + 4], coords[o + 7]) + tol) * inv);
+        const iz0 = Math.floor((Math.min(coords[o + 2], coords[o + 5], coords[o + 8]) - tol) * inv);
+        const iz1 = Math.floor((Math.max(coords[o + 2], coords[o + 5], coords[o + 8]) + tol) * inv);
+        for (let ix = ix0; ix <= ix1; ix++) {
+          for (let iy = iy0; iy <= iy1; iy++) {
+            for (let iz = iz0; iz <= iz1; iz++) {
+              const key = ((ix * 73856093) ^ (iy * 19349663) ^ (iz * 83492791)) | 0;
+              let list = grid.get(key);
+              if (!list) {
+                list = [];
+                grid.set(key, list);
+              }
+              list.push(i);
+            }
+          }
+        }
+      }
+      groups.push({ faceID: Number(faceID) >>> 0, coords, grid, inv });
     }
-    return best;
+    return groups;
   };
-  const triangleMaxDistanceSq = (triIndex, refs) => {
-    let maxDistanceSq = 0;
+
+  // Scalar equivalent of pointToTriangleDistanceSq() with identical
+  // floating-point operation order, without the THREE.Vector3 allocations.
+  const pointTriDistSqFlat = (px, py, pz, coords, o) => {
+    const ax = coords[o + 0], ay = coords[o + 1], az = coords[o + 2];
+    const abx = coords[o + 3] - ax, aby = coords[o + 4] - ay, abz = coords[o + 5] - az;
+    const acx = coords[o + 6] - ax, acy = coords[o + 7] - ay, acz = coords[o + 8] - az;
+    const apx = px - ax, apy = py - ay, apz = pz - az;
+    const d1 = abx * apx + aby * apy + abz * apz;
+    const d2 = acx * apx + acy * apy + acz * apz;
+    if (d1 <= 0 && d2 <= 0) return apx * apx + apy * apy + apz * apz;
+
+    const bpx = px - coords[o + 3], bpy = py - coords[o + 4], bpz = pz - coords[o + 5];
+    const d3 = abx * bpx + aby * bpy + abz * bpz;
+    const d4 = acx * bpx + acy * bpy + acz * bpz;
+    if (d3 >= 0 && d4 <= d3) return bpx * bpx + bpy * bpy + bpz * bpz;
+
+    const vc = (d1 * d4) - (d3 * d2);
+    if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+      const v = d1 / (d1 - d3);
+      const dx = px - (ax + abx * v), dy = py - (ay + aby * v), dz = pz - (az + abz * v);
+      return dx * dx + dy * dy + dz * dz;
+    }
+
+    const cpx = px - coords[o + 6], cpy = py - coords[o + 7], cpz = pz - coords[o + 8];
+    const d5 = abx * cpx + aby * cpy + abz * cpz;
+    const d6 = acx * cpx + acy * cpy + acz * cpz;
+    if (d6 >= 0 && d5 <= d6) return cpx * cpx + cpy * cpy + cpz * cpz;
+
+    const vb = (d5 * d2) - (d1 * d6);
+    if (vb <= 0 && d2 >= 0 && d6 <= 0) {
+      const w = d2 / (d2 - d6);
+      const dx = px - (ax + acx * w), dy = py - (ay + acy * w), dz = pz - (az + acz * w);
+      return dx * dx + dy * dy + dz * dz;
+    }
+
+    const va = (d3 * d6) - (d5 * d4);
+    if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
+      const bcx = coords[o + 6] - coords[o + 3], bcy = coords[o + 7] - coords[o + 4], bcz = coords[o + 8] - coords[o + 5];
+      const w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+      const dx = px - (coords[o + 3] + bcx * w), dy = py - (coords[o + 4] + bcy * w), dz = pz - (coords[o + 5] + bcz * w);
+      return dx * dx + dy * dy + dz * dz;
+    }
+
+    const denom = 1 / (va + vb + vc);
+    const v = vb * denom;
+    const w = vc * denom;
+    const dx = px - (ax + abx * v + acx * w);
+    const dy = py - (ay + aby * v + acy * w);
+    const dz = pz - (az + abz * v + acz * w);
+    return dx * dx + dy * dy + dz * dz;
+  };
+
+  const cornerWithinTol = (group, px, py, pz) => {
+    const key = (((Math.floor(px * group.inv) * 73856093) ^ (Math.floor(py * group.inv) * 19349663) ^ (Math.floor(pz * group.inv) * 83492791))) | 0;
+    const list = group.grid.get(key);
+    if (!list) return false;
+    for (let k = 0; k < list.length; k++) {
+      if (pointTriDistSqFlat(px, py, pz, group.coords, list[k] * 9) <= toleranceSq) return true;
+    }
+    return false;
+  };
+  const groupWithinTol = (group, triIndex) => {
     for (let corner = 0; corner < 3; corner++) {
       const vertex = tv[(triIndex * 3) + corner] >>> 0;
       const base = vertex * 3;
-      point.set(
+      if (!cornerWithinTol(
+        group,
         Number(vp[base + 0]) || 0,
         Number(vp[base + 1]) || 0,
         Number(vp[base + 2]) || 0,
-      );
-      const distSq = pointDistanceToSurfaceSq(point, refs);
-      if (distSq > maxDistanceSq) maxDistanceSq = distSq;
-      if (maxDistanceSq > toleranceSq) break;
+      )) return false;
     }
-    return maxDistanceSq;
+    return true;
   };
-  const bestFaceIDForTriangle = (triIndex, refsByFaceID) => {
-    let bestFaceID = 0;
-    let bestDistanceSq = Infinity;
-    for (const [faceID, refs] of refsByFaceID.entries()) {
-      const distanceSq = triangleMaxDistanceSq(triIndex, refs);
-      if (distanceSq < bestDistanceSq) {
-        bestDistanceSq = distanceSq;
-        bestFaceID = Number(faceID) >>> 0;
-        if (bestDistanceSq <= toleranceSq) break;
-      }
+  const firstGroupWithinTol = (groups, triIndex) => {
+    for (const group of groups) {
+      if (groupWithinTol(group, triIndex)) return group.faceID;
     }
-    return { faceID: bestFaceID, distanceSq: bestDistanceSq };
+    return 0;
   };
+
+  const sourceGroups = buildGroupIndex(sourceTriRefsByFaceID);
+  const offsetGroups = buildGroupIndex(offsetTriRefsByFaceID);
 
   let changed = 0;
   for (let triIndex = 0; triIndex < triCount; triIndex++) {
-    const startMatch = bestFaceIDForTriangle(triIndex, sourceTriRefsByFaceID);
-    const endMatch = startMatch.distanceSq <= toleranceSq
-      ? { faceID: 0, distanceSq: Infinity }
-      : bestFaceIDForTriangle(triIndex, offsetTriRefsByFaceID);
-    const nextID = startMatch.distanceSq <= toleranceSq
-      ? startMatch.faceID
-      : (endMatch.distanceSq <= toleranceSq ? endMatch.faceID : 0);
+    const nextID = firstGroupWithinTol(sourceGroups, triIndex)
+      || firstGroupWithinTol(offsetGroups, triIndex);
     if (nextID && ids[triIndex] !== nextID) {
       ids[triIndex] = nextID;
       changed += 1;
@@ -4059,7 +4121,12 @@ function thickenSurfaceToSolid(surface, face, distance, options: any = {}) {
     }
     let orientationWarning = typeof staged._isCoherentlyOrientedManifold === 'function' && staged._isCoherentlyOrientedManifold() !== true;
     let finalOrientation = orientationWarning ? analyzeTriangleOrientation(staged) : null;
-    if (orientationWarning && topology.boundaryEdgeCount === 0 && topology.nonManifoldEdgeCount === 0) {
+    if (
+      orientationWarning
+      && useSmallThicknessOrientationRepair
+      && topology.boundaryEdgeCount === 0
+      && topology.nonManifoldEdgeCount === 0
+    ) {
       const repaired = tryRepairCoherentOrientationCandidate(staged, {
         sourceFaceName,
         distance: dist,
@@ -4085,7 +4152,12 @@ function thickenSurfaceToSolid(surface, face, distance, options: any = {}) {
         finalOrientation = orientationWarning ? analyzeTriangleOrientation(staged) : null;
       }
     }
-    if (orientationWarning && topology.boundaryEdgeCount === 0 && topology.nonManifoldEdgeCount === 0) {
+    if (
+      orientationWarning
+      && useSmallThicknessOrientationRepair
+      && topology.boundaryEdgeCount === 0
+      && topology.nonManifoldEdgeCount === 0
+    ) {
       for (let finalCoherencePass = 0; finalCoherencePass < 32; finalCoherencePass++) {
         const removedThisPass = cullTrianglesTouchingSameDirectionEdges(staged);
         if (!(removedThisPass > 0)) break;

@@ -28,16 +28,42 @@ const toPlainEntryArray = (mapLike, serializer = (value) => value) => {
 
 const serializeMetadata = (metadata) => JSON.stringify(metadata && typeof metadata === "object" ? metadata : {});
 
-const rebuildVertexKeyMap = (vertProperties = [], numProp = 3) => {
-    const map = new Map();
-    const stride = Math.max(3, Number(numProp) || 3);
-    for (let i = 0; i + 2 < vertProperties.length; i += stride) {
-        const x = vertProperties[i + 0];
-        const y = vertProperties[i + 1];
-        const z = vertProperties[i + 2];
-        map.set(`${x},${y},${z}`, (i / stride) | 0);
+// Rebuild the triangle-object list from the flat vertex buffer + per-face triangle indices.
+const trianglesFromFlatArrays = (vertProperties, stride, triVerts, faceName) => {
+    const triangles: any[] = [];
+    const length = triVerts ? triVerts.length : 0;
+    for (let t = 0; t + 2 < length; t += 3) {
+        const i0 = triVerts[t];
+        const i1 = triVerts[t + 1];
+        const i2 = triVerts[t + 2];
+        const b0 = i0 * stride;
+        const b1 = i1 * stride;
+        const b2 = i2 * stride;
+        triangles.push({
+            faceName,
+            indices: [i0, i1, i2],
+            p1: [vertProperties[b0], vertProperties[b0 + 1], vertProperties[b0 + 2]],
+            p2: [vertProperties[b1], vertProperties[b1 + 1], vertProperties[b1 + 2]],
+            p3: [vertProperties[b2], vertProperties[b2 + 1], vertProperties[b2 + 2]],
+        });
     }
-    return map;
+    return triangles;
+};
+
+const trianglesFromPackedFace = (packed, faceName) => trianglesFromFlatArrays(
+    packed?.vertProperties || [],
+    Math.max(3, Number(packed?.numProp) || 3),
+    packed?.triVerts,
+    faceName,
+);
+
+const pointsFromFlatPositions = (flat) => {
+    const points: number[][] = [];
+    const length = flat ? flat.length : 0;
+    for (let i = 0; i + 2 < length; i += 3) {
+        points.push([flat[i], flat[i + 1], flat[i + 2]]);
+    }
+    return points;
 };
 
 const captureSolidCppSyncStamp = (solid) => ({
@@ -535,7 +561,9 @@ export const applySolidAuthoringStateSnapshot = (solid, snapshot, opts: AnyRecor
         parseMetadataJson(entry?.[1]),
     ]));
     solid._auxEdges = sanitizeAuxEdges(snapshot?.auxEdges);
-    solid._vertKeyToIndex = rebuildVertexKeyMap(vertProperties, numProp);
+    // Left empty on purpose: `_getPointIndex` rebuilds this map lazily on the
+    // first authoring mutation, so snapshot applies skip the O(n) string work.
+    solid._vertKeyToIndex = new Map();
     solid._faceMetadataVersion = Number(solid?._faceMetadataVersion || 0) + 1;
     solid._edgeMetadataVersion = Number(solid?._edgeMetadataVersion || 0) + 1;
     solid._cppSolidCoreSyncStamp = null;
@@ -742,7 +770,11 @@ export class CppSolidCore {
     }
 
     getFace(faceName) {
-        return Array.from((this._native.getFace(faceName) || []) as any[], (tri: any) => ({
+        const result = this._native.getFace(faceName);
+        if (result && result.triVerts) {
+            return trianglesFromPackedFace(result, String(faceName || ""));
+        }
+        return Array.from((result || []) as any[], (tri: any) => ({
             faceName: String(tri?.faceName || faceName || ""),
             indices: Array.from(tri?.indices || []),
             p1: Array.from(tri?.p1 || []),
@@ -763,7 +795,19 @@ export class CppSolidCore {
     }
 
     getFaces(includeEmpty = false) {
-        return Array.from((this._native.getFaces(!!includeEmpty) || []) as any[], (face: any) => ({
+        const result = this._native.getFaces(!!includeEmpty);
+        if (result && result.faces) {
+            const vertProperties = result.vertProperties || [];
+            const stride = Math.max(3, Number(result.numProp) || 3);
+            return Array.from(result.faces as any[], (face: any) => {
+                const faceName = String(face?.faceName || "");
+                return {
+                    faceName,
+                    triangles: trianglesFromFlatArrays(vertProperties, stride, face?.triVerts, faceName),
+                };
+            });
+        }
+        return Array.from((result || []) as any[], (face: any) => ({
             faceName: String(face?.faceName || ""),
             triangles: Array.from((face?.triangles || []) as any[], (tri: any) => ({
                 faceName: String(tri?.faceName || face?.faceName || ""),
@@ -781,10 +825,12 @@ export class CppSolidCore {
             faceA: String(edge?.faceA || ""),
             faceB: String(edge?.faceB || ""),
             indices: Array.from(edge?.indices || []),
-            positions: Array.from(
-                (edge?.positions || []) as any[],
-                (point: any): number[] => Array.from((point || []) as any[], (value: any) => Number(value)),
-            ),
+            positions: edge?.positionsFlat
+                ? pointsFromFlatPositions(edge.positionsFlat)
+                : Array.from(
+                    (edge?.positions || []) as any[],
+                    (point: any): number[] => Array.from((point || []) as any[], (value: any) => Number(value)),
+                ),
             closedLoop: !!edge?.closedLoop,
         }));
     }

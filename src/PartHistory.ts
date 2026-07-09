@@ -969,7 +969,16 @@ export class PartHistory {
     if (!pos || pos.itemSize !== 3 || pos.count < 1) return null;
     const index = geom && typeof geom.getIndex === 'function' ? geom.getIndex() : null;
     const triangles = [];
-    const pointForIndex = (idx) => this.#pointSignatureFromValues(pos.getX(idx), pos.getY(idx), pos.getZ(idx));
+    // Vertices are shared by ~6 triangles on average, so memoize per index.
+    const pointSigCache = new Array(pos.count);
+    const pointForIndex = (idx) => {
+      let sig = pointSigCache[idx];
+      if (sig === undefined) {
+        sig = this.#pointSignatureFromValues(pos.getX(idx), pos.getY(idx), pos.getZ(idx));
+        pointSigCache[idx] = sig;
+      }
+      return sig;
+    };
     if (index && index.count >= 3) {
       for (let i = 0; i + 2 < index.count; i += 3) {
         const tri = [

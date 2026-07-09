@@ -118,6 +118,13 @@ function pointInsideMesh(point, vp, tv, bounds = null) {
     const jitter = 1e-6 * diag;
     const dirs = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
     const triCount = (tv.length / 3) | 0;
+    // Per-triangle AABBs (from the min-gap index) let each axis ray skip
+    // triangles that cannot intersect it. The margin is far larger than the
+    // intersection epsilon, so the reject test is conservative.
+    const triRecords = Array.isArray(bounds?.triangles) && bounds.triangles.length === triCount
+        ? bounds.triangles
+        : null;
+    const margin = 2 * jitter;
     let votes = 0;
     for (let k = 0; k < dirs.length; k++) {
         const dir = dirs[k];
@@ -126,6 +133,19 @@ function pointInsideMesh(point, vp, tv, bounds = null) {
         const oz = point.z + (k + 3) * jitter;
         let hits = 0;
         for (let t = 0; t < triCount; t++) {
+            if (triRecords) {
+                const r = triRecords[t];
+                if (k === 0) {
+                    if (r.maxX < ox - margin || r.minY > oy + margin || r.maxY < oy - margin
+                        || r.minZ > oz + margin || r.maxZ < oz - margin) continue;
+                } else if (k === 1) {
+                    if (r.maxY < oy - margin || r.minX > ox + margin || r.maxX < ox - margin
+                        || r.minZ > oz + margin || r.maxZ < oz - margin) continue;
+                } else {
+                    if (r.maxZ < oz - margin || r.minX > ox + margin || r.maxX < ox - margin
+                        || r.minY > oy + margin || r.maxY < oy - margin) continue;
+                }
+            }
             const base = t * 3;
             const ia = tv[base] * 3, ib = tv[base + 1] * 3, ic = tv[base + 2] * 3;
             if (rayIntersectsTriangle(

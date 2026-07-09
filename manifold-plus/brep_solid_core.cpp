@@ -225,6 +225,15 @@ std::vector<AuxEdgeRecord> ReadAuxEdges(const emscripten::val& values) {
   return out;
 }
 
+emscripten::val ToFloat64Array(const std::vector<double>& values) {
+  if (values.empty()) {
+    return emscripten::val::global("Float64Array").new_(0);
+  }
+  return emscripten::val(
+             emscripten::typed_memory_view(values.size(), values.data()))
+      .call<emscripten::val>("slice");
+}
+
 emscripten::val ToAuxEdges(const std::vector<AuxEdgeRecord>& aux_edges) {
   emscripten::val array = emscripten::val::array();
   uint32_t index = 0;
@@ -596,6 +605,9 @@ void BrepSolidCore::WeldVerticesByEpsilon(double eps) {
     return static_cast<long long>(std::floor(value / eps));
   };
   auto make_cell_key = [](long long cx, long long cy, long long cz) {
+    // Decimal keys on purpose: the weld union-find merges in cell_map
+    // iteration order, so the key bytes (via hashing) affect which vertex
+    // becomes a cluster representative. See note on MakeVertexKey.
     std::ostringstream key_stream;
     key_stream << cx << ',' << cy << ',' << cz;
     return key_stream.str();
@@ -925,7 +937,13 @@ manifold::MeshGL BrepSolidCore::BuildRuntimeMeshGL() {
 }
 
 emscripten::val BrepSolidCore::GetFace(const std::string& face_name) {
-  emscripten::val out = emscripten::val::array();
+  // Packed shape: { numProp, vertProperties: Float32Array, triVerts: Uint32Array }.
+  // The JS wrapper (CppSolidCore.ts) rebuilds the per-triangle objects.
+  emscripten::val out = emscripten::val::object();
+  out.set("numProp", 3u);
+  out.set("vertProperties", ToJsTypedArray(std::vector<float>{}));
+  out.set("triVerts", ToJsTypedArray(std::vector<uint32_t>{}));
+
   const auto found = face_name_to_id_.find(face_name);
   if (found == face_name_to_id_.end()) return out;
 
@@ -938,7 +956,7 @@ emscripten::val BrepSolidCore::GetFace(const std::string& face_name) {
   }
   const uint32_t stride = std::max<uint32_t>(3, mesh.numProp);
   const uint32_t tri_count = static_cast<uint32_t>(mesh.NumTri());
-  uint32_t write_idx = 0;
+  std::vector<uint32_t> tri_verts;
   for (uint32_t tri_idx = 0; tri_idx < tri_count && tri_idx < mesh.faceID.size();
        ++tri_idx) {
     if (mesh.faceID[tri_idx] != target_id) continue;
@@ -951,30 +969,14 @@ emscripten::val BrepSolidCore::GetFace(const std::string& face_name) {
         i2 * stride + 2 >= mesh.vertProperties.size()) {
       continue;
     }
-
-    emscripten::val tri = emscripten::val::object();
-    tri.set("faceName", face_name);
-
-    emscripten::val indices = emscripten::val::array();
-    indices.set(0, i0);
-    indices.set(1, i1);
-    indices.set(2, i2);
-    tri.set("indices", indices);
-
-    auto build_point = [&](uint32_t vertex_idx) {
-      emscripten::val point = emscripten::val::array();
-      const uint32_t base = vertex_idx * stride;
-      point.set(0, mesh.vertProperties[base + 0]);
-      point.set(1, mesh.vertProperties[base + 1]);
-      point.set(2, mesh.vertProperties[base + 2]);
-      return point;
-    };
-
-    tri.set("p1", build_point(i0));
-    tri.set("p2", build_point(i1));
-    tri.set("p3", build_point(i2));
-    out.set(write_idx++, tri);
+    tri_verts.push_back(i0);
+    tri_verts.push_back(i1);
+    tri_verts.push_back(i2);
   }
+
+  out.set("numProp", stride);
+  out.set("vertProperties", ToJsTypedArray(mesh.vertProperties));
+  out.set("triVerts", ToJsTypedArray(tri_verts));
   return out;
 }
 
@@ -986,19 +988,20 @@ emscripten::val BrepSolidCore::GetFaces(bool include_empty) {
     mesh = BuildAuthoringMeshGL();
   }
   const uint32_t stride = std::max<uint32_t>(3, mesh.numProp);
-  emscripten::val out = emscripten::val::array();
+
+  // Packed shape: { numProp, vertProperties: Float32Array,
+  //                 faces: [{ faceName, triVerts: Uint32Array }, ...] }.
+  // Face entries keep the first-seen order the object-per-triangle format had,
+  // including entries whose triangles are all skipped by the bounds check.
+  std::vector<std::pair<std::string, std::vector<uint32_t>>> face_entries;
   std::unordered_map<std::string, uint32_t> face_to_index;
-  uint32_t next_index = 0;
 
   auto ensure_face_entry = [&](const std::string& face_name) -> uint32_t {
     const auto found = face_to_index.find(face_name);
     if (found != face_to_index.end()) return found->second;
-    const uint32_t index = next_index++;
+    const uint32_t index = static_cast<uint32_t>(face_entries.size());
     face_to_index.emplace(face_name, index);
-    emscripten::val entry = emscripten::val::object();
-    entry.set("faceName", face_name);
-    entry.set("triangles", emscripten::val::array());
-    out.set(index, entry);
+    face_entries.emplace_back(face_name, std::vector<uint32_t>{});
     return index;
   };
 
@@ -1013,7 +1016,6 @@ emscripten::val BrepSolidCore::GetFaces(bool include_empty) {
        ++tri_idx) {
     const std::string face_name = ResolveFaceName(mesh.faceID[tri_idx]);
     const uint32_t face_index = ensure_face_entry(face_name);
-    emscripten::val triangles = out[face_index]["triangles"];
 
     const uint32_t tri_base = tri_idx * 3;
     const uint32_t i0 = mesh.triVerts[tri_base + 0];
@@ -1024,33 +1026,24 @@ emscripten::val BrepSolidCore::GetFaces(bool include_empty) {
         i2 * stride + 2 >= mesh.vertProperties.size()) {
       continue;
     }
-
-    emscripten::val tri = emscripten::val::object();
-    tri.set("faceName", face_name);
-
-    emscripten::val indices = emscripten::val::array();
-    indices.set(0, i0);
-    indices.set(1, i1);
-    indices.set(2, i2);
-    tri.set("indices", indices);
-
-    auto build_point = [&](uint32_t vertex_idx) {
-      emscripten::val point = emscripten::val::array();
-      const uint32_t base = vertex_idx * stride;
-      point.set(0, mesh.vertProperties[base + 0]);
-      point.set(1, mesh.vertProperties[base + 1]);
-      point.set(2, mesh.vertProperties[base + 2]);
-      return point;
-    };
-
-    tri.set("p1", build_point(i0));
-    tri.set("p2", build_point(i1));
-    tri.set("p3", build_point(i2));
-    const uint32_t tri_out_idx =
-        triangles["length"].isUndefined() ? 0 : triangles["length"].as<uint32_t>();
-    triangles.set(tri_out_idx, tri);
+    auto& tri_verts = face_entries[face_index].second;
+    tri_verts.push_back(i0);
+    tri_verts.push_back(i1);
+    tri_verts.push_back(i2);
   }
 
+  emscripten::val faces = emscripten::val::array();
+  for (uint32_t index = 0; index < face_entries.size(); ++index) {
+    emscripten::val entry = emscripten::val::object();
+    entry.set("faceName", face_entries[index].first);
+    entry.set("triVerts", ToJsTypedArray(face_entries[index].second));
+    faces.set(index, entry);
+  }
+
+  emscripten::val out = emscripten::val::object();
+  out.set("numProp", stride);
+  out.set("vertProperties", ToJsTypedArray(mesh.vertProperties));
+  out.set("faces", faces);
   return out;
 }
 
@@ -1216,19 +1209,19 @@ emscripten::val BrepSolidCore::GetBoundaryEdgePolylines() {
       polyline.set("faceB", group.face_b);
       polyline.set("closedLoop", closed_loop);
 
-      emscripten::val indices = emscripten::val::array();
-      emscripten::val positions = emscripten::val::array();
+      // Flat marshaling: indices as one bulk array, positions as one
+      // Float64Array ("positionsFlat"); the JS wrapper rebuilds the nested
+      // [x, y, z] point arrays.
+      std::vector<double> positions_flat;
+      positions_flat.reserve(chain.size() * 3);
       for (uint32_t i = 0; i < chain.size(); ++i) {
-        indices.set(i, chain[i]);
-        emscripten::val point = emscripten::val::array();
         const uint32_t base = chain[i] * stride;
-        point.set(0, mesh.vertProperties[base + 0]);
-        point.set(1, mesh.vertProperties[base + 1]);
-        point.set(2, mesh.vertProperties[base + 2]);
-        positions.set(i, point);
+        positions_flat.push_back(mesh.vertProperties[base + 0]);
+        positions_flat.push_back(mesh.vertProperties[base + 1]);
+        positions_flat.push_back(mesh.vertProperties[base + 2]);
       }
-      polyline.set("indices", indices);
-      polyline.set("positions", positions);
+      polyline.set("indices", ToJsArray(chain));
+      polyline.set("positionsFlat", ToFloat64Array(positions_flat));
       polylines.set(polyline_index++, polyline);
     };
 
@@ -1437,22 +1430,25 @@ emscripten::val BrepSolidCore::GetBoundaryEdgePolylines() {
       polyline.set("faceB", group.face_b);
       polyline.set("closedLoop", closed_loop);
 
-      emscripten::val indices = emscripten::val::array();
-      emscripten::val positions = emscripten::val::array();
+      // Chain keys always come from edges whose endpoints were inserted into
+      // point_indices/point_positions, so the lookups cannot miss.
+      std::vector<uint32_t> indices;
+      indices.reserve(chain.size());
+      std::vector<double> positions_flat;
+      positions_flat.reserve(chain.size() * 3);
       for (uint32_t i = 0; i < chain.size(); ++i) {
         const auto index_found = point_indices.find(chain[i]);
-        indices.set(i, index_found == point_indices.end() ? 0 : index_found->second);
-        emscripten::val point = emscripten::val::array();
+        indices.push_back(index_found == point_indices.end() ? 0
+                                                             : index_found->second);
         const auto point_found = point_positions.find(chain[i]);
         if (point_found == point_positions.end()) continue;
         const auto& pos = point_found->second;
-        point.set(0, pos[0]);
-        point.set(1, pos[1]);
-        point.set(2, pos[2]);
-        positions.set(i, point);
+        positions_flat.push_back(pos[0]);
+        positions_flat.push_back(pos[1]);
+        positions_flat.push_back(pos[2]);
       }
-      polyline.set("indices", indices);
-      polyline.set("positions", positions);
+      polyline.set("indices", ToJsArray(indices));
+      polyline.set("positionsFlat", ToFloat64Array(positions_flat));
       polylines.set(polyline_index++, polyline);
     };
 
@@ -2468,6 +2464,10 @@ uint32_t BrepSolidCore::TriangleCount() const {
   return static_cast<uint32_t>(tri_ids_.size());
 }
 
+// NOTE: these keys are internal, but their byte layout feeds unordered_map
+// hashing, and several consumers (weld union-find, winding-fix seeding,
+// boundary chain walking) are sensitive to container iteration order. Keep
+// the decimal format so results stay bit-identical run to run.
 std::string BrepSolidCore::MakeVertexKey(double x, double y, double z) {
   std::ostringstream stream;
   stream.precision(std::numeric_limits<double>::max_digits10);
@@ -2484,19 +2484,19 @@ std::string BrepSolidCore::MakeUndirectedEdgeKey(uint32_t a, uint32_t b) {
 }
 
 emscripten::val BrepSolidCore::ToJsArray(const std::vector<float>& values) {
-  emscripten::val out = emscripten::val::array();
-  for (std::size_t i = 0; i < values.size(); ++i) {
-    out.set(static_cast<uint32_t>(i), values[i]);
-  }
-  return out;
+  if (values.empty()) return emscripten::val::array();
+  // Single boundary crossing: Array.from over a heap view yields the same
+  // plain JS Array (with identical widened doubles) as the per-element loop.
+  return emscripten::val::global("Array").call<emscripten::val>(
+      "from",
+      emscripten::val(emscripten::typed_memory_view(values.size(), values.data())));
 }
 
 emscripten::val BrepSolidCore::ToJsArray(const std::vector<uint32_t>& values) {
-  emscripten::val out = emscripten::val::array();
-  for (std::size_t i = 0; i < values.size(); ++i) {
-    out.set(static_cast<uint32_t>(i), values[i]);
-  }
-  return out;
+  if (values.empty()) return emscripten::val::array();
+  return emscripten::val::global("Array").call<emscripten::val>(
+      "from",
+      emscripten::val(emscripten::typed_memory_view(values.size(), values.data())));
 }
 
 emscripten::val BrepSolidCore::ToJsTypedArray(
@@ -2561,14 +2561,31 @@ emscripten::val BrepSolidCore::ToFaceIdEntries(
   return out;
 }
 
+namespace {
+
+// Copy a JS array-like of numbers into wasm memory with one boundary call.
+// Float64Array.prototype.set applies the same ToNumber coercion per element
+// as the previous values[i].as<double>() loop, so validation semantics match.
+std::vector<double> BulkReadNumberArray(const emscripten::val& values) {
+  const uint32_t length = values["length"].as<uint32_t>();
+  std::vector<double> doubles(length);
+  if (length > 0) {
+    emscripten::val view(
+        emscripten::typed_memory_view(doubles.size(), doubles.data()));
+    view.call<void>("set", values);
+  }
+  return doubles;
+}
+
+}  // namespace
+
 std::vector<float> BrepSolidCore::ReadFloatArray(const emscripten::val& values,
                                                  const char* label) {
   if (values.isUndefined() || values.isNull()) return {};
-  const uint32_t length = values["length"].as<uint32_t>();
+  const std::vector<double> doubles = BulkReadNumberArray(values);
   std::vector<float> out;
-  out.reserve(length);
-  for (uint32_t i = 0; i < length; ++i) {
-    const double value = values[i].as<double>();
+  out.reserve(doubles.size());
+  for (const double value : doubles) {
     if (!std::isfinite(value)) {
       throw std::runtime_error(std::string(label) +
                                " contains a non-finite numeric value.");
@@ -2581,11 +2598,10 @@ std::vector<float> BrepSolidCore::ReadFloatArray(const emscripten::val& values,
 std::vector<uint32_t> BrepSolidCore::ReadUint32Array(
     const emscripten::val& values, const char* label) {
   if (values.isUndefined() || values.isNull()) return {};
-  const uint32_t length = values["length"].as<uint32_t>();
+  const std::vector<double> doubles = BulkReadNumberArray(values);
   std::vector<uint32_t> out;
-  out.reserve(length);
-  for (uint32_t i = 0; i < length; ++i) {
-    const double value = values[i].as<double>();
+  out.reserve(doubles.size());
+  for (const double value : doubles) {
     if (!std::isfinite(value) || value < 0.0) {
       throw std::runtime_error(std::string(label) +
                                " contains an invalid unsigned integer value.");

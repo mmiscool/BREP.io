@@ -5,6 +5,8 @@
  * avoid manifoldization during detection and splitting.
  */
 
+import { manifold } from "../setupManifold.js";
+
 type AnyRecord = Record<string, any>;
 
 function invalidateGeometryCaches(solid: any) {
@@ -1172,90 +1174,33 @@ export function removeInternalTrianglesByWinding(this: any, { offsetScale = 1e-5
     const triCount = (tv.length / 3) | 0;
     if (triCount === 0) return 0;
 
-    // Bounding box for epsilon offset scaling
-    let minX = Infinity, minY = Infinity, minZ = Infinity;
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-    for (let i = 0; i < vp.length; i += 3) {
-        const x = vp[i], y = vp[i + 1], z = vp[i + 2];
-        if (x < minX) minX = x; if (x > maxX) maxX = x;
-        if (y < minY) minY = y; if (y > maxY) maxY = y;
-        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
-    }
-    const diag = Math.hypot(maxX - minX, maxY - minY, maxZ - minZ) || 1;
-    const eps = offsetScale * diag;
-
-    // Prepare faces and normals
-    const faces = new Array(triCount);
-    const centroids = new Array(triCount);
-    const normals = new Array(triCount);
-    for (let t = 0; t < triCount; t++) {
-        const b = t * 3;
-        const i0 = tv[b + 0] >>> 0;
-        const i1 = tv[b + 1] >>> 0;
-        const i2 = tv[b + 2] >>> 0;
-        const ax = vp[i0 * 3 + 0], ay = vp[i0 * 3 + 1], az = vp[i0 * 3 + 2];
-        const bx = vp[i1 * 3 + 0], by = vp[i1 * 3 + 1], bz = vp[i1 * 3 + 2];
-        const cx = vp[i2 * 3 + 0], cy = vp[i2 * 3 + 1], cz = vp[i2 * 3 + 2];
-        faces[t] = [[ax, ay, az], [bx, by, bz], [cx, cy, cz]];
-        centroids[t] = [(ax + bx + cx) / 3, (ay + by + cy) / 3, (az + bz + cz) / 3];
-        const ux = bx - ax, uy = by - ay, uz = bz - az;
-        const vx = cx - ax, vy = cy - ay, vz = cz - az;
-        let nx = uy * vz - uz * vy;
-        let ny = uz * vx - ux * vz;
-        let nz = ux * vy - uy * vx;
-        const nl = Math.hypot(nx, ny, nz);
-        if (nl < 1e-18) {
-            normals[t] = [0, 0, 0];
-        } else {
-            normals[t] = [nx / nl, ny / nl, nz / nl];
-        }
-    }
-
-    // Oriented solid angle of triangle ABC as seen from point P
-    const solidAngle = (P, A, B, C) => {
-        const ax = A[0] - P[0], ay = A[1] - P[1], az = A[2] - P[2];
-        const bx = B[0] - P[0], by = B[1] - P[1], bz = B[2] - P[2];
-        const cx = C[0] - P[0], cy = C[1] - P[1], cz = C[2] - P[2];
-        const la = Math.hypot(ax, ay, az), lb = Math.hypot(bx, by, bz), lc = Math.hypot(cx, cy, cz);
-        if (la < 1e-18 || lb < 1e-18 || lc < 1e-18) return 0;
-        const dotAB = ax * bx + ay * by + az * bz;
-        const dotBC = bx * cx + by * cy + bz * cz;
-        const dotCA = cx * ax + cy * ay + cz * az;
-        const crossx = ay * bz - az * by;
-        const crossy = az * bx - ax * bz;
-        const crossz = ax * by - ay * bx;
-        const triple = crossx * cx + crossy * cy + crossz * cz; // a·(b×c)
-        const denom = la * lb * lc + dotAB * lc + dotBC * la + dotCA * lb;
-        return 2 * Math.atan2(triple, denom);
-    };
-
-    // Generalized winding number w(P) in [−1,1]; normalized by 4π
-    const winding = (P) => {
-        let omega = 0;
-        for (let u = 0; u < triCount; u++) {
-            const [A, B, C] = faces[u];
-            omega += solidAngle(P, A, B, C);
-        }
-        return omega / (4 * Math.PI);
-    };
-
-    const keepTri = new Uint8Array(triCount);
-    for (let t = 0; t < triCount; t++) keepTri[t] = 1;
+    // Native classifier runs the same O(T^2) winding classification in WASM;
+    // the JS loop below is the fallback when the binding is unavailable.
+    let keepTri: Uint8Array | null = null;
     let removed = 0;
-    const tau = Math.max(0, Math.min(0.49, crossingTolerance));
-
-    for (let t = 0; t < triCount; t++) {
-        const N = normals[t];
-        if (!N || (N[0] === 0 && N[1] === 0 && N[2] === 0)) { continue; } // keep degenerate-orientation tris
-        const C = centroids[t];
-        const Pplus = [C[0] + N[0] * eps, C[1] + N[1] * eps, C[2] + N[2] * eps];
-        const Pminus = [C[0] - N[0] * eps, C[1] - N[1] * eps, C[2] - N[2] * eps];
-        const wPlus = winding(Pplus);
-        const wMinus = winding(Pminus);
-        const a = Math.abs(wPlus) - 0.5;
-        const b = Math.abs(wMinus) - 0.5;
-        const crosses = (a < -tau && b > tau) || (a > tau && b < -tau) || (a * b < -tau * tau);
-        if (!crosses) { keepTri[t] = 0; removed++; }
+    if (typeof (manifold as any)?.classifyInternalTrianglesByWinding === "function") {
+        try {
+            const mask = (manifold as any).classifyInternalTrianglesByWinding(
+                vp,
+                tv,
+                Number(offsetScale) || 0,
+                Number(crossingTolerance) || 0,
+            );
+            if (mask && mask.length === triCount) {
+                keepTri = mask;
+                for (let t = 0; t < triCount; t++) {
+                    if (!mask[t]) removed++;
+                }
+            }
+        } catch {
+            keepTri = null;
+            removed = 0;
+        }
+    }
+    if (!keepTri) {
+        const classified = classifyInternalTrianglesByWindingJs(vp, tv, triCount, offsetScale, crossingTolerance);
+        keepTri = classified.keepTri;
+        removed = classified.removed;
     }
 
     if (removed === 0) return 0;
@@ -1298,6 +1243,116 @@ export function removeInternalTrianglesByWinding(this: any, { offsetScale = 1e-5
     invalidateGeometryCaches(this);
     this.fixTriangleWindingsByAdjacency();
     return removed;
+}
+
+function classifyInternalTrianglesByWindingJs(vp, tv, triCount, offsetScale, crossingTolerance) {
+    // Bounding box for epsilon offset scaling
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (let i = 0; i < vp.length; i += 3) {
+        const x = vp[i], y = vp[i + 1], z = vp[i + 2];
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+    const diag = Math.hypot(maxX - minX, maxY - minY, maxZ - minZ) || 1;
+    const eps = offsetScale * diag;
+
+    // Prepare faces and normals in flat typed arrays (hot O(T^2) loop below).
+    const triCoords = new Float64Array(triCount * 9);
+    const centroids = new Float64Array(triCount * 3);
+    const normals = new Float64Array(triCount * 3);
+    for (let t = 0; t < triCount; t++) {
+        const b = t * 3;
+        const i0 = tv[b + 0] >>> 0;
+        const i1 = tv[b + 1] >>> 0;
+        const i2 = tv[b + 2] >>> 0;
+        const ax = vp[i0 * 3 + 0], ay = vp[i0 * 3 + 1], az = vp[i0 * 3 + 2];
+        const bx = vp[i1 * 3 + 0], by = vp[i1 * 3 + 1], bz = vp[i1 * 3 + 2];
+        const cx = vp[i2 * 3 + 0], cy = vp[i2 * 3 + 1], cz = vp[i2 * 3 + 2];
+        const c9 = t * 9;
+        triCoords[c9 + 0] = ax; triCoords[c9 + 1] = ay; triCoords[c9 + 2] = az;
+        triCoords[c9 + 3] = bx; triCoords[c9 + 4] = by; triCoords[c9 + 5] = bz;
+        triCoords[c9 + 6] = cx; triCoords[c9 + 7] = cy; triCoords[c9 + 8] = cz;
+        centroids[b + 0] = (ax + bx + cx) / 3;
+        centroids[b + 1] = (ay + by + cy) / 3;
+        centroids[b + 2] = (az + bz + cz) / 3;
+        const ux = bx - ax, uy = by - ay, uz = bz - az;
+        const vx = cx - ax, vy = cy - ay, vz = cz - az;
+        const nx = uy * vz - uz * vy;
+        const ny = uz * vx - ux * vz;
+        const nz = ux * vy - uy * vx;
+        const nl = Math.hypot(nx, ny, nz);
+        if (nl >= 1e-18) {
+            normals[b + 0] = nx / nl;
+            normals[b + 1] = ny / nl;
+            normals[b + 2] = nz / nl;
+        }
+    }
+
+    const keepTri = new Uint8Array(triCount);
+    for (let t = 0; t < triCount; t++) keepTri[t] = 1;
+    let removed = 0;
+    const tau = Math.max(0, Math.min(0.49, crossingTolerance));
+    const FOUR_PI = 4 * Math.PI;
+
+    for (let t = 0; t < triCount; t++) {
+        const b = t * 3;
+        const nx = normals[b + 0], ny = normals[b + 1], nz = normals[b + 2];
+        if (nx === 0 && ny === 0 && nz === 0) { continue; } // keep degenerate-orientation tris
+        const cx0 = centroids[b + 0], cy0 = centroids[b + 1], cz0 = centroids[b + 2];
+        const pxP = cx0 + nx * eps, pyP = cy0 + ny * eps, pzP = cz0 + nz * eps;
+        const pxM = cx0 - nx * eps, pyM = cy0 - ny * eps, pzM = cz0 - nz * eps;
+        // Generalized winding numbers at centroid +/- eps along the normal,
+        // accumulated in the same triangle order for both query points.
+        let omegaP = 0;
+        let omegaM = 0;
+        for (let u = 0, c9 = 0; u < triCount; u++, c9 += 9) {
+            const Ax = triCoords[c9 + 0], Ay = triCoords[c9 + 1], Az = triCoords[c9 + 2];
+            const Bx = triCoords[c9 + 3], By = triCoords[c9 + 4], Bz = triCoords[c9 + 5];
+            const Cx = triCoords[c9 + 6], Cy = triCoords[c9 + 7], Cz = triCoords[c9 + 8];
+            {
+                const ax = Ax - pxP, ay = Ay - pyP, az = Az - pzP;
+                const bx = Bx - pxP, by = By - pyP, bz = Bz - pzP;
+                const cx = Cx - pxP, cy = Cy - pyP, cz = Cz - pzP;
+                const la = Math.sqrt(ax * ax + ay * ay + az * az);
+                const lb = Math.sqrt(bx * bx + by * by + bz * bz);
+                const lc = Math.sqrt(cx * cx + cy * cy + cz * cz);
+                if (la >= 1e-18 && lb >= 1e-18 && lc >= 1e-18) {
+                    const dotAB = ax * bx + ay * by + az * bz;
+                    const dotBC = bx * cx + by * cy + bz * cz;
+                    const dotCA = cx * ax + cy * ay + cz * az;
+                    const triple = (ay * bz - az * by) * cx + (az * bx - ax * bz) * cy + (ax * by - ay * bx) * cz;
+                    const denom = la * lb * lc + dotAB * lc + dotBC * la + dotCA * lb;
+                    omegaP += 2 * Math.atan2(triple, denom);
+                }
+            }
+            {
+                const ax = Ax - pxM, ay = Ay - pyM, az = Az - pzM;
+                const bx = Bx - pxM, by = By - pyM, bz = Bz - pzM;
+                const cx = Cx - pxM, cy = Cy - pyM, cz = Cz - pzM;
+                const la = Math.sqrt(ax * ax + ay * ay + az * az);
+                const lb = Math.sqrt(bx * bx + by * by + bz * bz);
+                const lc = Math.sqrt(cx * cx + cy * cy + cz * cz);
+                if (la >= 1e-18 && lb >= 1e-18 && lc >= 1e-18) {
+                    const dotAB = ax * bx + ay * by + az * bz;
+                    const dotBC = bx * cx + by * cy + bz * cz;
+                    const dotCA = cx * ax + cy * ay + cz * az;
+                    const triple = (ay * bz - az * by) * cx + (az * bx - ax * bz) * cy + (ax * by - ay * bx) * cz;
+                    const denom = la * lb * lc + dotAB * lc + dotBC * la + dotCA * lb;
+                    omegaM += 2 * Math.atan2(triple, denom);
+                }
+            }
+        }
+        const wPlus = omegaP / FOUR_PI;
+        const wMinus = omegaM / FOUR_PI;
+        const a = Math.abs(wPlus) - 0.5;
+        const b2 = Math.abs(wMinus) - 0.5;
+        const crosses = (a < -tau && b2 > tau) || (a > tau && b2 < -tau) || (a * b2 < -tau * tau);
+        if (!crosses) { keepTri[t] = 0; removed++; }
+    }
+
+    return { keepTri, removed };
 }
 
 export function cleanupSelfIntersections(this: any, options: any = {}) {

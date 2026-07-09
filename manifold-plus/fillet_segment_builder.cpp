@@ -131,19 +131,51 @@ bool ReadOptionalPoint(const emscripten::val& value, Vec3& out) {
 }
 
 emscripten::val ToJsArray(const std::vector<float>& values) {
-  emscripten::val array = emscripten::val::array();
-  for (uint32_t i = 0; i < values.size(); ++i) {
-    array.set(i, emscripten::val(values[i]));
-  }
-  return array;
+  if (values.empty()) return emscripten::val::array();
+  // Single boundary crossing; Array.from over a heap view produces the same
+  // plain JS Array as the per-element loop.
+  return emscripten::val::global("Array").call<emscripten::val>(
+      "from",
+      emscripten::val(emscripten::typed_memory_view(values.size(), values.data())));
 }
 
 emscripten::val ToJsArray(const std::vector<uint32_t>& values) {
-  emscripten::val array = emscripten::val::array();
-  for (uint32_t i = 0; i < values.size(); ++i) {
-    array.set(i, emscripten::val(values[i]));
+  if (values.empty()) return emscripten::val::array();
+  return emscripten::val::global("Array").call<emscripten::val>(
+      "from",
+      emscripten::val(emscripten::typed_memory_view(values.size(), values.data())));
+}
+
+// Copy a JS array-like of numbers into wasm memory with one boundary call.
+// Float64Array.prototype.set applies the same per-element ToNumber coercion
+// as the former values[i].as<double>() loops.
+std::vector<double> BulkReadNumberArray(const emscripten::val& values) {
+  if (values.isUndefined() || values.isNull()) return {};
+  const uint32_t length = values["length"].as<uint32_t>();
+  std::vector<double> doubles(length);
+  if (length > 0) {
+    emscripten::val view(
+        emscripten::typed_memory_view(doubles.size(), doubles.data()));
+    view.call<void>("set", values);
   }
-  return array;
+  return doubles;
+}
+
+std::vector<float> BulkReadFloatArray(const emscripten::val& values) {
+  const std::vector<double> doubles = BulkReadNumberArray(values);
+  return std::vector<float>(doubles.begin(), doubles.end());
+}
+
+std::vector<uint32_t> BulkReadUint32Array(const emscripten::val& values) {
+  const std::vector<double> doubles = BulkReadNumberArray(values);
+  std::vector<uint32_t> out;
+  out.reserve(doubles.size());
+  for (const double value : doubles) {
+    out.push_back((std::isfinite(value) && value >= 0.0)
+                      ? static_cast<uint32_t>(value)
+                      : 0u);
+  }
+  return out;
 }
 
 emscripten::val ToPointValue(const Vec3& value) {
@@ -302,26 +334,9 @@ manifold::MeshGL SnapshotToMesh(const emscripten::val& snapshot) {
           ? 3
           : static_cast<uint32_t>(num_prop_val.as<double>());
 
-  const emscripten::val vp = snapshot["vertProperties"];
-  const uint32_t vp_length = vp["length"].as<uint32_t>();
-  mesh.vertProperties.reserve(vp_length);
-  for (uint32_t i = 0; i < vp_length; ++i) {
-    mesh.vertProperties.push_back(vp[i].as<float>());
-  }
-
-  const emscripten::val tv = snapshot["triVerts"];
-  const uint32_t tv_length = tv["length"].as<uint32_t>();
-  mesh.triVerts.reserve(tv_length);
-  for (uint32_t i = 0; i < tv_length; ++i) {
-    mesh.triVerts.push_back(tv[i].as<uint32_t>());
-  }
-
-  const emscripten::val ids = snapshot["triIDs"];
-  const uint32_t id_length = ids["length"].as<uint32_t>();
-  mesh.faceID.reserve(id_length);
-  for (uint32_t i = 0; i < id_length; ++i) {
-    mesh.faceID.push_back(ids[i].as<uint32_t>());
-  }
+  mesh.vertProperties = BulkReadFloatArray(snapshot["vertProperties"]);
+  mesh.triVerts = BulkReadUint32Array(snapshot["triVerts"]);
+  mesh.faceID = BulkReadUint32Array(snapshot["triIDs"]);
   return mesh;
 }
 
@@ -333,45 +348,11 @@ manifold::MeshGL PreparedMeshToMesh(const emscripten::val& prepared) {
           ? 3
           : static_cast<uint32_t>(num_prop_val.as<double>());
 
-  const emscripten::val vp = prepared["vertProperties"];
-  const uint32_t vp_length = vp["length"].as<uint32_t>();
-  mesh.vertProperties.reserve(vp_length);
-  for (uint32_t i = 0; i < vp_length; ++i) {
-    mesh.vertProperties.push_back(vp[i].as<float>());
-  }
-
-  const emscripten::val tv = prepared["triVerts"];
-  const uint32_t tv_length = tv["length"].as<uint32_t>();
-  mesh.triVerts.reserve(tv_length);
-  for (uint32_t i = 0; i < tv_length; ++i) {
-    mesh.triVerts.push_back(tv[i].as<uint32_t>());
-  }
-
-  const emscripten::val ids = prepared["faceID"];
-  const uint32_t id_length = ids["length"].as<uint32_t>();
-  mesh.faceID.reserve(id_length);
-  for (uint32_t i = 0; i < id_length; ++i) {
-    mesh.faceID.push_back(ids[i].as<uint32_t>());
-  }
-
-  const emscripten::val merge_from = prepared["mergeFromVert"];
-  if (!merge_from.isUndefined() && !merge_from.isNull()) {
-    const uint32_t merge_from_length = merge_from["length"].as<uint32_t>();
-    mesh.mergeFromVert.reserve(merge_from_length);
-    for (uint32_t i = 0; i < merge_from_length; ++i) {
-      mesh.mergeFromVert.push_back(merge_from[i].as<uint32_t>());
-    }
-  }
-
-  const emscripten::val merge_to = prepared["mergeToVert"];
-  if (!merge_to.isUndefined() && !merge_to.isNull()) {
-    const uint32_t merge_to_length = merge_to["length"].as<uint32_t>();
-    mesh.mergeToVert.reserve(merge_to_length);
-    for (uint32_t i = 0; i < merge_to_length; ++i) {
-      mesh.mergeToVert.push_back(merge_to[i].as<uint32_t>());
-    }
-  }
-
+  mesh.vertProperties = BulkReadFloatArray(prepared["vertProperties"]);
+  mesh.triVerts = BulkReadUint32Array(prepared["triVerts"]);
+  mesh.faceID = BulkReadUint32Array(prepared["faceID"]);
+  mesh.mergeFromVert = BulkReadUint32Array(prepared["mergeFromVert"]);
+  mesh.mergeToVert = BulkReadUint32Array(prepared["mergeToVert"]);
   return mesh;
 }
 
@@ -926,11 +907,7 @@ emscripten::val BuildSnapshotFromMesh(
 
 std::unordered_map<uint32_t, std::string> BuildResolvedIdToFaceName(
     const emscripten::val& snapshot) {
-  std::vector<uint32_t> tri_ids;
-  const emscripten::val tri_ids_val = snapshot["triIDs"];
-  const uint32_t tri_count = tri_ids_val["length"].as<uint32_t>();
-  tri_ids.reserve(tri_count);
-  for (uint32_t i = 0; i < tri_count; ++i) tri_ids.push_back(tri_ids_val[i].as<uint32_t>());
+  const std::vector<uint32_t> tri_ids = BulkReadUint32Array(snapshot["triIDs"]);
 
   std::unordered_set<uint32_t> tri_set(tri_ids.begin(), tri_ids.end());
   std::vector<uint32_t> tri_ids_sorted(tri_set.begin(), tri_set.end());
@@ -1084,20 +1061,24 @@ std::vector<Vec3> BuildTubePath(const std::vector<Vec3>& centerline, bool closed
 }
 
 double ComputeFaceArea(const emscripten::val& snapshot, uint32_t face_id) {
-  const emscripten::val vp = snapshot["vertProperties"];
-  const emscripten::val tv = snapshot["triVerts"];
-  const emscripten::val ids = snapshot["triIDs"];
-  const uint32_t tri_count = ids["length"].as<uint32_t>();
+  // Bulk copies; vertProperties stays double to match the former
+  // per-element .as<double>() reads exactly.
+  const std::vector<double> vp = BulkReadNumberArray(snapshot["vertProperties"]);
+  const std::vector<uint32_t> tv = BulkReadUint32Array(snapshot["triVerts"]);
+  const std::vector<uint32_t> ids = BulkReadUint32Array(snapshot["triIDs"]);
+  const uint32_t tri_count = static_cast<uint32_t>(ids.size());
   double area = 0.0;
   for (uint32_t t = 0; t < tri_count; ++t) {
-    if (ids[t].as<uint32_t>() != face_id) continue;
+    if (ids[t] != face_id) continue;
     const uint32_t base = t * 3;
-    const uint32_t i0 = tv[base + 0].as<uint32_t>() * 3;
-    const uint32_t i1 = tv[base + 1].as<uint32_t>() * 3;
-    const uint32_t i2 = tv[base + 2].as<uint32_t>() * 3;
-    const Vec3 a{vp[i0 + 0].as<double>(), vp[i0 + 1].as<double>(), vp[i0 + 2].as<double>()};
-    const Vec3 b{vp[i1 + 0].as<double>(), vp[i1 + 1].as<double>(), vp[i1 + 2].as<double>()};
-    const Vec3 c{vp[i2 + 0].as<double>(), vp[i2 + 1].as<double>(), vp[i2 + 2].as<double>()};
+    if (base + 2 >= tv.size()) break;
+    const uint32_t i0 = tv[base + 0] * 3;
+    const uint32_t i1 = tv[base + 1] * 3;
+    const uint32_t i2 = tv[base + 2] * 3;
+    if (i0 + 2 >= vp.size() || i1 + 2 >= vp.size() || i2 + 2 >= vp.size()) continue;
+    const Vec3 a{vp[i0 + 0], vp[i0 + 1], vp[i0 + 2]};
+    const Vec3 b{vp[i1 + 0], vp[i1 + 1], vp[i1 + 2]};
+    const Vec3 c{vp[i2 + 0], vp[i2 + 1], vp[i2 + 2]};
     area += TriangleArea(a, b, c);
   }
   return area;

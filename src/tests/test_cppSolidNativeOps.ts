@@ -1387,7 +1387,17 @@ export async function test_cppSolidNative_collapseFilletSideWallFaces_preserves_
         sourceFeatureId: "F_TEST",
     });
 
-    const sharedIndex = solid._vertKeyToIndex.get(shared.join(","));
+    // Look the vertex up in the authoring arrays directly: `_vertKeyToIndex`
+    // is a lazily rebuilt cache and may legitimately be empty here.
+    let sharedIndex = null;
+    for (let i = 0; i + 2 < solid._vertProperties.length; i += 3) {
+        if (solid._vertProperties[i] === shared[0]
+            && solid._vertProperties[i + 1] === shared[1]
+            && solid._vertProperties[i + 2] === shared[2]) {
+            sharedIndex = (i / 3) | 0;
+            break;
+        }
+    }
     if (sharedIndex == null) {
         throw new Error("Expected synthetic shared endpoint vertex to be present before collapse.");
     }

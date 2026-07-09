@@ -30,5 +30,6 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/fillet_segment_builder.cpp
     ${CMAKE_CURRENT_LIST_DIR}/brep_solid_core.cpp
     ${CMAKE_CURRENT_LIST_DIR}/brep_solid_bindings.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/winding_classifier.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tube_builder.cpp
 )
