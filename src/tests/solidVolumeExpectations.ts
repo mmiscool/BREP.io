@@ -525,6 +525,14 @@ export const solidVolumeExpectations = Object.freeze({
             }
         ]
     },
+    test_generated_history_20260709035143_offset_shell_prefers_source_face_names: {
+        solids: [
+            {
+                name: "TU2_O.S3",
+                volume: 9.434465155052967
+            }
+        ]
+    },
     test_generated_history_20260612230031: {
         solids: [
             {

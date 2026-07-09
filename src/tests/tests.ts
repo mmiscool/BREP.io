@@ -174,6 +174,7 @@ import {
     afterRun_generated_history_20260612230031,
     test_generated_history_20260612230031,
 } from './test_generated_history_20260612230031.js';
+import { test_generated_history_20260709035143_offset_shell_prefers_source_face_names } from './test_generated_history_20260709035143.js';
 import {
     afterRun_generated_history_20260612232755,
     test_generated_history_20260612232755,
@@ -1488,6 +1489,13 @@ export const testFunctions: any[] = [
     },
     {
         test: test_generated_history_20260607180752_offset_shell_cleanup_toggles_disable_pipe_collapse,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_generated_history_20260709035143_offset_shell_prefers_source_face_names,
         printArtifacts: false,
         exportFaces: false,
         exportSolids: false,

@@ -1529,6 +1529,256 @@ function reassignAreaLossSidewallFacesToDominantNeighbor(solid, opts: any = {}):
     return summary;
 }
 
+// Squared distance from point (px,py,pz) to the triangle at coords[o..o+8].
+function pointToFlatTriangleDistanceSq(px, py, pz, coords, o) {
+    const ax = coords[o + 0], ay = coords[o + 1], az = coords[o + 2];
+    const abx = coords[o + 3] - ax, aby = coords[o + 4] - ay, abz = coords[o + 5] - az;
+    const acx = coords[o + 6] - ax, acy = coords[o + 7] - ay, acz = coords[o + 8] - az;
+    const apx = px - ax, apy = py - ay, apz = pz - az;
+    const d1 = abx * apx + aby * apy + abz * apz;
+    const d2 = acx * apx + acy * apy + acz * apz;
+    if (d1 <= 0 && d2 <= 0) return apx * apx + apy * apy + apz * apz;
+
+    const bpx = px - coords[o + 3], bpy = py - coords[o + 4], bpz = pz - coords[o + 5];
+    const d3 = abx * bpx + aby * bpy + abz * bpz;
+    const d4 = acx * bpx + acy * bpy + acz * bpz;
+    if (d3 >= 0 && d4 <= d3) return bpx * bpx + bpy * bpy + bpz * bpz;
+
+    const vc = (d1 * d4) - (d3 * d2);
+    if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+        const v = d1 / (d1 - d3);
+        const dx = px - (ax + abx * v), dy = py - (ay + aby * v), dz = pz - (az + abz * v);
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    const cpx = px - coords[o + 6], cpy = py - coords[o + 7], cpz = pz - coords[o + 8];
+    const d5 = abx * cpx + aby * cpy + abz * cpz;
+    const d6 = acx * cpx + acy * cpy + acz * cpz;
+    if (d6 >= 0 && d5 <= d6) return cpx * cpx + cpy * cpy + cpz * cpz;
+
+    const vb = (d5 * d2) - (d1 * d6);
+    if (vb <= 0 && d2 >= 0 && d6 <= 0) {
+        const w = d2 / (d2 - d6);
+        const dx = px - (ax + acx * w), dy = py - (ay + acy * w), dz = pz - (az + acz * w);
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    const va = (d3 * d6) - (d5 * d4);
+    if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
+        const bcx = coords[o + 6] - coords[o + 3], bcy = coords[o + 7] - coords[o + 4], bcz = coords[o + 8] - coords[o + 5];
+        const w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        const dx = px - (coords[o + 3] + bcx * w), dy = py - (coords[o + 4] + bcy * w), dz = pz - (coords[o + 5] + bcz * w);
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    const denom = 1 / (va + vb + vc);
+    const v = vb * denom;
+    const w = vc * denom;
+    const dx = px - (ax + abx * v + acx * w);
+    const dy = py - (ay + aby * v + acy * w);
+    const dz = pz - (az + abz * v + acz * w);
+    return dx * dx + dy * dy + dz * dz;
+}
+
+// Uniform hash grid over flat triangle coords; cells sized so any triangle
+// inflated by `tol` registers in every cell a within-tol query point can hash to.
+function buildFlatTriangleGrid(coords, tol) {
+    const count = (coords.length / 9) | 0;
+    let maxExtent = 0;
+    for (let i = 0; i < count; i++) {
+        const o = i * 9;
+        const ext = Math.max(
+            Math.max(coords[o], coords[o + 3], coords[o + 6]) - Math.min(coords[o], coords[o + 3], coords[o + 6]),
+            Math.max(coords[o + 1], coords[o + 4], coords[o + 7]) - Math.min(coords[o + 1], coords[o + 4], coords[o + 7]),
+            Math.max(coords[o + 2], coords[o + 5], coords[o + 8]) - Math.min(coords[o + 2], coords[o + 5], coords[o + 8]),
+        );
+        if (ext > maxExtent) maxExtent = ext;
+    }
+    const cellSize = Math.max(tol * 4, maxExtent, 1e-12);
+    const inv = 1 / cellSize;
+    const cells = new Map<number, number[]>();
+    for (let i = 0; i < count; i++) {
+        const o = i * 9;
+        const ix0 = Math.floor((Math.min(coords[o], coords[o + 3], coords[o + 6]) - tol) * inv);
+        const ix1 = Math.floor((Math.max(coords[o], coords[o + 3], coords[o + 6]) + tol) * inv);
+        const iy0 = Math.floor((Math.min(coords[o + 1], coords[o + 4], coords[o + 7]) - tol) * inv);
+        const iy1 = Math.floor((Math.max(coords[o + 1], coords[o + 4], coords[o + 7]) + tol) * inv);
+        const iz0 = Math.floor((Math.min(coords[o + 2], coords[o + 5], coords[o + 8]) - tol) * inv);
+        const iz1 = Math.floor((Math.max(coords[o + 2], coords[o + 5], coords[o + 8]) + tol) * inv);
+        for (let ix = ix0; ix <= ix1; ix++) {
+            for (let iy = iy0; iy <= iy1; iy++) {
+                for (let iz = iz0; iz <= iz1; iz++) {
+                    const key = ((ix * 73856093) ^ (iy * 19349663) ^ (iz * 83492791)) | 0;
+                    let list = cells.get(key);
+                    if (!list) {
+                        list = [];
+                        cells.set(key, list);
+                    }
+                    list.push(i);
+                }
+            }
+        }
+    }
+    return { coords, cells, inv };
+}
+
+function flatTriangleGridDistanceSq(grid, px, py, pz, limitSq) {
+    const key = (((Math.floor(px * grid.inv) * 73856093)
+        ^ (Math.floor(py * grid.inv) * 19349663)
+        ^ (Math.floor(pz * grid.inv) * 83492791))) | 0;
+    const list = grid.cells.get(key);
+    if (!list) return Infinity;
+    let best = Infinity;
+    for (let k = 0; k < list.length; k++) {
+        const distSq = pointToFlatTriangleDistanceSq(px, py, pz, grid.coords, list[k] * 9);
+        if (distSq < best) {
+            best = distSq;
+            if (best <= limitSq) break;
+        }
+    }
+    return best;
+}
+
+// After the patch union, coincident sheets can survive with a generated
+// sidewall label even though they lie exactly on one of the original source
+// faces (e.g. a patch rim landing on an adjacent face's plane). Reassign such
+// triangles to the original face so the shell prefers source face names.
+function reassignSidewallTrianglesCoincidentWithSourceFaces(solid, sourceSolid, thickenedFaceNames, opts: any = {}): any {
+    const none = { reassignedTriangles: 0, reassignedFaces: 0, removedFaceLabels: 0, targetFaceCount: 0 };
+    const tv = Array.isArray(solid?._triVerts) ? solid._triVerts : null;
+    const vp = Array.isArray(solid?._vertProperties) ? solid._vertProperties : null;
+    const ids = Array.isArray(solid?._triIDs) ? solid._triIDs : null;
+    const idToFace = solid?._idToFaceName instanceof Map ? solid._idToFaceName : null;
+    const faceToId = solid?._faceNameToID instanceof Map ? solid._faceNameToID : null;
+    if (!solid || !tv || !vp || !ids || !idToFace || !faceToId) return none;
+
+    const targetFaceIDs = new Set<number>();
+    for (const [faceIDRaw, faceNameRaw] of idToFace.entries()) {
+        const faceID = faceIDRaw >>> 0;
+        const faceName = String(faceNameRaw || "").trim();
+        if (!faceName) continue;
+        if (!isOffsetShellSidewallFace(faceName, getFaceMetadataSafe(solid, faceName))) continue;
+        targetFaceIDs.add(faceID);
+    }
+    if (!targetFaceIDs.size) return none;
+
+    const receivingFaceIDByName = new Map<string, number>();
+    for (const nameRaw of thickenedFaceNames || []) {
+        const name = String(nameRaw || "").trim();
+        if (!name || receivingFaceIDByName.has(name)) continue;
+        const faceID = Number(faceToId.get(name)) >>> 0;
+        if (faceID) receivingFaceIDByName.set(name, faceID);
+    }
+    if (!receivingFaceIDByName.size) return none;
+
+    const stv = Array.isArray(sourceSolid?._triVerts) ? sourceSolid._triVerts : null;
+    const svp = Array.isArray(sourceSolid?._vertProperties) ? sourceSolid._vertProperties : null;
+    const sids = Array.isArray(sourceSolid?._triIDs) ? sourceSolid._triIDs : null;
+    const sIdToFace = sourceSolid?._idToFaceName instanceof Map ? sourceSolid._idToFaceName : null;
+    if (!stv || !svp || !sids || !sIdToFace) return none;
+
+    try { sourceSolid.updateMatrixWorld?.(true); } catch { /* ignore */ }
+    const matrix = sourceSolid?.matrixWorld || new THREE.Matrix4();
+    const point = new THREE.Vector3();
+    const coordsByFaceName = new Map<string, number[]>();
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    const sourceTriCount = Math.min((stv.length / 3) | 0, sids.length);
+    for (let t = 0; t < sourceTriCount; t++) {
+        const faceName = String(sIdToFace.get(sids[t]) || "").trim();
+        if (!receivingFaceIDByName.has(faceName)) continue;
+        let coords = coordsByFaceName.get(faceName);
+        if (!coords) {
+            coords = [];
+            coordsByFaceName.set(faceName, coords);
+        }
+        for (let corner = 0; corner < 3; corner++) {
+            const base = (stv[(t * 3) + corner] >>> 0) * 3;
+            point.set(
+                Number(svp[base + 0]) || 0,
+                Number(svp[base + 1]) || 0,
+                Number(svp[base + 2]) || 0,
+            ).applyMatrix4(matrix);
+            coords.push(point.x, point.y, point.z);
+            if (point.x < minX) minX = point.x;
+            if (point.x > maxX) maxX = point.x;
+            if (point.y < minY) minY = point.y;
+            if (point.y > maxY) maxY = point.y;
+            if (point.z < minZ) minZ = point.z;
+            if (point.z > maxZ) maxZ = point.z;
+        }
+    }
+    if (!coordsByFaceName.size) return none;
+
+    const scale = Number.isFinite(minX) ? Math.max(1e-9, Math.hypot(maxX - minX, maxY - minY, maxZ - minZ)) : 1;
+    const tol = Math.max(
+        Number(opts?.tolerance) || 0,
+        Math.abs(Number(opts?.thickenDistance) || 0) * 1e-3,
+        scale * 1e-5,
+        1e-6,
+    );
+    const tolSq = tol * tol;
+    const grids = [];
+    for (const [faceName, coords] of coordsByFaceName.entries()) {
+        grids.push({
+            faceName,
+            faceID: receivingFaceIDByName.get(faceName) >>> 0,
+            grid: buildFlatTriangleGrid(coords, tol),
+        });
+    }
+    grids.sort((a, b) => a.faceName.localeCompare(b.faceName));
+
+    let reassignedTriangles = 0;
+    const reassignedByFace = new Map<string, number>();
+    const triCount = Math.min(ids.length, (tv.length / 3) | 0);
+    for (let triIndex = 0; triIndex < triCount; triIndex++) {
+        if (!targetFaceIDs.has(ids[triIndex] >>> 0)) continue;
+        let bestEntry = null;
+        let bestDistanceSq = Infinity;
+        for (const entry of grids) {
+            let maxCornerDistSq = 0;
+            for (let corner = 0; corner < 3; corner++) {
+                const base = (tv[(triIndex * 3) + corner] >>> 0) * 3;
+                const distSq = flatTriangleGridDistanceSq(
+                    entry.grid,
+                    Number(vp[base + 0]) || 0,
+                    Number(vp[base + 1]) || 0,
+                    Number(vp[base + 2]) || 0,
+                    0,
+                );
+                if (distSq > maxCornerDistSq) maxCornerDistSq = distSq;
+                if (maxCornerDistSq > tolSq) break;
+            }
+            if (maxCornerDistSq <= tolSq && maxCornerDistSq < bestDistanceSq) {
+                bestDistanceSq = maxCornerDistSq;
+                bestEntry = entry;
+            }
+        }
+        if (!bestEntry) continue;
+        ids[triIndex] = bestEntry.faceID;
+        reassignedTriangles += 1;
+        reassignedByFace.set(bestEntry.faceName, (reassignedByFace.get(bestEntry.faceName) || 0) + 1);
+    }
+    if (!reassignedTriangles) return { ...none, targetFaceCount: targetFaceIDs.size };
+
+    solid._triIDs = ids;
+    const removedFaceLabels = pruneUnusedFaceLabelsFromTriangles(solid);
+    solid._faceIndex = null;
+    solid._dirty = true;
+    try { if (solid._manifold && typeof solid._manifold.delete === "function") solid._manifold.delete(); } catch { /* ignore */ }
+    solid._manifold = null;
+    solid._cppSolidCoreSyncStamp = null;
+
+    return {
+        reassignedTriangles,
+        reassignedFaces: reassignedByFace.size,
+        removedFaceLabels,
+        targetFaceCount: targetFaceIDs.size,
+        tolerance: tol,
+        targets: Array.from(reassignedByFace.entries(), ([faceName, triangleCount]) => ({ faceName, triangleCount })),
+    };
+}
+
 function buildRoundedTubePathTasks(edgeRecords) {
     const records = Array.isArray(edgeRecords)
         ? edgeRecords.filter((record) => Array.isArray(record?.points) && record.points.length >= 2)
@@ -2182,6 +2432,12 @@ export function offsetShell(faces, distance, options: any = {}) {
         }
     }
 
+    const coincidentSidewallReassign = reassignSidewallTrianglesCoincidentWithSourceFaces(
+        combined,
+        this,
+        thickenedFaceNames,
+        { thickenDistance },
+    );
     const faceIDRepair = repairGeneratedFaceIDProvenance(combined);
     if (offsetDistance < 0) {
         appendOffsetShellPipeCenterlines(combined, roundedPipeCenterlines);
@@ -2220,6 +2476,7 @@ export function offsetShell(faces, distance, options: any = {}) {
         unionFailureCount: Number(unionDiagnostics?.unionFailureCount || 0),
         firstUnionError: unionDiagnostics?.firstUnionError || null,
         roundedCorners,
+        coincidentSidewallReassign,
         faceIDRepair,
     };
     try {
