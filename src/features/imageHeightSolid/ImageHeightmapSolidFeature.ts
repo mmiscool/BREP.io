@@ -55,7 +55,7 @@ const inputParamsSchema = {
   baseHeight: {
     type: "number",
     default_value: 0,
-    hint: "Base plane height used as the minimum elevation",
+    hint: "Thickness of the solid base slab beneath the heightmap (sidewall height where pixel intensity is zero)",
   },
   invertHeights: {
     type: "boolean",
@@ -167,6 +167,11 @@ export class ImageHeightmapSolidFeature {
       pyArr[gy] = (centerXY ? (offsetY - sy) : -sy) * scaleXY;
     }
 
+    // The bottom face sits at z=0 and `base` is the thickness of the solid
+    // slab beneath the heightmap, so sidewalls run from 0 up to
+    // base + value*scaleZ. Fully transparent pixels are holes: they collapse
+    // to the bottom plane and cut through the slab.
+    const bottomZ = 0;
     const heights = new Float64Array(gridCount);
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
@@ -181,16 +186,16 @@ export class ImageHeightmapSolidFeature {
         const b = src[si + 2] | 0;
         const a = src[si + 3] | 0;
         const gray = (r * 0.2126 + g * 0.7152 + b * 0.0722) / 255;
-        let value = (a >= 16) ? (invert ? (1 - gray) : gray) : 0;
+        let value = invert ? (1 - gray) : gray;
         value = Math.max(0, Math.min(1, value));
-        const h = base + value * scaleZ;
+        const h = (a >= 16) ? (base + value * scaleZ) : bottomZ;
         heights[rowBase + gx] = h;
         if (h < minZ) minZ = h;
         if (h > maxZ) maxZ = h;
       }
     }
-    if (base < minZ) minZ = base;
-    if (base > maxZ) maxZ = base;
+    if (bottomZ < minZ) minZ = bottomZ;
+    if (bottomZ > maxZ) maxZ = bottomZ;
     for (let gx = 0; gx < gridWidth; gx++) {
       if (pxArr[gx] < minX) minX = pxArr[gx];
       if (pxArr[gx] > maxX) maxX = pxArr[gx];
@@ -211,16 +216,17 @@ export class ImageHeightmapSolidFeature {
     }
 
     // Relieve zero-thickness pinches: a grid edge whose endpoints both sit
-    // exactly on the base plane but whose two flanking triangles both carry
+    // exactly on the bottom plane but whose two flanking triangles both carry
     // material would be shared by four triangles once top vertices merge
     // into their base vertices — a non-manifold line where the solid touches
-    // itself. Lift such endpoints a hair off the base so the two regions
+    // itself. Lift such endpoints a hair off the bottom so the two regions
     // fuse through a thin wall instead. Lifting can expose new pinches one
     // ring further out, so repeat until stable.
-    const pinchLift = base + Math.sign(scaleZ || 1) * Math.max(Math.abs(scaleZ) * 1e-5, 1e-9);
+    const liftSign = Math.sign(base + scaleZ) || Math.sign(scaleZ) || 1;
+    const pinchLift = bottomZ + liftSign * Math.max((Math.abs(base) + Math.abs(scaleZ)) * 1e-5, 1e-9);
     const liftPinch = (iA, iB, iC1, iC2) => {
-      if (heights[iA] === base && heights[iB] === base
-        && heights[iC1] !== base && heights[iC2] !== base) {
+      if (heights[iA] === bottomZ && heights[iB] === bottomZ
+        && heights[iC1] !== bottomZ && heights[iC2] !== bottomZ) {
         heights[iA] = pinchLift;
         heights[iB] = pinchLift;
         return 1;
@@ -251,8 +257,9 @@ export class ImageHeightmapSolidFeature {
     // Bulk mesh construction. The grid structure makes vertex indices
     // deterministic, so we bypass Solid.addTriangle's string-keyed vertex
     // dedup entirely. Bottom vertices occupy indices [0, gridCount); a top
-    // vertex gets its own index only where its height differs from the base
-    // (matching the exact-coordinate merge addTriangle used to perform).
+    // vertex gets its own index only where its height differs from the
+    // bottom plane (matching the exact-coordinate merge addTriangle used to
+    // perform).
     const vertProperties = new Array(gridCount * 3 * 2);
     for (let i = 0, gy = 0; gy < gridHeight; gy++) {
       const py = pyArr[gy];
@@ -260,14 +267,14 @@ export class ImageHeightmapSolidFeature {
         const o = i * 3;
         vertProperties[o] = pxArr[gx];
         vertProperties[o + 1] = py;
-        vertProperties[o + 2] = base;
+        vertProperties[o + 2] = bottomZ;
       }
     }
     const topIndex = new Int32Array(gridCount);
     let vertCount = gridCount;
     for (let i = 0; i < gridCount; i++) {
       const h = heights[i];
-      if (h === base) {
+      if (h === bottomZ) {
         topIndex[i] = i;
       } else {
         const o = vertCount * 3;
@@ -283,7 +290,7 @@ export class ImageHeightmapSolidFeature {
     const triVerts = [];
     const triIDs = [];
     // Windings below are exact for the grid layout (x increases with gx,
-    // y decreases with gy, heights on one side of the base plane), so no
+    // y decreases with gy, heights on one side of the bottom plane), so no
     // per-triangle orientation heuristic is needed. Triangles that collapse
     // because a top vertex merged into its base vertex share indices and
     // are skipped; no other degenerate triangles can occur on the grid.
@@ -312,7 +319,7 @@ export class ImageHeightmapSolidFeature {
         const t10 = topIndex[i10];
         const t01 = topIndex[i01];
         const t11 = topIndex[i11];
-        // A triangle whose three corners all sit at the base plane has zero
+        // A triangle whose three corners all sit at the bottom plane has zero
         // thickness: its top copy would coincide with its bottom copy and
         // create a non-manifold membrane, so both copies are dropped. The
         // surface stays closed because top vertices merge into their base

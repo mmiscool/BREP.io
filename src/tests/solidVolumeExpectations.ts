@@ -9,6 +9,14 @@ export const solidVolumeExpectations = Object.freeze({
             }
         ]
     },
+    test_generated_history_20260709065543_base_thickness: {
+        solids: [
+            {
+                name: "HEIGHTMAP1",
+                volume: 471117.3142639298
+            }
+        ]
+    },
     import_part_badBoolean: {
         solids: [
             {

@@ -10,7 +10,7 @@ Image Heightmap Solid samples a grayscale (or RGB) image and extrudes the pixels
 - `fileToImport` – PNG heightmap data (file, data URL, or buffer). If empty, the image editor starts with a blank canvas.
 - `editImage` – Opens the built-in paint-style editor to tweak the heightmap.
 - `heightScale` – World units of elevation for a full-intensity pixel (0–255).
-- `baseHeight` – Baseline Z height added to every pixel.
+- `baseHeight` – Thickness of the solid base slab beneath the heightmap; sidewalls run from the flat bottom face up to `baseHeight` plus the local pixel height.
 - `invertHeights` – Flip grayscale so dark pixels become tall regions.
 - `pixelScale` – World units per pixel in X/Y.
 - `center` – Center the heightmap about the origin before placement.
@@ -33,6 +33,6 @@ How to use:
 3. Click `Finish` to save the edited PNG back into `fileToImport`.
 
 ## Behaviour
-- Decodes the image to a grid, samples with the requested stride, and builds top/bottom meshes offset by `baseHeight` plus scaled pixel heights (with optional invert).
+- Decodes the image to a grid, samples with the requested stride, and builds a solid with a flat bottom face at Z=0 and a top surface at `baseHeight` plus scaled pixel heights (with optional invert). Fully transparent pixels become holes that cut through the base slab.
 - Positions the mesh on the selected plane (or world XY) and centers it if requested.
 - Applies optional simplification, runs the configured boolean, and returns the new solid while flagging consumed inputs for removal.

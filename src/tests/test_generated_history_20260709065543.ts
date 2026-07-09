@@ -46,6 +46,17 @@ function buildHeightmapImage(width, height) {
 }
 
 export async function test_generated_history_20260709065543(partHistory) {
+  return buildHeightmapHistory(partHistory, "0");
+}
+
+// baseHeight > 0 gives the solid a base slab: the bottom face stays at Z=0
+// and the black background carries slab-thick material instead of collapsing
+// to zero thickness.
+export async function test_generated_history_20260709065543_base_thickness(partHistory) {
+  return buildHeightmapHistory(partHistory, "3");
+}
+
+async function buildHeightmapHistory(partHistory, baseHeight) {
   partHistory.expressions = "//Examples:\nx = 10 + 6; \ny = x * 2;\n\nresolution = 32;\n";
   partHistory.configurator = { fields: [], values: {} };
 
@@ -55,7 +66,7 @@ export async function test_generated_history_20260709065543(partHistory) {
     fileToImport: buildHeightmapImage(200, 200),
     editImage: null,
     heightScale: "40",
-    baseHeight: "0",
+    baseHeight,
     invertHeights: false,
     pixelScale: 1,
     center: true,

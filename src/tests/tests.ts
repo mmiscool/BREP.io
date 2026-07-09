@@ -115,6 +115,7 @@ import {
 import {
     afterRun_generated_history_20260709065543,
     test_generated_history_20260709065543,
+    test_generated_history_20260709065543_base_thickness,
 } from './test_generated_history_20260709065543.js';
 import {
     test_extrude_rectangle_profile_has_one_sidewall_per_sketch_edge,
@@ -1410,6 +1411,14 @@ export const testFunctions: any[] = [
     },
     {
         test: test_generated_history_20260709065543,
+        afterRun: afterRun_generated_history_20260709065543,
+        printArtifacts: false,
+        exportFaces: false,
+        exportSolids: false,
+        resetHistory: true,
+    },
+    {
+        test: test_generated_history_20260709065543_base_thickness,
         afterRun: afterRun_generated_history_20260709065543,
         printArtifacts: false,
         exportFaces: false,
