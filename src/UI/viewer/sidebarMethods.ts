@@ -267,12 +267,12 @@ export const sidebarMethods = {
             } catch { /* ignore */ }
 
             banner = document.createElement('A');
-            banner.href = this._homeBannerUrl + "../" || '#';
+            banner.href = this._homeBannerUrl || 'index.html';
             banner.type = 'button';
             banner.className = 'cad-sidebar-home-banner';
             banner.title = opensExternalHome ? 'Open BREP.io' : 'Back to workspace';
             banner.setAttribute('aria-label', opensExternalHome ? 'Open BREP.io' : 'Back to workspace');
-            banner.addEventListener('click', (event) => {
+            banner.addEventListener('click', async (event) => {
                 event.preventDefault();
                 event.stopPropagation();
                 if (this._homeBannerUrl) {
@@ -292,8 +292,7 @@ export const sidebarMethods = {
                     }
                     return;
                 }
-                alert('No home URL configured');
-                void navigateHomeWithGuard(this);
+                await navigateHomeWithGuard(this);
             });
 
             const logo = document.createElement('span');
