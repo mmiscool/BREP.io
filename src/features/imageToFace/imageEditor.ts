@@ -15,6 +15,9 @@ export class ImageEditorUI {
         this.onCancelCallback = (onSaveCallback && onSaveCallback.onCancel) || null;
         this.featureSchema = options && options.featureSchema ? options.featureSchema : null;
         this.featureParams = options && options.featureParams ? options.featureParams : null;
+        // Optional (params) => [schema keys to hide] used to filter the sidebar form
+        this.hiddenFields = options && typeof options.hiddenFields === 'function' ? options.hiddenFields : null;
+        this._hiddenFieldsSignature = '';
         this.onParamsChange = options && typeof options.onParamsChange === 'function' ? options.onParamsChange : null;
         this.featureViewer = options && options.viewer ? options.viewer : null;
         this.featurePartHistory = options && options.partHistory ? options.partHistory : null;
@@ -247,11 +250,39 @@ export class ImageEditorUI {
         this._renderFeatureForm();
     }
 
+    _hiddenFieldKeys() {
+        if (!this.hiddenFields) return [];
+        try {
+            const keys = this.hiddenFields(this.featureParams || {});
+            return Array.isArray(keys) ? keys.map((k) => String(k)) : [];
+        } catch (_) {
+            return [];
+        }
+    }
+
+    _visibleFeatureSchema() {
+        const hidden = new Set(this._hiddenFieldKeys());
+        this._hiddenFieldsSignature = Array.from(hidden).sort().join('|');
+        if (!hidden.size) return this.featureSchema;
+        const filtered = {};
+        for (const key of Object.keys(this.featureSchema)) {
+            if (!hidden.has(key)) filtered[key] = this.featureSchema[key];
+        }
+        return filtered;
+    }
+
+    _maybeRefreshFeatureForm() {
+        if (!this.hiddenFields || !this.featureSchema) return;
+        const prev = this._hiddenFieldsSignature;
+        const next = this._hiddenFieldKeys().sort().join('|');
+        if (next !== prev) this._renderFeatureForm();
+    }
+
     _renderFeatureForm() {
         if (!this.formHost || !this.featureSchema || !this.featureParams) return;
         try { this.formHost.innerHTML = ''; } catch (_) { /* ignore */ }
         try {
-            this.schemaForm = new (SchemaForm as any)(this.featureSchema, this.featureParams, {
+            this.schemaForm = new (SchemaForm as any)(this._visibleFeatureSchema(), this.featureParams, {
                 useShadowDOM: false,
                 viewer: this.featureViewer || null,
                 scene: (this.featureViewer && this.featureViewer.scene) ? this.featureViewer.scene : null,
@@ -259,6 +290,7 @@ export class ImageEditorUI {
                 onChange: () => {
                     this._vectorDirty = true;
                     this._scheduleVectorOverlayUpdate();
+                    this._maybeRefreshFeatureForm();
                     if (typeof this.onParamsChange === 'function') {
                         try { this.onParamsChange(); } catch (_) { /* ignore */ }
                     }
@@ -603,10 +635,12 @@ export class ImageEditorUI {
         const edgeMinSpacing = Number.isFinite(Number(params.edgeMinSpacing))
             ? Math.max(0, Number(params.edgeMinSpacing))
             : 0;
-        const pixelScale = Number.isFinite(Number(params.pixelScale)) ? Number(params.pixelScale) : 1;
-        const scaleAbs = Math.max(Math.abs(pixelScale) || 1, 1e-9);
-        const traceSimplify = (rdpTol && Number(rdpTol) > 0) ? (Number(rdpTol) / scaleAbs) : 0;
-        const curveTolImage = Math.max(0.01, curveTol) / scaleAbs;
+        // Mirror ImageToFaceFeature.run(): the whole trace runs in pixel space
+        // with pixel-unit tolerances (pixelScale only scales the final result),
+        // and when smoothing is on the curve fitter consumes the raw trace, so
+        // pre-simplification is skipped.
+        const traceSimplify = (!smooth && rdpTol && Number(rdpTol) > 0) ? Number(rdpTol) : 0;
+        const curveTolImage = Math.max(0.01, curveTol);
         const simplifyCollinearLoop = (loop) => {
             let pts = Array.isArray(loop) ? loop.slice() : [];
             if (!pts.length) return pts;
@@ -638,7 +672,7 @@ export class ImageEditorUI {
             threshold,
             mode: "luma+alpha",
             invert,
-            mergeCollinear: simplifyCollinear,
+            mergeCollinear: smooth ? false : simplifyCollinear,
             simplify: traceSimplify,
             minArea: speckleArea,
         });
@@ -653,7 +687,7 @@ export class ImageEditorUI {
         } else {
             polyLoops = polyLoops.map((l) => simplifyCollinearLoop(l));
         }
-        const sanitizeEps = Math.max(1e-6, 1e-6 * scaleAbs);
+        const sanitizeEps = 1e-6;
         polyLoops = sanitizeLoopsForExtrude(polyLoops, fallbackLoops, { eps: sanitizeEps });
         polyLoops = dropIntersectingLoops(polyLoops, { eps: sanitizeEps })
             .filter((l) => Array.isArray(l) && l.length >= 3);
@@ -675,8 +709,8 @@ export class ImageEditorUI {
         const manualPoints = [];
         const autoKeys = new Set();
         const manualKeys = new Set();
-        const minSegLen = Math.max(0.5, 1e-6 / scaleAbs);
-        const cornerSpacing = edgeMinSpacing / scaleAbs;
+        const minSegLen = 0.5;
+        const cornerSpacing = edgeMinSpacing;
         for (let li = 0; li < polyLoops.length; li++) {
             const loop = polyLoops[li];
             if (!loop || loop.length < 2) continue;

@@ -18,7 +18,7 @@ export function traceImageDataToPolylines(imageData, options = {}) {
 
   const mask = binarize(imageData, w, h, opt);
   const edges = buildBoundaryEdges(mask, w, h);
-  const loops = stitchEdgesToLoops(edges);
+  const loops = stitchEdgesToLoops(edges, w + 2);
 
   const out = [];
   for (const loop of loops) {
@@ -92,13 +92,14 @@ function buildBoundaryEdges(mask, w, h) {
   return edges;
 }
 
-function stitchEdgesToLoops(edges) {
+// `stride` must exceed the max node x coordinate so y*stride+x is unique.
+function stitchEdgesToLoops(edges, stride) {
   const startMap = new Map();
   const visited = new Uint8Array(edges.length);
 
   for (let i = 0; i < edges.length; i++) {
     const e = edges[i];
-    const k = vkey(e.sx, e.sy);
+    const k = e.sy * stride + e.sx;
     let arr = startMap.get(k);
     if (!arr) startMap.set(k, (arr = []));
     arr.push(i);
@@ -128,7 +129,7 @@ function stitchEdgesToLoops(edges) {
 
       loop.push({ x: cx, y: cy });
 
-      const nextIndex = pickNextEdge(startMap, edges, visited, cx, cy, dir);
+      const nextIndex = pickNextEdge(startMap, edges, visited, cy * stride + cx, dir);
       if (nextIndex < 0) {
         loop.length = 0;
         break;
@@ -150,9 +151,8 @@ function stitchEdgesToLoops(edges) {
   return loops;
 }
 
-function pickNextEdge(startMap, edges, visited, vx, vy, prevDir) {
-  const k = vkey(vx, vy);
-  const candidates = startMap.get(k);
+function pickNextEdge(startMap, edges, visited, vertexKey, prevDir) {
+  const candidates = startMap.get(vertexKey);
   if (!candidates || candidates.length === 0) return -1;
 
   const preferred = [
@@ -177,10 +177,6 @@ function pickNextEdge(startMap, edges, visited, vx, vy, prevDir) {
   }
 
   return bestIdx;
-}
-
-function vkey(x, y) {
-  return `${x},${y}`;
 }
 
 function removeCollinear(poly) {
@@ -374,26 +370,65 @@ export function applyCurveFit(loops, { tolerance = 0.75, cornerThresholdDeg = 70
     const ring = (loop[0][0] === loop[loop.length - 1][0] && loop[0][1] === loop[loop.length - 1][1]) ? loop.slice(0, -1) : loop.slice();
     if (ring.length < 3) return loop.slice();
 
-    const corners = findCorners(ring, angThresh);
-    let smoothed;
-    if (corners.length === 0) {
-      smoothed = chaikinClosed(ring, iterations);
-    } else {
-      smoothed = smoothWithAnchors(ring, corners, iterations);
+    const corners = findCorners(ring, angThresh, tol);
+    if (!corners.length) {
+      // No corners: smooth the whole ring, then simplify with the RDP seam at
+      // the farthest point from the centroid so it does not pin (and possibly
+      // kink at) an arbitrary vertex.
+      let smoothed = chaikinClosed(ring, iterations);
+      if (smoothed.length > 1) {
+        const f = smoothed[0];
+        const l = smoothed[smoothed.length - 1];
+        if (f[0] === l[0] && f[1] === l[1]) smoothed = smoothed.slice(0, -1);
+      }
+      const seam = farthestFromCentroidIndex(smoothed);
+      const rotated = smoothed.slice(seam).concat(smoothed.slice(0, seam));
+      rotated.push([rotated[0][0], rotated[0][1]]);
+      return rdp(rotated, tol);
     }
 
-    let closed = smoothed.slice();
-    if (closed[0][0] !== closed[closed.length - 1][0] || closed[0][1] !== closed[closed.length - 1][1]) {
-      closed.push([closed[0][0], closed[0][1]]);
+    // Smooth and simplify each arc between consecutive corners independently
+    // so corner vertices survive both steps exactly.
+    const n = ring.length;
+    const out = [];
+    for (let ci = 0; ci < corners.length; ci++) {
+      const aIdx = corners[ci];
+      const bIdx = corners[(ci + 1) % corners.length];
+      const seg = [ring[aIdx]];
+      let idx = (aIdx + 1) % n;
+      while (idx !== bIdx) {
+        seg.push(ring[idx]);
+        idx = (idx + 1) % n;
+      }
+      seg.push(ring[bIdx]);
+      let sm = seg.length >= 3 ? chaikinOpen(seg, iterations) : seg;
+      sm = rdpRecursive(sm, tol);
+      for (let i = (ci === 0 ? 0 : 1); i < sm.length; i++) out.push(sm[i]);
     }
-    closed = rdp(closed, tol);
-    if (closed[0][0] !== closed[closed.length - 1][0] || closed[0][1] !== closed[closed.length - 1][1]) {
-      closed.push([closed[0][0], closed[0][1]]);
+    if (out.length && (out[0][0] !== out[out.length - 1][0] || out[0][1] !== out[out.length - 1][1])) {
+      out.push([out[0][0], out[0][1]]);
     }
-    return closed;
+    return out;
   };
 
   return loops.map((l) => fitLoop(l));
+}
+
+function farthestFromCentroidIndex(pts) {
+  let cx = 0;
+  let cy = 0;
+  for (const p of pts) { cx += p[0]; cy += p[1]; }
+  cx /= pts.length;
+  cy /= pts.length;
+  let best = 0;
+  let bestD = -1;
+  for (let i = 0; i < pts.length; i++) {
+    const dx = pts[i][0] - cx;
+    const dy = pts[i][1] - cy;
+    const d = dx * dx + dy * dy;
+    if (d > bestD) { bestD = d; best = i; }
+  }
+  return best;
 }
 
 function cleanLoop2D(loop, eps) {
@@ -426,6 +461,23 @@ function cleanLoop2D(loop, eps) {
   return out;
 }
 
+function segmentBounds(ring, eps) {
+  const n = ring.length;
+  const minX = new Float64Array(n);
+  const maxX = new Float64Array(n);
+  const minY = new Float64Array(n);
+  const maxY = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % n];
+    minX[i] = Math.min(a[0], b[0]) - eps;
+    maxX[i] = Math.max(a[0], b[0]) + eps;
+    minY[i] = Math.min(a[1], b[1]) - eps;
+    maxY[i] = Math.max(a[1], b[1]) + eps;
+  }
+  return { minX, maxX, minY, maxY };
+}
+
 function loopSelfIntersects(loop, eps) {
   const ring = cleanLoop2D(loop, eps);
   const n = ring.length;
@@ -445,12 +497,15 @@ function loopSelfIntersects(loop, eps) {
     if (Math.abs(o4) <= eps && onSeg(c[0], c[1], d[0], d[1], b[0], b[1])) return true;
     return (o1 * o2 < -eps) && (o3 * o4 < -eps);
   };
+  const bb = segmentBounds(ring, eps);
   for (let i = 0; i < n; i++) {
     const a = ring[i];
     const b = ring[(i + 1) % n];
     for (let j = i + 1; j < n; j++) {
       const isAdjacent = (j === i) || (j === i + 1) || (i === 0 && j === n - 1);
       if (isAdjacent) continue;
+      if (bb.minX[i] > bb.maxX[j] || bb.minX[j] > bb.maxX[i]
+        || bb.minY[i] > bb.maxY[j] || bb.minY[j] > bb.maxY[i]) continue;
       const c = ring[j];
       const d = ring[(j + 1) % n];
       if (segsIntersect(a, b, c, d)) return true;
@@ -472,10 +527,25 @@ function loopAreaAbs(loop) {
   return Math.abs(a * 0.5);
 }
 
+function loopBounds(ring) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of ring) {
+    if (p[0] < minX) minX = p[0];
+    if (p[0] > maxX) maxX = p[0];
+    if (p[1] < minY) minY = p[1];
+    if (p[1] > maxY) maxY = p[1];
+  }
+  return { minX, minY, maxX, maxY };
+}
+
 function loopsIntersect2D(loopA, loopB, eps) {
   const a = cleanLoop2D(loopA, eps);
   const b = cleanLoop2D(loopB, eps);
   if (a.length < 2 || b.length < 2) return false;
+  const boundsA = loopBounds(a);
+  const boundsB = loopBounds(b);
+  if (boundsA.minX > boundsB.maxX + eps || boundsB.minX > boundsA.maxX + eps
+    || boundsA.minY > boundsB.maxY + eps || boundsB.minY > boundsA.maxY + eps) return false;
   const orient = (ax, ay, bx, by, cx, cy) => (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
   const onSeg = (ax, ay, bx, by, cx, cy) =>
     cx >= Math.min(ax, bx) - eps && cx <= Math.max(ax, bx) + eps
@@ -493,10 +563,16 @@ function loopsIntersect2D(loopA, loopB, eps) {
   };
   const na = a.length;
   const nb = b.length;
+  const bbA = segmentBounds(a, eps);
+  const bbB = segmentBounds(b, eps);
   for (let i = 0; i < na; i++) {
     const a0 = a[i];
     const a1 = a[(i + 1) % na];
+    if (bbA.minX[i] > boundsB.maxX + eps || boundsB.minX > bbA.maxX[i] + eps
+      || bbA.minY[i] > boundsB.maxY + eps || boundsB.minY > bbA.maxY[i] + eps) continue;
     for (let j = 0; j < nb; j++) {
+      if (bbA.minX[i] > bbB.maxX[j] || bbB.minX[j] > bbA.maxX[i]
+        || bbA.minY[i] > bbB.maxY[j] || bbB.minY[j] > bbA.maxY[i]) continue;
       const b0 = b[j];
       const b1 = b[(j + 1) % nb];
       if (segsIntersect(a0, a1, b0, b1)) return true;
@@ -527,11 +603,16 @@ export function dropIntersectingLoops(loops, { eps = 1e-6 } = {}) {
   const n = list.length;
   if (n < 2) return list.slice();
   const areas = list.map((l) => loopAreaAbs(l));
+  const bounds = list.map((l) => loopBounds(Array.isArray(l) ? l : []));
   const drop = new Set();
   for (let i = 0; i < n; i++) {
     if (drop.has(i)) continue;
     for (let j = i + 1; j < n; j++) {
       if (drop.has(j)) continue;
+      const bi = bounds[i];
+      const bj = bounds[j];
+      if (bi.minX > bj.maxX + eps || bj.minX > bi.maxX + eps
+        || bi.minY > bj.maxY + eps || bj.minY > bi.maxY + eps) continue;
       if (!loopsIntersect2D(list[i], list[j], eps)) continue;
       if (areas[i] <= areas[j]) drop.add(i);
       else drop.add(j);
@@ -582,47 +663,73 @@ export function assignBreaksToLoops(loops, breaks, { snapDist = Infinity } = {})
   return out;
 }
 
-function findCorners(ring, angThresh) {
+// Detect corner vertices on a closed ring using chord directions over a
+// fixed arc length either side of each vertex. Chords bridge pixel-staircase
+// noise, so corners between diagonal edges are found just as reliably as
+// corners between axis-aligned edges. Candidates are ranked by turn angle and
+// deduplicated with a minimum arc spacing so each true corner yields one hit.
+function findCorners(ring, angThresh, tol = 1) {
   const n = ring.length;
-  if (n < 3) return [];
-  const window = Math.max(2, Math.min(8, Math.floor(n / 40) || 2));
-  const straightThresh = 0.85;
-  const minSpan = window * 0.75;
-  const corners = [];
+  if (n < 4) return [];
+  const segLen = new Array(n);
+  const cum = new Array(n);
+  let totalLen = 0;
+  for (let i = 0; i < n; i++) {
+    cum[i] = totalLen;
+    const a = ring[i];
+    const b = ring[(i + 1) % n];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    segLen[i] = len;
+    totalLen += len;
+  }
+  if (!(totalLen > 1e-12)) return [];
+  const avgLen = totalLen / n;
+  // Long enough to span staircase steps, short enough to localize corners.
+  const spanLen = Math.min(totalLen / 4, Math.max(3 * avgLen, 2 * tol));
 
-  const sampleDir = (startIdx, step) => {
-    let sx = 0;
-    let sy = 0;
-    let total = 0;
-    for (let k = 0; k < window; k++) {
-      const i0 = (startIdx + k * step + n) % n;
-      const i1 = (i0 + step + n) % n;
-      const dx = ring[i1][0] - ring[i0][0];
-      const dy = ring[i1][1] - ring[i0][1];
-      const len = Math.hypot(dx, dy);
-      if (!len) continue;
-      sx += dx;
-      sy += dy;
-      total += len;
+  const chordDir = (startIdx, step) => {
+    let idx = startIdx;
+    let acc = 0;
+    for (let guard = 0; guard < n; guard++) {
+      const segIdx = step > 0 ? idx : (idx - 1 + n) % n;
+      acc += segLen[segIdx];
+      idx = (idx + step + n) % n;
+      if (acc >= spanLen) break;
     }
-    const mag = Math.hypot(sx, sy);
-    return {
-      dir: mag > 1e-9 ? [sx / mag, sy / mag] : [0, 0],
-      straightness: total > 0 ? mag / total : 0,
-      span: total
-    };
+    const dx = ring[idx][0] - ring[startIdx][0];
+    const dy = ring[idx][1] - ring[startIdx][1];
+    const mag = Math.hypot(dx, dy);
+    if (mag <= 1e-9) return null;
+    return [dx / mag, dy / mag];
   };
 
+  const candidates = [];
   for (let i = 0; i < n; i++) {
-    const prev = sampleDir(i - window, 1);
-    const next = sampleDir(i, 1);
-    if (prev.span < minSpan || next.span < minSpan) continue;
-    if (prev.straightness < straightThresh || next.straightness < straightThresh) continue;
-    const dot = prev.dir[0] * next.dir[0] + prev.dir[1] * next.dir[1];
+    const back = chordDir(i, -1);
+    const fwd = chordDir(i, 1);
+    if (!back || !fwd) continue;
+    // Incoming direction at i is opposite the backward chord.
+    const dot = -(back[0] * fwd[0] + back[1] * fwd[1]);
     const ang = Math.acos(Math.max(-1, Math.min(1, dot)));
-    if (ang > angThresh) corners.push(i);
+    if (ang >= angThresh) candidates.push({ idx: i, ang });
   }
-  return corners;
+  if (!candidates.length) return [];
+
+  const minSpacing = Math.max(spanLen, totalLen * 0.01);
+  const arcDist = (a, b) => {
+    const d = Math.abs(cum[a] - cum[b]);
+    return Math.min(d, totalLen - d);
+  };
+  candidates.sort((a, b) => b.ang - a.ang);
+  const picked = [];
+  for (const cand of candidates) {
+    let tooClose = false;
+    for (const sel of picked) {
+      if (arcDist(cand.idx, sel.idx) < minSpacing) { tooClose = true; break; }
+    }
+    if (!tooClose) picked.push(cand);
+  }
+  return picked.map((c) => c.idx).sort((a, b) => a - b);
 }
 
 function chaikinClosed(points, iterations) {
@@ -660,42 +767,6 @@ function chaikinOpen(points, iterations) {
     pts = next;
   }
   return pts;
-}
-
-function smoothWithAnchors(ring, corners, iterations) {
-  const n = ring.length;
-  const out = [];
-  const anchors = corners.slice();
-  anchors.sort((a, b) => a - b);
-  const uniq = [];
-  for (const idx of anchors) {
-    if (!uniq.length || uniq[uniq.length - 1] !== idx) uniq.push(idx);
-  }
-  anchors.length = 0; anchors.push(...uniq);
-
-  for (let ci = 0; ci < anchors.length; ci++) {
-    const aIdx = anchors[ci];
-    const bIdx = anchors[(ci + 1) % anchors.length];
-    const seg = [];
-    seg.push(ring[aIdx]);
-    let idx = (aIdx + 1) % n;
-    while (idx !== bIdx) {
-      seg.push(ring[idx]);
-      idx = (idx + 1) % n;
-    }
-    seg.push(ring[bIdx]);
-
-    const sm = chaikinOpen(seg, iterations);
-    if (ci === 0) {
-      for (const p of sm) out.push(p);
-    } else {
-      for (let i = 1; i < sm.length; i++) out.push(sm[i]);
-    }
-  }
-  if (out[0][0] !== out[out.length - 1][0] || out[0][1] !== out[out.length - 1][1]) {
-    out.push([out[0][0], out[0][1]]);
-  }
-  return out;
 }
 
 export function splitLoopIntoEdges(loop2D, {

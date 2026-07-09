@@ -15,6 +15,31 @@ const renderHiddenField = ({ id, row }) => {
   return { inputEl: input, inputRegistered: false, skipDefaultRefresh: true };
 };
 
+// Schema keys to hide for the current param values. Shared by the feature
+// dialog (via uiFieldsTest) and the image editor sidebar. `hasImage` is forced
+// true in the editor because it always has a canvas to trace, even before the
+// edited image is saved back to fileToImport.
+const hiddenParamKeys = (params, { hasImage = !!params?.fileToImport } = {}) => {
+  // Auto corner splitting is disabled (breaks are placed manually in the
+  // image editor), so its tuning fields stay hidden.
+  const exclude = ['edgeSplitAngle', 'edgeMinSpacing'];
+  if (!hasImage) {
+    exclude.push(
+      'threshold', 'invert', 'pixelScale', 'center', 'smoothCurves',
+      'curveTolerance', 'speckleArea', 'simplifyCollinear', 'rdpTolerance',
+    );
+    return exclude;
+  }
+  if (params?.smoothCurves !== false) {
+    // Curve fitting consumes the raw trace; manual simplification knobs only
+    // apply when smoothing is off.
+    exclude.push('simplifyCollinear', 'rdpTolerance');
+  } else {
+    exclude.push('curveTolerance');
+  }
+  return exclude;
+};
+
 const inputParamsSchema = {
   id: {
     type: "string",
@@ -68,6 +93,11 @@ const inputParamsSchema = {
         onCancel: () => { /* no-op */ }
       }, {
         featureSchema: inputParamsSchema,
+        // The editor always has a canvas to trace; also hide the fields that
+        // only make sense outside the editor (file picker, nested editor
+        // button, placement selection).
+        hiddenFields: (params) => hiddenParamKeys(params, { hasImage: true })
+          .concat(['fileToImport', 'editImage', 'placementPlane']),
         featureParams: ctx && ctx.feature && ctx.feature.inputParams ? ctx.feature.inputParams : (ctx?.params || {}),
         partHistory: ctx && ctx.partHistory ? ctx.partHistory : null,
         viewer: ctx && ctx.viewer ? ctx.viewer : (ctx && ctx.partHistory && ctx.partHistory.viewer ? ctx.partHistory.viewer : null),
@@ -120,7 +150,7 @@ const inputParamsSchema = {
     type: "number",
     default_value: 0.75,
     step:0.1,
-    hint: "Max deviation (world units) for curve smoothing/flattening; larger = smoother",
+    hint: "Max deviation (image pixels) for curve smoothing/flattening; larger = smoother",
   },
   speckleArea: {
     type: "number",
@@ -135,7 +165,7 @@ const inputParamsSchema = {
   rdpTolerance: {
     type: "number",
     default_value: 1,
-    hint: "Optional Ramer–Douglas–Peucker tolerance in world units (0 to disable)",
+    hint: "Optional Ramer–Douglas–Peucker tolerance in image pixels (0 to disable)",
   },
   edgeSplitAngle: {
     type: "number",
@@ -184,6 +214,11 @@ export class ImageToFaceFeature {
     this.persistentData = {};
   }
 
+  uiFieldsTest(context) {
+    const params = this.inputParams || context?.params || {};
+    return hiddenParamKeys(params);
+  }
+
   async run(partHistory) {
     const { fileToImport, threshold, invert, pixelScale, center, smoothCurves, curveTolerance, speckleArea, simplifyCollinear, rdpTolerance, edgeSplitAngle, edgeMinSpacing, edgeBreakPoints, edgeSuppressedBreaks } = this.inputParams;
 
@@ -194,12 +229,19 @@ export class ImageToFaceFeature {
     }
 
     const scale = Number(pixelScale) || 1;
+    const smoothingOn = smoothCurves !== false;
+    // Tracing, smoothing and simplification all run in image pixel space with
+    // pixel-unit tolerances; pixelScale is applied to the finished polylines
+    // afterward so it only sizes the result and never changes the trace.
+    // When smoothing is on the curve fitter needs the raw pixel trace;
+    // pre-simplification would erase the detail it fits against (and those
+    // fields are hidden in the dialog).
     const traceLoops = traceImageDataToPolylines(imageData, {
       threshold: Number.isFinite(Number(threshold)) ? Number(threshold) : 128,
       mode: "luma+alpha",
       invert: !!invert,
-      mergeCollinear: !!simplifyCollinear,
-      simplify: (rdpTolerance && Number(rdpTolerance) > 0) ? (Number(rdpTolerance) / Math.max(Math.abs(scale) || 1, 1e-9)) : 0,
+      mergeCollinear: smoothingOn ? false : !!simplifyCollinear,
+      simplify: (!smoothingOn && rdpTolerance && Number(rdpTolerance) > 0) ? Number(rdpTolerance) : 0,
       minArea: Number.isFinite(Number(speckleArea)) ? Math.max(0, Number(speckleArea)) : 0,
     });
     const loopsGrid = traceLoops.map((loop) => loop.map((p) => [p.x, p.y]));
@@ -208,22 +250,22 @@ export class ImageToFaceFeature {
       return { added: [], removed: [] };
     }
 
-    // Convert grid loops (integer node coords in image space, y-down) to world 2D loops (x, y-up)
-    const loops2D = loopsGrid.map((pts) => gridToWorld2D(pts, scale));
+    // Convert grid loops (integer node coords in image space, y-down) to pixel-space 2D loops (x, y-up)
+    const loops2D = loopsGrid.map((pts) => gridToWorld2D(pts, 1));
 
     // Optional curve fitting (Potrace-like) then simplification/cleanup
     let workingLoops = loops2D;
     const fallbackLoops = loops2D.map((l) => simplifyLoop(l, { simplifyCollinear: true, rdpTolerance: 0 }));
-    if (smoothCurves !== false) {
+    if (smoothingOn) {
       workingLoops = applyCurveFit(workingLoops, {
-        tolerance: Number.isFinite(Number(curveTolerance)) ? Math.max(0.01, Number(curveTolerance)) : Math.max(0.05, Math.abs(scale) * 0.75),
+        tolerance: Number.isFinite(Number(curveTolerance)) ? Math.max(0.01, Number(curveTolerance)) : 0.75,
         cornerThresholdDeg: 70,
         iterations: 3,
       });
     }
-    const cleanCollinear = smoothCurves === false;
+    const cleanCollinear = !smoothingOn;
     let simpLoops = workingLoops.map((l) => simplifyLoop(l, { simplifyCollinear: cleanCollinear, rdpTolerance: 0 }));
-    const sanitizeEps = Math.max(1e-6, 1e-6 * Math.max(Math.abs(scale) || 1, 1));
+    const sanitizeEps = 1e-6;
     simpLoops = sanitizeLoopsForExtrude(simpLoops, fallbackLoops, { eps: sanitizeEps });
     const invalidCount = simpLoops.filter((l) => !Array.isArray(l) || l.length < 3).length;
     if (invalidCount) console.warn(`[IMAGE] Dropped ${invalidCount} degenerate or self-intersecting loop(s)`);
@@ -236,6 +278,9 @@ export class ImageToFaceFeature {
       console.warn('[IMAGE] All loops invalid after cleanup; aborting');
       return { added: [], removed: [] };
     }
+
+    // Vectorization is done; scale the finished polylines to world units.
+    if (scale !== 1) simpLoops = simpLoops.map((loop) => loop.map(([x, y]) => [x * scale, y * scale]));
 
     // Optionally center (only if there are any points)
     let centerOffset = { x: 0, y: 0 };
