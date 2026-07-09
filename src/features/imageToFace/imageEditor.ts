@@ -45,9 +45,22 @@ export class ImageEditorUI {
         this.workWidth = 0;
         this.workHeight = 0;
 
-        // Resize-handle interaction
+        // Resize-handle interaction. Coarse pointers (touch/pen) get a larger
+        // hit area so the handle is actually tappable.
         this.isResizingCanvas = false;
-        this.resizeHandleSize = 12; // screen px for hit area and drawing
+        const coarsePointer = (() => {
+            try { return typeof matchMedia === 'function' && matchMedia('(pointer:coarse)').matches; }
+            catch { return false; }
+        })();
+        this.resizeHandleSize = coarsePointer ? 26 : 12; // screen px for hit area and drawing
+
+        // Multi-touch / pointer tracking for pinch-zoom + two-finger pan
+        this._pointers = new Map();
+        this._pinching = false;
+        this._pinchStartDist = 1;
+        this._pinchStartScale = 1;
+        this._pinchImageAnchor = { ix: 0, iy: 0 };
+        this._suppressDrawUntilRelease = false;
 
         // Initial view state flag
         this._didInitialView = false;
@@ -110,6 +123,7 @@ export class ImageEditorUI {
     open() {
         if (!this.overlay) return;
         if (!document.body.contains(this.overlay)) document.body.appendChild(this.overlay);
+        this._applyInitialSidebarState();
         this._attachEvents();
         try { if (this.featureViewer) this.featureViewer._imageEditorActive = true; } catch { /* ignore */ }
         // Ensure initial 1:1 view once canvas has real size
@@ -133,6 +147,10 @@ export class ImageEditorUI {
         .img-editor-overlay{
           position:fixed;
           inset:0;
+          display:flex;
+          flex-direction:column;
+          overscroll-behavior:contain;
+          -webkit-tap-highlight-color:transparent;
           background:rgba(7,10,16,0.72);
           z-index:100;
           color:var(--ie-fg);
@@ -148,24 +166,39 @@ export class ImageEditorUI {
           --ie-accent-bg:rgba(59,130,246,.24);
           --ie-accent-fg:#e8f2ff;
         }
-        .img-editor-toolbar{position:absolute;left:0;right:0;top:0;height:48px;background:var(--ie-bg-2);border-bottom:1px solid var(--ie-border);display:flex;align-items:center;gap:12px;padding:0 12px;}
+        .img-editor-toolbar{flex:0 0 auto;min-height:48px;background:var(--ie-bg-2);border-bottom:1px solid var(--ie-border);display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;padding:6px 12px;user-select:none;-webkit-user-select:none;}
         .img-editor-spacer{flex:1 1 auto;}
-        .img-editor-btn{border:1px solid var(--ie-border);background:var(--ie-bg-3);color:var(--ie-fg);border-radius:6px;padding:6px 10px;cursor:pointer;line-height:1;}
+        .img-editor-btn{border:1px solid var(--ie-border);background:var(--ie-bg-3);color:var(--ie-fg);border-radius:6px;padding:6px 10px;cursor:pointer;line-height:1;touch-action:manipulation;}
         .img-editor-btn.active{background:var(--ie-accent-bg);border-color:var(--ie-accent);color:var(--ie-accent-fg)}
         .img-editor-btn:disabled{opacity:.5;cursor:not-allowed;}
         .img-editor-right{margin-left:auto;display:flex;gap:8px;}
-        .img-editor-main{position:absolute;left:0;right:0;top:48px;bottom:0;display:flex;flex-direction:row-reverse;min-height:0;}
-        .img-editor-canvas-wrap{position:relative;flex:1;overflow:hidden;background-color:var(--ie-bg-1);background-image:linear-gradient(45deg,var(--ie-bg-2) 25%,transparent 25%,transparent 75%,var(--ie-bg-2) 75%,var(--ie-bg-2)),linear-gradient(45deg,var(--ie-bg-2) 25%,transparent 25%,transparent 75%,var(--ie-bg-2) 75%,var(--ie-bg-2));background-size:16px 16px;background-position:0 0,8px 8px;}
-        .img-editor-canvas{position:absolute;left:0;top:0;display:block;}
+        .img-editor-main{flex:1 1 auto;position:relative;display:flex;flex-direction:row-reverse;min-height:0;}
+        .img-editor-canvas-wrap{position:relative;flex:1;overflow:hidden;touch-action:none;background-color:var(--ie-bg-1);background-image:linear-gradient(45deg,var(--ie-bg-2) 25%,transparent 25%,transparent 75%,var(--ie-bg-2) 75%,var(--ie-bg-2)),linear-gradient(45deg,var(--ie-bg-2) 25%,transparent 25%,transparent 75%,var(--ie-bg-2) 75%,var(--ie-bg-2));background-size:16px 16px;background-position:0 0,8px 8px;}
+        .img-editor-canvas{position:absolute;left:0;top:0;display:block;touch-action:none;}
         .img-editor-overlay-svg{position:absolute;left:0;top:0;display:block;pointer-events:none;shape-rendering:geometricPrecision;}
         .img-editor-sidebar{width:320px;max-width:360px;min-width:240px;background:var(--ie-bg-2);border-right:1px solid var(--ie-border);overflow:auto;padding:12px;box-sizing:border-box;}
+        .img-editor-main:not(.sidebar-open) .img-editor-sidebar{display:none;}
         .img-editor-sidebar h3{margin:0 0 8px;font-size:14px;font-weight:600;color:var(--ie-fg);}
         .img-editor-form{background:var(--ie-bg-3);border:1px solid var(--ie-border);border-radius:8px;padding:8px;box-sizing:border-box;}
-        .img-editor-group{display:flex;align-items:center;gap:6px;border-right:1px dashed var(--ie-border);padding-right:10px;margin-right:8px;}
+        .img-editor-group{display:flex;align-items:center;flex-wrap:wrap;gap:6px;border-right:1px dashed var(--ie-border);padding-right:10px;margin-right:8px;}
         .img-editor-label{font-size:12px;color:var(--ie-muted);}
         .img-editor-color{width:32px;height:28px;border:1px solid var(--ie-border);border-radius:4px;padding:0;background:var(--ie-bg-3)}
-        .img-editor-range{width:120px}
+        .img-editor-range{width:120px;max-width:40vw;}
         .img-editor-select{height:28px;border:1px solid var(--ie-border);border-radius:4px;background:var(--ie-bg-3);color:var(--ie-fg);}
+        /* Larger hit targets for touch/pen (coarse) pointers */
+        @media (pointer:coarse){
+          .img-editor-btn{padding:9px 13px;}
+          .img-editor-select{height:34px;}
+          .img-editor-color{height:34px;width:38px;}
+          .img-editor-range{height:34px;}
+        }
+        /* Narrow screens (mobile): split the view — canvas on top, params as a
+           bottom sheet — so the image stays visible while tuning parameters,
+           instead of a drawer that covers it. Toggled by the "Params" button. */
+        @media (max-width:768px){
+          .img-editor-main{flex-direction:column;}
+          .img-editor-sidebar{width:auto;max-width:none;min-width:0;height:45vh;border-right:none;border-top:1px solid var(--ie-border);box-shadow:0 -8px 24px rgba(0,0,0,.45);}
+        }
       </style>
       <div class="img-editor-toolbar">
         <div class="img-editor-group">
@@ -194,6 +227,7 @@ export class ImageEditorUI {
         </div>
         <div class="img-editor-spacer"></div>
         <div class="img-editor-right">
+            <button class="img-editor-btn js-params" title="Show/hide parameters">Params</button>
             <button class="img-editor-btn js-finish" title="Finish (Enter)">Finish</button>
             <button class="img-editor-btn js-cancel" title="Cancel (Esc)">Cancel</button>
         </div>
@@ -226,7 +260,9 @@ export class ImageEditorUI {
         this.svgBreakpointsGroup = overlay.querySelector('.js-breakpoints-group');
         this.svgManualBreaksGroup = overlay.querySelector('.js-breakpoints-manual');
         this.svgSuppressedBreaksGroup = overlay.querySelector('.js-breakpoints-suppressed');
+        this.mainEl = overlay.querySelector('.img-editor-main');
         this.sidebar = overlay.querySelector('.img-editor-sidebar');
+        this.paramsBtn = overlay.querySelector('.js-params');
         this.formHost = overlay.querySelector('.js-feature-form');
         this.colorInput = overlay.querySelector('.js-color');
         this.sizeInput = overlay.querySelector('.js-size');
@@ -329,11 +365,13 @@ export class ImageEditorUI {
     _attachEvents() {
         const bound = this._bound;
         bound.onResize = () => this._resizeCanvasToViewport();
-        bound.onMouseDown = (e) => this._pointerDown(e);
-        bound.onMouseMove = (e) => this._pointerMove(e);
-        bound.onMouseUp = (e) => this._pointerUp(e);
+        bound.onPointerDown = (e) => this._onPointerDown(e);
+        bound.onPointerMove = (e) => this._onPointerMove(e);
+        bound.onPointerUp = (e) => this._onPointerUp(e);
+        bound.onPointerCancel = (e) => this._onPointerUp(e);
         bound.onWheel = (e) => this._wheel(e);
         bound.onKey = (e) => this._key(e);
+        bound.onParams = () => this._toggleSidebar();
         bound.onColor = (e) => { this.brushColor = e.target.value || '#000000'; this._updateButtons(); };
         bound.onSize = (e) => { this.brushSize = Math.max(1, Math.min(64, Number(e.target.value) || 8)); };
         bound.onBrush = () => { this.tool = 'brush'; this._updateButtons(); };
@@ -353,15 +391,20 @@ export class ImageEditorUI {
         bound.onContextMenu = (e) => { e.preventDefault(); };
 
         window.addEventListener('resize', bound.onResize);
-        this.canvas.addEventListener('mousedown', bound.onMouseDown);
-        window.addEventListener('mousemove', bound.onMouseMove);
-        window.addEventListener('mouseup', bound.onMouseUp);
+        // Pointer Events unify mouse, touch and pen. Capture keeps a drag alive
+        // when the pointer leaves the canvas; touch-action:none (CSS) stops the
+        // browser from scrolling/zooming the page during gestures.
+        this.canvas.addEventListener('pointerdown', bound.onPointerDown);
+        this.canvas.addEventListener('pointermove', bound.onPointerMove);
+        this.canvas.addEventListener('pointerup', bound.onPointerUp);
+        this.canvas.addEventListener('pointercancel', bound.onPointerCancel);
         this.canvas.addEventListener('wheel', bound.onWheel, { passive: false });
         this.canvas.addEventListener('contextmenu', bound.onContextMenu);
         window.addEventListener('keydown', bound.onKey);
         window.addEventListener('keyup', bound.onKey);
-        this.canvas.addEventListener('mouseenter', bound.onEnter);
-        this.canvas.addEventListener('mouseleave', bound.onLeave);
+        this.canvas.addEventListener('pointerenter', bound.onEnter);
+        this.canvas.addEventListener('pointerleave', bound.onLeave);
+        if (this.paramsBtn) this.paramsBtn.addEventListener('click', bound.onParams);
 
         this.colorInput.addEventListener('input', bound.onColor);
         this.sizeInput.addEventListener('input', bound.onSize);
@@ -386,14 +429,16 @@ export class ImageEditorUI {
         const b = this._bound;
         window.removeEventListener('resize', b.onResize);
         if (this.canvas) {
-            this.canvas.removeEventListener('mousedown', b.onMouseDown);
+            this.canvas.removeEventListener('pointerdown', b.onPointerDown);
+            this.canvas.removeEventListener('pointermove', b.onPointerMove);
+            this.canvas.removeEventListener('pointerup', b.onPointerUp);
+            this.canvas.removeEventListener('pointercancel', b.onPointerCancel);
             this.canvas.removeEventListener('wheel', b.onWheel);
-            this.canvas.removeEventListener('mouseenter', b.onEnter);
-            this.canvas.removeEventListener('mouseleave', b.onLeave);
+            this.canvas.removeEventListener('pointerenter', b.onEnter);
+            this.canvas.removeEventListener('pointerleave', b.onLeave);
             this.canvas.removeEventListener('contextmenu', b.onContextMenu);
         }
-        window.removeEventListener('mousemove', b.onMouseMove);
-        window.removeEventListener('mouseup', b.onMouseUp);
+        if (this.paramsBtn) this.paramsBtn.removeEventListener('click', b.onParams);
         window.removeEventListener('keydown', b.onKey);
         window.removeEventListener('keyup', b.onKey);
         if (this.colorInput) this.colorInput.removeEventListener('input', b.onColor);
@@ -969,6 +1014,126 @@ export class ImageEditorUI {
         breaks.push([nearest.point[0], nearest.point[1]]);
         this._setManualBreaks(breaks);
         this._render();
+    }
+
+    // ---- Pointer routing (mouse / touch / pen) ----
+    _onPointerDown(e) {
+        if (!this.canvas) return;
+        try { this.canvas.setPointerCapture?.(e.pointerId); } catch { /* ignore */ }
+        this._pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (this._pointers.size >= 2) {
+            // Second finger down: abandon any in-progress single-pointer action
+            // (revert a stray dab) and switch to pinch-zoom / two-finger pan.
+            this._cancelStroke();
+            this.isDrawing = false;
+            this.isPanning = false;
+            this.isResizingCanvas = false;
+            this._beginPinch();
+            return;
+        }
+        this._pointerDown(e);
+    }
+
+    _onPointerMove(e) {
+        if (!this.canvas) return;
+        if (this._pointers.has(e.pointerId)) {
+            this._pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        }
+        if (this._pinching || this._pointers.size >= 2) {
+            this._updatePinch();
+            return;
+        }
+        // Ignore the lone remaining finger after a pinch until it is lifted, so
+        // it does not suddenly start drawing/panning from mid-gesture.
+        if (this._suppressDrawUntilRelease) return;
+        this._pointerMove(e);
+    }
+
+    _onPointerUp(e) {
+        if (this.canvas) { try { this.canvas.releasePointerCapture?.(e.pointerId); } catch { /* ignore */ } }
+        this._pointers.delete(e.pointerId);
+
+        if (this._pinching) {
+            if (this._pointers.size < 2) this._pinching = false;
+            if (this._pointers.size === 0) this._suppressDrawUntilRelease = false;
+            return;
+        }
+        if (this._suppressDrawUntilRelease) {
+            if (this._pointers.size === 0) this._suppressDrawUntilRelease = false;
+            return;
+        }
+        this._pointerUp(e);
+        // Touch has no hover; clear the brush preview once the finger lifts.
+        if (e.pointerType === 'touch' && this._pointers.size === 0) {
+            this.isHovering = false;
+            this._render();
+        }
+    }
+
+    _beginPinch() {
+        const pts = Array.from(this._pointers.values()) as Array<{ x: number; y: number }>;
+        if (pts.length < 2) return;
+        const a = pts[0], b = pts[1];
+        const rect = this.canvas.getBoundingClientRect();
+        const midX = (a.x + b.x) * 0.5 - rect.left;
+        const midY = (a.y + b.y) * 0.5 - rect.top;
+        this._pinchStartDist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+        this._pinchStartScale = this.scale || 1;
+        const [ix, iy] = this._canvasToImage(midX, midY);
+        this._pinchImageAnchor = { ix, iy };
+        this._pinching = true;
+        this._suppressDrawUntilRelease = true;
+    }
+
+    _updatePinch() {
+        const pts = Array.from(this._pointers.values()) as Array<{ x: number; y: number }>;
+        if (pts.length < 2) return;
+        const a = pts[0], b = pts[1];
+        const rect = this.canvas.getBoundingClientRect();
+        const midX = (a.x + b.x) * 0.5 - rect.left;
+        const midY = (a.y + b.y) * 0.5 - rect.top;
+        const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+        const ratio = dist / (this._pinchStartDist || 1);
+        const newScale = Math.max(this.minScale, Math.min(this.maxScale, this._pinchStartScale * ratio));
+        this.scale = newScale;
+        // Keep the pinch anchor pinned under the current finger midpoint. Because
+        // the midpoint can also translate, this yields pan + zoom together.
+        this.offsetX = midX - this._pinchImageAnchor.ix * newScale;
+        this.offsetY = midY - this._pinchImageAnchor.iy * newScale;
+        this._render();
+    }
+
+    _cancelStroke() {
+        if (!this.isDrawing) return;
+        this.isDrawing = false;
+        const last = this.undoStack[this.undoStack.length - 1];
+        if (last && this.drawCtx) {
+            try { this.drawCtx.putImageData(last, 0, 0); } catch { /* ignore */ }
+            this._vectorDirty = true;
+            this._render();
+        }
+    }
+
+    _toggleSidebar() {
+        if (!this.mainEl) return;
+        this.mainEl.classList.toggle('sidebar-open');
+        // On mobile the params sheet splits the layout, so the canvas area
+        // resizes; re-measure and re-fit the image so it stays fully visible.
+        let narrow = false;
+        try { narrow = typeof matchMedia === 'function' && matchMedia('(max-width:768px)').matches; }
+        catch { narrow = false; }
+        this._resizeCanvasToViewport();
+        if (narrow) { this._resetViewToFit(); this._render(); }
+    }
+
+    _applyInitialSidebarState() {
+        if (!this.mainEl) return;
+        let narrow = false;
+        try { narrow = typeof matchMedia === 'function' && matchMedia('(max-width:768px)').matches; }
+        catch { narrow = false; }
+        // Sidebar visible by default on wide screens; collapsed drawer on narrow.
+        this.mainEl.classList.toggle('sidebar-open', !narrow);
     }
 
     _pointerDown(e) {

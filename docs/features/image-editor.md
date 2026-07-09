@@ -30,9 +30,17 @@ Brush shapes:
 
 ## View Controls
 - Mouse wheel zooms at cursor.
+- Two-finger pinch zooms and pans on touch devices.
 - `Fit` button (or `F`) resets view to fit the working canvas.
 - Default open view is 1:1 image pixel display.
-- Bottom-right resize handle changes working canvas size (supports expanding/cropping while preserving existing edits).
+- Bottom-right resize handle changes working canvas size (supports expanding/cropping while preserving existing edits). The handle uses a larger hit area on touch/pen devices.
+
+## Touch / Mobile Support
+- Input is handled through Pointer Events, so mouse, touch, and pen all work.
+- One finger draws (or pans/inserts breaks, depending on the active tool); two fingers pinch to zoom and pan. Bringing a second finger down cancels any in-progress single-finger stroke.
+- The toolbar wraps onto multiple rows on narrow screens, and buttons/controls get larger touch targets.
+- On narrow (mobile) screens the parameter panel becomes a bottom sheet in a split layout: the canvas stays on top and the params sit below, so the live trace preview remains visible while you tune parameters. Toggle the sheet with the `Params` button; opening/closing re-fits the image to the resized canvas area.
+- On wider screens the params panel is a side panel that the `Params` button collapses to reclaim canvas space.
 
 ## Undo / Redo And Hotkeys
 - `Undo`: `Ctrl/Cmd+Z`
