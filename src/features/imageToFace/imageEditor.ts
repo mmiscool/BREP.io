@@ -123,7 +123,7 @@ export class ImageEditorUI {
     open() {
         if (!this.overlay) return;
         if (!document.body.contains(this.overlay)) document.body.appendChild(this.overlay);
-        this._applyInitialSidebarState();
+        this._applyInitialDrawerState();
         this._attachEvents();
         try { if (this.featureViewer) this.featureViewer._imageEditorActive = true; } catch { /* ignore */ }
         // Ensure initial 1:1 view once canvas has real size
@@ -147,8 +147,6 @@ export class ImageEditorUI {
         .img-editor-overlay{
           position:fixed;
           inset:0;
-          display:flex;
-          flex-direction:column;
           overscroll-behavior:contain;
           -webkit-tap-highlight-color:transparent;
           background:rgba(7,10,16,0.72);
@@ -166,72 +164,63 @@ export class ImageEditorUI {
           --ie-accent-bg:rgba(59,130,246,.24);
           --ie-accent-fg:#e8f2ff;
         }
-        .img-editor-toolbar{flex:0 0 auto;min-height:48px;background:var(--ie-bg-2);border-bottom:1px solid var(--ie-border);display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;padding:6px 12px;user-select:none;-webkit-user-select:none;}
+        /* The canvas fills the whole editor; the toolbar and params float over
+           it as drawers, each opened/closed by a pull-tab (styled like the main
+           app's sidebar pin tab). */
+        .img-editor-main{position:absolute;inset:0;}
+        .img-editor-canvas-wrap{position:absolute;inset:0;overflow:hidden;touch-action:none;background-color:var(--ie-bg-1);background-image:linear-gradient(45deg,var(--ie-bg-2) 25%,transparent 25%,transparent 75%,var(--ie-bg-2) 75%,var(--ie-bg-2)),linear-gradient(45deg,var(--ie-bg-2) 25%,transparent 25%,transparent 75%,var(--ie-bg-2) 75%,var(--ie-bg-2));background-size:16px 16px;background-position:0 0,8px 8px;}
+        .img-editor-canvas{position:absolute;left:0;top:0;display:block;touch-action:none;}
+        .img-editor-overlay-svg{position:absolute;left:0;top:0;display:block;pointer-events:none;shape-rendering:geometricPrecision;}
+
+        /* Toolbar drawer (top) */
+        .img-editor-toolbar-drawer{position:absolute;top:0;left:0;right:0;z-index:5;transition:transform .2s ease;box-shadow:0 8px 24px rgba(0,0,0,.35);}
+        .img-editor-main:not(.toolbar-open) .img-editor-toolbar-drawer{transform:translateY(-100%);}
+        .img-editor-toolbar{min-height:48px;background:var(--ie-bg-2);border-bottom:1px solid var(--ie-border);display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;padding:6px 12px;user-select:none;-webkit-user-select:none;}
         .img-editor-spacer{flex:1 1 auto;}
-        .img-editor-btn{border:1px solid var(--ie-border);background:var(--ie-bg-3);color:var(--ie-fg);border-radius:6px;padding:6px 10px;cursor:pointer;line-height:1;touch-action:manipulation;}
+        .img-editor-btn{border:1px solid var(--ie-border);background:var(--ie-bg-3);color:var(--ie-fg);border-radius:6px;padding:6px 9px;min-width:36px;height:36px;text-align:center;font-size:15px;cursor:pointer;line-height:1;touch-action:manipulation;}
         .img-editor-btn.active{background:var(--ie-accent-bg);border-color:var(--ie-accent);color:var(--ie-accent-fg)}
         .img-editor-btn:disabled{opacity:.5;cursor:not-allowed;}
         .img-editor-right{margin-left:auto;display:flex;gap:8px;}
-        .img-editor-main{flex:1 1 auto;position:relative;display:flex;flex-direction:row-reverse;min-height:0;}
-        .img-editor-canvas-wrap{position:relative;flex:1;overflow:hidden;touch-action:none;background-color:var(--ie-bg-1);background-image:linear-gradient(45deg,var(--ie-bg-2) 25%,transparent 25%,transparent 75%,var(--ie-bg-2) 75%,var(--ie-bg-2)),linear-gradient(45deg,var(--ie-bg-2) 25%,transparent 25%,transparent 75%,var(--ie-bg-2) 75%,var(--ie-bg-2));background-size:16px 16px;background-position:0 0,8px 8px;}
-        .img-editor-canvas{position:absolute;left:0;top:0;display:block;touch-action:none;}
-        .img-editor-overlay-svg{position:absolute;left:0;top:0;display:block;pointer-events:none;shape-rendering:geometricPrecision;}
-        .img-editor-sidebar{width:320px;max-width:360px;min-width:240px;background:var(--ie-bg-2);border-right:1px solid var(--ie-border);overflow:auto;padding:12px;box-sizing:border-box;}
-        .img-editor-main:not(.sidebar-open) .img-editor-sidebar{display:none;}
-        .img-editor-sidebar h3{margin:0 0 8px;font-size:14px;font-weight:600;color:var(--ie-fg);}
-        .img-editor-form{background:var(--ie-bg-3);border:1px solid var(--ie-border);border-radius:8px;padding:8px;box-sizing:border-box;}
         .img-editor-group{display:flex;align-items:center;flex-wrap:wrap;gap:6px;border-right:1px dashed var(--ie-border);padding-right:10px;margin-right:8px;}
         .img-editor-label{font-size:12px;color:var(--ie-muted);}
         .img-editor-color{width:32px;height:28px;border:1px solid var(--ie-border);border-radius:4px;padding:0;background:var(--ie-bg-3)}
-        .img-editor-range{width:120px;max-width:40vw;}
+        .img-editor-range{width:120px;max-width:40vw;height:28px;box-sizing:border-box;vertical-align:middle;}
+        /* Slider fields rest as a compact number input and expand to a slider while focused */
+        input[type="number"].img-editor-range{width:64px;border:1px solid var(--ie-border);border-radius:4px;background:var(--ie-bg-3);color:var(--ie-fg);padding:0 6px;}
         .img-editor-select{height:28px;border:1px solid var(--ie-border);border-radius:4px;background:var(--ie-bg-3);color:var(--ie-fg);}
+
+        /* Params drawer (right) */
+        .img-editor-sidebar-drawer{position:absolute;top:0;right:0;bottom:0;width:320px;max-width:85vw;z-index:6;transition:transform .2s ease;box-shadow:-8px 0 24px rgba(0,0,0,.4);}
+        .img-editor-main:not(.sidebar-open) .img-editor-sidebar-drawer{transform:translateX(100%);}
+        .img-editor-sidebar{width:100%;height:100%;background:var(--ie-bg-2);border-left:1px solid var(--ie-border);overflow:auto;padding:12px;box-sizing:border-box;}
+        .img-editor-sidebar h3{margin:0 0 8px;font-size:14px;font-weight:600;color:var(--ie-fg);}
+        .img-editor-form{background:var(--ie-bg-3);border:1px solid var(--ie-border);border-radius:8px;padding:8px;box-sizing:border-box;}
+
+        /* Drawer pull-tabs — mirrors #sidebar-pin-tab in the main application */
+        .img-editor-tab{position:absolute;display:flex;align-items:center;justify-content:center;border:1px solid var(--ie-border);background:rgba(20,24,30,.92);color:var(--ie-fg);cursor:pointer;padding:0;margin:0;font-size:13px;line-height:1;user-select:none;-webkit-user-select:none;touch-action:manipulation;}
+        .img-editor-tab:active{filter:brightness(1.2);}
+        .img-editor-tab-top{top:100%;left:16px;width:54px;height:36px;border-top:none;border-radius:0 0 8px 8px;}
+        .img-editor-tab-right{top:76px;left:-20px;width:20px;height:36px;border-right:none;border-radius:8px 0 0 8px;}
+
         /* Larger hit targets for touch/pen (coarse) pointers */
         @media (pointer:coarse){
           .img-editor-btn{padding:9px 13px;}
           .img-editor-select{height:34px;}
           .img-editor-color{height:34px;width:38px;}
           .img-editor-range{height:34px;}
+          .img-editor-tab-top{width:60px;}
+          .img-editor-tab-right{width:26px;left:-26px;}
         }
-        /* Narrow screens (mobile): split the view — canvas on top, params as a
-           bottom sheet — so the image stays visible while tuning parameters,
-           instead of a drawer that covers it. Toggled by the "Params" button. */
+        /* Narrow screens (mobile): params drawer becomes a bottom sheet with its
+           tab on the top edge, so the image stays visible while it is closed. */
         @media (max-width:768px){
-          .img-editor-main{flex-direction:column;}
-          .img-editor-sidebar{width:auto;max-width:none;min-width:0;height:45vh;border-right:none;border-top:1px solid var(--ie-border);box-shadow:0 -8px 24px rgba(0,0,0,.45);}
+          .img-editor-sidebar-drawer{top:auto;left:0;right:0;bottom:0;width:auto;max-width:none;height:45vh;box-shadow:0 -8px 24px rgba(0,0,0,.45);}
+          .img-editor-main:not(.sidebar-open) .img-editor-sidebar-drawer{transform:translateY(100%);}
+          .img-editor-sidebar{border-left:none;border-top:1px solid var(--ie-border);}
+          .img-editor-tab-right{top:-36px;left:auto;right:16px;width:54px;height:36px;border:1px solid var(--ie-border);border-bottom:none;border-radius:8px 8px 0 0;}
+          @media (pointer:coarse){ .img-editor-tab-right{width:60px;} }
         }
       </style>
-      <div class="img-editor-toolbar">
-        <div class="img-editor-group">
-            <input type="color" class="img-editor-color js-color" value="#000000"/>
-            <button class="img-editor-btn js-brush" title="Brush (B)">Brush</button>
-            <select class="img-editor-select js-shape">
-                <option value="round" selected>Round</option>
-                <option value="square">Square</option>
-                <option value="diamond">Diamond</option>
-            </select>
-            <label class="img-editor-label">Size</label>
-            <input type="range" min="1" max="64" value="8" class="img-editor-range js-size"/>
-            <button class="img-editor-btn js-eraser" title="Eraser (E)">Eraser</button>
-            <button class="img-editor-btn js-pan" title="Pan (Hold Space)">Pan</button>
-            <button class="img-editor-btn js-break" title="Insert edge break">Break</button>
-        </div>
-        <div class="img-editor-group">
-            <button class="img-editor-btn js-bucket" title="Paint Bucket (G)">Bucket</button>
-            <label class="img-editor-label">Tolerance</label>
-            <input type="range" min="0" max="255" value="0" class="img-editor-range js-bucket-tol"/>
-        </div>
-        <div class="img-editor-group">
-            <button class="img-editor-btn js-undo" title="Undo (Ctrl+Z)">↶</button>
-            <button class="img-editor-btn js-redo" title="Redo (Ctrl+Y)">↷</button>
-            <button class="img-editor-btn js-fit" title="Fit (F)">Fit</button>
-        </div>
-        <div class="img-editor-spacer"></div>
-        <div class="img-editor-right">
-            <button class="img-editor-btn js-params" title="Show/hide parameters">Params</button>
-            <button class="img-editor-btn js-finish" title="Finish (Enter)">Finish</button>
-            <button class="img-editor-btn js-cancel" title="Cancel (Esc)">Cancel</button>
-        </div>
-      </div>
       <div class="img-editor-main">
         <div class="img-editor-canvas-wrap">
           <canvas class="img-editor-canvas"></canvas>
@@ -242,9 +231,48 @@ export class ImageEditorUI {
             <g class="js-breakpoints-suppressed" fill="none" stroke="#888" stroke-width="0.5" vector-effect="non-scaling-stroke" shape-rendering="geometricPrecision"></g>
           </svg>
         </div>
-        <div class="img-editor-sidebar">
-          <h3>Image to Face</h3>
-          <div class="img-editor-form js-feature-form"></div>
+        <div class="img-editor-toolbar-drawer">
+          <div class="img-editor-toolbar">
+            <div class="img-editor-group">
+                <input type="color" class="img-editor-color js-color" value="#000000"/>
+                <button class="img-editor-btn js-brush" title="Brush (B)" aria-label="Brush (B)">🖌</button>
+                <select class="img-editor-select js-shape">
+                    <option value="round" selected>Round</option>
+                    <option value="square">Square</option>
+                    <option value="diamond">Diamond</option>
+                </select>
+                <label class="img-editor-label">Size</label>
+                <input type="number" min="1" max="64" step="1" value="8" class="img-editor-range js-size js-slider-field"/>
+                <button class="img-editor-btn js-eraser" title="Eraser (E)" aria-label="Eraser (E)"><svg width="100%" height="100%" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+ <path d="M17.9995 13L10.9995 6.00004M20.9995 21H7.99955M10.9368 20.0628L19.6054 11.3941C20.7935 10.2061 21.3875 9.61207 21.6101 8.92709C21.8058 8.32456 21.8058 7.67551 21.6101 7.07298C21.3875 6.388 20.7935 5.79397 19.6054 4.60592L19.3937 4.39415C18.2056 3.2061 17.6116 2.61207 16.9266 2.38951C16.3241 2.19373 15.675 2.19373 15.0725 2.38951C14.3875 2.61207 13.7935 3.2061 12.6054 4.39415L4.39366 12.6059C3.20561 13.794 2.61158 14.388 2.38902 15.073C2.19324 15.6755 2.19324 16.3246 2.38902 16.9271C2.61158 17.6121 3.20561 18.2061 4.39366 19.3941L5.06229 20.0628C5.40819 20.4087 5.58114 20.5816 5.78298 20.7053C5.96192 20.815 6.15701 20.8958 6.36108 20.9448C6.59126 21 6.83585 21 7.32503 21H8.67406C9.16324 21 9.40784 21 9.63801 20.9448C9.84208 20.8958 10.0372 20.815 10.2161 20.7053C10.418 20.5816 10.5909 20.4087 10.9368 20.0628Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+ </svg></button>
+                <button class="img-editor-btn js-pan" title="Pan (Hold Space)" aria-label="Pan (Hold Space)">✋</button>
+                <button class="img-editor-btn js-break" title="Insert edge break" aria-label="Insert edge break">⌖</button>
+            </div>
+            <div class="img-editor-group">
+                <button class="img-editor-btn js-bucket" title="Paint Bucket (G)" aria-label="Paint Bucket (G)">🪣</button>
+                <label class="img-editor-label">Tolerance</label>
+                <input type="number" min="0" max="255" step="1" value="0" class="img-editor-range js-bucket-tol js-slider-field"/>
+            </div>
+            <div class="img-editor-group">
+                <button class="img-editor-btn js-undo" title="Undo (Ctrl+Z)" aria-label="Undo (Ctrl+Z)">↶</button>
+                <button class="img-editor-btn js-redo" title="Redo (Ctrl+Y)" aria-label="Redo (Ctrl+Y)">↷</button>
+                <button class="img-editor-btn js-fit" title="Fit (F)" aria-label="Fit (F)">⤢</button>
+            </div>
+            <div class="img-editor-spacer"></div>
+            <div class="img-editor-right">
+                <button class="img-editor-btn js-finish" title="Finish (Enter)">Finish</button>
+                <button class="img-editor-btn js-cancel" title="Cancel (Esc)">Cancel</button>
+            </div>
+          </div>
+          <button class="img-editor-tab img-editor-tab-top js-toolbar-tab" title="Hide toolbar" aria-label="Toggle toolbar">🧰</button>
+        </div>
+        <div class="img-editor-sidebar-drawer">
+          <button class="img-editor-tab img-editor-tab-right js-params-tab" title="Hide parameters" aria-label="Toggle parameters">⚙</button>
+          <div class="img-editor-sidebar">
+            <h3>Image to Face</h3>
+            <div class="img-editor-form js-feature-form"></div>
+          </div>
         </div>
       </div>
     `;
@@ -262,7 +290,10 @@ export class ImageEditorUI {
         this.svgSuppressedBreaksGroup = overlay.querySelector('.js-breakpoints-suppressed');
         this.mainEl = overlay.querySelector('.img-editor-main');
         this.sidebar = overlay.querySelector('.img-editor-sidebar');
-        this.paramsBtn = overlay.querySelector('.js-params');
+        this.toolbarDrawer = overlay.querySelector('.img-editor-toolbar-drawer');
+        this.sidebarDrawer = overlay.querySelector('.img-editor-sidebar-drawer');
+        this.toolbarTab = overlay.querySelector('.js-toolbar-tab');
+        this.paramsTab = overlay.querySelector('.js-params-tab');
         this.formHost = overlay.querySelector('.js-feature-form');
         this.colorInput = overlay.querySelector('.js-color');
         this.sizeInput = overlay.querySelector('.js-size');
@@ -364,14 +395,15 @@ export class ImageEditorUI {
 
     _attachEvents() {
         const bound = this._bound;
-        bound.onResize = () => this._resizeCanvasToViewport();
+        bound.onResize = () => { this._resizeCanvasToViewport(); this._syncDrawerLayout(); this._updateDrawerTabs(); };
         bound.onPointerDown = (e) => this._onPointerDown(e);
         bound.onPointerMove = (e) => this._onPointerMove(e);
         bound.onPointerUp = (e) => this._onPointerUp(e);
         bound.onPointerCancel = (e) => this._onPointerUp(e);
         bound.onWheel = (e) => this._wheel(e);
         bound.onKey = (e) => this._key(e);
-        bound.onParams = () => this._toggleSidebar();
+        bound.onToolbarTab = () => this._toggleToolbar();
+        bound.onParamsTab = () => this._toggleSidebar();
         bound.onColor = (e) => { this.brushColor = e.target.value || '#000000'; this._updateButtons(); };
         bound.onSize = (e) => { this.brushSize = Math.max(1, Math.min(64, Number(e.target.value) || 8)); };
         bound.onBrush = () => { this.tool = 'brush'; this._updateButtons(); };
@@ -404,7 +436,8 @@ export class ImageEditorUI {
         window.addEventListener('keyup', bound.onKey);
         this.canvas.addEventListener('pointerenter', bound.onEnter);
         this.canvas.addEventListener('pointerleave', bound.onLeave);
-        if (this.paramsBtn) this.paramsBtn.addEventListener('click', bound.onParams);
+        if (this.toolbarTab) this.toolbarTab.addEventListener('click', bound.onToolbarTab);
+        if (this.paramsTab) this.paramsTab.addEventListener('click', bound.onParamsTab);
 
         this.colorInput.addEventListener('input', bound.onColor);
         this.sizeInput.addEventListener('input', bound.onSize);
@@ -438,7 +471,8 @@ export class ImageEditorUI {
             this.canvas.removeEventListener('pointerleave', b.onLeave);
             this.canvas.removeEventListener('contextmenu', b.onContextMenu);
         }
-        if (this.paramsBtn) this.paramsBtn.removeEventListener('click', b.onParams);
+        if (this.toolbarTab) this.toolbarTab.removeEventListener('click', b.onToolbarTab);
+        if (this.paramsTab) this.paramsTab.removeEventListener('click', b.onParamsTab);
         window.removeEventListener('keydown', b.onKey);
         window.removeEventListener('keyup', b.onKey);
         if (this.colorInput) this.colorInput.removeEventListener('input', b.onColor);
@@ -1115,25 +1149,51 @@ export class ImageEditorUI {
         }
     }
 
+    _toggleToolbar() {
+        if (!this.mainEl) return;
+        this.mainEl.classList.toggle('toolbar-open');
+        this._updateDrawerTabs();
+        this._syncDrawerLayout();
+    }
+
     _toggleSidebar() {
         if (!this.mainEl) return;
         this.mainEl.classList.toggle('sidebar-open');
-        // On mobile the params sheet splits the layout, so the canvas area
-        // resizes; re-measure and re-fit the image so it stays fully visible.
-        let narrow = false;
-        try { narrow = typeof matchMedia === 'function' && matchMedia('(max-width:768px)').matches; }
-        catch { narrow = false; }
-        this._resizeCanvasToViewport();
-        if (narrow) { this._resetViewToFit(); this._render(); }
+        this._updateDrawerTabs();
     }
 
-    _applyInitialSidebarState() {
+    _isNarrow() {
+        try { return typeof matchMedia === 'function' && matchMedia('(max-width:768px)').matches; }
+        catch { return false; }
+    }
+
+    // On wide screens the top toolbar spans the full width, so drop the right
+    // params drawer below it (by the toolbar's measured height) to avoid covering
+    // the toolbar's Finish/Cancel buttons. On mobile the sheet sits at the bottom,
+    // so the CSS handles it and we clear the inline offset.
+    _syncDrawerLayout() {
+        if (!this.sidebarDrawer || !this.toolbarDrawer || !this.mainEl) return;
+        if (this._isNarrow()) { this.sidebarDrawer.style.top = ''; return; }
+        const toolbarOpen = this.mainEl.classList.contains('toolbar-open');
+        this.sidebarDrawer.style.top = toolbarOpen ? `${this.toolbarDrawer.offsetHeight}px` : '0px';
+    }
+
+    // The tabs use fixed icons (toolbox / gear); only the tooltip reflects state.
+    _updateDrawerTabs() {
+        const toolbarOpen = !!this.mainEl?.classList.contains('toolbar-open');
+        const sidebarOpen = !!this.mainEl?.classList.contains('sidebar-open');
+        if (this.toolbarTab) this.toolbarTab.title = toolbarOpen ? 'Hide toolbar' : 'Show toolbar';
+        if (this.paramsTab) this.paramsTab.title = sidebarOpen ? 'Hide parameters' : 'Show parameters';
+    }
+
+    _applyInitialDrawerState() {
         if (!this.mainEl) return;
-        let narrow = false;
-        try { narrow = typeof matchMedia === 'function' && matchMedia('(max-width:768px)').matches; }
-        catch { narrow = false; }
-        // Sidebar visible by default on wide screens; collapsed drawer on narrow.
-        this.mainEl.classList.toggle('sidebar-open', !narrow);
+        // Toolbar open by default; params open on wide screens, collapsed on narrow
+        // so the image is fully visible when the editor opens on a phone.
+        this.mainEl.classList.add('toolbar-open');
+        this.mainEl.classList.toggle('sidebar-open', !this._isNarrow());
+        this._updateDrawerTabs();
+        this._syncDrawerLayout();
     }
 
     _pointerDown(e) {

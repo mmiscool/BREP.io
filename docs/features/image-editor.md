@@ -17,11 +17,14 @@ The in-app Image Editor is shared by `Image to Face` and `Image Heightmap Solid`
 4. Click `Finish` to write a PNG data URL back into `fileToImport`, or `Cancel` to discard edits.
 
 ## Tools
-- `Brush` (`B`) – paint with color + brush size.
-- `Eraser` (`E`) – erase to transparency.
-- `Bucket` (`G`) – flood fill with adjustable tolerance (`0-255`).
-- `Pan` (button or hold `Space`) – drag the view.
-- `Break` – add/remove manual edge-break points on traced loops (mainly relevant for `Image to Face` edge segmentation).
+Toolbar buttons use icon glyphs; hover a button for its tooltip/label.
+- Brush 🖌 (`B`) – paint with color + brush size.
+- Eraser ⌫ (`E`) – erase to transparency.
+- Bucket 🪣 (`G`) – flood fill with adjustable tolerance (`0-255`).
+- Pan ✋ (button or hold `Space`) – drag the view.
+- Break ✂ – add/remove manual edge-break points on traced loops (mainly relevant for `Image to Face` edge segmentation).
+
+Other toolbar buttons: Undo ↶, Redo ↷, Fit ⤢, and text-labeled `Finish` / `Cancel`. The parameter panel is opened/closed by its drawer tab (see [Layout / Drawers](#layout--drawers)), not a toolbar button.
 
 Brush shapes:
 - `Round`
@@ -35,12 +38,17 @@ Brush shapes:
 - Default open view is 1:1 image pixel display.
 - Bottom-right resize handle changes working canvas size (supports expanding/cropping while preserving existing edits). The handle uses a larger hit area on touch/pen devices.
 
+## Layout / Drawers
+- The canvas fills the whole editor; the toolbar and the parameter panel float over it as drawers.
+- Each drawer has a pull-tab (styled like the main application's sidebar pin tab); click it to open or close the drawer.
+  - Toolbar drawer: slides down from the top; its tab (toolbox icon 🧰) sits on the toolbar's bottom edge.
+  - Params drawer: its tab uses a gear icon ⚙. On wide screens it slides in from the right (offset below the toolbar so it never covers the `Finish`/`Cancel` buttons); on narrow (mobile) screens it becomes a bottom sheet with its tab on the top edge, so the image stays visible while it is collapsed.
+- Defaults: the toolbar is open; the params drawer is open on wide screens and collapsed on mobile.
+
 ## Touch / Mobile Support
 - Input is handled through Pointer Events, so mouse, touch, and pen all work.
 - One finger draws (or pans/inserts breaks, depending on the active tool); two fingers pinch to zoom and pan. Bringing a second finger down cancels any in-progress single-finger stroke.
-- The toolbar wraps onto multiple rows on narrow screens, and buttons/controls get larger touch targets.
-- On narrow (mobile) screens the parameter panel becomes a bottom sheet in a split layout: the canvas stays on top and the params sit below, so the live trace preview remains visible while you tune parameters. Toggle the sheet with the `Params` button; opening/closing re-fits the image to the resized canvas area.
-- On wider screens the params panel is a side panel that the `Params` button collapses to reclaim canvas space.
+- The toolbar wraps onto multiple rows on narrow screens, and buttons/controls (including the drawer tabs) get larger touch targets.
 
 ## Undo / Redo And Hotkeys
 - `Undo`: `Ctrl/Cmd+Z`
