@@ -2,6 +2,22 @@ import { BREP } from "../../BREP/BREP.js";
 import { ImageEditorUI } from '../imageToFace/imageEditor.js';
 const THREE = BREP.THREE;
 
+// Schema keys to hide for the current param values. Shared by the feature
+// dialog (via uiFieldsTest) and the image editor sidebar. `hasImage` is forced
+// true in the editor because it always has a canvas to sample, even before the
+// edited image is saved back to fileToImport.
+const hiddenParamKeys = (params: any, { hasImage = !!params?.fileToImport } = {}) => {
+  const exclude: string[] = [];
+  if (!hasImage) {
+    // Until an image is chosen there is nothing to scale, place, or boolean.
+    exclude.push(
+      'heightScale', 'baseHeight', 'invertHeights', 'pixelScale', 'center',
+      'sampleStride', 'placementPlane', 'simplifyTolerance', 'boolean',
+    );
+  }
+  return exclude;
+};
+
 const inputParamsSchema = {
   id: {
     type: "string",
@@ -43,6 +59,31 @@ const inputParamsSchema = {
           } catch (_) { /* ignore preview rebuild failures */ }
         },
         onCancel: () => { /* no-op */ }
+      }, {
+        featureSchema: inputParamsSchema,
+        // The editor always has an image; also hide the fields that only make
+        // sense outside the editor (file picker, nested editor button, scene
+        // selections).
+        hiddenFields: (params: any) => hiddenParamKeys(params, { hasImage: true })
+          .concat(['fileToImport', 'editImage', 'placementPlane', 'boolean']),
+        featureParams: ctx && ctx.feature && ctx.feature.inputParams ? ctx.feature.inputParams : (ctx?.params || {}),
+        partHistory: ctx && ctx.partHistory ? ctx.partHistory : null,
+        viewer: ctx && ctx.viewer ? ctx.viewer : (ctx && ctx.partHistory && ctx.partHistory.viewer ? ctx.partHistory.viewer : null),
+        onParamsChange: () => {
+          try {
+            if (ctx && ctx.partHistory) {
+              ctx.partHistory.currentHistoryStepId = ctx.feature?.inputParams?.featureID;
+              if (typeof ctx.partHistory.runHistory === 'function') {
+                const runPromise = ctx.partHistory.runHistory();
+                if (runPromise && typeof runPromise.then === 'function') {
+                  runPromise.then(() => ctx.partHistory?.queueHistorySnapshot?.({ debounceMs: 0, reason: 'image-edit' }));
+                } else {
+                  ctx.partHistory?.queueHistorySnapshot?.({ debounceMs: 0, reason: 'image-edit' });
+                }
+              }
+            }
+          } catch (_) { /* ignore rebuild failures */ }
+        }
       });
       imageEditor.open();
     }
@@ -109,6 +150,11 @@ export class ImageHeightmapSolidFeature {
   constructor() {
     this.inputParams = {};
     this.persistentData = {};
+  }
+
+  uiFieldsTest(context: any) {
+    const params = this.inputParams || context?.params || {};
+    return hiddenParamKeys(params);
   }
 
   async run(partHistory: any) {
