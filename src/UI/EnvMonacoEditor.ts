@@ -187,6 +187,11 @@ class EnvMonacoEditor extends HTMLElement {
       this._installEnvAutocomplete();
       monaco.editor.setTheme(this.theme);
       this._loading.style.display = 'none';
+      this.dispatchEvent(new CustomEvent('editor-ready', {
+        detail: { editor: this._editor, monaco },
+        bubbles: true,
+        composed: true,
+      }));
     } catch (e) {
       try {
         this._loading.textContent = 'Editor failed to load';

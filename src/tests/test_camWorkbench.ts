@@ -2413,6 +2413,9 @@ export async function test_cam_workbench_registers_shadow_cutter_and_roughing_op
   assert(SurfacingEntity.inputParamsSchema.targetFaces?.selectionFilter?.includes('FACE'), 'Surfacing should select target faces');
   assert(SurfacingEntity.inputParamsSchema.rasterDirection?.options?.includes('Y'), 'Surfacing should expose raster direction choices');
   assert(SurfacingEntity.inputParamsSchema.rasterDirection?.options?.includes('Both'), 'Surfacing should expose a combined X/Y raster direction choice');
+  assert(SurfacingEntity.inputParamsSchema.rasterDirection?.default_value === 'Both', 'Surfacing should default to both raster directions');
+  const defaultSurfacing = manager.createOperation(CAM_OPERATION_TYPE_SURFACING);
+  assert(defaultSurfacing?.inputParams?.rasterDirection === 'Both', 'New Surfacing operations should initialize with both raster directions');
   assert(SurfacingEntity.inputParamsSchema.pathTolerance?.type === 'number', 'Surfacing should expose cutter-location simplification tolerance');
   assert(SurfacingEntity.inputParamsSchema.sampleSpacing?.type === 'number', 'Surfacing should expose adaptive sample spacing');
   assert(SurfacingEntity.inputParamsSchema.minSampleSpacing?.type === 'number', 'Surfacing should expose adaptive minimum sample spacing');
@@ -2611,6 +2614,12 @@ export async function test_cam_toolpath_simulator_visualizes_program_and_moves_h
   assert(group?.userData?.sceneOverlay === true, 'Simulator overlay should be marked as scene overlay');
   assert(group?.userData?.preventRemove === true, 'Simulator overlay should be protected from history scene cleanup');
   assert(simulator.getState().totalSteps === 2, 'Simulator should flatten path segments into simulation steps');
+
+  assert(simulator.seekToSegment('SIM-P1-S2'), 'Simulator should seek to a toolpath segment by its G-code segment id');
+  const soughtState = simulator.getState();
+  assert(soughtState.currentSegment?.segmentId === 'SIM-P1-S2', 'Segment seeking should activate the requested toolpath move');
+  assert(Math.abs((soughtState.currentPosition?.[0] || 0) - 10) < 1e-4, 'Segment seeking should move the tool head to the requested move start');
+  assert(!simulator.seekToSegment('SIM-P1-MISSING'), 'Segment seeking should reject unknown segment ids');
 
   simulator.setProgress(0.5);
   const midState = simulator.getState();

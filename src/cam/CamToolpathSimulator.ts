@@ -286,6 +286,25 @@ export class CamToolpathSimulator {
     this._requestRender();
   }
 
+  seekToSegment(segmentId: string) {
+    const targetId = String(segmentId || '');
+    if (!targetId) return false;
+    const segment = this.segments.find((entry) => entry.segmentId === targetId);
+    if (!segment) return false;
+    const representableOffset = Math.max(
+      segment.length * 1e-6,
+      Math.abs(segment.startDistance) * Number.EPSILON * 4,
+      Number.EPSILON,
+    );
+    const insideOffset = Math.min(segment.length * 0.5, representableOffset);
+    this.distance = Math.min(segment.endDistance, segment.startDistance + insideOffset);
+    this.progress = this.totalLength > 0 ? clamp01(this.distance / this.totalLength) : 0;
+    this._applyDistance(this.distance);
+    this._notify();
+    this._requestRender();
+    return true;
+  }
+
   getState(): CamToolpathSimulatorState {
     const index = this._segmentIndexForDistance(this.distance);
     const segment = index >= 0 ? this.segments[index] : null;

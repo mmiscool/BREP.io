@@ -4,8 +4,14 @@ import type { CamGenerationProgressEvent } from '../../cam/CamPlanManager.js';
 import { splitMachineMacroLines } from '../../cam/CamMachineProfile.js';
 import type { CamToolpathProgram } from '../../cam/CamToolpathDefinition.js';
 import { FloatingWindow } from '../FloatingWindow.js';
+import '../EnvMonacoEditor.js';
 
 type AnyRecord = Record<string, any>;
+type MonacoEditorElement = HTMLElement & {
+  editor?: AnyRecord | null;
+  monaco?: AnyRecord | null;
+  value: string;
+};
 
 function nextCamUiFrame() {
   return new Promise<void>((resolve) => {
@@ -48,8 +54,9 @@ export class CamHistoryWidget {
   _generationStepEl: HTMLDivElement | null = null;
   _generationPercentEl: HTMLDivElement | null = null;
   _generationProgressFillEl: HTMLDivElement | null = null;
-  _gcodeTextareaEl: HTMLTextAreaElement | null = null;
+  _gcodeEditorEl: MonacoEditorElement | null = null;
   _gcodeLineMap = new Map<string, number>();
+  _gcodeSegmentsByLine: Array<{ lineIndex: number; segmentId: string }> = [];
   _lastGcodeScrollSegmentId = '';
 
   constructor(viewer: any) {
@@ -72,6 +79,8 @@ export class CamHistoryWidget {
     this._hideGenerationProgress();
     try { this.historyWidget?.dispose?.(); } catch { /* ignore widget cleanup */ }
     this.historyWidget = null;
+    try { this._gcodeEditorEl?.remove?.(); } catch { /* ignore editor cleanup */ }
+    this._gcodeEditorEl = null;
   }
 
   setPanelVisible(visible: boolean): void {
@@ -816,15 +825,44 @@ export class CamHistoryWidget {
 
   _scrollGcodeToSimulatorSegment(state: CamToolpathSimulatorState | null | undefined) {
     const segmentId = String(state?.currentSegment?.segmentId || '');
-    if (!segmentId || segmentId === this._lastGcodeScrollSegmentId || !this._gcodeTextareaEl) return;
+    if (!segmentId || segmentId === this._lastGcodeScrollSegmentId || !this._gcodeEditorEl) return;
     const lineIndex = this._gcodeLineMap.get(segmentId);
     if (!Number.isFinite(lineIndex)) return;
-    const textarea = this._gcodeTextareaEl;
-    const style = window.getComputedStyle?.(textarea);
-    const lineHeight = parseFloat(style?.lineHeight || '') || ((parseFloat(style?.fontSize || '') || 12) * 1.45);
-    const target = Math.max(0, (Number(lineIndex) * lineHeight) - (textarea.clientHeight * 0.45));
-    textarea.scrollTop = target;
+    const editor = this._gcodeEditorEl.editor;
+    const model = editor?.getModel?.();
+    if (!editor || !model) return;
+    const lineNumber = Math.max(1, Math.min(model.getLineCount(), Number(lineIndex) + 1));
+    editor.setPosition({ lineNumber, column: 1 });
+    const immediateScrollType = this._gcodeEditorEl.monaco?.editor?.ScrollType?.Immediate ?? 1;
+    editor.revealLineInCenter(lineNumber, immediateScrollType);
     this._lastGcodeScrollSegmentId = segmentId;
+  }
+
+  _segmentIdForGcodeLine(lineIndex: number) {
+    const entries = this._gcodeSegmentsByLine;
+    if (!entries.length || !Number.isFinite(lineIndex)) return '';
+    const targetLine = Math.max(0, Math.floor(lineIndex));
+    let low = 0;
+    let high = entries.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (entries[mid].lineIndex < targetLine) low = mid + 1;
+      else high = mid;
+    }
+    return (entries[low] || entries[entries.length - 1])?.segmentId || '';
+  }
+
+  _seekSimulationToGcodeLine(lineNumber: number) {
+    const segmentId = this._segmentIdForGcodeLine(Number(lineNumber) - 1);
+    if (!segmentId) return false;
+    const sim = this._ensureSimulator();
+    if (!sim.getState().hasProgram) {
+      const plan = this.viewer?.partHistory?.camPlanManager?.getCombinedPlan?.() || null;
+      if (Number(plan?.summary?.pathCount ?? plan?.paths?.length ?? 0) > 0) sim.setProgram(plan);
+    }
+    if (!sim.getState().hasProgram || !sim.seekToSegment(segmentId)) return false;
+    this._syncSimulatorControls(sim.getState());
+    return true;
   }
 
   _renderProgram(): void {
@@ -833,8 +871,9 @@ export class CamHistoryWidget {
     const operations = Array.isArray(manager?.getOperations?.()) ? manager.getOperations() : [];
     const plan = manager?.getCombinedPlan?.() || null;
     const gcode = String(manager?.getCombinedGcode?.() || '');
-    this._gcodeTextareaEl = null;
+    this._gcodeEditorEl = null;
     this._gcodeLineMap = new Map();
+    this._gcodeSegmentsByLine = [];
     this._lastGcodeScrollSegmentId = '';
     this.programEl.textContent = '';
     const header = document.createElement('div');
@@ -857,15 +896,35 @@ export class CamHistoryWidget {
     this.programEl.appendChild(header);
 
     if (gcode.trim()) {
-      const textarea = document.createElement('textarea');
-      textarea.className = 'cam-program-code';
-      textarea.readOnly = true;
-      textarea.spellcheck = false;
-      textarea.value = gcode;
-      textarea.setAttribute('aria-label', 'Generated CAM G-code');
-      this.programEl.appendChild(textarea);
-      this._gcodeTextareaEl = textarea;
+      const editorEl = document.createElement('env-monaco-editor') as MonacoEditorElement;
+      editorEl.className = 'cam-program-code';
+      editorEl.setAttribute('language', 'plaintext');
+      editorEl.setAttribute('readonly', '');
+      editorEl.setAttribute('theme', 'vs-dark');
+      editorEl.setAttribute('aria-label', 'Generated CAM G-code');
+      editorEl.value = gcode;
+      editorEl.addEventListener('editor-ready', (event) => {
+        if (this._gcodeEditorEl !== editorEl) return;
+        const editor = (event as CustomEvent)?.detail?.editor || editorEl.editor;
+        editor?.onDidLayoutChange?.(() => {
+          if (this._gcodeEditorEl !== editorEl) return;
+          this._lastGcodeScrollSegmentId = '';
+          this._scrollGcodeToSimulatorSegment(this.simulator?.getState?.());
+        });
+        editor?.onMouseDown?.((mouseEvent: AnyRecord) => {
+          if (mouseEvent?.event?.rightButton || mouseEvent?.event?.middleButton) return;
+          const lineNumber = Number(mouseEvent?.target?.position?.lineNumber);
+          if (Number.isFinite(lineNumber)) this._seekSimulationToGcodeLine(lineNumber);
+        });
+        this._scrollGcodeToSimulatorSegment(this.simulator?.getState?.());
+      }, { once: true });
+      this._gcodeEditorEl = editorEl;
       this._gcodeLineMap = this._buildGcodeLineMap(plan as any);
+      this._gcodeSegmentsByLine = Array.from(
+        this._gcodeLineMap,
+        ([segmentId, lineIndex]) => ({ segmentId, lineIndex }),
+      ).sort((a, b) => a.lineIndex - b.lineIndex);
+      this.programEl.appendChild(editorEl);
       return;
     }
     const message = document.createElement('div');
@@ -1107,20 +1166,17 @@ export class CamHistoryWidget {
       }
       .cam-program-code {
         box-sizing: border-box;
+        display: block;
         width: 100%;
         min-width: 0;
         min-height: 360px;
+        height: 360px;
         max-height: 360px;
-        resize: vertical;
         border: 1px solid rgba(148, 163, 184, 0.18);
         border-radius: 8px;
         background: rgba(15, 23, 42, 0.45);
         color: #cbd5e1;
-        padding: 10px;
-        white-space: pre;
-        overflow: auto;
-        tab-size: 2;
-        font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        overflow: hidden;
       }
       .cam-generation-window-content {
         display: flex;

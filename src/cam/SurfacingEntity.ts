@@ -133,7 +133,7 @@ const inputParamsSchema = {
   rasterDirection: {
     type: 'options',
     options: ['X', 'Y', 'Both'],
-    default_value: 'X',
+    default_value: 'Both',
     hint: 'Direction the surfacing passes travel. Use Both to generate X and Y rasters in one operation.',
   },
   safeHeight: {
@@ -888,7 +888,7 @@ function optionalPositiveNumber(value: any, fallback: number, min = EPS) {
 }
 
 function normalizeSurfacingRasterDirections(value: any): Array<'X' | 'Y'> {
-  const text = String(value || 'X').trim().toUpperCase().replace(/\s+/g, '');
+  const text = String(value || 'Both').trim().toUpperCase().replace(/\s+/g, '');
   if (text === 'Y') return ['Y'];
   if (text === 'BOTH' || text === 'XY' || text === 'YX' || text === 'X+Y' || text === 'Y+X') return ['X', 'Y'];
   return ['X'];
