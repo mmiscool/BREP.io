@@ -938,6 +938,47 @@ export async function test_cam_roughing_uses_each_slice_shadow() {
   assert(secondSliceMaxX >= 10.99, 'Lower roughing slice should expand to the wider base shadow');
 }
 
+export async function test_cam_roughing_keeps_vertical_cutter_clear_of_overhangs() {
+  const manager = new CamPlanManager(null);
+  const operation = manager.createOperation(CAM_OPERATION_TYPE_ROUGHING, {
+    id: 'RG_OVERHANG_CLEARANCE',
+    targetSolids: ['cam-test-left-pillar', 'cam-test-right-pillar', 'cam-test-overhang-cap'],
+    toolDiameter: 1,
+    toolLength: 20,
+    stockAllowance: 0,
+    stepDown: 2,
+    extraDepth: 0,
+    safeHeight: 3,
+    feedRate: 600,
+    plungeRate: 120,
+    spindleRPM: 9000,
+  });
+  const direct = operation.run({
+    viewer: makeViewerWithSolids([
+      makeBoxMeshSolid(2, 5, 4, { name: 'cam-test-left-pillar' }),
+      makeBoxMeshSolid(2, 5, 4, { name: 'cam-test-right-pillar', offsetX: 8 }),
+      makeBoxMeshSolid(10, 5, 4, { name: 'cam-test-overhang-cap', offsetY: 5 }),
+    ]),
+    machineProfile: manager.getMachineProfile(),
+    stockProfile: manager.getStockProfile(),
+  });
+  const path = direct.paths[0];
+  assert(path, 'Overhang roughing should generate a toolpath');
+  assert(direct.metadata?.protectsFullCutterColumn === true, 'Roughing should report full vertical cutter-column protection');
+
+  // Slice four is entirely below the cap. A slice-local contour would enter
+  // between the two pillars and put the cutter shank through the cap above it.
+  const belowOverhang = cutPoints2dForSlice(path, 4);
+  assert(belowOverhang.length > 0, 'Overhang roughing should retain a contour below the cap');
+  assert(Math.min(...belowOverhang.map((point) => point[0])) <= -0.49, 'The lower contour should stay outside the cap on its left side');
+  assert(Math.max(...belowOverhang.map((point) => point[0])) >= 10.49, 'The lower contour should stay outside the cap on its right side');
+  const belowOverhangPassIds = new Set(path.points
+    .filter((point: any) => point.metadata?.sliceIndex === 4 && !point.metadata?.safe)
+    .map((point: any) => point.metadata?.passId)
+    .filter(Boolean));
+  assert(belowOverhangPassIds.size === 1, 'The lower level should follow one cumulative cap silhouette instead of entering between pillars');
+}
+
 export async function test_cam_roughing_unions_curved_slice_shadow_before_pathing() {
   const manager = new CamPlanManager(null);
   const operation = manager.createOperation(CAM_OPERATION_TYPE_ROUGHING, {

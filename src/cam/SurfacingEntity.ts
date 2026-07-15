@@ -60,6 +60,7 @@ type SurfacingProgressEvent = {
 };
 
 const SURFACING_SAFETY_SAMPLE_SPACING_MAX = 0.05;
+const SURFACING_LINK_VALIDATION_SPACING_MAX = 0.01;
 
 const inputParamsSchema = {
   id: {
@@ -1066,7 +1067,7 @@ function signXY(px: number, py: number, a: [number, number, number], b: [number,
 }
 
 // Drop-cutter: highest ball-nose position over the obstacle mesh at (x, y).
-class DropCutterIndex {
+export class DropCutterIndex {
   triangles: Triangle[];
   radius: number;
   minX = Infinity;
@@ -1802,6 +1803,7 @@ function tryLinkRuns({
     linkPoints.push([roundCoord(px), roundCoord(py), roundCoord(surfaceCenterZ - toolRadius)]);
   }
   const filtered = filterCutterLocationLine([from, ...linkPoints], pathTolerance);
+  if (!cutterLocationLineClearsObstacles(filtered, obstacleDropCutter, toolRadius)) return false;
   for (let index = 1; index < filtered.length; index += 1) {
     addMove('cut', filtered[index], { scanline, link: true });
   }
@@ -1868,6 +1870,28 @@ function samePoint3(a: [number, number, number] | undefined, b: [number, number,
     && Math.abs(a[2] - b[2]) <= EPS);
 }
 
+function cutterLocationLineClearsObstacles(
+  points: Array<[number, number, number]>,
+  dropCutter: DropCutterIndex,
+  toolRadius: number,
+) {
+  for (let index = 1; index < points.length; index += 1) {
+    const from = points[index - 1];
+    const to = points[index];
+    const distance = distanceXY(from, to);
+    const steps = Math.max(1, Math.ceil(distance / SURFACING_LINK_VALIDATION_SPACING_MAX));
+    for (let step = 1; step < steps; step += 1) {
+      const t = step / steps;
+      const px = from[0] + ((to[0] - from[0]) * t);
+      const py = from[1] + ((to[1] - from[1]) * t);
+      const actualTipZ = from[2] + ((to[2] - from[2]) * t);
+      const centerZ = dropCutter.centerZ(px, py);
+      if (centerZ !== null && actualTipZ < centerZ - toolRadius - EPS) return false;
+    }
+  }
+  return true;
+}
+
 function tryClearanceLinkRuns({
   from,
   to,
@@ -1891,7 +1915,11 @@ function tryClearanceLinkRuns({
 }) {
   const distance = Math.hypot(to[0] - from[0], to[1] - from[1]);
   if (!Number.isFinite(distance)) return false;
-  const steps = Math.max(1, Math.ceil(distance / Math.max(sampleStep, EPS)));
+  const clearanceSampleStep = Math.min(
+    Math.max(sampleStep, EPS),
+    SURFACING_LINK_VALIDATION_SPACING_MAX,
+  );
+  const steps = Math.max(1, Math.ceil(distance / clearanceSampleStep));
   let requiredZ = Math.max(from[2], to[2]);
   for (let step = 0; step <= steps; step += 1) {
     const t = step / steps;

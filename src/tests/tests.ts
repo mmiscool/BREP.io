@@ -36,6 +36,7 @@ import {
     test_cam_shadow_cutter_offset_keeps_l_shape_inside_corner_clear,
     test_cam_shadow_cutter_offset_stays_outside_concave_shadow,
     test_cam_roughing_history_item_generates_sliced_toolpaths,
+    test_cam_roughing_keeps_vertical_cutter_clear_of_overhangs,
     test_cam_roughing_debug_slices_emit_layer_solids,
     test_cam_roughing_debug_slices_create_real_scene_solids,
     test_cam_roughing_debug_slices_survive_combined_cam_plan,
@@ -80,6 +81,9 @@ import {
 import {
     test_cam_shadow_cutter_generated_history_20260704000935_keeps_outer_loop,
 } from './test_cam_shadow_cutter_generated_history.js';
+import {
+    test_generated_history_20260715000656,
+} from './test_cam_generated_history_20260715000656.js';
 import { test_Chamfer } from './test_chamfer.js';
 import {
     test_cppChamfer_auto_direction_uses_native_classifier,
@@ -1640,6 +1644,7 @@ export const testFunctions: any[] = [
     { test: test_cam_plan_manager_async_generation_reports_progress_steps, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_plan_manager_strips_legacy_generated_data, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_shadow_cutter_generated_history_20260704000935_keeps_outer_loop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_generated_history_20260715000656, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_shadow_cutter_cuts_each_loop_to_depth_before_next_loop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_shadow_cutter_generates_clear_hole_loop, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_shadow_cutter_generates_outer_and_hole_for_nonconvex_profile, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
@@ -1648,6 +1653,7 @@ export const testFunctions: any[] = [
     { test: test_cam_shadow_cutter_offset_keeps_l_shape_inside_corner_clear, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_shadow_cutter_offset_stays_outside_concave_shadow, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_roughing_history_item_generates_sliced_toolpaths, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_cam_roughing_keeps_vertical_cutter_clear_of_overhangs, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_roughing_debug_slices_emit_layer_solids, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_roughing_debug_slices_create_real_scene_solids, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_roughing_debug_slices_survive_combined_cam_plan, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

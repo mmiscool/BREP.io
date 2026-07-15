@@ -51,7 +51,7 @@ type RoughingPass = {
   id: string;
   loop: ShadowLoop;
   slice: RoughingSlice;
-  sourceLoops: ShadowLoop[];
+  protectedCenterLoops: ShadowLoop[];
 };
 
 const inputParamsSchema = {
@@ -221,11 +221,20 @@ export class RoughingEntity extends ListEntityBase {
     let outlinePointCount = 0;
     let activeSliceCount = 0;
     for (const slice of slices) {
-      const shadowLoops = buildSliceShadowLoops(triangles, slice);
-      if (debugSlicesEnabled && shadowLoops.length) {
-        debugSlices.push(makeRoughingDebugSlice(slice, shadowLoops, { operationId, operationName }));
+      const localSliceLoops = buildSliceShadowLoops(triangles, slice);
+      if (debugSlicesEnabled && localSliceLoops.length) {
+        debugSlices.push(makeRoughingDebugSlice(slice, localSliceLoops, { operationId, operationName }));
       }
-      const rawOffsetLoops = shadowLoops.flatMap((loop) => {
+
+      // A vertical 3-axis cutter occupies the whole column above its tip. Use
+      // every retained triangle above this cut depth, not only the current
+      // step-down slab, so neither the cutting edge nor the shank can enter an
+      // overhang while following a lower contour.
+      const protectedMaterialLoops = buildSliceShadowLoops(triangles, {
+        ...slice,
+        topZ,
+      });
+      const rawOffsetLoops = protectedMaterialLoops.flatMap((loop) => {
         const distance = loop.role === 'hole' ? -offsetDistance : offsetDistance;
         return offsetPolygon(loop.points, distance)
           .map((points) => ({ role: loop.role, points }));
@@ -239,7 +248,7 @@ export class RoughingEntity extends ListEntityBase {
           id: `${operationId}-S${slice.index}-${loop.role === 'hole' ? 'H' : 'O'}${loopIndex + 1}`,
           loop,
           slice,
-          sourceLoops: shadowLoops,
+          protectedCenterLoops: offsetLoops,
         });
       });
     }
@@ -302,6 +311,7 @@ export class RoughingEntity extends ListEntityBase {
         offsetDistance: roundCoord(offsetDistance),
         topZ: roundCoord(topZ),
         bottomZ: roundCoord(bottomZ),
+        protectsFullCutterColumn: true,
         debugSlicesEnabled,
         debugSliceCount: debugSlices.length,
         ...(debugSlicesEnabled ? { debugSlices } : {}),
@@ -500,7 +510,7 @@ function makeRoughingContinuousPath({
       addMove('plunge', start, z, pass);
     } else if (sameStart) {
       addMove('plunge', start, z, pass);
-    } else if (currentPass && canLinkAtCurrentZ(currentXY, start, currentPass.sourceLoops)) {
+    } else if (currentPass && canLinkAtCurrentZ(currentXY, start, currentPass.protectedCenterLoops)) {
       addMove('link', start, currentZ, pass, { z: currentZ, linkToSliceIndex: pass.slice.index });
       addMove('plunge', start, z, pass);
     } else {
@@ -556,18 +566,70 @@ function sameXY(a: CamPoint2, b: CamPoint2, tolerance = 1e-4) {
   return Math.abs(a[0] - b[0]) <= tolerance && Math.abs(a[1] - b[1]) <= tolerance;
 }
 
-function canLinkAtCurrentZ(from: CamPoint2, to: CamPoint2, sourceLoops: ShadowLoop[]) {
-  const distance = Math.hypot(to[0] - from[0], to[1] - from[1]);
-  const samples = Math.max(8, Math.ceil(distance / 0.25));
-  for (let sample = 1; sample < samples; sample += 1) {
-    const t = sample / samples;
+function canLinkAtCurrentZ(from: CamPoint2, to: CamPoint2, protectedCenterLoops: ShadowLoop[]) {
+  if (!protectedCenterLoops.length) return false;
+  const parameters = [0, 1];
+  for (const loop of protectedCenterLoops) {
+    for (let index = 0; index < loop.points.length; index += 1) {
+      parameters.push(...segmentEdgeIntersectionParameters(
+        from,
+        to,
+        loop.points[index],
+        loop.points[(index + 1) % loop.points.length],
+      ));
+    }
+  }
+  const sorted = parameters
+    .map((value) => Math.max(0, Math.min(1, value)))
+    .sort((a, b) => a - b)
+    .filter((value, index, values) => index === 0 || Math.abs(value - values[index - 1]) > EPS);
+  for (let index = 1; index < sorted.length; index += 1) {
+    if (sorted[index] - sorted[index - 1] <= EPS) continue;
+    const t = (sorted[index - 1] + sorted[index]) * 0.5;
     const point: CamPoint2 = [
-      from[0] + (to[0] - from[0]) * t,
-      from[1] + (to[1] - from[1]) * t,
+      from[0] + ((to[0] - from[0]) * t),
+      from[1] + ((to[1] - from[1]) * t),
     ];
-    if (pointInsideSliceShadow(point, sourceLoops)) return false;
+    if (pointInsideSliceShadow(point, protectedCenterLoops) && !pointOnLoopBoundary(point, protectedCenterLoops)) {
+      return false;
+    }
   }
   return true;
+}
+
+function segmentEdgeIntersectionParameters(from: CamPoint2, to: CamPoint2, a: CamPoint2, b: CamPoint2) {
+  const rx = to[0] - from[0];
+  const ry = to[1] - from[1];
+  const sx = b[0] - a[0];
+  const sy = b[1] - a[1];
+  const qpx = a[0] - from[0];
+  const qpy = a[1] - from[1];
+  const denominator = (rx * sy) - (ry * sx);
+  const crossQpR = (qpx * ry) - (qpy * rx);
+  if (Math.abs(denominator) <= EPS) {
+    if (Math.abs(crossQpR) > EPS) return [];
+    const lengthSq = (rx * rx) + (ry * ry);
+    if (lengthSq <= EPS * EPS) return [];
+    return [
+      ((a[0] - from[0]) * rx + (a[1] - from[1]) * ry) / lengthSq,
+      ((b[0] - from[0]) * rx + (b[1] - from[1]) * ry) / lengthSq,
+    ].filter((value) => value >= -EPS && value <= 1 + EPS);
+  }
+  const t = ((qpx * sy) - (qpy * sx)) / denominator;
+  const u = crossQpR / denominator;
+  return t >= -EPS && t <= 1 + EPS && u >= -EPS && u <= 1 + EPS ? [t] : [];
+}
+
+function pointOnLoopBoundary(point: CamPoint2, loops: ShadowLoop[], tolerance = 1e-6) {
+  return loops.some((loop) => loop.points.some((start, index) => {
+    const end = loop.points[(index + 1) % loop.points.length];
+    const dx = end[0] - start[0];
+    const dy = end[1] - start[1];
+    const lengthSq = (dx * dx) + (dy * dy);
+    if (lengthSq <= EPS * EPS) return Math.hypot(point[0] - start[0], point[1] - start[1]) <= tolerance;
+    const t = Math.max(0, Math.min(1, (((point[0] - start[0]) * dx) + ((point[1] - start[1]) * dy)) / lengthSq));
+    return Math.hypot(point[0] - (start[0] + (dx * t)), point[1] - (start[1] + (dy * t))) <= tolerance;
+  }));
 }
 
 function pointInsideSliceShadow(point: CamPoint2, loops: ShadowLoop[]) {
