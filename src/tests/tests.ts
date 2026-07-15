@@ -540,6 +540,10 @@ import {
     test_visibility_hidden_state_persistence,
 } from './test_visibility_hidden_state_persistence.js';
 import { test_thicken_feature_is_available_in_modeling_and_surfacing_workbenches } from './test_workbenchFeatureVisibility.js';
+import {
+    test_worker_history_protocol_feature_errors,
+    test_worker_history_protocol_round_trip,
+} from './test_worker_history_protocol.js';
 import { test_sketch_feature_scene_visibility } from './test_sketchFeatureVisibility.js';
 import {
     test_revolve_face_profile_boundary_recovery_marks_inner_loop_as_hole,
@@ -1689,6 +1693,8 @@ export const testFunctions: any[] = [
     { test: test_cam_workbench_registers_shadow_cutter_and_roughing_operations, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_cam_workbench_registers_and_persists_part_history_state, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_visibility_hidden_state_persistence, afterRun: afterRun_visibility_hidden_state_persistence, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_worker_history_protocol_round_trip, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
+    { test: test_worker_history_protocol_feature_errors, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_sketch_feature_scene_visibility, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },
     { test: test_textToFace, afterRun: afterRun_textToFace, printArtifacts: false, exportFaces: true, exportSolids: false, resetHistory: true },
     { test: test_sheetMetal_nonManifold_sm_f18, printArtifacts: false, exportFaces: false, exportSolids: false, resetHistory: true },

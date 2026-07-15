@@ -29,6 +29,10 @@ import { sanitizeTransformValue } from './utils/transformReferenceUtils.js';
 import { captureReferenceSelectionSnapshots } from './UI/referenceSnapshotStore.js';
 import { isSceneRemovalProtected } from './UI/sceneOverlayUtils.js';
 import {
+  rehydrateSceneObjects,
+  serializeSceneObjects,
+} from './workers/historySceneCodec.js';
+import {
   getDefaultWorkbenchForNewPart,
   getLegacyLoadWorkbenchDefault,
   normalizeWorkbenchId,
@@ -115,6 +119,64 @@ function stringifyInputParamsForDirtyCheck(inputParams) {
 }
 
 
+function isPlainDataObject(value) {
+  if (!value || typeof value !== 'object') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+// Deep-clone a value into structured-clone-safe plain data for crossing the
+// history-execution worker boundary. Live scene objects collapse to their
+// reference name; functions and render resources are dropped.
+function sanitizeValueForTransfer(value, seen = new WeakSet(), depth = 0) {
+  if (value == null) return value;
+  const t = typeof value;
+  if (t === 'string' || t === 'boolean') return value;
+  if (t === 'number') return Number.isFinite(value) ? value : null;
+  if (t !== 'object') return undefined; // functions, symbols
+  if (depth > 32) return undefined;
+  if (seen.has(value)) return undefined;
+
+  if (value.isObject3D) {
+    const names = getReferenceObjectNameCandidates(value);
+    return names.length ? names[0] : undefined;
+  }
+  if (value.isMaterial || value.isTexture || value.isBufferGeometry) return undefined;
+  if (ArrayBuffer.isView(value)) {
+    try { return (value as any).slice(); } catch { return undefined; }
+  }
+  if (value instanceof ArrayBuffer) {
+    try { return value.slice(0); } catch { return undefined; }
+  }
+
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      const out = [];
+      for (const item of value) {
+        const cleaned = sanitizeValueForTransfer(item, seen, depth + 1);
+        out.push(cleaned === undefined ? null : cleaned);
+      }
+      return out;
+    }
+    // Plain objects and simple data-carrier class instances (e.g. Vector3-like)
+    // both flatten to plain objects of their enumerable own props.
+    if (!isPlainDataObject(value) && typeof value.toJSON === 'function') {
+      try {
+        return sanitizeValueForTransfer(value.toJSON(), seen, depth + 1);
+      } catch { /* fall through to enumerable-props clone */ }
+    }
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      const cleaned = sanitizeValueForTransfer(item, seen, depth + 1);
+      if (cleaned !== undefined) out[key] = cleaned;
+    }
+    return out;
+  } finally {
+    seen.delete(value);
+  }
+}
+
 export class PartHistory {
   [key: string]: any;
 
@@ -130,6 +192,11 @@ export class PartHistory {
     this._modelChangeListeners = new Set();
     this._runHistoryQueue = null;
     this._runHistoryQueueToken = null;
+    this._historyWorkerClient = null;
+    this._historyExecutionEpoch = 0;
+    this._appliedExecutionEpoch = null;
+    this._appliedConstraintSignature = null;
+    this._lastRunSummary = null;
     this.currentHistoryStepId = null;
     this.runningFeatureId = null;
     this._runningFeatureTiming = null;
@@ -658,6 +725,7 @@ export class PartHistory {
   async reset() {
     this.features = [];
     this.idCounter = 0;
+    this._historyExecutionEpoch = (Number(this._historyExecutionEpoch) || 0) + 1;
     this.pmiViewsManager.reset();
     this.simulationStateManager.reset();
     this.camPlanManager.reset();
@@ -1273,7 +1341,7 @@ export class PartHistory {
     this._runHistoryQueueToken = token;
     const queued = previous
       .catch(() => { })
-      .then(() => this.#runHistoryImpl(options));
+      .then(() => this.#executeHistory(options));
     this._runHistoryQueue = queued.catch(() => { });
     try {
       return await queued;
@@ -1285,8 +1353,40 @@ export class PartHistory {
     }
   }
 
+  // Attach (or detach) a feature-history execution worker client. When a
+  // client is attached, runHistory() delegates execution to the worker and
+  // falls back to local execution if the worker cannot service the run.
+  setHistoryWorkerClient(client) {
+    this._historyWorkerClient = client || null;
+  }
+
+  get hasHistoryWorkerClient() {
+    return !!this._historyWorkerClient;
+  }
+
+  async #executeHistory(options: any = {}) {
+    const client = this._historyWorkerClient;
+    if (!client) return this.#runHistoryImpl(options);
+    try {
+      return await this.#runHistoryViaWorker(client, options);
+    } catch (error: any) {
+      // Feature failures reported by the worker keep worker execution active.
+      if (error && error.name === 'FeatureHistoryError') throw error;
+      if (error && error.code === 'unsupported-feature-types') {
+        console.warn('[PartHistory] Worker lacks some feature types; running this history locally:', error.message);
+        return await this.#runHistoryImpl(options);
+      }
+      console.warn('[PartHistory] Worker history execution failed; falling back to local execution.', error);
+      try { client.dispose?.(); } catch { /* ignore */ }
+      if (this._historyWorkerClient === client) this._historyWorkerClient = null;
+      return await this.#runHistoryImpl(options);
+    }
+  }
+
   async #runHistoryImpl(options: any = {}) {
     const throwOnFeatureError = !!options?.throwOnFeatureError;
+    const runSummary = { completed: false, modelChanged: false, earlyError: null, executedFeatureIds: [] };
+    this._lastRunSummary = runSummary;
     const whatStepToStopAt = this.currentHistoryStepId;
     const stopBeforeFeatureId = options?.stopBeforeFeatureId != null
       ? String(options.stopBeforeFeatureId)
@@ -1503,6 +1603,8 @@ export class PartHistory {
             feature.dirty = false;
             featureExecuted = true;
             modelChanged = true;
+            runSummary.modelChanged = true;
+            if (featureId != null) runSummary.executedFeatureIds.push(String(featureId));
           } catch (e) {
             const t1 = nowMs();
             const startedAt = this._runningFeatureTiming?.featureId === featureId
@@ -1529,6 +1631,12 @@ export class PartHistory {
               }
               throw error;
             }
+            runSummary.earlyError = {
+              featureId: featureId != null ? String(featureId) : null,
+              featureType: feature.type || null,
+              message: e?.message || String(e),
+            };
+            if (featureId != null) runSummary.executedFeatureIds.push(String(featureId));
             console.error(e);
             return;
           }
@@ -1569,10 +1677,323 @@ export class PartHistory {
         try { await this.callbacks.afterRunHistory(); } catch { /* ignore */ }
       }
 
+      runSummary.completed = true;
+
       if (modelChanged) {
         this.markModelChanged('runHistory');
       }
 
+      return this;
+    } finally {
+      this.#setFeatureRunningState(null);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Feature-history execution worker protocol
+  //
+  // The UI-side PartHistory builds an execution request (plain data), a
+  // worker-side PartHistory applies it, runs the history with the full BREP
+  // kernel, and returns an execution result (feature states + serialized
+  // scene) that the UI side applies back to its own features and scene.
+  // -------------------------------------------------------------------------
+
+  #transferSignature(value) {
+    try {
+      const json = JSON.stringify(value);
+      return json == null ? '' : json;
+    } catch {
+      return null;
+    }
+  }
+
+  buildHistoryExecutionRequest(options: any = {}) {
+    const features = (Array.isArray(this.features) ? this.features : []).map((feature) => ({
+      id: resolveFeatureEntryId(feature),
+      type: feature?.type ?? null,
+      inputParams: sanitizeValueForTransfer(feature?.inputParams || {}) || {},
+      persistentData: sanitizeValueForTransfer(this._sanitizePersistentDataForExport(feature?.persistentData || {}) || {}) || {},
+      dirty: feature?.dirty === true,
+    }));
+    const constraintsSnapshot = this.assemblyConstraintHistory?.snapshot?.() || { idCounter: 0, constraints: [] };
+    return {
+      epoch: Number(this._historyExecutionEpoch) || 0,
+      features,
+      expressions: typeof this.expressions === 'string' ? this.expressions : '',
+      idCounter: Number(this.idCounter) || 0,
+      currentHistoryStepId: this.currentHistoryStepId != null ? String(this.currentHistoryStepId) : null,
+      assemblyConstraints: sanitizeValueForTransfer(constraintsSnapshot.constraints) || [],
+      assemblyConstraintIdCounter: Number(constraintsSnapshot.idCounter) || 0,
+      options: {
+        throwOnFeatureError: !!options?.throwOnFeatureError,
+        stopBeforeFeatureId: options?.stopBeforeFeatureId != null ? String(options.stopBeforeFeatureId) : null,
+      },
+    };
+  }
+
+  // Worker side: reconcile an incoming execution request into this history,
+  // preserving cached execution state (dirty flags, effect snapshots, live
+  // scene outputs) for features whose identity is unchanged.
+  async applyHistoryExecutionRequest(request: any = {}) {
+    const epoch = Number(request?.epoch) || 0;
+    if (this._appliedExecutionEpoch !== epoch) {
+      // Different document generation: drop all cached execution state.
+      this.features = [];
+      this.#disposeSceneObjects();
+      await this.scene.clear();
+      this._appliedExecutionEpoch = epoch;
+      this._appliedConstraintSignature = null;
+    }
+
+    const prevById = new Map();
+    for (const feature of Array.isArray(this.features) ? this.features : []) {
+      const id = resolveFeatureEntryId(feature);
+      if (id != null) prevById.set(String(id), feature);
+    }
+
+    const nextFeatures = [];
+    for (const incoming of Array.isArray(request?.features) ? request.features : []) {
+      if (!incoming || typeof incoming !== 'object') continue;
+      const id = incoming.id != null ? String(incoming.id) : null;
+      const prev = id != null ? prevById.get(id) : null;
+      let entry;
+      if (prev && prev.type === incoming.type) {
+        prevById.delete(id);
+        entry = prev;
+        entry.inputParams = (incoming.inputParams && typeof incoming.inputParams === 'object') ? incoming.inputParams : {};
+        entry.persistentData = (incoming.persistentData && typeof incoming.persistentData === 'object') ? incoming.persistentData : {};
+        if (incoming.dirty) entry.dirty = true;
+      } else {
+        entry = {
+          id,
+          type: incoming.type,
+          inputParams: (incoming.inputParams && typeof incoming.inputParams === 'object') ? incoming.inputParams : {},
+          persistentData: (incoming.persistentData && typeof incoming.persistentData === 'object') ? incoming.persistentData : {},
+          dirty: true,
+        };
+      }
+      const prepared = this.#prepareFeatureEntry(entry);
+      if (!prepared) continue;
+      prepared.__requestInputParamsSignature = this.#transferSignature(prepared.inputParams);
+      nextFeatures.push(prepared);
+    }
+    this.features = nextFeatures;
+
+    if (typeof request?.expressions === 'string') this.expressions = request.expressions;
+    const incomingIdCounter = Number(request?.idCounter);
+    if (Number.isFinite(incomingIdCounter)) {
+      this.idCounter = Math.max(Number(this.idCounter) || 0, incomingIdCounter);
+    }
+    this.currentHistoryStepId = request?.currentHistoryStepId != null ? String(request.currentHistoryStepId) : null;
+
+    if (this.assemblyConstraintHistory) {
+      const constraints = Array.isArray(request?.assemblyConstraints) ? request.assemblyConstraints : [];
+      const counter = Number(request?.assemblyConstraintIdCounter) || 0;
+      const signature = this.#transferSignature({ constraints, counter });
+      if (signature == null || signature !== this._appliedConstraintSignature) {
+        try {
+          await this.assemblyConstraintHistory.replaceAll(deepClone(constraints), counter);
+          this._appliedConstraintSignature = signature;
+        } catch (error) {
+          console.warn('[PartHistory] Failed to apply assembly constraints from execution request:', error);
+        }
+      }
+    }
+  }
+
+  // Worker side: capture the outcome of the last runHistory() as plain data.
+  buildHistoryExecutionResult() {
+    const summary = this._lastRunSummary || { completed: true, modelChanged: false, earlyError: null, executedFeatureIds: [] };
+    const executedIds = new Set((summary.executedFeatureIds || []).map(String));
+
+    const features = (Array.isArray(this.features) ? this.features : []).map((feature) => {
+      const id = resolveFeatureEntryId(feature);
+      const executed = id != null && executedIds.has(String(id));
+      const state: any = {
+        id,
+        type: feature?.type ?? null,
+        dirty: feature?.dirty === true,
+        timestamp: Number.isFinite(Number(feature?.timestamp)) ? Number(feature.timestamp) : null,
+        lastRun: feature?.lastRun ? sanitizeValueForTransfer(feature.lastRun) : null,
+        lastRunInputParams: typeof feature?.lastRunInputParams === 'string' ? feature.lastRunInputParams : null,
+        previouseExpressions: sanitizeValueForTransfer(feature?.previouseExpressions || {}) || {},
+        effects: {
+          added: (Array.isArray(feature?.effects?.added) ? feature.effects.added : [])
+            .map((obj) => ({ name: obj?.name != null ? String(obj.name) : '', type: obj?.type != null ? String(obj.type) : '' }))
+            .filter((entry) => entry.name),
+          removed: (Array.isArray(feature?.effects?.removed) ? feature.effects.removed : [])
+            .map((obj) => ({ name: obj?.name != null ? String(obj.name) : '', type: obj?.type != null ? String(obj.type) : '' }))
+            .filter((entry) => entry.name),
+        },
+      };
+      if (executed) {
+        state.persistentData = sanitizeValueForTransfer(this._sanitizePersistentDataForExport(feature?.persistentData || {}) || {}) || {};
+      }
+      // Runs can rewrite inputParams (consumed file payloads, solved assembly
+      // transforms); ship them back only when they actually changed.
+      const inputSignature = this.#transferSignature(feature?.inputParams || {});
+      if (inputSignature == null || inputSignature !== feature?.__requestInputParamsSignature) {
+        state.inputParams = sanitizeValueForTransfer(feature?.inputParams || {}) || {};
+      }
+      return state;
+    });
+
+    const constraintsSnapshot = this.assemblyConstraintHistory?.snapshot?.() || null;
+
+    return {
+      completed: summary.completed !== false,
+      modelChanged: !!summary.modelChanged,
+      earlyError: summary.earlyError ? { ...summary.earlyError } : null,
+      features,
+      scene: serializeSceneObjects(this.scene?.children || []),
+      idCounter: Number(this.idCounter) || 0,
+      assemblyConstraints: constraintsSnapshot ? sanitizeValueForTransfer(constraintsSnapshot) : null,
+    };
+  }
+
+  // UI side: fold a worker execution result back into this history and scene.
+  async #applyHistoryExecutionResult(result: any = {}) {
+    const featureById = new Map();
+    for (const feature of Array.isArray(this.features) ? this.features : []) {
+      const id = resolveFeatureEntryId(feature);
+      if (id != null) featureById.set(String(id), feature);
+    }
+
+    const states = Array.isArray(result?.features) ? result.features : [];
+    for (const state of states) {
+      const id = state?.id != null ? String(state.id) : null;
+      const feature = id != null ? featureById.get(id) : null;
+      if (!feature || feature.type !== state.type) continue;
+      feature.lastRun = state.lastRun || null;
+      if (state.timestamp != null) feature.timestamp = state.timestamp;
+      feature.dirty = state.dirty === true;
+      if (state.lastRunInputParams != null) feature.lastRunInputParams = state.lastRunInputParams;
+      feature.previouseExpressions = state.previouseExpressions || {};
+      if (state.persistentData !== undefined) feature.persistentData = state.persistentData || {};
+      if (state.inputParams !== undefined && state.inputParams && typeof state.inputParams === 'object') {
+        const target = feature.inputParams && typeof feature.inputParams === 'object'
+          ? feature.inputParams
+          : (feature.inputParams = {});
+        for (const key of Object.keys(target)) {
+          if (!Object.prototype.hasOwnProperty.call(state.inputParams, key)) delete target[key];
+        }
+        Object.assign(target, state.inputParams);
+      }
+    }
+
+    // Rebuild the display scene from the worker's serialized scene graph,
+    // using the same clearing rules as local execution.
+    this.#disposeSceneObjects((obj) => !obj?.isLight && !obj?.isCamera && !obj?.isTransformGizmo);
+    await this.scene.clear();
+
+    const rehydrated = await rehydrateSceneObjects(Array.isArray(result?.scene) ? result.scene : []);
+    const objectsByName = new Map();
+    for (const obj of rehydrated) {
+      if (!obj) continue;
+      await this.scene.add(obj);
+      try { SelectionFilter.ensureSelectionHandlers(obj, { deep: true }); } catch { /* ignore */ }
+      try { obj.__removeFlag = false; } catch { /* ignore */ }
+      if (obj.name) objectsByName.set(String(obj.name), obj);
+    }
+
+    // Repopulate feature.effects with live rehydrated objects so UI consumers
+    // (feature dialogs, dimensions) keep working.
+    for (const state of states) {
+      const id = state?.id != null ? String(state.id) : null;
+      const feature = id != null ? featureById.get(id) : null;
+      if (!feature || feature.type !== state.type) continue;
+      const added = (Array.isArray(state?.effects?.added) ? state.effects.added : [])
+        .map((entry) => objectsByName.get(String(entry?.name || '')))
+        .filter(Boolean);
+      const removed = (Array.isArray(state?.effects?.removed) ? state.effects.removed : [])
+        .map((entry) => objectsByName.get(String(entry?.name || '')))
+        .filter((obj) => !!obj && !added.includes(obj));
+      feature.effects = { added, removed };
+      // Effect snapshots hold live worker-side objects; they are only used by
+      // local execution, which will regenerate them if it ever runs again.
+      delete feature.effectSnapshots;
+    }
+
+    // Sync solved assembly-constraint state (matched by constraint id).
+    const constraintStates = Array.isArray(result?.assemblyConstraints?.constraints)
+      ? result.assemblyConstraints.constraints
+      : [];
+    const localConstraints = Array.isArray(this.assemblyConstraintHistory?.constraints)
+      ? this.assemblyConstraintHistory.constraints
+      : [];
+    if (constraintStates.length && localConstraints.length) {
+      const constraintById = new Map();
+      for (const entry of localConstraints) {
+        const cid = entry?.inputParams?.id;
+        if (cid != null) constraintById.set(String(cid), entry);
+      }
+      for (const state of constraintStates) {
+        const cid = state?.inputParams?.id;
+        const entry = cid != null ? constraintById.get(String(cid)) : null;
+        if (!entry) continue;
+        if (state.persistentData && typeof state.persistentData === 'object') {
+          entry.persistentData = deepClone(state.persistentData);
+        }
+      }
+    }
+
+    const incomingIdCounter = Number(result?.idCounter);
+    if (Number.isFinite(incomingIdCounter)) {
+      this.idCounter = Math.max(Number(this.idCounter) || 0, incomingIdCounter);
+    }
+  }
+
+  async #runHistoryViaWorker(client, options: any = {}) {
+    const throwOnFeatureError = !!options?.throwOnFeatureError;
+    const hiddenVisibilityState = this.#captureHiddenVisibilityState();
+    this.#setFeatureRunningState(null);
+    try {
+      const request = this.buildHistoryExecutionRequest(options);
+      const featureById = new Map();
+      for (const feature of Array.isArray(this.features) ? this.features : []) {
+        const id = resolveFeatureEntryId(feature);
+        if (id != null) featureById.set(String(id), feature);
+      }
+
+      const result = await client.runHistory(request, {
+        onFeatureStart: async (featureId) => {
+          const key = featureId != null ? String(featureId) : null;
+          const feature = key != null ? (featureById.get(key) || null) : null;
+          this.#setFeatureRunningState(featureId, feature);
+          if (this.callbacks.run) {
+            try { await this.callbacks.run(featureId); } catch { /* ignore */ }
+          }
+        },
+      });
+
+      this.#setFeatureRunningState(null);
+      await this.#applyHistoryExecutionResult(result);
+      try { this.#restoreHiddenVisibilityState(hiddenVisibilityState); } catch { /* ignore */ }
+
+      if (result?.fatalError && throwOnFeatureError) {
+        const info = result.fatalError;
+        const error: any = new Error(info.message || 'Feature history execution failed');
+        error.name = info.name || 'FeatureHistoryError';
+        if (info.featureId !== undefined) error.featureId = info.featureId;
+        if (info.featureType !== undefined) error.featureType = info.featureType;
+        if (info.featureIndex !== undefined) error.featureIndex = info.featureIndex;
+        if (info.featureLastRun !== undefined) error.featureLastRun = info.featureLastRun;
+        if (info.stack) error.stack = info.stack;
+        throw error;
+      }
+
+      if (!result?.completed) {
+        // Mirror local behavior after a feature error without throw semantics:
+        // scene reflects the partial run; afterRunHistory/markModelChanged skip.
+        return;
+      }
+
+      if (this.callbacks.afterRunHistory) {
+        try { await this.callbacks.afterRunHistory(); } catch { /* ignore */ }
+      }
+      if (result.modelChanged) {
+        this.markModelChanged('runHistory');
+      }
       return this;
     } finally {
       this.#setFeatureRunningState(null);
@@ -1832,6 +2253,7 @@ export class PartHistory {
     const importData = JSON.parse(jsonString);
     this.runningFeatureId = null;
     this._runningFeatureTiming = null;
+    this._historyExecutionEpoch = (Number(this._historyExecutionEpoch) || 0) + 1;
     const rawFeatures = Array.isArray(importData.features) ? importData.features : [];
     this.features = this.#prepareFeatureList(rawFeatures);
     this.idCounter = importData.idCounter;

@@ -28,6 +28,7 @@ import { SidebarDockController } from './viewer/sidebarDock.js';
 import { sidebarMethods } from './viewer/sidebarMethods.js';
 import { ensureSelectionPickerStyles } from './viewer/styles.js';
 import { workbenchMethods } from './viewer/workbenchMethods.js';
+import { FeatureHistoryWorkerClient } from '../workers/featureHistoryWorkerClient.js';
 
 function applyViewerMethods(target, ...methodGroups) {
     for (const group of methodGroups) {
@@ -74,6 +75,25 @@ export class Viewer {
         this.BREP = BREP;
 
         this.partHistory = partHistory instanceof PartHistory ? partHistory : new PartHistory();
+
+        // Run feature-history execution in a dedicated kernel worker so long
+        // rebuilds don't block the UI thread. Message passing is the only
+        // interface between the UI and the worker-side BREP kernel; local
+        // execution remains as an automatic fallback (and can be forced by
+        // setting localStorage.__HISTORY_WORKER__ = 'off').
+        this._historyWorkerClient = null;
+        try {
+            const workerPref = readBrowserStorageValue('__HISTORY_WORKER__', { fallback: 'on' });
+            if (FeatureHistoryWorkerClient.isSupported() && String(workerPref).toLowerCase() !== 'off') {
+                this._historyWorkerClient = new FeatureHistoryWorkerClient();
+                this._historyWorkerClient.start();
+                this.partHistory.setHistoryWorkerClient(this._historyWorkerClient);
+            }
+        } catch (error) {
+            console.warn('[Viewer] History worker unavailable; feature history will run on the UI thread.', error);
+            this._historyWorkerClient = null;
+        }
+
         this._autoLoadLastModel = !!autoLoadLastModel;
         this._viewerOnlyMode = !!viewerOnlyMode;
         this._homeBannerUrl = String(homeBannerUrl || '').trim();

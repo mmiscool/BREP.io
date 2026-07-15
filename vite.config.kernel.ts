@@ -111,6 +111,13 @@ const __brepInlineCss = ${JSON.stringify(cssText)};
 
 export default defineConfig({
   plugins: [patchManifoldNodeImports(), wasm(), inlineImportedCss()],
+  // The feature-history worker (reachable through the embedded viewer) uses
+  // module syntax, which needs ES-format worker bundles instead of the
+  // default IIFE.
+  worker: {
+    format: 'es',
+    plugins: () => [patchManifoldNodeImports(), wasm()],
+  },
   resolve: {
     conditions: ['browser', 'import', 'module', 'default'],
     alias: {

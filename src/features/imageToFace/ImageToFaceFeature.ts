@@ -560,6 +560,19 @@ export class ImageToFaceFeature {
 
 // --- Helpers -----------------------------------------------------------------
 
+// Works on the UI thread (document canvas) and inside workers (OffscreenCanvas).
+function createDecodeCanvas(width, height) {
+  if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+    const c = document.createElement('canvas');
+    c.width = width; c.height = height;
+    return c;
+  }
+  if (typeof OffscreenCanvas !== 'undefined') {
+    return new OffscreenCanvas(width, height);
+  }
+  throw new Error('No 2D canvas implementation available for image decoding');
+}
+
 async function decodeToImageData(raw) {
   try {
     if (!raw) return null;
@@ -569,8 +582,7 @@ async function decodeToImageData(raw) {
       try {
         const blob = new Blob([raw], { type: 'image/png' });
         const img = await createImageBitmap(blob);
-        const c = document.createElement('canvas');
-        c.width = img.width; c.height = img.height;
+        const c = createDecodeCanvas(img.width, img.height);
         const ctx = c.getContext('2d');
         ctx.drawImage(img, 0, 0);
         const id = ctx.getImageData(0, 0, img.width, img.height);
@@ -582,8 +594,7 @@ async function decodeToImageData(raw) {
     if (typeof raw === 'string') {
       if (raw.startsWith('data:')) {
         const img = await createImageBitmap(await (await fetch(raw)).blob());
-        const c = document.createElement('canvas');
-        c.width = img.width; c.height = img.height;
+        const c = createDecodeCanvas(img.width, img.height);
         const ctx = c.getContext('2d');
         ctx.drawImage(img, 0, 0);
         const id = ctx.getImageData(0, 0, img.width, img.height);
@@ -599,8 +610,7 @@ async function decodeToImageData(raw) {
         for (let i = 0; i < len; i++) bytes[i] = binaryStr.charCodeAt(i) & 0xff;
         const blob = new Blob([bytes], { type: 'image/png' });
         const img = await createImageBitmap(blob);
-        const c = document.createElement('canvas');
-        c.width = img.width; c.height = img.height;
+        const c = createDecodeCanvas(img.width, img.height);
         const ctx = c.getContext('2d');
         ctx.drawImage(img, 0, 0);
         const id = ctx.getImageData(0, 0, img.width, img.height);

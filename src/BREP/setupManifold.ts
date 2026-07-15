@@ -26,9 +26,9 @@ const INLINE_MANIFOLD_JS_BASE64 =
     && typeof (globalThis as any).__MANIFOLD_JS_BASE64__ !== 'undefined'
     && (globalThis as any).__MANIFOLD_JS_BASE64__);
 
-const isNode =
-  typeof window === 'undefined' ||
-  !!globalThis?.process?.versions?.node;
+// Detect Node by the presence of the Node runtime itself; `typeof window`
+// alone misclassifies web workers (which have no `window`) as Node.
+const isNode = !!globalThis?.process?.versions?.node;
 
 const patchFileURLToPathForDataUrl = async () => {
   if (!isNode) return;

@@ -82,6 +82,13 @@ export default defineConfig(() => {
       cors: true,
     },
 
+    // The feature-history kernel worker uses module syntax (dynamic imports),
+    // which requires ES-format worker bundles instead of the default IIFE.
+    worker: {
+      format: 'es' as const,
+      plugins: () => [resolveKernelManifoldImports(), wasm()],
+    },
+
 
     build: {
       minify: 'esbuild' as const,

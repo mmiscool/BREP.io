@@ -1188,6 +1188,14 @@ export const solidVolumeExpectations = Object.freeze({
                 volume: 1000
             }
         ]
+    },
+    test_worker_history_protocol_round_trip: {
+        solids: [
+            {
+                name: "E2",
+                volume: 216
+            }
+        ]
     }
 });
 
