@@ -3,13 +3,13 @@
 > [!WARNING]
 > ## This project is deprecated
 >
-> BREP.io is no longer under active development. Please use the new [BREP.io project](https://next.BREP.io) instead. It has a completely new codebase written in Rust and provides a real BREP kernel with real surfaces and support for reading and writing real STEP files.
+> BREP.io is no longer under active development. Please use the new project https://next.BREP.io instead. It has a completely new codebase written in Rust and provides a real BREP kernel with real surfaces and support for reading and writing real STEP files.
 
 This repository is preserved for historical and reference purposes. The legacy browser-based CAD application and JavaScript kernel may still be useful for studying the earlier mesh-based implementation, but APIs and behavior are no longer actively maintained.
 
 ## Successor project
 
-For the current BREP.io project, visit **[https://next.BREP.io](https://next.BREP.io)**.
+For the current BREP.io project, visit **https://next.BREP.io**.
 
 The successor is built completely from scratch in Rust and provides:
 
